@@ -8,6 +8,16 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   // Resolve the `@/*` alias from tsconfig natively (replaces vite-tsconfig-paths).
   resolve: { tsconfigPaths: true },
+  build: {
+    rollupOptions: {
+      // @hugeicons/core-free-icons ships `/*#__PURE__*/` annotations that Rolldown
+      // can't position-match — harmless, but very noisy. Drop just that warning.
+      onLog(level, log, handler) {
+        if (log.code === "INVALID_ANNOTATION") return;
+        handler(level, log);
+      },
+    },
+  },
   plugins: [
     cloudflare({ viteEnvironment: { name: "ssr" } }),
     tailwindcss(),
