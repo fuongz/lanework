@@ -53,6 +53,18 @@ export const getRepos = createServerFn({ method: "GET" }).handler(async (): Prom
   return listRepos(token);
 });
 
+/**
+ * GitHub page where the user can grant this OAuth app access to their
+ * organizations' repos (the client id is public, not a secret).
+ */
+export const getGithubManageUrl = createServerFn({ method: "GET" }).handler(async () => {
+  const auth = getAuth();
+  const { headers } = getRequest();
+  const session = await auth.api.getSession({ headers });
+  if (!session) return null;
+  return `https://github.com/settings/connections/applications/${env.GITHUB_CLIENT_ID}`;
+});
+
 // GitHub owner/repo names: letters, digits, dot, dash, underscore — no slashes
 // or `..` (which would let a crafted value escape the intended API path).
 const NAME_RE = /^[A-Za-z0-9._-]+$/;

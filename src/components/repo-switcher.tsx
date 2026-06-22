@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { UnfoldMoreIcon } from "@hugeicons/core-free-icons";
+import { UnfoldMoreIcon, Github01Icon, LinkSquare01Icon } from "@hugeicons/core-free-icons";
 import {
   Command,
   CommandEmpty,
@@ -11,8 +11,12 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { getGithubManageUrl } from "@/server/reviews";
+import { signIn } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import type { Repo } from "@/lib/github";
+
+const FALLBACK_MANAGE_URL = "https://github.com/settings/applications";
 
 interface RepoSwitcherProps {
   repos: Repo[];
@@ -23,6 +27,22 @@ interface RepoSwitcherProps {
 export function RepoSwitcher({ repos, active, className }: RepoSwitcherProps) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [manageUrl, setManageUrl] = useState<string | null>(null);
+
+  // Load the GitHub "manage access" URL the first time the switcher opens.
+  useEffect(() => {
+    if (open && !manageUrl) {
+      getGithubManageUrl()
+        .then((url) => setManageUrl(url ?? FALLBACK_MANAGE_URL))
+        .catch(() => setManageUrl(FALLBACK_MANAGE_URL));
+    }
+  }, [open, manageUrl]);
+
+  function reconnect() {
+    setOpen(false);
+    const callbackURL = typeof window !== "undefined" ? window.location.pathname : "/";
+    signIn.social({ provider: "github", callbackURL });
+  }
 
   // "/" opens the switcher from anywhere (unless typing in a field).
   useEffect(() => {
@@ -87,6 +107,28 @@ export function RepoSwitcher({ repos, active, className }: RepoSwitcherProps) {
             </CommandGroup>
           </CommandList>
         </Command>
+
+        <div className="border-t bg-popover p-1">
+          <p className="px-2 pb-1 pt-1.5 text-[11px] text-muted-foreground">
+            Missing an org's repos?
+          </p>
+          <button
+            onClick={reconnect}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <HugeiconsIcon icon={Github01Icon} className="size-3.5" />
+            <span className="flex-1 text-left">Reconnect GitHub</span>
+          </button>
+          <a
+            href={manageUrl ?? FALLBACK_MANAGE_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <HugeiconsIcon icon={LinkSquare01Icon} className="size-3.5" />
+            <span className="flex-1">Grant organization access</span>
+          </a>
+        </div>
       </PopoverContent>
     </Popover>
   );
