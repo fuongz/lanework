@@ -34,9 +34,26 @@ export interface ReviewCard {
 }
 
 export class GitHubError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
+  /** Raw response body, kept for server-side logging — never shown to users. */
+  detail?: string;
+  constructor(public status: number, detail?: string) {
+    super(messageForStatus(status));
     this.name = "GitHubError";
+    this.detail = detail;
+  }
+}
+
+/** Short, user-facing message for a failed GitHub request. */
+function messageForStatus(status: number): string {
+  switch (status) {
+    case 401:
+      return "Your session expired — please sign in again.";
+    case 403:
+      return "You don't have access to this resource.";
+    case 404:
+      return "This review could not be found.";
+    default:
+      return `GitHub request failed (${status}).`;
   }
 }
 
@@ -56,7 +73,9 @@ async function ghFetch<T>(token: string, path: string, init?: RequestInit): Prom
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new GitHubError(res.status, `GitHub ${res.status} on ${path}: ${body.slice(0, 200)}`);
+    const err = new GitHubError(res.status, `GitHub ${res.status} on ${path}: ${body.slice(0, 200)}`);
+    console.error(err.detail);
+    throw err;
   }
   return (await res.json()) as T;
 }

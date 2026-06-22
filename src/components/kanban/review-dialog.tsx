@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { MarkdownHooks } from "react-markdown";
+import { MarkdownHooks, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeShiki from "@shikijs/rehype";
+import { Checkbox } from "@/components/ui/checkbox";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   LinkSquare01Icon,
@@ -28,6 +29,35 @@ import { formatDate, relativeAge } from "@/lib/format";
 import { tagPill } from "@/lib/tag-color";
 import { cn } from "@/lib/utils";
 import type { ReviewCard, Priority } from "@/lib/github";
+
+const markdownComponents: Components = {
+  // Render GFM task-list checkboxes with our Checkbox component instead of the
+  // browser's native (disabled) input.
+  input({ type, checked, ...props }) {
+    if (type === "checkbox") {
+      return (
+        <Checkbox
+          checked={!!checked}
+          disabled
+          className="relative top-px mr-0.5 inline-grid align-text-bottom disabled:opacity-100 data-checked:bg-primary"
+        />
+      );
+    }
+    return <input type={type} {...props} />;
+  },
+  // Drop the list marker on task-list items so the checkbox is the only marker.
+  li({ className, children, ...props }) {
+    const isTask = className?.includes("task-list-item");
+    return (
+      <li
+        className={cn(className, isTask && "list-none marker:content-none")}
+        {...props}
+      >
+        {children}
+      </li>
+    );
+  },
+};
 
 interface ReviewDialogProps {
   owner: string;
@@ -103,6 +133,7 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
             ) : (
               <article className="prose prose-sm prose-neutral max-w-none dark:prose-invert prose-code:before:content-none prose-code:after:content-none">
                 <MarkdownHooks
+                  components={markdownComponents}
                   remarkPlugins={[remarkGfm]}
                   rehypePlugins={[
                     [
