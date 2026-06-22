@@ -9,6 +9,8 @@ function buildAuth() {
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
+    trustedOrigins: [env.BETTER_AUTH_URL],
+    rateLimit: { enabled: true },
     database: drizzleAdapter(getDb(), {
       provider: "sqlite",
       schema,

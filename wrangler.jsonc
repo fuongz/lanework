@@ -4,18 +4,24 @@
   "compatibility_date": "2026-06-21",
   "compatibility_flags": ["nodejs_compat"],
   "main": "@tanstack/react-start/server-entry",
+  "workers_dev": false,
+  "preview_urls": false,
   "observability": {
     "enabled": true,
   },
+  "routes": [{ "pattern": "lanework.dev", "custom_domain": true }],
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "lanework-db",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "database_name": "prod-lanework",
+      "database_id": "076effb3-3f48-40a3-95c0-dfc44a8b6559",
       "migrations_dir": "drizzle",
     },
   ],
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "e1cb1e06b1a849f085709fd5e45f93c5" },
+  ],
   "vars": {
-    "BETTER_AUTH_URL": "http://localhost:5173",
+    "BETTER_AUTH_URL": "https://lanework.dev",
   },
 }

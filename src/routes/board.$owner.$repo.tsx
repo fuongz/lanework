@@ -40,7 +40,11 @@ export const Route = createFileRoute("/board/$owner/$repo")({
     <div className="grid min-h-screen place-items-center p-10 text-center">
       <div>
         <h1 className="text-lg font-semibold">Couldn’t load this board</h1>
-        <p className="mt-2 max-w-md text-sm text-muted-foreground">{error.message}</p>
+        <p className="mt-2 max-w-md text-sm text-muted-foreground">
+          {import.meta.env.PROD
+            ? "Something went wrong loading this board. Check the repo exists and you have access, then try again."
+            : error.message}
+        </p>
         <Link to="/" className="mt-4 inline-block text-sm underline">
           Back to projects
         </Link>

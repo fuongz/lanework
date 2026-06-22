@@ -102,12 +102,14 @@ export async function listReviewCards(
   repo: string,
   ref?: string,
 ): Promise<{ branch: string; cards: ReviewCard[] }> {
+  const o = encodeURIComponent(owner);
+  const r = encodeURIComponent(repo);
   const branch =
-    ref ?? (await ghFetch<{ default_branch: string }>(token, `/repos/${owner}/${repo}`)).default_branch;
+    ref ?? (await ghFetch<{ default_branch: string }>(token, `/repos/${o}/${r}`)).default_branch;
 
   const tree = await ghFetch<{ tree: TreeEntry[] }>(
     token,
-    `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+    `/repos/${o}/${r}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
   );
 
   const entries = tree.tree
@@ -153,7 +155,10 @@ export async function getReviewContent(
   const q = ref ? `?ref=${encodeURIComponent(ref)}` : "";
   const data = await ghFetch<{ content: string; encoding: string }>(
     token,
-    `/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}${q}`,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}${q}`,
   );
   if (data.encoding === "base64") {
     const binary = atob(data.content.replace(/\n/g, ""));

@@ -2,6 +2,9 @@
 # Copy to `.dev.vars` (gitignored) and fill in real values.
 # For production set these with: wrangler secret put <NAME>
 
+# Overrides the production BETTER_AUTH_URL (https://lanework.dev) for local dev.
+BETTER_AUTH_URL="http://localhost:5173"
+
 # A long random string. Generate with: openssl rand -base64 32
 BETTER_AUTH_SECRET="changeme-generate-a-random-32-byte-string"
 
