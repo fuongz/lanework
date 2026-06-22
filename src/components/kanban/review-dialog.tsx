@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { MarkdownHooks } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeShiki from "@shikijs/rehype";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   LinkSquare01Icon,
@@ -100,8 +101,27 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
                 <Skeleton className="h-4 w-full" />
               </div>
             ) : (
-              <article className="prose prose-sm prose-neutral max-w-none dark:prose-invert prose-pre:bg-muted prose-pre:text-foreground prose-code:before:content-none prose-code:after:content-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripFrontmatter(content)}</ReactMarkdown>
+              <article className="prose prose-sm prose-neutral max-w-none dark:prose-invert prose-code:before:content-none prose-code:after:content-none">
+                <MarkdownHooks
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[
+                    [
+                      rehypeShiki,
+                      {
+                        themes: { light: "github-light", dark: "github-dark" },
+                      },
+                    ],
+                  ]}
+                  fallback={
+                    <div className="space-y-3">
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-5/6" />
+                      <Skeleton className="h-4 w-2/3" />
+                    </div>
+                  }
+                >
+                  {stripFrontmatter(content)}
+                </MarkdownHooks>
               </article>
             )}
           </div>
