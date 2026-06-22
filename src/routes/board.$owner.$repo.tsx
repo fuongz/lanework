@@ -1,6 +1,6 @@
 import { createFileRoute, redirect, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { getBoard, getRepos, getSessionUser } from "@/server/reviews";
+import { getBoard, getSessionUser } from "@/server/reviews";
 import { AppShell } from "@/components/app-shell";
 import type { SidebarNav } from "@/components/app-sidebar";
 import { KanbanBoard } from "@/components/kanban/kanban-board";
@@ -8,7 +8,6 @@ import { ReviewList } from "@/components/kanban/review-list";
 import { ReviewDialog } from "@/components/kanban/review-dialog";
 import { BoardSkeleton } from "@/components/kanban/board-skeleton";
 import { cn } from "@/lib/utils";
-import type { Repo } from "@/lib/github";
 
 interface BoardSearch {
   mine?: boolean;
@@ -26,11 +25,8 @@ export const Route = createFileRoute("/board/$owner/$repo")({
     return { user };
   },
   loader: async ({ params }) => {
-    const [board, repos] = await Promise.all([
-      getBoard({ data: { owner: params.owner, repo: params.repo } }),
-      getRepos().catch(() => [] as Repo[]),
-    ]);
-    return { board, repos };
+    const board = await getBoard({ data: { owner: params.owner, repo: params.repo } });
+    return { board };
   },
   component: BoardPage,
   pendingMs: 120,
@@ -68,7 +64,7 @@ function PendingBoard() {
 
 function BoardPage() {
   const { user } = Route.useRouteContext();
-  const { board, repos } = Route.useLoaderData();
+  const { board } = Route.useLoaderData();
   const { mine, tag } = Route.useSearch();
   const [view, setView] = useState<View>("board");
 
@@ -103,7 +99,7 @@ function BoardPage() {
   const heading = mine ? "My tasks" : tag ? `#${tag}` : board.repo;
 
   return (
-    <AppShell user={user} repos={repos} active={{ owner: board.owner, repo: board.repo }} nav={nav}>
+    <AppShell user={user} active={{ owner: board.owner, repo: board.repo }} nav={nav}>
       {/* Header */}
       <div className="px-6 pt-5">
         <div className="text-sm text-muted-foreground">{board.owner}</div>

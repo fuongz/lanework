@@ -1,21 +1,21 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Copy01Icon,
   Tick02Icon,
+  FileDownloadIcon,
   Folder01Icon,
   FileEditIcon,
   Rocket01Icon,
-  Github01Icon,
   ArrowRight01Icon,
 } from "@hugeicons/core-free-icons";
-import { getSessionUser, getRepos } from "@/server/reviews";
+import { getSessionUser } from "@/server/reviews";
 import { AppShell } from "@/components/app-shell";
 import { SiteHeader } from "@/components/marketing/site-header";
-import { CtaButton } from "@/components/marketing/cta-button";
+import { GitHubLoginButton } from "@/components/marketing/github-login-button";
 import { Card, CardContent } from "@/components/ui/card";
-import { signIn } from "@/lib/auth-client";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { AGENTS_TEMPLATE, EXAMPLE_REVIEW } from "@/content/agents-template";
 import { STATUS_META } from "@/lib/review-status";
 import { ClaudeAiIcon } from "@/components/ui/svgs/claudeAiIcon";
@@ -25,28 +25,18 @@ import { CursorLight } from "@/components/ui/svgs/cursorLight";
 import { CursorDark } from "@/components/ui/svgs/cursorDark";
 import { Gemini } from "@/components/ui/svgs/gemini";
 import { cn } from "@/lib/utils";
-import { REVIEW_COLUMNS, type Repo } from "@/lib/github";
-
-const signInGitHub = () => signIn.social({ provider: "github", callbackURL: "/" });
+import { REVIEW_COLUMNS } from "@/lib/github";
 
 export const Route = createFileRoute("/guide")({
-  loader: async () => {
-    const user = await getSessionUser();
-    if (!user) return { user: null, repos: [] as Repo[] };
-    try {
-      return { user, repos: await getRepos() };
-    } catch {
-      return { user, repos: [] as Repo[] };
-    }
-  },
+  loader: async () => ({ user: await getSessionUser() }),
   component: GuidePage,
 });
 
 function GuidePage() {
-  const { user, repos } = Route.useLoaderData();
+  const { user } = Route.useLoaderData();
   if (user) {
     return (
-      <AppShell user={user} repos={repos}>
+      <AppShell user={user}>
         <GuideHeader />
         <div className="min-h-0 flex-1 overflow-y-auto">
           <GuideBody />
@@ -58,10 +48,7 @@ function GuidePage() {
     <div className="min-h-screen overflow-y-auto">
       <SiteHeader
         actions={
-          <CtaButton size="sm" onClick={signInGitHub}>
-            <HugeiconsIcon icon={Github01Icon} className="size-4" />
-            Continue with GitHub
-          </CtaButton>
+          <GitHubLoginButton size="sm">Continue with GitHub</GitHubLoginButton>
         }
       />
       <div className="pt-16">
@@ -167,7 +154,11 @@ function GuideBody() {
             Project-agnostic. Add your own Domain Rules &amp; Gotchas below the marked line, and
             swap in your own tag vocabulary.
           </p>
-          <CodeBlock code={AGENTS_TEMPLATE} />
+          <CodeBlock
+            code={AGENTS_TEMPLATE}
+            filename="AGENTS.md"
+            icon={<ClaudeAiIcon className="size-5" />}
+          />
         </Step>
 
         <Step n={3} title="Let the agent write a review">
@@ -199,7 +190,7 @@ function GuideBody() {
       {/* Example */}
       <section className="space-y-3">
         <SectionTitle icon={FileEditIcon}>Example review file</SectionTitle>
-        <CodeBlock code={EXAMPLE_REVIEW} />
+        <CodeBlock code={EXAMPLE_REVIEW} filename="2026-06-21-rate-limiting.md" />
       </section>
     </div>
   );
@@ -274,25 +265,112 @@ function ThemedIcon({ Light, Dark }: { Light: SvgIcon; Dark: SvgIcon }) {
   );
 }
 
-function CodeBlock({ code }: { code: string }) {
+function CodeBlock({
+  code,
+  filename,
+  lang = "markdown",
+  icon,
+}: {
+  code: string;
+  filename: string;
+  lang?: string;
+  /** Replaces the extension badge (e.g. a tool logo). */
+  icon?: React.ReactNode;
+}) {
   const [copied, setCopied] = useState(false);
+  const [html, setHtml] = useState<string | null>(null);
+
+  // Highlight with Shiki, lazy-imported so the bundle stays out of the route chunk.
+  useEffect(() => {
+    let active = true;
+    import("shiki")
+      .then(({ codeToHtml }) =>
+        codeToHtml(code, { lang, themes: { light: "github-light", dark: "github-dark" } }),
+      )
+      .then((out) => active && setHtml(out))
+      .catch(() => active && setHtml(null));
+    return () => {
+      active = false;
+    };
+  }, [code, lang]);
+
+  const ext = filename.split(".").pop()?.toUpperCase() ?? "TXT";
+
+  function copy() {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  function download() {
+    const url = URL.createObjectURL(new Blob([code], { type: "text/plain;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
-    <div className="relative">
-      <button
-        onClick={() => {
-          navigator.clipboard.writeText(code).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          });
-        }}
-        className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground shadow-xs transition-colors hover:text-foreground"
-      >
-        <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} className="size-3.5" />
-        {copied ? "Copied" : "Copy"}
-      </button>
-      <pre className="max-h-[460px] overflow-auto rounded-xl border bg-muted/40 p-4 pr-20 font-mono text-xs leading-relaxed text-foreground">
-        {code}
-      </pre>
+    <div className="overflow-hidden rounded-xl border bg-card">
+      {/* Header: file badge + name on the left, actions on the right */}
+      <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {icon ? (
+            <span className="grid size-5 shrink-0 place-items-center">{icon}</span>
+          ) : (
+            <span className="grid size-5 shrink-0 place-items-center rounded bg-foreground/85 font-mono text-[9px] font-bold text-background">
+              {ext}
+            </span>
+          )}
+          <span className="truncate font-mono text-xs text-muted-foreground">{filename}</span>
+        </div>
+        <div className="flex items-center gap-0.5">
+          <CodeAction onClick={download} icon={FileDownloadIcon} label="Download" />
+          <CodeAction
+            onClick={copy}
+            icon={copied ? Tick02Icon : Copy01Icon}
+            label={copied ? "Copied" : "Copy"}
+          />
+        </div>
+      </div>
+      {/* Body */}
+      <div className="shiki-block max-h-[460px] overflow-auto">
+        {html ? (
+          <div dangerouslySetInnerHTML={{ __html: html }} />
+        ) : (
+          <pre className="m-0 p-4 font-mono text-xs leading-relaxed text-foreground">{code}</pre>
+        )}
+      </div>
     </div>
+  );
+}
+
+function CodeAction({
+  onClick,
+  icon,
+  label,
+}: {
+  onClick: () => void;
+  icon: typeof Copy01Icon;
+  label: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+          >
+            <HugeiconsIcon icon={icon} className="size-4" />
+          </button>
+        }
+      />
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

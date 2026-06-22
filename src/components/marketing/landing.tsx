@@ -13,7 +13,6 @@ import {
   CheckmarkSquare02Icon,
   Flag02Icon,
 } from "@hugeicons/core-free-icons";
-import { signIn } from "@/lib/auth-client";
 import { ClaudeAiIcon } from "@/components/ui/svgs/claudeAiIcon";
 import { CodexLight } from "@/components/ui/svgs/codexLight";
 import { CodexDark } from "@/components/ui/svgs/codexDark";
@@ -24,11 +23,9 @@ import { tagPill } from "@/lib/tag-color";
 import { STATUS_META } from "@/lib/review-status";
 import { cn } from "@/lib/utils";
 import { Wordmark } from "./wordmark";
-import { CtaButton } from "./cta-button";
+import { GitHubLoginButton } from "./github-login-button";
 import { SiteHeader } from "./site-header";
 import type { ReviewColumn } from "@/lib/github";
-
-const signInGitHub = () => signIn.social({ provider: "github", callbackURL: "/" });
 
 export function MarketingLanding() {
   return (
@@ -74,10 +71,7 @@ function Nav() {
         </nav>
       }
       actions={
-        <CtaButton size="sm" onClick={signInGitHub}>
-          <HugeiconsIcon icon={Github01Icon} className="size-4" />
-          Sign in
-        </CtaButton>
+        <GitHubLoginButton size="sm">Sign in</GitHubLoginButton>
       }
     />
   );
@@ -133,10 +127,7 @@ function Hero() {
           transition={{ duration: 0.5, delay: 0.18 }}
           className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row"
         >
-          <CtaButton size="lg" onClick={signInGitHub}>
-            <HugeiconsIcon icon={Github01Icon} className="size-4" />
-            Continue with GitHub
-          </CtaButton>
+          <GitHubLoginButton size="lg">Continue with GitHub</GitHubLoginButton>
           <a
             href="#how"
             className="inline-flex h-12 items-center gap-1.5 rounded-xl px-4 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -487,10 +478,7 @@ function Convention() {
             progress. That’s it.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
-            <CtaButton size="lg" onClick={signInGitHub}>
-              <HugeiconsIcon icon={Github01Icon} className="size-4" />
-              Continue with GitHub
-            </CtaButton>
+            <GitHubLoginButton size="lg">Continue with GitHub</GitHubLoginButton>
             <Link
               to="/guide"
               className="inline-flex h-12 items-center gap-1.5 rounded-xl border px-5 text-sm font-medium transition-colors hover:bg-muted"
@@ -544,10 +532,9 @@ function CallToAction() {
               Sign in with GitHub and open your first board in under a minute. Free and open source.
             </p>
             <div className="mt-8 flex justify-center">
-              <CtaButton variant="invert" size="lg" onClick={signInGitHub}>
-                <HugeiconsIcon icon={Github01Icon} className="size-4" />
+              <GitHubLoginButton variant="invert" size="lg">
                 Continue with GitHub
-              </CtaButton>
+              </GitHubLoginButton>
             </div>
           </div>
         </div>

@@ -16,6 +16,7 @@ export interface Repo {
   name: string;
   private: boolean;
   description: string | null;
+  homepage: string | null; // repo's website, if set
   defaultBranch: string;
   updatedAt: string;
 }
@@ -86,22 +87,29 @@ export async function getViewerLogin(token: string): Promise<string> {
   return u.login;
 }
 
-/** Repos the authenticated user can access, most recently updated first. */
-export async function listRepos(token: string): Promise<Repo[]> {
-  const raw = await ghFetch<any[]>(
-    token,
-    "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member",
-  );
-  return raw.map((r) => ({
+const REPO_AFFILIATION = "owner,collaborator,organization_member";
+
+function mapRepo(r: any): Repo {
+  return {
     id: r.id,
     fullName: r.full_name,
     owner: r.owner.login,
     name: r.name,
     private: r.private,
     description: r.description,
+    homepage: r.homepage || null,
     defaultBranch: r.default_branch,
     updatedAt: r.updated_at,
-  }));
+  };
+}
+
+/** Repos the authenticated user can access, most recently updated first (full list). */
+export async function listRepos(token: string): Promise<Repo[]> {
+  const raw = await ghFetch<any[]>(
+    token,
+    `/user/repos?per_page=100&sort=updated&affiliation=${REPO_AFFILIATION}`,
+  );
+  return raw.map(mapRepo);
 }
 
 interface TreeEntry {

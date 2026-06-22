@@ -19,7 +19,6 @@ import { RepoSwitcher } from "@/components/repo-switcher";
 import { TagMore } from "@/components/tag-more";
 import { tagColor } from "@/lib/tag-color";
 import { cn } from "@/lib/utils";
-import type { Repo } from "@/lib/github";
 
 export interface SidebarNav {
   owner: string;
@@ -34,21 +33,20 @@ export interface SidebarNav {
 
 interface AppSidebarProps {
   user: { name: string; image: string | null };
-  repos: Repo[];
   active?: { owner: string; repo: string };
   nav?: SidebarNav;
 }
 
 const TOP_TAGS = 5;
 
-export function AppSidebar({ user, repos, active, nav }: AppSidebarProps) {
+export function AppSidebar({ user, active, nav }: AppSidebarProps) {
   const topTags = nav?.tags.slice(0, TOP_TAGS) ?? [];
 
   return (
     <aside className="flex w-64 shrink-0 flex-col gap-3 border-r bg-sidebar p-3 text-sidebar-foreground">
       {/* Header: searchable repo switcher */}
       <div className="pt-1">
-        <RepoSwitcher repos={repos} active={active} className="w-full" />
+        <RepoSwitcher active={active} className="w-full" />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">

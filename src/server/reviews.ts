@@ -47,8 +47,11 @@ export const getSessionUser = createServerFn({ method: "GET" }).handler(async ()
   };
 });
 
-/** Repos the signed-in user can access. */
-export const getRepos = createServerFn({ method: "GET" }).handler(async (): Promise<Repo[]> => {
+/**
+ * Full list of repos the user can access (up to 100). Fetched once and cached
+ * client-side, then paginated (listing) and searched (switcher) in-memory.
+ */
+export const getAllRepos = createServerFn({ method: "GET" }).handler(async (): Promise<Repo[]> => {
   const { token } = await requireGitHubToken();
   return listRepos(token);
 });

@@ -1,17 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { UnfoldMoreIcon, Github01Icon, LinkSquare01Icon } from "@hugeicons/core-free-icons";
 import {
   Command,
-  CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getGithubManageUrl } from "@/server/reviews";
+import { useRepoStore } from "@/stores/repo-store";
 import { signIn } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import type { Repo } from "@/lib/github";
@@ -19,24 +20,51 @@ import type { Repo } from "@/lib/github";
 const FALLBACK_MANAGE_URL = "https://github.com/settings/applications";
 
 interface RepoSwitcherProps {
-  repos: Repo[];
   active?: { owner: string; repo: string };
   className?: string;
 }
 
-export function RepoSwitcher({ repos, active, className }: RepoSwitcherProps) {
+/** How many repos to show in the switcher before the user searches. */
+const SWITCHER_PREVIEW = 10;
+
+export function RepoSwitcher({ active, className }: RepoSwitcherProps) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [manageUrl, setManageUrl] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
-  // Load the GitHub "manage access" URL the first time the switcher opens.
+  // The full repo list is fetched once into a session store; everything below filters it
+  // in-memory, so the switcher never re-hits the server while typing.
+  const { repos: allRepos, loading, ensureLoaded } = useRepoStore();
+  const trimmed = query.trim().toLowerCase();
+
+  const list = useMemo(() => {
+    if (!allRepos) return [];
+    if (!trimmed) return allRepos.slice(0, SWITCHER_PREVIEW);
+    return allRepos.filter(
+      (r) =>
+        r.fullName.toLowerCase().includes(trimmed) ||
+        (r.description?.toLowerCase().includes(trimmed) ?? false),
+    );
+  }, [trimmed, allRepos]);
+
+  const searching = !allRepos && loading; // first load still in flight
+
+  // On open: prime the full list (once) and load the "manage access" URL.
   useEffect(() => {
-    if (open && !manageUrl) {
+    if (!open) return;
+    ensureLoaded();
+    if (!manageUrl) {
       getGithubManageUrl()
         .then((url) => setManageUrl(url ?? FALLBACK_MANAGE_URL))
         .catch(() => setManageUrl(FALLBACK_MANAGE_URL));
     }
-  }, [open, manageUrl]);
+  }, [open, manageUrl, ensureLoaded]);
+
+  // Clear the query when the switcher closes, so reopening shows the first repos.
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
 
   function reconnect() {
     setOpen(false);
@@ -83,28 +111,48 @@ export function RepoSwitcher({ repos, active, className }: RepoSwitcherProps) {
       </PopoverTrigger>
 
       <PopoverContent align="start" sideOffset={6} className="w-72 gap-0 overflow-hidden rounded-xl p-0">
-        <Command>
-          <CommandInput placeholder="Search repositories…" />
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Search repositories…"
+            value={query}
+            onValueChange={setQuery}
+          />
           <CommandList>
-            <CommandEmpty>No repositories found.</CommandEmpty>
-            <CommandGroup>
-              {repos.map((repo) => {
-                const isActive = active?.owner === repo.owner && active?.repo === repo.name;
-                return (
-                  <CommandItem
-                    key={repo.id}
-                    value={repo.fullName}
-                    data-checked={isActive ? "true" : "false"}
-                    onSelect={() => choose(repo)}
-                  >
-                    <span className="flex min-w-0 flex-col">
-                      <span className="truncate font-medium">{repo.name}</span>
-                      <span className="truncate text-[11px] text-muted-foreground">{repo.owner}</span>
-                    </span>
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
+            {searching ? (
+              <div className="space-y-1 p-1">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex flex-col gap-1.5 px-2 py-1.5">
+                    <Skeleton className="h-3.5 w-2/3" />
+                    <Skeleton className="h-2.5 w-2/5" />
+                  </div>
+                ))}
+              </div>
+            ) : list.length === 0 ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">
+                No repositories found.
+              </div>
+            ) : (
+              <CommandGroup>
+                {list.map((repo) => {
+                  const isActive = active?.owner === repo.owner && active?.repo === repo.name;
+                  return (
+                    <CommandItem
+                      key={repo.id}
+                      value={repo.fullName}
+                      data-checked={isActive ? "true" : "false"}
+                      onSelect={() => choose(repo)}
+                    >
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate font-medium">{repo.name}</span>
+                        <span className="truncate text-[11px] text-muted-foreground">
+                          {repo.owner}
+                        </span>
+                      </span>
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            )}
           </CommandList>
         </Command>
 
