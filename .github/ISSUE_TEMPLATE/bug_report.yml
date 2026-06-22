@@ -1,0 +1,44 @@
+name: 🐛 Bug report
+description: Report something that isn't working
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to file a bug! Please don't include secrets or tokens.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected.
+      placeholder: When I open a board with private repos, …
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in with GitHub
+        2. Open repo X
+        3. Click …
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Where it happens (local dev vs deployed), browser, Bun version, OS.
+      placeholder: |
+        - Local (`bun run dev`) / Deployed
+        - Browser: Chrome 130
+        - Bun: 1.3.x
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / screenshots
+      description: Console or terminal output (redact secrets), and screenshots if UI-related.
+      render: shell
+    validations:
+      required: false

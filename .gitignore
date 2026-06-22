@@ -1,0 +1,18 @@
+node_modules
+dist
+.output
+.wrangler
+.vite
+
+# secrets
+.dev.vars
+.env
+.env.*
+!.env.example
+
+# generated (run `npm run cf-typegen` to refresh worker-configuration.d.ts)
+src/routeTree.gen.ts
+
+# os
+.DS_Store
+*.log

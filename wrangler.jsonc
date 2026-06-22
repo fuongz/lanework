@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lanework",
+  "compatibility_date": "2026-06-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "@tanstack/react-start/server-entry",
+  "observability": {
+    "enabled": true,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lanework-db",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "drizzle",
+    },
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "http://localhost:5173",
+  },
+}

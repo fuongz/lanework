@@ -1,0 +1,13 @@
+# Local development secrets for `vite dev` / `wrangler dev`.
+# Copy to `.dev.vars` (gitignored) and fill in real values.
+# For production set these with: wrangler secret put <NAME>
+
+# A long random string. Generate with: openssl rand -base64 32
+BETTER_AUTH_SECRET="changeme-generate-a-random-32-byte-string"
+
+# GitHub OAuth App credentials (https://github.com/settings/developers)
+# Authorization callback URL must be:
+#   http://localhost:5173/api/auth/callback/github   (local)
+#   https://<your-worker-domain>/api/auth/callback/github   (prod)
+GITHUB_CLIENT_ID="your-github-oauth-client-id"
+GITHUB_CLIENT_SECRET="your-github-oauth-client-secret"
