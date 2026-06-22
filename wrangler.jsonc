@@ -4,11 +4,18 @@
   "compatibility_date": "2026-06-21",
   "compatibility_flags": ["nodejs_compat"],
   "main": "@tanstack/react-start/server-entry",
-  "workers_dev": false,
-  "preview_urls": false,
   "observability": {
     "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true,
+    },
   },
+  "preview_urls": false,
+  "workers_dev": false,
   "routes": [{ "pattern": "lanework.dev", "custom_domain": true }],
   "d1_databases": [
     {
