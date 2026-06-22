@@ -30,6 +30,11 @@ const PAGE_SIZE = 12;
 
 export const Route = createFileRoute("/")({
   loader: async () => ({ user: await getSessionUser() }),
+  head: ({ loaderData }) => ({
+    meta: [
+      { title: loaderData?.user ? "Projects - Lanework" : "Lanework — every agent review, in its lane." },
+    ],
+  }),
   component: Home,
 });
 

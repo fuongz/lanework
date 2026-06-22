@@ -35,7 +35,7 @@ export function CtaButton({
       whileTap={pending ? undefined : { scale: 0.97 }}
       transition={{ type: "spring", stiffness: 400, damping: 22 }}
       className={cn(
-        "group relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-xl font-semibold shadow-lg ring-1 ring-inset transition-shadow hover:shadow-xl focus-visible:outline-none focus-visible:ring-2",
+        "group relative inline-flex cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl font-semibold shadow-lg ring-1 ring-inset transition-shadow hover:shadow-xl focus-visible:outline-none focus-visible:ring-2",
         VARIANTS[variant],
         size === "lg" ? "h-12 px-6 text-sm" : "h-9 px-4 text-sm",
         pending && "cursor-not-allowed opacity-80",

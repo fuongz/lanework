@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { getAuth } from "@/lib/auth";
 import {
   listRepos,
+  listBranches,
   listReviewCards,
   getReviewContent,
   getViewerLogin,
@@ -78,10 +79,37 @@ function safeName(value: unknown, field: string): string {
   return value;
 }
 
-const boardValidator = (d: unknown): { owner: string; repo: string } => {
+// A git ref (branch) may contain slashes (e.g. `feature/x`), so it's more permissive
+// than a repo name — but still reject traversal and whitespace.
+function safeRef(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || value.includes("..") || /\s/.test(value)) {
+    throw new Error("invalid branch");
+  }
+  return value;
+}
+
+const boardValidator = (d: unknown): { owner: string; repo: string; branch?: string } => {
+  const v = d as { owner?: string; repo?: string; branch?: string };
+  return {
+    owner: safeName(v?.owner, "owner"),
+    repo: safeName(v?.repo, "repo"),
+    branch: safeRef(v?.branch),
+  };
+};
+
+const branchesValidator = (d: unknown): { owner: string; repo: string } => {
   const v = d as { owner?: string; repo?: string };
   return { owner: safeName(v?.owner, "owner"), repo: safeName(v?.repo, "repo") };
 };
+
+/** Branch names for a repo (default branch first). */
+export const getBranches = createServerFn({ method: "GET" })
+  .validator(branchesValidator)
+  .handler(async ({ data }): Promise<string[]> => {
+    const { token } = await requireGitHubToken();
+    return listBranches(token, data.owner, data.repo);
+  });
 
 export interface BoardData {
   owner: string;
@@ -102,7 +130,7 @@ export const getBoard = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<BoardData> => {
     const { token, userId } = await requireGitHubToken();
     const cache = env.CACHE as KVNamespace | undefined;
-    const cacheKey = `board:${userId}:${data.owner}/${data.repo}`;
+    const cacheKey = `board:${userId}:${data.owner}/${data.repo}@${data.branch ?? "default"}`;
 
     if (cache) {
       const hit = await cache.get<CachedBoard>(cacheKey, "json").catch(() => null);
@@ -110,7 +138,7 @@ export const getBoard = createServerFn({ method: "GET" })
     }
 
     const [{ branch, cards }, viewer] = await Promise.all([
-      listReviewCards(token, data.owner, data.repo),
+      listReviewCards(token, data.owner, data.repo, data.branch),
       getViewerLogin(token),
     ]);
     const payload: CachedBoard = { branch, viewer, cards };

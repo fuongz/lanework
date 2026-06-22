@@ -112,6 +112,20 @@ export async function listRepos(token: string): Promise<Repo[]> {
   return raw.map(mapRepo);
 }
 
+/** Branch names for a repo (up to 100), default branch first. */
+export async function listBranches(token: string, owner: string, repo: string): Promise<string[]> {
+  const o = encodeURIComponent(owner);
+  const r = encodeURIComponent(repo);
+  const [raw, meta] = await Promise.all([
+    ghFetch<{ name: string }[]>(token, `/repos/${o}/${r}/branches?per_page=100`),
+    ghFetch<{ default_branch: string }>(token, `/repos/${o}/${r}`).catch(() => null),
+  ]);
+  const names = raw.map((b) => b.name);
+  const def = meta?.default_branch;
+  // Surface the default branch first; keep the rest in GitHub's order.
+  return def && names.includes(def) ? [def, ...names.filter((n) => n !== def)] : names;
+}
+
 interface TreeEntry {
   path: string;
   type: "blob" | "tree";

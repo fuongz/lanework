@@ -29,6 +29,7 @@ import { REVIEW_COLUMNS } from "@/lib/github";
 
 export const Route = createFileRoute("/guide")({
   loader: async () => ({ user: await getSessionUser() }),
+  head: () => ({ meta: [{ title: "How to use - Lanework" }] }),
   component: GuidePage,
 });
 

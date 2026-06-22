@@ -1,7 +1,10 @@
 import { createFileRoute, redirect, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { FolderLibraryIcon, Note01Icon } from "@hugeicons/core-free-icons";
 import { getBoard, getSessionUser } from "@/server/reviews";
 import { AppShell } from "@/components/app-shell";
+import { BranchSwitcher } from "@/components/branch-switcher";
 import type { SidebarNav } from "@/components/app-sidebar";
 import { KanbanBoard } from "@/components/kanban/kanban-board";
 import { ReviewList } from "@/components/kanban/review-list";
@@ -12,22 +15,30 @@ import { cn } from "@/lib/utils";
 interface BoardSearch {
   mine?: boolean;
   tag?: string;
+  branch?: string;
 }
 
 export const Route = createFileRoute("/board/$owner/$repo")({
   validateSearch: (s: Record<string, unknown>): BoardSearch => ({
     mine: s.mine === true || s.mine === "true" ? true : undefined,
     tag: typeof s.tag === "string" && s.tag ? s.tag : undefined,
+    branch: typeof s.branch === "string" && s.branch ? s.branch : undefined,
   }),
   beforeLoad: async () => {
     const user = await getSessionUser();
     if (!user) throw redirect({ to: "/" });
     return { user };
   },
-  loader: async ({ params }) => {
-    const board = await getBoard({ data: { owner: params.owner, repo: params.repo } });
+  loaderDeps: ({ search: { branch } }) => ({ branch }),
+  loader: async ({ params, deps }) => {
+    const board = await getBoard({
+      data: { owner: params.owner, repo: params.repo, branch: deps.branch },
+    });
     return { board };
   },
+  head: ({ params }) => ({
+    meta: [{ title: `${params.owner}/${params.repo} - Lanework` }],
+  }),
   component: BoardPage,
   pendingMs: 120,
   pendingMinMs: 400,
@@ -66,6 +77,7 @@ function BoardPage() {
   const { user } = Route.useRouteContext();
   const { board } = Route.useLoaderData();
   const { mine, tag } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const [view, setView] = useState<View>("board");
 
   const { filtered, nav } = useMemo(() => {
@@ -105,10 +117,24 @@ function BoardPage() {
         <div className="text-sm text-muted-foreground">{board.owner}</div>
         <div className="mt-1 flex items-end justify-between gap-4">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">{heading}</h1>
-          <p className="pb-1 text-xs text-muted-foreground">
-            .agents/reviews · {board.branch} · {filtered.length}
-            {filtered.length !== board.cards.length ? ` / ${board.cards.length}` : ""} reviews
-          </p>
+          <div className="flex shrink-0 items-center gap-1.5 pb-1">
+            <MetaPill icon={FolderLibraryIcon}>
+              <span className="font-mono">.agents/reviews</span>
+            </MetaPill>
+            <BranchSwitcher
+              owner={board.owner}
+              repo={board.repo}
+              current={board.branch}
+              onSelect={(branch) => navigate({ search: (prev) => ({ ...prev, branch }) })}
+            />
+            <MetaPill icon={Note01Icon} accent>
+              <span className="font-semibold text-foreground tabular-nums">{filtered.length}</span>
+              {filtered.length !== board.cards.length ? (
+                <span className="tabular-nums">/{board.cards.length}</span>
+              ) : null}
+              <span>reviews</span>
+            </MetaPill>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -140,5 +166,31 @@ function BoardPage() {
 
       <ReviewDialog owner={board.owner} repo={board.repo} branch={board.branch} />
     </AppShell>
+  );
+}
+
+/** A small metadata pill in the board header (path / branch / review count). */
+function MetaPill({
+  icon,
+  accent,
+  children,
+}: {
+  icon: typeof FolderLibraryIcon;
+  accent?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs text-muted-foreground transition-colors",
+        accent ? "border-primary/20 bg-primary/5" : "border-transparent bg-muted/60 hover:bg-muted",
+      )}
+    >
+      <HugeiconsIcon
+        icon={icon}
+        className={cn("size-3.5 shrink-0", accent ? "text-primary" : "text-muted-foreground/70")}
+      />
+      {children}
+    </span>
   );
 }
