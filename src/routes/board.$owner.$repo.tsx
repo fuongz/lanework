@@ -1,7 +1,12 @@
-import { createFileRoute, redirect, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { createFileRoute, redirect, Link, useRouter } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { FolderLibraryIcon, Note01Icon } from "@hugeicons/core-free-icons";
+import {
+  FolderLibraryIcon,
+  Note01Icon,
+  Clock01Icon,
+  RefreshIcon,
+} from "@hugeicons/core-free-icons";
 import { getBoard, getSessionUser } from "@/server/reviews";
 import { AppShell } from "@/components/app-shell";
 import { BranchSwitcher } from "@/components/branch-switcher";
@@ -134,6 +139,12 @@ function BoardPage() {
               ) : null}
               <span>reviews</span>
             </MetaPill>
+            <RefreshControl
+              owner={board.owner}
+              repo={board.repo}
+              branch={board.branch}
+              fetchedAt={board.fetchedAt}
+            />
           </div>
         </div>
 
@@ -166,6 +177,71 @@ function BoardPage() {
 
       <ReviewDialog owner={board.owner} repo={board.repo} branch={board.branch} />
     </AppShell>
+  );
+}
+
+function formatRelativeTime(epochMs: number): string {
+  const secs = Math.max(0, Math.round((Date.now() - epochMs) / 1000));
+  if (secs < 10) return "just now";
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
+/** "Updated Xm ago" badge + a button to force-refresh the board from GitHub. */
+function RefreshControl({
+  owner,
+  repo,
+  branch,
+  fetchedAt,
+}: {
+  owner: string;
+  repo: string;
+  branch: string;
+  fetchedAt: number;
+}) {
+  const router = useRouter();
+  const [refreshing, setRefreshing] = useState(false);
+  const [, setTick] = useState(0);
+
+  // Re-render periodically so the relative timestamp stays current.
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const onRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      // Force a fresh GitHub fetch (which rewrites the KV cache), then re-pull
+      // the loader so the board (and its new fetchedAt) updates.
+      await getBoard({ data: { owner, repo, branch, refresh: true } });
+      await router.invalidate();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      <MetaPill icon={Clock01Icon}>
+        <span className="tabular-nums">Updated {formatRelativeTime(fetchedAt)}</span>
+      </MetaPill>
+      <button
+        type="button"
+        onClick={onRefresh}
+        disabled={refreshing}
+        title="Refresh from GitHub"
+        aria-label="Refresh from GitHub"
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-transparent bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60"
+      >
+        <HugeiconsIcon icon={RefreshIcon} className={cn("size-3.5", refreshing && "animate-spin")} />
+      </button>
+    </div>
   );
 }
 

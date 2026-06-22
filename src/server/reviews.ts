@@ -89,12 +89,16 @@ function safeRef(value: unknown): string | undefined {
   return value;
 }
 
-const boardValidator = (d: unknown): { owner: string; repo: string; branch?: string } => {
-  const v = d as { owner?: string; repo?: string; branch?: string };
+const boardValidator = (
+  d: unknown,
+): { owner: string; repo: string; branch?: string; refresh: boolean } => {
+  const v = d as { owner?: string; repo?: string; branch?: string; refresh?: unknown };
   return {
     owner: safeName(v?.owner, "owner"),
     repo: safeName(v?.repo, "repo"),
     branch: safeRef(v?.branch),
+    // When true, bypass the KV cache and force a fresh GitHub fetch.
+    refresh: v?.refresh === true,
   };
 };
 
@@ -117,12 +121,20 @@ export interface BoardData {
   branch: string;
   viewer: string; // GitHub login of the signed-in user (for "My tasks")
   cards: ReviewCard[];
+  fetchedAt: number; // epoch ms the cards were fetched from GitHub
+  cached: boolean; // whether this response was served from KV
 }
 
-// Short-lived per-user cache. Keyed by user id so cached repo content is never
-// served to a different user (who may not have access to that repo).
-const BOARD_TTL_SECONDS = 60;
-type CachedBoard = { branch: string; viewer: string; cards: ReviewCard[] };
+// Per-user cache for the (slow) GitHub board fetch. Keyed by user id so cached
+// repo content is never served to a different user (who may not have access to
+// that repo). The TTL is the freshness bound; users can force-refresh sooner.
+const BOARD_TTL_SECONDS = 600; // 10 minutes
+type CachedBoard = {
+  branch: string;
+  viewer: string;
+  cards: ReviewCard[];
+  fetchedAt: number;
+};
 
 /** All review cards for a repo, grouped client-side into columns. */
 export const getBoard = createServerFn({ method: "GET" })
@@ -132,23 +144,23 @@ export const getBoard = createServerFn({ method: "GET" })
     const cache = env.CACHE as KVNamespace | undefined;
     const cacheKey = `board:${userId}:${data.owner}/${data.repo}@${data.branch ?? "default"}`;
 
-    if (cache) {
+    if (cache && !data.refresh) {
       const hit = await cache.get<CachedBoard>(cacheKey, "json").catch(() => null);
-      if (hit) return { owner: data.owner, repo: data.repo, ...hit };
+      if (hit) return { owner: data.owner, repo: data.repo, cached: true, ...hit };
     }
 
     const [{ branch, cards }, viewer] = await Promise.all([
       listReviewCards(token, data.owner, data.repo, data.branch),
       getViewerLogin(token),
     ]);
-    const payload: CachedBoard = { branch, viewer, cards };
+    const payload: CachedBoard = { branch, viewer, cards, fetchedAt: Date.now() };
 
     if (cache) {
       await cache
         .put(cacheKey, JSON.stringify(payload), { expirationTtl: BOARD_TTL_SECONDS })
         .catch(() => {});
     }
-    return { owner: data.owner, repo: data.repo, ...payload };
+    return { owner: data.owner, repo: data.repo, cached: false, ...payload };
   });
 
 const contentValidator = (d: unknown): { owner: string; repo: string; path: string; ref?: string } => {
