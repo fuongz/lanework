@@ -1,18 +1,19 @@
-import { createFileRoute, redirect, Link, useRouter } from "@tanstack/react-router";
+import { createFileRoute, redirect, Link, Outlet, useLocation, useParams, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
   FolderLibraryIcon,
   Note01Icon,
   Clock01Icon,
   RefreshIcon,
+  CheckmarkSquare02Icon,
+  LeftToRightListBulletIcon,
+  DashboardSquare01Icon,
 } from "@hugeicons/core-free-icons";
 import { getBoard, getSessionUser } from "@/server/reviews";
 import { AppShell } from "@/components/app-shell";
 import { BranchSwitcher } from "@/components/branch-switcher";
 import type { SidebarNav } from "@/components/app-sidebar";
-import { KanbanBoard } from "@/components/kanban/kanban-board";
-import { ReviewList } from "@/components/kanban/review-list";
 import { ReviewDialog } from "@/components/kanban/review-dialog";
 import { BoardSkeleton } from "@/components/kanban/board-skeleton";
 import { cn } from "@/lib/utils";
@@ -45,7 +46,7 @@ export const Route = createFileRoute("/board/$owner/$repo")({
   head: ({ params }) => ({
     meta: [{ title: `${params.owner}/${params.repo} - Lanework` }],
   }),
-  component: BoardPage,
+  component: BoardLayout,
   pendingMs: 120,
   pendingMinMs: 400,
   pendingComponent: PendingBoard,
@@ -66,12 +67,11 @@ export const Route = createFileRoute("/board/$owner/$repo")({
   ),
 });
 
-type View = "board" | "list" | "timeline" | "due";
-const TABS: Array<{ key: View; label: string; enabled: boolean }> = [
-  { key: "board", label: "Board", enabled: true },
-  { key: "list", label: "List", enabled: true },
-  { key: "timeline", label: "Timeline", enabled: false },
-  { key: "due", label: "Due Tasks", enabled: false },
+export type BoardView = "board" | "list";
+export const DEFAULT_VIEW: BoardView = "board";
+const TABS: Array<{ key: BoardView; label: string; icon: IconSvgElement }> = [
+  { key: "list", label: "List", icon: LeftToRightListBulletIcon },
+  { key: "board", label: "Kanban", icon: DashboardSquare01Icon },
 ];
 
 function PendingBoard() {
@@ -79,15 +79,15 @@ function PendingBoard() {
   return <BoardSkeleton owner={owner} repo={repo} />;
 }
 
-function BoardPage() {
-  const { user } = Route.useRouteContext();
+/**
+ * Filtered board data + sidebar nav, derived from the layout's loader data and
+ * the current search. Shared by the layout header and each view route (they all
+ * read the same parent loader, so switching tabs never refetches the board).
+ */
+export function useBoardData() {
   const { board } = Route.useLoaderData();
   const { mine, tag } = Route.useSearch();
-  const navigate = Route.useNavigate();
-  const [view, setView] = useState<View>("board");
-  useLocalLiveReload(); // live-refresh the board as local review files change (local mode only)
-
-  const { filtered, nav } = useMemo(() => {
+  return useMemo(() => {
     const tagCounts = new Map<string, number>();
     let myCount = 0;
     for (const c of board.cards) {
@@ -103,6 +103,12 @@ function BoardPage() {
         (!mine || c.assignees.includes(board.viewer)) && (!tag || c.tags.includes(tag)),
     );
 
+    // Aggregate checklist progress across the visible cards (x/x on the board).
+    const totals = filtered.reduce(
+      (acc, c) => ({ done: acc.done + c.stats.done, total: acc.total + c.stats.total }),
+      { done: 0, total: 0 },
+    );
+
     const nav: SidebarNav = {
       owner: board.owner,
       repo: board.repo,
@@ -112,14 +118,33 @@ function BoardPage() {
       myCount,
       tags,
     };
-    return { filtered, nav };
+    return { board, filtered, totals, nav, mine, tag };
   }, [board, mine, tag]);
+}
 
+function BoardLayout() {
+  const { user } = Route.useRouteContext();
+  const navigate = Route.useNavigate();
+  // The active view is the `$view` path param of the child route.
+  const { view } = useParams({ strict: false }) as { view?: string };
+  const activeView = (view ?? DEFAULT_VIEW) as BoardView;
+  useLocalLiveReload(); // live-refresh the board as local review files change (local mode only)
+
+  const { board, filtered, totals, nav, mine, tag } = useBoardData();
   const heading = mine ? "My tasks" : tag ? `#${tag}` : board.repo;
+  // The Cost child page lives under this layout but shows its own UI — hide the
+  // review header + view tabs there.
+  const location = useLocation();
+  const onCost = location.pathname.endsWith("/cost");
 
   return (
-    <AppShell user={user} active={{ owner: board.owner, repo: board.repo }} nav={nav}>
-      {/* Header */}
+    <AppShell
+      user={user}
+      active={{ owner: board.owner, repo: board.repo }}
+      nav={{ ...nav, cost: onCost }}
+    >
+      {/* Board header + view tabs (hidden on the Cost page) */}
+      {!onCost ? (
       <div className="px-6 pt-5">
         <div className="text-sm text-muted-foreground">{board.owner}</div>
         <div className="mt-1 flex items-end justify-between gap-4">
@@ -144,6 +169,14 @@ function BoardPage() {
               ) : null}
               <span>reviews</span>
             </MetaPill>
+            {totals.total > 0 ? (
+              <MetaPill icon={CheckmarkSquare02Icon} accent>
+                <span className="font-semibold text-foreground tabular-nums">
+                  {totals.done}/{totals.total}
+                </span>
+                <span>done</span>
+              </MetaPill>
+            ) : null}
             <RefreshControl
               owner={board.owner}
               repo={board.repo}
@@ -153,31 +186,41 @@ function BoardPage() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="mt-4 flex items-center gap-1 border-b">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              disabled={!t.enabled}
-              onClick={() => t.enabled && setView(t.key)}
-              title={t.enabled ? undefined : "Coming soon"}
-              className={cn(
-                "relative -mb-px rounded-t-lg px-3.5 py-2 text-sm transition-colors",
-                view === t.key
-                  ? "border border-b-background bg-background font-medium text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-                !t.enabled && "cursor-not-allowed opacity-40 hover:text-muted-foreground",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
+        {/* View tabs — each a separate route (/board/$owner/$repo/{view}) */}
+        <div className="mt-4 inline-flex items-center gap-1 rounded-xl border bg-muted/40 p-1">
+          {TABS.map((t) => {
+            const active = activeView === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() =>
+                  navigate({
+                    to: "/board/$owner/$repo/$view",
+                    params: (p) => ({ ...p, view: t.key }),
+                    search: (prev) => prev,
+                  })
+                }
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors",
+                  active
+                    ? "bg-background font-medium text-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
+                )}
+              >
+                <HugeiconsIcon icon={t.icon} className="size-4" />
+                {t.label}
+              </button>
+            );
+          })}
         </div>
       </div>
+      ) : null}
 
-      {/* Content */}
+      {/* Active view renders here */}
       <div className="min-h-0 flex-1 pt-5">
-        {view === "list" ? <ReviewList cards={filtered} /> : <KanbanBoard cards={filtered} />}
+        <Outlet />
       </div>
 
       <ReviewDialog owner={board.owner} repo={board.repo} branch={board.branch} />

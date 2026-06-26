@@ -28,7 +28,9 @@ approve before they implement. Lanework turns that convention into a board so
 you can see, across a repo, what's awaiting review, in progress, done, or dropped —
 and open any review to read and approve it.
 
-It's **read-only**: it reads `.agents/reviews/` and never writes back.
+The **hosted** app is read-only — it reads `.agents/reviews/` and never writes back.
+The **local CLI** reads the same way, but lets you tick checkboxes in a review and
+**Save changes** back to the file on disk when you choose to.
 
 ## Two ways to use it
 
@@ -39,15 +41,20 @@ It's **read-only**: it reads `.agents/reviews/` and never writes back.
 | Auth | GitHub sign-in (Better Auth) | None |
 | Network | Reads GitHub REST + GraphQL | Fully offline |
 | Live updates | Manual refresh (KV-cached) | Auto — watches the folder |
+| Checklists | Read-only | Tick boxes + **Save changes** to disk |
+| Cost view | — | Estimates Claude Code token spend from `~/.claude` |
 
 Both share the same UI and review-parsing logic (in `packages/shared`).
 
 ## Features
 
 - 🗂️ **Board & List views** — four columns from `.agents/reviews/{todo,processing,done,dropped}`
-- 🏷️ **Rich cards** — priority, assignee avatars, tags, date, and live checklist progress
+- 🏷️ **Rich cards** — priority, assignee avatars, tags, date, and an `x/x` checklist-progress badge
 - 🔎 **Filter** by **tag** or **My tasks**, with a searchable repo switcher (hosted)
 - 📄 **Full-screen review** with a clean metadata panel + rendered markdown
+- ☑️ **Interactive checklists** — tick items in a review with live progress; **"pick one"** groups render as radios
+- 💾 **Save to disk** (local CLI) — persist your ticks back to the markdown file
+- 💰 **Cost view** (local CLI) — estimates the project's Claude Code token spend from `~/.claude` transcripts, with a cache-aware per-model breakdown
 - 💻 **Local CLI** — `npx @phake/lanework` boards the current repo, no Cloudflare or auth, with live file-watch
 - 🔐 **GitHub sign-in** (hosted) — pick any repo you can access
 - ✨ **Polished** — Motion animations, Hugeicons, shadcn/Base UI, dark-mode tokens
@@ -79,8 +86,10 @@ bunx @phake/lanework              # same, with Bun
 npx @phake/lanework path/to/repo  # board a different directory
 ```
 
-It picks a free port (from `24300`), serves on `127.0.0.1`, and opens your browser.
-Edit or add review files and the board updates live.
+It picks a free port (from `3662`), serves on `127.0.0.1`, and opens your browser.
+Edit or add review files and the board updates live. Open a review to tick its
+checkboxes — they're a working view until you hit **Save changes**, which writes the
+updated markdown back to the file on disk.
 
 ```
 lanework [dir] [--port N] [--no-open]

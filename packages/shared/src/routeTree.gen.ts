@@ -13,6 +13,9 @@ import { Route as GuideRouteImport } from './routes/guide'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BoardOwnerRepoRouteImport } from './routes/board.$owner.$repo'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as BoardOwnerRepoIndexRouteImport } from './routes/board.$owner.$repo.index'
+import { Route as BoardOwnerRepoCostRouteImport } from './routes/board.$owner.$repo.cost'
+import { Route as BoardOwnerRepoViewRouteImport } from './routes/board.$owner.$repo.$view'
 
 const GuideRoute = GuideRouteImport.update({
   id: '/guide',
@@ -34,39 +37,83 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BoardOwnerRepoIndexRoute = BoardOwnerRepoIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => BoardOwnerRepoRoute,
+} as any)
+const BoardOwnerRepoCostRoute = BoardOwnerRepoCostRouteImport.update({
+  id: '/cost',
+  path: '/cost',
+  getParentRoute: () => BoardOwnerRepoRoute,
+} as any)
+const BoardOwnerRepoViewRoute = BoardOwnerRepoViewRouteImport.update({
+  id: '/$view',
+  path: '/$view',
+  getParentRoute: () => BoardOwnerRepoRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/guide': typeof GuideRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/board/$owner/$repo': typeof BoardOwnerRepoRoute
+  '/board/$owner/$repo': typeof BoardOwnerRepoRouteWithChildren
+  '/board/$owner/$repo/$view': typeof BoardOwnerRepoViewRoute
+  '/board/$owner/$repo/cost': typeof BoardOwnerRepoCostRoute
+  '/board/$owner/$repo/': typeof BoardOwnerRepoIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/guide': typeof GuideRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/board/$owner/$repo': typeof BoardOwnerRepoRoute
+  '/board/$owner/$repo/$view': typeof BoardOwnerRepoViewRoute
+  '/board/$owner/$repo/cost': typeof BoardOwnerRepoCostRoute
+  '/board/$owner/$repo': typeof BoardOwnerRepoIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/guide': typeof GuideRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/board/$owner/$repo': typeof BoardOwnerRepoRoute
+  '/board/$owner/$repo': typeof BoardOwnerRepoRouteWithChildren
+  '/board/$owner/$repo/$view': typeof BoardOwnerRepoViewRoute
+  '/board/$owner/$repo/cost': typeof BoardOwnerRepoCostRoute
+  '/board/$owner/$repo/': typeof BoardOwnerRepoIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/guide' | '/api/auth/$' | '/board/$owner/$repo'
+  fullPaths:
+    | '/'
+    | '/guide'
+    | '/api/auth/$'
+    | '/board/$owner/$repo'
+    | '/board/$owner/$repo/$view'
+    | '/board/$owner/$repo/cost'
+    | '/board/$owner/$repo/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/guide' | '/api/auth/$' | '/board/$owner/$repo'
-  id: '__root__' | '/' | '/guide' | '/api/auth/$' | '/board/$owner/$repo'
+  to:
+    | '/'
+    | '/guide'
+    | '/api/auth/$'
+    | '/board/$owner/$repo/$view'
+    | '/board/$owner/$repo/cost'
+    | '/board/$owner/$repo'
+  id:
+    | '__root__'
+    | '/'
+    | '/guide'
+    | '/api/auth/$'
+    | '/board/$owner/$repo'
+    | '/board/$owner/$repo/$view'
+    | '/board/$owner/$repo/cost'
+    | '/board/$owner/$repo/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   GuideRoute: typeof GuideRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  BoardOwnerRepoRoute: typeof BoardOwnerRepoRoute
+  BoardOwnerRepoRoute: typeof BoardOwnerRepoRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -99,14 +146,51 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/board/$owner/$repo/': {
+      id: '/board/$owner/$repo/'
+      path: '/'
+      fullPath: '/board/$owner/$repo/'
+      preLoaderRoute: typeof BoardOwnerRepoIndexRouteImport
+      parentRoute: typeof BoardOwnerRepoRoute
+    }
+    '/board/$owner/$repo/cost': {
+      id: '/board/$owner/$repo/cost'
+      path: '/cost'
+      fullPath: '/board/$owner/$repo/cost'
+      preLoaderRoute: typeof BoardOwnerRepoCostRouteImport
+      parentRoute: typeof BoardOwnerRepoRoute
+    }
+    '/board/$owner/$repo/$view': {
+      id: '/board/$owner/$repo/$view'
+      path: '/$view'
+      fullPath: '/board/$owner/$repo/$view'
+      preLoaderRoute: typeof BoardOwnerRepoViewRouteImport
+      parentRoute: typeof BoardOwnerRepoRoute
+    }
   }
 }
+
+interface BoardOwnerRepoRouteChildren {
+  BoardOwnerRepoViewRoute: typeof BoardOwnerRepoViewRoute
+  BoardOwnerRepoCostRoute: typeof BoardOwnerRepoCostRoute
+  BoardOwnerRepoIndexRoute: typeof BoardOwnerRepoIndexRoute
+}
+
+const BoardOwnerRepoRouteChildren: BoardOwnerRepoRouteChildren = {
+  BoardOwnerRepoViewRoute: BoardOwnerRepoViewRoute,
+  BoardOwnerRepoCostRoute: BoardOwnerRepoCostRoute,
+  BoardOwnerRepoIndexRoute: BoardOwnerRepoIndexRoute,
+}
+
+const BoardOwnerRepoRouteWithChildren = BoardOwnerRepoRoute._addFileChildren(
+  BoardOwnerRepoRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   GuideRoute: GuideRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-  BoardOwnerRepoRoute: BoardOwnerRepoRoute,
+  BoardOwnerRepoRoute: BoardOwnerRepoRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

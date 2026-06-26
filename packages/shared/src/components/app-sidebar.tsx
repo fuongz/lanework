@@ -6,6 +6,7 @@ import {
   Logout01Icon,
   UnfoldMoreIcon,
   HelpCircleIcon,
+  Coins01Icon,
 } from "@hugeicons/core-free-icons";
 import { signOut } from "@/lib/auth-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -29,6 +30,8 @@ export interface SidebarNav {
   myCount: number;
   /** All tags, sorted by count desc. */
   tags: { name: string; count: number }[];
+  /** True when the Cost page is active (so "Tasks" isn't also highlighted). */
+  cost?: boolean;
 }
 
 interface AppSidebarProps {
@@ -58,20 +61,36 @@ export function AppSidebar({ user, active, nav }: AppSidebarProps) {
                 owner={nav.owner}
                 repo={nav.repo}
                 search={{}}
-                active={!nav.mine && !nav.tag}
+                active={!nav.mine && !nav.tag && !nav.cost}
                 icon={DashboardSquare01Icon}
                 label="Tasks"
                 count={nav.totalCount}
               />
-              <NavItem
-                owner={nav.owner}
-                repo={nav.repo}
-                search={{ mine: true }}
-                active={nav.mine}
-                icon={UserIcon}
-                label="My tasks"
-                count={nav.myCount}
-              />
+              {/* No real user in local mode (synthetic viewer) — hide "My tasks". */}
+              {!__LANEWORK_LOCAL__ ? (
+                <NavItem
+                  owner={nav.owner}
+                  repo={nav.repo}
+                  search={{ mine: true }}
+                  active={nav.mine}
+                  icon={UserIcon}
+                  label="My tasks"
+                  count={nav.myCount}
+                />
+              ) : null}
+              {/* Cost reads ~/.claude transcripts — local CLI only. */}
+              {__LANEWORK_LOCAL__ ? (
+                <Link
+                  to="/board/$owner/$repo/cost"
+                  params={{ owner: nav.owner, repo: nav.repo }}
+                  className={rowClass}
+                  activeProps={{ className: rowActive }}
+                  inactiveProps={{ className: rowIdle }}
+                >
+                  <HugeiconsIcon icon={Coins01Icon} className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="flex-1">Cost</span>
+                </Link>
+              ) : null}
             </Section>
 
             {/* Tags */}

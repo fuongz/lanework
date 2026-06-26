@@ -232,3 +232,46 @@ export const getCardContent = createServerFn({ method: "GET" })
     const { token } = await requireGitHubToken();
     return getReviewContent(token, data.owner, data.repo, data.path, data.ref);
   });
+
+const saveValidator = (d: unknown): { owner: string; repo: string; path: string; content: string } => {
+  const v = d as { owner?: string; repo?: string; path?: string; content?: string };
+  const owner = safeName(v?.owner, "owner");
+  const repo = safeName(v?.repo, "repo");
+  if (typeof v?.path !== "string") throw new Error("path is required");
+  if (!v.path.startsWith(".agents/reviews/") || v.path.includes("..") || !v.path.endsWith(".md")) {
+    throw new Error("path outside reviews folder");
+  }
+  if (typeof v?.content !== "string") throw new Error("content is required");
+  return { owner, repo, path: v.path, content: v.content };
+};
+
+/**
+ * Persist edited review markdown back to disk. Only supported in local mode
+ * (`lanework`), where the board is the repo's own working tree; the cloud build
+ * has no write path to GitHub, so it rejects.
+ */
+export const saveCardContent = createServerFn({ method: "POST" })
+  .validator(saveValidator)
+  .handler(async ({ data }): Promise<{ ok: true }> => {
+    if (__LANEWORK_LOCAL__) {
+      const { saveLocalCardContent } = await import("@/lib/local-fs");
+      await saveLocalCardContent(data.path, data.content);
+      return { ok: true };
+    }
+    throw new Error("Saving is only available in local mode.");
+  });
+
+/**
+ * Aggregate token usage from this project's Claude Code transcripts
+ * (`~/.claude/projects/<…>`) so the board can estimate cost. Local mode only —
+ * the cloud build can't read the user's home directory.
+ */
+export const getCostEstimate = createServerFn({ method: "GET" }).handler(
+  async (): Promise<import("@/lib/local-fs").CostData> => {
+    if (__LANEWORK_LOCAL__) {
+      const { getLocalCostEstimate } = await import("@/lib/local-fs");
+      return getLocalCostEstimate();
+    }
+    return { available: false, projectDir: "", sessions: 0, models: [], firstAt: null, lastAt: null };
+  },
+);

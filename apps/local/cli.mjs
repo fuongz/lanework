@@ -7,7 +7,7 @@
 // Usage:
 //   lanework                 # board for the current directory
 //   lanework path/to/repo    # board for another directory
-//   lanework --port 24300    # preferred starting port (falls back upward)
+//   lanework --port 3662     # preferred starting port (falls back upward)
 //   lanework --no-open       # don't auto-open the browser
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";

@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MarkdownHooks, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeShiki from "@shikijs/rehype";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   LinkSquare01Icon,
@@ -13,7 +14,7 @@ import {
   CheckmarkSquare02Icon,
   Tag01Icon,
 } from "@hugeicons/core-free-icons";
-import { getCardContent } from "@/server/reviews";
+import { getCardContent, saveCardContent } from "@/server/reviews";
 import { useBoardStore } from "@/stores/board-store";
 import {
   Dialog,
@@ -23,41 +24,211 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { progressPercent } from "@/lib/review-stats";
+import { progressPercent, parseRadioGroups } from "@/lib/review-stats";
 import { STATUS_META } from "@/lib/review-status";
 import { formatDate, relativeAge } from "@/lib/format";
 import { tagPill } from "@/lib/tag-color";
 import { cn } from "@/lib/utils";
 import type { ReviewCard, Priority } from "@/lib/github";
 
-const markdownComponents: Components = {
-  // Render GFM task-list checkboxes with our Checkbox component instead of the
-  // browser's native (disabled) input.
-  input({ type, checked, ...props }) {
-    if (type === "checkbox") {
+/**
+ * Coordinates "pick one" task groups: registered rows in a group are mutually
+ * exclusive, so selecting one clears the rest. Stable across renders (created
+ * once per dialog) so it can live in the markdown components without churning
+ * their identity.
+ */
+interface RadioCoordinator {
+  register(groupId: string, line: number, set: (checked: boolean) => void): () => void;
+  selectExclusive(groupId: string, line: number): void;
+}
+
+function createRadioCoordinator(): RadioCoordinator {
+  const groups = new Map<string, Map<number, (checked: boolean) => void>>();
+  return {
+    register(groupId, line, set) {
+      let g = groups.get(groupId);
+      if (!g) {
+        g = new Map();
+        groups.set(groupId, g);
+      }
+      g.set(line, set);
+      return () => {
+        g?.delete(line);
+      };
+    },
+    selectExclusive(groupId, line) {
+      const g = groups.get(groupId);
+      if (!g) return;
+      for (const [other, set] of g) if (other !== line) set(false);
+    },
+  };
+}
+
+/**
+ * One GFM task rendered Notion-style: a checkbox + content row that owns its
+ * own checked state, so toggling never re-renders the whole markdown tree (and
+ * never re-runs the async Shiki pipeline). Changes are reported upward via
+ * `onToggle` purely so the dialog can offer "Save changes" — the source of
+ * truth for what gets written stays keyed by `line`.
+ *
+ * When `groupId` is set, the row belongs to a "pick one" group: it renders a
+ * round (radio-style) box and, on selection, clears its siblings.
+ */
+function TaskItem({
+  line,
+  defaultChecked,
+  groupId,
+  coordinator,
+  onToggle,
+  className,
+  children,
+}: {
+  line: number;
+  defaultChecked: boolean;
+  groupId?: string;
+  coordinator: RadioCoordinator;
+  onToggle: (line: number, checked: boolean) => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [checked, setChecked] = useState(defaultChecked);
+  // Re-seed when the document reloads (e.g. after a save) so the row reflects
+  // the new on-disk state instead of stale local state.
+  useEffect(() => {
+    setChecked(defaultChecked);
+  }, [defaultChecked]);
+
+  const set = useCallback(
+    (value: boolean) => {
+      setChecked(value);
+      onToggle(line, value);
+    },
+    [line, onToggle],
+  );
+
+  // Register in the radio group so a sibling's selection can clear this row.
+  useEffect(() => {
+    if (!groupId) return;
+    return coordinator.register(groupId, line, set);
+  }, [groupId, line, set, coordinator]);
+
+  const handleChange = (value: boolean) => {
+    set(value);
+    // Selecting a "pick one" option deselects the others in its group.
+    if (groupId && value) coordinator.selectExclusive(groupId, line);
+  };
+
+  return (
+    <li
+      className={cn(
+        className,
+        "group/task my-0.5 flex list-none items-start gap-2.5 rounded-md px-2 py-1 transition-colors marker:content-none hover:bg-muted/50",
+        // Tighten the first paragraph so it lines up with the checkbox, and
+        // drop the trailing margin so rows stay compact in loose lists.
+        "[&>div>:first-child]:mt-0 [&>div>:last-child]:mb-0",
+        checked && "text-muted-foreground line-through decoration-muted-foreground/40",
+      )}
+    >
+      <Checkbox
+        checked={checked}
+        onCheckedChange={(v) => handleChange(!!v)}
+        className={cn(
+          "relative top-1 shrink-0 cursor-pointer data-checked:bg-primary",
+          // Round box signals "pick one" (radio) semantics.
+          groupId && "rounded-full",
+        )}
+      />
+      <div className="min-w-0 flex-1">{children}</div>
+    </li>
+  );
+}
+
+/**
+ * Build markdown components that render GFM task lists as interactive,
+ * Notion-style tasks. `initial` (parsed once per document) seeds each row;
+ * `onToggle` reports edits up for the Save button. Both are stable across
+ * toggles, so this object's identity doesn't change and Shiki isn't re-run.
+ */
+function makeMarkdownComponents(
+  initial: Record<number, boolean>,
+  radioGroups: Record<number, string>,
+  coordinator: RadioCoordinator,
+  onToggle: (line: number, checked: boolean) => void,
+): Components {
+  return {
+    // GFM task-list checkbox nodes carry NO source position, so we can't key
+    // them here — they'd all collide on the same fallback key. The `li` handler
+    // (which does have a position) renders the checkbox via TaskItem; suppress
+    // the raw one. Non-checkbox inputs pass through.
+    input({ type, ...props }) {
+      if (type === "checkbox") return null;
+      return <input type={type} {...props} />;
+    },
+    // Collapse the bullet padding on task lists so checkboxes sit flush left.
+    ul({ className, children, ...props }) {
+      const isTaskList = className?.includes("contains-task-list");
       return (
-        <Checkbox
-          checked={!!checked}
-          disabled
-          className="relative top-px mr-0.5 inline-grid align-text-bottom disabled:opacity-100 data-checked:bg-primary"
-        />
+        <ul
+          className={cn(className, isTaskList && "my-2 list-none pl-0")}
+          {...props}
+        >
+          {children}
+        </ul>
       );
-    }
-    return <input type={type} {...props} />;
-  },
-  // Drop the list marker on task-list items so the checkbox is the only marker.
-  li({ className, children, ...props }) {
-    const isTask = className?.includes("task-list-item");
-    return (
-      <li
-        className={cn(className, isTask && "list-none marker:content-none")}
-        {...props}
-      >
-        {children}
-      </li>
-    );
-  },
-};
+    },
+    li({ className, children, node, ...props }) {
+      const isTask = className?.includes("task-list-item");
+      if (!isTask) {
+        return (
+          <li className={className} {...props}>
+            {children}
+          </li>
+        );
+      }
+      const line = node?.position?.start.line ?? 0;
+      return (
+        <TaskItem
+          line={line}
+          defaultChecked={initial[line] ?? false}
+          groupId={radioGroups[line]}
+          coordinator={coordinator}
+          onToggle={onToggle}
+          className={className}
+        >
+          {children}
+        </TaskItem>
+      );
+    },
+  };
+}
+
+/**
+ * A small circular progress ring (0–100). Uses `currentColor`, so it inherits
+ * the button's text color; the track is the same color faded out.
+ */
+function CircleProgress({ value, className }: { value: number; className?: string }) {
+  const r = 8;
+  const circumference = 2 * Math.PI * r;
+  const offset = circumference * (1 - Math.min(100, Math.max(0, value)) / 100);
+  return (
+    <svg viewBox="0 0 20 20" className={cn("size-4 -rotate-90", className)} aria-hidden>
+      {/* Faded track of the same color, so a small arc clearly reads as
+          "barely started" on whatever background the ring sits on. */}
+      <circle cx="10" cy="10" r={r} fill="none" strokeWidth="2.5" className="stroke-current/25" />
+      <circle
+        cx="10"
+        cy="10"
+        r={r}
+        fill="none"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        className="stroke-current transition-[stroke-dashoffset] duration-300"
+        strokeDasharray={circumference}
+        strokeDashoffset={offset}
+      />
+    </svg>
+  );
+}
 
 interface ReviewDialogProps {
   owner: string;
@@ -71,12 +242,102 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
 
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Checkbox edits made in this dialog, keyed by source line (relative to the
+  // rendered body). Cleared on load and after a successful save.
+  const [edits, setEdits] = useState<Record<number, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // The body is what we actually hand to the renderer, so source-line numbers
+  // (used as checkbox keys) must be computed against this same string.
+  const body = content ? stripFrontmatter(content) : "";
+
+  // The document's checkbox states as written on disk — seeds each row and is
+  // the baseline we diff against to know whether there are unsaved changes.
+  const initial = useMemo(() => parseTaskStates(body), [body]);
+
+  // Task lines that belong to a "pick one" group (→ mutually exclusive radios).
+  const radioGroups = useMemo(() => parseRadioGroups(body), [body]);
+
+  // Created once so registered radio rows survive re-renders; stable identity
+  // keeps it out of the markdownComponents dependency churn.
+  const coordinator = useMemo(() => createRadioCoordinator(), []);
+
+  // Stable across toggles → markdownComponents identity is stable → MarkdownHooks
+  // doesn't re-run the async Shiki pipeline every time a box is ticked.
+  const onToggle = useCallback((line: number, checked: boolean) => {
+    setEdits((prev) => ({ ...prev, [line]: checked }));
+  }, []);
+
+  const markdownComponents = useMemo(
+    () => makeMarkdownComponents(initial, radioGroups, coordinator, onToggle),
+    [initial, radioGroups, coordinator, onToggle],
+  );
+
+  const dirty = useMemo(
+    () => Object.entries(edits).some(([line, v]) => v !== (initial[Number(line)] ?? false)),
+    [edits, initial],
+  );
+
+  // Live completion counts: every parsed task, with this dialog's unsaved
+  // toggles applied over the on-disk baseline. Drives the Progress row in
+  // realtime as boxes are ticked. Null until the document has tasks to count.
+  const liveStats = useMemo(() => {
+    const lines = Object.keys(initial).map(Number);
+    if (lines.length === 0) return undefined;
+    const valueOf = (line: number) => (line in edits ? edits[line] : initial[line]);
+    let total = 0;
+    let done = 0;
+    // Each "pick one" group is a single decision: collapse its options to one
+    // item, done once any option is selected.
+    const groupChosen = new Map<string, boolean>();
+    for (const line of lines) {
+      const gid = radioGroups[line];
+      if (gid) {
+        if (!groupChosen.has(gid)) {
+          groupChosen.set(gid, false);
+          total++;
+        }
+        if (valueOf(line)) groupChosen.set(gid, true);
+      } else {
+        total++;
+        if (valueOf(line)) done++;
+      }
+    }
+    for (const chosen of groupChosen.values()) if (chosen) done++;
+    return { total, done };
+  }, [initial, edits, radioGroups]);
+
+  const livePct =
+    liveStats && liveStats.total > 0
+      ? Math.round((liveStats.done / liveStats.total) * 100)
+      : 0;
+
+  async function handleSave() {
+    if (!activeCard || content === null) return;
+    setSaving(true);
+    setSaveError(null);
+    const next = applyTaskStates(content, body, edits);
+    try {
+      await saveCardContent({ data: { owner, repo, path: activeCard.path, content: next } });
+      // Adopt the saved text as the new baseline: `initial` re-derives, rows
+      // re-seed, and `dirty` falls back to false.
+      setContent(next);
+      setEdits({});
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : "Failed to save.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!activeCard) return;
     let cancelled = false;
     setContent(null);
     setError(null);
+    setEdits({});
+    setSaveError(null);
     getCardContent({ data: { owner, repo, path: activeCard.path, ref: branch } })
       .then((md) => {
         if (!cancelled) setContent(md);
@@ -96,6 +357,24 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
   return (
     <Dialog open={!!activeCard} onOpenChange={(open) => !open && closeCard()}>
       <DialogContent className="flex h-screen max-h-screen w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none">
+        {/* Save edits to disk — local mode only (the cloud build has no write
+            path). Sits just left of the dialog's close button. */}
+        {__LANEWORK_LOCAL__ && dirty ? (
+          <div className="absolute top-3 right-14 z-10 flex items-center gap-2">
+            {saveError ? (
+              <span className="text-xs text-destructive">{saveError}</span>
+            ) : null}
+            {/* Ring fills (and the count climbs) as boxes are ticked, right on
+                the Save action. */}
+            <Button onClick={handleSave} disabled={saving} size="lg" className="gap-2 shadow-sm">
+              <CircleProgress value={livePct} />
+              {saving
+                ? "Saving…"
+                : `Save changes${liveStats ? ` · ${liveStats.done}/${liveStats.total}` : ""}`}
+            </Button>
+          </div>
+        ) : null}
+
         <DialogHeader className="shrink-0 px-6 pt-6 pb-4">
           <div className="mx-auto w-full max-w-3xl">
             <DialogTitle className="pr-8 text-left text-lg">{activeCard?.title}</DialogTitle>
@@ -115,7 +394,7 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
 
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-3xl px-6 py-5">
-            {activeCard ? <MetaPanel card={activeCard} /> : null}
+            {activeCard ? <MetaPanel card={activeCard} liveStats={liveStats} /> : null}
 
             <hr className="my-6 border-border" />
 
@@ -151,7 +430,7 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
                     </div>
                   }
                 >
-                  {stripFrontmatter(content)}
+                  {body}
                 </MarkdownHooks>
               </article>
             )}
@@ -168,9 +447,18 @@ const PRIORITY_STYLE: Record<Priority, string> = {
   low: "bg-muted text-muted-foreground",
 };
 
-function MetaPanel({ card }: { card: ReviewCard }) {
+function MetaPanel({
+  card,
+  liveStats,
+}: {
+  card: ReviewCard;
+  // Live checkbox counts from the open document; falls back to the board-time
+  // parse until the markdown has loaded.
+  liveStats?: { total: number; done: number };
+}) {
   const col = STATUS_META[card.column];
-  const pct = progressPercent(card.stats);
+  const stats = liveStats ?? card.stats;
+  const pct = progressPercent({ ...stats, notes: 0 });
   const age = relativeAge(card.date);
 
   return (
@@ -225,14 +513,26 @@ function MetaPanel({ card }: { card: ReviewCard }) {
       </Row>
 
       <Row icon={CheckmarkSquare02Icon} label="Progress">
-        {card.stats.total > 0 ? (
+        {stats.total > 0 ? (
           <span className="inline-flex items-center gap-2">
             <span className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
-              <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+              <span
+                className={cn(
+                  "block h-full rounded-full transition-all duration-300",
+                  pct === 100 ? "bg-emerald-500" : "bg-primary",
+                )}
+                style={{ width: `${pct}%` }}
+              />
             </span>
-            <span className="text-muted-foreground">
-              {card.stats.done}/{card.stats.total} · {pct}%
+            <span className="text-muted-foreground tabular-nums">
+              {stats.done}/{stats.total} · {pct}%
             </span>
+            {pct === 100 ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                <HugeiconsIcon icon={CheckmarkSquare02Icon} className="size-3.5" />
+                Ready
+              </span>
+            ) : null}
           </span>
         ) : (
           <span className="text-muted-foreground">—</span>
@@ -280,4 +580,46 @@ function Row({
 /** Remove the leading YAML frontmatter block so it isn't rendered in the body. */
 function stripFrontmatter(md: string): string {
   return md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+}
+
+/**
+ * Map each GFM task-list line (1-based, matching react-markdown's source
+ * positions) to its initial checked state, so toggles start from the document.
+ */
+function parseTaskStates(body: string): Record<number, boolean> {
+  const states: Record<number, boolean> = {};
+  body.split("\n").forEach((rawLine, i) => {
+    const match = rawLine.match(/^\s*[-*+]\s+\[([ xX])\]\s/);
+    if (match) states[i + 1] = match[1].toLowerCase() === "x";
+  });
+  return states;
+}
+
+// `parseRadioGroups` lives in `@/lib/review-stats` so the board's stats parsing
+// and this dialog collapse "pick one" groups identically.
+
+/**
+ * Write `edits` (keyed by body line) back into the full file `content`, flipping
+ * each task's `[ ]`/`[x]` marker. Body line numbers are offset by the stripped
+ * frontmatter so they land on the right line of the original file. Line endings
+ * are preserved (we split/join on `\n`, leaving any `\r` untouched).
+ */
+function applyTaskStates(
+  content: string,
+  body: string,
+  edits: Record<number, boolean>,
+): string {
+  const fm = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
+  const offset = fm ? (fm[0].match(/\n/g)?.length ?? 0) : 0;
+  const lines = content.split("\n");
+  for (const [key, value] of Object.entries(edits)) {
+    const idx = Number(key) + offset - 1; // body line (1-based) → content index
+    const line = lines[idx];
+    if (line === undefined) continue;
+    lines[idx] = line.replace(
+      /^(\s*[-*+]\s+\[)[ xX](\])/,
+      `$1${value ? "x" : " "}$2`,
+    );
+  }
+  return lines.join("\n");
 }

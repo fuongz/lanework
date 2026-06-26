@@ -28,8 +28,7 @@ export function KanbanCard({ card }: { card: ReviewCard }) {
       </h3>
 
       {card.assignees.length > 0 ? (
-        <div className="mt-2.5 flex items-center gap-2 text-xs text-muted-foreground">
-          <span>Assignees:</span>
+        <div className="mt-2.5">
           <Assignees logins={card.assignees} />
         </div>
       ) : null}
@@ -41,28 +40,24 @@ export function KanbanCard({ card }: { card: ReviewCard }) {
       </div>
 
       <div className="mt-3 flex items-center gap-3 border-t pt-2.5 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1" title="Checklist items done">
-          <HugeiconsIcon icon={CheckmarkSquare02Icon} className="size-3.5" />
-          {card.stats.done}/{card.stats.total}
-        </span>
         <span className="inline-flex items-center gap-1" title="Reviewer notes">
           <HugeiconsIcon icon={Comment01Icon} className="size-3.5" />
           {card.stats.notes}
         </span>
-        {pct !== null ? (
-          <span
-            className={cn(
-              "ml-auto rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-              pct === 100
-                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                : pct === 0
-                  ? "bg-muted text-muted-foreground"
-                  : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-            )}
-          >
-            {pct}%
-          </span>
-        ) : null}
+        <span
+          className={cn(
+            "ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums",
+            pct === 100
+              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+              : pct === null || pct === 0
+                ? "bg-muted text-muted-foreground"
+                : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+          )}
+          title="Checklist items done"
+        >
+          <HugeiconsIcon icon={CheckmarkSquare02Icon} className="size-3.5" />
+          {card.stats.done}/{card.stats.total}
+        </span>
       </div>
     </div>
   );
@@ -72,19 +67,24 @@ function Assignees({ logins }: { logins: string[] }) {
   const shown = logins.slice(0, 3);
   const extra = logins.length - shown.length;
   return (
-    <div className="flex items-center">
-      <div className="flex -space-x-1.5">
-        {shown.map((login) => (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {shown.map((login) => (
+        <span
+          key={login}
+          title={login}
+          className="inline-flex max-w-full items-center gap-1 rounded-full bg-secondary py-0.5 pr-2 pl-0.5 text-[11px] font-medium text-secondary-foreground"
+        >
           <img
-            key={login}
             src={`https://github.com/${login}.png?size=40`}
             alt={login}
-            title={login}
-            className="size-5 rounded-full ring-2 ring-card"
+            className="size-4 shrink-0 rounded-full"
           />
-        ))}
-      </div>
-      {extra > 0 ? <span className="ml-1 text-[11px]">{extra}+</span> : null}
+          <span className="truncate">{login}</span>
+        </span>
+      ))}
+      {extra > 0 ? (
+        <span className="text-[11px] text-muted-foreground">+{extra}</span>
+      ) : null}
     </div>
   );
 }

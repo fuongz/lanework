@@ -62,8 +62,19 @@ Do **not** add a \`status:\` field — the folder encodes it. After the frontmat
 add a "How to review" note (the user flips \`- [ ]\` to \`- [x]\` per item and writes
 \`> notes\` under items they disagree with), group items by topic, include a Context
 section, an explicit **out of scope** section, and a **files touched** table.
-Mutually-exclusive options appear as separate "pick ONE" boxes with a recommendation.
 If the user edits the checklist directly, treat their edits as decisions.
+
+For **mutually-exclusive options**, nest the alternatives under a \`Pick one:\` bullet
+and mark the default \`(Recommended)\`. Only the indented options are grouped, so keep
+any conditional follow-up at the outer level — it stays an independent checkbox. The
+board renders a nested group as radio buttons (selecting one clears the others):
+
+\`\`\`md
+- **D2. Storage backend — Pick one:**
+  - [ ] **D2.A (Recommended)** In-memory sliding window (single region).
+  - [ ] **D2.B** Durable Object counter (multi-region, more infra).
+- [ ] **D3.** For D2.A: document the single-region limitation.  ← independent
+\`\`\`
 
 > The Kanban board reads exactly these signals: the **column** from the folder, and
 > **date / priority / assignees / tags / progress** from the frontmatter + the
@@ -107,8 +118,11 @@ item you disagree with, add a \`> ...\` note. I implement only after every box i
 - Current endpoints, no limits, token-based auth…
 
 ## Decisions
-- [ ] **D1.** Limit to 100 requests/min per token (sliding window).
-- [ ] **D2.** Respond with \`429\` + a \`Retry-After\` header when exceeded.
+- [ ] **D1.** Respond with \`429\` + a \`Retry-After\` header when exceeded.
+- **D2. Counter backend — Pick one:**
+  - [ ] **D2.A (Recommended)** In-memory sliding window — single region, no new infra.
+  - [ ] **D2.B** Durable Object counter — multi-region, more moving parts.
+- [ ] **D3.** For D2.A: document the single-region limitation in the API docs.
 
 ## Out of scope
 - Per-route custom limits, billing-tier quotas.

@@ -108,7 +108,7 @@ function portFree(port, host) {
   });
 }
 
-/** First free port at or after `start` (Serena-style fallback: 24300, 24301, …). */
+/** First free port at or after `start` (Serena-style fallback: 3662, 3663, …). */
 async function findFreePort(start, host) {
   for (let p = start; p < start + 100; p++) {
     if (await portFree(p, host)) return p;
@@ -129,7 +129,7 @@ export async function start({
   const targetDir = dir;
   // Make the dir available to the SSR server functions (local-fs reads it).
   process.env.LANEWORK_DIR = targetDir;
-  const startPort = Number(port ?? process.env.PORT) || 24300;
+  const startPort = Number(port ?? process.env.PORT) || 3662;
   const boundPort = await findFreePort(startPort, host);
 
   await serve({
