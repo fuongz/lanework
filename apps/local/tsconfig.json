@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["vite/client", "@types/node", "../../apps/webapp/worker-configuration.d.ts"],
+    "paths": {
+      "@/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": ["../../packages/shared/src", "vite.config.local.ts"]
+}

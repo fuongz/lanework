@@ -90,6 +90,24 @@ export function RepoSwitcher({ active, className }: RepoSwitcherProps) {
     navigate({ to: "/board/$owner/$repo", params: { owner: repo.owner, repo: repo.name } });
   }
 
+  // Local mode has exactly one project (the working directory), so the switcher
+  // is a static header — no popover, no chevron, not clickable.
+  if (__LANEWORK_LOCAL__) {
+    return (
+      <div className={cn("flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-left", className)}>
+        <img src="/logo.png" alt="Lanework" className="size-7 shrink-0 rounded-lg" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[15px] font-semibold leading-tight">
+            {active?.repo ?? "Local"}
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">
+            {active?.owner ?? "local"}
+          </span>
+        </span>
+      </div>
+    );
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger

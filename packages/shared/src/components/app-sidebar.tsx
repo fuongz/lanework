@@ -114,30 +114,40 @@ export function AppSidebar({ user, active, nav }: AppSidebarProps) {
         How to use?
       </Link>
 
-      {/* Account menu */}
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          className={cn(
-            "flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-sidebar-accent data-[popup-open]:bg-sidebar-accent",
-          )}
-        >
+      {/* Account: static identity in local mode (no auth, so no logout). */}
+      {__LANEWORK_LOCAL__ ? (
+        <div className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-left">
           <Avatar size="sm">
             {user.image ? <AvatarImage src={user.image} alt={user.name} /> : null}
             <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{user.name}</span>
-          <HugeiconsIcon icon={UnfoldMoreIcon} className="size-4 shrink-0 text-muted-foreground" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="start" sideOffset={6} className="min-w-(--anchor-width)">
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => signOut({ fetchOptions: { onSuccess: () => window.location.reload() } })}
+        </div>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              "flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-sidebar-accent data-[popup-open]:bg-sidebar-accent",
+            )}
           >
-            <HugeiconsIcon icon={Logout01Icon} />
-            Logout
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <Avatar size="sm">
+              {user.image ? <AvatarImage src={user.image} alt={user.name} /> : null}
+              <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+            </Avatar>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{user.name}</span>
+            <HugeiconsIcon icon={UnfoldMoreIcon} className="size-4 shrink-0 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" sideOffset={6} className="min-w-(--anchor-width)">
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => signOut({ fetchOptions: { onSuccess: () => window.location.reload() } })}
+            >
+              <HugeiconsIcon icon={Logout01Icon} />
+              Logout
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </aside>
   );
 }

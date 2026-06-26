@@ -16,6 +16,7 @@ import { ReviewList } from "@/components/kanban/review-list";
 import { ReviewDialog } from "@/components/kanban/review-dialog";
 import { BoardSkeleton } from "@/components/kanban/board-skeleton";
 import { cn } from "@/lib/utils";
+import { useLocalLiveReload } from "@/hooks/use-local-live";
 
 interface BoardSearch {
   mine?: boolean;
@@ -84,6 +85,7 @@ function BoardPage() {
   const { mine, tag } = Route.useSearch();
   const navigate = Route.useNavigate();
   const [view, setView] = useState<View>("board");
+  useLocalLiveReload(); // live-refresh the board as local review files change (local mode only)
 
   const { filtered, nav } = useMemo(() => {
     const tagCounts = new Map<string, number>();
@@ -126,12 +128,15 @@ function BoardPage() {
             <MetaPill icon={FolderLibraryIcon}>
               <span className="font-mono">.agents/reviews</span>
             </MetaPill>
-            <BranchSwitcher
-              owner={board.owner}
-              repo={board.repo}
-              current={board.branch}
-              onSelect={(branch) => navigate({ search: (prev) => ({ ...prev, branch }) })}
-            />
+            {/* No git branches in local mode — the board is the working tree. */}
+            {!__LANEWORK_LOCAL__ && (
+              <BranchSwitcher
+                owner={board.owner}
+                repo={board.repo}
+                current={board.branch}
+                onSelect={(branch) => navigate({ search: (prev) => ({ ...prev, branch }) })}
+              />
+            )}
             <MetaPill icon={Note01Icon} accent>
               <span className="font-semibold text-foreground tabular-nums">{filtered.length}</span>
               {filtered.length !== board.cards.length ? (

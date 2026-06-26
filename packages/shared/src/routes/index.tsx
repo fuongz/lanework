@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -29,7 +29,18 @@ import {
 const PAGE_SIZE = 12;
 
 export const Route = createFileRoute("/")({
-  loader: async () => ({ user: await getSessionUser() }),
+  loader: async () => {
+    const user = await getSessionUser();
+    // Local mode: there's exactly one board (the working directory), so skip the
+    // marketing/projects page and jump straight to it.
+    if (__LANEWORK_LOCAL__ && user) {
+      throw redirect({
+        to: "/board/$owner/$repo",
+        params: { owner: "local", repo: user.name.replace(/[^A-Za-z0-9._-]/g, "-") || "local" },
+      });
+    }
+    return { user };
+  },
   head: ({ loaderData }) => ({
     meta: [
       { title: loaderData?.user ? "Projects - Lanework" : "Lanework — every agent review, in its lane." },

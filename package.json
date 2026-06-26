@@ -1,11 +1,11 @@
 {
-  "name": "lanework",
+  "name": "lanework-monorepo",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Visualize a GitHub repo's .agents/reviews folder as a Kanban board. TanStack Start + Cloudflare Workers + Better Auth.",
   "license": "MIT",
-  "author": "fuongz <phuong.phung@hiip.asia>",
+  "author": "fuongz <hi@phuongphung.com>",
   "homepage": "https://github.com/fuongz/lanework#readme",
   "repository": {
     "type": "git",
@@ -29,17 +29,22 @@
   "engines": {
     "bun": ">=1.2.0"
   },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "preview": "vite preview",
-    "deploy": "npm run build && wrangler deploy",
-    "start": "wrangler dev",
-    "cf-typegen": "wrangler types",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "wrangler d1 migrations apply prod-lanework --local",
-    "db:migrate:remote": "wrangler d1 migrations apply prod-lanework --remote",
-    "typecheck": "tsc --noEmit"
+    "dev": "bun run --cwd apps/webapp dev",
+    "build": "bun run --cwd apps/webapp build",
+    "deploy": "bun run --cwd apps/webapp deploy",
+    "start": "bun run --cwd apps/webapp start",
+    "local": "bun run --cwd apps/local build && node apps/local/cli.mjs",
+    "local:build": "bun run --cwd apps/local build",
+    "typecheck": "bun run --cwd apps/webapp typecheck",
+    "cf-typegen": "bun run --cwd apps/webapp cf-typegen",
+    "db:generate": "bun run --cwd apps/webapp db:generate",
+    "db:migrate:local": "bun run --cwd apps/webapp db:migrate:local",
+    "db:migrate:remote": "bun run --cwd apps/webapp db:migrate:remote"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -65,6 +70,7 @@
     "remark-gfm": "^4.0.1",
     "shadcn": "^4.11.0",
     "shiki": "^4.2.0",
+    "srvx": "^0.11.17",
     "tailwind-merge": "^3.6.0",
     "tw-animate-css": "^1.4.0",
     "zustand": "^5.0.14"

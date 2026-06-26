@@ -12,16 +12,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "allowImportingTsExtensions": true,
-    "types": ["vite/client", "./worker-configuration.d.ts", "@types/node"],
-    "paths": {
-      "@/*": ["./src/*"],
-    },
-  },
-  "include": [
-    "src",
-    "vite.config.ts",
-    "drizzle.config.ts",
-    "worker-configuration.d.ts",
-  ],
+    "allowImportingTsExtensions": true
+  }
 }

@@ -1,0 +1,22 @@
+{
+  "name": "@lanework/webapp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "lanework.dev — the hosted Kanban board (TanStack Start + Cloudflare Workers).",
+  "dependencies": {
+    "@lanework/shared": "workspace:*"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "vite build && wrangler deploy",
+    "start": "wrangler dev",
+    "cf-typegen": "wrangler types",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply prod-lanework --local",
+    "db:migrate:remote": "wrangler d1 migrations apply prod-lanework --remote",
+    "typecheck": "tsc --noEmit"
+  }
+}

@@ -11,7 +11,7 @@ This project is pre-1.0; only the latest `main` is supported with security fixes
 Report privately via one of:
 
 - GitHub's [private vulnerability reporting](https://github.com/fuongz/lanework/security/advisories/new)
-- Email: **phuong.phung@hiip.asia**
+- Email: **hi@phuongphung.com**
 
 Please include a description, reproduction steps, affected files/routes, and the
 potential impact. We aim to acknowledge reports within a few business days and

@@ -9,6 +9,7 @@ import {
   FileEditIcon,
   Rocket01Icon,
   ArrowRight01Icon,
+  ArrowLeft01Icon,
 } from "@hugeicons/core-free-icons";
 import { getSessionUser } from "@/server/reviews";
 import { AppShell } from "@/components/app-shell";
@@ -62,6 +63,13 @@ function GuidePage() {
 function GuideHeader() {
   return (
     <div className="px-6 pt-5 pb-4">
+      <Link
+        to="/"
+        className="mb-3 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
+        Back to board
+      </Link>
       <div className="text-sm text-muted-foreground">Documentation</div>
       <h1 className="mt-1 font-heading text-2xl font-semibold tracking-tight">How to use</h1>
     </div>

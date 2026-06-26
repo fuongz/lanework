@@ -1,0 +1,10 @@
+{
+  "name": "@lanework/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared UI, routes, server functions and review-parsing core for the lanework apps.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

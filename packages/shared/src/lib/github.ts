@@ -1,13 +1,20 @@
 // Thin GitHub REST/GraphQL client using fetch (no SDK) so it bundles cleanly on Workers.
-import { parseReviewStats, type ReviewStats } from "./review-stats";
+import {
+  REVIEW_ROOT,
+  REVIEW_COLUMNS,
+  buildReviewCard,
+  isReviewColumn,
+  type ReviewColumn,
+  type ReviewCard,
+} from "./reviews-core";
+
+// Re-export the shared review types/constants so existing importers of this
+// module (UI, server fns) keep working unchanged.
+export { REVIEW_ROOT, REVIEW_COLUMNS } from "./reviews-core";
+export type { ReviewColumn, Priority, ReviewCard } from "./reviews-core";
 
 const GH_API = "https://api.github.com";
 const GH_GRAPHQL = "https://api.github.com/graphql";
-
-export const REVIEW_ROOT = ".agents/reviews";
-export const REVIEW_COLUMNS = ["todo", "processing", "done", "dropped"] as const;
-export type ReviewColumn = (typeof REVIEW_COLUMNS)[number];
-export type Priority = "low" | "medium" | "high";
 
 export interface Repo {
   id: number;
@@ -19,19 +26,6 @@ export interface Repo {
   homepage: string | null; // repo's website, if set
   defaultBranch: string;
   updatedAt: string;
-}
-
-export interface ReviewCard {
-  path: string; // full repo path, e.g. .agents/reviews/todo/2026-06-21-foo.md
-  column: ReviewColumn;
-  fileName: string; // 2026-06-21-foo.md
-  date: string | null; // created_at frontmatter date, else date in filename
-  title: string; // humanized slug
-  sha: string;
-  assignees: string[];
-  tags: string[];
-  priority: Priority | null;
-  stats: ReviewStats;
 }
 
 export class GitHubError extends Error {
@@ -164,23 +158,15 @@ export async function listReviewCards(
 
   const blobs = await fetchBlobs(token, owner, repo, branch, entries.map((e) => e.entry.path));
 
-  const cards: ReviewCard[] = entries.map(({ entry, column, fileName }) => {
-    const text = blobs.get(entry.path);
-    const meta = text ? parseFrontmatter(text) : EMPTY_META;
-    const stats = text ? parseReviewStats(text) : { total: 0, done: 0, notes: 0 };
-    return {
+  const cards: ReviewCard[] = entries.map(({ entry, column, fileName }) =>
+    buildReviewCard({
       path: entry.path,
       column: column as ReviewColumn,
       fileName,
-      date: meta.createdAt ?? extractDate(fileName),
-      title: humanizeFileName(fileName),
       sha: entry.sha,
-      assignees: meta.assignees,
-      tags: meta.tags,
-      priority: meta.priority,
-      stats,
-    };
-  });
+      text: blobs.get(entry.path),
+    }),
+  );
 
   return { branch, cards };
 }
@@ -241,63 +227,3 @@ async function fetchBlobs(
   return out;
 }
 
-interface ReviewMeta {
-  assignees: string[];
-  tags: string[];
-  priority: Priority | null;
-  createdAt: string | null;
-}
-const EMPTY_META: ReviewMeta = { assignees: [], tags: [], priority: null, createdAt: null };
-
-/** Parse the simple YAML frontmatter block at the top of a review file. */
-function parseFrontmatter(md: string): ReviewMeta {
-  const m = md.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!m) return EMPTY_META;
-  const meta: ReviewMeta = { assignees: [], tags: [], priority: null, createdAt: null };
-  for (const line of m[1].split("\n")) {
-    const idx = line.indexOf(":");
-    if (idx === -1) continue;
-    const key = line.slice(0, idx).trim();
-    const val = line.slice(idx + 1).trim();
-    if (key === "assignees") meta.assignees = parseList(val);
-    else if (key === "tags") meta.tags = parseList(val);
-    else if (key === "priority") meta.priority = normPriority(val);
-    else if (key === "created_at") meta.createdAt = extractDate(val);
-  }
-  return meta;
-}
-
-function parseList(v: string): string[] {
-  try {
-    const parsed = JSON.parse(v);
-    if (Array.isArray(parsed)) return parsed.map(String);
-  } catch {
-    /* fall through to lenient parsing */
-  }
-  return v
-    .replace(/^\[|\]$/g, "")
-    .split(",")
-    .map((s) => s.trim().replace(/^["']|["']$/g, ""))
-    .filter(Boolean);
-}
-
-function normPriority(v: string): Priority | null {
-  const s = v.replace(/['"]/g, "").toLowerCase().trim();
-  return s === "low" || s === "medium" || s === "high" ? s : null;
-}
-
-function isReviewColumn(c: string): c is ReviewColumn {
-  return (REVIEW_COLUMNS as readonly string[]).includes(c);
-}
-
-function extractDate(s: string): string | null {
-  const m = s.match(/(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : null;
-}
-
-function humanizeFileName(fileName: string): string {
-  const withoutExt = fileName.replace(/\.md$/, "");
-  const withoutDate = withoutExt.replace(/^\d{4}-\d{2}-\d{2}-/, "");
-  const words = withoutDate.replace(/[-_]+/g, " ").trim();
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}

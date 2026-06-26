@@ -4,9 +4,10 @@
 
 **Visualize your AI coding agent's review checklists as a Kanban board.**
 
-Sign in with GitHub, pick a repo, and the markdown review files your agent writes to
-`.agents/reviews/` render as a live board — grouped by status, with priority,
-assignees, tags, and checklist progress.
+The markdown review files your agent writes to `.agents/reviews/` render as a live
+board — grouped by status, with priority, assignees, tags, and checklist progress.
+Run it **hosted** (sign in with GitHub, pick any repo) or **locally** against the
+repo you're in (`npx @phake/lanework`, no auth, no network).
 
 [![CI](https://github.com/fuongz/lanework/actions/workflows/ci.yml/badge.svg)](https://github.com/fuongz/lanework/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](./LICENSE)
@@ -27,16 +28,28 @@ approve before they implement. Lanework turns that convention into a board so
 you can see, across a repo, what's awaiting review, in progress, done, or dropped —
 and open any review to read and approve it.
 
-It's **read-only**: it reads from GitHub and never writes back to your repos.
+It's **read-only**: it reads `.agents/reviews/` and never writes back.
+
+## Two ways to use it
+
+| | Hosted (`apps/webapp`) | Local CLI (`apps/local`) |
+| --- | --- | --- |
+| Runs on | Cloudflare Workers (lanework.dev) | Your machine (`npx @phake/lanework`) |
+| Source | A GitHub repo (any branch) | The current directory on disk |
+| Auth | GitHub sign-in (Better Auth) | None |
+| Network | Reads GitHub REST + GraphQL | Fully offline |
+| Live updates | Manual refresh (KV-cached) | Auto — watches the folder |
+
+Both share the same UI and review-parsing logic (in `packages/shared`).
 
 ## Features
 
-- 🔐 **GitHub sign-in** (Better Auth) — pick any repo you can access
 - 🗂️ **Board & List views** — four columns from `.agents/reviews/{todo,processing,done,dropped}`
 - 🏷️ **Rich cards** — priority, assignee avatars, tags, date, and live checklist progress
-- 🔎 **Filter** by **tag** or **My tasks** (assigned to you), with a searchable repo switcher
+- 🔎 **Filter** by **tag** or **My tasks**, with a searchable repo switcher (hosted)
 - 📄 **Full-screen review** with a clean metadata panel + rendered markdown
-- ⚡ **Fast** — file contents batched via GitHub GraphQL; instant skeleton loading
+- 💻 **Local CLI** — `npx @phake/lanework` boards the current repo, no Cloudflare or auth, with live file-watch
+- 🔐 **GitHub sign-in** (hosted) — pick any repo you can access
 - ✨ **Polished** — Motion animations, Hugeicons, shadcn/Base UI, dark-mode tokens
 - 📘 **Built-in guide** (`/guide`) explaining how to set up the convention in any repo
 
@@ -53,8 +66,28 @@ It's **read-only**: it reads from GitHub and never writes back to your repos.
 
 Each card reads its **column** from the folder, and **date · priority · assignees ·
 tags · progress** from the file's YAML frontmatter + its `- [ ]` / `- [x]` checkboxes.
-See the in-app **[guide](src/routes/guide.tsx)** or the standardized
+See the in-app **[guide](packages/shared/src/routes/guide.tsx)** or the standardized
 **[`AGENTS.md`](./AGENTS.md)** template to set this up in your own repos.
+
+## Run locally on any repo
+
+No install, no config — point it at a repo that has an `.agents/reviews/` folder:
+
+```bash
+npx @phake/lanework               # boards the current directory
+bunx @phake/lanework              # same, with Bun
+npx @phake/lanework path/to/repo  # board a different directory
+```
+
+It picks a free port (from `24300`), serves on `127.0.0.1`, and opens your browser.
+Edit or add review files and the board updates live.
+
+```
+lanework [dir] [--port N] [--no-open]
+```
+
+After a global install (`npm i -g @phake/lanework`) the commands **`lanework`** and
+the short alias **`lw`** are available everywhere.
 
 ## Tech stack
 
@@ -63,24 +96,54 @@ See the in-app **[guide](src/routes/guide.tsx)** or the standardized
 | Framework | [TanStack Start](https://tanstack.com/start) (React 19, SSR, server functions) |
 | Hosting | [Cloudflare Workers](https://workers.cloudflare.com/) (`@cloudflare/vite-plugin` + Wrangler) |
 | Auth | [Better Auth](https://better-auth.com) — GitHub OAuth, sessions in Cloudflare **D1** via Drizzle |
-| Data | GitHub REST + GraphQL (`src/lib/github.ts`) |
-| UI | Tailwind CSS v4, shadcn (`base-lyra`) over Base UI, Hugeicons, Motion |
+| Data | GitHub REST + GraphQL (`packages/shared/src/lib/github.ts`) or the local filesystem (`local-fs.ts`) |
+| UI | Tailwind CSS v4, shadcn over Base UI, Hugeicons, Motion |
 | State | Zustand |
+| Monorepo | Bun workspaces |
 
-## Quick start
+## Monorepo layout
+
+```
+packages/shared/             all shared app code (one copy of the UI)
+└── src/
+    ├── routes/              TanStack routes (__root, index, guide, board.$owner.$repo)
+    ├── components/          ui/, kanban/, app-shell, app-sidebar, switchers
+    ├── server/reviews.ts    server functions (branch on __LANEWORK_LOCAL__)
+    ├── lib/                 github, reviews-core (shared parsing), local-fs,
+    │                        auth, db (Drizzle), utils, formatting
+    ├── stores/              Zustand UI state
+    └── content/             the standardized AGENTS.md template
+
+apps/webapp/                 hosted target → lanework.dev
+├── vite.config.ts           Cloudflare build (srcDirectory → ../../packages/shared/src)
+├── wrangler.jsonc, drizzle/ platform config + D1 migrations
+└── worker-configuration.d.ts
+
+apps/local/                  the `lanework` CLI (publishable to npm)
+├── cli.mjs                  port selection + auto-open browser
+├── server.mjs               srvx server: static assets, SSR, live-watch SSE
+├── vite.config.local.ts     Node build (no Cloudflare; cloudflare:workers shimmed)
+└── cloudflare-workers-shim.ts
+```
+
+Both apps point the route scanner at `packages/shared/src`. The filesystem code is
+gated behind a build-time `__LANEWORK_LOCAL__` flag, so it's dead-code-eliminated
+from the Cloudflare Worker.
+
+## Develop the hosted app
 
 > Requires [Bun](https://bun.sh) ≥ 1.2.
 
 ```bash
 bun install
-cp .dev.vars.example .dev.vars      # then fill in the secrets (see below)
-bunx wrangler d1 create lanework-db   # paste database_id into wrangler.jsonc
-bun run db:migrate:local
-bun run dev                          # http://localhost:5173
+cp apps/webapp/.dev.vars.example apps/webapp/.dev.vars   # fill in the secrets (below)
+cd apps/webapp && bunx wrangler d1 create lanework-db    # paste database_id into wrangler.jsonc
+cd ../.. && bun run db:migrate:local
+bun run dev                                              # http://localhost:5173
 ```
 
 You'll need a **GitHub OAuth App** (dev) with callback
-`http://localhost:5173/api/auth/callback/github`, then set in `.dev.vars`:
+`http://localhost:5173/api/auth/callback/github`, then set in `apps/webapp/.dev.vars`:
 
 ```ini
 BETTER_AUTH_SECRET=...   # openssl rand -base64 32
@@ -89,46 +152,63 @@ GITHUB_CLIENT_SECRET=...
 ```
 
 > The app requests the `repo` scope to read private repos — change it to
-> `public_repo` in `src/lib/auth.ts` if you only need public ones.
+> `public_repo` in `packages/shared/src/lib/auth.ts` if you only need public ones.
+
+To run the **local** target during development (boards the current directory):
+
+```bash
+bun run local            # builds apps/local and launches it
+```
 
 ## Deploy (Cloudflare)
 
 ```bash
 bun run cf-typegen
 bun run db:migrate:remote
+cd apps/webapp
 bunx wrangler secret put BETTER_AUTH_SECRET
 bunx wrangler secret put GITHUB_CLIENT_ID
 bunx wrangler secret put GITHUB_CLIENT_SECRET
-bun run deploy
+cd ../.. && bun run deploy
 ```
 
 Create a **separate prod OAuth App** (a classic OAuth App matches the callback by
 exact host, so dev `localhost` and prod can't share one) with your Worker's domain
-in both URLs, set `BETTER_AUTH_URL` in `wrangler.jsonc`, and redeploy. Since the
-Worker URL isn't known until the first deploy: deploy once → note the URL → create
-the prod app + secrets → redeploy.
+in both URLs, set `BETTER_AUTH_URL` in `apps/webapp/wrangler.jsonc`, and redeploy.
+Since the Worker URL isn't known until the first deploy: deploy once → note the URL
+→ create the prod app + secrets → redeploy.
 
-## Project layout
+## Publish the CLI to npm
 
+The CLI is published as **`@phake/lanework`** from `apps/local`. It ships the
+prebuilt app (`dist-local`), so it runs anywhere with no build step for consumers;
+`prepack` rebuilds the bundle automatically before packing. Scoped packages are
+private by default, so `publishConfig.access` is set to `public`.
+
+```bash
+# 1. From the repo root, install so the build toolchain is available
+bun install
+
+# 2. Log in to npm (needs an account that belongs to the `phake` org;
+#    prompts for an OTP if 2FA is on)
+npm login
+
+# 3. (For later releases) bump the version — npm versions are immutable
+cd apps/local
+npm version patch            # 0.1.0 → 0.1.1   (skip for the very first publish)
+
+# 4. Sanity-check what will ship, then publish (public, thanks to publishConfig)
+npm publish --dry-run
+npm publish
+
+# 5. Verify
+cd ~/any-repo && npx @phake/lanework
 ```
-src/
-├── routes/                       TanStack routes
-│   ├── __root.tsx                document shell + providers
-│   ├── index.tsx                 landing + projects home
-│   ├── guide.tsx                 "How to use" docs page
-│   ├── board.$owner.$repo.tsx    the board (+ pending skeleton)
-│   └── api/auth/$.ts             Better Auth handler
-├── components/
-│   ├── ui/                       shadcn / Base UI primitives (+ svgs/)
-│   ├── kanban/                   board, column, card, review dialog, skeleton
-│   ├── app-shell.tsx             sidebar + main frame
-│   ├── app-sidebar.tsx           repo switcher, nav, tags, account
-│   └── repo-switcher.tsx, tag-more.tsx
-├── server/reviews.ts             server functions (getRepos, getBoard, …)
-├── lib/                          auth, github, db (Drizzle), utils, formatting
-├── stores/board-store.ts         Zustand UI state
-└── content/agents-template.ts    the standardized AGENTS.md template
-```
+
+The **`phake` org must exist on npm** with your account as a member
+([create it here](https://www.npmjs.com/org/create) if needed). Only `apps/local`
+is published — `apps/webapp`, `packages/shared`, and the workspace root are all
+`private`.
 
 ## Documentation
 

@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* This file is in packages/shared/src/styles, but the build runs from each app
+   (apps/webapp, apps/local), so Tailwind's automatic content detection scans the
+   wrong directory and finds no classes. Point it explicitly at the shared source. */
+@source "../**/*.{ts,tsx}";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";

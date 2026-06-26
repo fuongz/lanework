@@ -45,7 +45,7 @@ individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the maintainers responsible for enforcement at **phuong.phung@hiip.asia**.
+reported to the maintainers responsible for enforcement at **hi@phuongphung.com**.
 All complaints will be reviewed and investigated promptly and fairly.
 
 ## Attribution

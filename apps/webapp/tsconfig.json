@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["vite/client", "./worker-configuration.d.ts", "@types/node"],
+    "paths": {
+      "@/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": [
+    "../../packages/shared/src",
+    "vite.config.ts",
+    "drizzle.config.ts",
+    "worker-configuration.d.ts"
+  ]
+}

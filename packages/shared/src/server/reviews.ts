@@ -34,8 +34,18 @@ async function requireGitHubToken(): Promise<{ token: string; userId: string }> 
   return { token, userId: session.user.id };
 }
 
+// In local mode there's no auth: the board is the local repo's own
+// `.agents/reviews` folder, so we return a synthetic always-signed-in user and
+// read everything off disk. `__LANEWORK_LOCAL__` is a build-time constant, so
+// the Cloudflare bundle drops these branches (and the node:* deps) entirely.
+const LOCAL_VIEWER = "local";
+
 /** Current signed-in user (or null). Safe to call when logged out. */
 export const getSessionUser = createServerFn({ method: "GET" }).handler(async () => {
+  if (__LANEWORK_LOCAL__) {
+    const { localRepoName } = await import("@/lib/local-fs");
+    return { id: LOCAL_VIEWER, name: localRepoName(), email: "", image: null };
+  }
   const auth = getAuth();
   const { headers } = getRequest();
   const session = await auth.api.getSession({ headers });
@@ -53,6 +63,24 @@ export const getSessionUser = createServerFn({ method: "GET" }).handler(async ()
  * client-side, then paginated (listing) and searched (switcher) in-memory.
  */
 export const getAllRepos = createServerFn({ method: "GET" }).handler(async (): Promise<Repo[]> => {
+  if (__LANEWORK_LOCAL__) {
+    const { localRepoName } = await import("@/lib/local-fs");
+    const name = localRepoName();
+    // A single synthetic repo representing the local working directory.
+    return [
+      {
+        id: 0,
+        fullName: `${LOCAL_VIEWER}/${name}`,
+        owner: LOCAL_VIEWER,
+        name,
+        private: true,
+        description: null,
+        homepage: null,
+        defaultBranch: "local",
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+  }
   const { token } = await requireGitHubToken();
   return listRepos(token);
 });
@@ -62,6 +90,7 @@ export const getAllRepos = createServerFn({ method: "GET" }).handler(async (): P
  * organizations' repos (the client id is public, not a secret).
  */
 export const getGithubManageUrl = createServerFn({ method: "GET" }).handler(async () => {
+  if (__LANEWORK_LOCAL__) return null; // no GitHub OAuth app in local mode
   const auth = getAuth();
   const { headers } = getRequest();
   const session = await auth.api.getSession({ headers });
@@ -111,6 +140,7 @@ const branchesValidator = (d: unknown): { owner: string; repo: string } => {
 export const getBranches = createServerFn({ method: "GET" })
   .validator(branchesValidator)
   .handler(async ({ data }): Promise<string[]> => {
+    if (__LANEWORK_LOCAL__) return ["local"]; // single pseudo-branch (the working tree)
     const { token } = await requireGitHubToken();
     return listBranches(token, data.owner, data.repo);
   });
@@ -140,6 +170,19 @@ type CachedBoard = {
 export const getBoard = createServerFn({ method: "GET" })
   .validator(boardValidator)
   .handler(async ({ data }): Promise<BoardData> => {
+    if (__LANEWORK_LOCAL__) {
+      const { listLocalReviewCards } = await import("@/lib/local-fs");
+      const cards = await listLocalReviewCards();
+      return {
+        owner: data.owner,
+        repo: data.repo,
+        branch: "local",
+        viewer: LOCAL_VIEWER,
+        cards,
+        fetchedAt: Date.now(),
+        cached: false,
+      };
+    }
     const { token, userId } = await requireGitHubToken();
     const cache = env.CACHE as KVNamespace | undefined;
     const cacheKey = `board:${userId}:${data.owner}/${data.repo}@${data.branch ?? "default"}`;
@@ -182,6 +225,10 @@ const contentValidator = (d: unknown): { owner: string; repo: string; path: stri
 export const getCardContent = createServerFn({ method: "GET" })
   .validator(contentValidator)
   .handler(async ({ data }): Promise<string> => {
+    if (__LANEWORK_LOCAL__) {
+      const { getLocalCardContent } = await import("@/lib/local-fs");
+      return getLocalCardContent(data.path);
+    }
     const { token } = await requireGitHubToken();
     return getReviewContent(token, data.owner, data.repo, data.path, data.ref);
   });
