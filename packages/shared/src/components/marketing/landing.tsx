@@ -1,25 +1,27 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { motion } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Github01Icon,
   ArrowRight01Icon,
   ArrowDown01Icon,
   DashboardSquare01Icon,
-  Tag01Icon,
-  FileEditIcon,
-  Rocket01Icon,
   SparklesIcon,
   CheckmarkSquare02Icon,
+  CheckmarkCircle02Icon,
   Flag02Icon,
+  Comment01Icon,
+  ComputerTerminal01Icon,
+  CloudIcon,
+  Coins01Icon,
+  Copy01Icon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { ClaudeAiIcon } from "@/components/ui/svgs/claudeAiIcon";
 import { CodexLight } from "@/components/ui/svgs/codexLight";
 import { CodexDark } from "@/components/ui/svgs/codexDark";
 import { CursorLight } from "@/components/ui/svgs/cursorLight";
 import { CursorDark } from "@/components/ui/svgs/cursorDark";
-import { Gemini } from "@/components/ui/svgs/gemini";
-import { tagPill } from "@/lib/tag-color";
 import { STATUS_META } from "@/lib/review-status";
 import { cn } from "@/lib/utils";
 import { Wordmark } from "./wordmark";
@@ -34,6 +36,7 @@ export function MarketingLanding() {
       <Nav />
       <Hero />
       <Trusted />
+      <RunItYourWay />
       <HowItWorks />
       <Features />
       <Convention />
@@ -59,6 +62,9 @@ function Nav() {
     <SiteHeader
       center={
         <nav className="hidden items-center gap-8 font-mono text-xs tracking-wide text-muted-foreground md:flex">
+          <a href="#run" className="transition-colors hover:text-foreground">
+            local & cloud
+          </a>
           <a href="#how" className="transition-colors hover:text-foreground">
             how it works
           </a>
@@ -89,7 +95,10 @@ function Hero() {
           transition={{ duration: 0.4 }}
           className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-muted/40 px-3 py-1 font-mono text-xs tracking-wide text-muted-foreground"
         >
-          <span className="size-1.5 rounded-full bg-primary" />
+          <span className="relative flex size-1.5">
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+            <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
+          </span>
           .agents/reviews
           <HugeiconsIcon icon={ArrowRight01Icon} className="size-3.5" />
           kanban
@@ -118,27 +127,33 @@ function Hero() {
         >
           Your AI coding agent writes review checklists before it ships. Lanework turns
           that <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm">.agents/reviews</code> folder
-          into a live Kanban board — so you can see, approve, and track every change across a repo.
+          into a live Kanban board — <strong className="font-semibold text-foreground">right where you
+          code</strong>. One command, no sign-in, fully offline.
         </motion.p>
 
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.18 }}
-          className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row"
+          className="mt-9 flex flex-col items-center justify-center gap-4"
         >
-          <GitHubLoginButton size="lg">Continue with GitHub</GitHubLoginButton>
+          <CommandPill command="npx @phake/lanework" />
           <a
             href="#how"
-            className="inline-flex h-12 items-center gap-1.5 rounded-xl px-4 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
-            See how it works
+            how it works
             <HugeiconsIcon icon={ArrowDown01Icon} className="size-4" />
           </a>
         </motion.div>
-        <p className="mt-4 font-mono text-xs text-muted-foreground">
-          read-only · never writes to your repos
-        </p>
+        <motion.p
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.24 }}
+          className="mt-4 font-mono text-xs text-muted-foreground"
+        >
+          local-first · no account needed · fully offline · open source
+        </motion.p>
       </div>
 
       <motion.div
@@ -172,14 +187,110 @@ function Underline() {
   );
 }
 
+/** Copyable `npx` command pill — the primary, local-first call to action. */
+function CommandPill({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        navigator.clipboard?.writeText(command).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="group inline-flex h-12 items-center gap-3 rounded-xl border border-border bg-card pr-2.5 pl-4 font-mono text-sm shadow-sm transition-colors hover:bg-muted/40"
+      aria-label={`Copy: ${command}`}
+    >
+      <span className="text-primary">$</span>
+      <span className="text-foreground">{command}</span>
+      <span className="grid size-7 place-items-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover:text-foreground">
+        <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} className="size-4" />
+      </span>
+    </button>
+  );
+}
+
+/* --------------------------------------------------------- run it your way -- */
+
+function RunItYourWay() {
+  return (
+    <section id="run" className="mx-auto max-w-6xl scroll-mt-20 px-6 py-20">
+      <SectionHeading eyebrow="local-first" title="Run it your way" />
+      <div className="mt-12 grid gap-5 lg:grid-cols-2">
+        {/* Local — the recommended path */}
+        <Reveal>
+          <div className="relative h-full rounded-2xl border-2 border-primary/30 bg-card p-7 shadow-sm">
+            <span className="absolute top-6 right-6 rounded-full bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-medium text-primary">
+              recommended
+            </span>
+            <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-primary">
+              <HugeiconsIcon icon={ComputerTerminal01Icon} className="size-6" />
+            </span>
+            <h3 className="mt-4 text-xl font-semibold tracking-tight">Local</h3>
+            <p className="mt-1.5 max-w-sm text-sm leading-relaxed text-muted-foreground">
+              Board the repo you’re in — no Cloudflare, no account, fully offline.
+            </p>
+            <div className="mt-5">
+              <CommandPill command="npx @phake/lanework" />
+            </div>
+            <ul className="mt-6 flex flex-col gap-2.5 text-sm">
+              <Bullet>
+                Live-watches <code className="font-mono text-xs">.agents/reviews/</code> as your agent writes
+              </Bullet>
+              <Bullet>
+                Tick boxes and <strong className="font-medium text-foreground">Save changes</strong> back to disk
+              </Bullet>
+              <Bullet>
+                <strong className="font-medium text-foreground">Cost view</strong> — estimate your Claude Code token spend
+              </Bullet>
+            </ul>
+          </div>
+        </Reveal>
+
+        {/* Cloud — the hosted option */}
+        <Reveal delay={0.08}>
+          <div className="h-full rounded-2xl border border-border/70 bg-card p-7 shadow-sm">
+            <span className="grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground">
+              <HugeiconsIcon icon={CloudIcon} className="size-6" />
+            </span>
+            <h3 className="mt-4 text-xl font-semibold tracking-tight">Cloud</h3>
+            <p className="mt-1.5 max-w-sm text-sm leading-relaxed text-muted-foreground">
+              Prefer the hosted app? Sign in with GitHub and board any repo you can access, from anywhere.
+            </p>
+            <div className="mt-5">
+              <GitHubLoginButton size="lg">Continue with GitHub</GitHubLoginButton>
+            </div>
+            <ul className="mt-6 flex flex-col gap-2.5 text-sm">
+              <Bullet>Any repo, any branch — nothing to install</Bullet>
+              <Bullet>KV-cached fetch with a “last fetched” badge</Bullet>
+              <Bullet>Read-only — never writes to your repos</Bullet>
+            </ul>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function Bullet({ children }: { children: React.ReactNode }) {
+  return (
+    <li className="flex items-start gap-2 text-muted-foreground">
+      <HugeiconsIcon icon={CheckmarkCircle02Icon} className="mt-0.5 size-4 shrink-0 text-primary" />
+      <span className="leading-relaxed">{children}</span>
+    </li>
+  );
+}
+
 /* -------------------------------------------------------------- board mock -- */
 
 interface MockCard {
   title: string;
   priority?: "high" | "medium" | "low";
-  tags: string[];
+  date: string;
   done: number;
   total: number;
+  notes: number;
   people: string[];
 }
 
@@ -187,21 +298,21 @@ const MOCK: { col: ReviewColumn; cards: MockCard[] }[] = [
   {
     col: "todo",
     cards: [
-      { title: "Add dark mode toggle", priority: "medium", tags: ["ui"], done: 0, total: 8, people: ["A", "M"] },
-      { title: "Paginate the search API", priority: "low", tags: ["api"], done: 0, total: 5, people: ["P"] },
+      { title: "Add dark mode toggle", priority: "medium", date: "21 Jun", done: 0, total: 8, notes: 1, people: ["alex", "mira"] },
+      { title: "Paginate the search API", priority: "low", date: "20 Jun", done: 0, total: 5, notes: 0, people: ["pat"] },
     ],
   },
   {
     col: "processing",
     cards: [
-      { title: "Refactor auth middleware", priority: "high", tags: ["auth", "api"], done: 4, total: 9, people: ["A", "J", "M"] },
+      { title: "Refactor auth middleware", priority: "high", date: "19 Jun", done: 4, total: 9, notes: 3, people: ["alex", "jdoe", "mira"] },
     ],
   },
   {
     col: "done",
     cards: [
-      { title: "Cache homepage queries", priority: "medium", tags: ["perf"], done: 14, total: 14, people: ["P"] },
-      { title: "Fix flaky checkout test", priority: "low", tags: ["tests"], done: 6, total: 6, people: ["A", "M"] },
+      { title: "Cache homepage queries", priority: "medium", date: "18 Jun", done: 14, total: 14, notes: 2, people: ["pat"] },
+      { title: "Fix flaky checkout test", priority: "low", date: "17 Jun", done: 6, total: 6, notes: 0, people: ["alex", "mira"] },
     ],
   },
 ];
@@ -247,48 +358,62 @@ function BoardMock() {
 }
 
 const PRIORITY: Record<string, string> = {
-  high: "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
-  medium: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  high: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
+  medium: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
   low: "bg-muted text-muted-foreground",
 };
-const AVATAR = ["bg-emerald-500", "bg-sky-500", "bg-violet-500"];
+const AVATAR = ["bg-emerald-500", "bg-sky-500", "bg-violet-500", "bg-rose-500"];
 
+// Mirrors the real KanbanCard: title → assignee pills → flag/date/priority →
+// footer with notes + a color-coded x/x progress badge.
 function MockCardView({ card }: { card: MockCard }) {
   const pct = card.total ? Math.round((card.done / card.total) * 100) : 0;
   return (
-    <div className="rounded-lg border bg-card p-3 shadow-xs">
-      <p className="text-[13px] font-medium leading-snug">{card.title}</p>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {card.tags.map((t) => (
-          <span key={t} className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium", tagPill(t))}>
-            {t}
+    <div className="rounded-xl border bg-card p-3.5 shadow-xs">
+      <h3 className="line-clamp-2 text-sm font-medium leading-snug text-card-foreground">{card.title}</h3>
+
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        {card.people.map((p, i) => (
+          <span
+            key={p}
+            className="inline-flex items-center gap-1 rounded-full bg-secondary py-0.5 pr-2 pl-0.5 text-[11px] font-medium text-secondary-foreground"
+          >
+            <span className={cn("grid size-4 place-items-center rounded-full text-[8px] font-semibold text-white", AVATAR[i % AVATAR.length])}>
+              {p[0].toUpperCase()}
+            </span>
+            {p}
           </span>
         ))}
+      </div>
+
+      <div className="mt-2.5 flex items-center gap-2 text-xs text-muted-foreground">
+        <HugeiconsIcon icon={Flag02Icon} className="size-3.5" />
+        <span>{card.date}</span>
         {card.priority ? (
-          <span className={cn("ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-medium capitalize", PRIORITY[card.priority])}>
+          <span className={cn("ml-auto rounded-md px-1.5 py-0.5 text-[11px] font-medium capitalize", PRIORITY[card.priority])}>
             {card.priority}
           </span>
         ) : null}
       </div>
-      <div className="mt-2.5 flex items-center gap-2 border-t pt-2 text-[11px] text-muted-foreground">
+
+      <div className="mt-3 flex items-center gap-3 border-t pt-2.5 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">
-          <HugeiconsIcon icon={CheckmarkSquare02Icon} className="size-3" />
+          <HugeiconsIcon icon={Comment01Icon} className="size-3.5" />
+          {card.notes}
+        </span>
+        <span
+          className={cn(
+            "ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums",
+            pct === 100
+              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+              : pct === 0
+                ? "bg-muted text-muted-foreground"
+                : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+          )}
+        >
+          <HugeiconsIcon icon={CheckmarkSquare02Icon} className="size-3.5" />
           {card.done}/{card.total}
         </span>
-        <div className="flex -space-x-1.5">
-          {card.people.map((p, i) => (
-            <span
-              key={i}
-              className={cn(
-                "grid size-4 place-items-center rounded-full text-[8px] font-semibold text-white ring-2 ring-card",
-                AVATAR[i % AVATAR.length],
-              )}
-            >
-              {p}
-            </span>
-          ))}
-        </div>
-        <span className="ml-auto font-mono">{pct}%</span>
       </div>
     </div>
   );
@@ -315,9 +440,6 @@ function Trusted() {
             <CursorLight className="size-6 dark:hidden" />
             <CursorDark className="hidden size-6 dark:block" />
           </Brand>
-          <Brand label="Gemini">
-            <Gemini className="size-6" />
-          </Brand>
         </div>
       </Reveal>
     </section>
@@ -339,8 +461,8 @@ function HowItWorks() {
   const steps = [
     {
       n: "01",
-      title: "Add AGENTS.md",
-      body: "Drop the convention into your repo — one file, works with Claude Code, Codex, Cursor and more. Copy the template from the guide.",
+      title: "Add an instructions file to your repo",
+      body: "Drop the convention into your AGENTS.md — one file, works with Claude Code, Codex, Cursor and more. Copy the template from the guide.",
     },
     {
       n: "02",
@@ -350,7 +472,7 @@ function HowItWorks() {
     {
       n: "03",
       title: "Watch the board",
-      body: "Open the repo in Lanework. Cards flow todo → processing → done as work gets approved and ships.",
+      body: "Run npx @phake/lanework in the repo (or sign in to the Cloud). Cards flow todo → processing → done as work gets approved and ships.",
     },
   ];
   return (
@@ -420,11 +542,11 @@ function MappingCard() {
 
 function Features() {
   const features = [
+    { icon: ComputerTerminal01Icon, title: "Local-first CLI", body: "Run npx @phake/lanework against the repo you’re in. No auth, no network, with live folder-watch." },
     { icon: DashboardSquare01Icon, title: "Board & List", body: "Four columns from your folders, or a dense list view. Your reviews, organized the way you think." },
-    { icon: Tag01Icon, title: "Filter by tag & owner", body: "Slice to My tasks or any tag. The top tags surface right in the sidebar." },
-    { icon: FileEditIcon, title: "Full-screen review", body: "Open a card for the rendered markdown plus a clean metadata panel — status, priority, progress." },
-    { icon: Github01Icon, title: "GitHub-native, read-only", body: "Sign in, pick a repo. Lanework reads your reviews and never writes back — your files stay yours." },
-    { icon: Rocket01Icon, title: "Fast by design", body: "File contents batch over GraphQL with an instant skeleton, so big boards open quick." },
+    { icon: CheckmarkSquare02Icon, title: "Approve in place", body: "Tick checklist items in the full-screen review — locally, Save changes writes them back to the markdown." },
+    { icon: Coins01Icon, title: "Cost view", body: "See what the project cost in Claude Code tokens, with a cache-aware per-model breakdown. (Local)" },
+    { icon: CloudIcon, title: "Cloud, when you want it", body: "Sign in with GitHub to board any repo from anywhere — KV-cached and read-only." },
     { icon: SparklesIcon, title: "Built to feel good", body: "Fluid motion, dark-mode tokens, and a “/” to jump between repos. A tool you’ll want to open." },
   ];
   return (
@@ -477,8 +599,8 @@ function Convention() {
             the folder for the column, the frontmatter for the metadata, and the checkboxes for
             progress. That’s it.
           </p>
-          <div className="mt-7 flex flex-wrap gap-3">
-            <GitHubLoginButton size="lg">Continue with GitHub</GitHubLoginButton>
+          <div className="mt-7 flex flex-wrap items-center gap-3">
+            <CommandPill command="npx @phake/lanework" />
             <Link
               to="/guide"
               className="inline-flex h-12 items-center gap-1.5 rounded-xl border px-5 text-sm font-medium transition-colors hover:bg-muted"
@@ -529,11 +651,12 @@ function CallToAction() {
               Bring your agent’s reviews to life.
             </h2>
             <p className="mx-auto mt-4 max-w-md text-emerald-50/80">
-              Sign in with GitHub and open your first board in under a minute. Free and open source.
+              One command in any repo — or sign in for the Cloud. Free and open source.
             </p>
-            <div className="mt-8 flex justify-center">
-              <GitHubLoginButton variant="invert" size="lg">
-                Continue with GitHub
+            <div className="mt-8 flex flex-col items-center gap-3">
+              <CommandPill command="npx @phake/lanework" />
+              <GitHubLoginButton variant="invert" size="sm">
+                or continue with GitHub
               </GitHubLoginButton>
             </div>
           </div>
