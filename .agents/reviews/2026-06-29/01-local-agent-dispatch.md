@@ -1,5 +1,5 @@
 ---
-status: processing
+status: done
 assignees: []
 created_at: 2026-06-29 00:00:00Z
 priority: high

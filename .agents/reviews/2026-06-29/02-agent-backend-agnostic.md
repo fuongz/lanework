@@ -38,11 +38,11 @@ won't work — the flags differ per tool.
 - [ ] **B3. Status reporting for non-MCP backends.** The round-trip today relies on
   the agent calling the lanework MCP `toggle_item` / `set_status` tools. Backends
   without MCP can't. Pick a fallback (decision needed):
-  - **(a)** Process-state only — the card shows running/done/failed from the exit
+  - [ ] **(a)** Process-state only — the card shows running/done/failed from the exit
     code; no per-item ticking. Simplest; least rich.
-  - **(b)** A tiny lanework HTTP shim the agent is told to `curl` (e.g. a localhost
+  - [ ] **(b)** A tiny lanework HTTP shim the agent is told to `curl` (e.g. a localhost
     token-scoped endpoint that maps to `toggle_item`/`set_status`).
-  - **(c)** Inject a one-off MCP-compatible bridge only for backends that support
+  - [ ] **(c)** Inject a one-off MCP-compatible bridge only for backends that support
     MCP at all (Cursor does; others may not).
 
 - [ ] **B4. Per-backend auth/availability check.** Preflight that the chosen CLI is
