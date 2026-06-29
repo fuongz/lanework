@@ -49,8 +49,14 @@ One command (Serena-style) registers the MCP server — it wraps `claude mcp add
 ```bash
 lanework setup claude-code              # global (user scope)
 lanework setup claude-code --project    # only the current project
+lanework setup claude-code --dashboard  # also auto-open the board (≈ :3662) on startup — Serena-style
 lanework setup claude-code --local      # register this local build instead of npx
 ```
+
+With `--dashboard`, the web board boots (and opens your browser) every time Claude Code
+starts and connects the server — like Serena. Without it the server runs headless. Plugin
+users get the same behaviour by setting `LANEWORK_DASHBOARD=1` in the server's env. Note:
+each Claude Code session starts its own board (the port climbs from `3662` if one's busy).
 
 …or do it by hand:
 

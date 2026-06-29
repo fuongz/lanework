@@ -63,7 +63,7 @@ for (let i = 0; i < argv.length; i++) {
       "Usage:\n" +
         "  lanework [dir] [--port N] [--no-open]   board a repo's .agents/reviews\n" +
         "  lanework mcp [dir] [--no-dashboard]     run as an MCP (stdio) server\n" +
-        "  lanework setup claude-code [--project] [--local]   register the MCP server with Claude Code",
+        "  lanework setup claude-code [--project] [--dashboard] [--local]   register the MCP server with Claude Code",
     );
     process.exit(0);
   } else if (!a.startsWith("-")) dir = resolve(a);
@@ -94,22 +94,30 @@ if (open) openBrowser(url);
  * the plugin (see plugin/README.md). Flags:
  *   --project   scope to the current project (default: --scope user, global)
  *   --local     register this local build instead of `npx @phake/lanework`
+ *   --dashboard also boot the web board (≈ :3662) whenever Claude Code starts —
+ *               Serena-style. Default: headless (no board).
  *   --name <id> server name (default: lanework)
  */
 async function runSetup(args) {
   const client = args.find((a) => !a.startsWith("-"));
   if (client !== "claude-code") {
-    console.error("Usage: lanework setup claude-code [--project] [--local] [--name <id>]");
+    console.error(
+      "Usage: lanework setup claude-code [--project] [--dashboard] [--local] [--name <id>]",
+    );
     process.exit(client ? 1 : 0);
   }
   const useLocal = args.includes("--local");
   const projectScope = args.includes("--project");
+  const dashboard = args.includes("--dashboard");
   const nameIdx = args.indexOf("--name");
   const name = nameIdx >= 0 && args[nameIdx + 1] ? args[nameIdx + 1] : "lanework";
 
+  // With --dashboard the server also opens the board on startup (Serena-style);
+  // otherwise it runs headless.
+  const tail = dashboard ? ["mcp"] : ["mcp", "--no-dashboard"];
   const launch = useLocal
-    ? [process.execPath, fileURLToPath(new URL("./cli.mjs", import.meta.url)), "mcp", "--no-dashboard"]
-    : ["npx", "-y", "@phake/lanework", "mcp", "--no-dashboard"];
+    ? [process.execPath, fileURLToPath(new URL("./cli.mjs", import.meta.url)), ...tail]
+    : ["npx", "-y", "@phake/lanework", ...tail];
 
   const addArgs = ["mcp", "add"];
   if (!projectScope) addArgs.push("--scope", "user");
@@ -131,7 +139,10 @@ async function runSetup(args) {
       if (code === 0) {
         console.log(
           `\n✓ Registered. Restart Claude Code, then run /mcp — server "${name}" should be connected.\n` +
-            "  Tools: list_reviews, create_review, set_status, toggle_item, lifecycle_status, …",
+            "  Tools: list_reviews, create_review, set_status, toggle_item, lifecycle_status, …" +
+            (dashboard
+              ? "\n  Dashboard: the board opens automatically (≈ http://127.0.0.1:3662) each time Claude Code starts."
+              : "\n  Tip: pass --dashboard to also auto-open the board on startup (Serena-style)."),
         );
       }
       process.exit(code ?? 0);

@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Auto-open the board on Claude Code startup (Serena-style)** —
+  `lanework setup claude-code --dashboard` registers the MCP server so it also boots
+  the web board (≈ `:3662`) whenever Claude Code starts. Plugin users can opt in with
+  `LANEWORK_DASHBOARD=1` in the server env. Headless remains the default.
+
+### Changed
+- The marketing landing (`/`) is now fully static — no server-side calls in the cloud
+  build. The authenticated repository list moved to a new **`/dashboard`** route; sign-in
+  lands there. Landing + guide gained MCP / AI-DLC sections.
+
 ## [0.2.0] - 2026-06-29
 
 ### Added

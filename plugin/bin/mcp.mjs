@@ -10,8 +10,14 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const passthru = process.argv.slice(2); // e.g. ["--no-dashboard"]
+let passthru = process.argv.slice(2); // e.g. ["--no-dashboard"]
 const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+
+// Opt in to the web board (Serena-style) by setting LANEWORK_DASHBOARD=1 in the
+// MCP server's env — drops the default --no-dashboard so the board boots on start.
+if (/^(1|true|yes|on)$/i.test(process.env.LANEWORK_DASHBOARD || "")) {
+  passthru = passthru.filter((a) => a !== "--no-dashboard");
+}
 
 const localCli = fileURLToPath(new URL("../../apps/local/cli.mjs", import.meta.url));
 const localLib = fileURLToPath(new URL("../../apps/local/dist-local/reviews-lib.mjs", import.meta.url));
