@@ -615,6 +615,12 @@ function Mcp() {
             <div className="mt-5">
               <CommandPill command="lanework setup claude-code" />
             </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Add{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">--dashboard</code>{" "}
+              to also auto-open the board (≈ <span className="font-mono">:3662</span>) whenever Claude
+              Code starts — Serena-style.
+            </p>
             <div className="mt-6 flex flex-col gap-4">
               {MCP_STEPS.map((s) => (
                 <div key={s.cmd} className="flex items-start gap-3">
