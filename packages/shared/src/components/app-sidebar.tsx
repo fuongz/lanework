@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { RepoSwitcher } from "@/components/repo-switcher";
 import { TagMore } from "@/components/tag-more";
+import { UsageFooter } from "@/components/usage-footer";
 import { tagColor } from "@/lib/tag-color";
 import { cn } from "@/lib/utils";
 
@@ -132,6 +133,9 @@ export function AppSidebar({ user, active, nav }: AppSidebarProps) {
         <HugeiconsIcon icon={HelpCircleIcon} className="size-4 shrink-0 text-muted-foreground" />
         How to use?
       </Link>
+
+      {/* Claude token usage (week + current session). Local mode only. */}
+      {__LANEWORK_LOCAL__ ? <UsageFooter /> : null}
 
       {/* Account: static identity in local mode (no auth, so no logout). */}
       {__LANEWORK_LOCAL__ ? (

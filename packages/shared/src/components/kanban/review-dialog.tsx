@@ -23,6 +23,7 @@ import {
 import { getCardContent, saveCardContent } from "@/server/reviews";
 import { runAgentForCard, stopAgentForCard, mergeAgentForCard } from "@/lib/agent-client";
 import { useAgentStatus } from "@/hooks/use-agent-status";
+import { estimateCost } from "@/lib/claude-pricing";
 import { useBoardStore } from "@/stores/board-store";
 import {
   Dialog,
@@ -533,6 +534,7 @@ function AgentPanel({ card }: { card: ReviewCard }) {
           branch <span className="text-foreground">{entry.branch}</span>
         </p>
       ) : null}
+      {entry?.usage?.length ? <AgentUsage usage={entry.usage} /> : null}
 
       <div className="mt-3 flex flex-wrap gap-2">
         {!entry ? (
@@ -569,6 +571,45 @@ function AgentPanel({ card }: { card: ReviewCard }) {
         </pre>
       ) : null}
     </div>
+  );
+}
+
+type AgentUsageModels = {
+  model: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite5m: number;
+  cacheWrite1h: number;
+}[];
+
+/** Token in/out + estimated cost for an agent run (priced from its transcript). */
+function AgentUsage({ usage }: { usage: AgentUsageModels }) {
+  let input = 0;
+  let output = 0;
+  let cost = 0;
+  for (const m of usage) {
+    input += m.input + m.cacheRead + m.cacheWrite5m + m.cacheWrite1h;
+    output += m.output;
+    cost += estimateCost(m.model, {
+      input: m.input,
+      output: m.output,
+      cacheRead: m.cacheRead,
+      cacheWrite5m: m.cacheWrite5m,
+      cacheWrite1h: m.cacheWrite1h,
+    });
+  }
+  const fmt = (n: number) =>
+    n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}K` : String(n);
+  const dollars = cost > 0 && cost < 0.01 ? "<$0.01" : `$${cost.toFixed(2)}`;
+  return (
+    <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+      <span className="tabular-nums">{fmt(input)} in</span>
+      <span aria-hidden>·</span>
+      <span className="tabular-nums">{fmt(output)} out</span>
+      <span aria-hidden>·</span>
+      <span className="font-medium text-foreground tabular-nums">~{dollars}</span>
+    </p>
   );
 }
 

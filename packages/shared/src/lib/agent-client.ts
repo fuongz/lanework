@@ -46,6 +46,18 @@ export interface AgentStatus {
       startedAt: string;
       endedAt: string | null;
       exitCode: number | null;
+      /** Per-model token usage from this agent's worktree transcript (or null). */
+      usage:
+        | {
+            model: string;
+            messages: number;
+            input: number;
+            output: number;
+            cacheRead: number;
+            cacheWrite5m: number;
+            cacheWrite1h: number;
+          }[]
+        | null;
       log: string[];
     }
   >;

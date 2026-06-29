@@ -8,7 +8,7 @@ tags: ["local", "agents", "backends"]
 
 # Review: Backend-agnostic agent dispatch (Cursor CLI / Codex / …)
 
-Follow-up to [[01-local-agent-dispatch]]. The dispatcher in `apps/local/agent-runner.mjs`
+Follow-up to the local agent dispatcher work (see the `agents` tag). The dispatcher in `apps/local/agent-runner.mjs`
 already isolates everything backend-specific into the spawn step — worktree
 creation, the registry, run/stop/merge, and status round-trip are all generic. To
 support other coding-agent CLIs (Cursor's `cursor-agent`, OpenAI `codex`, etc.) we

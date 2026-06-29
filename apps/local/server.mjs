@@ -44,7 +44,7 @@ const json = (data, status = 200) =>
 async function handleAgent(request, url) {
   if (url.pathname === "/_local/agent/status" && request.method === "GET") {
     const { agentStatus } = await getAgentRunner();
-    return json(agentStatus());
+    return json(await agentStatus());
   }
   const ACTIONS = { "/_local/agent/run": "runAgent", "/_local/agent/stop": "stopAgent", "/_local/agent/merge": "mergeAgent" };
   if (ACTIONS[url.pathname] && request.method === "POST") {

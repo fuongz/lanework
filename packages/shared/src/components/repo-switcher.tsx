@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { UnfoldMoreIcon, Github01Icon, LinkSquare01Icon } from "@hugeicons/core-free-icons";
+import { UnfoldMoreIcon, Github01Icon, LinkSquare01Icon, GitBranchIcon } from "@hugeicons/core-free-icons";
 import {
   Command,
   CommandGroup,
@@ -11,7 +11,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getGithubManageUrl } from "@/server/reviews";
+import { getGithubManageUrl, getLocalBranch } from "@/server/reviews";
 import { useRepoStore } from "@/stores/repo-store";
 import { signIn } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,19 @@ export function RepoSwitcher({ active, className }: RepoSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [manageUrl, setManageUrl] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+
+  // Current git branch (local mode only) — shown under the repo name.
+  const [branch, setBranch] = useState<string | null>(null);
+  useEffect(() => {
+    if (!__LANEWORK_LOCAL__) return;
+    let cancelled = false;
+    getLocalBranch()
+      .then((b) => !cancelled && setBranch(b))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // The full repo list is fetched once into a session store; everything below filters it
   // in-memory, so the switcher never re-hits the server while typing.
@@ -100,8 +113,15 @@ export function RepoSwitcher({ active, className }: RepoSwitcherProps) {
           <span className="block truncate text-[15px] font-semibold leading-tight">
             {active?.repo ?? "Local"}
           </span>
-          <span className="block truncate text-xs text-muted-foreground">
-            {active?.owner ?? "local"}
+          <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+            {branch ? (
+              <>
+                <HugeiconsIcon icon={GitBranchIcon} className="size-3 shrink-0" />
+                <span className="truncate font-mono">{branch}</span>
+              </>
+            ) : (
+              (active?.owner ?? "local")
+            )}
           </span>
         </span>
       </div>

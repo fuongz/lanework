@@ -359,3 +359,23 @@ export const getCostEstimate = createServerFn({ method: "GET" }).handler(
     return { available: false, projectDir: "", sessions: 0, models: [], firstAt: null, lastAt: null };
   },
 );
+
+/** Current git branch of the local checkout (null in hosted mode). */
+export const getLocalBranch = createServerFn({ method: "GET" }).handler(async (): Promise<string | null> => {
+  if (__LANEWORK_LOCAL__) {
+    const { localGitBranch } = await import("@/lib/local-fs");
+    return localGitBranch();
+  }
+  return null;
+});
+
+/** Weekly + current-session token usage for the sidebar widget. Local mode only. */
+export const getUsageSummary = createServerFn({ method: "GET" }).handler(
+  async (): Promise<import("@/lib/local-fs").UsageSummary> => {
+    if (__LANEWORK_LOCAL__) {
+      const { getLocalUsageSummary } = await import("@/lib/local-fs");
+      return getLocalUsageSummary();
+    }
+    return { available: false, weekly: [], session: [], weekStart: "", sessionStart: null, sessionEnd: null };
+  },
+);

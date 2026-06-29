@@ -20,7 +20,7 @@ const execFileP = promisify(execFile);
 // The fs data layer (bundled from packages/shared/src/lib/local-fs.ts), same
 // module the MCP server uses — gives us the lifecycle helpers + the project root.
 const libUrl = new URL("./dist-local/reviews-lib.mjs", import.meta.url).href;
-const { getLocalCardContent, localRoot } = await import(libUrl);
+const { getLocalCardContent, localRoot, getCostEstimateForDir } = await import(libUrl);
 
 const CLI = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -62,10 +62,21 @@ function activeCount() {
   return n;
 }
 
-/** Public snapshot of the registry for GET /_local/agent/status. */
-export function agentStatus() {
+/**
+ * Public snapshot of the registry for GET /_local/agent/status. Per agent we also
+ * price its run by reading the worktree's Claude Code transcript (best-effort — the
+ * client turns the token counts into a cost estimate). Async because of that read.
+ */
+export async function agentStatus() {
   const agents = {};
   for (const [path, e] of registry) {
+    let usage = null;
+    try {
+      const cost = await getCostEstimateForDir(e.worktree);
+      if (cost.available && cost.models.length) usage = cost.models;
+    } catch {
+      /* no transcript yet / unreadable — leave usage null */
+    }
     agents[path] = {
       state: e.state,
       mode: e.mode,
@@ -75,6 +86,7 @@ export function agentStatus() {
       startedAt: e.startedAt,
       endedAt: e.endedAt ?? null,
       exitCode: e.exitCode ?? null,
+      usage,
       log: e.log.slice(-40),
     };
   }

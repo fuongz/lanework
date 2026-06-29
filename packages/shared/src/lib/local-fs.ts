@@ -34,6 +34,20 @@ export function localRoot(): string {
   return process.env.LANEWORK_DIR || process.cwd();
 }
 
+/** Current git branch of the local checkout (or a short SHA when detached). Reads
+ *  `.git/HEAD` directly — no spawn. Returns null when not a git repo. */
+export async function localGitBranch(): Promise<string | null> {
+  try {
+    const head = await readFile(join(resolve(localRoot()), ".git", "HEAD"), "utf8");
+    const ref = head.match(/ref:\s*refs\/heads\/(.+?)\s*$/);
+    if (ref) return ref[1];
+    const sha = head.trim();
+    return /^[0-9a-f]{7,40}$/i.test(sha) ? sha.slice(0, 7) : null; // detached HEAD
+  } catch {
+    return null;
+  }
+}
+
 /** A short, human-friendly name for the local "repo" (the folder name). */
 export function localRepoName(): string {
   const root = localRoot();
@@ -307,27 +321,33 @@ function encodeProjectPath(root: string): string {
   return root.replace(/[/._]/g, "-");
 }
 
-/**
- * Aggregate token usage from this project's Claude Code transcripts so the board
- * can price it. Reads only the matching `~/.claude/projects/<encoded>` folder;
- * dedupes assistant messages by id so retries/duplicate lines aren't double-counted.
- */
-export async function getLocalCostEstimate(): Promise<CostData> {
-  const root = resolve(localRoot());
-  const dir = join(claudeProjectsDir(), encodeProjectPath(root));
+interface UsageRecord {
+  model: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite5m: number;
+  cacheWrite1h: number;
+  ts: string | null;
+  file: string;
+}
 
+/**
+ * Read + dedupe assistant-message token usage from a project's transcript dir.
+ * Dedupes by assistant message id so retries/streamed duplicate lines don't
+ * double-count. `available: false` when the project has no transcripts.
+ */
+async function collectUsageRecords(
+  dir: string,
+): Promise<{ available: boolean; files: string[]; records: UsageRecord[] }> {
   let files: string[];
   try {
     files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl"));
   } catch {
-    return { available: false, projectDir: dir, sessions: 0, models: [], firstAt: null, lastAt: null };
+    return { available: false, files: [], records: [] };
   }
-
-  const byModel = new Map<string, ModelUsage>();
+  const records: UsageRecord[] = [];
   const seen = new Set<string>();
-  let firstAt: string | null = null;
-  let lastAt: string | null = null;
-
   for (const file of files) {
     const text = await readFile(join(dir, file), "utf8").catch(() => "");
     for (const line of text.split("\n")) {
@@ -342,44 +362,106 @@ export async function getLocalCostEstimate(): Promise<CostData> {
       const msg = rec.message as { id?: string; model?: string; usage?: Record<string, number | undefined> } | undefined;
       const usage = msg?.usage;
       if (!usage) continue;
-      // Dedupe by assistant message id (skip duplicate/streamed lines).
       const id = msg?.id;
       if (id) {
         if (seen.has(id)) continue;
         seen.add(id);
       }
-
-      const model = msg?.model || "unknown";
-      let agg = byModel.get(model);
-      if (!agg) {
-        agg = { model, messages: 0, input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
-        byModel.set(model, agg);
-      }
       const cacheCreation = usage.cache_creation as
         | { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number }
         | undefined;
-      agg.messages += 1;
-      agg.input += usage.input_tokens ?? 0;
-      agg.output += usage.output_tokens ?? 0;
-      agg.cacheRead += usage.cache_read_input_tokens ?? 0;
-      if (cacheCreation) {
-        agg.cacheWrite5m += cacheCreation.ephemeral_5m_input_tokens ?? 0;
-        agg.cacheWrite1h += cacheCreation.ephemeral_1h_input_tokens ?? 0;
-      } else {
-        // No 5m/1h split available → treat all cache writes as 5-minute.
-        agg.cacheWrite5m += usage.cache_creation_input_tokens ?? 0;
-      }
-
-      const ts = typeof rec.timestamp === "string" ? rec.timestamp : null;
-      if (ts) {
-        if (!firstAt || ts < firstAt) firstAt = ts;
-        if (!lastAt || ts > lastAt) lastAt = ts;
-      }
+      records.push({
+        model: msg?.model || "unknown",
+        input: usage.input_tokens ?? 0,
+        output: usage.output_tokens ?? 0,
+        cacheRead: usage.cache_read_input_tokens ?? 0,
+        cacheWrite5m: cacheCreation ? (cacheCreation.ephemeral_5m_input_tokens ?? 0) : (usage.cache_creation_input_tokens ?? 0),
+        cacheWrite1h: cacheCreation ? (cacheCreation.ephemeral_1h_input_tokens ?? 0) : 0,
+        ts: typeof rec.timestamp === "string" ? rec.timestamp : null,
+        file,
+      });
     }
   }
+  return { available: true, files, records };
+}
 
-  const models = [...byModel.values()].sort(
-    (a, b) => b.input + b.output - (a.input + a.output),
-  );
-  return { available: true, projectDir: dir, sessions: files.length, models, firstAt, lastAt };
+/** Aggregate flat usage records into per-model totals (largest first). */
+function groupByModel(records: UsageRecord[]): ModelUsage[] {
+  const byModel = new Map<string, ModelUsage>();
+  for (const r of records) {
+    let agg = byModel.get(r.model);
+    if (!agg) {
+      agg = { model: r.model, messages: 0, input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
+      byModel.set(r.model, agg);
+    }
+    agg.messages += 1;
+    agg.input += r.input;
+    agg.output += r.output;
+    agg.cacheRead += r.cacheRead;
+    agg.cacheWrite5m += r.cacheWrite5m;
+    agg.cacheWrite1h += r.cacheWrite1h;
+  }
+  return [...byModel.values()].sort((a, b) => b.input + b.output - (a.input + a.output));
+}
+
+/**
+ * Token usage for a specific project directory's Claude Code transcripts. The
+ * agent dispatcher uses this to price a worktree's agent run; `getLocalCostEstimate`
+ * is the current project's all-time view (Cost page + MCP `cost_estimate`).
+ */
+export async function getCostEstimateForDir(rootDir: string): Promise<CostData> {
+  const dir = join(claudeProjectsDir(), encodeProjectPath(resolve(rootDir)));
+  const { available, files, records } = await collectUsageRecords(dir);
+  if (!available) return { available: false, projectDir: dir, sessions: 0, models: [], firstAt: null, lastAt: null };
+  let firstAt: string | null = null;
+  let lastAt: string | null = null;
+  for (const r of records) {
+    if (!r.ts) continue;
+    if (!firstAt || r.ts < firstAt) firstAt = r.ts;
+    if (!lastAt || r.ts > lastAt) lastAt = r.ts;
+  }
+  return { available: true, projectDir: dir, sessions: files.length, models: groupByModel(records), firstAt, lastAt };
+}
+
+export async function getLocalCostEstimate(): Promise<CostData> {
+  return getCostEstimateForDir(localRoot());
+}
+
+export interface UsageSummary {
+  available: boolean;
+  /** Per-model usage over the last 7 days. */
+  weekly: ModelUsage[];
+  /** Per-model usage for the most recent Claude Code session (transcript file). */
+  session: ModelUsage[];
+  weekStart: string; // ISO cutoff (7 days ago)
+  sessionStart: string | null;
+  sessionEnd: string | null;
+}
+
+/** Weekly + current-session usage for this project, for the sidebar widget. */
+export async function getLocalUsageSummary(): Promise<UsageSummary> {
+  const dir = join(claudeProjectsDir(), encodeProjectPath(resolve(localRoot())));
+  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { available, records } = await collectUsageRecords(dir);
+  if (!available) {
+    return { available: false, weekly: [], session: [], weekStart, sessionStart: null, sessionEnd: null };
+  }
+
+  const weekly = groupByModel(records.filter((r) => r.ts !== null && r.ts >= weekStart));
+
+  // Current session = the transcript file holding the most recent message.
+  let latest: UsageRecord | null = null;
+  for (const r of records) {
+    if (r.ts && (!latest || r.ts > (latest.ts ?? ""))) latest = r;
+  }
+  const sessionFile = latest?.file ?? null;
+  const sessionRecords = sessionFile ? records.filter((r) => r.file === sessionFile) : [];
+  let sessionStart: string | null = null;
+  let sessionEnd: string | null = null;
+  for (const r of sessionRecords) {
+    if (!r.ts) continue;
+    if (!sessionStart || r.ts < sessionStart) sessionStart = r.ts;
+    if (!sessionEnd || r.ts > sessionEnd) sessionEnd = r.ts;
+  }
+  return { available: true, weekly, session: groupByModel(sessionRecords), weekStart, sessionStart, sessionEnd };
 }
