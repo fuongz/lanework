@@ -11,24 +11,24 @@
       "enabled": true,
       "head_sampling_rate": 1,
       "persist": true,
-      "invocation_logs": true,
-    },
+      "invocation_logs": true
+    }
   },
   "preview_urls": false,
   "workers_dev": false,
   "routes": [{ "pattern": "lanework.dev", "custom_domain": true }],
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "prod-lanework",
-      "database_id": "076effb3-3f48-40a3-95c0-dfc44a8b6559",
-      "migrations_dir": "drizzle",
-    },
-  ],
-  "kv_namespaces": [
-    { "binding": "CACHE", "id": "e1cb1e06b1a849f085709fd5e45f93c5" },
-  ],
+  // "d1_databases": [
+  //   {
+  //     "binding": "DB",
+  //     "database_name": "prod-lanework",
+  //     "database_id": "076effb3-3f48-40a3-95c0-dfc44a8b6559",
+  //     "migrations_dir": "drizzle"
+  //   }
+  // ],
+  // "kv_namespaces": [
+  //   { "binding": "CACHE", "id": "e1cb1e06b1a849f085709fd5e45f93c5" }
+  // ],
   "vars": {
-    "BETTER_AUTH_URL": "https://lanework.dev",
-  },
+    "BETTER_AUTH_URL": "https://lanework.dev"
+  }
 }

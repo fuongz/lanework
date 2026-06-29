@@ -5,6 +5,7 @@ dist-local
 .output
 .wrangler
 .vite
+.lanework
 
 # secrets
 .dev.vars

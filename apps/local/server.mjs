@@ -29,6 +29,47 @@ const MIME = {
 // Import the SSR handler (default export = { fetch }).
 const { default: ssr } = await import(new URL("./dist-local/server/server.js", import.meta.url).href);
 
+// Agent dispatcher (lazy — loaded on first /_local/agent request so a problem in
+// the runner can't stop the board from booting). Cached after the first import.
+let agentRunner;
+async function getAgentRunner() {
+  if (!agentRunner) agentRunner = await import(new URL("./agent-runner.mjs", import.meta.url).href);
+  return agentRunner;
+}
+
+const json = (data, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+
+/** Handle the /_local/agent/* dispatcher endpoints. Returns null if not matched. */
+async function handleAgent(request, url) {
+  if (url.pathname === "/_local/agent/status" && request.method === "GET") {
+    const { agentStatus } = await getAgentRunner();
+    return json(agentStatus());
+  }
+  const ACTIONS = { "/_local/agent/run": "runAgent", "/_local/agent/stop": "stopAgent", "/_local/agent/merge": "mergeAgent" };
+  if (ACTIONS[url.pathname] && request.method === "POST") {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "invalid JSON body" }, 400);
+    }
+    const runner = await getAgentRunner();
+    const action = ACTIONS[url.pathname];
+    try {
+      // run accepts an optional mode ("implement" | "plan"); stop/merge take only the path.
+      const result =
+        action === "runAgent"
+          ? await runner.runAgent(body?.path, body?.mode)
+          : await runner[action](body?.path);
+      return json(result);
+    } catch (e) {
+      return json({ error: e.message }, 400);
+    }
+  }
+  return null;
+}
+
 /** Resolve a URL path to a file inside clientDir, or null if it escapes/missing. */
 async function staticFile(pathname) {
   // Block traversal: normalize and ensure it stays under clientDir.
@@ -138,6 +179,10 @@ export async function start({
     async fetch(request) {
       const url = new URL(request.url);
       if (url.pathname === "/_local/events") return liveEvents(targetDir);
+      if (url.pathname.startsWith("/_local/agent/")) {
+        const res = await handleAgent(request, url);
+        if (res) return res;
+      }
       if (request.method === "GET" || request.method === "HEAD") {
         const file = await staticFile(url.pathname);
         if (file) {

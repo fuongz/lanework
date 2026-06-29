@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "@tanstack/react-router";
 import { MarkdownHooks, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeShiki from "@shikijs/rehype";
@@ -13,8 +14,15 @@ import {
   Calendar03Icon,
   CheckmarkSquare02Icon,
   Tag01Icon,
+  RoboticIcon,
+  PlayIcon,
+  StopIcon,
+  GitMergeIcon,
+  Delete02Icon,
 } from "@hugeicons/core-free-icons";
 import { getCardContent, saveCardContent } from "@/server/reviews";
+import { runAgentForCard, stopAgentForCard, mergeAgentForCard } from "@/lib/agent-client";
+import { useAgentStatus } from "@/hooks/use-agent-status";
 import { useBoardStore } from "@/stores/board-store";
 import {
   Dialog,
@@ -396,6 +404,8 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
           <div className="mx-auto w-full max-w-3xl px-6 py-5">
             {activeCard ? <MetaPanel card={activeCard} liveStats={liveStats} /> : null}
 
+            {__LANEWORK_LOCAL__ && activeCard ? <AgentPanel card={activeCard} /> : null}
+
             <hr className="my-6 border-border" />
 
             {error ? (
@@ -446,6 +456,121 @@ const PRIORITY_STYLE: Record<Priority, string> = {
   medium: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
   low: "bg-muted text-muted-foreground",
 };
+
+const STATE_BADGE: Record<string, string> = {
+  running: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
+  done: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  failed: "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
+};
+
+/**
+ * Local-mode agent controls for a card: run a headless Claude Code agent on it,
+ * watch its live state + log tail, then stop, discard, or merge its branch.
+ * Polls `/_local/agent/status` while open. Rendered only when `__LANEWORK_LOCAL__`.
+ */
+function AgentPanel({ card }: { card: ReviewCard }) {
+  const router = useRouter();
+  const { status, refresh } = useAgentStatus(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const entry = status?.agents[card.path];
+  const state = entry?.state;
+
+  const act = async (label: string, fn: () => Promise<unknown>) => {
+    setBusy(label);
+    setErr(null);
+    try {
+      await fn();
+      await refresh();
+      await router.invalidate();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const run = () => act("run", () => runAgentForCard(card.path));
+  const merge = () => act("merge", () => mergeAgentForCard(card.path));
+  // Stopping kills the agent + prunes its worktree; the card stays in its column.
+  const stopClean = () => act("stop", () => stopAgentForCard(card.path));
+
+  const disabled = busy !== null;
+
+  return (
+    <div className="mt-6 rounded-xl border bg-muted/30 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
+          <HugeiconsIcon icon={RoboticIcon} className="size-4 text-violet-500" />
+          Agent
+        </span>
+        {state ? (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium capitalize",
+              STATE_BADGE[state] ?? "bg-muted text-muted-foreground",
+            )}
+          >
+            {state === "running" ? (
+              <span className="relative flex size-1.5">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-current opacity-70" />
+                <span className="relative inline-flex size-1.5 rounded-full bg-current" />
+              </span>
+            ) : null}
+            {state === "failed" && entry?.exitCode != null ? `failed · exit ${entry.exitCode}` : state}
+          </span>
+        ) : null}
+        {status ? (
+          <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+            {status.active}/{status.max} running
+          </span>
+        ) : null}
+      </div>
+
+      {entry?.branch ? (
+        <p className="mt-2 font-mono text-xs text-muted-foreground">
+          branch <span className="text-foreground">{entry.branch}</span>
+        </p>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {!entry ? (
+          <Button size="sm" onClick={run} disabled={disabled} className="gap-1.5">
+            <HugeiconsIcon icon={PlayIcon} className="size-4" />
+            {busy === "run" ? "Starting…" : "Run agent"}
+          </Button>
+        ) : null}
+        {state === "running" ? (
+          <Button size="sm" variant="outline" onClick={stopClean} disabled={disabled} className="gap-1.5">
+            <HugeiconsIcon icon={StopIcon} className="size-4" />
+            {busy === "stop" ? "Stopping…" : "Stop & clean"}
+          </Button>
+        ) : null}
+        {state === "done" || state === "failed" ? (
+          <>
+            <Button size="sm" onClick={merge} disabled={disabled} className="gap-1.5">
+              <HugeiconsIcon icon={GitMergeIcon} className="size-4" />
+              {busy === "merge" ? "Merging…" : "Merge & clean"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={stopClean} disabled={disabled} className="gap-1.5">
+              <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+              {busy === "stop" ? "Discarding…" : "Discard"}
+            </Button>
+          </>
+        ) : null}
+      </div>
+
+      {err ? <p className="mt-2 text-xs text-destructive">{err}</p> : null}
+
+      {entry?.log?.length ? (
+        <pre className="mt-3 max-h-44 overflow-auto rounded-lg bg-background/80 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
+          {entry.log.slice(-30).join("\n")}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
 
 function MetaPanel({
   card,

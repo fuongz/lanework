@@ -3,6 +3,7 @@ import { motion, type Variants } from "motion/react";
 import type { BoardData } from "@/server/reviews";
 import { REVIEW_COLUMNS, type ReviewColumn, type ReviewCard, type Priority } from "@/lib/github";
 import { useBoardStore } from "@/stores/board-store";
+import { RunAgentButton, AgentWorkingBadge } from "./run-agent-button";
 import { progressPercent } from "@/lib/review-stats";
 import { STATUS_META } from "@/lib/review-status";
 import { formatDate } from "@/lib/format";
@@ -41,7 +42,15 @@ const ROW_ITEM: Variants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.22, ease: "easeOut" } },
 };
 
-export function ReviewList({ cards }: { cards: BoardData["cards"] }) {
+const EMPTY = new Set<string>();
+
+export function ReviewList({
+  cards,
+  runningPaths = EMPTY,
+}: {
+  cards: BoardData["cards"];
+  runningPaths?: Set<string>;
+}) {
   const grouped = useMemo(() => {
     const by: Record<ReviewColumn, ReviewCard[]> = { todo: [], processing: [], done: [], dropped: [] };
     for (const c of cards) by[c.column].push(c);
@@ -91,7 +100,7 @@ export function ReviewList({ cards }: { cards: BoardData["cards"] }) {
 
               <motion.div variants={STAGGER} initial="hidden" animate="show">
                 {grouped[col].map((card) => (
-                  <ListRow key={card.path} card={card} />
+                  <ListRow key={card.path} card={card} running={runningPaths.has(card.path)} />
                 ))}
               </motion.div>
             </motion.section>
@@ -102,7 +111,7 @@ export function ReviewList({ cards }: { cards: BoardData["cards"] }) {
   );
 }
 
-function ListRow({ card }: { card: ReviewCard }) {
+function ListRow({ card, running }: { card: ReviewCard; running: boolean }) {
   const openCard = useBoardStore((s) => s.openCard);
   const pct = progressPercent(card.stats);
 
@@ -120,10 +129,19 @@ function ListRow({ card }: { card: ReviewCard }) {
       }}
       className={cn(
         GRID,
-        "cursor-pointer border-b py-2.5 text-sm transition-colors last:border-b-0 hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none",
+        "group cursor-pointer border-b py-2.5 text-sm transition-colors last:border-b-0 hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none",
       )}
     >
-      <span className="min-w-0 truncate font-medium text-foreground">{card.title}</span>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 truncate font-medium text-foreground">{card.title}</span>
+        {__LANEWORK_LOCAL__ && running ? <AgentWorkingBadge className="shrink-0" /> : null}
+        {__LANEWORK_LOCAL__ && !running ? (
+          <RunAgentButton
+            path={card.path}
+            className="shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+          />
+        ) : null}
+      </span>
 
       <span className="hidden md:block">
         <PriorityPill priority={card.priority} />

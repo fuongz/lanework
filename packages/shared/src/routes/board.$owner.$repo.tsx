@@ -131,7 +131,7 @@ function BoardLayout() {
   useLocalLiveReload(); // live-refresh the board as local review files change (local mode only)
 
   const { board, filtered, totals, nav, mine, tag } = useBoardData();
-  const heading = mine ? "My tasks" : tag ? `#${tag}` : board.repo;
+  const heading = mine ? "My tasks" : tag ? `#${tag}` : "Tasks";
   // The Cost child page lives under this layout but shows its own UI — hide the
   // review header + view tabs there.
   const location = useLocation();
@@ -146,8 +146,7 @@ function BoardLayout() {
       {/* Board header + view tabs (hidden on the Cost page) */}
       {!onCost ? (
       <div className="px-6 pt-5">
-        <div className="text-sm text-muted-foreground">{board.owner}</div>
-        <div className="mt-1 flex items-end justify-between gap-4">
+        <div className="flex items-end justify-between gap-4">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">{heading}</h1>
           <div className="flex shrink-0 items-center gap-1.5 pb-1">
             <MetaPill icon={FolderLibraryIcon}>
@@ -255,9 +254,9 @@ function RefreshControl({
   const [refreshing, setRefreshing] = useState(false);
   const [, setTick] = useState(0);
 
-  // Re-render periodically so the relative timestamp stays current.
+  // Tick every second so the "Updated Xs ago" label counts up live.
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -265,10 +264,15 @@ function RefreshControl({
     if (refreshing) return;
     setRefreshing(true);
     try {
-      // Force a fresh GitHub fetch (which rewrites the KV cache), then re-pull
-      // the loader so the board (and its new fetchedAt) updates.
-      await getBoard({ data: { owner, repo, branch, refresh: true } });
-      await router.invalidate();
+      // Re-pull the loader so the board (and its new fetchedAt) updates. Hold the
+      // refreshing state for at least 1s so the spinner is clearly visible.
+      await Promise.all([
+        (async () => {
+          await getBoard({ data: { owner, repo, branch, refresh: true } });
+          await router.invalidate();
+        })(),
+        new Promise((resolve) => setTimeout(resolve, 1000)),
+      ]);
     } finally {
       setRefreshing(false);
     }
@@ -277,14 +281,16 @@ function RefreshControl({
   return (
     <div className="inline-flex items-center gap-1.5">
       <MetaPill icon={Clock01Icon}>
-        <span className="tabular-nums">Updated {formatRelativeTime(fetchedAt)}</span>
+        <span className="tabular-nums">
+          {refreshing ? "Refreshing…" : `Updated ${formatRelativeTime(fetchedAt)}`}
+        </span>
       </MetaPill>
       <button
         type="button"
         onClick={onRefresh}
         disabled={refreshing}
-        title="Refresh from GitHub"
-        aria-label="Refresh from GitHub"
+        title="Refresh"
+        aria-label="Refresh"
         className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-transparent bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60"
       >
         <HugeiconsIcon icon={RefreshIcon} className={cn("size-3.5", refreshing && "animate-spin")} />

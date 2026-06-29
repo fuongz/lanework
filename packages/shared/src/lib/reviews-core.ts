@@ -21,6 +21,7 @@ export interface ReviewCard {
   tags: string[];
   priority: Priority | null;
   stats: ReviewStats;
+  summary: string; // first prose paragraph of the body, for the card preview
 }
 
 interface ReviewMeta {
@@ -249,7 +250,34 @@ export function buildReviewCard(args: {
     tags: meta.tags,
     priority: meta.priority,
     stats,
+    summary: text ? extractSummary(text) : "",
   };
+}
+
+/**
+ * First prose paragraph of a review body, for the card preview. Skips the
+ * frontmatter, the `# Review:` heading, the "How to review" boilerplate, quotes,
+ * and checklist items; strips inline markdown; truncates to a card-sized snippet.
+ */
+export function extractSummary(md: string): string {
+  const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+  for (const raw of body.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("#")) continue; // heading
+    if (line.startsWith(">")) continue; // quote
+    if (/^[-*+]\s/.test(line) || /^\d+\.\s/.test(line)) continue; // list / checklist
+    if (/^\*\*how to review/i.test(line)) continue; // template boilerplate
+    const text = line
+      .replace(/`([^`]+)`/g, "$1") // inline code
+      .replace(/\*\*([^*]+)\*\*/g, "$1") // bold
+      .replace(/\*([^*]+)\*/g, "$1") // italic
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links → text
+      .trim();
+    if (!text) continue;
+    return text.length > 200 ? `${text.slice(0, 200).trimEnd()}…` : text;
+  }
+  return "";
 }
 
 /**

@@ -16,6 +16,7 @@ import {
   Coins01Icon,
   Copy01Icon,
   Tick02Icon,
+  RoboticIcon,
 } from "@hugeicons/core-free-icons";
 import { ClaudeAiIcon } from "@/components/ui/svgs/claudeAiIcon";
 import { CodexLight } from "@/components/ui/svgs/codexLight";
@@ -28,6 +29,11 @@ import { Wordmark } from "./wordmark";
 import { GitHubLoginButton } from "./github-login-button";
 import { SiteHeader } from "./site-header";
 import type { ReviewColumn } from "@/lib/github";
+
+// The hosted webapp is PAUSED while we focus on the CLI + MCP. Flip this to `true`
+// to re-surface the Cloud / GitHub sign-in entry points on the landing page (the
+// webapp code itself is untouched — this only gates the marketing CTAs).
+const SHOW_CLOUD = false;
 
 export function MarketingLanding() {
   return (
@@ -64,7 +70,7 @@ function Nav() {
       center={
         <nav className="hidden items-center gap-8 font-mono text-xs tracking-wide text-muted-foreground md:flex">
           <a href="#run" className="transition-colors hover:text-foreground">
-            local & cloud
+            {SHOW_CLOUD ? "local & cloud" : "local"}
           </a>
           <a href="#how" className="transition-colors hover:text-foreground">
             how it works
@@ -81,7 +87,17 @@ function Nav() {
         </nav>
       }
       actions={
-        <GitHubLoginButton size="sm">Sign in</GitHubLoginButton>
+        SHOW_CLOUD ? (
+          <GitHubLoginButton size="sm">Sign in</GitHubLoginButton>
+        ) : (
+          <a
+            href="#mcp"
+            className="inline-flex h-8 items-center gap-1.5 rounded-2xl bg-primary px-3.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Get started
+            <HugeiconsIcon icon={ArrowRight01Icon} className="size-3.5" />
+          </a>
+        )
       }
     />
   );
@@ -192,8 +208,12 @@ function Underline() {
 }
 
 /** Copyable `npx` command pill — the primary, local-first call to action. */
-function CommandPill({ command }: { command: string }) {
+// `tone="onDark"` is for pills sitting on the dark emerald CTA — the default
+// muted/card tokens bleed the green through on hover, so use crisp, emerald-aware
+// colors there instead.
+function CommandPill({ command, tone = "default" }: { command: string; tone?: "default" | "onDark" }) {
   const [copied, setCopied] = useState(false);
+  const onDark = tone === "onDark";
   return (
     <button
       type="button"
@@ -203,12 +223,24 @@ function CommandPill({ command }: { command: string }) {
           setTimeout(() => setCopied(false), 1500);
         });
       }}
-      className="group inline-flex h-12 items-center gap-3 rounded-xl border border-border bg-card pr-2.5 pl-4 font-mono text-sm shadow-sm transition-colors hover:bg-muted/40"
+      className={cn(
+        "group inline-flex h-12 items-center gap-3 rounded-xl border pr-2.5 pl-4 font-mono text-sm shadow-sm transition-colors",
+        onDark
+          ? "border-white/20 bg-white hover:bg-emerald-50"
+          : "border-border bg-card hover:bg-muted/40",
+      )}
       aria-label={`Copy: ${command}`}
     >
-      <span className="text-primary">$</span>
-      <span className="text-foreground">{command}</span>
-      <span className="grid size-7 place-items-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover:text-foreground">
+      <span className={onDark ? "text-emerald-600" : "text-primary"}>$</span>
+      <span className={onDark ? "text-emerald-950" : "text-foreground"}>{command}</span>
+      <span
+        className={cn(
+          "grid size-7 place-items-center rounded-lg transition-colors",
+          onDark
+            ? "bg-emerald-600/10 text-emerald-700 group-hover:bg-emerald-600/20 group-hover:text-emerald-900"
+            : "bg-muted text-muted-foreground group-hover:text-foreground",
+        )}
+      >
         <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} className="size-4" />
       </span>
     </button>
@@ -220,20 +252,22 @@ function CommandPill({ command }: { command: string }) {
 function RunItYourWay() {
   return (
     <section id="run" className="mx-auto max-w-6xl scroll-mt-20 px-6 py-20">
-      <SectionHeading eyebrow="local-first" title="Run it your way" />
-      <div className="mt-12 grid gap-5 lg:grid-cols-2">
+      <SectionHeading eyebrow="local-first" title={SHOW_CLOUD ? "Run it your way" : "Run it locally"} />
+      <div className={cn("mt-12 grid gap-5", SHOW_CLOUD ? "lg:grid-cols-2" : "mx-auto max-w-xl")}>
         {/* Local — the recommended path */}
         <Reveal>
           <div className="relative h-full rounded-2xl border-2 border-primary/30 bg-card p-7 shadow-sm">
-            <span className="absolute top-6 right-6 rounded-full bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-medium text-primary">
-              recommended
-            </span>
+            {SHOW_CLOUD ? (
+              <span className="absolute top-6 right-6 rounded-full bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-medium text-primary">
+                recommended
+              </span>
+            ) : null}
             <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-primary">
               <HugeiconsIcon icon={ComputerTerminal01Icon} className="size-6" />
             </span>
             <h3 className="mt-4 text-xl font-semibold tracking-tight">Local</h3>
             <p className="mt-1.5 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              Board the repo you’re in — no Cloudflare, no account, fully offline.
+              Board the repo you’re in — no account, no network, fully offline.
             </p>
             <div className="mt-5">
               <CommandPill command="npx @phake/lanework" />
@@ -252,26 +286,28 @@ function RunItYourWay() {
           </div>
         </Reveal>
 
-        {/* Cloud — the hosted option */}
-        <Reveal delay={0.08}>
-          <div className="h-full rounded-2xl border border-border/70 bg-card p-7 shadow-sm">
-            <span className="grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground">
-              <HugeiconsIcon icon={CloudIcon} className="size-6" />
-            </span>
-            <h3 className="mt-4 text-xl font-semibold tracking-tight">Cloud</h3>
-            <p className="mt-1.5 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              Prefer the hosted app? Sign in with GitHub and board any repo you can access, from anywhere.
-            </p>
-            <div className="mt-5">
-              <GitHubLoginButton size="lg">Continue with GitHub</GitHubLoginButton>
+        {/* Cloud — the hosted option (paused) */}
+        {SHOW_CLOUD ? (
+          <Reveal delay={0.08}>
+            <div className="h-full rounded-2xl border border-border/70 bg-card p-7 shadow-sm">
+              <span className="grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground">
+                <HugeiconsIcon icon={CloudIcon} className="size-6" />
+              </span>
+              <h3 className="mt-4 text-xl font-semibold tracking-tight">Cloud</h3>
+              <p className="mt-1.5 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                Prefer the hosted app? Sign in with GitHub and board any repo you can access, from anywhere.
+              </p>
+              <div className="mt-5">
+                <GitHubLoginButton size="lg">Continue with GitHub</GitHubLoginButton>
+              </div>
+              <ul className="mt-6 flex flex-col gap-2.5 text-sm">
+                <Bullet>Any repo, any branch — nothing to install</Bullet>
+                <Bullet>KV-cached fetch with a “last fetched” badge</Bullet>
+                <Bullet>Read-only — never writes to your repos</Bullet>
+              </ul>
             </div>
-            <ul className="mt-6 flex flex-col gap-2.5 text-sm">
-              <Bullet>Any repo, any branch — nothing to install</Bullet>
-              <Bullet>KV-cached fetch with a “last fetched” badge</Bullet>
-              <Bullet>Read-only — never writes to your repos</Bullet>
-            </ul>
-          </div>
-        </Reveal>
+          </Reveal>
+        ) : null}
       </div>
     </section>
   );
@@ -476,7 +512,7 @@ function HowItWorks() {
     {
       n: "03",
       title: "Watch the board",
-      body: "Run npx @phake/lanework in the repo (or sign in to the Cloud). Cards flow todo → processing → done as work gets approved and ships.",
+      body: "Run npx @phake/lanework in the repo. Cards flow todo → processing → done as work gets approved and ships.",
     },
   ];
   return (
@@ -550,7 +586,9 @@ function Features() {
     { icon: DashboardSquare01Icon, title: "Board & List", body: "Four columns from your folders, or a dense list view. Your reviews, organized the way you think." },
     { icon: CheckmarkSquare02Icon, title: "Approve in place", body: "Tick checklist items in the full-screen review — locally, Save changes writes them back to the markdown." },
     { icon: Coins01Icon, title: "Cost view", body: "See what the project cost in Claude Code tokens, with a cache-aware per-model breakdown. (Local)" },
-    { icon: CloudIcon, title: "Cloud, when you want it", body: "Sign in with GitHub to board any repo from anywhere — KV-cached and read-only." },
+    SHOW_CLOUD
+      ? { icon: CloudIcon, title: "Cloud, when you want it", body: "Sign in with GitHub to board any repo from anywhere — KV-cached and read-only." }
+      : { icon: RoboticIcon, title: "Drive it from Claude Code", body: "The bundled MCP server runs the full review lifecycle — create, tick, advance — and dispatches agents on cards." },
     { icon: SparklesIcon, title: "Built to feel good", body: "Fluid motion, dark-mode tokens, and a “/” to jump between repos. A tool you’ll want to open." },
   ];
   return (
@@ -752,13 +790,17 @@ function CallToAction() {
               Bring your agent’s reviews to life.
             </h2>
             <p className="mx-auto mt-4 max-w-md text-emerald-50/80">
-              One command in any repo — or sign in for the Cloud. Free and open source.
+              {SHOW_CLOUD
+                ? "One command in any repo — or sign in for the Cloud. Free and open source."
+                : "One command in any repo. Free and open source."}
             </p>
             <div className="mt-8 flex flex-col items-center gap-3">
-              <CommandPill command="npx @phake/lanework" />
-              <GitHubLoginButton variant="invert" size="sm">
-                or continue with GitHub
-              </GitHubLoginButton>
+              <CommandPill command="npx @phake/lanework" tone="onDark" />
+              {SHOW_CLOUD ? (
+                <GitHubLoginButton variant="invert" size="sm">
+                  or continue with GitHub
+                </GitHubLoginButton>
+              ) : null}
             </div>
           </div>
         </div>

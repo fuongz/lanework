@@ -184,7 +184,10 @@ export const getBoard = createServerFn({ method: "GET" })
       };
     }
     const { token, userId } = await requireGitHubToken();
-    const cache = env.CACHE as KVNamespace | undefined;
+    // `CACHE` (KV) is commented out in wrangler.jsonc while the hosted webapp is
+    // paused, so it's absent from the generated `Env` type. Hosted-only path; cast
+    // so it typechecks and degrades to "no cache" when the binding isn't bound.
+    const cache = (env as unknown as { CACHE?: KVNamespace }).CACHE;
     const cacheKey = `board:${userId}:${data.owner}/${data.repo}@${data.branch ?? "default"}`;
 
     if (cache && !data.refresh) {
@@ -259,6 +262,87 @@ export const saveCardContent = createServerFn({ method: "POST" })
       return { ok: true };
     }
     throw new Error("Saving is only available in local mode.");
+  });
+
+const REVIEW_STATUSES = ["todo", "processing", "done", "dropped"] as const;
+
+const statusValidator = (d: unknown): { owner: string; repo: string; path: string; status: string } => {
+  const v = d as { owner?: string; repo?: string; path?: string; status?: string };
+  const owner = safeName(v?.owner, "owner");
+  const repo = safeName(v?.repo, "repo");
+  if (typeof v?.path !== "string") throw new Error("path is required");
+  if (!v.path.startsWith(".agents/reviews/") || v.path.includes("..") || !v.path.endsWith(".md")) {
+    throw new Error("path outside reviews folder");
+  }
+  if (typeof v?.status !== "string" || !(REVIEW_STATUSES as readonly string[]).includes(v.status)) {
+    throw new Error("invalid status");
+  }
+  return { owner, repo, path: v.path, status: v.status };
+};
+
+/**
+ * Move a review card to a new column by rewriting its `status:` frontmatter (or
+ * relocating the file in folder mode). Drives drag-and-drop on the board. Local
+ * mode only — the cloud build has no write path to GitHub. Returns the (possibly
+ * relocated) path so the caller can follow the card.
+ */
+export const setCardStatus = createServerFn({ method: "POST" })
+  .validator(statusValidator)
+  .handler(async ({ data }): Promise<{ path: string; status: string; moved: boolean }> => {
+    if (__LANEWORK_LOCAL__) {
+      const { setLocalReviewStatus } = await import("@/lib/local-fs");
+      return setLocalReviewStatus(data.path, data.status);
+    }
+    throw new Error("Changing status is only available in local mode.");
+  });
+
+const PRIORITIES = ["low", "medium", "high"] as const;
+
+const createValidator = (
+  d: unknown,
+): { owner: string; repo: string; title: string; assignees: string[]; priority?: string; status: string } => {
+  const v = d as {
+    owner?: string;
+    repo?: string;
+    title?: string;
+    assignees?: unknown;
+    priority?: string;
+    status?: string;
+  };
+  const owner = safeName(v?.owner, "owner");
+  const repo = safeName(v?.repo, "repo");
+  const title = typeof v?.title === "string" ? v.title.trim() : "";
+  if (!title) throw new Error("title is required");
+  if (title.length > 200) throw new Error("title too long");
+  const assignees = Array.isArray(v?.assignees)
+    ? v.assignees.filter((a): a is string => typeof a === "string" && a.trim() !== "").map((a) => a.trim())
+    : [];
+  const status =
+    typeof v?.status === "string" && (REVIEW_STATUSES as readonly string[]).includes(v.status) ? v.status : "todo";
+  const priority =
+    typeof v?.priority === "string" && (PRIORITIES as readonly string[]).includes(v.priority) ? v.priority : undefined;
+  return { owner, repo, title, assignees, priority, status };
+};
+
+/**
+ * Create a brand-new review card (the "Add" action on the board). Local mode only
+ * — the cloud build has no write path to GitHub. Returns the new card's path so the
+ * caller can immediately dispatch a planning agent at it.
+ */
+export const createCard = createServerFn({ method: "POST" })
+  .validator(createValidator)
+  .handler(async ({ data }): Promise<{ path: string; status: string }> => {
+    if (__LANEWORK_LOCAL__) {
+      const { createLocalReview } = await import("@/lib/local-fs");
+      const res = await createLocalReview({
+        title: data.title,
+        status: data.status,
+        assignees: data.assignees,
+        priority: data.priority as "low" | "medium" | "high" | undefined,
+      });
+      return { path: res.path, status: res.status };
+    }
+    throw new Error("Creating cards is only available in local mode.");
   });
 
 /**
