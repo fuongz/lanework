@@ -9,6 +9,8 @@
 //   lanework path/to/repo    # board for another directory
 //   lanework --port 3662     # preferred starting port (falls back upward)
 //   lanework --no-open       # don't auto-open the browser
+//   lanework mcp             # run as an MCP server (stdio) — for Claude etc.
+//   lanework mcp --no-dashboard   # MCP only, don't also open the board
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -25,8 +27,23 @@ if (!existsSync(join(here, "dist-local", "server", "server.js"))) {
   process.exit(1);
 }
 
-// --- parse args --------------------------------------------------------------
 const argv = process.argv.slice(2);
+
+// --- `lanework mcp` subcommand: run as an MCP (stdio) server ------------------
+// Must run BEFORE any stdout writes — stdout is the JSON-RPC channel.
+if (argv[0] === "mcp") {
+  const rest = argv.slice(1);
+  let mcpDir = process.cwd();
+  for (const a of rest) if (!a.startsWith("-")) mcpDir = resolve(a);
+  const { startMcp } = await import("./mcp.mjs");
+  await startMcp({ dir: mcpDir, dashboard: !rest.includes("--no-dashboard") });
+  // startMcp keeps the process alive on the stdio transport.
+} else {
+  await runDashboard();
+}
+
+async function runDashboard() {
+// --- parse args --------------------------------------------------------------
 let dir = process.cwd();
 let port;
 let open = true;
@@ -35,7 +52,7 @@ for (let i = 0; i < argv.length; i++) {
   if (a === "--no-open") open = false;
   else if (a === "--port" || a === "-p") port = Number(argv[++i]);
   else if (a === "--help" || a === "-h") {
-    console.log("Usage: lanework [dir] [--port N] [--no-open]");
+    console.log("Usage: lanework [dir] [--port N] [--no-open]  |  lanework mcp [--no-dashboard]");
     process.exit(0);
   } else if (!a.startsWith("-")) dir = resolve(a);
 }
@@ -56,3 +73,4 @@ console.log(`  board for ${dir}/.agents/reviews`);
 console.log(`  watching for changes… (Ctrl+C to stop)\n`);
 
 if (open) openBrowser(url);
+}

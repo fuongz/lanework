@@ -98,6 +98,36 @@ lanework [dir] [--port N] [--no-open]
 After a global install (`npm i -g @phake/lanework`) the commands **`lanework`** and
 the short alias **`lw`** are available everywhere.
 
+## Use as an MCP server (Serena-style)
+
+`lanework mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
+server over stdio, so an agent like Claude can read and update your review board
+during its reasoning loop — and, like Serena, it also boots the web dashboard and
+opens your browser on startup.
+
+Register it with Claude Code (it launches the server with your repo as the working
+directory):
+
+```bash
+claude mcp add lanework -- npx -y @phake/lanework mcp
+# MCP only, without opening the dashboard:
+claude mcp add lanework -- npx -y @phake/lanework mcp --no-dashboard
+```
+
+Tools exposed:
+
+| Tool | What it does |
+| --- | --- |
+| `list_reviews` | List review cards (filter by `column` / `tag` / `assignee`) |
+| `get_review` | Read one review file's markdown by path |
+| `board_summary` | Counts per column + aggregate checklist progress |
+| `save_review` | Overwrite a review file (check items off, move work forward) |
+| `cost_estimate` | Per-model token usage from this project's Claude Code transcripts |
+
+All tools read/write the current repo's `.agents/reviews/` directly — no auth, no
+network. stdout is reserved for the protocol; the dashboard runs as a child process
+so it can't corrupt the stream.
+
 ## Tech stack
 
 | Area | Choice |

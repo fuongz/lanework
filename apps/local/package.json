@@ -22,6 +22,7 @@
   "files": [
     "cli.mjs",
     "server.mjs",
+    "mcp.mjs",
     "dist-local",
     "README.md"
   ],
@@ -29,15 +30,17 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "vite build -c vite.config.local.ts",
+    "build": "vite build -c vite.config.local.ts && bun build ../../packages/shared/src/lib/local-fs.ts --target=node --format=esm --outfile=dist-local/reviews-lib.mjs",
     "start": "node cli.mjs",
-    "prepack": "vite build -c vite.config.local.ts",
+    "mcp": "node cli.mjs mcp",
+    "prepack": "bun run build",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@hugeicons/core-free-icons": "^4.2.1",
     "@hugeicons/react": "^1.1.7",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@shikijs/rehype": "^4.2.0",
     "@tanstack/react-router": "^1.170.16",
     "@tanstack/react-start": "^1.168.26",
@@ -57,6 +60,7 @@
     "shiki": "^4.2.0",
     "srvx": "^0.11.17",
     "tailwind-merge": "^3.6.0",
+    "zod": "^4.4.3",
     "zustand": "^5.0.14"
   }
 }
