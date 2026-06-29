@@ -616,10 +616,10 @@ function Mcp() {
               <CommandPill command="lanework setup claude-code" />
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Add{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">--dashboard</code>{" "}
-              to also auto-open the board (≈ <span className="font-mono">:3662</span>) whenever Claude
-              Code starts — Serena-style.
+              The board opens automatically (≈ <span className="font-mono">:3662</span>) whenever
+              Claude Code starts — Serena-style. Pass{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">--no-dashboard</code>{" "}
+              to run headless.
             </p>
             <div className="mt-6 flex flex-col gap-4">
               {MCP_STEPS.map((s) => (

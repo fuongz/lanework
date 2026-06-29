@@ -113,19 +113,19 @@ during its reasoning loop — an AI-Driven Development Lifecycle (AI-DLC): incep
 **Install into Claude Code — one command** (like `serena setup claude-code`):
 
 ```bash
-lanework setup claude-code              # global (user scope)
-lanework setup claude-code --project    # current project only
-lanework setup claude-code --dashboard  # also auto-open the board (≈ :3662) on startup — Serena-style
-lanework setup claude-code --local      # register a local build instead of npx
+lanework setup claude-code                 # global (user scope) — opens the board on startup
+lanework setup claude-code --project       # current project only
+lanework setup claude-code --no-dashboard  # headless — don't open the board
+lanework setup claude-code --local         # register a local build instead of npx
 ```
 
-> With `--dashboard`, the web board boots (and opens your browser) every time Claude Code
-> starts the server — like Serena. Without it the server runs headless.
+> By default the web board boots (and opens your browser) every time Claude Code starts the
+> server — like Serena. Pass `--no-dashboard` to run headless.
 
 …or by hand:
 
 ```bash
-claude mcp add --scope user lanework -- npx -y @phake/lanework mcp --no-dashboard
+claude mcp add --scope user lanework -- npx -y @phake/lanework mcp
 ```
 
 Restart Claude Code, then `/mcp` shows **lanework** connected. Tools exposed:

@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-29
+
+### Changed
+- **The board now opens by default** when the MCP server starts (Serena-style):
+  `lanework setup claude-code` and the Claude Code plugin boot the web board
+  (≈ `:3662`) whenever Claude Code starts. Run headless with
+  `lanework setup claude-code --no-dashboard`, or set `LANEWORK_DASHBOARD=0` in the
+  plugin server's env.
+
 ## [0.2.1] - 2026-06-29
 
 ### Added

@@ -332,10 +332,11 @@ function GuideBody() {
               icon={<HugeiconsIcon icon={ComputerTerminal01Icon} className="size-4 text-primary" />}
             />
             <p className="text-muted-foreground">
-              Add <code className="rounded bg-muted px-1 py-0.5 text-xs">--dashboard</code> to also
-              auto-open the board (≈{" "}
+              The board opens automatically (≈{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">127.0.0.1:3662</code>) whenever
-              Claude Code starts — Serena-style. Without it the server runs headless.
+              Claude Code starts — Serena-style. Pass{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">--no-dashboard</code> to run
+              headless.
             </p>
             <p className="text-muted-foreground">
               Prefer slash commands too? Install the plugin —{" "}
