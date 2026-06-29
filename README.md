@@ -106,32 +106,46 @@ the short alias **`lw`** are available everywhere.
 ## Use as an MCP server (Serena-style)
 
 `lanework mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
-server over stdio, so an agent like Claude can read and update your review board
-during its reasoning loop — and, like Serena, it also boots the web dashboard and
-opens your browser on startup.
+server over stdio, so an agent like Claude can **drive the full review lifecycle**
+during its reasoning loop — an AI-Driven Development Lifecycle (AI-DLC): inception
+(`create_review`) → review (`toggle_item`) → construction & shipping (`set_status`).
 
-Register it with Claude Code (it launches the server with your repo as the working
-directory):
+**Install into Claude Code — one command** (like `serena setup claude-code`):
 
 ```bash
-claude mcp add lanework -- npx -y @phake/lanework mcp
-# MCP only, without opening the dashboard:
-claude mcp add lanework -- npx -y @phake/lanework mcp --no-dashboard
+lanework setup claude-code            # global (user scope)
+lanework setup claude-code --project  # current project only
+lanework setup claude-code --local    # register a local build instead of npx
 ```
 
-Tools exposed:
+…or by hand:
+
+```bash
+claude mcp add --scope user lanework -- npx -y @phake/lanework mcp --no-dashboard
+```
+
+Restart Claude Code, then `/mcp` shows **lanework** connected. Tools exposed:
 
 | Tool | What it does |
 | --- | --- |
-| `list_reviews` | List review cards (filter by `column` / `tag` / `assignee`) |
+| `lifecycle_status` | Phase view + suggested next actions (cards ready to advance) |
+| `list_reviews` | List cards (filter by `column` / `tag` / `assignee`) |
 | `get_review` | Read one review file's markdown by path |
 | `board_summary` | Counts per column + aggregate checklist progress |
-| `save_review` | Overwrite a review file (check items off, move work forward) |
+| `create_review` | Inception — create a new checklist card |
+| `toggle_item` | Check/uncheck a checklist item (by index or text) + note |
+| `set_status` | Advance a card todo → processing → done (or dropped) |
+| `update_review` | Patch priority / tags / assignees |
+| `save_review` | Overwrite a review file (raw escape hatch) |
 | `cost_estimate` | Per-model token usage from this project's Claude Code transcripts |
 
 All tools read/write the current repo's `.agents/reviews/` directly — no auth, no
-network. stdout is reserved for the protocol; the dashboard runs as a child process
-so it can't corrupt the stream.
+network. stdout is reserved for the protocol; the dashboard (if enabled) runs as a
+child process so it can't corrupt the stream.
+
+> Prefer slash commands too? Install the **[Claude Code plugin](./plugin/)** instead —
+> it bundles this MCP server *plus* `/lanework:create`, `/lanework:status`, etc.
+> (`claude plugin marketplace add fuongz/lanework` → `claude plugin install lanework@lanework`).
 
 ## Tech stack
 

@@ -28,6 +28,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Claude Code plugin** — installable via `claude plugin marketplace add fuongz/lanework`,
   bundling the MCP server plus `/lanework:{create,status,review,advance,tick}` slash
   commands. A launcher prefers a local build and falls back to the published package.
+- **`lanework setup claude-code`** — one-command MCP registration (Serena-style) that
+  wraps `claude mcp add`, with `--project` and `--local` variants.
 - **Guide & docs** — `/guide` and the `AGENTS.md` template document the new default
   layout, the `config.json` options, a frontmatter field reference, and key aliasing.
 

@@ -11,12 +11,21 @@
 //   lanework --no-open       # don't auto-open the browser
 //   lanework mcp             # run as an MCP server (stdio) — for Claude etc.
 //   lanework mcp --no-dashboard   # MCP only, don't also open the board
+//   lanework setup claude-code    # register the MCP server with Claude Code
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+const argv = process.argv.slice(2);
+
+// --- `lanework setup <client>` — register the MCP server with a client --------
+// Runs before the build check: it only shells out to the client's CLI.
+if (argv[0] === "setup") {
+  await runSetup(argv.slice(1));
+}
 
 // The CLI needs the local build (dist-local). Fail with a clear hint if absent.
 if (!existsSync(join(here, "dist-local", "server", "server.js"))) {
@@ -26,8 +35,6 @@ if (!existsSync(join(here, "dist-local", "server", "server.js"))) {
   );
   process.exit(1);
 }
-
-const argv = process.argv.slice(2);
 
 // --- `lanework mcp` subcommand: run as an MCP (stdio) server ------------------
 // Must run BEFORE any stdout writes — stdout is the JSON-RPC channel.
@@ -52,7 +59,12 @@ for (let i = 0; i < argv.length; i++) {
   if (a === "--no-open") open = false;
   else if (a === "--port" || a === "-p") port = Number(argv[++i]);
   else if (a === "--help" || a === "-h") {
-    console.log("Usage: lanework [dir] [--port N] [--no-open]  |  lanework mcp [--no-dashboard]");
+    console.log(
+      "Usage:\n" +
+        "  lanework [dir] [--port N] [--no-open]   board a repo's .agents/reviews\n" +
+        "  lanework mcp [dir] [--no-dashboard]     run as an MCP (stdio) server\n" +
+        "  lanework setup claude-code [--project] [--local]   register the MCP server with Claude Code",
+    );
     process.exit(0);
   } else if (!a.startsWith("-")) dir = resolve(a);
 }
@@ -73,4 +85,56 @@ console.log(`  board for ${dir}/.agents/reviews`);
 console.log(`  watching for changes… (Ctrl+C to stop)\n`);
 
 if (open) openBrowser(url);
+}
+
+/**
+ * `lanework setup claude-code` — register the lanework MCP server with Claude
+ * Code by running `claude mcp add` (the Serena-style one-command install). This
+ * gives the MCP *tools* only; for the `/lanework:*` slash commands too, install
+ * the plugin (see plugin/README.md). Flags:
+ *   --project   scope to the current project (default: --scope user, global)
+ *   --local     register this local build instead of `npx @phake/lanework`
+ *   --name <id> server name (default: lanework)
+ */
+async function runSetup(args) {
+  const client = args.find((a) => !a.startsWith("-"));
+  if (client !== "claude-code") {
+    console.error("Usage: lanework setup claude-code [--project] [--local] [--name <id>]");
+    process.exit(client ? 1 : 0);
+  }
+  const useLocal = args.includes("--local");
+  const projectScope = args.includes("--project");
+  const nameIdx = args.indexOf("--name");
+  const name = nameIdx >= 0 && args[nameIdx + 1] ? args[nameIdx + 1] : "lanework";
+
+  const launch = useLocal
+    ? [process.execPath, fileURLToPath(new URL("./cli.mjs", import.meta.url)), "mcp", "--no-dashboard"]
+    : ["npx", "-y", "@phake/lanework", "mcp", "--no-dashboard"];
+
+  const addArgs = ["mcp", "add"];
+  if (!projectScope) addArgs.push("--scope", "user");
+  addArgs.push(name, "--", ...launch);
+
+  console.log(`Registering the lanework MCP server with Claude Code:\n  claude ${addArgs.join(" ")}\n`);
+  // Await the child so we never fall through to the dashboard branch.
+  await new Promise(() => {
+    const child = spawn("claude", addArgs, { stdio: "inherit" });
+    child.on("error", (e) => {
+      if (e.code === "ENOENT") {
+        console.error("The `claude` CLI was not found. Install Claude Code, then run the command above manually.");
+      } else {
+        console.error("setup failed:", e.message);
+      }
+      process.exit(1);
+    });
+    child.on("exit", (code) => {
+      if (code === 0) {
+        console.log(
+          `\n✓ Registered. Restart Claude Code, then run /mcp — server "${name}" should be connected.\n` +
+            "  Tools: list_reviews, create_review, set_status, toggle_item, lifecycle_status, …",
+        );
+      }
+      process.exit(code ?? 0);
+    });
+  });
 }

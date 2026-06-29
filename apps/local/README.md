@@ -42,11 +42,25 @@ lanework mcp [dir]            # MCP server + the web board (a live "dashboard")
 lanework mcp --no-dashboard   # MCP server only, no browser (headless / CI)
 ```
 
-Register it with your client, e.g. Claude Code:
+### Install into Claude Code
+
+One command (Serena-style) registers the MCP server — it wraps `claude mcp add` for you:
 
 ```bash
-claude mcp add lanework -- npx -y @phake/lanework mcp --no-dashboard
+lanework setup claude-code              # global (user scope)
+lanework setup claude-code --project    # only the current project
+lanework setup claude-code --local      # register this local build instead of npx
 ```
+
+…or do it by hand:
+
+```bash
+claude mcp add --scope user lanework -- npx -y @phake/lanework mcp --no-dashboard
+```
+
+Restart Claude Code, then `/mcp` should show **lanework** connected. (This gives the MCP
+*tools*; for the `/lanework:*` slash commands too, install the plugin — see
+[Slash commands](#slash-commands-lanework) below.)
 
 ### Tools
 
