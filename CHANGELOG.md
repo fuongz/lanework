@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-29
+
 ### Added
 - **Auto-open the board on Claude Code startup (Serena-style)** —
   `lanework setup claude-code --dashboard` registers the MCP server so it also boots
