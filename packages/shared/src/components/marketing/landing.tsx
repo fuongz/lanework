@@ -39,6 +39,7 @@ export function MarketingLanding() {
       <RunItYourWay />
       <HowItWorks />
       <Features />
+      <Mcp />
       <Convention />
       <CallToAction />
       <Footer />
@@ -70,6 +71,9 @@ function Nav() {
           </a>
           <a href="#features" className="transition-colors hover:text-foreground">
             features
+          </a>
+          <a href="#mcp" className="transition-colors hover:text-foreground">
+            mcp
           </a>
           <Link to="/guide" className="transition-colors hover:text-foreground">
             guide
@@ -569,9 +573,97 @@ function Features() {
   );
 }
 
+/* --------------------------------------------------------------------- mcp -- */
+
+const MCP_STEPS = [
+  { icon: Flag02Icon, cmd: "create_review", label: "Inception", body: "Draft a checklist of decisions as a todo card." },
+  { icon: CheckmarkSquare02Icon, cmd: "toggle_item", label: "Review", body: "Tick each decision once it's agreed." },
+  { icon: ArrowRight01Icon, cmd: "set_status", label: "Ship", body: "Advance todo → processing → done." },
+];
+
+const MCP_FLOW = `$ lanework setup claude-code
+✓ lanework registered with Claude Code
+
+# then, inside Claude Code:
+/lanework:create  Add rate limiting
+  → create_review   .agents/reviews/2026-06-29/01-add-rate-limiting.md
+/lanework:tick     rate limiting :: 1
+  → toggle_item     1/3 done
+/lanework:advance  rate limiting → processing
+  → set_status      processing`;
+
+function Mcp() {
+  return (
+    <section id="mcp" className="mx-auto max-w-6xl scroll-mt-20 px-6 py-20">
+      <SectionHeading eyebrow="mcp · ai-dlc" title="Or let your agent run the board" />
+      <p className="mx-auto mt-4 max-w-2xl text-center text-sm leading-relaxed text-muted-foreground">
+        Lanework ships a Model Context Protocol server, so your agent drives an
+        <strong className="text-foreground"> AI-Driven Development Lifecycle</strong> end to end —
+        creating reviews, ticking decisions, and moving cards across the board as work ships.
+      </p>
+
+      <div className="mt-12 grid gap-5 lg:grid-cols-2 lg:items-stretch">
+        <Reveal>
+          <div className="flex h-full flex-col rounded-2xl border border-border/70 bg-card p-7 shadow-sm">
+            <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-primary">
+              <HugeiconsIcon icon={ComputerTerminal01Icon} className="size-6" />
+            </span>
+            <h3 className="mt-4 text-xl font-semibold tracking-tight">One-command install</h3>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+              Register the MCP server with Claude Code — Serena-style, no marketplace step.
+            </p>
+            <div className="mt-5">
+              <CommandPill command="lanework setup claude-code" />
+            </div>
+            <div className="mt-6 flex flex-col gap-4">
+              {MCP_STEPS.map((s) => (
+                <div key={s.cmd} className="flex items-start gap-3">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-primary">
+                    <HugeiconsIcon icon={s.icon} className="size-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {s.label}{" "}
+                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-muted-foreground">
+                        {s.cmd}
+                      </code>
+                    </p>
+                    <p className="text-sm leading-relaxed text-muted-foreground">{s.body}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-6 flex flex-wrap items-center gap-1.5 border-t pt-5 font-mono text-[11px] text-muted-foreground">
+              also as slash commands:
+              {["/lanework:create", "/lanework:status", "/lanework:advance", "/lanework:tick"].map((c) => (
+                <span key={c} className="rounded bg-muted px-1.5 py-0.5">
+                  {c}
+                </span>
+              ))}
+            </p>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.08}>
+          <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-[#0c0f0d] shadow-xl">
+            <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
+              <HugeiconsIcon icon={ComputerTerminal01Icon} className="size-3.5 text-emerald-400" />
+              <span className="font-mono text-[11px] text-white/50">claude code → lanework mcp</span>
+            </div>
+            <pre className="flex-1 overflow-x-auto p-5 font-mono text-[12px] leading-relaxed text-emerald-50/90">
+              {MCP_FLOW}
+            </pre>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------- convention -- */
 
 const EXAMPLE = `---
+status: processing
 assignees: ["you"]
 created_at: 2026-06-21
 priority: high
@@ -596,8 +688,8 @@ function Convention() {
           />
           <p className="mt-5 max-w-md text-sm leading-relaxed text-muted-foreground">
             No new format to learn. A review is a checklist with a little frontmatter. Lanework reads
-            the folder for the column, the frontmatter for the metadata, and the checkboxes for
-            progress. That’s it.
+            the <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">status:</code> field for
+            the column, the frontmatter for the metadata, and the checkboxes for progress. That’s it.
           </p>
           <div className="mt-7 flex flex-wrap items-center gap-3">
             <CommandPill command="npx @phake/lanework" />
@@ -616,7 +708,7 @@ function Convention() {
             <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
               <HugeiconsIcon icon={Flag02Icon} className="size-3.5 text-emerald-400" />
               <span className="font-mono text-[11px] text-white/50">
-                .agents/reviews/processing/2026-06-21-refactor-auth-middleware.md
+                .agents/reviews/2026-06-21/01-refactor-auth-middleware.md
               </span>
             </div>
             <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-relaxed text-emerald-50/90">

@@ -10,6 +10,7 @@ import {
   Rocket01Icon,
   ArrowRight01Icon,
   ArrowLeft01Icon,
+  ComputerTerminal01Icon,
 } from "@hugeicons/core-free-icons";
 import { getSessionUser } from "@/server/reviews";
 import { AppShell } from "@/components/app-shell";
@@ -97,11 +98,11 @@ function GuideHeader() {
   return (
     <div className="px-6 pt-5 pb-4">
       <Link
-        to="/"
+        to="/dashboard"
         className="mb-3 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
-        Back to board
+        Back to projects
       </Link>
       <div className="text-sm text-muted-foreground">Documentation</div>
       <h1 className="mt-1 font-heading text-2xl font-semibold tracking-tight">How to use</h1>
@@ -299,7 +300,7 @@ function GuideBody() {
         <Step n={4} title="Open the repo here">
           <p className="text-sm text-muted-foreground">
             Use the repo switcher (top-left) or the{" "}
-            <Link to="/" className="underline underline-offset-2 hover:text-foreground">
+            <Link to="/dashboard" className="underline underline-offset-2 hover:text-foreground">
               projects page
             </Link>{" "}
             to open the board. Cards appear as the agent creates and moves review files.
@@ -311,6 +312,51 @@ function GuideBody() {
       <section className="space-y-3">
         <SectionTitle icon={FileEditIcon}>Example review file</SectionTitle>
         <CodeBlock code={EXAMPLE_REVIEW} filename="2026-06-21/01-rate-limiting.md" />
+      </section>
+
+      {/* MCP / agent */}
+      <section className="space-y-3">
+        <SectionTitle icon={ComputerTerminal01Icon}>Let your agent drive the board (MCP)</SectionTitle>
+        <Card>
+          <CardContent className="space-y-4 pt-6 text-sm">
+            <p className="text-muted-foreground">
+              lanework ships a Model Context Protocol server, so your agent can run the whole review
+              lifecycle — an <strong className="text-foreground">AI-Driven Development Lifecycle</strong>:
+              create a checklist, tick decisions, and advance the column as work ships. Register it with
+              Claude Code in one command:
+            </p>
+            <CodeBlock
+              code={"lanework setup claude-code"}
+              filename="Claude Code"
+              lang="bash"
+              icon={<HugeiconsIcon icon={ComputerTerminal01Icon} className="size-4 text-primary" />}
+            />
+            <p className="text-muted-foreground">
+              Prefer slash commands too? Install the plugin —{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">claude plugin marketplace add fuongz/lanework</code>{" "}
+              then{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">claude plugin install lanework@lanework</code>{" "}
+              — for{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">/lanework:create</code>,{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">/lanework:status</code>,{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">/lanework:advance</code>, and more.
+            </p>
+            <div className="divide-y overflow-hidden rounded-lg border text-muted-foreground">
+              {[
+                ["create_review", "Inception — write a new todo checklist of decisions"],
+                ["toggle_item", "Tick/untick a decision (by index or text), with a note"],
+                ["set_status", "Advance todo → processing → done (or dropped)"],
+                ["lifecycle_status", "Phase view + suggested next actions"],
+                ["list_reviews / get_review", "Read the board and a card's full markdown"],
+              ].map(([tool, desc]) => (
+                <div key={tool} className="grid grid-cols-1 gap-1 p-3 sm:grid-cols-[12rem_1fr] sm:gap-3">
+                  <code className="font-mono text-xs text-foreground">{tool}</code>
+                  <span>{desc}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </section>
     </div>
   );

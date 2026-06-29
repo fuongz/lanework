@@ -11,7 +11,7 @@ import { CtaButton } from "./cta-button";
  * navigates away (pending intentionally stays true on success).
  */
 export function GitHubLoginButton({
-  callbackURL = "/",
+  callbackURL = "/dashboard",
   size = "lg",
   variant,
   className,

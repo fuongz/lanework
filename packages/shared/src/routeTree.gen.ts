@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as GuideRouteImport } from './routes/guide'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BoardOwnerRepoRouteImport } from './routes/board.$owner.$repo'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -20,6 +21,11 @@ import { Route as BoardOwnerRepoViewRouteImport } from './routes/board.$owner.$r
 const GuideRoute = GuideRouteImport.update({
   id: '/guide',
   path: '/guide',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -55,6 +61,7 @@ const BoardOwnerRepoViewRoute = BoardOwnerRepoViewRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/dashboard': typeof DashboardRoute
   '/guide': typeof GuideRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/board/$owner/$repo': typeof BoardOwnerRepoRouteWithChildren
@@ -64,6 +71,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/dashboard': typeof DashboardRoute
   '/guide': typeof GuideRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/board/$owner/$repo/$view': typeof BoardOwnerRepoViewRoute
@@ -73,6 +81,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/dashboard': typeof DashboardRoute
   '/guide': typeof GuideRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/board/$owner/$repo': typeof BoardOwnerRepoRouteWithChildren
@@ -84,6 +93,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/dashboard'
     | '/guide'
     | '/api/auth/$'
     | '/board/$owner/$repo'
@@ -93,6 +103,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/dashboard'
     | '/guide'
     | '/api/auth/$'
     | '/board/$owner/$repo/$view'
@@ -101,6 +112,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/dashboard'
     | '/guide'
     | '/api/auth/$'
     | '/board/$owner/$repo'
@@ -111,6 +123,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DashboardRoute: typeof DashboardRoute
   GuideRoute: typeof GuideRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   BoardOwnerRepoRoute: typeof BoardOwnerRepoRouteWithChildren
@@ -123,6 +136,13 @@ declare module '@tanstack/react-router' {
       path: '/guide'
       fullPath: '/guide'
       preLoaderRoute: typeof GuideRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -188,6 +208,7 @@ const BoardOwnerRepoRouteWithChildren = BoardOwnerRepoRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DashboardRoute: DashboardRoute,
   GuideRoute: GuideRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   BoardOwnerRepoRoute: BoardOwnerRepoRouteWithChildren,

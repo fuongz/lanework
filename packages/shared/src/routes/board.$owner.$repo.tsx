@@ -59,7 +59,7 @@ export const Route = createFileRoute("/board/$owner/$repo")({
             ? "Something went wrong loading this board. Check the repo exists and you have access, then try again."
             : error.message}
         </p>
-        <Link to="/" className="mt-4 inline-block text-sm underline">
+        <Link to="/dashboard" className="mt-4 inline-block text-sm underline">
           Back to projects
         </Link>
       </div>
