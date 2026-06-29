@@ -326,7 +326,7 @@ function GuideBody() {
               Claude Code in one command:
             </p>
             <CodeBlock
-              code={"lanework setup claude-code"}
+              code={"npx @phake/lanework setup claude-code"}
               filename="Claude Code"
               lang="bash"
               icon={<HugeiconsIcon icon={ComputerTerminal01Icon} className="size-4 text-primary" />}

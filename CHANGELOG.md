@@ -10,16 +10,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - **The board now opens by default** when the MCP server starts (Serena-style):
-  `lanework setup claude-code` and the Claude Code plugin boot the web board
+  `npx @phake/lanework setup claude-code` and the Claude Code plugin boot the web board
   (≈ `:3662`) whenever Claude Code starts. Run headless with
-  `lanework setup claude-code --no-dashboard`, or set `LANEWORK_DASHBOARD=0` in the
+  `npx @phake/lanework setup claude-code --no-dashboard`, or set `LANEWORK_DASHBOARD=0` in the
   plugin server's env.
 
 ## [0.2.1] - 2026-06-29
 
 ### Added
 - **Auto-open the board on Claude Code startup (Serena-style)** —
-  `lanework setup claude-code --dashboard` registers the MCP server so it also boots
+  `npx @phake/lanework setup claude-code --dashboard` registers the MCP server so it also boots
   the web board (≈ `:3662`) whenever Claude Code starts. Plugin users can opt in with
   `LANEWORK_DASHBOARD=1` in the server env. Headless remains the default.
 
@@ -50,7 +50,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Claude Code plugin** — installable via `claude plugin marketplace add fuongz/lanework`,
   bundling the MCP server plus `/lanework:{create,status,review,advance,tick}` slash
   commands. A launcher prefers a local build and falls back to the published package.
-- **`lanework setup claude-code`** — one-command MCP registration (Serena-style) that
+- **`npx @phake/lanework setup claude-code`** — one-command MCP registration (Serena-style) that
   wraps `claude mcp add`, with `--project` and `--local` variants.
 - **Guide & docs** — `/guide` and the `AGENTS.md` template document the new default
   layout, the `config.json` options, a frontmatter field reference, and key aliasing.

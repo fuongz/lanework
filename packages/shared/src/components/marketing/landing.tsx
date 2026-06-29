@@ -581,7 +581,7 @@ const MCP_STEPS = [
   { icon: ArrowRight01Icon, cmd: "set_status", label: "Ship", body: "Advance todo → processing → done." },
 ];
 
-const MCP_FLOW = `$ lanework setup claude-code
+const MCP_FLOW = `$ npx @phake/lanework setup claude-code
 ✓ lanework registered with Claude Code
 
 # then, inside Claude Code:
@@ -613,7 +613,7 @@ function Mcp() {
               Register the MCP server with Claude Code — Serena-style, no marketplace step.
             </p>
             <div className="mt-5">
-              <CommandPill command="lanework setup claude-code" />
+              <CommandPill command="npx @phake/lanework setup claude-code" />
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
               The board opens automatically (≈ <span className="font-mono">:3662</span>) whenever

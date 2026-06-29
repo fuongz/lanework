@@ -113,10 +113,10 @@ during its reasoning loop — an AI-Driven Development Lifecycle (AI-DLC): incep
 **Install into Claude Code — one command** (like `serena setup claude-code`):
 
 ```bash
-lanework setup claude-code                 # global (user scope) — opens the board on startup
-lanework setup claude-code --project       # current project only
-lanework setup claude-code --no-dashboard  # headless — don't open the board
-lanework setup claude-code --local         # register a local build instead of npx
+npx @phake/lanework setup claude-code                 # global (user scope) — opens the board on startup
+npx @phake/lanework setup claude-code --project       # current project only
+npx @phake/lanework setup claude-code --no-dashboard  # headless — don't open the board
+npx @phake/lanework setup claude-code --local         # register a local build instead of npx
 ```
 
 > By default the web board boots (and opens your browser) every time Claude Code starts the

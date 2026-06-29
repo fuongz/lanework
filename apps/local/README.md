@@ -47,10 +47,10 @@ lanework mcp --no-dashboard   # MCP server only, no browser (headless / CI)
 One command (Serena-style) registers the MCP server — it wraps `claude mcp add` for you:
 
 ```bash
-lanework setup claude-code                 # global (user scope) — opens the board on startup
-lanework setup claude-code --project       # only the current project
-lanework setup claude-code --no-dashboard  # headless — don't open the board
-lanework setup claude-code --local         # register this local build instead of npx
+npx @phake/lanework setup claude-code                 # global (user scope) — opens the board on startup
+npx @phake/lanework setup claude-code --project       # only the current project
+npx @phake/lanework setup claude-code --no-dashboard  # headless — don't open the board
+npx @phake/lanework setup claude-code --local         # register this local build instead of npx
 ```
 
 By default the web board boots (and opens your browser) every time Claude Code starts and
