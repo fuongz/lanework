@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Children, isValidElement, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { MarkdownHooks, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -13,6 +13,7 @@ import {
   UserGroupIcon,
   Calendar03Icon,
   CheckmarkSquare02Icon,
+  CheckmarkCircle02Icon,
   Tag01Icon,
   RoboticIcon,
   PlayIcon,
@@ -20,7 +21,7 @@ import {
   GitMergeIcon,
   Delete02Icon,
 } from "@hugeicons/core-free-icons";
-import { getCardContent, saveCardContent } from "@/server/reviews";
+import { getCardContent, saveCardContent, deleteCard } from "@/server/reviews";
 import { runAgentForCard, stopAgentForCard, mergeAgentForCard } from "@/lib/agent-client";
 import { useAgentStatus } from "@/hooks/use-agent-status";
 import { estimateCost } from "@/lib/claude-pricing";
@@ -32,6 +33,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { progressPercent, parseRadioGroups } from "@/lib/review-stats";
 import { STATUS_META } from "@/lib/review-status";
@@ -128,22 +139,33 @@ function TaskItem({
   };
 
   return (
+    // The whole row is the toggle target (the checkbox is presentational).
     <li
+      role="button"
+      tabIndex={0}
+      aria-pressed={checked}
+      onClick={() => handleChange(!checked)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleChange(!checked);
+        }
+      }}
       className={cn(
         className,
-        "group/task my-0.5 flex list-none items-start gap-2.5 rounded-md px-2 py-1 transition-colors marker:content-none hover:bg-muted/50",
-        // Tighten the first paragraph so it lines up with the checkbox, and
-        // drop the trailing margin so rows stay compact in loose lists.
+        "group/task flex list-none cursor-pointer items-start gap-3 rounded-lg px-2 py-1 transition-colors marker:content-none hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none",
+        // Tighten the first paragraph so it lines up with the marker, and drop
+        // the trailing margin so rows stay compact in loose lists.
         "[&>div>:first-child]:mt-0 [&>div>:last-child]:mb-0",
-        checked && "text-muted-foreground line-through decoration-muted-foreground/40",
       )}
     >
+      {/* Bigger checkbox with border + shadow. Round for "pick one" radio groups,
+          square otherwise. Presentational — the row's onClick drives it. */}
       <Checkbox
         checked={checked}
-        onCheckedChange={(v) => handleChange(!!v)}
+        tabIndex={-1}
         className={cn(
-          "relative top-1 shrink-0 cursor-pointer data-checked:bg-primary",
-          // Round box signals "pick one" (radio) semantics.
+          "pointer-events-none relative top-0.5 size-5 shrink-0 border shadow-sm data-checked:bg-primary [&_svg]:size-4",
           groupId && "rounded-full",
         )}
       />
@@ -173,16 +195,42 @@ function makeMarkdownComponents(
       if (type === "checkbox") return null;
       return <input type={type} {...props} />;
     },
-    // Collapse the bullet padding on task lists so checkboxes sit flush left.
+    // Task lists render as a single bordered, shadowed card with a titled header.
     ul({ className, children, ...props }) {
       const isTaskList = className?.includes("contains-task-list");
+      if (!isTaskList) {
+        return (
+          <ul className={className} {...props}>
+            {children}
+          </ul>
+        );
+      }
+      const items = Children.toArray(children).filter(isValidElement);
+      const total = items.length;
+      const done = items.filter((el) => (el.props as { defaultChecked?: boolean }).defaultChecked).length;
       return (
-        <ul
-          className={cn(className, isTaskList && "my-2 list-none pl-0")}
-          {...props}
-        >
-          {children}
-        </ul>
+        <div className="my-3 overflow-hidden rounded-xl border bg-card shadow-sm">
+          <div className="flex items-center justify-between border-b bg-muted/30 px-3 py-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Checklist
+            </span>
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              {total > 0 ? (
+                done === total ? (
+                  <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-4 text-emerald-500" />
+                ) : (
+                  <CircleProgress value={(done / total) * 100} className="text-emerald-500" />
+                )
+              ) : null}
+              <span className="tabular-nums">
+                {total} {total === 1 ? "task" : "tasks"}
+              </span>
+            </span>
+          </div>
+          <ul className={cn(className, "list-none p-1.5")} {...props}>
+            {children}
+          </ul>
+        </div>
       );
     },
     li({ className, children, node, ...props }) {
@@ -246,6 +294,7 @@ interface ReviewDialogProps {
 }
 
 export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
+  const router = useRouter();
   const activeCard = useBoardStore((s) => s.activeCard);
   const closeCard = useBoardStore((s) => s.closeCard);
 
@@ -256,6 +305,21 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
   const [edits, setEdits] = useState<Record<number, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  async function handleDelete() {
+    if (!activeCard) return;
+    setDeleting(true);
+    try {
+      await deleteCard({ data: { owner, repo, path: activeCard.path } });
+      closeCard();
+      await router.invalidate();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Failed to delete.");
+      setDeleting(false);
+    }
+  }
 
   // The body is what we actually hand to the renderer, so source-line numbers
   // (used as checkbox keys) must be computed against this same string.
@@ -445,6 +509,46 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
                 </MarkdownHooks>
               </article>
             )}
+
+            {/* Danger zone — delete the task file (local mode only). */}
+            {__LANEWORK_LOCAL__ && activeCard ? (
+              <div className="mt-8 flex items-center justify-between gap-3 border-t border-dashed pt-4">
+                <span className="text-xs text-muted-foreground">
+                  Permanently removes this review file from disk.
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={deleting}
+                  className="gap-1.5 text-destructive hover:text-destructive"
+                >
+                  <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+                  {deleting ? "Deleting…" : "Delete task"}
+                </Button>
+                <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete this task?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This permanently removes{" "}
+                        <span className="font-medium text-foreground">{activeCard.title}</span> from disk.
+                        This can’t be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleDelete}
+                        className="bg-destructive text-white hover:bg-destructive/90"
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            ) : null}
           </div>
         </div>
       </DialogContent>

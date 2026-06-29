@@ -267,6 +267,13 @@ export async function toggleLocalReviewItem(
   return { path: repoPath, line: res.line, checked: res.checked, progress: parseReviewStats(res.content) };
 }
 
+/** Delete a review card's file from disk. */
+export async function deleteLocalReview(repoPath: string): Promise<{ ok: true }> {
+  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  await unlink(safeFull(repoPath));
+  return { ok: true };
+}
+
 /** Patch a card's priority / tags / assignees frontmatter (no file move). */
 export async function updateLocalReviewMeta(
   repoPath: string,
@@ -425,43 +432,4 @@ export async function getCostEstimateForDir(rootDir: string): Promise<CostData> 
 
 export async function getLocalCostEstimate(): Promise<CostData> {
   return getCostEstimateForDir(localRoot());
-}
-
-export interface UsageSummary {
-  available: boolean;
-  /** Per-model usage over the last 7 days. */
-  weekly: ModelUsage[];
-  /** Per-model usage for the most recent Claude Code session (transcript file). */
-  session: ModelUsage[];
-  weekStart: string; // ISO cutoff (7 days ago)
-  sessionStart: string | null;
-  sessionEnd: string | null;
-}
-
-/** Weekly + current-session usage for this project, for the sidebar widget. */
-export async function getLocalUsageSummary(): Promise<UsageSummary> {
-  const dir = join(claudeProjectsDir(), encodeProjectPath(resolve(localRoot())));
-  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const { available, records } = await collectUsageRecords(dir);
-  if (!available) {
-    return { available: false, weekly: [], session: [], weekStart, sessionStart: null, sessionEnd: null };
-  }
-
-  const weekly = groupByModel(records.filter((r) => r.ts !== null && r.ts >= weekStart));
-
-  // Current session = the transcript file holding the most recent message.
-  let latest: UsageRecord | null = null;
-  for (const r of records) {
-    if (r.ts && (!latest || r.ts > (latest.ts ?? ""))) latest = r;
-  }
-  const sessionFile = latest?.file ?? null;
-  const sessionRecords = sessionFile ? records.filter((r) => r.file === sessionFile) : [];
-  let sessionStart: string | null = null;
-  let sessionEnd: string | null = null;
-  for (const r of sessionRecords) {
-    if (!r.ts) continue;
-    if (!sessionStart || r.ts < sessionStart) sessionStart = r.ts;
-    if (!sessionEnd || r.ts > sessionEnd) sessionEnd = r.ts;
-  }
-  return { available: true, weekly, session: groupByModel(sessionRecords), weekStart, sessionStart, sessionEnd };
 }

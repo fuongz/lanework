@@ -1,4 +1,5 @@
 import {
+  type CollisionDetection,
   DndContext,
   type DragEndEvent,
   DragOverlay,
@@ -10,7 +11,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { PlusSignIcon } from "@hugeicons/core-free-icons";
+import { Archive02Icon, CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
@@ -19,12 +20,22 @@ import { STATUS_META } from "@/lib/review-status";
 import { cn } from "@/lib/utils";
 import type { BoardData } from "@/server/reviews";
 import { setCardStatus } from "@/server/reviews";
-import { CreateCardDialog } from "./create-card-dialog";
 import { KanbanCard } from "./kanban-card";
 import { KanbanColumn } from "./kanban-column";
 
 type Cards = BoardData["cards"];
 const EMPTY = new Set<string>();
+
+const ZONE_DONE = "zone-done";
+const ZONE_ARCHIVE = "zone-dropped"; // status value stays `dropped`, shown as "Archived"
+
+// Prioritize the top/bottom drop zones: if the pointer is within one, it wins over
+// whatever column sits behind it.
+const collisionDetection: CollisionDetection = (args) => {
+  const hits = pointerWithin(args);
+  const zone = hits.find((h) => h.id === ZONE_DONE || h.id === ZONE_ARCHIVE);
+  return zone ? [zone] : hits;
+};
 
 function groupByColumn(cards: Cards, override: Record<string, ReviewColumn> = {}) {
   const byColumn: Record<ReviewColumn, Cards> = {
@@ -95,7 +106,6 @@ function LocalBoard({
   // file-watcher's loader refresh confirm it. Cleared whenever fresh data arrives.
   const [pending, setPending] = useState<Record<string, ReviewColumn>>({});
   const [activeCard, setActiveCard] = useState<ReviewCard | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
 
   const dataKey = cards.map((c) => `${c.path}:${c.column}`).join("|");
   useEffect(() => setPending({}), [dataKey]);
@@ -109,13 +119,8 @@ function LocalBoard({
     setActiveCard((e.active.data.current?.card as ReviewCard) ?? null);
   };
 
-  const onDragEnd = async (e: DragEndEvent) => {
-    setActiveCard(null);
-    const card = e.active.data.current?.card as ReviewCard | undefined;
-    const to = e.over?.id as ReviewColumn | undefined;
-    if (!card || !to || !REVIEW_COLUMNS.includes(to)) return;
+  const moveCard = async (card: ReviewCard, to: ReviewColumn) => {
     if (to === card.column) return;
-
     setPending((p) => ({ ...p, [card.path]: to }));
     try {
       await setCardStatus({ data: { owner, repo, path: card.path, status: to } });
@@ -130,23 +135,34 @@ function LocalBoard({
     }
   };
 
+  const onDragEnd = (e: DragEndEvent) => {
+    setActiveCard(null);
+    const card = e.active.data.current?.card as ReviewCard | undefined;
+    const overId = e.over?.id as string | undefined;
+    if (!card || !overId) return;
+    // The top/bottom screen zones are shortcuts to Done / Archived; otherwise the
+    // target is the column the card was dropped on.
+    const to: ReviewColumn | undefined =
+      overId === ZONE_DONE
+        ? "done"
+        : overId === ZONE_ARCHIVE
+          ? "dropped"
+          : (REVIEW_COLUMNS as readonly string[]).includes(overId)
+            ? (overId as ReviewColumn)
+            : undefined;
+    if (to) moveCard(card, to);
+  };
+
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={pointerWithin}
+      collisionDetection={collisionDetection}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
       <div className="flex h-full gap-4 overflow-x-auto px-6 pb-6 pt-1">
         {REVIEW_COLUMNS.map((col, i) => (
-          <DroppableColumn
-            key={col}
-            column={col}
-            cards={columns[col]}
-            index={i}
-            runningPaths={runningPaths}
-            onAdd={col === "todo" ? () => setAddOpen(true) : undefined}
-          />
+          <DroppableColumn key={col} column={col} cards={columns[col]} index={i} runningPaths={runningPaths} />
         ))}
       </div>
       <DragOverlay dropAnimation={null}>
@@ -156,7 +172,13 @@ function LocalBoard({
           </div>
         ) : null}
       </DragOverlay>
-      <CreateCardDialog open={addOpen} onOpenChange={setAddOpen} owner={owner} repo={repo} />
+      {/* Edge drop zones — only while dragging: top → Done, bottom → Archived. */}
+      {activeCard ? (
+        <>
+          <DropZone id={ZONE_DONE} edge="top" label="Move to Done" icon={CheckmarkCircle02Icon} tone="done" />
+          <DropZone id={ZONE_ARCHIVE} edge="bottom" label="Archive" icon={Archive02Icon} tone="archive" />
+        </>
+      ) : null}
     </DndContext>
   );
 }
@@ -167,13 +189,11 @@ function DroppableColumn({
   cards,
   index,
   runningPaths,
-  onAdd,
 }: {
   column: ReviewColumn;
   cards: Cards;
   index: number;
   runningPaths: Set<string>;
-  onAdd?: () => void;
 }) {
   const meta = STATUS_META[column];
   const { setNodeRef, isOver } = useDroppable({ id: column });
@@ -192,18 +212,6 @@ function DroppableColumn({
         <HugeiconsIcon icon={meta.icon} className={cn("size-4", meta.color)} />
         <h2 className="text-sm font-medium text-foreground">{meta.label}</h2>
         <span className="text-sm text-muted-foreground">{cards.length}</span>
-        {onAdd ? (
-          <button
-            type="button"
-            onClick={onAdd}
-            title="Add a task"
-            aria-label="Add a task"
-            className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground"
-          >
-            <HugeiconsIcon icon={PlusSignIcon} className="size-3.5" />
-            Add
-          </button>
-        ) : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-2.5 pb-2.5 pt-0.5">
         {cards.length === 0 ? (
@@ -217,6 +225,43 @@ function DroppableColumn({
         )}
       </div>
     </motion.div>
+  );
+}
+
+/** A full-width drop zone pinned to the top or bottom of the viewport, shown only
+ *  while a card is being dragged. Highlights when the card hovers over it. */
+function DropZone({
+  id,
+  edge,
+  label,
+  icon,
+  tone,
+}: {
+  id: string;
+  edge: "top" | "bottom";
+  label: string;
+  icon: typeof Archive02Icon;
+  tone: "done" | "archive";
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "fixed inset-x-0 z-50 flex h-12 items-center justify-center gap-2 text-sm font-medium backdrop-blur-sm transition-colors",
+        edge === "top" ? "top-0" : "bottom-0",
+        tone === "done"
+          ? isOver
+            ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+            : "bg-emerald-500/[0.06] text-emerald-600/80"
+          : isOver
+            ? "bg-zinc-500/20 text-foreground"
+            : "bg-muted/50 text-muted-foreground",
+      )}
+    >
+      <HugeiconsIcon icon={icon} className="size-5" />
+      {label}
+    </div>
   );
 }
 

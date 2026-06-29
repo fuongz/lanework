@@ -14,9 +14,9 @@ import { tagPill } from "@/lib/tag-color";
 import { cn } from "@/lib/utils";
 
 const PRIORITY_ICON: Record<Priority, string> = {
-  high: "text-rose-500",
-  medium: "text-amber-500",
-  low: "text-muted-foreground/50",
+  high: "text-rose-500 fill-rose-100",
+  medium: "text-amber-500 fill-amber-100",
+  low: "text-muted-foreground/50 fill-muted-foreground",
 };
 
 export function KanbanCard({ card, running = false }: { card: ReviewCard; running?: boolean }) {

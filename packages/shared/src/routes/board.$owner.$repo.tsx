@@ -3,18 +3,19 @@ import { useEffect, useMemo, useState } from "react";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
   FolderLibraryIcon,
-  Note01Icon,
   Clock01Icon,
   RefreshIcon,
-  CheckmarkSquare02Icon,
+  PlusSignIcon,
   LeftToRightListBulletIcon,
-  DashboardSquare01Icon,
+  KanbanIcon,
 } from "@hugeicons/core-free-icons";
 import { getBoard, getSessionUser } from "@/server/reviews";
 import { AppShell } from "@/components/app-shell";
 import { BranchSwitcher } from "@/components/branch-switcher";
+import { Button } from "@/components/ui/button";
 import type { SidebarNav } from "@/components/app-sidebar";
 import { ReviewDialog } from "@/components/kanban/review-dialog";
+import { CreateCardDialog } from "@/components/kanban/create-card-dialog";
 import { BoardSkeleton } from "@/components/kanban/board-skeleton";
 import { cn } from "@/lib/utils";
 import { useLocalLiveReload } from "@/hooks/use-local-live";
@@ -71,7 +72,7 @@ export type BoardView = "board" | "list";
 export const DEFAULT_VIEW: BoardView = "board";
 const TABS: Array<{ key: BoardView; label: string; icon: IconSvgElement }> = [
   { key: "list", label: "List", icon: LeftToRightListBulletIcon },
-  { key: "board", label: "Kanban", icon: DashboardSquare01Icon },
+  { key: "board", label: "Kanban", icon: KanbanIcon },
 ];
 
 function PendingBoard() {
@@ -130,7 +131,8 @@ function BoardLayout() {
   const activeView = (view ?? DEFAULT_VIEW) as BoardView;
   useLocalLiveReload(); // live-refresh the board as local review files change (local mode only)
 
-  const { board, filtered, totals, nav, mine, tag } = useBoardData();
+  const { board, nav, mine, tag } = useBoardData();
+  const [addOpen, setAddOpen] = useState(false);
   const heading = mine ? "My tasks" : tag ? `#${tag}` : "Tasks";
   // The Cost child page lives under this layout but shows its own UI — hide the
   // review header + view tabs there.
@@ -146,12 +148,9 @@ function BoardLayout() {
       {/* Board header + view tabs (hidden on the Cost page) */}
       {!onCost ? (
       <div className="px-6 pt-5">
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex items-center justify-between gap-4">
           <h1 className="font-heading text-2xl font-semibold tracking-tight">{heading}</h1>
-          <div className="flex shrink-0 items-center gap-1.5 pb-1">
-            <MetaPill icon={FolderLibraryIcon}>
-              <span className="font-mono">.agents/reviews</span>
-            </MetaPill>
+          <div className="flex shrink-0 items-center gap-1.5">
             {/* No git branches in local mode — the board is the working tree. */}
             {!__LANEWORK_LOCAL__ && (
               <BranchSwitcher
@@ -161,21 +160,6 @@ function BoardLayout() {
                 onSelect={(branch) => navigate({ search: (prev) => ({ ...prev, branch }) })}
               />
             )}
-            <MetaPill icon={Note01Icon} accent>
-              <span className="font-semibold text-foreground tabular-nums">{filtered.length}</span>
-              {filtered.length !== board.cards.length ? (
-                <span className="tabular-nums">/{board.cards.length}</span>
-              ) : null}
-              <span>reviews</span>
-            </MetaPill>
-            {totals.total > 0 ? (
-              <MetaPill icon={CheckmarkSquare02Icon} accent>
-                <span className="font-semibold text-foreground tabular-nums">
-                  {totals.done}/{totals.total}
-                </span>
-                <span>done</span>
-              </MetaPill>
-            ) : null}
             <RefreshControl
               owner={board.owner}
               repo={board.repo}
@@ -185,34 +169,51 @@ function BoardLayout() {
           </div>
         </div>
 
-        {/* View tabs — each a separate route (/board/$owner/$repo/{view}) */}
-        <div className="mt-4 inline-flex items-center gap-1 rounded-xl border bg-muted/40 p-1">
-          {TABS.map((t) => {
-            const active = activeView === t.key;
-            return (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() =>
-                  navigate({
-                    to: "/board/$owner/$repo/$view",
-                    params: (p) => ({ ...p, view: t.key }),
-                    search: (prev) => prev,
-                  })
-                }
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors",
-                  active
-                    ? "bg-background font-medium text-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
-                )}
-              >
-                <HugeiconsIcon icon={t.icon} className="size-4" />
-                {t.label}
-              </button>
-            );
-          })}
+        {/* Toolbar: primary action + view switcher — one shared 36px control height. */}
+        <div className="mt-4 flex items-center gap-2">
+          {__LANEWORK_LOCAL__ ? (
+            <Button
+              size="lg"
+              onClick={() => setAddOpen(true)}
+              className="h-9 gap-1.5 rounded-xl px-3.5 shadow-sm"
+            >
+              <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
+              Add task
+            </Button>
+          ) : null}
+          <div
+            role="tablist"
+            aria-label="Board view"
+            className="inline-flex h-9 items-center gap-1 rounded-xl border bg-muted/40 p-1"
+          >
+            {TABS.map((t) => {
+              const active = activeView === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() =>
+                    navigate({
+                      to: "/board/$owner/$repo/$view",
+                      params: (p) => ({ ...p, view: t.key }),
+                      search: (prev) => prev,
+                    })
+                  }
+                  className={cn(
+                    "inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-sm transition-colors",
+                    active
+                      ? "bg-background font-medium text-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
+                  )}
+                >
+                  <HugeiconsIcon icon={t.icon} className="size-4" />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
       ) : null}
@@ -222,6 +223,9 @@ function BoardLayout() {
         <Outlet />
       </div>
 
+      {__LANEWORK_LOCAL__ ? (
+        <CreateCardDialog open={addOpen} onOpenChange={setAddOpen} owner={board.owner} repo={board.repo} />
+      ) : null}
       <ReviewDialog owner={board.owner} repo={board.repo} branch={board.branch} />
     </AppShell>
   );

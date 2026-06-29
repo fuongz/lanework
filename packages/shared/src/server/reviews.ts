@@ -360,6 +360,28 @@ export const getCostEstimate = createServerFn({ method: "GET" }).handler(
   },
 );
 
+const pathOnlyValidator = (d: unknown): { owner: string; repo: string; path: string } => {
+  const v = d as { owner?: string; repo?: string; path?: string };
+  const owner = safeName(v?.owner, "owner");
+  const repo = safeName(v?.repo, "repo");
+  if (typeof v?.path !== "string") throw new Error("path is required");
+  if (!v.path.startsWith(".agents/reviews/") || v.path.includes("..") || !v.path.endsWith(".md")) {
+    throw new Error("path outside reviews folder");
+  }
+  return { owner, repo, path: v.path };
+};
+
+/** Delete a review card's file. Local mode only — the cloud build is read-only. */
+export const deleteCard = createServerFn({ method: "POST" })
+  .validator(pathOnlyValidator)
+  .handler(async ({ data }): Promise<{ ok: true }> => {
+    if (__LANEWORK_LOCAL__) {
+      const { deleteLocalReview } = await import("@/lib/local-fs");
+      return deleteLocalReview(data.path);
+    }
+    throw new Error("Deleting is only available in local mode.");
+  });
+
 /** Current git branch of the local checkout (null in hosted mode). */
 export const getLocalBranch = createServerFn({ method: "GET" }).handler(async (): Promise<string | null> => {
   if (__LANEWORK_LOCAL__) {
@@ -368,14 +390,3 @@ export const getLocalBranch = createServerFn({ method: "GET" }).handler(async ()
   }
   return null;
 });
-
-/** Weekly + current-session token usage for the sidebar widget. Local mode only. */
-export const getUsageSummary = createServerFn({ method: "GET" }).handler(
-  async (): Promise<import("@/lib/local-fs").UsageSummary> => {
-    if (__LANEWORK_LOCAL__) {
-      const { getLocalUsageSummary } = await import("@/lib/local-fs");
-      return getLocalUsageSummary();
-    }
-    return { available: false, weekly: [], session: [], weekStart: "", sessionStart: null, sessionEnd: null };
-  },
-);

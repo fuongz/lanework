@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { RepoSwitcher } from "@/components/repo-switcher";
 import { TagMore } from "@/components/tag-more";
-import { UsageFooter } from "@/components/usage-footer";
 import { tagColor } from "@/lib/tag-color";
 import { cn } from "@/lib/utils";
 
@@ -134,19 +133,8 @@ export function AppSidebar({ user, active, nav }: AppSidebarProps) {
         How to use?
       </Link>
 
-      {/* Claude token usage (week + current session). Local mode only. */}
-      {__LANEWORK_LOCAL__ ? <UsageFooter /> : null}
-
-      {/* Account: static identity in local mode (no auth, so no logout). */}
-      {__LANEWORK_LOCAL__ ? (
-        <div className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-left">
-          <Avatar size="sm">
-            {user.image ? <AvatarImage src={user.image} alt={user.name} /> : null}
-            <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
-          </Avatar>
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">{user.name}</span>
-        </div>
-      ) : (
+      {/* Account dropdown — hosted only (local mode has no auth, so no identity row). */}
+      {!__LANEWORK_LOCAL__ ? (
         <DropdownMenu>
           <DropdownMenuTrigger
             className={cn(
@@ -170,7 +158,7 @@ export function AppSidebar({ user, active, nav }: AppSidebarProps) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      )}
+      ) : null}
     </aside>
   );
 }
