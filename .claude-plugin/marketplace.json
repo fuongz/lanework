@@ -1,0 +1,14 @@
+{
+  "name": "lanework",
+  "owner": {
+    "name": "fuongz",
+    "url": "https://github.com/fuongz/lanework"
+  },
+  "plugins": [
+    {
+      "name": "lanework",
+      "source": "./plugin",
+      "description": "AI-DLC Kanban for .agents/reviews — /lanework slash commands + the lanework MCP server."
+    }
+  ]
+}

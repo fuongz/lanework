@@ -6,6 +6,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-29
+
+### Added
+- **Flexible review layouts** — alongside the flat `<status>/YYYY-MM-DD-<slug>.md`
+  convention, files can now be grouped in date folders as
+  `<status>/YYYY-MM-DD/NN-<slug>.md`: the date comes from the folder and the leading
+  `NN-` orders cards within the day (a new `ordinal` sort key).
+- **Status from frontmatter (new default)** — a card's column now comes from its
+  `status:` field, falling back to the containing column folder (so existing
+  folder-based boards keep working). Set `{"status":{"from":"folder"}}` in
+  `.agents/reviews/config.json` to make folders authoritative instead.
+- **Custom frontmatter keys** — a `fields` map in `config.json` aliases your own
+  keys onto card fields, e.g. `{"fields":{"assignees":["owner"],"tags":["labels"]}}`;
+  the canonical key always keeps working.
+- **AI-DLC MCP server** — `lanework mcp` gains workflow-aware tools that drive the
+  full review lifecycle: `create_review` (inception), `toggle_item` (approve), `set_status`
+  (advance todo → processing → done, honouring frontmatter vs. folder mode),
+  `update_review`, and `lifecycle_status` (phase view + suggested next actions) — joining
+  the existing `list_reviews`, `get_review`, `board_summary`, `save_review`, `cost_estimate`.
+- **Claude Code plugin** — installable via `claude plugin marketplace add fuongz/lanework`,
+  bundling the MCP server plus `/lanework:{create,status,review,advance,tick}` slash
+  commands. A launcher prefers a local build and falls back to the published package.
+- **Guide & docs** — `/guide` and the `AGENTS.md` template document the new default
+  layout, the `config.json` options, a frontmatter field reference, and key aliasing.
+
+### Changed
+- The zero-config default for deriving a card's column is now the `status:` frontmatter
+  field (with folder fallback) instead of strictly the folder name. Pure folder boards
+  with no `status:` field are unaffected.
+
 ## [0.1.2] - 2026-06-26
 
 ### Added

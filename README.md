@@ -48,7 +48,7 @@ Both share the same UI and review-parsing logic (in `packages/shared`).
 
 ## Features
 
-- 🗂️ **Board & List views** — four columns from `.agents/reviews/{todo,processing,done,dropped}`
+- 🗂️ **Board & List views** — four columns from your `.agents/reviews/` markdown (column from each card's `status:` field, or from `todo/processing/done/dropped` folders)
 - 🏷️ **Rich cards** — priority, assignee avatars, tags, date, and an `x/x` checklist-progress badge
 - 🔎 **Filter** by **tag** or **My tasks**, with a searchable repo switcher (hosted)
 - 📄 **Full-screen review** with a clean metadata panel + rendered markdown
@@ -56,25 +56,30 @@ Both share the same UI and review-parsing logic (in `packages/shared`).
 - 💾 **Save to disk** (local CLI) — persist your ticks back to the markdown file
 - 💰 **Cost view** (local CLI) — estimates the project's Claude Code token spend from `~/.claude` transcripts, with a cache-aware per-model breakdown
 - 💻 **Local CLI** — `npx @phake/lanework` boards the current repo, no Cloudflare or auth, with live file-watch
+- 🤖 **MCP server (AI-DLC)** — `lanework mcp` lets an AI client drive the full review lifecycle (create → tick → advance status) via Model Context Protocol tools
+- 🧩 **Claude Code plugin** — `/lanework:create`, `/lanework:status`, `/lanework:advance`, … slash commands; install via `claude plugin marketplace add fuongz/lanework` (see [`plugin/`](./plugin/))
 - 🔐 **GitHub sign-in** (hosted) — pick any repo you can access
 - ✨ **Polished** — Motion animations, Hugeicons, shadcn/Base UI, dark-mode tokens
 - 📘 **Built-in guide** (`/guide`) explaining how to set up the convention in any repo
 
 ## How it maps
 
+By default a card's **column** comes from its `status:` field, with files grouped by date:
+
 ```
 <repo>/.agents/reviews/
-├── todo/        → "To-Do" column
-├── processing/  → "In Progress" column
-├── done/        → "Done" column
-└── dropped/     → "Dropped" column
-        └── 2026-06-21-bulk-send-message.md   → a card
+└── 2026-06-21/                       → the card's date
+      ├── 01-ship-landing.md          # ── status: done
+      └── 02-bulk-send-message.md     # ── status: processing
 ```
 
-Each card reads its **column** from the folder, and **date · priority · assignees ·
-tags · progress** from the file's YAML frontmatter + its `- [ ]` / `- [x]` checkboxes.
-See the in-app **[guide](packages/shared/src/routes/guide.tsx)** or the standardized
-**[`AGENTS.md`](./AGENTS.md)** template to set this up in your own repos.
+A card reads its **column** from the `status:` field, its **date** from the enclosing
+`YYYY-MM-DD/` folder (the leading `NN-` orders cards within the day), and **priority ·
+assignees · tags · progress** from the rest of the YAML frontmatter + its `- [ ]` /
+`- [x]` checkboxes. You can instead let `todo/processing/done/dropped` folders carry the
+status (`{"status":{"from":"folder"}}` in `.agents/reviews/config.json` makes folders
+authoritative). See the in-app **[guide](packages/shared/src/routes/guide.tsx)** or the
+standardized **[`AGENTS.md`](./AGENTS.md)** template to set this up in your own repos.
 
 ## Run locally on any repo
 

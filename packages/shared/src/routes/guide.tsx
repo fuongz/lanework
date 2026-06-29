@@ -34,6 +34,39 @@ export const Route = createFileRoute("/guide")({
   component: GuidePage,
 });
 
+/** Frontmatter fields the board reads, for the reference table. */
+const FRONTMATTER_FIELDS: { key: string; values: string; note: React.ReactNode }[] = [
+  {
+    key: "status",
+    values: "todo · processing · done · dropped",
+    note: "Sets the board column. Omit it if you let folders carry the status instead.",
+  },
+  {
+    key: "priority",
+    values: "low · medium · high",
+    note: "Colours the card's priority indicator.",
+  },
+  {
+    key: "assignees",
+    values: "GitHub logins",
+    note: (
+      <>
+        Rendered as avatars, e.g. <code className="rounded bg-muted px-1 py-0.5 text-xs">{`["octocat"]`}</code>.
+      </>
+    ),
+  },
+  {
+    key: "tags",
+    values: "any strings",
+    note: "Your own vocabulary — each value renders as a coloured pill you can filter by.",
+  },
+  {
+    key: "created_at",
+    values: "a YYYY-MM-DD date",
+    note: "The card's date. Falls back to the YYYY-MM-DD/ folder or the filename.",
+  },
+];
+
 function GuidePage() {
   const { user } = Route.useLoaderData();
   if (user) {
@@ -95,13 +128,15 @@ function GuideBody() {
         <SectionTitle icon={Folder01Icon}>How files map to the board</SectionTitle>
         <Card>
           <CardContent className="space-y-4 pt-6 text-sm">
-            <p className="font-mono text-xs text-muted-foreground">.agents/reviews/</p>
+            <p className="font-mono text-xs text-muted-foreground">
+              .agents/reviews/YYYY-MM-DD/NN-&lt;slug&gt;.md
+            </p>
             <div className="flex flex-col gap-2">
               {REVIEW_COLUMNS.map((col) => {
                 const m = STATUS_META[col];
                 return (
                   <div key={col} className="flex items-center gap-3">
-                    <code className="w-28 font-mono text-xs text-foreground">{col}/</code>
+                    <code className="w-32 font-mono text-xs text-foreground">status: {col}</code>
                     <HugeiconsIcon icon={ArrowRight01Icon} className="size-4 text-muted-foreground" />
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
                       <HugeiconsIcon icon={m.icon} className={cn("size-3.5", m.color)} />
@@ -112,11 +147,85 @@ function GuideBody() {
               })}
             </div>
             <p className="text-muted-foreground">
-              Each card reads its <strong>column</strong> from the folder, and{" "}
-              <strong>date · priority · assignees · tags · progress</strong> from the file's YAML
-              frontmatter plus its <code className="rounded bg-muted px-1 py-0.5 text-xs">- [ ]</code>{" "}
-              / <code className="rounded bg-muted px-1 py-0.5 text-xs">- [x]</code> checkboxes.
+              Each card reads its <strong>column</strong> from the{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">status:</code> field, its{" "}
+              <strong>date</strong> from the <code className="rounded bg-muted px-1 py-0.5 text-xs">YYYY-MM-DD/</code>{" "}
+              folder (the leading <code className="rounded bg-muted px-1 py-0.5 text-xs">NN-</code> orders cards
+              within the day), and <strong>priority · assignees · tags · progress</strong> from the rest of the
+              YAML frontmatter plus its <code className="rounded bg-muted px-1 py-0.5 text-xs">- [ ]</code> /{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">- [x]</code> checkboxes.
             </p>
+
+            <div className="border-t pt-4 text-muted-foreground">
+              <p>
+                <strong className="text-foreground">Prefer folders?</strong> You can instead drop the{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">status:</code> field and put files in{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">todo/ processing/ done/ dropped/</code>{" "}
+                folders — the folder then sets the column. To make folders authoritative, add{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">.agents/reviews/config.json</code> with{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                  {`{"status":{"from":"folder"}}`}
+                </code>
+                .
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Frontmatter reference */}
+      <section className="space-y-3">
+        <SectionTitle icon={FileEditIcon}>Frontmatter fields</SectionTitle>
+        <Card>
+          <CardContent className="space-y-4 pt-6 text-sm">
+            <p className="text-muted-foreground">
+              Start each file with a YAML block between{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">---</code> lines. Every field is
+              optional, and lists accept either a JSON array (
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">{`["a","b"]`}</code>) or a
+              comma-separated string (<code className="rounded bg-muted px-1 py-0.5 text-xs">a, b</code>).
+              Any field the board doesn't recognise is left untouched — so you can keep your own custom
+              keys alongside these.
+            </p>
+            <div className="divide-y overflow-hidden rounded-lg border">
+              {FRONTMATTER_FIELDS.map((f) => (
+                <div
+                  key={f.key}
+                  className="grid grid-cols-1 gap-1 p-3 sm:grid-cols-[8rem_1fr] sm:gap-3"
+                >
+                  <code className="font-mono text-xs text-foreground">{f.key}</code>
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="font-mono text-xs text-muted-foreground">{f.values}</div>
+                    <div className="text-muted-foreground">{f.note}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t pt-4 text-muted-foreground">
+              <p>
+                <strong className="text-foreground">Use your own key names.</strong> Already have a
+                convention like <code className="rounded bg-muted px-1 py-0.5 text-xs">owner:</code> or{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">labels:</code>? Map them in{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">.agents/reviews/config.json</code>{" "}
+                — the canonical key keeps working too:
+              </p>
+              <pre className="mt-2 overflow-x-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+                {`{
+  "fields": {
+    "assignees": ["owner"],
+    "tags": ["labels"],
+    "priority": ["prio"],
+    "created_at": ["due", "date"],
+    "status": ["state"]
+  }
+}`}
+              </pre>
+              <p className="mt-2">
+                Each value is the list of frontmatter keys to accept for that card field; the first one
+                present in a file wins.
+              </p>
+            </div>
           </CardContent>
         </Card>
       </section>
@@ -175,13 +284,15 @@ function GuideBody() {
             Ask your agent to plan a behavior-changing task. Following the rules above, it writes a
             checklist to{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-              .agents/reviews/todo/YYYY-MM-DD-&lt;slug&gt;.md
-            </code>
-            . You approve by flipping every <code className="rounded bg-muted px-1 py-0.5 text-xs">- [ ]</code>{" "}
-            to <code className="rounded bg-muted px-1 py-0.5 text-xs">- [x]</code>; it then moves the
-            file to <code className="rounded bg-muted px-1 py-0.5 text-xs">processing/</code>
+              .agents/reviews/YYYY-MM-DD/NN-&lt;slug&gt;.md
+            </code>{" "}
+            with <code className="rounded bg-muted px-1 py-0.5 text-xs">status: todo</code>. You approve by
+            flipping every <code className="rounded bg-muted px-1 py-0.5 text-xs">- [ ]</code> to{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">- [x]</code>; it then bumps{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">status:</code> to{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">processing</code>
             <HugeiconsIcon icon={ArrowRight01Icon} className="mx-1 inline size-3.5 align-[-0.2em]" />
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">done/</code>.
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">done</code>.
           </p>
         </Step>
 
@@ -199,7 +310,7 @@ function GuideBody() {
       {/* Example */}
       <section className="space-y-3">
         <SectionTitle icon={FileEditIcon}>Example review file</SectionTitle>
-        <CodeBlock code={EXAMPLE_REVIEW} filename="2026-06-21-rate-limiting.md" />
+        <CodeBlock code={EXAMPLE_REVIEW} filename="2026-06-21/01-rate-limiting.md" />
       </section>
     </div>
   );

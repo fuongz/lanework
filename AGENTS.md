@@ -27,7 +27,7 @@ filename (it sorts chronologically).
 | Artifact | Path | When to write it |
 | --- | --- | --- |
 | Plan | `.agents/todo.md` | Before any substantial edit (3–5 concrete steps). |
-| Review checklist | `.agents/reviews/<status>/YYYY-MM-DD-<slug>.md` | Behavior-changing work with real design decisions. |
+| Review checklist | `.agents/reviews/YYYY-MM-DD/NN-<slug>.md` | Behavior-changing work with real design decisions. |
 | Lesson | `.agents/lessons/YYYY-MM-DD/<slug>.md` | After a durable correction likely to recur. |
 | Bug report | `.agents/bugs/YYYY-MM-DD/<slug>.md` | Ambiguous / recurring / production-impacting bug. |
 
@@ -65,34 +65,45 @@ option and say so.
 ### 2. Review Gate for Behavior-Changing Work
 
 Before implementing behavior-changing work, write a review checklist to
-`.agents/reviews/<status>/YYYY-MM-DD-<slug>.md` and wait for the user to check
-every box. **Implementation starts ONLY after all items are `[x]`.**
+`.agents/reviews/YYYY-MM-DD/NN-<slug>.md` and wait for the user to check every box.
+**Implementation starts ONLY after all items are `[x]`.**
 
-Reviews are bucketed by **status** (the folder), not by date:
+Each checklist has a **status** — its board column:
 
-| `<status>` | Meaning |
+| `status` | Meaning |
 | --- | --- |
 | `todo` | Plan written, boxes not all checked — awaiting review. **New checklists start here.** |
 | `processing` | Approved (all gating boxes `[x]`) and being implemented. |
 | `done` | Shipped and verified. |
 | `dropped` | Superseded or abandoned. |
 
-**Lifecycle:** create in `todo/` → move to `processing/` when approved → move to
-`done/` once shipped (or `dropped/`). Moving a file is a plain rename — keep the
-`YYYY-MM-DD-<slug>.md` name; the creation date never changes.
+**Default layout — status in frontmatter, files grouped by date:**
+`.agents/reviews/YYYY-MM-DD/NN-<slug>.md`. The date comes from the `YYYY-MM-DD/` folder;
+the leading `NN-` (`01`, `02`, …) orders cards within the day; the **column is the
+`status:` field**. Advancing a review is a one-line `status:` edit — the file never moves.
 
 **Frontmatter** (the board reads these): start each file with YAML, then `# Review: …`:
 
 ```yaml
 ---
+status: todo                       # todo | processing | done | dropped
 assignees: ["your-github-login"]
-created_at: YYYY-MM-DD 00:00:00Z   # the filename date
+created_at: YYYY-MM-DD 00:00:00Z   # the date for this card
 priority: medium                   # low | medium | high
 tags: ["ui", "server-fn"]          # controlled vocabulary (see below)
 ---
 ```
 
-Do **not** add a `status:` field — the folder encodes it. Tag vocabulary for this
+**Alternative — status from the folder:** omit `status:` and place files in
+`todo/ processing/ done/ dropped/` folders (flat `<status>/YYYY-MM-DD-<slug>.md` or
+`<status>/YYYY-MM-DD/NN-<slug>.md`); the folder then sets the column. To make folders
+authoritative and ignore any `status:` field, add `.agents/reviews/config.json` with
+`{"status":{"from":"folder"}}`.
+
+**Custom frontmatter keys:** a repo can map its own key names onto card fields via a
+`fields` block in `config.json`, e.g.
+`{"fields":{"assignees":["owner"],"tags":["labels"]}}` — the canonical key still works.
+Tag vocabulary for this
 repo: `ui`, `design-system`, `board`, `sidebar`, `dialog`, `animation`, `auth`,
 `github`, `server-fn`, `d1`, `drizzle`, `routing`, `cloudflare`, `guide`, `docs`.
 After the frontmatter add a "How to review" note (flip `- [ ]` → `- [x]`, write
@@ -189,8 +200,11 @@ shape. Those only need `.agents/todo.md`.
   must never reach the client.
 - Board metadata is batch-fetched via the **GraphQL** blobs query (≈50 files/req);
   per-file REST fetch is only for on-demand single-file content (the dialog).
-- The board reads `.agents/reviews/<column>/*.md`; frontmatter + checkboxes drive
-  card fields. Keep parsing in `lib/github.ts` + `lib/review-stats.ts`.
+- The board reads `.agents/reviews/**` markdown; frontmatter + checkboxes drive card
+  fields. Layout/column resolution (flat vs. date-folder, folder vs. frontmatter
+  `status:` via `config.json`) lives in `lib/reviews-core.ts` (`resolveCardLocation`,
+  `parseBoardConfig`) and is shared by both data sources; keep checklist parsing in
+  `lib/review-stats.ts`.
 
 ---
 

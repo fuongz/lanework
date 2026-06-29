@@ -1,0 +1,14 @@
+{
+  "name": "lanework",
+  "description": "Drive your .agents/reviews Kanban board through an AI-Driven Development Lifecycle — create review checklists, tick decisions, and advance status — backed by the lanework MCP server.",
+  "version": "0.2.0",
+  "author": {
+    "name": "fuongz",
+    "url": "https://github.com/fuongz/lanework"
+  },
+  "homepage": "https://github.com/fuongz/lanework",
+  "repository": "https://github.com/fuongz/lanework",
+  "license": "MIT",
+  "keywords": ["lanework", "kanban", "ai-dlc", "reviews", "mcp", "agents"],
+  "mcpServers": "./.mcp.json"
+}

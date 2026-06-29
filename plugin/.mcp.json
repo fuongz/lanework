@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "lanework": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/mcp.mjs", "--no-dashboard"]
+    }
+  }
+}

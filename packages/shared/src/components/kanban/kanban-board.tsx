@@ -14,7 +14,11 @@ export function KanbanBoard({ cards }: { cards: BoardData["cards"] }) {
     };
     for (const card of cards) byColumn[card.column].push(card);
     for (const col of REVIEW_COLUMNS) {
-      byColumn[col].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+      byColumn[col].sort(
+        (a, b) =>
+          (b.date ?? "").localeCompare(a.date ?? "") ||
+          (a.ordinal ?? Infinity) - (b.ordinal ?? Infinity),
+      );
     }
     return byColumn;
   }, [cards]);

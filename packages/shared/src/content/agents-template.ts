@@ -19,7 +19,7 @@ filename so it sorts chronologically.
 | Artifact | Path | When to write it |
 | --- | --- | --- |
 | Plan | \`.agents/todo.md\` | Before any substantial edit (3–5 concrete steps). |
-| Review checklist | \`.agents/reviews/<status>/YYYY-MM-DD-<slug>.md\` | Behavior-changing work with real design decisions. |
+| Review checklist | \`.agents/reviews/YYYY-MM-DD/NN-<slug>.md\` | Behavior-changing work with real design decisions. |
 | Lesson | \`.agents/lessons/YYYY-MM-DD/<slug>.md\` | After a durable correction likely to recur. |
 | Bug report | \`.agents/bugs/YYYY-MM-DD/<slug>.md\` | Ambiguous / recurring / production-impacting bug. |
 
@@ -29,10 +29,10 @@ or delete these files unless the user explicitly authorizes it.
 ## Review gate
 
 Before implementing behavior-changing work, write a review checklist to
-\`.agents/reviews/<status>/YYYY-MM-DD-<slug>.md\` and wait for the user to check every
-box. **Implementation starts ONLY after all items are \`[x]\`.**
+\`.agents/reviews/YYYY-MM-DD/NN-<slug>.md\` and wait for the user to check every box.
+**Implementation starts ONLY after all items are \`[x]\`.**
 
-Reviews are bucketed by **status** (the folder), not by date:
+Each checklist has a **status** — its board column:
 
 | status | meaning |
 | --- | --- |
@@ -41,9 +41,15 @@ Reviews are bucketed by **status** (the folder), not by date:
 | \`done\` | Shipped and verified. |
 | \`dropped\` | Superseded or abandoned. |
 
-**Lifecycle:** create in \`todo/\` → move to \`processing/\` when approved → move to
-\`done/\` once shipped (or \`dropped/\`). Moving a file is a plain rename — keep the
-\`YYYY-MM-DD-<slug>.md\` name so it still sorts. The creation date never changes.
+**Default layout — status in frontmatter, files grouped by date:**
+
+\`\`\`
+.agents/reviews/YYYY-MM-DD/NN-<slug>.md
+\`\`\`
+
+The date comes from the \`YYYY-MM-DD/\` folder; the leading \`NN-\` (\`01\`, \`02\`, …) orders
+cards within that day; the **column is the \`status:\` field** in each file. Changing
+status is a one-line edit — the file never moves.
 
 ### Checklist frontmatter
 
@@ -51,14 +57,33 @@ Start each file with a YAML frontmatter block, then a \`# Review: …\` heading:
 
 \`\`\`yaml
 ---
+status: todo                       # todo | processing | done | dropped
 assignees: ["your-github-login"]
-created_at: YYYY-MM-DD 00:00:00Z   # the filename date
+created_at: YYYY-MM-DD 00:00:00Z   # the date for this card
 priority: medium                   # low | medium | high
 tags: ["area-a", "area-b"]         # your own controlled vocabulary
 ---
 \`\`\`
 
-Do **not** add a \`status:\` field — the folder encodes it. After the frontmatter,
+All fields are optional. Lists accept a JSON array (\`["a","b"]\`) or a comma-separated
+string (\`a, b\`). \`priority\` must be \`low | medium | high\`; \`status\` one of the four
+columns; anything else is normalised away. Keep \`created_at\` as \`YYYY-MM-DD\`. Fields the
+board doesn't recognise are left untouched, so a repo can carry its own custom keys.
+
+**Use your own key names.** To map existing frontmatter keys onto card fields, add a
+\`fields\` block to \`.agents/reviews/config.json\` (the canonical key keeps working too):
+
+\`\`\`json
+{ "fields": { "assignees": ["owner"], "tags": ["labels"], "created_at": ["due"] } }
+\`\`\`
+
+**Alternative — status from the folder.** You can instead omit \`status:\` and place
+files in \`todo/ processing/ done/ dropped/\` folders (either flat
+\`<status>/YYYY-MM-DD-<slug>.md\` or \`<status>/YYYY-MM-DD/NN-<slug>.md\`); the folder
+then sets the column. To make folders authoritative and ignore any \`status:\` field,
+add \`.agents/reviews/config.json\` with \`{"status":{"from":"folder"}}\`.
+
+After the frontmatter,
 add a "How to review" note (the user flips \`- [ ]\` to \`- [x]\` per item and writes
 \`> notes\` under items they disagree with), group items by topic, include a Context
 section, an explicit **out of scope** section, and a **files touched** table.
@@ -76,8 +101,9 @@ board renders a nested group as radio buttons (selecting one clears the others):
 - [ ] **D3.** For D2.A: document the single-region limitation.  ← independent
 \`\`\`
 
-> The Kanban board reads exactly these signals: the **column** from the folder, and
-> **date / priority / assignees / tags / progress** from the frontmatter + the
+> The Kanban board reads exactly these signals: the **column** from the \`status:\`
+> field (or the folder — see above), **date** from the \`YYYY-MM-DD/\` folder or filename,
+> and **priority / assignees / tags / progress** from the frontmatter + the
 > \`- [ ]\` / \`- [x]\` checkboxes.
 
 ## Workflow
@@ -103,6 +129,7 @@ board renders a nested group as radio buttons (selecting one clears the others):
 `;
 
 export const EXAMPLE_REVIEW = `---
+status: todo
 assignees: ["your-github-login"]
 created_at: 2026-06-21 00:00:00Z
 priority: high

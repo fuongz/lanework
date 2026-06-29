@@ -29,9 +29,59 @@ lanework [dir] [--port N] [--no-open]
 | `--port N`, `-p N` | Preferred starting port (falls back upward if taken). Default `3662`. |
 | `--no-open` | Don't auto-open the browser. |
 
+## MCP server — drive the lifecycle (AI-DLC)
+
+`lanework mcp` runs a Model Context Protocol server (stdio) so an AI client can **drive
+the whole review lifecycle** — not just read it. It speaks an AI-Driven Development
+Lifecycle: **inception** (`create_review` → a `todo` checklist of decisions) → **review**
+(`toggle_item` ticks each decision) → **construction & shipping** (`set_status` advances
+`todo → processing → done`, or `dropped`).
+
+```bash
+lanework mcp [dir]            # MCP server + the web board (a live "dashboard")
+lanework mcp --no-dashboard   # MCP server only, no browser (headless / CI)
+```
+
+Register it with your client, e.g. Claude Code:
+
+```bash
+claude mcp add lanework -- npx -y @phake/lanework mcp --no-dashboard
+```
+
+### Tools
+
+| Tool | What it does |
+| --- | --- |
+| `lifecycle_status` | Phase view + **suggested next actions** (which cards are ready to advance). |
+| `list_reviews` | List cards; filter by `column`, `tag`, or `assignee`. |
+| `get_review` | Read one card's full markdown. |
+| `board_summary` | Counts per column + aggregate checklist progress. |
+| `create_review` | Inception — new checklist card (`title`, `priority`, `tags`, `assignees`, `date`, `body`). |
+| `toggle_item` | Check/uncheck a checklist item by `index` or `match`, with an optional `> note`. |
+| `set_status` | Advance the column. Frontmatter mode edits `status:`; folder mode moves the file. |
+| `update_review` | Patch `priority` / `tags` / `assignees`. |
+| `save_review` | Raw whole-file write (escape hatch — prefer the tools above). |
+| `cost_estimate` | Per-model Claude Code token usage from local `~/.claude` transcripts. |
+
+All tools honour the layout/config below (date folders, frontmatter `status:`, field aliases).
+
+### Slash commands (`/lanework:*`)
+
+For Claude Code, the **lanework plugin** wraps these tools in slash commands —
+`/lanework:create`, `/lanework:status`, `/lanework:review`, `/lanework:advance`,
+`/lanework:tick` — and registers the MCP server for you:
+
+```bash
+claude plugin marketplace add fuongz/lanework
+claude plugin install lanework@lanework
+```
+
+See [`plugin/README.md`](../../plugin/README.md) for details.
+
 ## What it does
 
-- 🗂️ **Board & List views** from `.agents/reviews/{todo,processing,done,dropped}`.
+- 🗂️ **Board & List views** from your `.agents/reviews/` markdown (column from each
+  card's `status:` field, or from `todo/processing/done/dropped` folders — see below).
 - 🏷️ **Rich cards** — priority, assignees, tags, date, and an `x/x` checklist-progress badge.
 - ☑️ **Interactive checklists** — tick `- [ ]` items right in the full-screen review,
   with live progress and a "Ready" state at 100%.
@@ -46,17 +96,66 @@ lanework [dir] [--port N] [--no-open]
 
 ## How it maps
 
+By default each card declares its **column** with a `status:` field, and files are
+grouped by date:
+
+```
+<repo>/.agents/reviews/
+└── 2026-06-21/                           → a date folder (the card's date)
+      ├── 01-ship-landing.md              # ── frontmatter: status: done
+      └── 02-bulk-send-message.md         # ── frontmatter: status: processing
+```
+
+A card reads its **column** from the `status:` field, its **date** from the enclosing
+`YYYY-MM-DD/` folder (the leading `NN-` orders cards within that day), and
+**priority · assignees · tags · progress** from the rest of the YAML frontmatter + its
+`- [ ]` / `- [x]` checkboxes. `status:` must be one of `todo · processing · done ·
+dropped`; if it's missing the card falls back to its folder, then to `todo`.
+
+### Alternative: status from the folder
+
+Prefer folders to carry the status? Drop the `status:` field and put files in
+`todo/ processing/ done/ dropped/` folders instead — flat or with date subfolders:
+
 ```
 <repo>/.agents/reviews/
 ├── todo/        → "To-Do" column
 ├── processing/  → "In Progress" column
 ├── done/        → "Done" column
 └── dropped/     → "Dropped" column
-        └── 2026-06-21-bulk-send-message.md   → a card
+        ├── 2026-06-21-bulk-send-message.md       → a card (flat)
+        └── 2026-06-21/01-retry-failed-sends.md   → a card (date folder)
 ```
 
-Each card reads its **column** from the folder, and **date · priority · assignees ·
-tags · progress** from the file's YAML frontmatter + its `- [ ]` / `- [x]` checkboxes.
+This works out of the box (the folder sets the column). To make folders **authoritative**
+and ignore any stray `status:` field, add `<repo>/.agents/reviews/config.json`:
+
+```json
+{ "status": { "from": "folder" } }
+```
+
+Both layouts can coexist.
+
+### Customize frontmatter keys
+
+Already use your own frontmatter terms (e.g. `owner` instead of `assignees`, `labels`
+instead of `tags`)? Map them to card fields in `<repo>/.agents/reviews/config.json`:
+
+```json
+{
+  "fields": {
+    "assignees": ["owner"],
+    "tags": ["labels"],
+    "priority": ["prio"],
+    "created_at": ["due", "date"],
+    "status": ["state"]
+  }
+}
+```
+
+Each value lists the frontmatter keys to accept for that field; the first one present in
+a file wins. The canonical key (`assignees`, `tags`, …) always keeps working, so adding
+an alias never breaks existing files.
 
 ## Setting up the convention
 

@@ -1,10 +1,10 @@
 // Thin GitHub REST/GraphQL client using fetch (no SDK) so it bundles cleanly on Workers.
 import {
   REVIEW_ROOT,
-  REVIEW_COLUMNS,
+  BOARD_CONFIG_PATH,
   buildReviewCard,
-  isReviewColumn,
-  type ReviewColumn,
+  parseBoardConfig,
+  resolveCardLocation,
   type ReviewCard,
 } from "./reviews-core";
 
@@ -127,9 +127,11 @@ interface TreeEntry {
 }
 
 /**
- * List every review card under `.agents/reviews/<column>/`, enriched with the
- * frontmatter metadata + checklist stats parsed from each file's content.
- * Content is batch-fetched via GraphQL (≈50 files per request).
+ * List every review card under `.agents/reviews/`, enriched with the frontmatter
+ * metadata + checklist stats parsed from each file's content. Content is
+ * batch-fetched via GraphQL (≈50 files per request). The optional
+ * `.agents/reviews/config.json` selects how each card's column is derived
+ * (folder vs. frontmatter `status:`); see `resolveCardLocation`.
  */
 export async function listReviewCards(
   token: string,
@@ -147,26 +149,36 @@ export async function listReviewCards(
     `/repos/${o}/${r}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
   );
 
-  const entries = tree.tree
-    .filter((e) => e.type === "blob" && e.path.endsWith(".md") && e.path.startsWith(`${REVIEW_ROOT}/`))
-    .map((e) => {
-      const rest = e.path.slice(REVIEW_ROOT.length + 1); // <column>/<file>.md
-      const [column, ...fileParts] = rest.split("/");
-      return { entry: e, column, fileName: fileParts[0], ok: isReviewColumn(column) && fileParts.length === 1 };
-    })
-    .filter((x) => x.ok);
-
-  const blobs = await fetchBlobs(token, owner, repo, branch, entries.map((e) => e.entry.path));
-
-  const cards: ReviewCard[] = entries.map(({ entry, column, fileName }) =>
-    buildReviewCard({
-      path: entry.path,
-      column: column as ReviewColumn,
-      fileName,
-      sha: entry.sha,
-      text: blobs.get(entry.path),
-    }),
+  const mdEntries = tree.tree.filter(
+    (e) => e.type === "blob" && e.path.endsWith(".md") && e.path.startsWith(`${REVIEW_ROOT}/`),
   );
+  const hasConfig = tree.tree.some((e) => e.type === "blob" && e.path === BOARD_CONFIG_PATH);
+
+  // One batched fetch for every review file plus the config (frontmatter mode
+  // needs each file's content to read its `status:` field).
+  const paths = mdEntries.map((e) => e.path);
+  if (hasConfig) paths.push(BOARD_CONFIG_PATH);
+  const blobs = await fetchBlobs(token, owner, repo, branch, paths);
+  const config = parseBoardConfig(hasConfig ? blobs.get(BOARD_CONFIG_PATH) : undefined);
+
+  const cards: ReviewCard[] = [];
+  for (const entry of mdEntries) {
+    const text = blobs.get(entry.path);
+    const segments = entry.path.slice(REVIEW_ROOT.length + 1).split("/");
+    const loc = resolveCardLocation(segments, config, text);
+    if (!loc) continue; // not a board file (e.g. a stray .md outside any column)
+    cards.push(
+      buildReviewCard({
+        path: entry.path,
+        column: loc.column,
+        fileName: loc.fileName,
+        sha: entry.sha,
+        text,
+        folderDate: loc.folderDate,
+        config,
+      }),
+    );
+  }
 
   return { branch, cards };
 }

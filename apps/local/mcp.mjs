@@ -24,7 +24,14 @@ const {
   getLocalCostEstimate,
   localRepoName,
   localRoot,
+  loadLocalBoardConfig,
+  createLocalReview,
+  setLocalReviewStatus,
+  toggleLocalReviewItem,
+  updateLocalReviewMeta,
 } = await import(libUrl);
+
+const PRIORITIES = ["low", "medium", "high"];
 
 function log(...args) {
   console.error("[lanework-mcp]", ...args);
@@ -74,7 +81,17 @@ export async function startMcp({ dir = process.cwd(), dashboard = true } = {}) {
   process.env.LANEWORK_DIR = dir;
   if (dashboard) startDashboard(dir);
 
-  const server = new McpServer({ name: "lanework", version: "0.1.0" });
+  const server = new McpServer(
+    { name: "lanework", version: "0.2.0" },
+    {
+      instructions:
+        "lanework drives an AI-Driven Development Lifecycle through a repo's .agents/reviews board. " +
+        "Lifecycle: create_review (inception → a `todo` checklist of decisions) → the user/agent ticks " +
+        "items with toggle_item → set_status advances todo → processing → done (or dropped). Use " +
+        "lifecycle_status to see what's actionable, list_reviews/get_review to read, and update_review " +
+        "to set priority/tags/assignees. Prefer these tools over save_review (raw whole-file write).",
+    },
+  );
 
   server.registerTool(
     "list_reviews",
@@ -162,6 +179,154 @@ export async function startMcp({ dir = process.cwd(), dashboard = true } = {}) {
       } catch (e) {
         return { isError: true, content: [{ type: "text", text: `could not save ${path}: ${e.message}` }] };
       }
+    },
+  );
+
+  // ── Lifecycle tools ───────────────────────────────────────────────────────
+
+  server.registerTool(
+    "create_review",
+    {
+      title: "Create review",
+      description:
+        "Inception: create a new review checklist card. Lands at .agents/reviews/<date>/NN-<slug>.md " +
+        "with a status: field (or under the status folder when the board is folder-mode). Returns the " +
+        "new file path. Provide a markdown `body` of decisions as `- [ ]` items, or omit it for a starter template.",
+      inputSchema: {
+        title: z.string().describe("Short review title, e.g. 'Add rate limiting to the public API'"),
+        status: z.enum(COLUMNS).optional().describe("Starting column (default: todo)"),
+        priority: z.enum(PRIORITIES).optional().describe("low | medium | high"),
+        tags: z.array(z.string()).optional().describe("e.g. ['auth','api']"),
+        assignees: z.array(z.string()).optional().describe("GitHub logins"),
+        date: z.string().optional().describe("YYYY-MM-DD for the card's date folder (default: today)"),
+        body: z.string().optional().describe("Markdown after the heading: decisions as `- [ ]` items, context, etc."),
+      },
+    },
+    async (args) => {
+      try {
+        return ok(await createLocalReview(args));
+      } catch (e) {
+        return { isError: true, content: [{ type: "text", text: `could not create review: ${e.message}` }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "set_status",
+    {
+      title: "Set status",
+      description:
+        "Advance a review through the lifecycle (todo → processing → done, or dropped). In the default " +
+        "frontmatter mode this rewrites the `status:` field in place (path is unchanged); in folder mode it " +
+        "moves the file into the new column folder (path changes — use the returned path afterwards).",
+      inputSchema: {
+        path: z.string().describe("Repo-relative path of the review file"),
+        status: z.enum(COLUMNS).describe("New column"),
+      },
+    },
+    async ({ path, status }) => {
+      try {
+        return ok(await setLocalReviewStatus(path, status));
+      } catch (e) {
+        return { isError: true, content: [{ type: "text", text: `could not set status: ${e.message}` }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "toggle_item",
+    {
+      title: "Toggle checklist item",
+      description:
+        "Check or uncheck one checklist item in a review, selected by 1-based `index` (across all items) or " +
+        "by `match` text. Optionally attach a `> note`. Returns the updated checklist progress. Use this to " +
+        "approve decisions instead of rewriting the whole file.",
+      inputSchema: {
+        path: z.string().describe("Repo-relative path of the review file"),
+        index: z.number().int().positive().optional().describe("1-based item position across all checkboxes"),
+        match: z.string().optional().describe("Case-insensitive text to find the item (used if index is omitted)"),
+        checked: z.boolean().optional().describe("Force checked/unchecked (default: flip current state)"),
+        note: z.string().optional().describe("Optional reviewer note added as a `> …` line under the item"),
+      },
+    },
+    async ({ path, index, match, checked, note }) => {
+      try {
+        return ok(await toggleLocalReviewItem(path, { index, match, checked, note }));
+      } catch (e) {
+        return { isError: true, content: [{ type: "text", text: `could not toggle item: ${e.message}` }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "update_review",
+    {
+      title: "Update review metadata",
+      description:
+        "Patch a review's priority, tags, and/or assignees in frontmatter (does not move the file or change " +
+        "status — use set_status for that). Only the provided fields change.",
+      inputSchema: {
+        path: z.string().describe("Repo-relative path of the review file"),
+        priority: z.enum(PRIORITIES).optional().describe("low | medium | high"),
+        tags: z.array(z.string()).optional().describe("Replaces the tag list"),
+        assignees: z.array(z.string()).optional().describe("Replaces the assignee list"),
+      },
+    },
+    async ({ path, priority, tags, assignees }) => {
+      try {
+        return ok(await updateLocalReviewMeta(path, { priority, tags, assignees }));
+      } catch (e) {
+        return { isError: true, content: [{ type: "text", text: `could not update review: ${e.message}` }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "lifecycle_status",
+    {
+      title: "Lifecycle status",
+      description:
+        "A workflow view of the board: cards per phase plus suggested next actions — todo reviews whose boxes " +
+        "are all checked (ready to advance to processing) and processing reviews that are 100% done (ready to " +
+        "ship to done). Use this to decide what to do next.",
+    },
+    async () => {
+      const config = await loadLocalBoardConfig();
+      const cards = await listLocalReviewCards();
+      const slim = (c) => ({
+        path: c.path,
+        title: c.title,
+        progress: { done: c.stats.done, total: c.stats.total },
+      });
+      const phases = Object.fromEntries(COLUMNS.map((c) => [c, []]));
+      for (const c of cards) phases[c.column].push(slim(c));
+
+      const allChecked = (c) => c.stats.total > 0 && c.stats.done === c.stats.total;
+      const readyForProcessing = cards.filter((c) => c.column === "todo" && allChecked(c)).map(slim);
+      const readyForDone = cards.filter((c) => c.column === "processing" && allChecked(c)).map(slim);
+
+      const suggestions = [
+        ...readyForProcessing.map((c) => ({
+          action: "set_status",
+          path: c.path,
+          to: "processing",
+          why: "all checklist items are checked — approved, ready to implement",
+        })),
+        ...readyForDone.map((c) => ({
+          action: "set_status",
+          path: c.path,
+          to: "done",
+          why: "implementation checklist is complete — ready to ship",
+        })),
+      ];
+
+      return ok({
+        repo: localRepoName(),
+        statusMode: config.status.from,
+        counts: Object.fromEntries(COLUMNS.map((c) => [c, phases[c].length])),
+        phases,
+        suggestions,
+      });
     },
   );
 

@@ -6,18 +6,28 @@
 // Workers bundle. It is only ever loaded through a dynamic import guarded by the
 // statically-false `__LANEWORK_LOCAL__` constant in the cloud build, so the
 // bundler drops this branch (and its node deps) from the Worker entirely.
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
 import {
-  REVIEW_COLUMNS,
   REVIEW_ROOT,
   buildReviewCard,
+  composeReviewFile,
+  isReviewColumn,
+  parseBoardConfig,
+  patchFrontmatter,
+  resolveCardLocation,
+  serializeList,
+  slugify,
+  toggleChecklistItem,
+  type BoardConfig,
+  type Priority,
   type ReviewCard,
   type ReviewColumn,
 } from "./reviews-core";
+import { parseReviewStats } from "./review-stats";
 
 /** Target directory: the dir the CLI was launched in (or LANEWORK_DIR). */
 export function localRoot(): string {
@@ -41,31 +51,49 @@ function contentSha(text: string): string {
   return createHash("sha1").update(text).digest("hex").slice(0, 12);
 }
 
-/** Every review card under `<root>/.agents/reviews/<column>/*.md`. */
+/** Recursively collect every `.md` file under `dir`, as path segments relative to it. */
+async function walkMdFiles(dir: string, rel: string[] = []): Promise<string[][]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => [] as Dirent[]);
+  const out: string[][] = [];
+  for (const e of entries) {
+    if (e.isDirectory()) out.push(...(await walkMdFiles(join(dir, e.name), [...rel, e.name])));
+    else if (e.isFile() && e.name.endsWith(".md")) out.push([...rel, e.name]);
+  }
+  return out;
+}
+
+/**
+ * Every review card under `<root>/.agents/reviews/`. Supports the flat layout
+ * (`<column>/YYYY-MM-DD-slug.md`), the date-folder layout
+ * (`<column>/YYYY-MM-DD/NN-slug.md`), and — when `config.json` sets
+ * `status.from = "frontmatter"` — any layout with the column in frontmatter.
+ */
+/** Read and parse the optional `.agents/reviews/config.json` for this repo. */
+export async function loadLocalBoardConfig(): Promise<BoardConfig> {
+  const json = await readFile(join(reviewsDir(), "config.json"), "utf8").catch(() => undefined);
+  return parseBoardConfig(json);
+}
+
 export async function listLocalReviewCards(): Promise<ReviewCard[]> {
   const base = reviewsDir();
+  const config = await loadLocalBoardConfig();
+
   const cards: ReviewCard[] = [];
-  for (const column of REVIEW_COLUMNS) {
-    const dir = join(base, column);
-    let entries: Dirent[];
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      continue; // column folder absent → no cards for it
-    }
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-      const text = await readFile(join(dir, entry.name), "utf8").catch(() => undefined);
-      cards.push(
-        buildReviewCard({
-          path: `${REVIEW_ROOT}/${column}/${entry.name}`,
-          column: column as ReviewColumn,
-          fileName: entry.name,
-          sha: text ? contentSha(text) : entry.name,
-          text,
-        }),
-      );
-    }
+  for (const segments of await walkMdFiles(base)) {
+    const text = await readFile(join(base, ...segments), "utf8").catch(() => undefined);
+    const loc = resolveCardLocation(segments, config, text);
+    if (!loc) continue; // not a board file (e.g. a stray .md outside any column)
+    cards.push(
+      buildReviewCard({
+        path: `${REVIEW_ROOT}/${segments.join("/")}`,
+        column: loc.column,
+        fileName: loc.fileName,
+        sha: text ? contentSha(text) : loc.fileName,
+        text,
+        folderDate: loc.folderDate,
+        config,
+      }),
+    );
   }
   return cards;
 }
@@ -96,6 +124,149 @@ export async function saveLocalCardContent(repoPath: string, content: string): P
     throw new Error("path outside project root");
   }
   await writeFile(full, content, "utf8");
+}
+
+// ── Lifecycle orchestrators (used by the MCP server) ─────────────────────────
+//
+// These compose the pure helpers in reviews-core with the filesystem so the MCP
+// tools can drive the review lifecycle — create → advance status → tick items —
+// without hand-editing whole files. Each honours the board's status mode.
+
+/** Re-anchor a repo-relative path under the root and reject escapes. */
+function safeFull(repoPath: string): string {
+  const root = resolve(localRoot());
+  const full = resolve(root, repoPath);
+  if (full !== root && !full.startsWith(root + sep)) throw new Error("path outside project root");
+  return full;
+}
+
+function isReviewPath(repoPath: string): boolean {
+  return repoPath.startsWith(`${REVIEW_ROOT}/`) && repoPath.endsWith(".md") && !repoPath.includes("..");
+}
+
+/** Today as YYYY-MM-DD (local time). */
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Next `NN` ordinal for a date folder: max existing prefix + 1. */
+async function nextOrdinal(absDir: string): Promise<number> {
+  const entries = await readdir(absDir, { withFileTypes: true }).catch(() => [] as Dirent[]);
+  let max = 0;
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith(".md")) continue;
+    const m = e.name.match(/^(\d+)[-_]/);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max + 1;
+}
+
+export interface CreateReviewInput {
+  title: string;
+  status?: string;
+  priority?: Priority;
+  tags?: string[];
+  assignees?: string[];
+  date?: string; // YYYY-MM-DD; defaults to today
+  body?: string; // markdown after the `# Review:` heading
+}
+
+/**
+ * Create a new review card. In the default frontmatter mode it lands at
+ * `.agents/reviews/<date>/NN-<slug>.md` with a `status:` field; in folder mode at
+ * `.agents/reviews/<status>/<date>/NN-<slug>.md` (folder encodes the column).
+ */
+export async function createLocalReview(input: CreateReviewInput): Promise<{
+  path: string;
+  status: ReviewColumn;
+  date: string;
+  ordinal: number;
+}> {
+  const config = await loadLocalBoardConfig();
+  const status: ReviewColumn = input.status && isReviewColumn(input.status) ? input.status : "todo";
+  const date = input.date && /^\d{4}-\d{2}-\d{2}$/.test(input.date) ? input.date : todayISO();
+  const folderMode = config.status.from === "folder";
+
+  const dirRel = folderMode ? `${REVIEW_ROOT}/${status}/${date}` : `${REVIEW_ROOT}/${date}`;
+  const absDir = join(resolve(localRoot()), dirRel);
+  await mkdir(absDir, { recursive: true });
+  const ordinal = await nextOrdinal(absDir);
+  const fileName = `${String(ordinal).padStart(2, "0")}-${slugify(input.title)}.md`;
+  const repoPath = `${dirRel}/${fileName}`;
+
+  const content = composeReviewFile({
+    title: input.title,
+    status: folderMode ? null : status,
+    assignees: input.assignees,
+    tags: input.tags,
+    priority: input.priority ?? null,
+    date,
+    body: input.body,
+  });
+  await saveLocalCardContent(repoPath, content);
+  return { path: repoPath, status, date, ordinal };
+}
+
+/** Replace the column segment of a folder-mode path with `newColumn`. */
+function relocateColumn(repoPath: string, newColumn: ReviewColumn): string {
+  const rest = repoPath.slice(REVIEW_ROOT.length + 1).split("/");
+  rest[0] = newColumn;
+  return `${REVIEW_ROOT}/${rest.join("/")}`;
+}
+
+/**
+ * Advance a card to a new column. Frontmatter mode edits the `status:` field in
+ * place; folder mode moves the file into the new column folder.
+ */
+export async function setLocalReviewStatus(
+  repoPath: string,
+  status: string,
+): Promise<{ path: string; status: ReviewColumn; moved: boolean }> {
+  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  if (!isReviewColumn(status)) throw new Error(`invalid status: ${status}`);
+  const config = await loadLocalBoardConfig();
+  const content = await getLocalCardContent(repoPath);
+
+  if (config.status.from === "folder") {
+    const newPath = relocateColumn(repoPath, status);
+    if (newPath === repoPath) return { path: repoPath, status, moved: false };
+    await mkdir(dirname(safeFull(newPath)), { recursive: true });
+    await saveLocalCardContent(newPath, content);
+    await unlink(safeFull(repoPath));
+    return { path: newPath, status, moved: true };
+  }
+
+  await saveLocalCardContent(repoPath, patchFrontmatter(content, { status }));
+  return { path: repoPath, status, moved: false };
+}
+
+/** Check/uncheck one checklist item (by index or text), optionally adding a note. */
+export async function toggleLocalReviewItem(
+  repoPath: string,
+  opts: { index?: number; match?: string; checked?: boolean; note?: string },
+): Promise<{ path: string; line: number | null; checked: boolean | null; progress: ReturnType<typeof parseReviewStats> }> {
+  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  const content = await getLocalCardContent(repoPath);
+  const res = toggleChecklistItem(content, opts);
+  if (!res.found) throw new Error("no matching checklist item");
+  await saveLocalCardContent(repoPath, res.content);
+  return { path: repoPath, line: res.line, checked: res.checked, progress: parseReviewStats(res.content) };
+}
+
+/** Patch a card's priority / tags / assignees frontmatter (no file move). */
+export async function updateLocalReviewMeta(
+  repoPath: string,
+  meta: { priority?: Priority; tags?: string[]; assignees?: string[] },
+): Promise<{ path: string }> {
+  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  const patch: Record<string, string | null> = {};
+  if (meta.priority !== undefined) patch.priority = meta.priority;
+  if (meta.tags !== undefined) patch.tags = serializeList(meta.tags);
+  if (meta.assignees !== undefined) patch.assignees = serializeList(meta.assignees);
+  if (Object.keys(patch).length === 0) return { path: repoPath };
+  const content = await getLocalCardContent(repoPath);
+  await saveLocalCardContent(repoPath, patchFrontmatter(content, patch));
+  return { path: repoPath };
 }
 
 // ── Cost estimation from Claude Code transcripts ────────────────────────────

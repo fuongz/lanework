@@ -45,7 +45,12 @@ export function ReviewList({ cards }: { cards: BoardData["cards"] }) {
   const grouped = useMemo(() => {
     const by: Record<ReviewColumn, ReviewCard[]> = { todo: [], processing: [], done: [], dropped: [] };
     for (const c of cards) by[c.column].push(c);
-    for (const col of REVIEW_COLUMNS) by[col].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+    for (const col of REVIEW_COLUMNS)
+      by[col].sort(
+        (a, b) =>
+          (b.date ?? "").localeCompare(a.date ?? "") ||
+          (a.ordinal ?? Infinity) - (b.ordinal ?? Infinity),
+      );
     return by;
   }, [cards]);
 
