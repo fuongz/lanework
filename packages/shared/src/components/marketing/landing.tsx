@@ -581,8 +581,9 @@ const MCP_STEPS = [
   { icon: ArrowRight01Icon, cmd: "set_status", label: "Ship", body: "Advance todo → processing → done." },
 ];
 
-const MCP_FLOW = `$ npx @phake/lanework setup claude-code
-✓ lanework registered with Claude Code
+const MCP_FLOW = `$ claude plugin marketplace add fuongz/lanework
+$ claude plugin install lanework@lanework
+✓ lanework installed (commands + MCP server)
 
 # then, inside Claude Code:
 /lanework:create  Add rate limiting
@@ -608,17 +609,19 @@ function Mcp() {
             <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-primary">
               <HugeiconsIcon icon={ComputerTerminal01Icon} className="size-6" />
             </span>
-            <h3 className="mt-4 text-xl font-semibold tracking-tight">One-command install</h3>
+            <h3 className="mt-4 text-xl font-semibold tracking-tight">Install the plugin</h3>
             <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-              Register the MCP server with Claude Code — Serena-style, no marketplace step.
+              The Claude Code plugin gives you the slash commands <strong className="text-foreground">and</strong>{" "}
+              the MCP server in one step.
             </p>
-            <div className="mt-5">
-              <CommandPill command="npx @phake/lanework setup claude-code" />
+            <div className="mt-5 flex flex-col gap-2">
+              <CommandPill command="claude plugin marketplace add fuongz/lanework" />
+              <CommandPill command="claude plugin install lanework@lanework" />
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              The board opens automatically (≈ <span className="font-mono">:3662</span>) whenever
-              Claude Code starts — Serena-style. Pass{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">--no-dashboard</code>{" "}
+              The board also opens automatically (≈ <span className="font-mono">:3662</span>) whenever
+              Claude Code starts — Serena-style. Set{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">LANEWORK_DASHBOARD=0</code>{" "}
               to run headless.
             </p>
             <div className="mt-6 flex flex-col gap-4">
@@ -640,7 +643,7 @@ function Mcp() {
               ))}
             </div>
             <p className="mt-6 flex flex-wrap items-center gap-1.5 border-t pt-5 font-mono text-[11px] text-muted-foreground">
-              also as slash commands:
+              slash commands:
               {["/lanework:create", "/lanework:status", "/lanework:advance", "/lanework:tick"].map((c) => (
                 <span key={c} className="rounded bg-muted px-1.5 py-0.5">
                   {c}

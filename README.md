@@ -110,25 +110,23 @@ server over stdio, so an agent like Claude can **drive the full review lifecycle
 during its reasoning loop — an AI-Driven Development Lifecycle (AI-DLC): inception
 (`create_review`) → review (`toggle_item`) → construction & shipping (`set_status`).
 
-**Install into Claude Code — one command** (like `serena setup claude-code`):
+**Install the Claude Code plugin** — gets you the `/lanework:*` slash commands **and**
+the MCP server in one step:
 
 ```bash
-npx @phake/lanework setup claude-code                 # global (user scope) — opens the board on startup
-npx @phake/lanework setup claude-code --project       # current project only
-npx @phake/lanework setup claude-code --no-dashboard  # headless — don't open the board
-npx @phake/lanework setup claude-code --local         # register a local build instead of npx
+claude plugin marketplace add fuongz/lanework
+claude plugin install lanework@lanework
 ```
 
-> By default the web board boots (and opens your browser) every time Claude Code starts the
-> server — like Serena. Pass `--no-dashboard` to run headless.
+Restart Claude Code, then type `/lanework:` for the commands (`/lanework:create`,
+`/lanework:status`, `/lanework:advance`, …). By default the web board also opens (≈ `:3662`)
+when a session starts — Serena-style; set `LANEWORK_DASHBOARD=0` in the server env to run
+headless.
 
-…or by hand:
+> Just want the MCP **tools** (no slash commands)? Register the server on its own:
+> `npx @phake/lanework setup claude-code` (add `--no-dashboard` for headless).
 
-```bash
-claude mcp add --scope user lanework -- npx -y @phake/lanework mcp
-```
-
-Restart Claude Code, then `/mcp` shows **lanework** connected. Tools exposed:
+Tools exposed:
 
 | Tool | What it does |
 | --- | --- |
@@ -145,11 +143,7 @@ Restart Claude Code, then `/mcp` shows **lanework** connected. Tools exposed:
 
 All tools read/write the current repo's `.agents/reviews/` directly — no auth, no
 network. stdout is reserved for the protocol; the dashboard (if enabled) runs as a
-child process so it can't corrupt the stream.
-
-> Prefer slash commands too? Install the **[Claude Code plugin](./plugin/)** instead —
-> it bundles this MCP server *plus* `/lanework:create`, `/lanework:status`, etc.
-> (`claude plugin marketplace add fuongz/lanework` → `claude plugin install lanework@lanework`).
+child process so it can't corrupt the stream. See [`plugin/`](./plugin/) for the plugin.
 
 ## Tech stack
 

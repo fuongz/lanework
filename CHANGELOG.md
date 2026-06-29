@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-29
+
+### Changed
+- **The Claude Code plugin is now the recommended install everywhere** — it provides
+  both the `/lanework:*` slash commands and the MCP server in one step:
+  `claude plugin marketplace add fuongz/lanework` → `claude plugin install lanework@lanework`.
+  `npx @phake/lanework setup claude-code` remains as an MCP-tools-only path (no slash
+  commands). Landing, guide, and READMEs updated accordingly.
+
 ## [0.2.2] - 2026-06-29
 
 ### Changed

@@ -322,31 +322,30 @@ function GuideBody() {
             <p className="text-muted-foreground">
               lanework ships a Model Context Protocol server, so your agent can run the whole review
               lifecycle — an <strong className="text-foreground">AI-Driven Development Lifecycle</strong>:
-              create a checklist, tick decisions, and advance the column as work ships. Register it with
-              Claude Code in one command:
+              create a checklist, tick decisions, and advance the column as work ships. Install the
+              Claude Code plugin — it adds the <code className="rounded bg-muted px-1 py-0.5 text-xs">/lanework:*</code>{" "}
+              slash commands <strong className="text-foreground">and</strong> the MCP server:
             </p>
             <CodeBlock
-              code={"npx @phake/lanework setup claude-code"}
+              code={"claude plugin marketplace add fuongz/lanework\nclaude plugin install lanework@lanework"}
               filename="Claude Code"
               lang="bash"
               icon={<HugeiconsIcon icon={ComputerTerminal01Icon} className="size-4 text-primary" />}
             />
             <p className="text-muted-foreground">
-              The board opens automatically (≈{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">127.0.0.1:3662</code>) whenever
-              Claude Code starts — Serena-style. Pass{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">--no-dashboard</code> to run
-              headless.
+              Restart Claude Code, then type{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">/lanework:</code> —{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">create</code>,{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">status</code>,{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">advance</code>, and more. The board
+              also opens (≈{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">127.0.0.1:3662</code>) on startup —
+              Serena-style; set <code className="rounded bg-muted px-1 py-0.5 text-xs">LANEWORK_DASHBOARD=0</code>{" "}
+              to run headless.
             </p>
             <p className="text-muted-foreground">
-              Prefer slash commands too? Install the plugin —{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">claude plugin marketplace add fuongz/lanework</code>{" "}
-              then{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">claude plugin install lanework@lanework</code>{" "}
-              — for{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">/lanework:create</code>,{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">/lanework:status</code>,{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">/lanework:advance</code>, and more.
+              Just want the MCP tools (no slash commands)? Register the server on its own:{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">npx @phake/lanework setup claude-code</code>.
             </p>
             <div className="divide-y overflow-hidden rounded-lg border text-muted-foreground">
               {[

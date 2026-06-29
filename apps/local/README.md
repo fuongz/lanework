@@ -44,29 +44,23 @@ lanework mcp --no-dashboard   # MCP server only, no browser (headless / CI)
 
 ### Install into Claude Code
 
-One command (Serena-style) registers the MCP server — it wraps `claude mcp add` for you:
+Install the lanework **plugin** — it gives you the `/lanework:*` slash commands **and** the
+MCP server in one step:
 
 ```bash
-npx @phake/lanework setup claude-code                 # global (user scope) — opens the board on startup
-npx @phake/lanework setup claude-code --project       # only the current project
-npx @phake/lanework setup claude-code --no-dashboard  # headless — don't open the board
-npx @phake/lanework setup claude-code --local         # register this local build instead of npx
+claude plugin marketplace add fuongz/lanework
+claude plugin install lanework@lanework
 ```
 
-By default the web board boots (and opens your browser) every time Claude Code starts and
-connects the server — like Serena. Pass `--no-dashboard` to run headless; plugin users opt
-out by setting `LANEWORK_DASHBOARD=0` in the server's env. Note: each Claude Code session
-starts its own board (the port climbs from `3662` if one's busy).
+Restart Claude Code, then type `/lanework:` — `/lanework:create`, `/lanework:status`,
+`/lanework:review`, `/lanework:advance`, `/lanework:tick`. By default the web board also
+opens (≈ `:3662`) when a session starts — Serena-style; set `LANEWORK_DASHBOARD=0` in the
+server env to run headless. (Each Claude Code session starts its own board; the port climbs
+from `3662` if one's busy.) See [`plugin/README.md`](../../plugin/README.md).
 
-…or do it by hand:
-
-```bash
-claude mcp add --scope user lanework -- npx -y @phake/lanework mcp
-```
-
-Restart Claude Code, then `/mcp` should show **lanework** connected. (This gives the MCP
-*tools*; for the `/lanework:*` slash commands too, install the plugin — see
-[Slash commands](#slash-commands-lanework) below.)
+> Just want the MCP **tools** (no slash commands)? Register the server on its own:
+> `npx @phake/lanework setup claude-code` (add `--no-dashboard` for headless, `--local` to
+> use this build).
 
 ### Tools
 
@@ -84,19 +78,6 @@ Restart Claude Code, then `/mcp` should show **lanework** connected. (This gives
 | `cost_estimate` | Per-model Claude Code token usage from local `~/.claude` transcripts. |
 
 All tools honour the layout/config below (date folders, frontmatter `status:`, field aliases).
-
-### Slash commands (`/lanework:*`)
-
-For Claude Code, the **lanework plugin** wraps these tools in slash commands —
-`/lanework:create`, `/lanework:status`, `/lanework:review`, `/lanework:advance`,
-`/lanework:tick` — and registers the MCP server for you:
-
-```bash
-claude plugin marketplace add fuongz/lanework
-claude plugin install lanework@lanework
-```
-
-See [`plugin/README.md`](../../plugin/README.md) for details.
 
 ## What it does
 
