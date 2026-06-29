@@ -1,7 +1,7 @@
 {
   "name": "lanework",
   "description": "Drive your .agents/reviews Kanban board through an AI-Driven Development Lifecycle — create review checklists, tick decisions, and advance status — backed by the lanework MCP server.",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "author": {
     "name": "fuongz",
     "url": "https://github.com/fuongz/lanework"

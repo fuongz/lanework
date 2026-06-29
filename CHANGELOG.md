@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-29
+
+### Added
+- **Local agent orchestration** — run an agent directly against a review card from the
+  board (and a Todoist-style card layout to drive it). The hosted webapp is paused in
+  favour of the local-first flow.
+- **Claude usage costs + git branch in the sidebar** — surface per-run cost estimates and
+  the active branch alongside the board.
+
+### Changed
+- **Board + checklist UI polish** across the card and review dialog.
+
+### Fixed
+- **Per-checklist live progress** — each checklist header now shows its own `x of x`
+  count with a progress ring that fills as boxes are ticked (and a solid checkmark at
+  100%), instead of a static seed or the whole document's combined total. "Pick one"
+  radio groups collapse to a single item.
+
 ## [0.2.3] - 2026-06-29
 
 ### Changed

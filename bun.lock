@@ -51,7 +51,7 @@
     },
     "apps/local": {
       "name": "@phake/lanework",
-      "version": "0.2.3",
+      "version": "0.3.0",
       "bin": {
         "lanework": "cli.mjs",
         "lw": "cli.mjs",

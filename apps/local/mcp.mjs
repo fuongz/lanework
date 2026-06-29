@@ -82,7 +82,7 @@ export async function startMcp({ dir = process.cwd(), dashboard = true } = {}) {
   if (dashboard) startDashboard(dir);
 
   const server = new McpServer(
-    { name: "lanework", version: "0.2.3" },
+    { name: "lanework", version: "0.3.0" },
     {
       instructions:
         "lanework drives an AI-Driven Development Lifecycle through a repo's .agents/reviews board. " +
