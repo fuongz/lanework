@@ -1,8 +1,8 @@
-// lanework MCP server (stdio) — the "Serena-style" mode.
+// lanework MCP server (stdio).
 //
 // Claude (or any MCP client) launches `lanework mcp`. This:
 //   1. exposes tools the agent calls to read/update the repo's .agents/reviews,
-//   2. optionally boots the web dashboard + opens the browser, like Serena.
+//   2. optionally boots the web dashboard + opens the browser.
 //
 // STDIO PROTOCOL RULE: stdout carries the JSON-RPC stream, so nothing else may
 // write to it. All logs go to stderr, and the dashboard runs as a *child*

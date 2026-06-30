@@ -54,7 +54,7 @@ claude plugin install lanework@lanework
 
 Restart Claude Code, then type `/lanework:` — `/lanework:create`, `/lanework:status`,
 `/lanework:review`, `/lanework:advance`, `/lanework:tick`. By default the web board also
-opens (≈ `:3662`) when a session starts — Serena-style; set `LANEWORK_DASHBOARD=0` in the
+opens (≈ `:3662`) when a session starts; set `LANEWORK_DASHBOARD=0` in the
 server env to run headless. (Each Claude Code session starts its own board; the port climbs
 from `3662` if one's busy.) See [`plugin/README.md`](../../plugin/README.md).
 

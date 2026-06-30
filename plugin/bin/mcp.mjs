@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 const passthru = process.argv.slice(2);
 const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
-// The board opens on startup by default (Serena-style). Opt out — run headless —
+// The board opens on startup by default. Opt out — run headless —
 // by setting LANEWORK_DASHBOARD to a falsy value in the MCP server's env.
 const headless = /^(0|false|no|off)$/i.test(process.env.LANEWORK_DASHBOARD || "");
 if (headless && !passthru.includes("--no-dashboard")) passthru.push("--no-dashboard");

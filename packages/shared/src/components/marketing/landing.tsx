@@ -664,7 +664,7 @@ function Mcp() {
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
               The board also opens automatically (≈ <span className="font-mono">:3662</span>) whenever
-              Claude Code starts — Serena-style. Set{" "}
+              Claude Code starts. Set{" "}
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">LANEWORK_DASHBOARD=0</code>{" "}
               to run headless.
             </p>

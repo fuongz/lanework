@@ -112,7 +112,7 @@ lanework [dir] [--port N] [--no-open]
 After a global install (`npm i -g @phake/lanework`) the commands **`lanework`** and
 the short alias **`lw`** are available everywhere.
 
-## Use as an MCP server (Serena-style)
+## Use as an MCP server
 
 `lanework mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
 server over stdio, so an agent like Claude can **drive the full review lifecycle**
@@ -129,8 +129,7 @@ claude plugin install lanework@lanework
 
 Restart Claude Code, then type `/lanework:` for the commands (`/lanework:create`,
 `/lanework:status`, `/lanework:advance`, …). By default the web board also opens (≈ `:3662`)
-when a session starts — Serena-style; set `LANEWORK_DASHBOARD=0` in the server env to run
-headless.
+when a session starts; set `LANEWORK_DASHBOARD=0` in the server env to run headless.
 
 > Just want the MCP **tools** (no slash commands)? Register the server on its own:
 > `npx @phake/lanework setup claude-code` (add `--no-dashboard` for headless).

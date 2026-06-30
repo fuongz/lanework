@@ -6,7 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 // Local (no-Cloudflare) build target. Builds the shared app source into a Node
 // SSR fetch handler + client assets (dist-local/) that cli.mjs + server.mjs
-// serve with srvx on 127.0.0.1 — the "run like Serena" mode. Differences from
+// serve with srvx on 127.0.0.1 — the local-first mode. Differences from
 // the webapp config:
 //  - No `@cloudflare/vite-plugin` (we're not targeting Workers).
 //  - `cloudflare:workers` is aliased to a Node shim so imports resolve.

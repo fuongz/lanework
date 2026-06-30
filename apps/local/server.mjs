@@ -1,5 +1,5 @@
 // Local server launcher — serves the Node SSR build (dist-local) on 127.0.0.1,
-// the "run like Serena" mode. Static client assets are served from disk; every
+// the local-first mode. Static client assets are served from disk; every
 // other request is delegated to the TanStack Start SSR fetch handler.
 import { serve } from "srvx";
 import { readFile, stat } from "node:fs/promises";
@@ -153,7 +153,7 @@ function portFree(port, host) {
   });
 }
 
-/** First free port at or after `start` (Serena-style fallback: 3662, 3663, …). */
+/** First free port at or after `start` (fallback: 3662, 3663, …). */
 async function findFreePort(start, host) {
   for (let p = start; p < start + 100; p++) {
     if (await portFree(p, host)) return p;

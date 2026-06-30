@@ -339,8 +339,8 @@ function GuideBody() {
               <code className="rounded bg-muted px-1 py-0.5 text-xs">status</code>,{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">advance</code>, and more. The board
               also opens (≈{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">127.0.0.1:3662</code>) on startup —
-              Serena-style; set <code className="rounded bg-muted px-1 py-0.5 text-xs">LANEWORK_DASHBOARD=0</code>{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">127.0.0.1:3662</code>) on startup; set{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">LANEWORK_DASHBOARD=0</code>{" "}
               to run headless.
             </p>
             <p className="text-muted-foreground">

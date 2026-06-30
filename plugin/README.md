@@ -39,6 +39,23 @@ claude plugin install lanework@lanework
 Then restart Claude Code in the repo you want to board, and type `/lanework:` to see the
 commands. The MCP server boots automatically and operates on that repo's `.agents/reviews`.
 
+## Running headless (no board)
+
+By default the web board also opens (≈ `http://127.0.0.1:3662`) whenever the MCP server
+starts. To keep the tools but **not** open the board, set
+`LANEWORK_DASHBOARD=0` (any of `0`/`false`/`no`/`off`) in the server's environment.
+
+The most durable way — survives plugin updates — is to export it where Claude Code launches:
+
+```bash
+# ~/.zshrc (or ~/.bashrc)
+export LANEWORK_DASHBOARD=0
+```
+
+MCP servers inherit Claude Code's environment, so the board stays closed on every session.
+Restart Claude Code after changing it. Unset the variable (or set it to `1`) to bring the
+board back.
+
 ## How the MCP server is launched
 
 `.mcp.json` runs `bin/mcp.mjs`, a small launcher that **prefers this repo's local build**

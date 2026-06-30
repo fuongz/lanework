@@ -2,7 +2,7 @@
 // `lanework` — run the kanban board locally against the current directory's
 // `.agents/reviews` folder. No Cloudflare, no auth, no network: it reads files
 // off disk, serves the same UI on 127.0.0.1, and opens your browser — the
-// "run like Serena" local mode.
+// local-first mode.
 //
 // Usage:
 //   lanework                 # board for the current directory
@@ -89,12 +89,12 @@ if (open) openBrowser(url);
 
 /**
  * `lanework setup claude-code` — register the lanework MCP server with Claude
- * Code by running `claude mcp add` (the Serena-style one-command install). This
+ * Code by running `claude mcp add` (the one-command install). This
  * gives the MCP *tools* only; for the `/lanework:*` slash commands too, install
  * the plugin (see plugin/README.md). Flags:
  *   --project       scope to the current project (default: --scope user, global)
  *   --no-dashboard  run headless — don't boot the web board on startup. By default
- *                   the board opens (≈ :3662) whenever Claude Code starts (Serena-style).
+ *                   the board opens (≈ :3662) whenever Claude Code starts.
  *   --local         register this local build instead of `npx @phake/lanework`
  *   --name <id>     server name (default: lanework)
  */
@@ -112,7 +112,7 @@ async function runSetup(args) {
   const nameIdx = args.indexOf("--name");
   const name = nameIdx >= 0 && args[nameIdx + 1] ? args[nameIdx + 1] : "lanework";
 
-  // By default the server also opens the board on startup (Serena-style);
+  // By default the server also opens the board on startup;
   // --no-dashboard runs it headless.
   const tail = headless ? ["mcp", "--no-dashboard"] : ["mcp"];
   const launch = useLocal
