@@ -78,7 +78,7 @@ function summarizeCard(c) {
   };
 }
 
-export async function startMcp({ dir = process.cwd(), dashboard = true } = {}) {
+export async function startMcp({ dir = process.cwd(), dashboard = false } = {}) {
   process.env.LANEWORK_DIR = dir;
   if (dashboard) startDashboard(dir);
 

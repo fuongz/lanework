@@ -39,22 +39,22 @@ claude plugin install lanework@lanework
 Then restart Claude Code in the repo you want to board, and type `/lanework:` to see the
 commands. The MCP server boots automatically and operates on that repo's `.agents/reviews`.
 
-## Running headless (no board)
+## Opening the web board
 
-By default the web board also opens (≈ `http://127.0.0.1:3662`) whenever the MCP server
-starts. To keep the tools but **not** open the board, set
-`LANEWORK_DASHBOARD=0` (any of `0`/`false`/`no`/`off`) in the server's environment.
+By default the plugin runs **headless** — you get the MCP tools and slash commands, but no
+board window. To also auto-open the web board (≈ `http://127.0.0.1:3662`) whenever the MCP
+server starts, set `LANEWORK_DASHBOARD=1` (any of `1`/`true`/`yes`/`on`) in the server's
+environment.
 
 The most durable way — survives plugin updates — is to export it where Claude Code launches:
 
 ```bash
 # ~/.zshrc (or ~/.bashrc)
-export LANEWORK_DASHBOARD=0
+export LANEWORK_DASHBOARD=1
 ```
 
-MCP servers inherit Claude Code's environment, so the board stays closed on every session.
-Restart Claude Code after changing it. Unset the variable (or set it to `1`) to bring the
-board back.
+MCP servers inherit Claude Code's environment, so the board opens on every session. Restart
+Claude Code after changing it. Unset the variable (or set it to `0`) to go back to headless.
 
 ## How the MCP server is launched
 
@@ -81,7 +81,7 @@ change needs a fresh session.
 Quick alternative (no plugin, just the server) for a one-off check:
 
 ```bash
-claude mcp add lanework -- node "$(pwd)/apps/local/cli.mjs" mcp --no-dashboard
+claude mcp add lanework -- node "$(pwd)/apps/local/cli.mjs" mcp
 ```
 
 ## Publishing (for end users)

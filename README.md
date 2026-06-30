@@ -128,11 +128,12 @@ claude plugin install lanework@lanework
 ```
 
 Restart Claude Code, then type `/lanework:` for the commands (`/lanework:create`,
-`/lanework:status`, `/lanework:advance`, …). By default the web board also opens (≈ `:3662`)
-when a session starts; set `LANEWORK_DASHBOARD=0` in the server env to run headless.
+`/lanework:status`, `/lanework:advance`, …). The server runs **headless by default**
+(tools only); set `LANEWORK_DASHBOARD=1` in the server env to also auto-open the web
+board (≈ `:3662`) when a session starts.
 
 > Just want the MCP **tools** (no slash commands)? Register the server on its own:
-> `npx @phake/lanework setup claude-code` (add `--no-dashboard` for headless).
+> `npx @phake/lanework setup claude-code` (add `--dashboard` to auto-open the board).
 
 Tools exposed:
 

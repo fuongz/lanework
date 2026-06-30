@@ -38,8 +38,8 @@ Lifecycle: **inception** (`create_review` → a `todo` checklist of decisions) �
 `todo → processing → done`, or `dropped`).
 
 ```bash
-lanework mcp [dir]            # MCP server + the web board (a live "dashboard")
-lanework mcp --no-dashboard   # MCP server only, no browser (headless / CI)
+lanework mcp [dir]           # MCP server only, no browser (headless / CI)
+lanework mcp --dashboard     # MCP server + the web board (a live "dashboard")
 ```
 
 ### Install into Claude Code
@@ -53,13 +53,13 @@ claude plugin install lanework@lanework
 ```
 
 Restart Claude Code, then type `/lanework:` — `/lanework:create`, `/lanework:status`,
-`/lanework:review`, `/lanework:advance`, `/lanework:tick`. By default the web board also
-opens (≈ `:3662`) when a session starts; set `LANEWORK_DASHBOARD=0` in the
-server env to run headless. (Each Claude Code session starts its own board; the port climbs
-from `3662` if one's busy.) See [`plugin/README.md`](../../plugin/README.md).
+`/lanework:review`, `/lanework:advance`, `/lanework:tick`. The server runs headless by
+default (tools only); set `LANEWORK_DASHBOARD=1` in the server env to also auto-open the
+web board (≈ `:3662`) when a session starts. (Each Claude Code session starts its own
+board; the port climbs from `3662` if one's busy.) See [`plugin/README.md`](../../plugin/README.md).
 
 > Just want the MCP **tools** (no slash commands)? Register the server on its own:
-> `npx @phake/lanework setup claude-code` (add `--no-dashboard` for headless, `--local` to
+> `npx @phake/lanework setup claude-code` (add `--dashboard` to auto-open the board, `--local` to
 > use this build).
 
 ### Tools

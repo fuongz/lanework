@@ -43,7 +43,9 @@ if (argv[0] === "mcp") {
   let mcpDir = process.cwd();
   for (const a of rest) if (!a.startsWith("-")) mcpDir = resolve(a);
   const { startMcp } = await import("./mcp.mjs");
-  await startMcp({ dir: mcpDir, dashboard: !rest.includes("--no-dashboard") });
+  // Headless by default; the board only opens when --dashboard is passed (and an
+  // explicit --no-dashboard always wins, for back-compat with older registrations).
+  await startMcp({ dir: mcpDir, dashboard: rest.includes("--dashboard") && !rest.includes("--no-dashboard") });
   // startMcp keeps the process alive on the stdio transport.
 } else {
   await runDashboard();
@@ -62,8 +64,8 @@ for (let i = 0; i < argv.length; i++) {
     console.log(
       "Usage:\n" +
         "  lanework [dir] [--port N] [--no-open]   board a repo's .agents/reviews\n" +
-        "  lanework mcp [dir] [--no-dashboard]     run as an MCP (stdio) server\n" +
-        "  lanework setup claude-code [--project] [--no-dashboard] [--local]   register the MCP server with Claude Code",
+        "  lanework mcp [dir] [--dashboard]        run as an MCP (stdio) server\n" +
+        "  lanework setup claude-code [--project] [--dashboard] [--local]   register the MCP server with Claude Code",
     );
     process.exit(0);
   } else if (!a.startsWith("-")) dir = resolve(a);
@@ -93,8 +95,8 @@ if (open) openBrowser(url);
  * gives the MCP *tools* only; for the `/lanework:*` slash commands too, install
  * the plugin (see plugin/README.md). Flags:
  *   --project       scope to the current project (default: --scope user, global)
- *   --no-dashboard  run headless — don't boot the web board on startup. By default
- *                   the board opens (≈ :3662) whenever Claude Code starts.
+ *   --dashboard     also auto-open the web board (≈ :3662) whenever Claude Code
+ *                   starts. By default the server runs headless (tools only).
  *   --local         register this local build instead of `npx @phake/lanework`
  *   --name <id>     server name (default: lanework)
  */
@@ -102,19 +104,18 @@ async function runSetup(args) {
   const client = args.find((a) => !a.startsWith("-"));
   if (client !== "claude-code") {
     console.error(
-      "Usage: lanework setup claude-code [--project] [--no-dashboard] [--local] [--name <id>]",
+      "Usage: lanework setup claude-code [--project] [--dashboard] [--local] [--name <id>]",
     );
     process.exit(client ? 1 : 0);
   }
   const useLocal = args.includes("--local");
   const projectScope = args.includes("--project");
-  const headless = args.includes("--no-dashboard") || args.includes("--headless");
+  const withDashboard = args.includes("--dashboard");
   const nameIdx = args.indexOf("--name");
   const name = nameIdx >= 0 && args[nameIdx + 1] ? args[nameIdx + 1] : "lanework";
 
-  // By default the server also opens the board on startup;
-  // --no-dashboard runs it headless.
-  const tail = headless ? ["mcp", "--no-dashboard"] : ["mcp"];
+  // Headless by default (tools only); --dashboard also auto-opens the board on startup.
+  const tail = withDashboard ? ["mcp", "--dashboard"] : ["mcp"];
   const launch = useLocal
     ? [process.execPath, fileURLToPath(new URL("./cli.mjs", import.meta.url)), ...tail]
     : ["npx", "-y", "@phake/lanework", ...tail];
@@ -140,9 +141,9 @@ async function runSetup(args) {
         console.log(
           `\n✓ Registered. Restart Claude Code, then run /mcp — server "${name}" should be connected.\n` +
             "  Tools: list_reviews, create_review, set_status, toggle_item, lifecycle_status, …" +
-            (headless
-              ? "\n  Headless: no board. Re-run without --no-dashboard to auto-open it on startup."
-              : "\n  Dashboard: the board opens automatically (≈ http://127.0.0.1:3662) each time Claude Code starts."),
+            (withDashboard
+              ? "\n  Dashboard: the board opens automatically (≈ http://127.0.0.1:3662) each time Claude Code starts."
+              : "\n  Headless: tools only, no board. Re-run with --dashboard to auto-open it on startup."),
         );
       }
       process.exit(code ?? 0);
