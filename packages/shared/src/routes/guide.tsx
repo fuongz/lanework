@@ -15,7 +15,6 @@ import {
 import { getSessionUser } from "@/server/reviews";
 import { AppShell } from "@/components/app-shell";
 import { SiteHeader } from "@/components/marketing/site-header";
-import { GitHubLoginButton } from "@/components/marketing/github-login-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { AGENTS_TEMPLATE, EXAMPLE_REVIEW } from "@/content/agents-template";
@@ -82,11 +81,7 @@ function GuidePage() {
   }
   return (
     <div className="min-h-screen overflow-y-auto">
-      <SiteHeader
-        actions={
-          <GitHubLoginButton size="sm">Continue with GitHub</GitHubLoginButton>
-        }
-      />
+      <SiteHeader />
       <div className="pt-16">
         <GuideBody />
       </div>
@@ -337,11 +332,11 @@ function GuideBody() {
               <code className="rounded bg-muted px-1 py-0.5 text-xs">/lanework:</code> —{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">create</code>,{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">status</code>,{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">advance</code>, and more. The board
-              also opens (≈{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">127.0.0.1:3662</code>) on startup; set{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">LANEWORK_DASHBOARD=0</code>{" "}
-              to run headless.
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">advance</code>, and more. The server
+              runs headless by default; set{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">LANEWORK_DASHBOARD=1</code>{" "}
+              to also auto-open the board (≈{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">127.0.0.1:3662</code>) on startup.
             </p>
             <p className="text-muted-foreground">
               Just want the MCP tools (no slash commands)? Register the server on its own:{" "}

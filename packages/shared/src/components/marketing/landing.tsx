@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { motion } from "motion/react";
+import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight01Icon,
@@ -10,7 +10,7 @@ import {
   CheckmarkSquare02Icon,
   CheckmarkCircle02Icon,
   Flag02Icon,
-  Comment01Icon,
+  Calendar03Icon,
   ComputerTerminal01Icon,
   CloudIcon,
   Coins01Icon,
@@ -24,6 +24,7 @@ import { CodexDark } from "@/components/ui/svgs/codexDark";
 import { CursorLight } from "@/components/ui/svgs/cursorLight";
 import { CursorDark } from "@/components/ui/svgs/cursorDark";
 import { STATUS_META } from "@/lib/review-status";
+import { tagPill } from "@/lib/tag-color";
 import { cn } from "@/lib/utils";
 import { Wordmark } from "./wordmark";
 import { GitHubLoginButton } from "./github-login-button";
@@ -211,7 +212,15 @@ function Underline() {
 // `tone="onDark"` is for pills sitting on the dark emerald CTA — the default
 // muted/card tokens bleed the green through on hover, so use crisp, emerald-aware
 // colors there instead.
-function CommandPill({ command, tone = "default" }: { command: string; tone?: "default" | "onDark" }) {
+function CommandPill({
+  command,
+  tone = "default",
+  block = false,
+}: {
+  command: string;
+  tone?: "default" | "onDark";
+  block?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   const onDark = tone === "onDark";
   return (
@@ -224,7 +233,8 @@ function CommandPill({ command, tone = "default" }: { command: string; tone?: "d
         });
       }}
       className={cn(
-        "group inline-flex h-12 items-center gap-3 rounded-xl border pr-2.5 pl-4 font-mono text-sm shadow-sm transition-colors",
+        "group h-12 items-center gap-3 rounded-xl border pr-2.5 pl-4 font-mono text-sm shadow-sm transition-colors",
+        block ? "flex w-full" : "inline-flex",
         onDark
           ? "border-white/20 bg-white hover:bg-emerald-50"
           : "border-border bg-card hover:bg-muted/40",
@@ -235,7 +245,7 @@ function CommandPill({ command, tone = "default" }: { command: string; tone?: "d
       <span className={onDark ? "text-emerald-950" : "text-foreground"}>{command}</span>
       <span
         className={cn(
-          "grid size-7 place-items-center rounded-lg transition-colors",
+          "ml-auto grid size-7 shrink-0 place-items-center rounded-lg transition-colors",
           onDark
             ? "bg-emerald-600/10 text-emerald-700 group-hover:bg-emerald-600/20 group-hover:text-emerald-900"
             : "bg-muted text-muted-foreground group-hover:text-foreground",
@@ -332,38 +342,191 @@ function Bullet({ children }: { children: React.ReactNode }) {
 
 interface MockCard {
   title: string;
+  summary?: string;
   priority?: "high" | "medium" | "low";
   date: string;
   done: number;
   total: number;
-  notes: number;
+  tags?: string[];
   people: string[];
+  /** Shows the "Claude is working" badge — a card with a live agent run. */
+  running?: boolean;
 }
 
-const MOCK: { col: ReviewColumn; cards: MockCard[] }[] = [
+interface MockItem {
+  id: string;
+  col: ReviewColumn;
+  card: MockCard;
+}
+
+/** The three pipeline columns the demo card flows through. */
+const BOARD_COLS: ReviewColumn[] = ["todo", "processing", "done"];
+
+const INITIAL_ITEMS: MockItem[] = [
   {
+    id: "dark-mode",
     col: "todo",
-    cards: [
-      { title: "Add dark mode toggle", priority: "medium", date: "21 Jun", done: 0, total: 8, notes: 1, people: ["alex", "mira"] },
-      { title: "Paginate the search API", priority: "low", date: "20 Jun", done: 0, total: 5, notes: 0, people: ["pat"] },
-    ],
+    card: {
+      title: "Add dark mode toggle",
+      summary: "Respect the OS preference and persist the choice across sessions.",
+      priority: "medium",
+      date: "21 Jun 2026",
+      done: 0,
+      total: 8,
+      tags: ["ui", "design-system"],
+      people: ["alex", "mira"],
+    },
   },
   {
+    id: "search-api",
+    col: "todo",
+    card: {
+      title: "Paginate the search API",
+      summary: "Cursor-based pagination for the results endpoint, 25 per page.",
+      priority: "low",
+      date: "20 Jun 2026",
+      done: 0,
+      total: 5,
+      tags: ["server-fn"],
+      people: ["pat"],
+    },
+  },
+  {
+    id: "auth",
     col: "processing",
-    cards: [
-      { title: "Refactor auth middleware", priority: "high", date: "19 Jun", done: 4, total: 9, notes: 3, people: ["alex", "jdoe", "mira"] },
-    ],
+    card: {
+      title: "Refactor auth middleware",
+      summary: "Extract token verification into a shared helper and cover the refresh path.",
+      priority: "high",
+      date: "19 Jun 2026",
+      done: 4,
+      total: 9,
+      tags: ["auth", "server-fn"],
+      people: ["alex", "jdoe", "mira"],
+    },
   },
   {
+    id: "og-images",
+    col: "processing",
+    card: {
+      title: "Generate OG images",
+      summary: "Render per-page social cards at build time via a Worker.",
+      priority: "medium",
+      date: "19 Jun 2026",
+      done: 2,
+      total: 6,
+      tags: ["cloudflare"],
+      people: ["jdoe"],
+      running: true,
+    },
+  },
+  {
+    id: "cache",
     col: "done",
-    cards: [
-      { title: "Cache homepage queries", priority: "medium", date: "18 Jun", done: 14, total: 14, notes: 2, people: ["pat"] },
-      { title: "Fix flaky checkout test", priority: "low", date: "17 Jun", done: 6, total: 6, notes: 0, people: ["alex", "mira"] },
-    ],
+    card: {
+      title: "Cache homepage queries",
+      summary: "Memoize the board metadata GraphQL query (≈50 files per request).",
+      priority: "medium",
+      date: "18 Jun 2026",
+      done: 14,
+      total: 14,
+      tags: ["d1", "cloudflare"],
+      people: ["pat"],
+    },
+  },
+  {
+    id: "flaky",
+    col: "done",
+    card: {
+      title: "Fix flaky checkout test",
+      summary: "Stabilize the retry-prone e2e by awaiting the network-idle state.",
+      priority: "low",
+      date: "17 Jun 2026",
+      done: 6,
+      total: 6,
+      tags: ["board"],
+      people: ["alex", "mira"],
+    },
   },
 ];
 
+/** Cards that take turns "flowing" forward through the columns, in this order. */
+const TRAVELERS = ["dark-mode", "auth", "search-api"];
+
+/** Pointer coords (viewport-relative, like getBoundingClientRect) from a drag event. */
+function pointerXY(e: MouseEvent | TouchEvent | PointerEvent): { x: number; y: number } {
+  if ("clientX" in e) return { x: e.clientX, y: e.clientY };
+  const t = e.changedTouches?.[0];
+  return t ? { x: t.clientX, y: t.clientY } : { x: 0, y: 0 };
+}
+
 function BoardMock() {
+  const reduceMotion = useReducedMotion();
+  const [items, setItems] = useState(INITIAL_ITEMS);
+  const [liftedId, setLiftedId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  // Column drop zones for hit-testing a user drag, + a timestamp that pauses the
+  // auto-demo for a bit after the user interacts (so it never fights the user).
+  const colRefs = useRef<Partial<Record<ReviewColumn, HTMLDivElement | null>>>({});
+  const pauseUntil = useRef(0);
+
+  // Auto-demo: on a loop, "pick up" a card (lift) and drop it into the next
+  // column — the shared `layoutId` makes it glide across and the counts reflow.
+  // Paused while/just after the user drags, and skipped under reduced motion.
+  useEffect(() => {
+    if (reduceMotion) return;
+    let cancelled = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const wait = (ms: number) =>
+      new Promise<void>((resolve) => {
+        timers.push(setTimeout(resolve, ms));
+      });
+
+    void (async () => {
+      let turn = 0;
+      while (!cancelled) {
+        await wait(2400);
+        if (cancelled) break;
+        if (Date.now() < pauseUntil.current) continue; // user is driving — skip this turn
+        const id = TRAVELERS[turn % TRAVELERS.length];
+        turn += 1;
+        setLiftedId(id); // pick up
+        await wait(420);
+        if (cancelled) break;
+        setItems((prev) =>
+          prev.map((it) =>
+            it.id === id
+              ? { ...it, col: BOARD_COLS[(BOARD_COLS.indexOf(it.col) + 1) % BOARD_COLS.length] }
+              : it,
+          ),
+        ); // drop into the next column
+        await wait(560);
+        if (cancelled) break;
+        setLiftedId(null); // set down
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
+  }, [reduceMotion]);
+
+  const handleDragEnd = (id: string, e: MouseEvent | TouchEvent | PointerEvent) => {
+    const { x, y } = pointerXY(e);
+    let target: ReviewColumn | null = null;
+    for (const col of BOARD_COLS) {
+      const r = colRefs.current[col]?.getBoundingClientRect();
+      if (r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+        target = col;
+        break;
+      }
+    }
+    setDraggingId(null);
+    pauseUntil.current = Date.now() + 6000; // give the user the wheel for a bit
+    if (target) setItems((prev) => prev.map((it) => (it.id === id ? { ...it, col: target } : it)));
+  };
+
   return (
     <div className="relative mx-auto max-w-5xl rounded-2xl border border-border/70 bg-card/80 p-3 shadow-2xl shadow-black/5 backdrop-blur sm:p-4">
       {/* faux window bar */}
@@ -372,94 +535,168 @@ function BoardMock() {
         <span className="size-2.5 rounded-full bg-muted-foreground/25" />
         <span className="size-2.5 rounded-full bg-muted-foreground/25" />
         <span className="ml-3 font-mono text-[11px] text-muted-foreground">lanework — acme/web</span>
+        <span className="ml-auto hidden font-mono text-[10px] text-muted-foreground/70 sm:inline">
+          drag a card between columns
+        </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {MOCK.map((column, ci) => {
-          const meta = STATUS_META[column.col];
-          return (
-            <motion.div
-              key={column.col}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.35 + ci * 0.1 }}
-              className="rounded-xl bg-muted/40 p-2.5"
-            >
-              <div className="mb-2 flex items-center gap-2 px-1">
-                <HugeiconsIcon icon={meta.icon} className={cn("size-4", meta.color)} />
-                <span className="text-sm font-medium">{meta.label}</span>
-                <span className="text-sm text-muted-foreground">{column.cards.length}</span>
-              </div>
-              <div className="flex flex-col gap-2">
-                {column.cards.map((card) => (
-                  <MockCardView key={card.title} card={card} />
-                ))}
-              </div>
-            </motion.div>
-          );
-        })}
-      </div>
+      <LayoutGroup>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {BOARD_COLS.map((col) => {
+            const meta = STATUS_META[col];
+            const colItems = items.filter((it) => it.col === col);
+            return (
+              <motion.div
+                key={col}
+                ref={(el) => {
+                  colRefs.current[col] = el;
+                }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.45 }}
+                className="rounded-xl bg-muted/40 p-2.5"
+              >
+                <div className="mb-2 flex items-center gap-2 px-1">
+                  <HugeiconsIcon icon={meta.icon} className={cn("size-4", meta.color)} />
+                  <span className="text-sm font-medium">{meta.label}</span>
+                  <motion.span layout className="text-sm text-muted-foreground">
+                    {colItems.length}
+                  </motion.span>
+                </div>
+                <div className="flex min-h-[4.5rem] flex-col gap-2">
+                  {colItems.map((it) => {
+                    const dragging = draggingId === it.id;
+                    const lifted = liftedId === it.id || dragging;
+                    return (
+                      <motion.div
+                        key={it.id}
+                        layout
+                        layoutId={it.id}
+                        drag
+                        dragSnapToOrigin
+                        dragElastic={0.2}
+                        whileDrag={{ scale: 1.05, rotate: -2 }}
+                        onDragStart={() => {
+                          setDraggingId(it.id);
+                          pauseUntil.current = Date.now() + 6000;
+                        }}
+                        onDragEnd={(e) => handleDragEnd(it.id, e)}
+                        animate={
+                          dragging ? undefined : { scale: lifted ? 1.035 : 1, rotate: lifted ? -1.5 : 0 }
+                        }
+                        transition={{
+                          layout: { type: "spring", stiffness: 380, damping: 32 },
+                          default: { duration: 0.28 },
+                        }}
+                        style={{ position: "relative", zIndex: lifted ? 30 : 1 }}
+                        className="cursor-grab touch-none active:cursor-grabbing"
+                      >
+                        <MockCardView card={it.card} lifted={lifted} />
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      </LayoutGroup>
     </div>
   );
 }
 
-const PRIORITY: Record<string, string> = {
-  high: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
-  medium: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-  low: "bg-muted text-muted-foreground",
+// Priority shown as a colored flag in the card corner (mirrors KanbanCard's PRIORITY_ICON).
+const PRIORITY_FLAG: Record<string, string> = {
+  high: "text-rose-500 fill-rose-100",
+  medium: "text-amber-500 fill-amber-100",
+  low: "text-muted-foreground/50 fill-muted-foreground",
 };
 const AVATAR = ["bg-emerald-500", "bg-sky-500", "bg-violet-500", "bg-rose-500"];
 
-// Mirrors the real KanbanCard: title → assignee pills → flag/date/priority →
-// footer with notes + a color-coded x/x progress badge.
-function MockCardView({ card }: { card: MockCard }) {
+// Mirrors the real KanbanCard: title + priority flag → summary → calendar date →
+// footer (color-coded x/y progress, tag pills, stacked assignee avatars).
+function MockCardView({ card, lifted = false }: { card: MockCard; lifted?: boolean }) {
   const pct = card.total ? Math.round((card.done / card.total) * 100) : 0;
   return (
-    <div className="rounded-xl border bg-card p-3.5 shadow-xs">
-      <h3 className="line-clamp-2 text-sm font-medium leading-snug text-card-foreground">{card.title}</h3>
-
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-        {card.people.map((p, i) => (
-          <span
-            key={p}
-            className="inline-flex items-center gap-1 rounded-full bg-secondary py-0.5 pr-2 pl-0.5 text-[11px] font-medium text-secondary-foreground"
-          >
-            <span className={cn("grid size-4 place-items-center rounded-full text-[8px] font-semibold text-white", AVATAR[i % AVATAR.length])}>
-              {p[0].toUpperCase()}
-            </span>
-            {p}
-          </span>
-        ))}
-      </div>
-
-      <div className="mt-2.5 flex items-center gap-2 text-xs text-muted-foreground">
-        <HugeiconsIcon icon={Flag02Icon} className="size-3.5" />
-        <span>{card.date}</span>
+    <div
+      className={cn(
+        "rounded-xl border bg-card p-3.5 transition-shadow duration-300",
+        lifted
+          ? "border-primary/40 shadow-[0_14px_30px_rgba(0,0,0,0.18)]"
+          : "border-border shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <h3 className="line-clamp-2 flex-1 text-sm font-semibold leading-snug text-card-foreground">{card.title}</h3>
         {card.priority ? (
-          <span className={cn("ml-auto rounded-md px-1.5 py-0.5 text-[11px] font-medium capitalize", PRIORITY[card.priority])}>
-            {card.priority}
-          </span>
+          <HugeiconsIcon icon={Flag02Icon} className={cn("mt-0.5 size-4 shrink-0", PRIORITY_FLAG[card.priority])} />
         ) : null}
       </div>
 
-      <div className="mt-3 flex items-center gap-3 border-t pt-2.5 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1">
-          <HugeiconsIcon icon={Comment01Icon} className="size-3.5" />
-          {card.notes}
+      {card.summary ? (
+        <p className="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">{card.summary}</p>
+      ) : null}
+
+      {card.running ? (
+        <span className="mt-2.5 inline-flex items-center gap-1.5 text-xs font-medium text-violet-600 dark:text-violet-400">
+          <HugeiconsIcon icon={RoboticIcon} className="size-3.5" />
+          Claude is working
+          <span className="relative flex size-1.5">
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-violet-500/70" />
+            <span className="relative inline-flex size-1.5 rounded-full bg-violet-500" />
+          </span>
         </span>
-        <span
-          className={cn(
-            "ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums",
-            pct === 100
-              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-              : pct === 0
-                ? "bg-muted text-muted-foreground"
-                : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-          )}
-        >
-          <HugeiconsIcon icon={CheckmarkSquare02Icon} className="size-3.5" />
-          {card.done}/{card.total}
-        </span>
+      ) : null}
+
+      <div className="mt-2.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <HugeiconsIcon icon={Calendar03Icon} className="size-3.5" />
+        <span className="tabular-nums">{card.date}</span>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2.5 border-t border-border/60 pt-2.5 text-xs text-muted-foreground">
+        {card.total > 0 ? (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 tabular-nums",
+              pct === 100 && "font-medium text-emerald-600 dark:text-emerald-400",
+            )}
+          >
+            <HugeiconsIcon icon={CheckmarkSquare02Icon} className="size-3.5" />
+            {card.done}/{card.total}
+          </span>
+        ) : null}
+
+        {card.tags?.length ? (
+          <span className="flex min-w-0 items-center gap-1">
+            {card.tags.slice(0, 2).map((tag) => (
+              <span
+                key={tag}
+                className={cn("max-w-[6rem] truncate rounded-md px-1.5 py-0.5 text-[11px] font-medium", tagPill(tag))}
+              >
+                {tag}
+              </span>
+            ))}
+            {card.tags.length > 2 ? (
+              <span className="text-[11px] text-muted-foreground">+{card.tags.length - 2}</span>
+            ) : null}
+          </span>
+        ) : null}
+
+        {card.people.length ? (
+          <div className="ml-auto flex -space-x-1.5">
+            {card.people.slice(0, 3).map((p, i) => (
+              <span
+                key={p}
+                className={cn(
+                  "grid size-5 place-items-center rounded-full text-[8px] font-semibold text-white ring-2 ring-card",
+                  AVATAR[i % AVATAR.length],
+                )}
+              >
+                {p[0].toUpperCase()}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -617,6 +854,108 @@ function Features() {
   );
 }
 
+/* ------------------------------------------------------- file/code window -- */
+
+/**
+ * A light "file window" chrome — a titled header bar (icon · filename · copy
+ * affordance) over a syntax-highlighted body. Shared by the MCP terminal and the
+ * convention-file mockups so both read as the same on-brand surface, not raw
+ * dark terminals. The syntax accent uses the page's emerald `text-primary`.
+ */
+function FileWindow({
+  icon,
+  name,
+  children,
+}: {
+  icon: React.ComponentProps<typeof HugeiconsIcon>["icon"];
+  name: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xl">
+      <div className="flex items-center gap-2 border-b border-border/70 bg-muted/40 px-4 py-2.5">
+        <HugeiconsIcon icon={icon} className="size-3.5 shrink-0 text-primary" />
+        <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{name}</span>
+      </div>
+      <div className="flex-1 overflow-x-auto p-5">{children}</div>
+    </div>
+  );
+}
+
+/** One highlighted line of a markdown review file (headings, frontmatter, checkboxes). */
+function MdLine({ line }: { line: string }) {
+  if (/^#{1,6}\s/.test(line)) return <span className="font-medium text-primary">{line}</span>;
+  if (line === "---") return <span className="text-muted-foreground/50">{line}</span>;
+  const cb = line.match(/^(\s*-\s\[)([ xX])(\]\s)(.*)$/);
+  if (cb) {
+    return (
+      <span className="text-foreground">
+        {cb[1]}
+        <span className={cb[2].trim() ? "text-primary" : "text-muted-foreground"}>{cb[2]}</span>
+        {cb[3]}
+        {cb[4]}
+      </span>
+    );
+  }
+  const kv = line.match(/^([a-z_]+)(:\s*)(.*)$/);
+  if (kv) {
+    return (
+      <span className="text-foreground">
+        <span className="text-muted-foreground">{kv[1]}</span>
+        {kv[2]}
+        {kv[3]}
+      </span>
+    );
+  }
+  return <span className="text-foreground">{line || " "}</span>;
+}
+
+/** One highlighted line of a shell/Claude Code session (prompts, ✓, comments, slash cmds). */
+function ShLine({ line }: { line: string }) {
+  if (line.startsWith("$ "))
+    return (
+      <span className="text-foreground">
+        <span className="text-muted-foreground">$</span>
+        {line.slice(1)}
+      </span>
+    );
+  if (line.startsWith("✓")) return <span className="text-emerald-600 dark:text-emerald-400">{line}</span>;
+  if (line.startsWith("#")) return <span className="italic text-muted-foreground/70">{line}</span>;
+  const cmd = line.match(/^(\/lanework:\S+)(.*)$/);
+  if (cmd)
+    return (
+      <span className="text-foreground">
+        <span className="font-medium text-primary">{cmd[1]}</span>
+        {cmd[2]}
+      </span>
+    );
+  const arrow = line.match(/^(\s*→\s)(\S+)(\s+)(.*)$/);
+  if (arrow)
+    return (
+      <span className="text-muted-foreground">
+        {arrow[1]}
+        <span className="text-foreground/80">{arrow[2]}</span>
+        {arrow[3]}
+        <span className="text-primary/80">{arrow[4]}</span>
+      </span>
+    );
+  return <span className="text-foreground">{line || " "}</span>;
+}
+
+/** Syntax-highlighted code body for the FileWindow, line by line. */
+function CodeBlock({ code, lang }: { code: string; lang: "md" | "sh" }) {
+  const Line = lang === "md" ? MdLine : ShLine;
+  return (
+    <pre className="font-mono text-[12.5px] leading-relaxed">
+      {code.split("\n").map((l, i) => (
+        <div key={i}>
+          <Line line={l} />
+        </div>
+      ))}
+    </pre>
+  );
+}
+
 /* --------------------------------------------------------------------- mcp -- */
 
 const MCP_STEPS = [
@@ -659,14 +998,13 @@ function Mcp() {
               the MCP server in one step.
             </p>
             <div className="mt-5 flex flex-col gap-2">
-              <CommandPill command="claude plugin marketplace add fuongz/lanework" />
-              <CommandPill command="claude plugin install lanework@lanework" />
+              <CommandPill command="claude plugin marketplace add fuongz/lanework" block />
+              <CommandPill command="claude plugin install lanework@lanework" block />
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              The board also opens automatically (≈ <span className="font-mono">:3662</span>) whenever
-              Claude Code starts. Set{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">LANEWORK_DASHBOARD=0</code>{" "}
-              to run headless.
+              Runs headless by default (tools only). Set{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">LANEWORK_DASHBOARD=1</code>{" "}
+              to also auto-open the board (≈ <span className="font-mono">:3662</span>) when Claude Code starts.
             </p>
             <div className="mt-6 flex flex-col gap-4">
               {MCP_STEPS.map((s) => (
@@ -698,15 +1036,9 @@ function Mcp() {
         </Reveal>
 
         <Reveal delay={0.08}>
-          <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-[#0c0f0d] shadow-xl">
-            <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
-              <HugeiconsIcon icon={ComputerTerminal01Icon} className="size-3.5 text-emerald-400" />
-              <span className="font-mono text-[11px] text-white/50">claude code → lanework mcp</span>
-            </div>
-            <pre className="flex-1 overflow-x-auto p-5 font-mono text-[12px] leading-relaxed text-emerald-50/90">
-              {MCP_FLOW}
-            </pre>
-          </div>
+          <FileWindow icon={ComputerTerminal01Icon} name="claude code → lanework mcp">
+            <CodeBlock code={MCP_FLOW} lang="sh" />
+          </FileWindow>
         </Reveal>
       </div>
     </section>
@@ -757,17 +1089,9 @@ function Convention() {
         </Reveal>
 
         <Reveal delay={0.1}>
-          <div className="overflow-hidden rounded-2xl border border-border/70 bg-[#0c0f0d] shadow-xl">
-            <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
-              <HugeiconsIcon icon={Flag02Icon} className="size-3.5 text-emerald-400" />
-              <span className="font-mono text-[11px] text-white/50">
-                .agents/reviews/2026-06-21/01-refactor-auth-middleware.md
-              </span>
-            </div>
-            <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-relaxed text-emerald-50/90">
-              {EXAMPLE}
-            </pre>
-          </div>
+          <FileWindow icon={Flag02Icon} name=".agents/reviews/2026-06-21/01-refactor-auth-middleware.md">
+            <CodeBlock code={EXAMPLE} lang="md" />
+          </FileWindow>
         </Reveal>
       </div>
     </section>
