@@ -277,6 +277,9 @@ function RunItYourWay() {
                 Live-watches <code className="font-mono text-xs">.agents/reviews/</code> as your agent writes
               </Bullet>
               <Bullet>
+                <strong className="font-medium text-foreground">Run a Claude Code agent</strong> on a card — one click, right from the board
+              </Bullet>
+              <Bullet>
                 Tick boxes and <strong className="font-medium text-foreground">Save changes</strong> back to disk
               </Bullet>
               <Bullet>
@@ -588,7 +591,7 @@ function Features() {
     { icon: Coins01Icon, title: "Cost view", body: "See what the project cost in Claude Code tokens, with a cache-aware per-model breakdown. (Local)" },
     SHOW_CLOUD
       ? { icon: CloudIcon, title: "Cloud, when you want it", body: "Sign in with GitHub to board any repo from anywhere — KV-cached and read-only." }
-      : { icon: RoboticIcon, title: "Drive it from Claude Code", body: "The bundled MCP server runs the full review lifecycle — create, tick, advance — and dispatches agents on cards." },
+      : { icon: RoboticIcon, title: "Run agents on cards", body: "Dispatch a Claude Code agent on any card in one click, or let the bundled MCP server drive the full review lifecycle — create, tick, advance." },
     { icon: SparklesIcon, title: "Built to feel good", body: "Fluid motion, dark-mode tokens, and a “/” to jump between repos. A tool you’ll want to open." },
   ];
   return (
