@@ -28,6 +28,7 @@ import {
   type ReviewColumn,
 } from "./reviews-core";
 import { parseReviewStats } from "./review-stats";
+import { estimateCost } from "./claude-pricing";
 
 /** Target directory: the dir the CLI was launched in (or LANEWORK_DIR). */
 export function localRoot(): string {
@@ -432,4 +433,132 @@ export async function getCostEstimateForDir(rootDir: string): Promise<CostData> 
 
 export async function getLocalCostEstimate(): Promise<CostData> {
   return getCostEstimateForDir(localRoot());
+}
+
+// ── Agent run telemetry ──────────────────────────────────────────────────────
+//
+// After a dispatched agent finishes, the runner records what the run cost back
+// into the card file: structured `last_run_*` keys in the frontmatter (latest
+// run, machine-readable) plus a row appended to a human-readable `## Agent runs`
+// table (full history, rendered in the review dialog).
+
+/** What the runner knows about a finished run; usage/cost are derived here. */
+export interface AgentRunInput {
+  repoPath: string;
+  /** The run's worktree — its Claude Code transcript is priced from this. */
+  worktree: string;
+  mode: string; // "implement" | "plan"
+  result: string; // "done" | "failed" | "stopped"
+  startedAt: string; // ISO
+  endedAt: string; // ISO
+}
+
+/** Compact human duration: 48s · 7m12s · 1h03m. */
+function formatRunDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) ms = 0;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m${String(s % 60).padStart(2, "0")}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h${String(m % 60).padStart(2, "0")}m`;
+}
+
+/** Compact token count: 812 · 8.1k · 1.2M. */
+function formatCompactTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+const AGENT_RUNS_HEADING = "## Agent runs";
+const AGENT_RUNS_HEADER = "| Finished | Mode | Result | Runtime | In | Out | Cache | Cost |";
+const AGENT_RUNS_DIVIDER = "| --- | --- | --- | --- | --- | --- | --- | --- |";
+
+/** Append a row to the `## Agent runs` table, creating the section if absent. */
+function appendAgentRunRow(md: string, rowLine: string): string {
+  const lines = md.split("\n");
+  const hIdx = lines.findIndex((l) => l.trim() === AGENT_RUNS_HEADING);
+  if (hIdx === -1) {
+    const trimmed = md.replace(/\s+$/, "");
+    const block = [AGENT_RUNS_HEADING, "", AGENT_RUNS_HEADER, AGENT_RUNS_DIVIDER, rowLine];
+    return `${trimmed}\n\n${block.join("\n")}\n`;
+  }
+  // The section runs until the next heading (or EOF); append after its last row.
+  let end = lines.length;
+  for (let i = hIdx + 1; i < lines.length; i++) {
+    if (/^#{1,6}\s/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  let lastRow = -1;
+  for (let i = hIdx + 1; i < end; i++) {
+    if (lines[i].trim().startsWith("|")) lastRow = i;
+  }
+  if (lastRow === -1) {
+    lines.splice(hIdx + 1, 0, "", AGENT_RUNS_HEADER, AGENT_RUNS_DIVIDER, rowLine);
+  } else {
+    lines.splice(lastRow + 1, 0, rowLine);
+  }
+  return lines.join("\n");
+}
+
+/** "2026-06-30 16:05" in local time, from an ISO timestamp. */
+function formatRunStamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * Persist a finished agent run into its card: `last_run_*` frontmatter (latest
+ * run) + a row in the `## Agent runs` history table. Token usage and USD cost are
+ * read from the run's worktree transcript. Best-effort and self-contained — the
+ * caller (agent runner) wraps this in a catch so telemetry never breaks teardown.
+ */
+export async function recordAgentRun(run: AgentRunInput): Promise<void> {
+  // Price the run from its worktree's Claude Code transcript.
+  const cost = await getCostEstimateForDir(run.worktree).catch(
+    () => ({ available: false, models: [] }) as Pick<CostData, "available" | "models">,
+  );
+  let input = 0;
+  let output = 0;
+  let cache = 0;
+  let usd = 0;
+  for (const m of cost.models) {
+    input += m.input;
+    output += m.output;
+    cache += m.cacheRead + m.cacheWrite5m + m.cacheWrite1h;
+    usd += estimateCost(m.model, m);
+  }
+
+  const runtimeMs = Date.parse(run.endedAt) - Date.parse(run.startedAt);
+  const runtime = formatRunDuration(runtimeMs);
+  const costStr = `~$${usd.toFixed(usd > 0 && usd < 0.01 ? 4 : 2)}`;
+
+  let content = await getLocalCardContent(run.repoPath);
+  content = patchFrontmatter(content, {
+    last_run_at: run.endedAt,
+    last_run_mode: run.mode,
+    last_run_result: run.result,
+    last_run_runtime: runtime,
+    last_run_tokens_in: String(input),
+    last_run_tokens_out: String(output),
+    last_run_cache: String(cache),
+    last_run_cost_usd: usd.toFixed(usd > 0 && usd < 0.01 ? 4 : 2),
+  });
+  const row = [
+    formatRunStamp(run.endedAt),
+    run.mode,
+    run.result,
+    runtime,
+    formatCompactTokens(input),
+    formatCompactTokens(output),
+    formatCompactTokens(cache),
+    costStr,
+  ];
+  content = appendAgentRunRow(content, `| ${row.join(" | ")} |`);
+  await saveLocalCardContent(run.repoPath, content);
 }

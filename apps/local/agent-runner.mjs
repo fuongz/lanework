@@ -20,7 +20,7 @@ const execFileP = promisify(execFile);
 // The fs data layer (bundled from packages/shared/src/lib/local-fs.ts), same
 // module the MCP server uses — gives us the lifecycle helpers + the project root.
 const libUrl = new URL("./dist-local/reviews-lib.mjs", import.meta.url).href;
-const { getLocalCardContent, localRoot, getCostEstimateForDir } = await import(libUrl);
+const { getLocalCardContent, localRoot, getCostEstimateForDir, recordAgentRun } = await import(libUrl);
 
 const CLI = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -287,16 +287,30 @@ export async function runAgent(repoPath, mode = "implement") {
     entry.pid = null;
     entry.child = null;
     entry.state = code === 0 ? "done" : "failed";
+    const result = entry.stopping ? "stopped" : entry.state;
     log(`agent for ${repoPath} exited (code=${code} signal=${signal}) → ${entry.state}`);
-    // A successful PLAN run produces no code (only the card's checklist), so there's
-    // nothing to merge — auto-clean its worktree/branch and drop it from the registry.
-    // The IMPLEMENT flow keeps the entry so the user can review/merge the branch; on
-    // failure (either mode) we keep it too, so the log + Discard remain available.
-    if (code === 0 && entry.mode === "plan") {
-      pruneWorktree(resolve(localRoot()), entry)
-        .catch(() => {})
-        .finally(() => registry.delete(repoPath));
-    }
+    // Record what the run cost (tokens/runtime/$) back into the card, then do any
+    // mode-specific cleanup. Best-effort — telemetry must never block teardown.
+    recordAgentRun({
+      repoPath,
+      worktree: entry.worktree,
+      mode: entry.mode,
+      result,
+      startedAt: entry.startedAt,
+      endedAt: entry.endedAt,
+    })
+      .catch((e) => log(`couldn't record run telemetry for ${repoPath}: ${e.message}`))
+      .finally(() => {
+        // A successful PLAN run produces no code (only the card's checklist), so
+        // there's nothing to merge — auto-clean its worktree/branch and drop it from
+        // the registry. The IMPLEMENT flow keeps the entry so the user can review/merge
+        // the branch; on failure (either mode) we keep it too, so the log + Discard remain.
+        if (code === 0 && entry.mode === "plan") {
+          pruneWorktree(resolve(localRoot()), entry)
+            .catch(() => {})
+            .finally(() => registry.delete(repoPath));
+        }
+      });
   });
 
   log(`dispatched agent for ${repoPath} on ${branch} (pid ${child.pid})`);
@@ -340,6 +354,9 @@ export async function stopAgent(repoPath) {
 
   if (entry.child && entry.state === "running") {
     clearTimeout(entry.timer);
+    // Flag the run as user-stopped so the exit handler records it as "stopped"
+    // (not "failed") in the card's run telemetry.
+    entry.stopping = true;
     try {
       entry.child.kill("SIGTERM");
     } catch {
