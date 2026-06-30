@@ -6,8 +6,10 @@
 
 The markdown review files your agent writes to `.agents/reviews/` render as a live
 board — grouped by status, with priority, assignees, tags, and checklist progress.
-Run it **hosted** (sign in with GitHub, pick any repo) or **locally** against the
-repo you're in (`npx @phake/lanework`, no auth, no network).
+Run it **locally** against the repo you're in (`npx @phake/lanework`, no auth, no
+network), tick checkboxes back to disk, and **dispatch a Claude Code agent on any
+card in one click**. A **hosted**, GitHub-backed read-only app also exists but is
+currently paused while we focus on the local CLI + MCP server.
 
 [![CI](https://github.com/fuongz/lanework/actions/workflows/ci.yml/badge.svg)](https://github.com/fuongz/lanework/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](./LICENSE)
@@ -34,6 +36,10 @@ The **local CLI** reads the same way, but lets you tick checkboxes in a review a
 
 ## Two ways to use it
 
+> **The local CLI is the recommended path.** The hosted app is paused (the code
+> is untouched — see [Develop the hosted app](#develop-the-hosted-app) — but the
+> public CTAs are gated off while we focus local-first).
+
 | | Hosted (`apps/webapp`) | Local CLI (`apps/local`) |
 | --- | --- | --- |
 | Runs on | Cloudflare Workers (lanework.dev) | Your machine (`npx @phake/lanework`) |
@@ -42,6 +48,7 @@ The **local CLI** reads the same way, but lets you tick checkboxes in a review a
 | Network | Reads GitHub REST + GraphQL | Fully offline |
 | Live updates | Manual refresh (KV-cached) | Auto — watches the folder |
 | Checklists | Read-only | Tick boxes + **Save changes** to disk |
+| Run agents | — | One-click Claude Code dispatch on a card |
 | Cost view | — | Estimates Claude Code token spend from `~/.claude` |
 
 Both share the same UI and review-parsing logic (in `packages/shared`).
@@ -52,7 +59,8 @@ Both share the same UI and review-parsing logic (in `packages/shared`).
 - 🏷️ **Rich cards** — priority, assignee avatars, tags, date, and an `x/x` checklist-progress badge
 - 🔎 **Filter** by **tag** or **My tasks**, with a searchable repo switcher (hosted)
 - 📄 **Full-screen review** with a clean metadata panel + rendered markdown
-- ☑️ **Interactive checklists** — tick items in a review with live progress; **"pick one"** groups render as radios
+- ☑️ **Interactive checklists** — tick items in a review with a live per-checklist progress ring (`x of x`, solid checkmark at 100%); **"pick one"** groups render as radios
+- 🤖 **Run agents on cards** (local CLI) — dispatch a Claude Code agent on any card in one click; a pulsing "Claude is working" badge shows live status
 - 💾 **Save to disk** (local CLI) — persist your ticks back to the markdown file
 - 💰 **Cost view** (local CLI) — estimates the project's Claude Code token spend from `~/.claude` transcripts, with a cache-aware per-model breakdown
 - 💻 **Local CLI** — `npx @phake/lanework` boards the current repo, no Cloudflare or auth, with live file-watch
@@ -94,7 +102,8 @@ npx @phake/lanework path/to/repo  # board a different directory
 It picks a free port (from `3662`), serves on `127.0.0.1`, and opens your browser.
 Edit or add review files and the board updates live. Open a review to tick its
 checkboxes — they're a working view until you hit **Save changes**, which writes the
-updated markdown back to the file on disk.
+updated markdown back to the file on disk. Hover a card and hit **Run** to dispatch a
+Claude Code agent against that review without leaving the board.
 
 ```
 lanework [dir] [--port N] [--no-open]
