@@ -22,6 +22,19 @@ export interface ReviewCard {
   priority: Priority | null;
   stats: ReviewStats;
   summary: string; // first prose paragraph of the body, for the card preview
+  lastRun: LastRun | null; // telemetry from the most recent agent run (last_run_* frontmatter)
+}
+
+/** The most recent agent run on a card, parsed from its `last_run_*` frontmatter. */
+export interface LastRun {
+  at: string | null; // ISO timestamp the run finished
+  mode: string | null; // "implement" | "plan"
+  result: string | null; // "done" | "failed" | "stopped"
+  runtime: string | null; // human duration, e.g. "7m12s"
+  tokensIn: number;
+  tokensOut: number;
+  cache: number;
+  costUsd: number;
 }
 
 interface ReviewMeta {
@@ -251,6 +264,30 @@ export function buildReviewCard(args: {
     priority: meta.priority,
     stats,
     summary: text ? extractSummary(text) : "",
+    lastRun: text ? parseLastRun(parseFrontmatterMap(text)) : null,
+  };
+}
+
+/** Parse the `last_run_*` frontmatter keys into a LastRun (null if no run yet). */
+function parseLastRun(map: Record<string, string>): LastRun | null {
+  if (!map["last_run_at"]) return null;
+  const num = (k: string) => {
+    const n = Number(map[k]);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const str = (k: string) => {
+    const v = map[k];
+    return v ? v.replace(/^["']|["']$/g, "") : null;
+  };
+  return {
+    at: str("last_run_at"),
+    mode: str("last_run_mode"),
+    result: str("last_run_result"),
+    runtime: str("last_run_runtime"),
+    tokensIn: num("last_run_tokens_in"),
+    tokensOut: num("last_run_tokens_out"),
+    cache: num("last_run_cache"),
+    costUsd: num("last_run_cost_usd"),
   };
 }
 
@@ -266,6 +303,7 @@ export function extractSummary(md: string): string {
     if (!line) continue;
     if (line.startsWith("#")) continue; // heading
     if (line.startsWith(">")) continue; // quote
+    if (line.startsWith("|")) continue; // table row (e.g. the Agent runs log)
     if (/^[-*+]\s/.test(line) || /^\d+\.\s/.test(line)) continue; // list / checklist
     if (/^\*\*how to review/i.test(line)) continue; // template boilerplate
     const text = line
@@ -357,9 +395,48 @@ export function serializeList(arr: string[]): string {
   return `[${arr.map((s) => JSON.stringify(s)).join(", ")}]`;
 }
 
+/** The standard "How to review" instruction line, shared by every composer. */
+const HOW_TO_REVIEW =
+  "**How to review:** flip `- [ ]` to `- [x]` for each item you agree with; add a `> note` under any you don't. Implementation starts only after every box is `[x]`.";
+
+/**
+ * Canonical below-frontmatter body for a review: the `# Review:` heading, an
+ * optional context paragraph, the standard "How to review" line, and a
+ * `## Decisions` list rendered as `- [ ] **D{n}.** …`. Shared by create_review's
+ * starter and the plan tool so every generated card matches the house format.
+ * Each decision string is plain text; the `**D{n}.**` prefix is added here.
+ */
+export function composeReviewBody(opts: { title: string; context?: string; decisions?: string[] }): string {
+  const lines: string[] = [`# Review: ${opts.title}`, ""];
+  const context = opts.context?.trim();
+  if (context) lines.push(context, "");
+  lines.push(HOW_TO_REVIEW, "", "## Decisions", "");
+  const decisions = (opts.decisions ?? []).map((d) => d.trim()).filter(Boolean);
+  if (decisions.length) {
+    decisions.forEach((d, i) => lines.push(`- [ ] **D${i + 1}.** ${d}`));
+  } else {
+    lines.push("- [ ] **D1.** …");
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+/** The frontmatter block (`---` … `---`) of a file, or null if it has none. */
+function frontmatterBlock(md: string): string | null {
+  const m = md.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  return m ? m[0] : null;
+}
+
+/** The title from a review's `# Review: …` (or first `#`) heading, else null. */
+export function extractReviewTitle(md: string): string | null {
+  const m = md.match(/^#\s+(?:Review:\s*)?(.+)$/m);
+  return m ? m[1].trim() : null;
+}
+
 /**
  * Compose a fresh review file (frontmatter + heading + body). Writes canonical
- * keys; pass `status: null` to omit the field (folder-encoded boards).
+ * keys; pass `status: null` to omit the field (folder-encoded boards). A custom
+ * `body` is placed verbatim after the heading; omit it for the canonical starter.
  */
 export function composeReviewFile(opts: {
   title: string;
@@ -370,27 +447,27 @@ export function composeReviewFile(opts: {
   date: string; // YYYY-MM-DD
   body?: string;
 }): string {
-  const lines: string[] = ["---"];
-  if (opts.status) lines.push(`status: ${opts.status}`);
-  lines.push(`assignees: ${serializeList(opts.assignees ?? [])}`);
-  lines.push(`created_at: ${opts.date} 00:00:00Z`);
-  if (opts.priority) lines.push(`priority: ${opts.priority}`);
-  lines.push(`tags: ${serializeList(opts.tags ?? [])}`);
-  lines.push("---", "");
-  lines.push(`# Review: ${opts.title}`, "");
+  const fm: string[] = ["---"];
+  if (opts.status) fm.push(`status: ${opts.status}`);
+  fm.push(`assignees: ${serializeList(opts.assignees ?? [])}`);
+  fm.push(`created_at: ${opts.date} 00:00:00Z`);
+  if (opts.priority) fm.push(`priority: ${opts.priority}`);
+  fm.push(`tags: ${serializeList(opts.tags ?? [])}`);
+  fm.push("---");
   const body = opts.body?.trim();
-  if (body) {
-    lines.push(body, "");
-  } else {
-    lines.push(
-      "**How to review:** flip `- [ ]` to `- [x]` for each item you agree with; add a `> note` under any you don't. Implementation starts only after every box is `[x]`.",
-      "",
-      "## Decisions",
-      "- [ ] **D1.** …",
-      "",
-    );
-  }
-  return lines.join("\n");
+  const below = body ? `# Review: ${opts.title}\n\n${body}\n` : composeReviewBody({ title: opts.title });
+  return `${fm.join("\n")}\n\n${below}`;
+}
+
+/**
+ * Replace everything below the frontmatter with a freshly composed canonical
+ * plan body, preserving the file's existing frontmatter exactly. Used by the
+ * plan tool so an agent fills in a card without hand-rebuilding the file.
+ */
+export function setReviewBody(md: string, opts: { title: string; context?: string; decisions?: string[] }): string {
+  const fm = frontmatterBlock(md);
+  const below = composeReviewBody(opts);
+  return fm ? `${fm}\n\n${below}` : below;
 }
 
 /**

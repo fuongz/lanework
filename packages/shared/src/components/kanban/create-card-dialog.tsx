@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { createCard } from "@/server/reviews";
 import { runAgentForCard } from "@/lib/agent-client";
+import { useRunOptions, RunOptionsRow } from "./run-options";
 
 /**
  * "Add a task" dialog (local mode). Collects a title + optional assignees, creates
@@ -38,6 +39,8 @@ export function CreateCardDialog({
   const [investigate, setInvestigate] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Run options for the post-create agent run; defaults to "plan" (investigate).
+  const runOpts = useRunOptions("plan");
 
   const reset = () => {
     setTitle("");
@@ -66,7 +69,7 @@ export function CreateCardDialog({
         .map((a) => a.trim())
         .filter(Boolean);
       const { path } = await createCard({ data: { owner, repo, title: trimmed, assignees, status: "todo" } });
-      if (investigate) await runAgentForCard(path, "plan");
+      if (investigate) await runAgentForCard(path, runOpts.options);
       await router.invalidate();
       reset();
       onOpenChange(false);
@@ -117,9 +120,13 @@ export function CreateCardDialog({
             <Checkbox checked={investigate} onCheckedChange={(v) => setInvestigate(!!v)} />
             <span className="inline-flex items-center gap-1.5 text-sm">
               <HugeiconsIcon icon={RoboticIcon} className="size-4 text-violet-500" />
-              Investigate with an agent (writes the checklist)
+              Run an agent after creating
             </span>
           </label>
+
+          {investigate ? (
+            <RunOptionsRow state={runOpts} disabled={busy} />
+          ) : null}
 
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>

@@ -60,7 +60,7 @@ Both share the same UI and review-parsing logic (in `packages/shared`).
 - 🔎 **Filter** by **tag** or **My tasks**, with a searchable repo switcher (hosted)
 - 📄 **Full-screen review** with a clean metadata panel + rendered markdown
 - ☑️ **Interactive checklists** — tick items in a review with a live per-checklist progress ring (`x of x`, solid checkmark at 100%); **"pick one"** groups render as radios
-- 🤖 **Run agents on cards** (local CLI) — dispatch a Claude Code agent on any card in one click; a pulsing "Claude is working" badge shows live status
+- 🤖 **Run agents on cards** (local CLI) — dispatch a Claude Code agent on any card; pick the **model · effort · mode** per run, watch a "Claude is working" badge, then see the run's **cost** (tokens · runtime · ~$) written back onto the card
 - 💾 **Save to disk** (local CLI) — persist your ticks back to the markdown file
 - 💰 **Cost view** (local CLI) — estimates the project's Claude Code token spend from `~/.claude` transcripts, with a cache-aware per-model breakdown
 - 💻 **Local CLI** — `npx @phake/lanework` boards the current repo, no Cloudflare or auth, with live file-watch
@@ -144,6 +144,7 @@ Tools exposed:
 | `get_review` | Read one review file's markdown by path |
 | `board_summary` | Counts per column + aggregate checklist progress |
 | `create_review` | Inception — create a new checklist card |
+| `plan_review` | Fill a card's checklist in the canonical format (context + `- [ ] **Dn.**` decisions), frontmatter preserved |
 | `toggle_item` | Check/uncheck a checklist item (by index or text) + note |
 | `set_status` | Advance a card todo → processing → done (or dropped) |
 | `update_review` | Patch priority / tags / assignees |

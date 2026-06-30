@@ -46,6 +46,26 @@ function isReviewPath(p) {
   return typeof p === "string" && p.startsWith(".agents/reviews/") && p.endsWith(".md") && !p.includes("..");
 }
 
+const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+/**
+ * Validate the optional per-run `model` / `effort` overrides into clean `claude`
+ * flag values. Args are passed to spawn() as an array (no shell), so this guards
+ * against bad values reaching the CLI, not against injection: an unknown effort is
+ * rejected, and a model must look like an alias/id (`[A-Za-z0-9._-]`).
+ */
+function resolveRunOpts(opts) {
+  let model = typeof opts.model === "string" ? opts.model.trim() : "";
+  if (model && !/^[A-Za-z0-9._-]{1,64}$/.test(model)) {
+    throw new Error(`invalid model: ${model}`);
+  }
+  const effort = typeof opts.effort === "string" ? opts.effort.trim() : "";
+  if (effort && !EFFORT_LEVELS.has(effort)) {
+    throw new Error(`invalid effort: ${effort} (expected one of ${[...EFFORT_LEVELS].join(", ")})`);
+  }
+  return { model, effort };
+}
+
 /** Stable, filesystem-safe id for a card path: drop the prefix, kebab the rest. */
 function slugFor(repoPath) {
   return repoPath
@@ -80,6 +100,8 @@ export async function agentStatus() {
     agents[path] = {
       state: e.state,
       mode: e.mode,
+      model: e.model ?? null,
+      effort: e.effort ?? null,
       branch: e.branch,
       worktree: e.worktree,
       pid: e.pid ?? null,
@@ -121,14 +143,15 @@ function buildPlanPrompt(repoPath, cardMarkdown) {
     `created at \`${repoPath}\` with only a title. Investigate THIS repository to`,
     "understand what the task below would involve, then write a focused review",
     "checklist into the card. Steps:",
-    `- First call the lanework MCP \`get_review\` tool with path \`${repoPath}\` to read`,
-    "  the current file, so you preserve its YAML frontmatter exactly.",
-    `- Then call the lanework \`save_review\` tool (path \`${repoPath}\`) writing: the`,
-    "  unchanged frontmatter, a `# Review: <title>` heading, a 1–2 sentence context",
-    "  paragraph, and a `## Decisions` section of 5–10 `- [ ]` items capturing the key",
-    "  choices/steps a human should approve before implementation.",
+    "- Investigate the repo to understand the task (read files, search) — do NOT edit any code.",
+    `- Call the lanework MCP \`plan_review\` tool (path \`${repoPath}\`) with:`,
+    "    • `context`: a 1–2 sentence summary of what the task involves, and",
+    "    • `decisions`: 5–10 key choices/steps a human should approve before implementation,",
+    "      each as PLAIN TEXT, one per array entry. The tool numbers them and writes the",
+    "      canonical file format for you — do NOT include `- [ ]` or `**Dn.**` prefixes, and",
+    "      do NOT touch the frontmatter or use `save_review`.",
     "- Do NOT modify any code or other files — only the card, and only via the MCP tools.",
-    `- When the checklist is written, call \`set_status\` (path \`${repoPath}\`, status \`todo\`)`,
+    `- When the plan is written, call \`set_status\` (path \`${repoPath}\`, status \`todo\`)`,
     "  so a human can review it.",
     "",
     "--- Task ---",
@@ -177,9 +200,11 @@ async function allocateSlot(root, baseSlug) {
  * and spawns the headless agent. Resolves once the process is launched (the agent
  * runs on in the background and reports back through the MCP tools).
  */
-export async function runAgent(repoPath, mode = "implement") {
+export async function runAgent(repoPath, opts = {}) {
   if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  const mode = opts.mode ?? "implement";
   if (mode !== "implement" && mode !== "plan") throw new Error(`unknown agent mode: ${mode}`);
+  const { model, effort } = resolveRunOpts(opts);
 
   const existing = registry.get(repoPath);
   if (existing?.state === "running") throw new Error("an agent is already running for this card");
@@ -233,12 +258,18 @@ export async function runAgent(repoPath, mode = "implement") {
     "mcp__lanework__*",
     "--max-turns",
     String(MAX_TURNS),
+    // Optional per-run overrides (validated in resolveRunOpts). `--model` takes an
+    // alias/id; `--effort` is the reasoning level. Both omitted → the CLI default.
+    ...(model ? ["--model", model] : []),
+    ...(effort ? ["--effort", effort] : []),
     mode === "plan" ? buildPlanPrompt(repoPath, cardMarkdown) : buildPrompt(repoPath, cardMarkdown),
   ];
 
   const entry = {
     state: "running",
     mode,
+    model: model || null,
+    effort: effort || null,
     branch,
     worktree,
     mcpConfigPath,

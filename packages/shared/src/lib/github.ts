@@ -11,7 +11,7 @@ import {
 // Re-export the shared review types/constants so existing importers of this
 // module (UI, server fns) keep working unchanged.
 export { REVIEW_ROOT, REVIEW_COLUMNS } from "./reviews-core";
-export type { ReviewColumn, Priority, ReviewCard } from "./reviews-core";
+export type { ReviewColumn, Priority, ReviewCard, LastRun } from "./reviews-core";
 
 const GH_API = "https://api.github.com";
 const GH_GRAPHQL = "https://api.github.com/graphql";

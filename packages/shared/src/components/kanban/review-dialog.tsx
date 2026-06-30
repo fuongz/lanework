@@ -28,10 +28,14 @@ import {
   StopIcon,
   GitMergeIcon,
   Delete02Icon,
+  Coins01Icon,
 } from "@hugeicons/core-free-icons";
 import { getCardContent, saveCardContent, deleteCard } from "@/server/reviews";
 import { runAgentForCard, stopAgentForCard, mergeAgentForCard } from "@/lib/agent-client";
 import { useAgentStatus } from "@/hooks/use-agent-status";
+import { useLocalLiveTick } from "@/hooks/use-local-live";
+import { formatRunCost, formatRunTokens, runResultClass } from "@/lib/run-format";
+import { useRunOptions, RunOptionsRow } from "./run-options";
 import { estimateCost } from "@/lib/claude-pricing";
 import { useBoardStore } from "@/stores/board-store";
 import {
@@ -537,6 +541,29 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
     };
   }, [activeCard, owner, repo, branch]);
 
+  // Live refresh: when a watched file changes (e.g. an agent run just wrote its
+  // telemetry + status into this card), re-fetch the open card's body so the
+  // "## Agent runs" table updates without reopening. Skipped while the user has
+  // unsaved edits, so we never stomp in-progress checkbox ticks. Silent — no
+  // skeleton flash; we replace the body in place only if it actually changed.
+  const liveTick = useLocalLiveTick();
+  useEffect(() => {
+    if (!activeCard || content === null || dirty) return;
+    let cancelled = false;
+    getCardContent({ data: { owner, repo, path: activeCard.path, ref: branch } })
+      .then((md) => {
+        if (!cancelled) setContent((prev) => (md !== prev ? md : prev));
+      })
+      .catch(() => {
+        /* transient read while the file is mid-write — the next tick will retry */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `liveTick` is the trigger; the other values are read fresh each tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTick]);
+
   const githubUrl = activeCard
     ? `https://github.com/${owner}/${repo}/blob/${branch}/${activeCard.path}`
     : "#";
@@ -692,6 +719,8 @@ function AgentPanel({ card }: { card: ReviewCard }) {
   const { status, refresh } = useAgentStatus(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Persisted run options (mode · model · effort), shared with every run surface.
+  const runOpts = useRunOptions();
 
   const entry = status?.agents[card.path];
   const state = entry?.state;
@@ -710,7 +739,7 @@ function AgentPanel({ card }: { card: ReviewCard }) {
     }
   };
 
-  const run = () => act("run", () => runAgentForCard(card.path));
+  const run = () => act("run", () => runAgentForCard(card.path, runOpts.options));
   const merge = () => act("merge", () => mergeAgentForCard(card.path));
   // Stopping kills the agent + prunes its worktree; the card stays in its column.
   const stopClean = () => act("stop", () => stopAgentForCard(card.path));
@@ -752,7 +781,20 @@ function AgentPanel({ card }: { card: ReviewCard }) {
           branch <span className="text-foreground">{entry.branch}</span>
         </p>
       ) : null}
+      {entry && (entry.model || entry.effort) ? (
+        <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          {entry.model ? (
+            <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{entry.model}</span>
+          ) : null}
+          {entry.effort ? (
+            <span className="rounded bg-muted px-1.5 py-0.5 font-mono">effort: {entry.effort}</span>
+          ) : null}
+        </p>
+      ) : null}
       {entry?.usage?.length ? <AgentUsage usage={entry.usage} /> : null}
+
+      {/* Run options (mode · model · effort) — only before a run is dispatched. */}
+      {!entry ? <div className="mt-3"><RunOptionsRow state={runOpts} disabled={disabled} /></div> : null}
 
       <div className="mt-3 flex flex-wrap gap-2">
         {!entry ? (
@@ -937,6 +979,30 @@ function MetaPanel({
           <span className="text-muted-foreground">No tags</span>
         )}
       </Row>
+
+      {card.lastRun ? (
+        <Row icon={Coins01Icon} label="Last run">
+          <span
+            className={cn(
+              "rounded-full px-2.5 py-1 text-xs font-medium capitalize",
+              runResultClass(card.lastRun.result),
+            )}
+          >
+            {card.lastRun.result ?? "run"}
+          </span>
+          {card.lastRun.runtime ? (
+            <span className="text-muted-foreground tabular-nums">{card.lastRun.runtime}</span>
+          ) : null}
+          <span className="text-muted-foreground tabular-nums">
+            {formatRunTokens(card.lastRun.tokensIn + card.lastRun.cache)} in ·{" "}
+            {formatRunTokens(card.lastRun.tokensOut)} out
+          </span>
+          <span className="font-medium tabular-nums">~{formatRunCost(card.lastRun.costUsd)}</span>
+          {card.lastRun.at ? (
+            <span className="text-muted-foreground">{relativeAge(card.lastRun.at.slice(0, 10))}</span>
+          ) : null}
+        </Row>
+      ) : null}
     </div>
   );
 }

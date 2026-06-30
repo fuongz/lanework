@@ -6,6 +6,35 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-30
+
+### Added
+- **Agent run telemetry on the card** — when a dispatched agent finishes, what the
+  run cost is written back into the review `.md`: structured `last_run_*` keys in the
+  frontmatter (latest run) plus a row in a human-readable `## Agent runs` history table.
+- **Run cost in the UI** — a result-colored cost badge on the board card, and a "Last
+  run" row (result · runtime · tokens · ~$) in the review dialog's meta panel.
+- **Pick model · effort · mode per run** — the review dialog, the create-task dialog,
+  and the card's Run button now offer selectors that map to `claude --model` /
+  `--effort` (plus implement/plan mode); choices persist across sessions.
+- **`plan_review` MCP tool** — the planning agent fills a card's checklist through a
+  structured tool that composes the canonical house format (frontmatter preserved,
+  `## Decisions` as `- [ ] **Dn.** …`) instead of free-form `save_review`.
+- **Live review dialog** — an open card re-fetches its body when the file changes (e.g.
+  an agent just wrote its run telemetry), so the `## Agent runs` table updates without
+  reopening. Skipped while you have unsaved edits.
+
+### Changed
+- **Refreshed board design (Height/Linear-style)** — white cards float on a layered-gray
+  canvas (sidebar < canvas < cards), columns are unboxed with a status-circle header +
+  count pill, cards get a tighter radius, hairline border, and soft hover shadow, and the
+  board toolbar right-aligns the view switcher + a renamed **New task** action.
+
+### Fixed
+- **Per-checklist progress** counts each checklist independently (live `x of x` ring,
+  solid checkmark at 100%), and the card's Run-options popover no longer opens the task
+  detail dialog when you use its selects.
+
 ## [0.3.0] - 2026-06-29
 
 ### Added

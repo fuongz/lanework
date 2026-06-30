@@ -57,10 +57,14 @@ async function handleAgent(request, url) {
     const runner = await getAgentRunner();
     const action = ACTIONS[url.pathname];
     try {
-      // run accepts an optional mode ("implement" | "plan"); stop/merge take only the path.
+      // run accepts optional mode/model/effort overrides; stop/merge take only the path.
       const result =
         action === "runAgent"
-          ? await runner.runAgent(body?.path, body?.mode)
+          ? await runner.runAgent(body?.path, {
+              mode: body?.mode,
+              model: body?.model,
+              effort: body?.effort,
+            })
           : await runner[action](body?.path);
       return json(result);
     } catch (e) {

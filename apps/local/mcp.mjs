@@ -26,6 +26,7 @@ const {
   localRoot,
   loadLocalBoardConfig,
   createLocalReview,
+  planLocalReview,
   setLocalReviewStatus,
   toggleLocalReviewItem,
   updateLocalReviewMeta,
@@ -82,7 +83,7 @@ export async function startMcp({ dir = process.cwd(), dashboard = true } = {}) {
   if (dashboard) startDashboard(dir);
 
   const server = new McpServer(
-    { name: "lanework", version: "0.3.0" },
+    { name: "lanework", version: "0.3.1" },
     {
       instructions:
         "lanework drives an AI-Driven Development Lifecycle through a repo's .agents/reviews board. " +
@@ -207,6 +208,35 @@ export async function startMcp({ dir = process.cwd(), dashboard = true } = {}) {
         return ok(await createLocalReview(args));
       } catch (e) {
         return { isError: true, content: [{ type: "text", text: `could not create review: ${e.message}` }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "plan_review",
+    {
+      title: "Write review plan",
+      description:
+        "Fill in a review card's checklist in the canonical house format. Preserves the card's frontmatter, " +
+        "then writes the `# Review:` heading, an optional `context` paragraph, the standard 'How to review' line, " +
+        "and a `## Decisions` list rendered as `- [ ] **D1.** …`. PREFER THIS over save_review for planning — " +
+        "it guarantees the file shape so it matches every other card. Pass each decision as plain text (no " +
+        "leading `- [ ]` or `**Dn.**` — those are added for you).",
+      inputSchema: {
+        path: z.string().describe("Repo-relative path of the review file to fill in"),
+        decisions: z
+          .array(z.string())
+          .min(1)
+          .describe("5–10 decisions/steps to approve, each as plain text (one checklist item per entry)"),
+        context: z.string().optional().describe("1–2 sentence context paragraph placed under the heading"),
+        title: z.string().optional().describe("Override the heading title (default: keep the card's existing title)"),
+      },
+    },
+    async ({ path, decisions, context, title }) => {
+      try {
+        return ok(await planLocalReview(path, { decisions, context, title }));
+      } catch (e) {
+        return { isError: true, content: [{ type: "text", text: `could not write plan: ${e.message}` }] };
       }
     },
   );

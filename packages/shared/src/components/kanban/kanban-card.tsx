@@ -4,13 +4,15 @@ import {
   CheckmarkSquare02Icon,
   Comment01Icon,
   Flag02Icon,
+  Coins01Icon,
 } from "@hugeicons/core-free-icons";
-import type { ReviewCard, Priority } from "@/lib/github";
+import type { ReviewCard, Priority, LastRun } from "@/lib/github";
 import { useBoardStore } from "@/stores/board-store";
 import { RunAgentButton, AgentWorkingBadge } from "./run-agent-button";
 import { progressPercent } from "@/lib/review-stats";
 import { formatDate } from "@/lib/format";
 import { tagPill } from "@/lib/tag-color";
+import { formatRunCost, runResultClass } from "@/lib/run-format";
 import { cn } from "@/lib/utils";
 
 const PRIORITY_ICON: Record<Priority, string> = {
@@ -22,20 +24,31 @@ const PRIORITY_ICON: Record<Priority, string> = {
 export function KanbanCard({ card, running = false }: { card: ReviewCard; running?: boolean }) {
   const openCard = useBoardStore((s) => s.openCard);
   const pct = progressPercent(card.stats);
-  const hasFooter = card.stats.notes > 0 || card.stats.total > 0 || card.tags.length > 0 || card.assignees.length > 0;
+  const hasFooter =
+    card.stats.notes > 0 ||
+    card.stats.total > 0 ||
+    card.tags.length > 0 ||
+    card.assignees.length > 0 ||
+    card.lastRun != null;
 
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() => openCard(card)}
+      onClick={(e) => {
+        // Ignore clicks that bubbled (through a React portal) from the Run-options
+        // popover / its selects — their DOM lives in <body>, not inside this card.
+        if (!e.currentTarget.contains(e.target as Node)) return;
+        openCard(card);
+      }}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return; // key events from nested controls
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           openCard(card);
         }
       }}
-      className="group relative cursor-pointer rounded-2xl border border-border/70 bg-card p-4 shadow-xs transition-shadow duration-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+      className="group relative cursor-pointer rounded-xl border border-border bg-card p-3.5 shadow-[0_1px_3px_rgba(0,0,0,0.06)] transition-shadow duration-200 hover:shadow-[0_3px_10px_rgba(0,0,0,0.10)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
     >
       {/* Quick "Run agent" — explicit alternative; local only, hidden while running. */}
       {__LANEWORK_LOCAL__ && !running ? (
@@ -72,9 +85,9 @@ export function KanbanCard({ card, running = false }: { card: ReviewCard; runnin
         </div>
       ) : null}
 
-      {/* Footer: counts + labels + assignees, above a dashed divider */}
+      {/* Footer: counts + labels + assignees, above a hairline divider */}
       {hasFooter ? (
-        <div className="mt-3 flex items-center gap-2.5 border-t border-dashed pt-2.5 text-xs text-muted-foreground">
+        <div className="mt-3 flex items-center gap-2.5 border-t border-border/60 pt-2.5 text-xs text-muted-foreground">
           {card.stats.notes > 0 ? (
             <span className="inline-flex items-center gap-1" title="Reviewer notes">
               <HugeiconsIcon icon={Comment01Icon} className="size-3.5" />
@@ -95,6 +108,8 @@ export function KanbanCard({ card, running = false }: { card: ReviewCard; runnin
             </span>
           ) : null}
 
+          {card.lastRun ? <LastRunCost run={card.lastRun} /> : null}
+
           {card.tags.length > 0 ? <Labels tags={card.tags} /> : null}
 
           {card.assignees.length > 0 ? (
@@ -105,6 +120,30 @@ export function KanbanCard({ card, running = false }: { card: ReviewCard; runnin
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Estimated cost of the card's most recent agent run, colored by result. */
+function LastRunCost({ run }: { run: LastRun }) {
+  const detail = [
+    run.result ?? "run",
+    run.runtime,
+    `${run.tokensIn + run.cache} in`,
+    `${run.tokensOut} out`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <span
+      title={`Last agent run — ${detail}`}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums",
+        runResultClass(run.result),
+      )}
+    >
+      <HugeiconsIcon icon={Coins01Icon} className="size-3" />
+      {formatRunCost(run.costUsd)}
+    </span>
   );
 }
 

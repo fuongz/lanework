@@ -13,13 +13,49 @@ async function post(path: string, body: unknown) {
   return data;
 }
 
+export type AgentMode = "implement" | "plan";
+/** Reasoning effort, mapped to the `claude --effort` flag ("" = CLI default). */
+export type AgentEffort = "" | "low" | "medium" | "high" | "xhigh" | "max";
+
+export interface RunOptions {
+  mode?: AgentMode;
+  /** Claude model alias/id (e.g. "opus", "sonnet", "haiku"); "" = CLI default. */
+  model?: string;
+  effort?: AgentEffort;
+}
+
+/** Selectable models for the run UI. "" = whatever `claude` is configured to use. */
+export const AGENT_MODELS: { value: string; label: string }[] = [
+  { value: "", label: "Default model" },
+  { value: "opus", label: "Opus" },
+  { value: "sonnet", label: "Sonnet" },
+  { value: "haiku", label: "Haiku" },
+];
+
+/** Selectable reasoning efforts for the run UI (the `claude --effort` levels). */
+export const AGENT_EFFORTS: { value: AgentEffort; label: string }[] = [
+  { value: "", label: "Default effort" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra high" },
+  { value: "max", label: "Max" },
+];
+
+/** Selectable run modes for the UI. */
+export const AGENT_MODES: { value: AgentMode; label: string }[] = [
+  { value: "implement", label: "Implement" },
+  { value: "plan", label: "Plan" },
+];
+
 /**
  * Dispatch a Claude Code agent for a card (worktree + headless run).
  * `mode` "implement" (default) builds + commits code; "plan" investigates the repo
- * and writes the card's review checklist, then returns it to To-Do.
+ * and writes the card's review checklist, then returns it to To-Do. `model` and
+ * `effort` map to the `claude --model` / `--effort` flags (omit for CLI defaults).
  */
-export function runAgentForCard(path: string, mode: "implement" | "plan" = "implement") {
-  return post("/_local/agent/run", { path, mode });
+export function runAgentForCard(path: string, opts: RunOptions = {}) {
+  return post("/_local/agent/run", { path, ...opts });
 }
 
 /** Stop a card's agent and prune its worktree/branch. */
@@ -40,6 +76,9 @@ export interface AgentStatus {
     {
       state: "running" | "done" | "failed";
       mode: "implement" | "plan";
+      /** The model/effort this run was dispatched with (null = CLI default). */
+      model: string | null;
+      effort: string | null;
       branch: string;
       worktree: string;
       pid: number | null;

@@ -15,11 +15,13 @@ import {
   REVIEW_ROOT,
   buildReviewCard,
   composeReviewFile,
+  extractReviewTitle,
   isReviewColumn,
   parseBoardConfig,
   patchFrontmatter,
   resolveCardLocation,
   serializeList,
+  setReviewBody,
   slugify,
   toggleChecklistItem,
   type BoardConfig,
@@ -220,6 +222,34 @@ export async function createLocalReview(input: CreateReviewInput): Promise<{
   });
   await saveLocalCardContent(repoPath, content);
   return { path: repoPath, status, date, ordinal };
+}
+
+/**
+ * Fill in an existing card's checklist in the canonical house format: preserves
+ * the file's frontmatter, then writes the `# Review:` heading, an optional
+ * context paragraph, the standard "How to review" line, and a `## Decisions`
+ * list. The composer owns the formatting, so a planning agent never hand-builds
+ * (and drifts from) the file shape — it just supplies the decision text.
+ */
+export async function planLocalReview(
+  repoPath: string,
+  opts: { context?: string; decisions: string[]; title?: string },
+): Promise<{ path: string; items: number }> {
+  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  const decisions = (opts.decisions ?? []).map((d) => String(d).trim()).filter(Boolean);
+  if (decisions.length === 0) throw new Error("provide at least one decision");
+  const content = await getLocalCardContent(repoPath);
+  const title = opts.title?.trim() || extractReviewTitle(content) || humanizeSlug(repoPath);
+  const next = setReviewBody(content, { title, context: opts.context, decisions });
+  await saveLocalCardContent(repoPath, next);
+  return { path: repoPath, items: decisions.length };
+}
+
+/** Humanize the slug of a review path, as a title fallback when none is present. */
+function humanizeSlug(repoPath: string): string {
+  const base = (repoPath.split("/").pop() ?? "").replace(/\.md$/, "");
+  const slug = base.replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/^\d+[-_]/, "").replace(/[-_]+/g, " ").trim();
+  return slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : "Untitled";
 }
 
 /** Replace the column segment of a folder-mode path with `newColumn`. */

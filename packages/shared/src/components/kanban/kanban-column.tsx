@@ -23,15 +23,17 @@ export function KanbanColumn({
 				delay: index * 0.07,
 				ease: [0.22, 1, 0.36, 1],
 			}}
-			className="flex h-full w-80 shrink-0 flex-col rounded-2xl bg-muted/40"
+			className="flex h-full w-[19rem] shrink-0 flex-col"
 		>
-			<div className="flex items-center gap-2 px-4 py-3">
+			<div className="flex items-center gap-2 px-1.5 pb-2.5 pt-1">
 				<HugeiconsIcon icon={meta.icon} className={cn("size-4", meta.color)} />
-				<h2 className="text-sm font-medium text-foreground">{meta.label}</h2>
-				<span className="text-sm text-muted-foreground">{cards.length}</span>
+				<h2 className="text-sm font-semibold text-foreground">{meta.label}</h2>
+				<span className="rounded-md bg-muted px-1.5 text-xs font-medium tabular-nums text-muted-foreground">
+					{cards.length}
+				</span>
 			</div>
 
-			<div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-2.5 pb-2.5 pt-0.5">
+			<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-2.5 pt-0.5">
 				{cards.length === 0 ? (
 					<p className="rounded-xl border border-dashed py-8 text-center text-xs text-muted-foreground">
 						No reviews
