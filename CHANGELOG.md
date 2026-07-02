@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-02
+
+### Fixed
+- **Broken `npx @phake/lanework`** — the published 0.3.1 package was missing
+  `agent-runner.mjs` (not listed in `files`), so `server.mjs`'s dynamic import of it
+  failed with `ERR_MODULE_NOT_FOUND` for every fresh install. Added it to `files`.
+
 ## [0.3.1] - 2026-06-30
 
 ### Added
