@@ -6,14 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-07-03
+
+### Fixed
+- **`status.values` aliases didn't apply to folder names** — `resolveCardLocation`
+  only ran the alias check against the frontmatter `status:` field; in folder mode
+  (or the frontmatter-mode folder-date fallback), a column folder renamed e.g.
+  `done/` → `completed/` was silently dropped from the board instead of resolving
+  to `done`. Both paths now go through the same alias resolver.
+
 ## [0.3.3] - 2026-07-03
 
 ### Added
 - **Custom status vocabulary** — `.agents/reviews/config.json` gained
-  `status.values` (extra words accepted for a column, mapped onto the four
-  canonical columns) and `status.labels` (what the board displays for each
-  column), so a client whose files say `status: In Review` or `Shipped` — or,
-  in folder mode, a column folder named `completed/` instead of `done/` —
+  `status.values` (extra words a file's `status:` field can use, mapped onto
+  the four canonical columns) and `status.labels` (what the board displays for
+  each column), so a client whose files say `status: In Review` or `Shipped`
   reads and displays correctly without touching the underlying lifecycle. The
   MCP `create_review`/`set_status` tools accept these words too.
 

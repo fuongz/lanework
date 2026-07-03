@@ -97,7 +97,7 @@ export async function startMcp({ dir = process.cwd(), dashboard = false } = {}) 
   const statusHint = describeStatuses(boardConfig);
 
   const server = new McpServer(
-    { name: "lanework", version: "0.3.3" },
+    { name: "lanework", version: "0.3.4" },
     {
       instructions:
         "lanework drives an AI-Driven Development Lifecycle through a repo's .agents/reviews board. " +
