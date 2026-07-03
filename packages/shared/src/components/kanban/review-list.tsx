@@ -5,7 +5,7 @@ import { REVIEW_COLUMNS, type ReviewColumn, type ReviewCard, type Priority } fro
 import { useBoardStore } from "@/stores/board-store";
 import { RunAgentButton, AgentWorkingBadge } from "./run-agent-button";
 import { progressPercent } from "@/lib/review-stats";
-import { STATUS_META } from "@/lib/review-status";
+import { statusMeta } from "@/lib/review-status";
 import { formatDate } from "@/lib/format";
 import { tagPill } from "@/lib/tag-color";
 import { cn } from "@/lib/utils";
@@ -47,9 +47,12 @@ const EMPTY = new Set<string>();
 export function ReviewList({
   cards,
   runningPaths = EMPTY,
+  statusLabels,
 }: {
   cards: BoardData["cards"];
   runningPaths?: Set<string>;
+  /** Column display label overrides from `.agents/reviews/config.json`. */
+  statusLabels?: Partial<Record<ReviewColumn, string>>;
 }) {
   const grouped = useMemo(() => {
     const by: Record<ReviewColumn, ReviewCard[]> = { todo: [], processing: [], done: [], dropped: [] };
@@ -82,7 +85,7 @@ export function ReviewList({
                 )}
               >
                 <span className={cn("size-2.5 rounded-full", DOT[col])} />
-                <h2 className="text-sm font-semibold">{STATUS_META[col].label}</h2>
+                <h2 className="text-sm font-semibold">{statusMeta(col, statusLabels).label}</h2>
                 <span className="rounded-md bg-background/70 px-1.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums">
                   {String(grouped[col].length).padStart(2, "0")}
                 </span>

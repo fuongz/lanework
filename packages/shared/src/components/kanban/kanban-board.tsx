@@ -23,7 +23,7 @@ import {
 	type ReviewCard,
 	type ReviewColumn,
 } from "@/lib/github";
-import { STATUS_META } from "@/lib/review-status";
+import { statusMeta } from "@/lib/review-status";
 import { cn } from "@/lib/utils";
 import type { BoardData } from "@/server/reviews";
 import { setCardStatus } from "@/server/reviews";
@@ -31,6 +31,7 @@ import { KanbanCard } from "./kanban-card";
 import { KanbanColumn } from "./kanban-column";
 
 type Cards = BoardData["cards"];
+type StatusLabels = Partial<Record<ReviewColumn, string>>;
 const EMPTY = new Set<string>();
 
 const ZONE_DONE = "zone-done";
@@ -71,12 +72,15 @@ export function KanbanBoard({
 	owner,
 	repo,
 	runningPaths = EMPTY,
+	statusLabels,
 }: {
 	cards: Cards;
 	owner: string;
 	repo: string;
 	/** Card paths with a live agent — surfaced as a "running" badge + drag lock. */
 	runningPaths?: Set<string>;
+	/** Column display label overrides from `.agents/reviews/config.json`. */
+	statusLabels?: StatusLabels;
 }) {
 	// Drag-and-drop + status persistence is local-only — the hosted board is
 	// read-only, so it renders the static, non-draggable board.
@@ -87,20 +91,21 @@ export function KanbanBoard({
 				owner={owner}
 				repo={repo}
 				runningPaths={runningPaths}
+				statusLabels={statusLabels}
 			/>
 		);
-	return <StaticBoard cards={cards} />;
+	return <StaticBoard cards={cards} statusLabels={statusLabels} />;
 }
 
 /** Read-only board (hosted): group into columns, render each column. */
-function StaticBoard({ cards }: { cards: Cards }) {
+function StaticBoard({ cards, statusLabels }: { cards: Cards; statusLabels?: StatusLabels }) {
 	const columns = useMemo(() => groupByColumn(cards), [cards]);
 	return (
 		<div className="flex h-full gap-4 overflow-x-auto px-6 pb-6 pt-1">
 			{REVIEW_COLUMNS.map((col, i) => (
 				<KanbanColumn
 					key={col}
-					meta={STATUS_META[col]}
+					meta={statusMeta(col, statusLabels)}
 					cards={columns[col]}
 					index={i}
 				/>
@@ -119,11 +124,13 @@ function LocalBoard({
 	owner,
 	repo,
 	runningPaths,
+	statusLabels,
 }: {
 	cards: Cards;
 	owner: string;
 	repo: string;
 	runningPaths: Set<string>;
+	statusLabels?: StatusLabels;
 }) {
 	// Optimistic moves: show the card in its new column immediately, then let the
 	// file-watcher's loader refresh confirm it. Cleared whenever fresh data arrives.
@@ -199,6 +206,7 @@ function LocalBoard({
 						cards={columns[col]}
 						index={i}
 						runningPaths={runningPaths}
+						statusLabels={statusLabels}
 					/>
 				))}
 			</div>
@@ -238,13 +246,15 @@ function DroppableColumn({
 	cards,
 	index,
 	runningPaths,
+	statusLabels,
 }: {
 	column: ReviewColumn;
 	cards: Cards;
 	index: number;
 	runningPaths: Set<string>;
+	statusLabels?: StatusLabels;
 }) {
-	const meta = STATUS_META[column];
+	const meta = statusMeta(column, statusLabels);
 	const { setNodeRef, isOver } = useDroppable({ id: column });
 	return (
 		<motion.div

@@ -62,6 +62,16 @@ export function isReviewColumn(c: string): c is ReviewColumn {
 //   { "fields": { "assignees": ["owner"], "tags": ["labels"], "created_at": ["due"] } }
 // The canonical key is always accepted too, so adding an alias never breaks the
 // defaults. The first matching key present in a file wins.
+//
+// A client that doesn't speak "to-do / done" can also remap the *status
+// values themselves*, independently in each direction:
+//   "values" — extra words accepted in a file's `status:` field, mapped onto
+//              the canonical column, e.g. { "processing": ["In Review"] } lets
+//              `status: In Review` resolve to the `processing` column.
+//   "labels" — what the board displays for a column, e.g.
+//              { "processing": "In Review" } shows that text in the UI
+//              instead of "In Progress". Purely cosmetic — files are always
+//              written with the canonical value.
 
 /** Frontmatter keys accepted for each card field (canonical key always included). */
 export interface FieldAliases {
@@ -85,6 +95,10 @@ export interface BoardConfig {
     from: "folder" | "frontmatter";
     /** Column used when no `status:` field and no column folder apply. */
     fallback: ReviewColumn;
+    /** Extra frontmatter `status:` words accepted for each canonical column. */
+    values: Partial<Record<ReviewColumn, string[]>>;
+    /** Display label override per canonical column (e.g. "In Review" for `processing`). */
+    labels: Partial<Record<ReviewColumn, string>>;
   };
   /** Frontmatter key aliases per card field. */
   fields: FieldAliases;
@@ -99,7 +113,7 @@ const DEFAULT_FIELDS: FieldAliases = {
 };
 
 export const DEFAULT_BOARD_CONFIG: BoardConfig = {
-  status: { from: "frontmatter", fallback: "todo" },
+  status: { from: "frontmatter", fallback: "todo", values: {}, labels: {} },
   fields: DEFAULT_FIELDS,
 };
 
@@ -116,18 +130,43 @@ function aliasesFor(canonical: string, raw: unknown): string[] {
   return [...new Set([canonical, ...extra.map((s) => s.trim())])];
 }
 
+/** Non-empty trimmed strings out of a JSON value that may be a string or string array. */
+function stringsFrom(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+  return list.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((s) => s.trim());
+}
+
+/** Parse a `{ column: string | string[] }` map, dropping unrecognised columns/empty lists. */
+function parseColumnMap<T>(raw: unknown, pick: (v: unknown) => T | undefined): Partial<Record<ReviewColumn, T>> {
+  const out: Partial<Record<ReviewColumn, T>> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isReviewColumn(k)) continue;
+    const picked = pick(v);
+    if (picked !== undefined) out[k] = picked;
+  }
+  return out;
+}
+
 /** Parse (and defensively validate) the board config JSON; falls back to defaults. */
 export function parseBoardConfig(json: string | undefined): BoardConfig {
   if (!json) return DEFAULT_BOARD_CONFIG;
   try {
     const raw = JSON.parse(json) as {
-      status?: { from?: unknown; fallback?: unknown };
+      status?: { from?: unknown; fallback?: unknown; values?: unknown; labels?: unknown };
       fields?: Record<string, unknown>;
     };
     // Anything other than an explicit "folder" means the default frontmatter mode.
     const from = raw.status?.from === "folder" ? "folder" : "frontmatter";
     const fb = raw.status?.fallback;
     const fallback = typeof fb === "string" && isReviewColumn(fb) ? fb : "todo";
+    const values = parseColumnMap(raw.status?.values, (v) => {
+      const list = stringsFrom(v);
+      return list.length ? list : undefined;
+    });
+    const labels = parseColumnMap(raw.status?.labels, (v) =>
+      typeof v === "string" && v.trim() ? v.trim() : undefined,
+    );
     const f = raw.fields ?? {};
     const fields: FieldAliases = {
       status: aliasesFor("status", f.status),
@@ -136,10 +175,25 @@ export function parseBoardConfig(json: string | undefined): BoardConfig {
       priority: aliasesFor("priority", f.priority),
       created_at: aliasesFor("created_at", f.created_at),
     };
-    return { status: { from, fallback }, fields };
+    return { status: { from, fallback, values, labels }, fields };
   } catch {
     return DEFAULT_BOARD_CONFIG;
   }
+}
+
+/**
+ * Resolve a raw `status:` string (or MCP tool argument) to its canonical
+ * column: the canonical name itself, or one of `values`' configured aliases
+ * for any column (case-insensitive, quotes stripped). Null if unrecognised.
+ */
+export function canonicalStatus(raw: string, values?: Partial<Record<ReviewColumn, string[]>>): ReviewColumn | null {
+  const v = raw.replace(/['"]/g, "").trim().toLowerCase();
+  if (isReviewColumn(v)) return v;
+  if (!values) return null;
+  for (const col of REVIEW_COLUMNS) {
+    if (values[col]?.some((alias) => alias.toLowerCase() === v)) return col;
+  }
+  return null;
 }
 
 /** A `YYYY-MM-DD` path segment used as a date subfolder in the date-folder layout. */
@@ -169,14 +223,13 @@ function pickField(map: Record<string, string>, keys: string[]): string | undefi
 }
 
 /**
- * Column from the `status:` frontmatter field (honouring `fields.status`
- * aliases); null if absent or unrecognised.
+ * Column from the `status:` frontmatter field, honouring `fields.status` key
+ * aliases and `status.values` value aliases; null if absent or unrecognised.
  */
-export function statusFromFrontmatter(md: string, fields: FieldAliases = DEFAULT_FIELDS): ReviewColumn | null {
-  const raw = pickField(parseFrontmatterMap(md), fields.status);
+export function statusFromFrontmatter(md: string, config: BoardConfig = DEFAULT_BOARD_CONFIG): ReviewColumn | null {
+  const raw = pickField(parseFrontmatterMap(md), config.fields.status);
   if (raw === undefined) return null;
-  const v = raw.replace(/['"]/g, "").toLowerCase();
-  return isReviewColumn(v) ? v : null;
+  return canonicalStatus(raw, config.status.values);
 }
 
 /** First `YYYY-MM-DD` path segment, if any (date-folder layout). */
@@ -207,7 +260,7 @@ export function resolveCardLocation(
   const folderColumn = isReviewColumn(dirs[0] ?? "") ? (dirs[0] as ReviewColumn) : null;
 
   if (config.status.from === "frontmatter") {
-    const fromStatus = text ? statusFromFrontmatter(text, config.fields) : null;
+    const fromStatus = text ? statusFromFrontmatter(text, config) : null;
     const folderDate = dateFromSegments(dirs);
     // Treat as a card only if it declares a status, sits in a column folder, or
     // lives in a date folder — so loose markdown (READMEs, notes) isn't surfaced.

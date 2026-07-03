@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { useLocalLiveReload } from "@/hooks/use-local-live";
 import { cn } from "@/lib/utils";
 import { getBoard, getSessionUser } from "@/server/reviews";
+import { useBoardStore } from "@/stores/board-store";
 
 interface BoardSearch {
 	mine?: boolean;
@@ -146,6 +147,10 @@ function BoardLayout() {
 	const { board, nav, mine, tag } = useBoardData();
 	const [addOpen, setAddOpen] = useState(false);
 	const heading = mine ? "My tasks" : tag ? `#${tag}` : "Tasks";
+	// Keep the store's status labels current so the detail drawer (rendered here,
+	// outside the child view's props) can show the client's own column vocabulary.
+	const setStatusLabels = useBoardStore((s) => s.setStatusLabels);
+	useEffect(() => setStatusLabels(board.statusLabels), [board.statusLabels, setStatusLabels]);
 	// The Cost child page lives under this layout but shows its own UI — hide the
 	// review header + view tabs there.
 	const location = useLocation();

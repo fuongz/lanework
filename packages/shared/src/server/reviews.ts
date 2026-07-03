@@ -10,6 +10,7 @@ import {
   getViewerLogin,
   type Repo,
   type ReviewCard,
+  type ReviewColumn,
 } from "@/lib/github";
 
 /** Resolve the current session + a fresh GitHub access token, or throw 401. */
@@ -151,6 +152,9 @@ export interface BoardData {
   branch: string;
   viewer: string; // GitHub login of the signed-in user (for "My tasks")
   cards: ReviewCard[];
+  // Per-column display label overrides from `.agents/reviews/config.json`
+  // (`status.labels`), so the board can show a client's own status words.
+  statusLabels: Partial<Record<ReviewColumn, string>>;
   fetchedAt: number; // epoch ms the cards were fetched from GitHub
   cached: boolean; // whether this response was served from KV
 }
@@ -163,6 +167,7 @@ type CachedBoard = {
   branch: string;
   viewer: string;
   cards: ReviewCard[];
+  statusLabels: Partial<Record<ReviewColumn, string>>;
   fetchedAt: number;
 };
 
@@ -171,14 +176,15 @@ export const getBoard = createServerFn({ method: "GET" })
   .validator(boardValidator)
   .handler(async ({ data }): Promise<BoardData> => {
     if (__LANEWORK_LOCAL__) {
-      const { listLocalReviewCards } = await import("@/lib/local-fs");
-      const cards = await listLocalReviewCards();
+      const { listLocalReviewCards, loadLocalBoardConfig } = await import("@/lib/local-fs");
+      const [cards, config] = await Promise.all([listLocalReviewCards(), loadLocalBoardConfig()]);
       return {
         owner: data.owner,
         repo: data.repo,
         branch: "local",
         viewer: LOCAL_VIEWER,
         cards,
+        statusLabels: config.status.labels,
         fetchedAt: Date.now(),
         cached: false,
       };
@@ -195,11 +201,11 @@ export const getBoard = createServerFn({ method: "GET" })
       if (hit) return { owner: data.owner, repo: data.repo, cached: true, ...hit };
     }
 
-    const [{ branch, cards }, viewer] = await Promise.all([
+    const [{ branch, cards, statusLabels }, viewer] = await Promise.all([
       listReviewCards(token, data.owner, data.repo, data.branch),
       getViewerLogin(token),
     ]);
-    const payload: CachedBoard = { branch, viewer, cards, fetchedAt: Date.now() };
+    const payload: CachedBoard = { branch, viewer, cards, statusLabels, fetchedAt: Date.now() };
 
     if (cache) {
       await cache

@@ -83,6 +83,25 @@ files in \`todo/ processing/ done/ dropped/\` folders (either flat
 then sets the column. To make folders authoritative and ignore any \`status:\` field,
 add \`.agents/reviews/config.json\` with \`{"status":{"from":"folder"}}\`.
 
+**Client uses different status words?** The four columns (\`todo | processing | done |
+dropped\`) are always the underlying model — advancing the lifecycle, the "ready to
+advance" suggestions, etc. all key off them — but you can accept and display a client's
+own vocabulary on top, in \`.agents/reviews/config.json\`:
+
+\`\`\`json
+{
+  "status": {
+    "values": { "processing": ["In Review", "WIP"], "done": ["Shipped"] },
+    "labels": { "todo": "Backlog", "processing": "In Review", "done": "Shipped" }
+  }
+}
+\`\`\`
+
+\`values\` lets a file's \`status:\` field use any of those words in addition to the
+canonical name (e.g. \`status: In Review\` resolves to \`processing\`). \`labels\`
+overrides what the board displays for that column. Files lanework itself writes always
+use the canonical value; the alias mapping only affects what's *read*.
+
 After the frontmatter,
 add a "How to review" note (the user flips \`- [ ]\` to \`- [x]\` per item and writes
 \`> notes\` under items they disagree with), group items by topic, include a Context

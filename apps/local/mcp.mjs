@@ -78,9 +78,23 @@ function summarizeCard(c) {
   };
 }
 
+/** Human-readable status hint for tool descriptions, listing any configured aliases. */
+function describeStatuses(config) {
+  return COLUMNS.map((c) => {
+    const aliases = config.status.values?.[c];
+    return aliases?.length ? `${c} (aka ${aliases.join(", ")})` : c;
+  }).join(" | ");
+}
+
 export async function startMcp({ dir = process.cwd(), dashboard = false } = {}) {
   process.env.LANEWORK_DIR = dir;
   if (dashboard) startDashboard(dir);
+
+  // Read once at startup so tool descriptions can mention this repo's configured
+  // status aliases (`.agents/reviews/config.json` → `status.values`); a change to
+  // that file takes effect after the MCP server restarts.
+  const boardConfig = await loadLocalBoardConfig();
+  const statusHint = describeStatuses(boardConfig);
 
   const server = new McpServer(
     { name: "lanework", version: "0.3.1" },
@@ -195,7 +209,7 @@ export async function startMcp({ dir = process.cwd(), dashboard = false } = {}) 
         "new file path. Provide a markdown `body` of decisions as `- [ ]` items, or omit it for a starter template.",
       inputSchema: {
         title: z.string().describe("Short review title, e.g. 'Add rate limiting to the public API'"),
-        status: z.enum(COLUMNS).optional().describe("Starting column (default: todo)"),
+        status: z.string().optional().describe(`Starting column, default: todo. One of: ${statusHint}`),
         priority: z.enum(PRIORITIES).optional().describe("low | medium | high"),
         tags: z.array(z.string()).optional().describe("e.g. ['auth','api']"),
         assignees: z.array(z.string()).optional().describe("GitHub logins"),
@@ -251,7 +265,7 @@ export async function startMcp({ dir = process.cwd(), dashboard = false } = {}) 
         "moves the file into the new column folder (path changes — use the returned path afterwards).",
       inputSchema: {
         path: z.string().describe("Repo-relative path of the review file"),
-        status: z.enum(COLUMNS).describe("New column"),
+        status: z.string().describe(`New column. One of: ${statusHint}`),
       },
     },
     async ({ path, status }) => {

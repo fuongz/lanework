@@ -22,3 +22,14 @@ export const STATUS_META: Record<ReviewColumn, StatusMeta> = {
   // `dropped` is the underlying status value (kept for back-compat); shown as "Archived".
   dropped: { label: "Archived", icon: Archive02Icon, color: "text-zinc-500" },
 };
+
+/**
+ * A column's display meta, honouring a board's optional `status.labels`
+ * override (`.agents/reviews/config.json`) so a client's own vocabulary (e.g.
+ * "In Review" instead of "In Progress") shows on the board. Icon/color are
+ * always the fixed defaults — only the label text is configurable.
+ */
+export function statusMeta(column: ReviewColumn, labels?: Partial<Record<ReviewColumn, string>>): StatusMeta {
+  const label = labels?.[column];
+  return label ? { ...STATUS_META[column], label } : STATUS_META[column];
+}

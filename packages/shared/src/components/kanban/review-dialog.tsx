@@ -57,7 +57,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { progressPercent, parseRadioGroups } from "@/lib/review-stats";
-import { STATUS_META } from "@/lib/review-status";
+import { statusMeta } from "@/lib/review-status";
 import { formatDate, relativeAge } from "@/lib/format";
 import { tagPill } from "@/lib/tag-color";
 import { cn } from "@/lib/utils";
@@ -882,7 +882,8 @@ function MetaPanel({
   // parse until the markdown has loaded.
   liveStats?: { total: number; done: number };
 }) {
-  const col = STATUS_META[card.column];
+  const statusLabels = useBoardStore((s) => s.statusLabels);
+  const col = statusMeta(card.column, statusLabels);
   const stats = liveStats ?? card.stats;
   const pct = progressPercent({ ...stats, notes: 0 });
   const age = relativeAge(card.date);

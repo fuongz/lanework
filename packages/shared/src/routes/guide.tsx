@@ -222,6 +222,31 @@ function GuideBody() {
                 present in a file wins.
               </p>
             </div>
+
+            <div className="border-t pt-4 text-muted-foreground">
+              <p>
+                <strong className="text-foreground">Client uses different status words?</strong> The
+                board's four columns still drive the lifecycle, but you can accept and display a
+                client's own vocabulary on top, also in{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">.agents/reviews/config.json</code>:
+              </p>
+              <pre className="mt-2 overflow-x-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+                {`{
+  "status": {
+    "values": { "processing": ["In Review", "WIP"], "done": ["Shipped"] },
+    "labels": { "todo": "Backlog", "processing": "In Review", "done": "Shipped" }
+  }
+}`}
+              </pre>
+              <p className="mt-2">
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">values</code> lets a file's{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">status:</code> field use any of
+                those words in addition to the canonical name;{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">labels</code> overrides what the
+                board displays for that column. Both are optional and independent — files lanework
+                writes always use the canonical value.
+              </p>
+            </div>
           </CardContent>
         </Card>
       </section>

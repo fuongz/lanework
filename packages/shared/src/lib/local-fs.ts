@@ -14,9 +14,9 @@ import { createHash } from "node:crypto";
 import {
   REVIEW_ROOT,
   buildReviewCard,
+  canonicalStatus,
   composeReviewFile,
   extractReviewTitle,
-  isReviewColumn,
   parseBoardConfig,
   patchFrontmatter,
   resolveCardLocation,
@@ -200,7 +200,8 @@ export async function createLocalReview(input: CreateReviewInput): Promise<{
   ordinal: number;
 }> {
   const config = await loadLocalBoardConfig();
-  const status: ReviewColumn = input.status && isReviewColumn(input.status) ? input.status : "todo";
+  const status: ReviewColumn =
+    (input.status && canonicalStatus(input.status, config.status.values)) || "todo";
   const date = input.date && /^\d{4}-\d{2}-\d{2}$/.test(input.date) ? input.date : todayISO();
   const folderMode = config.status.from === "folder";
 
@@ -268,21 +269,22 @@ export async function setLocalReviewStatus(
   status: string,
 ): Promise<{ path: string; status: ReviewColumn; moved: boolean }> {
   if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
-  if (!isReviewColumn(status)) throw new Error(`invalid status: ${status}`);
   const config = await loadLocalBoardConfig();
+  const resolved = canonicalStatus(status, config.status.values);
+  if (!resolved) throw new Error(`invalid status: ${status}`);
   const content = await getLocalCardContent(repoPath);
 
   if (config.status.from === "folder") {
-    const newPath = relocateColumn(repoPath, status);
-    if (newPath === repoPath) return { path: repoPath, status, moved: false };
+    const newPath = relocateColumn(repoPath, resolved);
+    if (newPath === repoPath) return { path: repoPath, status: resolved, moved: false };
     await mkdir(dirname(safeFull(newPath)), { recursive: true });
     await saveLocalCardContent(newPath, content);
     await unlink(safeFull(repoPath));
-    return { path: newPath, status, moved: true };
+    return { path: newPath, status: resolved, moved: true };
   }
 
-  await saveLocalCardContent(repoPath, patchFrontmatter(content, { status }));
-  return { path: repoPath, status, moved: false };
+  await saveLocalCardContent(repoPath, patchFrontmatter(content, { status: resolved }));
+  return { path: repoPath, status: resolved, moved: false };
 }
 
 /** Check/uncheck one checklist item (by index or text), optionally adding a note. */

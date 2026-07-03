@@ -6,6 +6,7 @@ import {
   parseBoardConfig,
   resolveCardLocation,
   type ReviewCard,
+  type ReviewColumn,
 } from "./reviews-core";
 
 // Re-export the shared review types/constants so existing importers of this
@@ -138,7 +139,7 @@ export async function listReviewCards(
   owner: string,
   repo: string,
   ref?: string,
-): Promise<{ branch: string; cards: ReviewCard[] }> {
+): Promise<{ branch: string; cards: ReviewCard[]; statusLabels: Partial<Record<ReviewColumn, string>> }> {
   const o = encodeURIComponent(owner);
   const r = encodeURIComponent(repo);
   const branch =
@@ -180,7 +181,7 @@ export async function listReviewCards(
     );
   }
 
-  return { branch, cards };
+  return { branch, cards, statusLabels: config.status.labels };
 }
 
 /** Decoded markdown content of a single review file (for the detail drawer). */

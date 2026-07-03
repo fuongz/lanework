@@ -25,8 +25,15 @@ function ViewPage() {
     return set;
   }, [status]);
 
-  if (view === "list") return <ReviewList cards={filtered} runningPaths={runningPaths} />;
+  if (view === "list")
+    return <ReviewList cards={filtered} runningPaths={runningPaths} statusLabels={board.statusLabels} />;
   return (
-    <KanbanBoard cards={filtered} owner={board.owner} repo={board.repo} runningPaths={runningPaths} />
+    <KanbanBoard
+      cards={filtered}
+      owner={board.owner}
+      repo={board.repo}
+      runningPaths={runningPaths}
+      statusLabels={board.statusLabels}
+    />
   );
 }
