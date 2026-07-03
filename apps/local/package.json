@@ -1,6 +1,6 @@
 {
   "name": "@phake/lanework",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "type": "module",
   "description": "Run the lanework Kanban board locally against any repo's .agents/reviews folder — no Cloudflare, no auth, no network.",
   "license": "MIT",

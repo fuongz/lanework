@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-03
+
 ### Added
 - **Custom status vocabulary** — `.agents/reviews/config.json` gained
   `status.values` (extra words a file's `status:` field can use, mapped onto
