@@ -10,9 +10,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - **Custom status vocabulary** — `.agents/reviews/config.json` gained
-  `status.values` (extra words a file's `status:` field can use, mapped onto
-  the four canonical columns) and `status.labels` (what the board displays for
-  each column), so a client whose files say `status: In Review` or `Shipped`
+  `status.values` (extra words accepted for a column, mapped onto the four
+  canonical columns) and `status.labels` (what the board displays for each
+  column), so a client whose files say `status: In Review` or `Shipped` — or,
+  in folder mode, a column folder named `completed/` instead of `done/` —
   reads and displays correctly without touching the underlying lifecycle. The
   MCP `create_review`/`set_status` tools accept these words too.
 

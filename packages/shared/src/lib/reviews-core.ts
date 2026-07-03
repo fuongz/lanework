@@ -65,13 +65,14 @@ export function isReviewColumn(c: string): c is ReviewColumn {
 //
 // A client that doesn't speak "to-do / done" can also remap the *status
 // values themselves*, independently in each direction:
-//   "values" — extra words accepted in a file's `status:` field, mapped onto
-//              the canonical column, e.g. { "processing": ["In Review"] } lets
-//              `status: In Review` resolve to the `processing` column.
+//   "values" — extra words accepted for a column, mapped onto the canonical
+//              name, e.g. { "processing": ["In Review"] } lets a file's
+//              `status: In Review` field *and* a `In Review/` column folder
+//              (in folder mode) both resolve to the `processing` column.
 //   "labels" — what the board displays for a column, e.g.
 //              { "processing": "In Review" } shows that text in the UI
-//              instead of "In Progress". Purely cosmetic — files are always
-//              written with the canonical value.
+//              instead of "In Progress". Purely cosmetic — files (and folders)
+//              lanework writes are always the canonical value.
 
 /** Frontmatter keys accepted for each card field (canonical key always included). */
 export interface FieldAliases {
@@ -257,7 +258,7 @@ export function resolveCardLocation(
   if (segments.length === 0) return null;
   const fileName = segments[segments.length - 1];
   const dirs = segments.slice(0, -1);
-  const folderColumn = isReviewColumn(dirs[0] ?? "") ? (dirs[0] as ReviewColumn) : null;
+  const folderColumn = canonicalStatus(dirs[0] ?? "", config.status.values);
 
   if (config.status.from === "frontmatter") {
     const fromStatus = text ? statusFromFrontmatter(text, config) : null;
@@ -269,9 +270,11 @@ export function resolveCardLocation(
     return { column, fileName, folderDate };
   }
 
-  // Folder mode: first segment is the column, with an optional date subfolder.
-  const [column, ...rest] = segments;
-  if (!isReviewColumn(column)) return null;
+  // Folder mode: first segment is the column (canonical name or a configured
+  // `status.values` alias, e.g. "completed" for `done`), with an optional date subfolder.
+  const [rawColumn, ...rest] = segments;
+  const column = canonicalStatus(rawColumn, config.status.values);
+  if (!column) return null;
   if (rest.length === 1) return { column, fileName: rest[0], folderDate: null };
   if (rest.length === 2 && DATE_DIR.test(rest[0])) {
     return { column, fileName: rest[1], folderDate: rest[0] };

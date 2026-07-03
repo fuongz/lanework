@@ -98,9 +98,11 @@ own vocabulary on top, in \`.agents/reviews/config.json\`:
 \`\`\`
 
 \`values\` lets a file's \`status:\` field use any of those words in addition to the
-canonical name (e.g. \`status: In Review\` resolves to \`processing\`). \`labels\`
-overrides what the board displays for that column. Files lanework itself writes always
-use the canonical value; the alias mapping only affects what's *read*.
+canonical name (e.g. \`status: In Review\` resolves to \`processing\`) — and, in
+folder mode, a column folder can be named with an alias too (e.g. a \`completed/\`
+folder resolves to \`done\` given \`{"values":{"done":["completed"]}}\`). \`labels\`
+overrides what the board displays for that column. Files/folders lanework itself
+writes always use the canonical value; the alias mapping only affects what's *read*.
 
 After the frontmatter,
 add a "How to review" note (the user flips \`- [ ]\` to \`- [x]\` per item and writes

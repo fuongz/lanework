@@ -241,10 +241,12 @@ function GuideBody() {
               <p className="mt-2">
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">values</code> lets a file's{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">status:</code> field use any of
-                those words in addition to the canonical name;{" "}
-                <code className="rounded bg-muted px-1 py-0.5 text-xs">labels</code> overrides what the
-                board displays for that column. Both are optional and independent — files lanework
-                writes always use the canonical value.
+                those words in addition to the canonical name — and, if you're using the folder layout
+                instead, a column folder named with an alias (e.g.{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">completed/</code>) resolves the
+                same way. <code className="rounded bg-muted px-1 py-0.5 text-xs">labels</code> overrides
+                what the board displays for that column. Both are optional and independent — anything
+                lanework itself writes always uses the canonical value.
               </p>
             </div>
           </CardContent>
