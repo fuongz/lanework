@@ -23,6 +23,7 @@ export interface ReviewCard {
   stats: ReviewStats;
   summary: string; // first prose paragraph of the body, for the card preview
   lastRun: LastRun | null; // telemetry from the most recent agent run (last_run_* frontmatter)
+  custom: Record<string, string>; // frontmatter keys the board doesn't recognise, shown as-is in the dialog
 }
 
 /** The most recent agent run on a card, parsed from its `last_run_*` frontmatter. */
@@ -73,6 +74,13 @@ export function isReviewColumn(c: string): c is ReviewColumn {
 //              { "processing": "In Review" } shows that text in the UI
 //              instead of "In Progress". Purely cosmetic — files (and folders)
 //              lanework writes are always the canonical value.
+//
+// `date.pattern` lets a repo's filenames/folders/frontmatter values encode a
+// date in a shape other than `YYYY-MM-DD` (which always matches first), e.g. a
+// compact `YYYYMMDD` prefix from a `task_id` convention:
+//   { "date": { "pattern": "(?<year>\\d{4})-(?<month>\\d{2})(?<day>\\d{2})" } }
+// The pattern must be a regex source string with named `year`/`month`/`day`
+// capture groups; anything else is ignored and the built-in match is the only one tried.
 
 /** Frontmatter keys accepted for each card field (canonical key always included). */
 export interface FieldAliases {
@@ -103,6 +111,11 @@ export interface BoardConfig {
   };
   /** Frontmatter key aliases per card field. */
   fields: FieldAliases;
+  date: {
+    /** Extra date pattern tried after the built-in `YYYY-MM-DD` match, for
+     * filenames/folders/frontmatter values that encode dates differently. */
+    pattern: RegExp | null;
+  };
 }
 
 const DEFAULT_FIELDS: FieldAliases = {
@@ -116,6 +129,7 @@ const DEFAULT_FIELDS: FieldAliases = {
 export const DEFAULT_BOARD_CONFIG: BoardConfig = {
   status: { from: "frontmatter", fallback: "todo", values: {}, labels: {} },
   fields: DEFAULT_FIELDS,
+  date: { pattern: null },
 };
 
 /** Repo-relative path of the optional board config file. */
@@ -149,6 +163,21 @@ function parseColumnMap<T>(raw: unknown, pick: (v: unknown) => T | undefined): P
   return out;
 }
 
+/**
+ * Compile a user-supplied date pattern (a regex source string with named
+ * `year`/`month`/`day` groups) into a `RegExp`; null if missing, invalid, or
+ * lacking the groups needed to normalise a match back to `YYYY-MM-DD`.
+ */
+function compileDatePattern(raw: unknown): RegExp | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  if (!raw.includes("?<year>") || !raw.includes("?<month>") || !raw.includes("?<day>")) return null;
+  try {
+    return new RegExp(raw);
+  } catch {
+    return null;
+  }
+}
+
 /** Parse (and defensively validate) the board config JSON; falls back to defaults. */
 export function parseBoardConfig(json: string | undefined): BoardConfig {
   if (!json) return DEFAULT_BOARD_CONFIG;
@@ -156,6 +185,7 @@ export function parseBoardConfig(json: string | undefined): BoardConfig {
     const raw = JSON.parse(json) as {
       status?: { from?: unknown; fallback?: unknown; values?: unknown; labels?: unknown };
       fields?: Record<string, unknown>;
+      date?: { pattern?: unknown };
     };
     // Anything other than an explicit "folder" means the default frontmatter mode.
     const from = raw.status?.from === "folder" ? "folder" : "frontmatter";
@@ -176,7 +206,8 @@ export function parseBoardConfig(json: string | undefined): BoardConfig {
       priority: aliasesFor("priority", f.priority),
       created_at: aliasesFor("created_at", f.created_at),
     };
-    return { status: { from, fallback, values, labels }, fields };
+    const datePattern = compileDatePattern(raw.date?.pattern);
+    return { status: { from, fallback, values, labels }, fields, date: { pattern: datePattern } };
   } catch {
     return DEFAULT_BOARD_CONFIG;
   }
@@ -304,14 +335,15 @@ export function buildReviewCard(args: {
   config?: BoardConfig;
 }): ReviewCard {
   const { path, column, fileName, sha, text, folderDate, config } = args;
-  const fields = (config ?? DEFAULT_BOARD_CONFIG).fields;
-  const meta = text ? parseFrontmatter(text, fields) : EMPTY_META;
+  const cfg = config ?? DEFAULT_BOARD_CONFIG;
+  const map = text ? parseFrontmatterMap(text) : {};
+  const meta = text ? parseFrontmatter(map, cfg) : EMPTY_META;
   const stats = text ? parseReviewStats(text) : { total: 0, done: 0, notes: 0 };
   return {
     path,
     column,
     fileName,
-    date: meta.createdAt ?? extractDate(folderDate ?? "") ?? extractDate(fileName),
+    date: meta.createdAt ?? extractDate(folderDate ?? "", cfg.date.pattern) ?? extractDate(fileName, cfg.date.pattern),
     ordinal: folderDate ? extractOrdinal(fileName) : null,
     title: humanizeFileName(fileName),
     sha,
@@ -320,7 +352,8 @@ export function buildReviewCard(args: {
     priority: meta.priority,
     stats,
     summary: text ? extractSummary(text) : "",
-    lastRun: text ? parseLastRun(parseFrontmatterMap(text)) : null,
+    lastRun: text ? parseLastRun(map) : null,
+    custom: text ? extractCustomFields(map, cfg.fields) : {},
   };
 }
 
@@ -376,21 +409,56 @@ export function extractSummary(md: string): string {
 
 /**
  * Parse the simple YAML frontmatter block at the top of a review file, reading
- * each card field from the first matching key in `fields` (canonical key + any
- * repo-configured aliases).
+ * each card field from the first matching key in `config.fields` (canonical
+ * key + any repo-configured aliases).
  */
-function parseFrontmatter(md: string, fields: FieldAliases = DEFAULT_FIELDS): ReviewMeta {
-  const map = parseFrontmatterMap(md);
-  const assignees = pickField(map, fields.assignees);
-  const tags = pickField(map, fields.tags);
-  const priority = pickField(map, fields.priority);
-  const createdAt = pickField(map, fields.created_at);
+function parseFrontmatter(map: Record<string, string>, config: BoardConfig = DEFAULT_BOARD_CONFIG): ReviewMeta {
+  const assignees = pickField(map, config.fields.assignees);
+  const tags = pickField(map, config.fields.tags);
+  const priority = pickField(map, config.fields.priority);
+  const createdAt = pickField(map, config.fields.created_at);
   return {
     assignees: assignees ? parseList(assignees) : [],
     tags: tags ? parseList(tags) : [],
     priority: priority ? normPriority(priority) : null,
-    createdAt: createdAt ? extractDate(createdAt) : null,
+    createdAt: createdAt ? extractDate(createdAt, config.date.pattern) : null,
   };
+}
+
+/** Frontmatter keys already surfaced as dedicated card fields, so they aren't repeated as "custom". */
+const RESERVED_META_KEYS = new Set([
+  "last_run_at",
+  "last_run_mode",
+  "last_run_result",
+  "last_run_runtime",
+  "last_run_tokens_in",
+  "last_run_tokens_out",
+  "last_run_cache",
+  "last_run_cost_usd",
+  "agent",
+  "agent_started_at",
+]);
+
+/**
+ * Frontmatter keys the board doesn't otherwise read — a repo's own custom
+ * vocabulary (e.g. `task_id`, `phase`, `gate`) — shown as-is in the dialog
+ * instead of silently dropped.
+ */
+function extractCustomFields(map: Record<string, string>, fields: FieldAliases): Record<string, string> {
+  const reserved = new Set([
+    ...fields.status,
+    ...fields.assignees,
+    ...fields.tags,
+    ...fields.priority,
+    ...fields.created_at,
+    ...RESERVED_META_KEYS,
+  ]);
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(map)) {
+    if (reserved.has(key) || value === "") continue;
+    out[key] = value.replace(/^["']|["']$/g, "");
+  }
+  return out;
 }
 
 function parseList(v: string): string[] {
@@ -412,9 +480,13 @@ function normPriority(v: string): Priority | null {
   return s === "low" || s === "medium" || s === "high" ? s : null;
 }
 
-function extractDate(s: string): string | null {
+function extractDate(s: string, pattern?: RegExp | null): string | null {
   const m = s.match(/(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : null;
+  if (m) return m[1];
+  if (!pattern) return null;
+  const g = s.match(pattern)?.groups;
+  if (!g?.year || !g?.month || !g?.day) return null;
+  return `${g.year}-${g.month.padStart(2, "0")}-${g.day.padStart(2, "0")}`;
 }
 
 /** Leading `NN-`/`NN_` ordinal of a date-folder filename (e.g. `01-foo.md` → 1). */

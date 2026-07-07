@@ -1,12 +1,4 @@
-import {
-  Children,
-  isValidElement,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { MarkdownHooks, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -36,6 +28,7 @@ import { useAgentStatus } from "@/hooks/use-agent-status";
 import { useLocalLiveTick } from "@/hooks/use-local-live";
 import { formatRunCost, formatRunTokens, runResultClass } from "@/lib/run-format";
 import { useRunOptions, RunOptionsRow } from "./run-options";
+import { AssigneeAvatar } from "./assignee-avatar";
 import { estimateCost } from "@/lib/claude-pricing";
 import { useBoardStore } from "@/stores/board-store";
 import {
@@ -97,103 +90,6 @@ function createRadioCoordinator(): RadioCoordinator {
 }
 
 /**
- * Live, per-line checkbox state shared between the task rows and each
- * checklist's header. Each TaskItem writes its current state here (keyed by
- * source line); a checklist header reads back only the lines that belong to it,
- * so every list shows its own count. Created once per dialog (stable identity)
- * so the markdown components can close over it without re-running Shiki — reads
- * happen through `useSyncExternalStore` on a bumping version, not new props.
- */
-interface TaskStateStore {
-  set(line: number, checked: boolean): void;
-  remove(line: number): void;
-  isChecked(line: number): boolean;
-  getVersion(): number;
-  subscribe(onChange: () => void): () => void;
-}
-
-function createTaskStateStore(): TaskStateStore {
-  const states = new Map<number, boolean>();
-  let version = 0;
-  const listeners = new Set<() => void>();
-  const bump = () => {
-    version++;
-    for (const cb of listeners) cb();
-  };
-  return {
-    set(line, checked) {
-      if (states.get(line) === checked) return;
-      states.set(line, checked);
-      bump();
-    },
-    remove(line) {
-      if (states.delete(line)) bump();
-    },
-    isChecked: (line) => states.get(line) ?? false,
-    getVersion: () => version,
-    subscribe(cb) {
-      listeners.add(cb);
-      return () => {
-        listeners.delete(cb);
-      };
-    },
-  };
-}
-
-/**
- * One checklist's header count + progress ring, scoped to the task `lines` in
- * that list. Subscribes to the shared store (via its version), collapses each
- * "pick one" radio group to a single item, shows a filling ring while in
- * progress and a solid checkmark once every task is done.
- */
-function ChecklistHeaderStats({
-  store,
-  lines,
-  radioGroups,
-}: {
-  store: TaskStateStore;
-  lines: number[];
-  radioGroups: Record<number, string>;
-}) {
-  // Re-render whenever any checkbox toggles; the count is derived from the
-  // store below, so the version is all we need to read.
-  useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
-
-  let total = 0;
-  let done = 0;
-  const groupChosen = new Map<string, boolean>();
-  for (const line of lines) {
-    const gid = radioGroups[line];
-    if (gid) {
-      if (!groupChosen.has(gid)) {
-        groupChosen.set(gid, false);
-        total++;
-      }
-      if (store.isChecked(line)) groupChosen.set(gid, true);
-    } else {
-      total++;
-      if (store.isChecked(line)) done++;
-    }
-  }
-  for (const chosen of groupChosen.values()) if (chosen) done++;
-
-  return (
-    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      {total > 0 ? (
-        done === total ? (
-          <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-4 text-emerald-500 fill-emerald-100" />
-        ) : (
-          <CircleProgress value={(done / total) * 100} className="text-emerald-500" />
-        )
-      ) : null}
-      <span className="tabular-nums">
-        {done} of {total}
-      </span>
-    </span>
-  );
-}
-
-/**
  * One GFM task rendered Notion-style: a checkbox + content row that owns its
  * own checked state, so toggling never re-renders the whole markdown tree (and
  * never re-runs the async Shiki pipeline). Changes are reported upward via
@@ -208,7 +104,6 @@ function TaskItem({
   defaultChecked,
   groupId,
   coordinator,
-  statsStore,
   onToggle,
   className,
   children,
@@ -217,7 +112,6 @@ function TaskItem({
   defaultChecked: boolean;
   groupId?: string;
   coordinator: RadioCoordinator;
-  statsStore: TaskStateStore;
   onToggle: (line: number, checked: boolean) => void;
   className?: string;
   children: React.ReactNode;
@@ -228,13 +122,6 @@ function TaskItem({
   useEffect(() => {
     setChecked(defaultChecked);
   }, [defaultChecked]);
-
-  // Mirror this row's state into the shared store so its checklist header can
-  // count it live; drop it when the row unmounts (e.g. document reload).
-  useEffect(() => {
-    statsStore.set(line, checked);
-  }, [statsStore, line, checked]);
-  useEffect(() => () => statsStore.remove(line), [statsStore, line]);
 
   const set = useCallback(
     (value: boolean) => {
@@ -303,7 +190,6 @@ function makeMarkdownComponents(
   radioGroups: Record<number, string>,
   coordinator: RadioCoordinator,
   onToggle: (line: number, checked: boolean) => void,
-  statsStore: TaskStateStore,
 ): Components {
   return {
     // GFM task-list checkbox nodes carry NO source position, so we can't key
@@ -324,20 +210,13 @@ function makeMarkdownComponents(
           </ul>
         );
       }
-      // The task lines in THIS list — read off the TaskItem children the `li`
-      // handler produced — so the header counts only its own items.
-      const lines = Children.toArray(children)
-        .filter(isValidElement)
-        .map((el) => (el.props as { line?: number }).line)
-        .filter((l): l is number => typeof l === "number");
       return (
         <div className="my-3 overflow-hidden rounded-xl border bg-card shadow-sm">
-          <div className="flex items-center justify-between border-b bg-muted/30 px-3 py-2">
+          <div className="flex items-center gap-1.5 border-b bg-muted/30 px-3 py-2">
             <span className="text-xs font-semibold flex items-center gap-1.5 uppercase tracking-wide text-muted-foreground">
               <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-4 text-muted-foreground" />
               Checklist
             </span>
-            <ChecklistHeaderStats store={statsStore} lines={lines} radioGroups={radioGroups} />
           </div>
           <ul className={cn(className, "list-none p-1.5 mt-0!")} {...props}>
             {children}
@@ -361,7 +240,6 @@ function makeMarkdownComponents(
           defaultChecked={initial[line] ?? false}
           groupId={radioGroups[line]}
           coordinator={coordinator}
-          statsStore={statsStore}
           onToggle={onToggle}
           className={className}
         >
@@ -449,11 +327,6 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
   // keeps it out of the markdownComponents dependency churn.
   const coordinator = useMemo(() => createRadioCoordinator(), []);
 
-  // Live per-line checkbox state shared with each checklist's header. Stable
-  // identity keeps it out of the markdownComponents deps (below) so ticking a
-  // box doesn't re-run Shiki; the rows write into it and the headers read back.
-  const statsStore = useMemo(() => createTaskStateStore(), []);
-
   // Stable across toggles → markdownComponents identity is stable → MarkdownHooks
   // doesn't re-run the async Shiki pipeline every time a box is ticked.
   const onToggle = useCallback((line: number, checked: boolean) => {
@@ -461,8 +334,8 @@ export function ReviewDialog({ owner, repo, branch }: ReviewDialogProps) {
   }, []);
 
   const markdownComponents = useMemo(
-    () => makeMarkdownComponents(initial, radioGroups, coordinator, onToggle, statsStore),
-    [initial, radioGroups, coordinator, onToggle, statsStore],
+    () => makeMarkdownComponents(initial, radioGroups, coordinator, onToggle),
+    [initial, radioGroups, coordinator, onToggle],
   );
 
   const dirty = useMemo(
@@ -919,11 +792,7 @@ function MetaPanel({
               key={login}
               className="inline-flex items-center gap-1.5 rounded-full bg-secondary py-0.5 pr-2.5 pl-0.5 text-xs font-medium"
             >
-              <img
-                src={`https://github.com/${login}.png?size=40`}
-                alt={login}
-                className="size-5 rounded-full"
-              />
+              <AssigneeAvatar login={login} className="size-5" />
               {login}
             </span>
           ))
@@ -1004,8 +873,20 @@ function MetaPanel({
           ) : null}
         </Row>
       ) : null}
+
+      {Object.entries(card.custom).map(([key, value]) => (
+        <Row key={key} icon={CircleIcon} label={humanizeFieldKey(key)}>
+          <span className="break-all">{value}</span>
+        </Row>
+      ))}
     </div>
   );
+}
+
+/** `task_id` → "Task id" — a repo's own custom frontmatter keys, humanized for the Row label. */
+function humanizeFieldKey(key: string): string {
+  const words = key.replace(/[-_]+/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function Row({

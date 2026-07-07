@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-07-07
+
+### Added
+- **`date.pattern` config option** — `.agents/reviews/config.json` can now declare
+  an extra date pattern (a regex source string with named `year`/`month`/`day`
+  groups) for filenames, folders, and frontmatter date values that don't use the
+  built-in `YYYY-MM-DD` shape, e.g. a compact `YYYYMMDD` prefix from a `task_id`
+  convention. The built-in `YYYY-MM-DD` match is always tried first; an invalid or
+  incomplete pattern is ignored rather than erroring.
+- **Custom frontmatter fields in the review dialog** — any frontmatter key the
+  board doesn't otherwise read (e.g. a repo's own `task_id`, `phase`, `gate`)
+  now shows up as its own row in the card detail view instead of being silently
+  dropped.
+
+### Fixed
+- **Broken assignee avatars** — a GitHub avatar `<img>` that 404s (e.g. the login
+  isn't a real GitHub user) now falls back to a deterministic gradient + initial
+  avatar instead of the browser's broken-image icon.
+- **Inaccurate checklist counter removed** — the per-checklist "N of M" header
+  counter (and the live-count store that only existed to feed it) is gone; the
+  Checklist card header now just shows the label.
+- **Unchecked checkbox styling** — the unchecked state changed from a gray fill
+  to a white/background fill with a visible border, matching the checked state's
+  visual weight instead of reading as disabled.
+
 ## [0.3.4] - 2026-07-03
 
 ### Fixed

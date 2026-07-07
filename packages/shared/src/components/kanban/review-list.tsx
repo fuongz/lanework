@@ -4,6 +4,7 @@ import type { BoardData } from "@/server/reviews";
 import { REVIEW_COLUMNS, type ReviewColumn, type ReviewCard, type Priority } from "@/lib/github";
 import { useBoardStore } from "@/stores/board-store";
 import { RunAgentButton, AgentWorkingBadge } from "./run-agent-button";
+import { AssigneeAvatar } from "./assignee-avatar";
 import { progressPercent } from "@/lib/review-stats";
 import { statusMeta } from "@/lib/review-status";
 import { formatDate } from "@/lib/format";
@@ -224,13 +225,7 @@ function Assignees({ logins }: { logins: string[] }) {
     <div className="flex items-center justify-end">
       <div className="flex -space-x-1.5">
         {shown.map((login) => (
-          <img
-            key={login}
-            src={`https://github.com/${login}.png?size=40`}
-            alt={login}
-            title={login}
-            className="size-5 rounded-full ring-2 ring-background"
-          />
+          <AssigneeAvatar key={login} login={login} className="size-5 ring-2 ring-background" />
         ))}
       </div>
       {extra > 0 ? <span className="ml-1 text-[11px] text-muted-foreground">+{extra}</span> : null}

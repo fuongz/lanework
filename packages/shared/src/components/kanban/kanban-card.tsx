@@ -9,6 +9,7 @@ import {
 import type { ReviewCard, Priority, LastRun } from "@/lib/github";
 import { useBoardStore } from "@/stores/board-store";
 import { RunAgentButton, AgentWorkingBadge } from "./run-agent-button";
+import { AssigneeAvatar } from "./assignee-avatar";
 import { progressPercent } from "@/lib/review-stats";
 import { formatDate } from "@/lib/format";
 import { tagPill } from "@/lib/tag-color";
@@ -175,13 +176,7 @@ function Assignees({ logins }: { logins: string[] }) {
     <div className="flex items-center">
       <div className="flex -space-x-1.5">
         {shown.map((login) => (
-          <img
-            key={login}
-            src={`https://github.com/${login}.png?size=40`}
-            alt={login}
-            title={login}
-            className="size-5 rounded-full ring-2 ring-card"
-          />
+          <AssigneeAvatar key={login} login={login} className="size-5 ring-2 ring-card" />
         ))}
       </div>
       {extra > 0 ? <span className="ml-1 text-[11px] text-muted-foreground">+{extra}</span> : null}
