@@ -59,8 +59,10 @@ name + owner, opens on click or `/`, navigates to the board on select. `TagMore`
 ## ReviewDialog — `src/components/kanban/review-dialog.tsx`
 
 Full-screen `Dialog` for a review. Header (title + GitHub link), a **metadata
-panel** (label/value rows: Status, Priority, Assignees, Created, Progress, Tags),
-divider, then the markdown body (frontmatter stripped, `prose`, `max-w-3xl`).
+panel** (label/value rows: Status, Priority, Assignees, Created, Progress, Tags,
+Last run, then one row per unrecognised frontmatter key — a repo's own custom
+fields, humanized label), divider, then the markdown body (frontmatter stripped,
+`prose`, `max-w-3xl`).
 
 ## BoardSkeleton — `src/components/kanban/board-skeleton.tsx`
 

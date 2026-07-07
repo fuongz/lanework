@@ -103,6 +103,10 @@ authoritative and ignore any `status:` field, add `.agents/reviews/config.json` 
 **Custom frontmatter keys:** a repo can map its own key names onto card fields via a
 `fields` block in `config.json`, e.g.
 `{"fields":{"assignees":["owner"],"tags":["labels"]}}` — the canonical key still works.
+Keys the board doesn't map to a field (e.g. `task_id`, `phase`) are shown as-is, one row
+per key, in the card detail dialog. **Dates in a non-`YYYY-MM-DD` shape** (e.g. a compact
+`YYYYMMDD` prefix) need a `date.pattern` regex (named `year`/`month`/`day` groups) in
+`config.json`, e.g. `{"date":{"pattern":"(?<year>\\d{4})-(?<month>\\d{2})(?<day>\\d{2})"}}`.
 Tag vocabulary for this
 repo: `ui`, `design-system`, `board`, `sidebar`, `dialog`, `animation`, `auth`,
 `github`, `server-fn`, `d1`, `drizzle`, `routing`, `cloudflare`, `guide`, `docs`.
@@ -204,7 +208,10 @@ shape. Those only need `.agents/todo.md`.
   fields. Layout/column resolution (flat vs. date-folder, folder vs. frontmatter
   `status:` via `config.json`) lives in `lib/reviews-core.ts` (`resolveCardLocation`,
   `parseBoardConfig`) and is shared by both data sources; keep checklist parsing in
-  `lib/review-stats.ts`.
+  `lib/review-stats.ts`. Non-`YYYY-MM-DD` dates go through `config.date.pattern`
+  (`extractDate`); frontmatter keys not mapped to a card field land in
+  `ReviewCard.custom` (`extractCustomFields`) and render in `review-dialog.tsx`'s
+  `MetaPanel`.
 
 ---
 

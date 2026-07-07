@@ -84,6 +84,8 @@ All tools honour the layout/config below (date folders, frontmatter `status:`, f
 - 🗂️ **Board & List views** from your `.agents/reviews/` markdown (column from each
   card's `status:` field, or from `todo/processing/done/dropped` folders — see below).
 - 🏷️ **Rich cards** — priority, assignees, tags, date, and an `x/x` checklist-progress badge.
+  Any frontmatter key the board doesn't otherwise map (e.g. your own `task_id`, `phase`,
+  `gate`) shows up as its own row in the card's detail view instead of being dropped.
 - ☑️ **Interactive checklists** — tick `- [ ]` items right in the full-screen review,
   with live progress and a "Ready" state at 100%.
 - 🔘 **"Pick one" groups** — options nested under a `Pick one:` bullet render as radio
@@ -157,6 +159,21 @@ instead of `tags`)? Map them to card fields in `<repo>/.agents/reviews/config.js
 Each value lists the frontmatter keys to accept for that field; the first one present in
 a file wins. The canonical key (`assignees`, `tags`, …) always keeps working, so adding
 an alias never breaks existing files.
+
+### Customize date parsing
+
+Filenames, date folders, and `created_at`-style values must be `YYYY-MM-DD` by default.
+If your convention encodes dates differently — e.g. a compact `YYYYMMDD` prefix from a
+`task_id` like `2026-0707-rd16-slug` — add a `date.pattern` to
+`<repo>/.agents/reviews/config.json`: a regex source string with named `year`/`month`/`day`
+groups, tried whenever the built-in `YYYY-MM-DD` match fails:
+
+```json
+{ "date": { "pattern": "(?<year>\\d{4})-(?<month>\\d{2})(?<day>\\d{2})" } }
+```
+
+An invalid pattern (bad regex, or missing one of the three named groups) is ignored — only
+the built-in match is tried.
 
 ## Setting up the convention
 

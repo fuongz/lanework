@@ -84,10 +84,13 @@ By default a card's **column** comes from its `status:` field, with files groupe
 A card reads its **column** from the `status:` field, its **date** from the enclosing
 `YYYY-MM-DD/` folder (the leading `NN-` orders cards within the day), and **priority ·
 assignees · tags · progress** from the rest of the YAML frontmatter + its `- [ ]` /
-`- [x]` checkboxes. You can instead let `todo/processing/done/dropped` folders carry the
-status (`{"status":{"from":"folder"}}` in `.agents/reviews/config.json` makes folders
-authoritative). See the in-app **[guide](packages/shared/src/routes/guide.tsx)** or the
-standardized **[`AGENTS.md`](./AGENTS.md)** template to set this up in your own repos.
+`- [x]` checkboxes. Any other frontmatter key (e.g. your own `task_id`, `phase`) still
+shows up as its own row in the card's detail view. You can instead let
+`todo/processing/done/dropped` folders carry the status
+(`{"status":{"from":"folder"}}` in `.agents/reviews/config.json` makes folders
+authoritative), or teach it a non-`YYYY-MM-DD` date shape with `date.pattern`. See the
+in-app **[guide](packages/shared/src/routes/guide.tsx)** or the standardized
+**[`AGENTS.md`](./AGENTS.md)** template to set this up in your own repos.
 
 ## Run locally on any repo
 

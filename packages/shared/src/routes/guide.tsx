@@ -181,7 +181,7 @@ function GuideBody() {
               <code className="rounded bg-muted px-1 py-0.5 text-xs">{`["a","b"]`}</code>) or a
               comma-separated string (<code className="rounded bg-muted px-1 py-0.5 text-xs">a, b</code>).
               Any field the board doesn't recognise is left untouched — so you can keep your own custom
-              keys alongside these.
+              keys alongside these, and each one shows up as its own row in the card's detail view.
             </p>
             <div className="divide-y overflow-hidden rounded-lg border">
               {FRONTMATTER_FIELDS.map((f) => (
@@ -220,6 +220,30 @@ function GuideBody() {
               <p className="mt-2">
                 Each value is the list of frontmatter keys to accept for that card field; the first one
                 present in a file wins.
+              </p>
+            </div>
+
+            <div className="border-t pt-4 text-muted-foreground">
+              <p>
+                <strong className="text-foreground">Dates in a different shape.</strong> Filenames, date
+                folders, and <code className="rounded bg-muted px-1 py-0.5 text-xs">created_at</code>-style
+                values must be <code className="rounded bg-muted px-1 py-0.5 text-xs">YYYY-MM-DD</code> by
+                default. If your convention encodes dates differently — e.g. a compact{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">YYYYMMDD</code> prefix from a{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">task_id</code> like{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">2026-0707-rd16-slug</code> — add a{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">date.pattern</code>: a regex with
+                named <code className="rounded bg-muted px-1 py-0.5 text-xs">year</code>/
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">month</code>/
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">day</code> groups, tried whenever the
+                built-in match fails:
+              </p>
+              <pre className="mt-2 overflow-x-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+                {`{ "date": { "pattern": "(?<year>\\\\d{4})-(?<month>\\\\d{2})(?<day>\\\\d{2})" } }`}
+              </pre>
+              <p className="mt-2">
+                An invalid pattern (bad regex, or missing one of the three named groups) is ignored — only
+                the built-in match is tried.
               </p>
             </div>
 

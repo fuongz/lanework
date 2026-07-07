@@ -68,7 +68,8 @@ tags: ["area-a", "area-b"]         # your own controlled vocabulary
 All fields are optional. Lists accept a JSON array (\`["a","b"]\`) or a comma-separated
 string (\`a, b\`). \`priority\` must be \`low | medium | high\`; \`status\` one of the four
 columns; anything else is normalised away. Keep \`created_at\` as \`YYYY-MM-DD\`. Fields the
-board doesn't recognise are left untouched, so a repo can carry its own custom keys.
+board doesn't recognise are left untouched, so a repo can carry its own custom keys — each
+shows up as its own row in the card's detail view.
 
 **Use your own key names.** To map existing frontmatter keys onto card fields, add a
 \`fields\` block to \`.agents/reviews/config.json\` (the canonical key keeps working too):
@@ -76,6 +77,19 @@ board doesn't recognise are left untouched, so a repo can carry its own custom k
 \`\`\`json
 { "fields": { "assignees": ["owner"], "tags": ["labels"], "created_at": ["due"] } }
 \`\`\`
+
+**Dates in a different shape.** Filenames, date folders, and \`created_at\`-style values
+must be \`YYYY-MM-DD\` by default. If your convention encodes dates differently — e.g. a
+compact \`YYYYMMDD\` prefix from a \`task_id\` like \`2026-0707-rd16-slug\` — add a
+\`date.pattern\` to \`.agents/reviews/config.json\`: a regex with named \`year\`/\`month\`/\`day\`
+groups, tried whenever the built-in \`YYYY-MM-DD\` match fails:
+
+\`\`\`json
+{ "date": { "pattern": "(?<year>\\\\d{4})-(?<month>\\\\d{2})(?<day>\\\\d{2})" } }
+\`\`\`
+
+An invalid pattern (bad regex, or missing one of the three named groups) is ignored —
+only the built-in match is tried.
 
 **Alternative — status from the folder.** You can instead omit \`status:\` and place
 files in \`todo/ processing/ done/ dropped/\` folders (either flat
