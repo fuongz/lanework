@@ -39,9 +39,10 @@ function log(...args) {
 }
 
 /** Spawn the dashboard (cli.mjs) as a child whose stdout can't taint our protocol. */
-function startDashboard(dir) {
+function startDashboard(dir, reviewsDir) {
   const cli = fileURLToPath(new URL("./cli.mjs", import.meta.url));
-  const child = spawn(process.execPath, [cli, dir], { stdio: "ignore" });
+  const args = reviewsDir ? [cli, "--reviews-dir", reviewsDir, dir] : [cli, dir];
+  const child = spawn(process.execPath, args, { stdio: "ignore" });
   child.on("error", (e) => log("dashboard failed to start:", e.message));
   const kill = () => {
     try {
@@ -86,9 +87,10 @@ function describeStatuses(config) {
   }).join(" | ");
 }
 
-export async function startMcp({ dir = process.cwd(), dashboard = false } = {}) {
+export async function startMcp({ dir = process.cwd(), dashboard = false, reviewsDir } = {}) {
   process.env.LANEWORK_DIR = dir;
-  if (dashboard) startDashboard(dir);
+  if (reviewsDir) process.env.LANEWORK_REVIEWS_DIR = reviewsDir;
+  if (dashboard) startDashboard(dir, reviewsDir);
 
   // Read once at startup so tool descriptions can mention this repo's configured
   // status aliases (`.agents/reviews/config.json` → `status.values`); a change to

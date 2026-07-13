@@ -9,7 +9,7 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
 import {
   REVIEW_ROOT,
@@ -58,9 +58,35 @@ export function localRepoName(): string {
   return parts[parts.length - 1] || "local";
 }
 
-/** Absolute path to `<root>/.agents/reviews`. */
+/**
+ * The reviews subfolder, relative to the repo root by default (`.agents/reviews`),
+ * overridable via `LANEWORK_REVIEWS_DIR` so a repo can keep its board somewhere
+ * else — either another relative path or an absolute one. This is the same
+ * string used to prefix every card's `path`, so it stays consistent with
+ * whatever's actually on disk.
+ */
+export function reviewRootRel(): string {
+  return process.env.LANEWORK_REVIEWS_DIR || REVIEW_ROOT;
+}
+
+/** Absolute path to the reviews folder (`<root>/.agents/reviews` by default). */
 function reviewsDir(): string {
-  return join(localRoot(), REVIEW_ROOT);
+  const rel = reviewRootRel();
+  return isAbsolute(rel) ? rel : join(localRoot(), rel);
+}
+
+/**
+ * Resolve a card's repo-relative path (e.g. `<reviewRootRel()>/todo/foo.md`) to
+ * its absolute location on disk, rejecting anything that resolves outside the
+ * reviews root.
+ */
+function resolveReviewPath(repoPath: string): string {
+  const prefix = `${reviewRootRel()}/`;
+  if (!repoPath.startsWith(prefix)) throw new Error(`path must be under ${reviewRootRel()}/`);
+  const base = resolve(reviewsDir());
+  const full = resolve(base, repoPath.slice(prefix.length));
+  if (full !== base && !full.startsWith(base + sep)) throw new Error("path outside reviews root");
+  return full;
 }
 
 /** Short content hash used as the card's `sha` (changes when the file changes). */
@@ -102,7 +128,7 @@ export async function listLocalReviewCards(): Promise<ReviewCard[]> {
     if (!loc) continue; // not a board file (e.g. a stray .md outside any column)
     cards.push(
       buildReviewCard({
-        path: `${REVIEW_ROOT}/${segments.join("/")}`,
+        path: `${reviewRootRel()}/${segments.join("/")}`,
         column: loc.column,
         fileName: loc.fileName,
         sha: text ? contentSha(text) : loc.fileName,
@@ -121,12 +147,7 @@ export async function listLocalReviewCards(): Promise<ReviewCard[]> {
  * re-anchor it under the root and reject any path that escapes it.
  */
 export async function getLocalCardContent(repoPath: string): Promise<string> {
-  const root = resolve(localRoot());
-  const full = resolve(root, repoPath);
-  if (full !== root && !full.startsWith(root + sep)) {
-    throw new Error("path outside project root");
-  }
-  return readFile(full, "utf8");
+  return readFile(resolveReviewPath(repoPath), "utf8");
 }
 
 /**
@@ -135,12 +156,7 @@ export async function getLocalCardContent(repoPath: string): Promise<string> {
  * rejected if it escapes. Used by the board to persist checkbox edits to disk.
  */
 export async function saveLocalCardContent(repoPath: string, content: string): Promise<void> {
-  const root = resolve(localRoot());
-  const full = resolve(root, repoPath);
-  if (full !== root && !full.startsWith(root + sep)) {
-    throw new Error("path outside project root");
-  }
-  await writeFile(full, content, "utf8");
+  await writeFile(resolveReviewPath(repoPath), content, "utf8");
 }
 
 // ── Lifecycle orchestrators (used by the MCP server) ─────────────────────────
@@ -149,16 +165,13 @@ export async function saveLocalCardContent(repoPath: string, content: string): P
 // tools can drive the review lifecycle — create → advance status → tick items —
 // without hand-editing whole files. Each honours the board's status mode.
 
-/** Re-anchor a repo-relative path under the root and reject escapes. */
+/** Re-anchor a repo-relative path under the reviews root and reject escapes. */
 function safeFull(repoPath: string): string {
-  const root = resolve(localRoot());
-  const full = resolve(root, repoPath);
-  if (full !== root && !full.startsWith(root + sep)) throw new Error("path outside project root");
-  return full;
+  return resolveReviewPath(repoPath);
 }
 
 function isReviewPath(repoPath: string): boolean {
-  return repoPath.startsWith(`${REVIEW_ROOT}/`) && repoPath.endsWith(".md") && !repoPath.includes("..");
+  return repoPath.startsWith(`${reviewRootRel()}/`) && repoPath.endsWith(".md") && !repoPath.includes("..");
 }
 
 /** Today as YYYY-MM-DD (local time). */
@@ -205,12 +218,12 @@ export async function createLocalReview(input: CreateReviewInput): Promise<{
   const date = input.date && /^\d{4}-\d{2}-\d{2}$/.test(input.date) ? input.date : todayISO();
   const folderMode = config.status.from === "folder";
 
-  const dirRel = folderMode ? `${REVIEW_ROOT}/${status}/${date}` : `${REVIEW_ROOT}/${date}`;
-  const absDir = join(resolve(localRoot()), dirRel);
+  const dirRel = folderMode ? `${status}/${date}` : date;
+  const absDir = join(reviewsDir(), dirRel);
   await mkdir(absDir, { recursive: true });
   const ordinal = await nextOrdinal(absDir);
   const fileName = `${String(ordinal).padStart(2, "0")}-${slugify(input.title)}.md`;
-  const repoPath = `${dirRel}/${fileName}`;
+  const repoPath = `${reviewRootRel()}/${dirRel}/${fileName}`;
 
   const content = composeReviewFile({
     title: input.title,
@@ -236,7 +249,7 @@ export async function planLocalReview(
   repoPath: string,
   opts: { context?: string; decisions: string[]; title?: string },
 ): Promise<{ path: string; items: number }> {
-  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  if (!isReviewPath(repoPath)) throw new Error(`path must be under ${reviewRootRel()}/ and end in .md`);
   const decisions = (opts.decisions ?? []).map((d) => String(d).trim()).filter(Boolean);
   if (decisions.length === 0) throw new Error("provide at least one decision");
   const content = await getLocalCardContent(repoPath);
@@ -255,9 +268,10 @@ function humanizeSlug(repoPath: string): string {
 
 /** Replace the column segment of a folder-mode path with `newColumn`. */
 function relocateColumn(repoPath: string, newColumn: ReviewColumn): string {
-  const rest = repoPath.slice(REVIEW_ROOT.length + 1).split("/");
+  const root = reviewRootRel();
+  const rest = repoPath.slice(root.length + 1).split("/");
   rest[0] = newColumn;
-  return `${REVIEW_ROOT}/${rest.join("/")}`;
+  return `${root}/${rest.join("/")}`;
 }
 
 /**
@@ -268,7 +282,7 @@ export async function setLocalReviewStatus(
   repoPath: string,
   status: string,
 ): Promise<{ path: string; status: ReviewColumn; moved: boolean }> {
-  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  if (!isReviewPath(repoPath)) throw new Error(`path must be under ${reviewRootRel()}/ and end in .md`);
   const config = await loadLocalBoardConfig();
   const resolved = canonicalStatus(status, config.status.values);
   if (!resolved) throw new Error(`invalid status: ${status}`);
@@ -292,7 +306,7 @@ export async function toggleLocalReviewItem(
   repoPath: string,
   opts: { index?: number; match?: string; checked?: boolean; note?: string },
 ): Promise<{ path: string; line: number | null; checked: boolean | null; progress: ReturnType<typeof parseReviewStats> }> {
-  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  if (!isReviewPath(repoPath)) throw new Error(`path must be under ${reviewRootRel()}/ and end in .md`);
   const content = await getLocalCardContent(repoPath);
   const res = toggleChecklistItem(content, opts);
   if (!res.found) throw new Error("no matching checklist item");
@@ -302,7 +316,7 @@ export async function toggleLocalReviewItem(
 
 /** Delete a review card's file from disk. */
 export async function deleteLocalReview(repoPath: string): Promise<{ ok: true }> {
-  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  if (!isReviewPath(repoPath)) throw new Error(`path must be under ${reviewRootRel()}/ and end in .md`);
   await unlink(safeFull(repoPath));
   return { ok: true };
 }
@@ -312,7 +326,7 @@ export async function updateLocalReviewMeta(
   repoPath: string,
   meta: { priority?: Priority; tags?: string[]; assignees?: string[] },
 ): Promise<{ path: string }> {
-  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  if (!isReviewPath(repoPath)) throw new Error(`path must be under ${reviewRootRel()}/ and end in .md`);
   const patch: Record<string, string | null> = {};
   if (meta.priority !== undefined) patch.priority = meta.priority;
   if (meta.tags !== undefined) patch.tags = serializeList(meta.tags);

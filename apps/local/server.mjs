@@ -6,7 +6,7 @@ import { readFile, stat } from "node:fs/promises";
 import { existsSync, watch } from "node:fs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
-import { extname, join, normalize } from "node:path";
+import { dirname, extname, isAbsolute, join, normalize } from "node:path";
 
 const root = fileURLToPath(new URL("./dist-local/", import.meta.url));
 const clientDir = join(root, "client");
@@ -89,10 +89,18 @@ async function staticFile(pathname) {
   }
 }
 
-// Nearest existing dir to watch: .agents/reviews → .agents → project root, so a
-// reviews folder created after launch still produces change events.
+/** Absolute path to the reviews folder — `<targetDir>/.agents/reviews` by default,
+ *  or `LANEWORK_REVIEWS_DIR` (relative to targetDir, or absolute) when set. */
+function reviewsRootDir(targetDir) {
+  const rel = process.env.LANEWORK_REVIEWS_DIR || join(".agents", "reviews");
+  return isAbsolute(rel) ? rel : join(targetDir, rel);
+}
+
+// Nearest existing dir to watch: the reviews folder → its parent → project root,
+// so a reviews folder created after launch still produces change events.
 function watchDir(targetDir) {
-  for (const d of [join(targetDir, ".agents", "reviews"), join(targetDir, ".agents"), targetDir]) {
+  const reviewsRoot = reviewsRootDir(targetDir);
+  for (const d of [reviewsRoot, dirname(reviewsRoot), targetDir]) {
     if (existsSync(d)) return d;
   }
   return targetDir;
@@ -170,10 +178,12 @@ export async function start({
   dir = process.cwd(),
   host = "127.0.0.1",
   port,
+  reviewsDir,
 } = {}) {
   const targetDir = dir;
   // Make the dir available to the SSR server functions (local-fs reads it).
   process.env.LANEWORK_DIR = targetDir;
+  if (reviewsDir) process.env.LANEWORK_REVIEWS_DIR = reviewsDir;
   const startPort = Number(port ?? process.env.PORT) || 3662;
   const boundPort = await findFreePort(startPort, host);
 

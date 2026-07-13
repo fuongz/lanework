@@ -109,7 +109,15 @@ updated markdown back to the file on disk. Hover a card and hit **Run** to dispa
 Claude Code agent against that review without leaving the board.
 
 ```
-lanework [dir] [--port N] [--no-open]
+lanework [dir] [--port N] [--no-open] [--reviews-dir PATH]
+```
+
+Reviews live at `<dir>/.agents/reviews` by default. Pass `--reviews-dir` (or set
+`LANEWORK_REVIEWS_DIR`) to board a different folder instead — relative to `dir`,
+or absolute:
+
+```bash
+npx @phake/lanework --reviews-dir .custom/reviews
 ```
 
 After a global install (`npm i -g @phake/lanework`) the commands **`lanework`** and

@@ -20,7 +20,7 @@ const execFileP = promisify(execFile);
 // The fs data layer (bundled from packages/shared/src/lib/local-fs.ts), same
 // module the MCP server uses — gives us the lifecycle helpers + the project root.
 const libUrl = new URL("./dist-local/reviews-lib.mjs", import.meta.url).href;
-const { getLocalCardContent, localRoot, getCostEstimateForDir, recordAgentRun } = await import(libUrl);
+const { getLocalCardContent, localRoot, getCostEstimateForDir, recordAgentRun, reviewRootRel } = await import(libUrl);
 
 const CLI = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -43,7 +43,7 @@ function log(...args) {
 }
 
 function isReviewPath(p) {
-  return typeof p === "string" && p.startsWith(".agents/reviews/") && p.endsWith(".md") && !p.includes("..");
+  return typeof p === "string" && p.startsWith(`${reviewRootRel()}/`) && p.endsWith(".md") && !p.includes("..");
 }
 
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
@@ -69,7 +69,7 @@ function resolveRunOpts(opts) {
 /** Stable, filesystem-safe id for a card path: drop the prefix, kebab the rest. */
 function slugFor(repoPath) {
   return repoPath
-    .slice(".agents/reviews/".length)
+    .slice(`${reviewRootRel()}/`.length)
     .replace(/\.md$/, "")
     .replace(/[^a-zA-Z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
@@ -126,7 +126,7 @@ function buildPrompt(repoPath, cardMarkdown) {
     "  lanework MCP tools: call `toggle_item` (match each item by its text) as you",
     "  complete each checklist item, and `set_status` to `done` when everything is",
     `  finished and verified. Always pass path \`${repoPath}\`.`,
-    "- Do NOT edit anything under `.agents/` directly — only via the MCP tools.",
+    `- Do NOT edit anything under \`${reviewRootRel()}/\` directly — only via the MCP tools.`,
     "- Make your code changes here in the worktree and commit them to this branch",
     "  with clear messages. Do not push.",
     "- If you cannot complete the work, stop and leave a brief explanation.",
@@ -201,7 +201,7 @@ async function allocateSlot(root, baseSlug) {
  * runs on in the background and reports back through the MCP tools).
  */
 export async function runAgent(repoPath, opts = {}) {
-  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  if (!isReviewPath(repoPath)) throw new Error(`path must be under ${reviewRootRel()}/ and end in .md`);
   const mode = opts.mode ?? "implement";
   if (mode !== "implement" && mode !== "plan") throw new Error(`unknown agent mode: ${mode}`);
   const { model, effort } = resolveRunOpts(opts);
@@ -229,7 +229,10 @@ export async function runAgent(repoPath, opts = {}) {
 
   // MCP config: a lanework stdio server pointed at the MAIN checkout, so the
   // agent's status writes land on the board the user is watching (not the worktree).
+  // Pass --reviews-dir explicitly (rather than relying on env inheritance) so a
+  // custom reviews location survives however the MCP client spawns this server.
   const mcpConfigPath = join(root, ".lanework", `${slug}.mcp.json`);
+  const reviewsDirFlag = process.env.LANEWORK_REVIEWS_DIR;
   await writeFile(
     mcpConfigPath,
     JSON.stringify({
@@ -237,7 +240,7 @@ export async function runAgent(repoPath, opts = {}) {
         lanework: {
           type: "stdio",
           command: process.execPath,
-          args: [CLI, "mcp", "--no-dashboard", root],
+          args: [CLI, "mcp", "--no-dashboard", ...(reviewsDirFlag ? ["--reviews-dir", reviewsDirFlag] : []), root],
         },
       },
     }),
@@ -355,7 +358,7 @@ export async function runAgent(repoPath, opts = {}) {
  * On a merge conflict it aborts the merge and reports, leaving the branch intact.
  */
 export async function mergeAgent(repoPath) {
-  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  if (!isReviewPath(repoPath)) throw new Error(`path must be under ${reviewRootRel()}/ and end in .md`);
   const entry = registry.get(repoPath);
   if (!entry) throw new Error("no agent branch for this card");
   if (entry.state === "running") throw new Error("agent is still running — stop or wait for it first");
@@ -379,7 +382,7 @@ export async function mergeAgent(repoPath) {
 
 /** Stop a running agent and prune its worktree + branch + config. */
 export async function stopAgent(repoPath) {
-  if (!isReviewPath(repoPath)) throw new Error("path must be under .agents/reviews/ and end in .md");
+  if (!isReviewPath(repoPath)) throw new Error(`path must be under ${reviewRootRel()}/ and end in .md`);
   const entry = registry.get(repoPath);
   if (!entry) return { ok: true, note: "no agent for this card" };
 

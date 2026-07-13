@@ -5,13 +5,14 @@
 // local-first mode.
 //
 // Usage:
-//   lanework                 # board for the current directory
-//   lanework path/to/repo    # board for another directory
-//   lanework --port 3662     # preferred starting port (falls back upward)
-//   lanework --no-open       # don't auto-open the browser
-//   lanework mcp             # run as an MCP server (stdio) — for Claude etc.
-//   lanework mcp --no-dashboard   # MCP only, don't also open the board
-//   lanework setup claude-code    # register the MCP server with Claude Code
+//   lanework                          # board for the current directory
+//   lanework path/to/repo             # board for another directory
+//   lanework --port 3662              # preferred starting port (falls back upward)
+//   lanework --no-open                # don't auto-open the browser
+//   lanework --reviews-dir .custom/reviews   # board a non-default reviews folder
+//   lanework mcp                      # run as an MCP server (stdio) — for Claude etc.
+//   lanework mcp --no-dashboard       # MCP only, don't also open the board
+//   lanework setup claude-code        # register the MCP server with Claude Code
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,27 @@ import { dirname, join, resolve } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 
 const argv = process.argv.slice(2);
+
+/**
+ * Pull `--<name> value` or `--<name>=value` out of `args`, returning the value
+ * (undefined if absent) and the remaining args with that flag (and its
+ * space-separated value, if any) removed.
+ */
+function extractFlagValue(args, name) {
+  const rest = [];
+  let value;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === `--${name}`) {
+      value = args[++i];
+    } else if (a.startsWith(`--${name}=`)) {
+      value = a.slice(name.length + 3);
+    } else {
+      rest.push(a);
+    }
+  }
+  return { value, rest };
+}
 
 // --- `lanework setup <client>` — register the MCP server with a client --------
 // Runs before the build check: it only shells out to the client's CLI.
@@ -39,13 +61,17 @@ if (!existsSync(join(here, "dist-local", "server", "server.js"))) {
 // --- `lanework mcp` subcommand: run as an MCP (stdio) server ------------------
 // Must run BEFORE any stdout writes — stdout is the JSON-RPC channel.
 if (argv[0] === "mcp") {
-  const rest = argv.slice(1);
+  const { value: reviewsDir, rest } = extractFlagValue(argv.slice(1), "reviews-dir");
   let mcpDir = process.cwd();
   for (const a of rest) if (!a.startsWith("-")) mcpDir = resolve(a);
   const { startMcp } = await import("./mcp.mjs");
   // Headless by default; the board only opens when --dashboard is passed (and an
   // explicit --no-dashboard always wins, for back-compat with older registrations).
-  await startMcp({ dir: mcpDir, dashboard: rest.includes("--dashboard") && !rest.includes("--no-dashboard") });
+  await startMcp({
+    dir: mcpDir,
+    dashboard: rest.includes("--dashboard") && !rest.includes("--no-dashboard"),
+    reviewsDir,
+  });
   // startMcp keeps the process alive on the stdio transport.
 } else {
   await runDashboard();
@@ -53,19 +79,23 @@ if (argv[0] === "mcp") {
 
 async function runDashboard() {
 // --- parse args --------------------------------------------------------------
+const { value: reviewsDir, rest } = extractFlagValue(argv, "reviews-dir");
 let dir = process.cwd();
 let port;
 let open = true;
-for (let i = 0; i < argv.length; i++) {
-  const a = argv[i];
+for (let i = 0; i < rest.length; i++) {
+  const a = rest[i];
   if (a === "--no-open") open = false;
-  else if (a === "--port" || a === "-p") port = Number(argv[++i]);
+  else if (a === "--port" || a === "-p") port = Number(rest[++i]);
   else if (a === "--help" || a === "-h") {
     console.log(
       "Usage:\n" +
-        "  lanework [dir] [--port N] [--no-open]   board a repo's .agents/reviews\n" +
-        "  lanework mcp [dir] [--dashboard]        run as an MCP (stdio) server\n" +
-        "  lanework setup claude-code [--project] [--dashboard] [--local]   register the MCP server with Claude Code",
+        "  lanework [dir] [--port N] [--no-open] [--reviews-dir PATH]   board a repo's .agents/reviews\n" +
+        "  lanework mcp [dir] [--dashboard] [--reviews-dir PATH]        run as an MCP (stdio) server\n" +
+        "  lanework setup claude-code [--project] [--dashboard] [--local]   register the MCP server with Claude Code\n" +
+        "\n" +
+        "  --reviews-dir PATH   board a non-default reviews folder (relative to dir, or absolute).\n" +
+        "                       Same as setting LANEWORK_REVIEWS_DIR. Default: .agents/reviews",
     );
     process.exit(0);
   } else if (!a.startsWith("-")) dir = resolve(a);
@@ -80,10 +110,10 @@ function openBrowser(url) {
 }
 
 const { start } = await import("./server.mjs");
-const { url } = await start({ dir, port });
+const { url } = await start({ dir, port, reviewsDir });
 
 console.log(`\n  lanework  →  ${url}`);
-console.log(`  board for ${dir}/.agents/reviews`);
+console.log(`  board for ${reviewsDir || `${dir}/.agents/reviews`}`);
 console.log(`  watching for changes… (Ctrl+C to stop)\n`);
 
 if (open) openBrowser(url);
