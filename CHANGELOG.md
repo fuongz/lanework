@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-07-13
+
+### Added
+- **`--reviews-dir` flag / `LANEWORK_REVIEWS_DIR` env var** — board a reviews
+  folder other than the default `.agents/reviews`, relative to the repo root or
+  absolute (`lanework --reviews-dir .custom/reviews`). Works for the dashboard,
+  `lanework mcp`, and dispatched agent runs alike.
+
 ## [0.3.5] - 2026-07-07
 
 ### Added
