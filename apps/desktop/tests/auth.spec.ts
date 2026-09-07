@@ -111,18 +111,19 @@ test("a device user code is checked before anyone is asked to retype it", () => 
     expect(looksLikeUserCode(rejected), String(rejected)).toBe(false);
 });
 
-test("an unconfigured install resolves no control plane", () => {
+test("the control plane defaults to production, overridable in order", () => {
   const saved = process.env.LANEWORK_API_URL;
   try {
     delete process.env.LANEWORK_API_URL;
-    expect(resolveApi()).toBeNull();
-    expect(resolveApi("https://api.example.test/")).toBe(
-      "https://api.example.test",
-    );
+    expect(resolveApi()).toBe("https://api.lanework.dev");
+    // https, never http: this origin receives a PKCE verifier and hands back a
+    // machine credential, so the transport is part of the flow's security.
+    expect(new URL(resolveApi()).protocol).toBe("https:");
+
     process.env.LANEWORK_API_URL = "https://env.example.test//";
     expect(resolveApi()).toBe("https://env.example.test");
     // An explicit origin still wins over the environment.
-    expect(resolveApi("https://arg.example.test")).toBe(
+    expect(resolveApi("https://arg.example.test/")).toBe(
       "https://arg.example.test",
     );
   } finally {
@@ -183,9 +184,11 @@ test("the renderer gets a redacted session and no way to reach a credential", as
   };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_RENDERER_URL;
-  // An unconfigured install must behave, so the sign-in refusal below is about
-  // configuration rather than a network call this test would depend on.
-  delete env.LANEWORK_API_URL;
+  // ⚠️ Pointed at a dead local port, NOT left to the default. The control plane
+  // now defaults to production, so an unset value here would make this test
+  // sign in against the real service.
+  const deadApi = "http://127.0.0.1:1";
+  env.LANEWORK_API_URL = deadApi;
 
   const application = await electron.launch({ args: [resolve(".")], env });
   try {
@@ -215,7 +218,9 @@ test("the renderer gets a redacted session and no way to reach a credential", as
     )) as RedactedSession;
 
     expect(session.principal).toEqual({ kind: "anonymous" });
-    expect(session.apiUrl).toBeNull();
+    expect(session.apiUrl).toBe(deadApi);
+    // Nobody has asked yet, which is not the same as "unreachable" — with no
+    // credential on disk there is nothing to probe and no request is made.
     expect(session.verdict).toBeNull();
     // Nothing anywhere in what crosses the bridge may look like a credential.
     expect(JSON.stringify(session)).not.toMatch(/secret|token|bearer/i);
@@ -226,9 +231,9 @@ test("the renderer gets a redacted session and no way to reach a credential", as
       "verdict",
     ]);
 
-    // The policy gate and the config check both run in main, so a renderer that
-    // calls a refused operation gets an error rather than a silent no-op.
-    const refusal = await page.evaluate(async () => {
+    // A failure to reach the control plane names the origin and the remedy, so
+    // the reader is not left guessing which service was even being called.
+    const unreachable = await page.evaluate(async () => {
       try {
         await (
           globalThis as unknown as {
@@ -240,7 +245,8 @@ test("the renderer gets a redacted session and no way to reach a credential", as
         return (error as Error).message;
       }
     });
-    expect(refusal).toContain("No control plane is configured");
+    expect(unreachable).toContain("Could not reach the control plane at");
+    expect(unreachable).toContain(deadApi);
 
     // Arguments are validated in main: a bad mode never reaches a flow.
     const badMode = await page.evaluate(async () => {

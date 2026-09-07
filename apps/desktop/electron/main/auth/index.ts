@@ -208,11 +208,9 @@ export async function signIn(
     );
   if (inFlight) throw new Error("A sign-in is already in progress.");
 
+  // Env or the built-in default, never a record's stored origin: a revoked
+  // record may name a control plane this install no longer targets.
   const apiUrl = api.resolveApi();
-  if (!apiUrl)
-    throw new Error(
-      "No control plane is configured. Set LANEWORK_API_URL to the origin to sign in against.",
-    );
 
   const controller = new AbortController();
   inFlight = controller;

@@ -27,8 +27,8 @@ export type Verdict = "ok" | "revoked" | "unreachable";
  */
 export interface RedactedSession {
   principal: Principal;
-  /** Control-plane origin in force, or null when unconfigured (offline). */
-  apiUrl: string | null;
+  /** Control-plane origin in force. Always set — see `resolveApi`. */
+  apiUrl: string;
   /** `null` means nobody has asked yet — not the same as "unreachable". */
   verdict: Verdict | null;
   checkedAt: string | null;
@@ -71,6 +71,6 @@ export interface DesktopAuthApi {
 export const anonymous: Principal = { kind: "anonymous" };
 
 /** The session an unconfigured or signed-out install reports. */
-export function anonymousSession(apiUrl: string | null): RedactedSession {
+export function anonymousSession(apiUrl: string): RedactedSession {
   return { principal: anonymous, apiUrl, verdict: null, checkedAt: null };
 }

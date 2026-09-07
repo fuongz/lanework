@@ -4,15 +4,24 @@ import { externalUrlOn, looksLikeUserCode } from "./redirect";
 import type { MachineRecord } from "./store";
 
 /**
- * The control plane this install talks to, or `null` when none is configured.
+ * The control plane this install talks to.
  *
- * There is deliberately no built-in default. An unconfigured install is a
- * working offline install, not a broken one — baking in an origin would point
- * every developer's app at a service they never chose.
+ * `https`, never `http`: this origin receives a PKCE verifier and hands back a
+ * machine credential, so the transport is part of the security of the flow.
+ *
+ * Overridable because local development needs to point at a stub or a
+ * `wrangler dev`, and because self-hosting the control plane is a legitimate
+ * thing to want. Precedence: an explicit origin (a record's own) >
+ * `LANEWORK_API_URL` > this.
  */
-export function resolveApi(apiUrl?: string | null): string | null {
-  const value = apiUrl || process.env.LANEWORK_API_URL || "";
-  return value ? value.replace(/\/+$/, "") : null;
+const DEFAULT_API = "https://api.lanework.dev";
+
+/** The control-plane origin in force, with no trailing slash. Never empty. */
+export function resolveApi(apiUrl?: string | null): string {
+  return (apiUrl || process.env.LANEWORK_API_URL || DEFAULT_API).replace(
+    /\/+$/,
+    "",
+  );
 }
 
 /** What this machine tells the control plane about itself. Display data only. */
@@ -80,7 +89,12 @@ async function postJson(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: signal ?? AbortSignal.timeout(15_000),
+      // BOTH, not either: a caller's signal carries cancellation, and the
+      // timeout is what keeps a hung connection from waiting out the sign-in's
+      // ten-minute window instead of failing in fifteen seconds.
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+        : AbortSignal.timeout(15_000),
     });
   } catch (cause) {
     if (signal?.aborted) throw cause;
@@ -296,11 +310,6 @@ export async function probe(
   record: MachineRecord,
 ): Promise<{ verdict: Verdict; userId: string | null }> {
   const api = resolveApi(record.apiUrl);
-  if (!api) {
-    verdict = "unreachable";
-    verdictAt = Date.now();
-    return { verdict, userId: record.userId };
-  }
   try {
     const res = await fetch(`${api}/v1/machines/me`, {
       headers: { authorization: `Bearer ${record.secret}` },
@@ -346,7 +355,6 @@ export async function probeIfStale(
  */
 export async function revokeSelf(record: MachineRecord): Promise<boolean> {
   const api = resolveApi(record.apiUrl);
-  if (!api) return false;
   try {
     const res = await fetch(`${api}/v1/machines/me`, {
       method: "DELETE",
