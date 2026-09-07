@@ -154,6 +154,11 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Reveal the native macOS material without changing opaque card tokens. */
+  html[data-vibrancy="true"],
+  html[data-vibrancy="true"] body {
+    background: transparent;
+  }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;

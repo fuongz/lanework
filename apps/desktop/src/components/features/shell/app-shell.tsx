@@ -9,6 +9,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     void usePreferences.persist.rehydrate();
   }, []);
+  useEffect(() => {
+    let disposed = false;
+    void window.desktop
+      ?.getAppInfo()
+      .then((info) => {
+        if (!disposed && info.platform === "darwin")
+          document.documentElement.dataset.vibrancy = "true";
+      })
+      .catch(() => {
+        // Keep the opaque fallback when native app information is unavailable.
+      });
+    return () => {
+      disposed = true;
+      delete document.documentElement.dataset.vibrancy;
+    };
+  }, []);
   return (
     <div className="min-h-screen">
       <header className="flex h-20 items-center justify-between border-b px-8">

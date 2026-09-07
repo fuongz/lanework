@@ -29,6 +29,21 @@ test("production SPA supports native IPC, navigation and persisted preferences",
     await expect(
       page.getByRole("heading", { name: /A little space/ }),
     ).toBeVisible();
+    if (process.platform === "darwin") {
+      await expect(page.locator("body")).toHaveCSS(
+        "background-color",
+        "rgba(0, 0, 0, 0)",
+      );
+      await expect(page.locator('[data-slot="card"]').first()).not.toHaveCSS(
+        "background-color",
+        "rgba(0, 0, 0, 0)",
+      );
+    } else {
+      await expect(page.locator("body")).not.toHaveCSS(
+        "background-color",
+        "rgba(0, 0, 0, 0)",
+      );
+    }
     await page.getByRole("link", { name: "Settings", exact: true }).click();
     await expect(page.getByText("0.1.0", { exact: true })).toBeVisible();
     const toggle = page.getByRole("switch", { name: "Compact layout" });
@@ -36,6 +51,11 @@ test("production SPA supports native IPC, navigation and persisted preferences",
     await expect(page.locator("main")).toHaveAttribute("data-compact", "true");
     await page.reload();
     await expect(toggle).toBeChecked();
+    if (process.platform === "darwin")
+      await expect(page.locator("body")).toHaveCSS(
+        "background-color",
+        "rgba(0, 0, 0, 0)",
+      );
     await expect(
       page.getByRole("heading", { name: "Settings", exact: true }),
     ).toBeVisible();

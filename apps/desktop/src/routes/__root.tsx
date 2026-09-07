@@ -33,7 +33,7 @@ function Document({ children }: { children: ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body className="min-h-screen bg-background text-foreground antialiased">
+      <body className="min-h-screen text-foreground antialiased">
         <MotionConfig reducedMotion="user">{children}</MotionConfig>
         <Scripts />
       </body>

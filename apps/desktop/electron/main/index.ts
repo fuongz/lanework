@@ -28,7 +28,13 @@ function createWindow() {
     minHeight: 560,
     show: false,
     title: "Lanework",
-    backgroundColor: "#fafafa",
+    ...(process.platform === "darwin"
+      ? {
+          vibrancy: "under-window",
+          visualEffectState: "active",
+          backgroundColor: "#00000000",
+        }
+      : { backgroundColor: "#fafafa" }),
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
