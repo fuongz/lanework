@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+.tanstack/
+.output/
+*.tsbuildinfo
+.DS_Store
+apps/desktop/src/routeTree.gen.ts
+.agents/artifacts/

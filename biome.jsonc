@@ -1,0 +1,61 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.12/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "**",
+      "!!.agents",
+      "!!apps/desktop/src/routeTree.gen.ts",
+      "!!scripts/audit-layout.mjs"
+    ]
+  },
+  "formatter": {
+    "indentStyle": "space"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["apps/desktop/src/components/ui/field.tsx"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off"
+          },
+          "suspicious": {
+            "noDoubleEquals": "off",
+            "noArrayIndexKey": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/desktop/src/components/ui/label.tsx"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "noLabelWithoutControl": "off"
+          }
+        }
+      }
+    }
+  ]
+}

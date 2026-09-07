@@ -1,0 +1,29 @@
+{
+  "name": "lanework",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.11",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "bun run --cwd apps/desktop dev",
+    "build": "bun run --cwd apps/desktop build",
+    "typecheck": "bun run --cwd apps/desktop typecheck",
+    "lint": "biome check . && node scripts/audit-layout.mjs",
+    "format": "biome check --write .",
+    "gate": "bun run build && bun run lint && bun run typecheck",
+    "package": "bun run --cwd apps/desktop package",
+    "test": "bun run --cwd apps/desktop test",
+    "test:dev": "bun run --cwd apps/desktop test:dev",
+    "test:packaged": "bun run --cwd apps/desktop test:packaged"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "typescript": "^7.0.2"
+  },
+  "trustedDependencies": [
+    "electron",
+    "esbuild"
+  ]
+}

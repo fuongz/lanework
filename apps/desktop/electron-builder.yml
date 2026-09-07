@@ -1,0 +1,17 @@
+appId: com.lanework.desktop
+productName: Lanework
+asar: true
+directories:
+  output: release
+files:
+  - dist/electron/**/*
+  - dist/client/**/*
+  - package.json
+mac:
+  identity: null
+  category: public.app-category.productivity
+  target: dmg
+win:
+  target: nsis
+linux:
+  target: AppImage
