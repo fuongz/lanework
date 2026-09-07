@@ -2,9 +2,10 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { context } from "esbuild";
 import { createServer } from "vite";
+import { brandDevBundle } from "./brand-dev-bundle.mjs";
 
 const require = createRequire(import.meta.url);
-const electron = require("electron");
+const electron = brandDevBundle(require("electron"));
 const server = await createServer();
 await server.listen();
 let child;

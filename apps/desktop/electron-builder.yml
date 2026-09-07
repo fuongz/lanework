@@ -8,6 +8,7 @@ files:
   - dist/client/**/*
   - package.json
 mac:
+  icon: build/icon.icns
   identity: null
   category: public.app-category.productivity
   target: dmg

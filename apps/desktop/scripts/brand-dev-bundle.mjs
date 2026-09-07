@@ -1,0 +1,51 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// macOS reads native branding from the running .app, including in development.
+// Clone Electron so the installed dependency remains untouched.
+export function brandDevBundle(electron) {
+  if (process.platform !== "darwin") return electron;
+  const root = dirname(dirname(fileURLToPath(import.meta.url)));
+  const source = dirname(dirname(dirname(electron)));
+  const icon = join(root, "build/icon.icns");
+  const { version } = JSON.parse(
+    readFileSync(join(root, "package.json"), "utf8"),
+  );
+  const key = createHash("sha256")
+    .update(source)
+    .update(readFileSync(join(source, "Contents/Info.plist")))
+    .update(readFileSync(icon))
+    .update(version)
+    .digest("hex")
+    .slice(0, 16);
+  const cache = join(root, "node_modules/.lanework-dev", key);
+  const bundle = join(cache, "Lanework.app");
+  const binary = join(bundle, "Contents/MacOS/Electron");
+  const ready = join(cache, "ready");
+  if (existsSync(ready) && existsSync(binary)) return binary;
+  mkdirSync(cache, { recursive: true });
+  execFileSync("/usr/bin/ditto", [source, bundle]);
+  copyFileSync(icon, join(bundle, "Contents/Resources/lanework.icns"));
+  const plist = join(bundle, "Contents/Info.plist");
+  for (const [key, value] of Object.entries({
+    CFBundleName: "Lanework",
+    CFBundleDisplayName: "Lanework",
+    CFBundleIdentifier: "com.lanework.desktop.dev",
+    CFBundleIconFile: "lanework.icns",
+    CFBundleShortVersionString: version,
+    CFBundleVersion: version,
+  })) {
+    execFileSync("/usr/bin/plutil", ["-replace", key, "-string", value, plist]);
+  }
+  writeFileSync(ready, "");
+  return binary;
+}

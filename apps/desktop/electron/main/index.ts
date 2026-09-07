@@ -6,6 +6,12 @@ import { broadcast, handle } from "./ipc";
 import { registerAppProtocol } from "./protocol";
 import { appOrigin, isTrustedUrl } from "./security";
 
+app.setName("Lanework");
+app.setAboutPanelOptions({
+  applicationName: "Lanework",
+  applicationVersion: app.getVersion(),
+});
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "app",
