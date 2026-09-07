@@ -1,4 +1,4 @@
-import type { Principal } from "./auth";
+import type { Principal, RedactedSession } from "./auth";
 
 /**
  * Everything a caller can ask to do. A closed vocabulary: each action is read
@@ -6,6 +6,8 @@ import type { Principal } from "./auth";
  * nothing consults.
  */
 export const ACTIONS = [
+  /** Use the app at all. The one question the UI gate and main both ask. */
+  "app:use",
   "session:read",
   "session:signIn",
   "session:signOut",
@@ -32,6 +34,12 @@ export type Action = (typeof ACTIONS)[number];
  */
 export function can(principal: Principal, action: Action): boolean {
   switch (action) {
+    case "app:use":
+      // Only a credential the control plane still accepts opens the app. Being
+      // OFFLINE is not being locked out: `unreachable` keeps the principal a
+      // `machine` (BE-01 D8), so an enrolled install keeps working — see
+      // `lockState` for why that is the whole of FE-01's O1.
+      return principal.kind === "machine";
     case "session:read":
       return true;
     case "session:signIn":
@@ -50,4 +58,32 @@ export function can(principal: Principal, action: Action): boolean {
     case "machine:revokeAny":
       return false;
   }
+}
+
+/** Why the app is closed, or that it is open. */
+export type LockState =
+  | { locked: false }
+  | { locked: true; reason: "signed-out" }
+  | { locked: true; reason: "revoked"; machineName: string };
+
+/**
+ * Whether this session may use the app, and what to say when it may not.
+ *
+ * Derived from `can(…, "app:use")` rather than from `principal.kind` directly,
+ * so the gate and main cannot drift apart: there is one rule and two readers.
+ *
+ * ⚠️ There is deliberately no "unreachable" lock. Two separate reasons:
+ *   • An ENROLLED install that loses the network keeps working (O1). Locking it
+ *     would trade a risk we do not carry — the data is local — for a failure we
+ *     meet constantly.
+ *   • An install that has NEVER enrolled cannot be `unreachable` at all: nothing
+ *     probes without a credential, so its verdict is `null`. "Cannot reach the
+ *     control plane" therefore reaches the user as a FAILED SIGN-IN, which is
+ *     where it actually happens, not as a lock reason.
+ */
+export function lockState(session: RedactedSession): LockState {
+  if (can(session.principal, "app:use")) return { locked: false };
+  return session.principal.kind === "revoked"
+    ? { locked: true, reason: "revoked", machineName: session.principal.name }
+    : { locked: true, reason: "signed-out" };
 }

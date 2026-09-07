@@ -24,6 +24,35 @@ import {
 /** How long a device sign-in may stay open. Matches the server's TTL. */
 const DEVICE_WAIT_MS = 10 * 60 * 1000;
 
+/**
+ * How often main re-asks the control plane whether our credential still works.
+ *
+ * ⚠️ This timer is what makes revocation LAND. Revoking happens on the server
+ * and nothing travels down to this machine, and `currentSession()` only probes
+ * when something asks it — so with no beat, a revoked install keeps showing the
+ * app until the user happens to trigger a read. The reference daemon beats at
+ * the same 60s, and `/v1/machines/me` doubles as its presence ping.
+ *
+ * `LANEWORK_HEARTBEAT_MS` tunes it. The honest motivation is testability — a
+ * test has to watch a revocation land without sitting through a minute — but it
+ * is a legitimate operational knob either way, and it sits beside the other
+ * `LANEWORK_*` values. Floored at one second so a stray value cannot turn this
+ * into a request loop against the control plane.
+ */
+const DEFAULT_HEARTBEAT_MS = 60_000;
+
+function heartbeatMs(): number {
+  const raw = Number(process.env.LANEWORK_HEARTBEAT_MS);
+  return Number.isFinite(raw) && raw > 0
+    ? Math.max(1_000, raw)
+    : DEFAULT_HEARTBEAT_MS;
+}
+
+let heartbeat: ReturnType<typeof setInterval> | null = null;
+
+/** The last session pushed to renderers, so a beat that changes nothing is silent. */
+let lastPublished: string | null = null;
+
 /** The sign-in currently running, so a second one can be refused and this one cancelled. */
 let inFlight: AbortController | null = null;
 
@@ -73,11 +102,57 @@ export async function currentSession(): Promise<RedactedSession> {
   };
 }
 
+/**
+ * The part of a session the gate reacts to.
+ *
+ * ⚠️ Excludes `checkedAt`, which moves on every single probe — keying on the
+ * whole object would make each beat look like a change and push a pointless
+ * re-render to every window once a minute.
+ */
+function sessionKey(session: RedactedSession): string {
+  return JSON.stringify({
+    principal: session.principal,
+    verdict: session.verdict,
+  });
+}
+
 /** Recompute the session and push it to every window. */
 async function publish(): Promise<RedactedSession> {
   const session = await currentSession();
+  lastPublished = sessionKey(session);
   broadcast(authChannels.changed, session);
   return session;
+}
+
+/** One beat: re-probe, and push only when the session actually moved. */
+async function beat(): Promise<void> {
+  try {
+    const record = await readRecord();
+    // Nothing to probe, and an anonymous session cannot change on its own —
+    // only a sign-in changes it, and that publishes for itself.
+    if (!record) return;
+
+    // Forced, not `probeIfStale`: the cache exists to absorb bursts of reads,
+    // and a beat is exactly the thing that should go and look.
+    await api.probe(record);
+
+    const session = await currentSession();
+    const key = sessionKey(session);
+    if (key === lastPublished) return;
+    lastPublished = key;
+    broadcast(authChannels.changed, session);
+  } catch {
+    // A failed beat is a missed beat, never an unhandled rejection in main.
+    // The next one asks again, and `probe` already reports its own failures
+    // as `unreachable` rather than throwing.
+  }
+}
+
+function startHeartbeat(): void {
+  if (heartbeat) return;
+  heartbeat = setInterval(() => void beat(), heartbeatMs());
+  // Never let this timer be the reason the process stays alive.
+  heartbeat.unref?.();
 }
 
 function emitProgress(progress: SignInProgress): void {
@@ -274,4 +349,5 @@ export function registerAuth(devUrl?: string): void {
     if (args.length) throw new Error("This operation takes no arguments");
     cancelSignIn();
   });
+  startHeartbeat();
 }

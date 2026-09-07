@@ -10,8 +10,8 @@ import {
   parseLoopbackRedirect,
 } from "../electron/main/auth/redirect";
 import { APP_HOME_NAME, appHomeDir } from "../electron/main/paths";
-import type { Principal, RedactedSession } from "../shared/auth";
-import { can } from "../shared/policy";
+import type { Principal, RedactedSession, Verdict } from "../shared/auth";
+import { can, lockState } from "../shared/policy";
 
 // These modules are deliberately free of any `electron` import, so the whole
 // pure core is exercised here without booting the app.
@@ -168,6 +168,48 @@ test("a machine credential may never do a human's job", () => {
   // A credential the other side stopped accepting can do neither.
   expect(can(revoked, "machine:self")).toBe(false);
   expect(can(revoked, "machine:revokeSelf")).toBe(false);
+});
+
+test("only an accepted credential opens the app, and being offline is not being locked out", () => {
+  const session = (
+    principal: Principal,
+    verdict: Verdict | null,
+  ): RedactedSession => ({
+    principal,
+    apiUrl: "https://api.example.test",
+    verdict,
+    checkedAt: null,
+  });
+  const machine: Principal = {
+    kind: "machine",
+    machineId: "m1",
+    userId: "u1",
+    name: "laptop",
+  };
+
+  expect(can(machine, "app:use")).toBe(true);
+  expect(can({ kind: "anonymous" }, "app:use")).toBe(false);
+  expect(
+    can({ kind: "revoked", machineId: "m1", name: "laptop" }, "app:use"),
+  ).toBe(false);
+
+  expect(lockState(session(machine, "ok"))).toEqual({ locked: false });
+  // ⚠️ The whole of O1: an enrolled install that lost the network keeps working.
+  expect(lockState(session(machine, "unreachable"))).toEqual({ locked: false });
+  // Nobody has asked yet is also not a lock.
+  expect(lockState(session(machine, null))).toEqual({ locked: false });
+
+  expect(lockState(session({ kind: "anonymous" }, null))).toEqual({
+    locked: true,
+    reason: "signed-out",
+  });
+  // Revoked says something different from signed-out, which is the reason
+  // BE-01 gave it a principal of its own.
+  expect(
+    lockState(
+      session({ kind: "revoked", machineId: "m1", name: "laptop" }, "revoked"),
+    ),
+  ).toEqual({ locked: true, reason: "revoked", machineName: "laptop" });
 });
 
 test("the renderer gets a redacted session and no way to reach a credential", async () => {

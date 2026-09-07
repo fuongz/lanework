@@ -1,5 +1,8 @@
-import { resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
+import { launchEnv, seedCredential } from "./auth-fixtures";
 
 test("unpacked macOS app opens and calls native IPC", async () => {
   test.skip(
@@ -7,13 +10,13 @@ test("unpacked macOS app opens and calls native IPC", async () => {
     "This packaging smoke test targets macOS.",
   );
   const directory = process.arch === "arm64" ? "mac-arm64" : "mac";
-  const env: Record<string, string> = Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
-  delete env.ELECTRON_RUN_AS_NODE;
-  delete env.ELECTRON_RENDERER_URL;
+  // ⚠️ This test previously isolated NOTHING — no userData, no app home. Once
+  // login is required that means reading the developer's real credential, so it
+  // would pass or fail depending on whether they happen to be signed in.
+  const profile = await mkdtemp(join(tmpdir(), "lanework-packaged-"));
+  const home = join(profile, "home");
+  await seedCredential(home);
+  const env = launchEnv({ profile, home });
   const application = await electron.launch({
     executablePath: resolve(
       `release/${directory}/Lanework.app/Contents/MacOS/Lanework`,
@@ -41,5 +44,6 @@ test("unpacked macOS app opens and calls native IPC", async () => {
     expect(errors).toEqual([]);
   } finally {
     await application.close();
+    await rm(profile, { recursive: true, force: true });
   }
 });

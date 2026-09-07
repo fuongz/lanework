@@ -2,23 +2,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
+import { launchEnv, seedCredential } from "./auth-fixtures";
 
 test("production SPA supports native IPC, navigation and persisted preferences", async () => {
   const profile = await mkdtemp(join(tmpdir(), "lanework-test-"));
-  const env: Record<string, string> = {
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
-    ),
-    LANEWORK_TEST_USER_DATA: profile,
-    // The app home is a fixed dotfolder under $HOME and does NOT follow
-    // `LANEWORK_TEST_USER_DATA`, so it needs its own override or this run would
-    // write into the developer's real credential.
-    LANEWORK_HOME: join(profile, "home"),
-  };
-  delete env.ELECTRON_RUN_AS_NODE;
-  delete env.ELECTRON_RENDERER_URL;
+  const home = join(profile, "home");
+  // Login is required, so this seeds an enrolled machine. Pointed at a dead
+  // port, the probe says `unreachable` and the principal stays a `machine` —
+  // which is FE-01 O1 in one line: enrolled, offline, still usable.
+  await seedCredential(home);
+  const env = launchEnv({ profile, home });
   const application = await electron.launch({ args: [resolve(".")], env });
   try {
     const page = await application.firstWindow();

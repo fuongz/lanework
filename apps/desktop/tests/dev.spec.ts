@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect, test } from "@playwright/test";
+import { DEAD_API, seedCredential } from "./auth-fixtures";
 
 test("renderer HMR preserves the page; main and preload changes restart Electron", async () => {
   test.setTimeout(60_000);
@@ -13,10 +14,17 @@ test("renderer HMR preserves the page; main and preload changes restart Electron
     [source, main, preload].map((file) => readFile(file, "utf8")),
   );
   const profile = await mkdtemp(join(tmpdir(), "lanework-dev-test-"));
+  const home = join(profile, "home");
+  // Login is required, and `LANEWORK_TEST_USER_DATA` does not move the app
+  // home — without the seed and the override this reads the developer's real
+  // credential and shows the gate instead of the page it asserts on.
+  await seedCredential(home);
   const proc = spawn(process.execPath, ["scripts/dev.mjs"], {
     env: {
       ...process.env,
       LANEWORK_TEST_USER_DATA: profile,
+      LANEWORK_HOME: home,
+      LANEWORK_API_URL: DEAD_API,
       LANEWORK_DEV_DEBUG_PORT: "9223",
     },
     stdio: ["ignore", "pipe", "pipe"],

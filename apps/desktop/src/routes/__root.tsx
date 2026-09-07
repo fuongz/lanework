@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { MotionConfig } from "motion/react";
 import type { ReactNode } from "react";
+import { AuthGate } from "#/components/features/auth/auth-gate";
 import { AppShell } from "#/components/features/shell/app-shell";
 import css from "#/styles/app.css?url";
 export const Route = createRootRoute({
@@ -21,9 +22,11 @@ export const Route = createRootRoute({
   shellComponent: Document,
   component: () => (
     <ClientOnly fallback={<p className="p-8">Opening Lanework…</p>}>
-      <AppShell>
-        <Outlet />
-      </AppShell>
+      <AuthGate>
+        <AppShell>
+          <Outlet />
+        </AppShell>
+      </AuthGate>
     </ClientOnly>
   ),
 });
