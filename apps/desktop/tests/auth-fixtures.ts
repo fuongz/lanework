@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 
@@ -72,19 +72,47 @@ export function launchEnv(options: {
  * The one control-plane route the app polls: `/v1/machines/me`, whose 401 is
  * how a revocation becomes visible. Enough to drive the gate open and shut.
  */
-export async function startStubPlane(): Promise<{
+export async function startStubPlane(
+  options: {
+    /** Omit the owner block, standing in for a control plane older than it. */
+    owner?: boolean;
+  } = {},
+): Promise<{
   origin: string;
   setRevoked: (value: boolean) => void;
+  /** Every request seen, as `METHOD /path` — so a test can prove a call happened. */
+  calls: string[];
   close: () => Promise<void>;
 }> {
   let revoked = false;
+  const calls: string[] = [];
   const server = createServer((req, res) => {
-    if (req.url === "/v1/machines/me" && !revoked) {
+    calls.push(`${req.method} ${req.url}`);
+
+    // What sign-out calls. Revoking is the server's doing, not a local delete.
+    if (req.method === "DELETE" && req.url === "/v1/machines/me") {
+      revoked = true;
+      res
+        .writeHead(200, { "Content-Type": "application/json" })
+        .end(JSON.stringify({ revoked: "test-machine" }));
+      return;
+    }
+    if (req.method === "GET" && req.url === "/v1/machines/me" && !revoked) {
       res.writeHead(200, { "Content-Type": "application/json" }).end(
         JSON.stringify({
           machineId: "test-machine",
           name: "test-machine",
           userId: "test-user",
+          // The owner block the real control plane now returns from this route.
+          ...(options.owner === false
+            ? {}
+            : {
+                user: {
+                  name: "Test Person",
+                  email: "test@example.test",
+                  image: null,
+                },
+              }),
         }),
       );
       return;
@@ -103,6 +131,7 @@ export async function startStubPlane(): Promise<{
 
   return {
     origin: `http://127.0.0.1:${port}`,
+    calls,
     setRevoked: (value) => {
       revoked = value;
     },
@@ -112,4 +141,22 @@ export async function startStubPlane(): Promise<{
         server.close(() => resolve());
       }),
   };
+}
+
+/**
+ * Delete a launch profile, tolerating Electron's parting writes.
+ *
+ * ⚠️ `maxRetries` is the whole point. Electron keeps flushing `GPUCache` for a
+ * moment after its process has exited, so a bare `rm` loses the race and throws
+ * `ENOTEMPTY` — out of a `finally`, which turns a passing test red for reasons
+ * that have nothing to do with what it tested.
+ */
+export async function removeProfile(...dirs: string[]): Promise<void> {
+  for (const dir of dirs)
+    await rm(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 8,
+      retryDelay: 120,
+    }).catch(() => {});
 }

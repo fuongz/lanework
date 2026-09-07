@@ -27,6 +27,14 @@
 :root {
   --radius: 0.625rem;
 
+  /* Elevation for cards and containers, as a shadow rather than a border:
+     `--card` and `--background` are the SAME white in light mode, so a card's
+     only separation from the page was a hairline whose job was depth. Three
+     layers here — a 1px ring, a subtle lift, then ambient depth. */
+  --elevation-card:
+    0px 0px 0px 1px oklch(0 0 0 / 0.06), 0px 1px 2px -1px oklch(0 0 0 / 0.06),
+    0px 2px 4px 0px oklch(0 0 0 / 0.04);
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -62,6 +70,10 @@
 }
 
 .dark {
+  /* One white ring, not the light mode's three layers: layered depth shadows
+     are invisible against a dark ground and only cost paint. */
+  --elevation-card: 0 0 0 1px oklch(1 0 0 / 0.08);
+
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -100,6 +112,8 @@
   --font-sans: "Inter Variable", sans-serif;
   --font-heading: var(--font-sans);
   --font-mono: ui-monospace, monospace;
+
+  --shadow-card: var(--elevation-card);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -178,5 +192,31 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+@layer base {
+  /* A drag handle and traffic-light clearance for full-window views that have
+     no app header of their own. Zero height off macOS, where the window keeps
+     its native title bar. */
+  .settings-titlebar {
+    height: 0;
+  }
+  html[data-vibrancy="true"] .settings-titlebar {
+    height: 36px;
+    app-region: drag;
+  }
+  /* Not a utility class: `--sidebar` is exactly the token for this surface and
+     it is correct in BOTH themes — 0.985 against a white page, 0.205 against a
+     0.145 one — where a single blend of `--muted` could only ever be right in
+     one of them.
+
+     ⚠️ Opaque on purpose, including under vibrancy. It was translucent, and the
+     result was a sidebar whose colour depended on whatever the window happened
+     to be composited over: fine in light, a washed mid-grey in dark. Settings
+     is a full-window view; it paints its own surfaces. */
+  .settings-sidebar {
+    background-color: var(--sidebar);
+    border-inline-end: 1px solid var(--sidebar-border);
   }
 }

@@ -6,9 +6,30 @@
  * that human approves. No session cookie ever reaches this process, which is
  * why "human" is not a principal this app can hold — see `policy.ts`.
  */
+/**
+ * Who the account belongs to, as much of it as a machine credential may read.
+ *
+ * ⚠️ This is the ONLY human detail any machine route exposes — the control
+ * plane returns it from `GET /v1/machines/me` and nowhere else. Everything
+ * further (profile, workspaces) stays behind a browser session this app never
+ * holds. Fields are nullable because a client must be able to say "we do not
+ * know" rather than render `undefined`.
+ */
+export interface AccountOwner {
+  name: string | null;
+  email: string | null;
+  image: string | null;
+}
+
 export type Principal =
   | { kind: "anonymous" }
-  | { kind: "machine"; machineId: string; userId: string | null; name: string }
+  | {
+      kind: "machine";
+      machineId: string;
+      userId: string | null;
+      name: string;
+      owner: AccountOwner | null;
+    }
   /**
    * We hold a credential the control plane no longer accepts. Distinct from
    * `anonymous` because there is still something on this disk to clean up, and

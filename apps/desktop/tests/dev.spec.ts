@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect, test } from "@playwright/test";
-import { DEAD_API, seedCredential } from "./auth-fixtures";
+import { DEAD_API, removeProfile, seedCredential } from "./auth-fixtures";
 
 test("renderer HMR preserves the page; main and preload changes restart Electron", async () => {
   test.setTimeout(60_000);
@@ -93,7 +93,7 @@ test("renderer HMR preserves the page; main and preload changes restart Electron
         writeFile(file, originals[index]),
       ),
     );
-    await rm(profile, { recursive: true, force: true });
+    await removeProfile(profile);
     if (test.info().status !== test.info().expectedStatus) console.error(logs);
   }
 });

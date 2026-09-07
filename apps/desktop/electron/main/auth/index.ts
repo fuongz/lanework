@@ -74,6 +74,7 @@ function principalOf(
     machineId: record.machineId,
     userId: record.userId,
     name: record.name,
+    owner: record.owner,
   };
 }
 
@@ -89,13 +90,15 @@ export async function currentSession(): Promise<RedactedSession> {
   const apiUrl = api.resolveApi(record?.apiUrl);
   if (!record) return anonymousSession(apiUrl);
 
-  const { verdict, userId } = await api.probeIfStale(record);
-  if (userId && userId !== record.userId)
-    await writeRecord({ ...record, userId });
+  const { verdict, userId, owner } = await api.probeIfStale(record);
+  // Written back when either moved: identity lives on the server, and keeping a
+  // local copy is what lets the account screen say something offline.
+  if (userId !== record.userId || owner !== record.owner)
+    await writeRecord({ ...record, userId, owner });
 
   const { checkedAt } = api.cachedVerdict();
   return {
-    principal: principalOf({ ...record, userId }, verdict),
+    principal: principalOf({ ...record, userId, owner }, verdict),
     apiUrl,
     verdict,
     checkedAt: checkedAt ? new Date(checkedAt).toISOString() : null,
@@ -182,6 +185,8 @@ async function accept(
     apiUrl,
     name,
     userId: null,
+    // Both arrive on the first probe; `accept` publishes, which triggers one.
+    owner: null,
   });
   return publish();
 }

@@ -1,6 +1,7 @@
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { safeStorage } from "electron";
+import type { AccountOwner } from "../../../shared/auth";
 import { appHomeDir } from "../paths";
 
 /** This install's control-plane identity. `secret` is never logged or returned. */
@@ -11,6 +12,8 @@ export interface MachineRecord {
   name: string;
   /** Learned from `/v1/machines/me`; kept so the principal survives offline. */
   userId: string | null;
+  /** Same source, same reason — a settings screen should not go blank offline. */
+  owner: AccountOwner | null;
 }
 
 /** On-disk shape. The secret is encrypted whenever the OS will do it for us. */
@@ -20,6 +23,7 @@ type Stored = {
   apiUrl: string;
   name: string;
   userId: string | null;
+  owner: AccountOwner | null;
 } & ({ enc: true; secretEnc: string } | { enc: false; secret: string });
 
 function credentialFile(): string {
@@ -66,6 +70,7 @@ export async function readRecord(): Promise<MachineRecord | null> {
     apiUrl: data.apiUrl,
     name: data.name ?? "",
     userId: data.userId ?? null,
+    owner: data.owner ?? null,
   };
 }
 
@@ -86,6 +91,7 @@ export async function writeRecord(record: MachineRecord): Promise<string> {
     apiUrl: record.apiUrl,
     name: record.name,
     userId: record.userId,
+    owner: record.owner,
   };
   const stored: Stored = safeStorage.isEncryptionAvailable()
     ? {

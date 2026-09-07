@@ -1,8 +1,8 @@
 import { join } from "node:path";
-import { app, BrowserWindow, protocol, session } from "electron";
-import { type AppInfo, channels } from "../../shared/desktop";
+import { app, BrowserWindow, nativeTheme, protocol, session } from "electron";
+import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
 import { registerAuth } from "./auth";
-import { handle } from "./ipc";
+import { broadcast, handle } from "./ipc";
 import { registerAppProtocol } from "./protocol";
 import { appOrigin, isTrustedUrl } from "./security";
 
@@ -77,6 +77,23 @@ app
         platform: process.platform,
       };
     });
+    // ⚠️ `nativeTheme` rather than a class the renderer sets alone. This also
+    // drives the native window chrome and the vibrancy, and it makes
+    // `prefers-color-scheme` in the renderer report the EFFECTIVE theme — so
+    // "system" needs no logic on the other side to stay in step with macOS.
+    handle(channels.setTheme, devUrl, (args): boolean => {
+      if (args.length !== 1)
+        throw new Error("This operation takes one argument");
+      const [source] = args;
+      if (!isThemeSource(source))
+        throw new Error('theme must be "system", "light" or "dark"');
+      nativeTheme.themeSource = source;
+      return nativeTheme.shouldUseDarkColors;
+    });
+    // Covers the OS changing under us, which no renderer can see for itself.
+    nativeTheme.on("updated", () =>
+      broadcast(channels.themeChanged, nativeTheme.shouldUseDarkColors),
+    );
     registerAuth(devUrl);
     createWindow();
     app.on("activate", () => {

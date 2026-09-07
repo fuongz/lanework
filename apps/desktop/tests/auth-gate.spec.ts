@@ -1,8 +1,13 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
-import { launchEnv, seedCredential, startStubPlane } from "./auth-fixtures";
+import {
+  launchEnv,
+  removeProfile,
+  seedCredential,
+  startStubPlane,
+} from "./auth-fixtures";
 
 test("with no credential the app shows the gate, not the app", async () => {
   const profile = await mkdtemp(join(tmpdir(), "lanework-gate-"));
@@ -38,8 +43,7 @@ test("with no credential the app shows the gate, not the app", async () => {
     ).toBeHidden();
   } finally {
     await application.close();
-    await rm(profile, { recursive: true, force: true });
-    await rm(home, { recursive: true, force: true });
+    await removeProfile(profile, home);
   }
 });
 
@@ -84,7 +88,6 @@ test("a revoke on the control plane closes the gate with no restart", async () =
   } finally {
     await application.close();
     await plane.close();
-    await rm(profile, { recursive: true, force: true });
-    await rm(home, { recursive: true, force: true });
+    await removeProfile(profile, home);
   }
 });

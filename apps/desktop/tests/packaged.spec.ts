@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
-import { launchEnv, seedCredential } from "./auth-fixtures";
+import { launchEnv, removeProfile, seedCredential } from "./auth-fixtures";
 
 test("unpacked macOS app opens and calls native IPC", async () => {
   test.skip(
@@ -36,14 +36,20 @@ test("unpacked macOS app opens and calls native IPC", async () => {
       path: "../../.agents/artifacts/packaged-welcome.png",
     });
     await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Account", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "About", exact: true }).click();
     await expect(page.getByText("0.1.0", { exact: true })).toBeVisible();
+    // A reload deep in the settings tree — the route split has to survive
+    // the app:// protocol handler in a packaged build too.
     await page.reload();
     await expect(
-      page.getByRole("heading", { name: "Settings", exact: true }),
+      page.getByRole("heading", { name: "About", exact: true }),
     ).toBeVisible();
     expect(errors).toEqual([]);
   } finally {
     await application.close();
-    await rm(profile, { recursive: true, force: true });
+    await removeProfile(profile);
   }
 });

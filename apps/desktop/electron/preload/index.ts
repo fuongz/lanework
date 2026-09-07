@@ -30,6 +30,8 @@ const auth: DesktopAuthApi = {
 
 const desktop: DesktopApi = {
   getAppInfo: () => ipcRenderer.invoke(channels.appInfo),
+  setTheme: (source) => ipcRenderer.invoke(channels.setTheme, source),
+  onThemeChange: (listener) => subscribe(channels.themeChanged, listener),
   auth,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

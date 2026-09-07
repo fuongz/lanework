@@ -6,9 +6,11 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { MotionConfig } from "motion/react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { AuthGate } from "#/components/features/auth/auth-gate";
-import { AppShell } from "#/components/features/shell/app-shell";
+import { useTheme } from "#/hooks/use-theme";
+import { useVibrancy } from "#/hooks/use-vibrancy";
+import { usePreferences } from "#/stores/preferences";
 import css from "#/styles/app.css?url";
 export const Route = createRootRoute({
   head: () => ({
@@ -20,16 +22,25 @@ export const Route = createRootRoute({
     links: [{ rel: "stylesheet", href: css }],
   }),
   shellComponent: Document,
-  component: () => (
+  component: RootShell,
+});
+function RootShell() {
+  useVibrancy();
+  useTheme();
+  // Hydrated once for the whole app. It used to live in `AppShell`, which left
+  // a route outside that shell reading the store's defaults rather than the
+  // user's saved preference.
+  useEffect(() => {
+    void usePreferences.persist.rehydrate();
+  }, []);
+  return (
     <ClientOnly fallback={<p className="p-8">Opening Lanework…</p>}>
       <AuthGate>
-        <AppShell>
-          <Outlet />
-        </AppShell>
+        <Outlet />
       </AuthGate>
     </ClientOnly>
-  ),
-});
+  );
+}
 function Document({ children }: { children: ReactNode }) {
   return (
     <html lang="en">

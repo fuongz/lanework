@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
-import { launchEnv, seedCredential } from "./auth-fixtures";
+import { launchEnv, removeProfile, seedCredential } from "./auth-fixtures";
 
 test("production SPA supports native IPC, navigation and persisted preferences", async () => {
   const profile = await mkdtemp(join(tmpdir(), "lanework-test-"));
@@ -50,20 +50,31 @@ test("production SPA supports native IPC, navigation and persisted preferences",
         "rgba(0, 0, 0, 0)",
       );
     }
+    // Settings is its own full window, so there is no page called "Settings":
+    // it lands on Account, and the version lives under About.
     await page.getByRole("link", { name: "Settings", exact: true }).click();
-    await expect(page.getByText("0.1.0", { exact: true })).toBeVisible();
-    const toggle = page.getByRole("switch", { name: "Compact layout" });
-    await toggle.check();
-    await expect(page.locator("main")).toHaveAttribute("data-compact", "true");
-    await page.reload();
-    await expect(toggle).toBeChecked();
+    await expect(
+      page.getByRole("heading", { name: "Account", exact: true }),
+    ).toBeVisible();
+
+    // The theme is the persisted preference. Set it here; the RELAUNCH at the
+    // bottom is what proves it survived the process rather than a reload —
+    // coverage `settings.spec.ts` cannot give, because it never quits the app.
+    await page.getByRole("link", { name: "Appearance", exact: true }).click();
+    await page
+      .getByRole("radiogroup", { name: "Theme" })
+      .getByRole("radio", { name: "Dark" })
+      .click();
+    await expect(page.locator("html")).toHaveClass(/dark/);
     if (process.platform === "darwin")
       await expect(page.locator("body")).toHaveCSS(
         "background-color",
         "rgba(0, 0, 0, 0)",
       );
+
+    await page.getByRole("link", { name: "Back to app" }).click();
     await expect(
-      page.getByRole("heading", { name: "Settings", exact: true }),
+      page.getByRole("heading", { name: /A little space/ }),
     ).toBeVisible();
     expect(
       await page.evaluate(
@@ -74,13 +85,17 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       await page.evaluate(() =>
         Object.keys((globalThis as { desktop?: object }).desktop ?? {}),
       ),
-    ).toEqual(["getAppInfo", "auth"]);
+    ).toEqual(["getAppInfo", "setTheme", "onThemeChange", "auth"]);
     expect(
       await page.evaluate(
         async () => (await fetch("app://lanework/assets/missing.js")).status,
       ),
     ).toBe(404);
-    await page.screenshot({ path: "../../.agents/artifacts/settings.png" });
+    // Named for what it now captures: the flow ends back in the app, not in
+    // settings, so `settings.png` would have been a lie.
+    await page.screenshot({
+      path: "../../.agents/artifacts/app-shell-dark.png",
+    });
     expect(errors).toEqual([]);
   } finally {
     await application.close();
@@ -88,12 +103,18 @@ test("production SPA supports native IPC, navigation and persisted preferences",
   const reopened = await electron.launch({ args: [resolve(".")], env });
   try {
     const page = await reopened.firstWindow();
+    // Survived a full quit and relaunch, not merely a reload.
+    await expect(page.locator("html")).toHaveClass(/dark/);
+    // Settings lands on Account, so the theme card is a click further in.
     await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("link", { name: "Appearance", exact: true }).click();
     await expect(
-      page.getByRole("switch", { name: "Compact layout" }),
+      page
+        .getByRole("radiogroup", { name: "Theme" })
+        .getByRole("radio", { name: "Dark" }),
     ).toBeChecked();
   } finally {
     await reopened.close();
-    await rm(profile, { recursive: true, force: true });
+    await removeProfile(profile);
   }
 });

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
@@ -12,6 +12,7 @@ import {
 import { APP_HOME_NAME, appHomeDir } from "../electron/main/paths";
 import type { Principal, RedactedSession, Verdict } from "../shared/auth";
 import { can, lockState } from "../shared/policy";
+import { removeProfile } from "./auth-fixtures";
 
 // These modules are deliberately free of any `electron` import, so the whole
 // pure core is exercised here without booting the app.
@@ -139,6 +140,7 @@ test("a machine credential may never do a human's job", () => {
     machineId: "m1",
     userId: "u1",
     name: "laptop",
+    owner: null,
   };
   const revoked: Principal = {
     kind: "revoked",
@@ -185,6 +187,7 @@ test("only an accepted credential opens the app, and being offline is not being 
     machineId: "m1",
     userId: "u1",
     name: "laptop",
+    owner: null,
   };
 
   expect(can(machine, "app:use")).toBe(true);
@@ -317,7 +320,6 @@ test("the renderer gets a redacted session and no way to reach a credential", as
     expect(afterSignOut.principal).toEqual({ kind: "anonymous" });
   } finally {
     await application.close();
-    await rm(profile, { recursive: true, force: true });
-    await rm(home, { recursive: true, force: true });
+    await removeProfile(profile, home);
   }
 });

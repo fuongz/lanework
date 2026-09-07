@@ -20,6 +20,14 @@ interface SessionState {
   hydrate: () => void;
   signIn: () => Promise<void>;
   cancelSignIn: () => Promise<void>;
+  /**
+   * Revoke this machine and drop the credential.
+   *
+   * Not merely "log out": main calls `DELETE /v1/machines/me` first, so coming
+   * back needs a browser and a fresh approval. Callers are expected to confirm
+   * before reaching here.
+   */
+  signOut: () => Promise<void>;
 }
 
 /**
@@ -87,5 +95,18 @@ export const useSession = create<SessionState>()((set) => ({
     // The rejection this causes in `signIn` is what clears `busy`, so there is
     // nothing to set here.
     await window.desktop?.auth.cancelSignIn().catch(() => {});
+  },
+
+  signOut: async () => {
+    const auth = window.desktop?.auth;
+    if (!auth) return;
+    set({ busy: true, error: null });
+    try {
+      set({ session: await auth.signOut() });
+    } catch (error) {
+      set({ error: message(error) });
+    } finally {
+      set({ busy: false });
+    }
   },
 }));

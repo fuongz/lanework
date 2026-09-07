@@ -1,5 +1,5 @@
 import { hostname } from "node:os";
-import type { Verdict } from "../../../shared/auth";
+import type { AccountOwner, Verdict } from "../../../shared/auth";
 import { externalUrlOn, looksLikeUserCode } from "./redirect";
 import type { MachineRecord } from "./store";
 
@@ -306,9 +306,25 @@ export function resetVerdict(): void {
  * machine, so a status read that only looks at the file answers "signed in"
  * forever. This is the only thing that can say otherwise.
  */
-export async function probe(
-  record: MachineRecord,
-): Promise<{ verdict: Verdict; userId: string | null }> {
+/** The owner block from `/v1/machines/me`, or null when it did not say. */
+function ownerOf(value: unknown): AccountOwner | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const owner = {
+    name: str(raw.name, 200),
+    email: str(raw.email, 320),
+    image: str(raw.image, 2048),
+  };
+  // All three absent is the same as no owner at all — better to fall back to
+  // whatever was stored than to overwrite it with a row of nulls.
+  return owner.name || owner.email || owner.image ? owner : null;
+}
+
+export async function probe(record: MachineRecord): Promise<{
+  verdict: Verdict;
+  userId: string | null;
+  owner: AccountOwner | null;
+}> {
   const api = resolveApi(record.apiUrl);
   try {
     const res = await fetch(`${api}/v1/machines/me`, {
@@ -320,28 +336,35 @@ export async function probe(
     else verdict = "unreachable";
 
     let userId = record.userId;
+    let owner = record.owner;
     if (res.ok) {
       const data = (await res.json().catch(() => ({}))) as Record<
         string,
         unknown
       >;
       userId = str(data.userId, 64) ?? userId;
+      // ⚠️ Kept when the response omits it, rather than cleared. A control
+      // plane older than this field is a working control plane, and blanking a
+      // name we already had would make the account screen worse on upgrade.
+      owner = ownerOf(data.user) ?? owner;
     }
     verdictAt = Date.now();
-    return { verdict, userId };
+    return { verdict, userId, owner };
   } catch {
     verdict = "unreachable";
     verdictAt = Date.now();
-    return { verdict, userId: record.userId };
+    return { verdict, userId: record.userId, owner: record.owner };
   }
 }
 
 /** `probe`, but only when the cached answer has gone stale. */
-export async function probeIfStale(
-  record: MachineRecord,
-): Promise<{ verdict: Verdict | null; userId: string | null }> {
+export async function probeIfStale(record: MachineRecord): Promise<{
+  verdict: Verdict | null;
+  userId: string | null;
+  owner: AccountOwner | null;
+}> {
   if (verdict && Date.now() - verdictAt <= VERDICT_FRESH_MS)
-    return { verdict, userId: record.userId };
+    return { verdict, userId: record.userId, owner: record.owner };
   return probe(record);
 }
 
