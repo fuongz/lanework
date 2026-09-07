@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect } from "react";
+import { StartupLoading } from "#/components/shared/loading/startup-loading";
 import { useSession } from "#/stores/session";
 import { lockState } from "../../../../shared/policy";
 import { SignIn } from "./sign-in";
@@ -26,8 +27,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     hydrate();
   }, [hydrate]);
 
-  if (!ready)
-    return <p className="text-muted-foreground p-8">Opening Lanework…</p>;
+  if (!ready) return <StartupLoading />;
   if (!session) return <SignIn lock={null} />;
 
   const lock = lockState(session);

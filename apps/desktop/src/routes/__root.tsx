@@ -8,6 +8,7 @@ import {
 import { MotionConfig } from "motion/react";
 import { type ReactNode, useEffect } from "react";
 import { AuthGate } from "#/components/features/auth/auth-gate";
+import { StartupLoading } from "#/components/shared/loading/startup-loading";
 import { useTheme } from "#/hooks/use-theme";
 import { useVibrancy } from "#/hooks/use-vibrancy";
 import { usePreferences } from "#/stores/preferences";
@@ -34,7 +35,7 @@ function RootShell() {
     void usePreferences.persist.rehydrate();
   }, []);
   return (
-    <ClientOnly fallback={<p className="p-8">Opening Lanework…</p>}>
+    <ClientOnly fallback={<StartupLoading />}>
       <AuthGate>
         <Outlet />
       </AuthGate>
