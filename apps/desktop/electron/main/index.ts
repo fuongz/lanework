@@ -1,6 +1,8 @@
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, protocol, session } from "electron";
+import { app, BrowserWindow, protocol, session } from "electron";
 import { type AppInfo, channels } from "../../shared/desktop";
+import { registerAuth } from "./auth";
+import { handle } from "./ipc";
 import { registerAppProtocol } from "./protocol";
 import { appOrigin, isTrustedUrl } from "./security";
 
@@ -67,15 +69,7 @@ app
     );
     session.defaultSession.setPermissionCheckHandler(() => false);
     registerAppProtocol(join(__dirname, "../../client"));
-    ipcMain.handle(channels.appInfo, (event, ...args: unknown[]): AppInfo => {
-      const frame = event.senderFrame;
-      if (
-        !frame ||
-        frame !== event.sender.mainFrame ||
-        !BrowserWindow.fromWebContents(event.sender) ||
-        !isTrustedUrl(frame.url, devUrl)
-      )
-        throw new Error("Untrusted IPC sender");
+    handle(channels.appInfo, devUrl, (args): AppInfo => {
       if (args.length) throw new Error("This operation takes no arguments");
       return {
         name: "Lanework",
@@ -83,6 +77,7 @@ app
         platform: process.platform,
       };
     });
+    registerAuth(devUrl);
     createWindow();
     app.on("activate", () => {
       if (!BrowserWindow.getAllWindows().length) createWindow();

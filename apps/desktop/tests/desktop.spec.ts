@@ -12,6 +12,10 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       ),
     ),
     LANEWORK_TEST_USER_DATA: profile,
+    // The app home is a fixed dotfolder under $HOME and does NOT follow
+    // `LANEWORK_TEST_USER_DATA`, so it needs its own override or this run would
+    // write into the developer's real credential.
+    LANEWORK_HOME: join(profile, "home"),
   };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_RENDERER_URL;
@@ -77,7 +81,7 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       await page.evaluate(() =>
         Object.keys((globalThis as { desktop?: object }).desktop ?? {}),
       ),
-    ).toEqual(["getAppInfo"]);
+    ).toEqual(["getAppInfo", "auth"]);
     expect(
       await page.evaluate(
         async () => (await fetch("app://lanework/assets/missing.js")).status,
