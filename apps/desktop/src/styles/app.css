@@ -159,6 +159,19 @@
   html[data-vibrancy="true"] body {
     background: transparent;
   }
+  .app-header {
+    padding-inline: 24px;
+  }
+  html[data-vibrancy="true"] .app-header {
+    /* Reserve the native traffic lights and align them with the toolbar. */
+    padding-inline-start: 104px;
+    app-region: drag;
+    user-select: none;
+  }
+  .app-header a,
+  .app-header button {
+    app-region: no-drag;
+  }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;

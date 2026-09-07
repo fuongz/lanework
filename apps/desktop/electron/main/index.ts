@@ -30,6 +30,8 @@ function createWindow() {
     title: "Lanework",
     ...(process.platform === "darwin"
       ? {
+          titleBarStyle: "hidden",
+          trafficLightPosition: { x: 20, y: 20 },
           vibrancy: "under-window",
           visualEffectState: "active",
           backgroundColor: "#00000000",

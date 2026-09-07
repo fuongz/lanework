@@ -30,6 +30,15 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       page.getByRole("heading", { name: /A little space/ }),
     ).toBeVisible();
     if (process.platform === "darwin") {
+      // Keep content beyond the native window buttons, including after CSS bundling.
+      await expect
+        .poll(async () => {
+          const bounds = await page
+            .getByRole("link", { name: "lanework", exact: true })
+            .boundingBox();
+          return bounds?.x ?? 0;
+        })
+        .toBeGreaterThanOrEqual(104);
       await expect(page.locator("body")).toHaveCSS(
         "background-color",
         "rgba(0, 0, 0, 0)",
