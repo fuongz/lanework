@@ -36,7 +36,7 @@ async function open(options: { owner?: boolean } = {}): Promise<{
   // it, and the navigation times out — the failure looks like a broken route
   // rather than a race.
   await page
-    .getByRole("heading", { name: /A little space/ })
+    .getByRole("heading", { name: "Your workspaces" })
     .waitFor({ state: "visible", timeout: 15_000 });
   return {
     app,
@@ -84,7 +84,7 @@ test("settings is a full window, and every section deep-links", async () => {
 
     await page.getByRole("link", { name: "Back to app" }).click();
     await expect(
-      page.getByRole("heading", { name: /A little space/ }),
+      page.getByRole("heading", { name: "Your workspaces" }),
     ).toBeVisible();
   } finally {
     await cleanup();

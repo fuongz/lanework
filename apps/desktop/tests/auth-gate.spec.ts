@@ -23,7 +23,7 @@ test("with no credential the app shows the gate, not the app", async () => {
       page.getByRole("heading", { name: "Sign in to continue" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: /A little space/ }),
+      page.getByRole("heading", { name: "Your workspaces" }),
     ).toBeHidden();
     // No app chrome: drawing nav for someone who cannot use it is drawing
     // things to bounce off.
@@ -69,7 +69,7 @@ test("a revoke on the control plane closes the gate with no restart", async () =
 
     // An accepted credential opens the app.
     await expect(
-      page.getByRole("heading", { name: /A little space/ }),
+      page.getByRole("heading", { name: "Your workspaces" }),
     ).toBeVisible();
 
     // Revoked on the SERVER. Nothing travels down to this machine, so only the
@@ -83,7 +83,7 @@ test("a revoke on the control plane closes the gate with no restart", async () =
       page.getByRole("heading", { name: "Sign in to continue" }),
     ).toBeHidden();
     await expect(
-      page.getByRole("heading", { name: /A little space/ }),
+      page.getByRole("heading", { name: "Your workspaces" }),
     ).toBeHidden();
   } finally {
     await application.close();

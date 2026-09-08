@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import type { Workspace } from "../shared/workspaces";
 
 /** A port nothing listens on, so a probe fails fast instead of reaching prod. */
 export const DEAD_API = "http://127.0.0.1:1";
@@ -76,18 +77,45 @@ export async function startStubPlane(
   options: {
     /** Omit the owner block, standing in for a control plane older than it. */
     owner?: boolean;
+    workspaces?: Workspace[];
   } = {},
 ): Promise<{
   origin: string;
   setRevoked: (value: boolean) => void;
   /** Every request seen, as `METHOD /path` — so a test can prove a call happened. */
   calls: string[];
+  setWorkspaces: (value: Workspace[]) => void;
+  setWorkspaceResponse: (
+    status: number,
+    body?: unknown,
+    delayMs?: number,
+  ) => void;
+  workspaceAuth: string[];
   close: () => Promise<void>;
 }> {
   let revoked = false;
+  let workspaces = options.workspaces ?? [];
+  let workspaceStatus = 200;
+  let workspaceBody: unknown;
+  let workspaceDelay = 0;
+  const workspaceAuth: string[] = [];
   const calls: string[] = [];
   const server = createServer((req, res) => {
     calls.push(`${req.method} ${req.url}`);
+
+    if (req.method === "GET" && req.url === "/v1/sync/state") {
+      workspaceAuth.push(req.headers.authorization ?? "");
+      const status = revoked ? 401 : workspaceStatus;
+      const body = workspaceBody ?? { workspaces };
+      setTimeout(
+        () =>
+          res
+            .writeHead(status, { "Content-Type": "application/json" })
+            .end(JSON.stringify(body)),
+        workspaceDelay,
+      );
+      return;
+    }
 
     // What sign-out calls. Revoking is the server's doing, not a local delete.
     if (req.method === "DELETE" && req.url === "/v1/machines/me") {
@@ -132,6 +160,18 @@ export async function startStubPlane(
   return {
     origin: `http://127.0.0.1:${port}`,
     calls,
+    workspaceAuth,
+    setWorkspaces: (value) => {
+      workspaces = value;
+      workspaceStatus = 200;
+      workspaceBody = undefined;
+      workspaceDelay = 0;
+    },
+    setWorkspaceResponse: (status, body, delayMs = 0) => {
+      workspaceStatus = status;
+      workspaceBody = body;
+      workspaceDelay = delayMs;
+    },
     setRevoked: (value) => {
       revoked = value;
     },

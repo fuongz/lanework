@@ -29,7 +29,7 @@ test("unpacked macOS app opens and calls native IPC", async () => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await expect(
-      page.getByRole("heading", { name: /A little space/ }),
+      page.getByRole("heading", { name: "Your workspaces" }),
     ).toBeVisible();
     expect(await application.evaluate(({ app }) => app.isPackaged)).toBe(true);
     await page.screenshot({

@@ -1,4 +1,5 @@
 import type { DesktopAuthApi } from "./auth";
+import type { DesktopWorkspacesApi } from "./workspaces";
 
 export const channels = {
   appInfo: "app:get-info",
@@ -40,4 +41,5 @@ export interface DesktopApi {
   /** Fires when the resolved theme changes, including from the OS. */
   onThemeChange: (listener: (dark: boolean) => void) => () => void;
   auth: DesktopAuthApi;
+  workspaces: DesktopWorkspacesApi;
 }

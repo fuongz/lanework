@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { authChannels, type DesktopAuthApi } from "../../shared/auth";
 import { channels, type DesktopApi } from "../../shared/desktop";
+import { workspaceChannels } from "../../shared/workspaces";
 
 /** Subscribe to a main→renderer channel, returning an unsubscribe function. */
 function subscribe<T>(
@@ -33,5 +34,9 @@ const desktop: DesktopApi = {
   setTheme: (source) => ipcRenderer.invoke(channels.setTheme, source),
   onThemeChange: (listener) => subscribe(channels.themeChanged, listener),
   auth,
+  workspaces: {
+    load: () => ipcRenderer.invoke(workspaceChannels.load),
+    select: (slug) => ipcRenderer.invoke(workspaceChannels.select, slug),
+  },
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

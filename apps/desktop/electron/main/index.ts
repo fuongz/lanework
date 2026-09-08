@@ -5,6 +5,7 @@ import { registerAuth } from "./auth";
 import { broadcast, handle } from "./ipc";
 import { registerAppProtocol } from "./protocol";
 import { appOrigin, isTrustedUrl } from "./security";
+import { registerWorkspaces } from "./workspaces";
 
 app.setName("Lanework");
 app.setAboutPanelOptions({
@@ -101,6 +102,7 @@ app
       broadcast(channels.themeChanged, nativeTheme.shouldUseDarkColors),
     );
     registerAuth(devUrl);
+    registerWorkspaces(devUrl);
     createWindow();
     app.on("activate", () => {
       if (!BrowserWindow.getAllWindows().length) createWindow();

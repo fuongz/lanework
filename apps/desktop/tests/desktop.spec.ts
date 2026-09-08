@@ -24,7 +24,7 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       if (message.type() === "error") console.error(message.text());
     });
     await expect(
-      page.getByRole("heading", { name: /A little space/ }),
+      page.getByRole("heading", { name: "Your workspaces" }),
     ).toBeVisible();
     if (process.platform === "darwin") {
       // Keep content beyond the native window buttons, including after CSS bundling.
@@ -74,7 +74,7 @@ test("production SPA supports native IPC, navigation and persisted preferences",
 
     await page.getByRole("link", { name: "Back to app" }).click();
     await expect(
-      page.getByRole("heading", { name: /A little space/ }),
+      page.getByRole("heading", { name: "Your workspaces" }),
     ).toBeVisible();
     expect(
       await page.evaluate(
@@ -85,7 +85,13 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       await page.evaluate(() =>
         Object.keys((globalThis as { desktop?: object }).desktop ?? {}),
       ),
-    ).toEqual(["getAppInfo", "setTheme", "onThemeChange", "auth"]);
+    ).toEqual([
+      "getAppInfo",
+      "setTheme",
+      "onThemeChange",
+      "auth",
+      "workspaces",
+    ]);
     expect(
       await page.evaluate(
         async () => (await fetch("app://lanework/assets/missing.js")).status,

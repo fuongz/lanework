@@ -9,11 +9,11 @@
 /**
  * Who the account belongs to, as much of it as a machine credential may read.
  *
- * ⚠️ This is the ONLY human detail any machine route exposes — the control
- * plane returns it from `GET /v1/machines/me` and nowhere else. Everything
- * further (profile, workspaces) stays behind a browser session this app never
- * holds. Fields are nullable because a client must be able to say "we do not
- * know" rather than render `undefined`.
+ * The control plane returns this account display from `GET /v1/machines/me`.
+ * Account editing stays behind a browser session this app never holds. Workspace
+ * discovery uses the separate machine-authenticated sync surface. Fields are
+ * nullable because a client must be able to say "we do not know" rather than
+ * render `undefined`.
  */
 export interface AccountOwner {
   name: string | null;

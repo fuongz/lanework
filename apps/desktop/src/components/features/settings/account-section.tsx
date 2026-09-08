@@ -22,8 +22,8 @@ import { useSession } from "#/stores/session";
  * Who is signed in, and on which machine.
  *
  * ⚠️ Name and email come from `GET /v1/machines/me` — the ONE machine route the
- * control plane lets carry a human detail. Everything further (profile,
- * workspaces) is `sessionAuth`, which this app never holds. So this page shows
+ * control plane uses for account display. Editing is `sessionAuth`, which this
+ * app never holds; workspace discovery uses `/v1/sync/state`. So this page shows
  * the account, never edits it, and falls back to the id when an older control
  * plane does not send the block.
  */

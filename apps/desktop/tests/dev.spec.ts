@@ -7,7 +7,7 @@ import { DEAD_API, removeProfile, seedCredential } from "./auth-fixtures";
 
 test("renderer HMR preserves the page; main and preload changes restart Electron", async () => {
   test.setTimeout(60_000);
-  const source = "src/components/features/welcome/welcome.tsx";
+  const source = "src/components/features/workspaces/workspace-home.tsx";
   const main = "electron/main/index.ts";
   const preload = "electron/preload/index.ts";
   const originals = await Promise.all(
@@ -53,24 +53,24 @@ test("renderer HMR preserves the page; main and preload changes restart Electron
     const page = browser.contexts()[0]?.pages()[0];
     if (!page) throw new Error("No Electron renderer page");
     await expect(
-      page.getByRole("heading", { name: /A little space/ }),
+      page.getByRole("heading", { name: "Your workspaces" }),
     ).toBeVisible();
     await page.evaluate(() => {
       (globalThis as { hmrProbe?: string }).hmrProbe = "preserved";
     });
     await writeFile(
       source,
-      originals[0].replace("A little space.", "A live space."),
+      originals[0].replace("Your workspaces", "Your live workspaces"),
     );
     await expect(
-      page.getByRole("heading", { name: /A live space/ }),
+      page.getByRole("heading", { name: "Your live workspaces" }),
     ).toBeVisible();
     expect(
       await page.evaluate(() => (globalThis as { hmrProbe?: string }).hmrProbe),
     ).toBe("preserved");
     await writeFile(source, originals[0]);
     await expect(
-      page.getByRole("heading", { name: /A little space/ }),
+      page.getByRole("heading", { name: "Your workspaces" }),
     ).toBeVisible();
     const initialStarts = (logs.match(/Electron started/g) ?? []).length;
     await writeFile(main, `${originals[1]}\n// HMR verification\n`);
