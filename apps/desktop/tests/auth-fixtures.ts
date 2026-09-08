@@ -73,6 +73,30 @@ export function launchEnv(options: {
  * The one control-plane route the app polls: `/v1/machines/me`, whose 401 is
  * how a revocation becomes visible. Enough to drive the gate open and shut.
  */
+/** A card as the board API serializes one — the fields this app reads. */
+export interface StubCard {
+  id: string;
+  revision: number;
+  title: string;
+  body: string;
+  columnKey: string;
+  categoryKey: string | null;
+  taskId: string | null;
+  priority: "low" | "medium" | "high" | null;
+  tags: string[];
+  rank: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  checklist?: {
+    key: string;
+    section: string;
+    text: string;
+    checked: boolean;
+    checkedAt: string | null;
+    note: string | null;
+  }[];
+}
+
 export async function startStubPlane(
   options: {
     /** Omit the owner block, standing in for a control plane older than it. */
@@ -91,10 +115,61 @@ export async function startStubPlane(
     delayMs?: number,
   ) => void;
   workspaceAuth: string[];
+  /** Seed the board one workspace id serves. */
+  setBoard: (
+    workspaceId: string,
+    board: {
+      migratedAt?: string | null;
+      columns: { key: string; name: string; role?: string | null }[];
+      cards: StubCard[];
+    },
+  ) => void;
+  /** Make the next checklist write answer 409 with the server's copy. */
+  setChecklistConflict: (value: boolean) => void;
+  /** Fail every board read, so the app has to fall back to its saved copy. */
+  setBoardOffline: (value: boolean) => void;
+  /** `If-Match` headers the board saw, so a test can prove the precondition. */
+  boardPreconditions: string[];
+  /**
+   * Answer `POST /v1/sync/state/workspace` with 404, as a deployment that
+   * predates the route does. The app has to report an out-of-date service
+   * rather than a bad name.
+   */
+  setCreateMissing: (value: boolean) => void;
+  /** Records the import surface accepted, in the order they arrived. */
+  imported: { ref: string; columnKey: string; checklist: number }[];
+  /** The board config the migration pushed, or null. */
+  pushedConfig: { columns: number; categories: number; tagMax: number } | null;
+  /** Make the next import batch fail, so a stopped run can be asserted. */
+  setImportBroken: (value: boolean) => void;
+  /** What the seal was asked to agree to, and what the board will claim. */
+  sealed: { items: number; manifest: string }[];
+  setSealMismatch: (value: number | null) => void;
   close: () => Promise<void>;
 }> {
   let revoked = false;
   let workspaces = options.workspaces ?? [];
+  const boards = new Map<
+    string,
+    {
+      migratedAt: string | null;
+      columns: { key: string; name: string; role?: string | null }[];
+      cards: StubCard[];
+    }
+  >();
+  let checklistConflict = false;
+  let boardOffline = false;
+  let createMissing = false;
+  let importBroken = false;
+  let sealMismatch: number | null = null;
+  const imported: { ref: string; columnKey: string; checklist: number }[] = [];
+  const sealed: { items: number; manifest: string }[] = [];
+  let pushedConfig: {
+    columns: number;
+    categories: number;
+    tagMax: number;
+  } | null = null;
+  const boardPreconditions: string[] = [];
   let workspaceStatus = 200;
   let workspaceBody: unknown;
   let workspaceDelay = 0;
@@ -114,6 +189,230 @@ export async function startStubPlane(
             .end(JSON.stringify(body)),
         workspaceDelay,
       );
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/v1/sync/state/workspace") {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += chunk;
+      });
+      req.on("end", () => {
+        const json = (status: number, body: unknown) =>
+          res
+            .writeHead(status, { "Content-Type": "application/json" })
+            .end(JSON.stringify(body));
+        if (revoked) return json(401, { error: "revoked" });
+        if (createMissing) return json(404, { error: "not found" });
+        const input = JSON.parse(raw || "{}") as {
+          slug?: string;
+          name?: string;
+        };
+        if (!input.slug || !input.name)
+          return json(400, { error: "a slug and a name are required" });
+        const clash = workspaces.find((entry) => entry.slug === input.slug);
+        if (clash) return json(409, { error: "taken", id: clash.id });
+        const created = {
+          id: `ws-${input.slug}`,
+          slug: input.slug,
+          name: input.name,
+          path: null,
+          baseBranch: null,
+        };
+        // The account's list really grows, so the app's next read sees it —
+        // which is what makes "created and opened" testable end to end.
+        workspaces = [...workspaces, created];
+        return json(201, { workspace: created });
+      });
+      return;
+    }
+
+    // The board surface, enough of it to drive the desktop end to end.
+    const board = /^\/v1\/boards\/([^/?]+)(\/[^?]*)?/.exec(req.url ?? "");
+    if (board && !revoked) {
+      const state = boards.get(board[1]);
+      const rest = (board[2] ?? "").split("?")[0];
+      if (boardOffline || !state) {
+        res
+          .writeHead(boardOffline ? 503 : 404, {
+            "Content-Type": "application/json",
+          })
+          .end(JSON.stringify({ error: "not found" }));
+        return;
+      }
+      const json = (status: number, body: unknown) =>
+        res
+          .writeHead(status, { "Content-Type": "application/json" })
+          .end(JSON.stringify(body));
+
+      if (req.method === "GET" && rest === "/config") {
+        json(200, {
+          board: {
+            workspaceId: board[1],
+            migratedAt: state.migratedAt,
+            columns: state.columns.map((column, position) => ({
+              ...column,
+              role: column.role ?? null,
+              icon: "circle-dashed",
+              tone: "neutral",
+              position,
+            })),
+            categories: [],
+          },
+        });
+        return;
+      }
+      if (req.method === "GET" && rest === "/items") {
+        json(200, { items: state.cards, cursor: null });
+        return;
+      }
+      if (req.method === "PUT" && rest === "/config") {
+        let raw = "";
+        req.on("data", (chunk) => {
+          raw += chunk;
+        });
+        req.on("end", () => {
+          const body = JSON.parse(raw || "{}") as {
+            columns?: unknown[];
+            categories?: unknown[];
+            tags?: { max?: number };
+          };
+          pushedConfig = {
+            columns: body.columns?.length ?? 0,
+            categories: body.categories?.length ?? 0,
+            tagMax: body.tags?.max ?? 0,
+          };
+          json(200, { board: { workspaceId: board[1] } });
+        });
+        return;
+      }
+      if (req.method === "POST" && rest === "/import") {
+        let raw = "";
+        req.on("data", (chunk) => {
+          raw += chunk;
+        });
+        req.on("end", () => {
+          if (importBroken) return json(503, { error: "unavailable" });
+          const body = JSON.parse(raw || "{}") as {
+            records?: {
+              source?: { ref?: string };
+              columnKey?: string;
+              restore?: { checklist?: unknown[] };
+            }[];
+          };
+          const receipts = (body.records ?? []).map((record) => {
+            imported.push({
+              ref: record.source?.ref ?? "?",
+              columnKey: record.columnKey ?? "?",
+              checklist: record.restore?.checklist?.length ?? 0,
+            });
+            return { ref: record.source?.ref ?? "?", status: "imported" };
+          });
+          json(200, {
+            receipts,
+            summary: { imported: receipts.length },
+          });
+        });
+        return;
+      }
+      if (req.method === "POST" && rest === "/migrated") {
+        let raw = "";
+        req.on("data", (chunk) => {
+          raw += chunk;
+        });
+        req.on("end", () => {
+          const body = JSON.parse(raw || "{}") as {
+            items?: number;
+            manifest?: string;
+          };
+          sealed.push({
+            items: body.items ?? 0,
+            manifest: body.manifest ?? "",
+          });
+          // ⚠️ The real service COUNTS its own table and refuses a mismatch
+          // with both numbers, which is the case the app has to report
+          // verbatim rather than smooth over.
+          if (sealMismatch !== null)
+            return json(409, {
+              error: "the board does not hold what the import reported",
+              expected: body.items ?? 0,
+              actual: sealMismatch,
+            });
+          state.migratedAt = "2026-09-08T07:00:00.000Z";
+          json(200, {
+            migratedAt: state.migratedAt,
+            items: body.items ?? 0,
+          });
+        });
+        return;
+      }
+      const move = /^\/items\/([^/]+)\/move$/.exec(rest);
+      if (req.method === "POST" && move) {
+        const card = state.cards.find((entry) => entry.id === move[1]);
+        let raw = "";
+        req.on("data", (chunk) => (raw += chunk));
+        req.on("end", () => {
+          if (!card) return json(404, { error: "not found" });
+          const parsed = JSON.parse(raw || "{}") as { columnKey?: string };
+          card.columnKey = parsed.columnKey ?? card.columnKey;
+          card.revision += 1;
+          json(200, { item: card });
+        });
+        return;
+      }
+      const toggle = /^\/items\/([^/]+)\/checklist\/([^/]+)$/.exec(rest);
+      if (req.method === "PATCH" && toggle) {
+        boardPreconditions.push(req.headers["if-match"] ?? "");
+        const card = state.cards.find((entry) => entry.id === toggle[1]);
+        let raw = "";
+        req.on("data", (chunk) => (raw += chunk));
+        req.on("end", () => {
+          if (!card) return json(404, { error: "not found" });
+          if (checklistConflict) {
+            // What the real 409 carries: the card as it stands NOW, so the app
+            // can show both sides rather than only "you are out of date".
+            return json(409, {
+              error: "that card changed since you read it",
+              revision: card.revision + 1,
+              item: { ...card, revision: card.revision + 1 },
+            });
+          }
+          const parsed = JSON.parse(raw || "{}") as { checked?: boolean };
+          const item = card.checklist?.find(
+            (entry) => entry.key === decodeURIComponent(toggle[2]),
+          );
+          if (item) item.checked = parsed.checked ?? item.checked;
+          card.revision += 1;
+          json(200, { item: card });
+        });
+        return;
+      }
+      if (req.method === "POST" && rest === "/items") {
+        let raw = "";
+        req.on("data", (chunk) => (raw += chunk));
+        req.on("end", () => {
+          const parsed = JSON.parse(raw || "{}") as { title?: string };
+          const card: StubCard = {
+            id: `card-${state.cards.length + 1}`,
+            revision: 1,
+            title: parsed.title ?? "Untitled",
+            body: "",
+            columnKey: state.columns[0]?.key ?? "todo",
+            categoryKey: null,
+            taskId: null,
+            priority: null,
+            tags: [],
+            rank: `V${state.cards.length}`,
+            createdAt: null,
+            updatedAt: null,
+            checklist: [],
+          };
+          state.cards.push(card);
+          json(201, { item: card });
+        });
+        return;
+      }
+      json(404, { error: "not found" });
       return;
     }
 
@@ -167,6 +466,34 @@ export async function startStubPlane(
       workspaceBody = undefined;
       workspaceDelay = 0;
     },
+    setBoard: (workspaceId, board) => {
+      boards.set(workspaceId, {
+        migratedAt: board.migratedAt ?? null,
+        columns: board.columns,
+        cards: board.cards,
+      });
+    },
+    setChecklistConflict: (value) => {
+      checklistConflict = value;
+    },
+    setBoardOffline: (value) => {
+      boardOffline = value;
+    },
+    setCreateMissing: (value) => {
+      createMissing = value;
+    },
+    imported,
+    get pushedConfig() {
+      return pushedConfig;
+    },
+    setImportBroken: (value) => {
+      importBroken = value;
+    },
+    sealed,
+    setSealMismatch: (value) => {
+      sealMismatch = value;
+    },
+    boardPreconditions,
     setWorkspaceResponse: (status, body, delayMs = 0) => {
       workspaceStatus = status;
       workspaceBody = body;

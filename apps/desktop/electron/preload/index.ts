@@ -36,7 +36,50 @@ const desktop: DesktopApi = {
   auth,
   workspaces: {
     load: () => ipcRenderer.invoke(workspaceChannels.load),
-    select: (slug) => ipcRenderer.invoke(workspaceChannels.select, slug),
+    // ⚠️ The cloud workspace id, not the slug: every board call is addressed by
+    // it, and a slug is a display key a rename can move.
+    select: (id) => ipcRenderer.invoke(workspaceChannels.select, id),
+    // The NAME a human typed; main derives the slug the service demands.
+    create: (name) =>
+      ipcRenderer.invoke(workspaceChannels.createWorkspace, name),
+    board: {
+      load: (workspaceId) =>
+        ipcRenderer.invoke(workspaceChannels.board, workspaceId),
+      move: (workspaceId, cardId, columnKey) =>
+        ipcRenderer.invoke(
+          workspaceChannels.move,
+          workspaceId,
+          cardId,
+          columnKey,
+        ),
+      toggle: (workspaceId, cardId, key, checked, revision) =>
+        ipcRenderer.invoke(
+          workspaceChannels.toggle,
+          workspaceId,
+          cardId,
+          key,
+          checked,
+          revision,
+        ),
+      create: (workspaceId, title) =>
+        ipcRenderer.invoke(workspaceChannels.create, workspaceId, title),
+      importPreview: (workspaceId) =>
+        ipcRenderer.invoke(workspaceChannels.importPreview, workspaceId),
+      importRun: (workspaceId) =>
+        ipcRenderer.invoke(workspaceChannels.importRun, workspaceId),
+      importSeal: (workspaceId) =>
+        ipcRenderer.invoke(workspaceChannels.importSeal, workspaceId),
+    },
+    // ⚠️ Keyed by SLUG, not by the workspace id: the id is absent on a service
+    // that predates it, which is the very screen this surface serves.
+    folder: {
+      state: (slug) => ipcRenderer.invoke(workspaceChannels.folderState, slug),
+      pick: (slug) => ipcRenderer.invoke(workspaceChannels.folderPick, slug),
+      forget: (slug) =>
+        ipcRenderer.invoke(workspaceChannels.folderForget, slug),
+      reveal: (slug) =>
+        ipcRenderer.invoke(workspaceChannels.folderReveal, slug),
+    },
   },
 };
 contextBridge.exposeInMainWorld("desktop", desktop);
