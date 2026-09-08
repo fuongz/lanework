@@ -1,0 +1,79 @@
+{
+  "slug": "jakubkrehel-skills",
+  "name": "jakubkrehel/skills",
+  "description": "A collection of agent skills that help you build a great interface.",
+  "repo": "jakubkrehel/skills",
+  "ref": "main",
+  "subpath": "skills",
+  "license": "MIT",
+  "author": "jakubkrehel",
+  "importedAt": "2026-09-07T10:16:57.815Z",
+  "skills": [
+    {
+      "name": "better-accessibility",
+      "upstreamPath": "skills/better-accessibility",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "328acc5aa554b75cf95dc7eb5c581a6579f9e7e5c31dfa98b39d35b3881156d5"
+    },
+    {
+      "name": "better-colors",
+      "upstreamPath": "skills/better-colors",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "0ecbb4db40e1dc745ff077a46ca34498ede54616fb28ca5d30e6c0d20c73cf43"
+    },
+    {
+      "name": "better-interface",
+      "upstreamPath": "skills/better-interface",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "69ca68ba28b52af9f97a17f712068742cb2c9bf99179f7b2c17864bd027c0e58"
+    },
+    {
+      "name": "better-layout",
+      "upstreamPath": "skills/better-layout",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "4458cb557c8af48e3e3f3f678b9f2a3acfe97a02b7bbc9ebe65e7783870657ad"
+    },
+    {
+      "name": "better-typography",
+      "upstreamPath": "skills/better-typography",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "cea99306b3f4b5e8dcb7c86f817bbfa048371c58a40767602b6cc284eeea1977"
+    },
+    {
+      "name": "better-ui",
+      "upstreamPath": "skills/better-ui",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "4c3c757d0aec0872d5857aa06a47e59d15069c191079eb85f68436b592d01935"
+    },
+    {
+      "name": "better-writing",
+      "upstreamPath": "skills/better-writing",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "1a08d17385bfc9fc21c16452740b7a73f4c915025d981cf92aa4db78c49262e9"
+    },
+    {
+      "name": "break",
+      "upstreamPath": "skills/break",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "cd06e3d316d37a47e5b604c37976859700ff4895a91600b0552814a629ab66d0"
+    },
+    {
+      "name": "explain-interface",
+      "upstreamPath": "skills/explain-interface",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "5386bc23a17ce6b2f7b62c78c8ce45cd409c9caef8b2aebac75a4b1261e765cc"
+    },
+    {
+      "name": "interface-review",
+      "upstreamPath": "skills/interface-review",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "f13c2bfcb9f71b52540baee388cafdb87ce87f68ced9c23baa98933ecf3c8951"
+    },
+    {
+      "name": "variant",
+      "upstreamPath": "skills/variant",
+      "commit": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+      "contentHash": "7f0ff8cfa6a8b80aa4b50f19ee4bb667251d7ae3950334999f181e016e0f7a20"
+    }
+  ]
+}
