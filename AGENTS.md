@@ -17,6 +17,30 @@ use a raw filesystem writer as a fallback. If the Lanework MCP is unavailable,
 report the blocker and ask the user to restore it; do not create the card by
 another route.
 
+## Required card metadata
+
+Every new task/review card **must explicitly include `category`, `tags`, and
+`priority`** in the `create_review` call. Do not omit them, leave them empty,
+or rely on server defaults. This also applies to successor/handoff cards.
+
+- **Category:** choose the main implementation area: `product-design`,
+  `frontend`, `backend`, `infrastructure`, or `documentation`. The agent is
+  authorized to choose based on the task; follow an explicit user choice when
+  given. For cross-repo cards, classify the work in the target repo.
+- **Tags:** use 1–3 relevant tags. Call `list_reviews` first and reuse the
+  board's vocabulary; add a short tag only when no existing tag fits.
+- **Priority:** choose `high` for blockers, critical fixes, or prerequisites
+  for the agreed release; `medium` for normal planned work; `low` for optional
+  polish. Always pass the value explicitly.
+
+After creating or updating a card, verify through `get_review` or
+`list_reviews` that all three fields are populated and valid, and that the MCP
+assigned a task ID. Correct omissions with `update_review` before handing off.
+Never invent or write `task_id` yourself; the MCP assigns it from the category.
+Use `update_review` for metadata and `set_status` for lifecycle changes; do not
+rewrite review files directly. Metadata changes do not approve checklist items
+or change the card's status.
+
 ## Where artifacts go
 
 All agent working files live under `.agents/`. Use **`YYYY-MM-DD`** for every
@@ -49,7 +73,8 @@ Each checklist has a **status** — its board column:
 | `done` | Shipped and verified. |
 | `dropped` | Superseded or abandoned. |
 
-Advancing a review is a one-line `status:` edit — the file never moves.
+Advance a review with the MCP `set_status` tool. In frontmatter mode it updates
+`status:` in place — the file never moves.
 
 **Frontmatter** (the board reads these): start each file with YAML, then a
 `# Review: …` heading:
@@ -59,8 +84,9 @@ Advancing a review is a one-line `status:` edit — the file never moves.
 status: todo                       # todo | processing | done | dropped
 agent_assignee: ["code-reviewer"]   # the card's agent PIC — one agent, start to finish
 created_at: YYYY-MM-DD 00:00:00Z   # the date for this card
+category: frontend                # required; one of the five board categories
 priority: medium                   # low | medium | high
-tags: ["ui", "server-fn"]          # AT MOST 3, from a short vocabulary for your repo
+tags: ["ui", "electron"]          # required: 1–3 tags from the board vocabulary
 ---
 ```
 
