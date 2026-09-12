@@ -1,4 +1,6 @@
 import {
+  FolderLibraryIcon,
+  GithubIcon,
   InformationCircleIcon,
   Sun01Icon,
   UserAccountIcon,
@@ -52,6 +54,25 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         label: "Account",
         icon: UserAccountIcon,
         keywords: "sign out signed in user machine revoke credential",
+      },
+    ],
+  },
+  {
+    label: "Workspace",
+    items: [
+      {
+        to: "/settings/workspaces",
+        label: "Projects",
+        icon: FolderLibraryIcon,
+        keywords:
+          "workspace workspaces project projects create new delete remove rename folder folders source primary",
+      },
+      {
+        to: "/settings/git",
+        label: "GitHub",
+        icon: GithubIcon,
+        keywords:
+          "github git repo repository pull request pr connect disconnect token oauth review diff",
       },
     ],
   },

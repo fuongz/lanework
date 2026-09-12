@@ -3,18 +3,20 @@ import {
   SettingsPage,
   SettingsValue,
 } from "#/components/shared/settings/settings-page";
-import { useSession } from "#/stores/session";
 import type { AppInfo } from "../../../../shared/desktop";
 
-/** What the control plane last said, in words rather than a status code. */
-const VERDICT_LABEL = {
-  ok: "Connected",
-  revoked: "Access revoked",
-  unreachable: "Cannot reach the control plane",
-} as const;
-
+/**
+ * Which build this is. Nothing else.
+ *
+ * ⚠️ There used to be a "Control plane" section here — the API origin in force
+ * and the heartbeat's last verdict. Both are the app's own plumbing: the origin
+ * is set by an environment variable a user never sets, and the verdict already
+ * reaches them as the thing it causes (a board that will not load, a gate that
+ * says access was revoked) rather than as a line to interpret. The one moment
+ * the origin is worth reading is a sign-in that failed, and the gate prints it
+ * there — see `SignIn`.
+ */
 export function AboutSection() {
-  const session = useSession((state) => state.session);
   const [info, setInfo] = useState<AppInfo | null>(null);
 
   useEffect(() => {
@@ -32,14 +34,10 @@ export function AboutSection() {
     };
   }, []);
 
-  const checkedAt = session?.checkedAt
-    ? new Date(session.checkedAt).toLocaleTimeString()
-    : null;
-
   return (
     <SettingsPage
       title="About"
-      description="This build of Lanework, and where it signs in."
+      description="This build of Lanework."
       sections={[
         {
           title: "Application",
@@ -53,32 +51,6 @@ export function AboutSection() {
               label: "Platform",
               keywords: "os system",
               control: <SettingsValue>{info?.platform ?? "—"}</SettingsValue>,
-            },
-          ],
-        },
-        {
-          title: "Control plane",
-          rows: [
-            {
-              label: "Signing in against",
-              description:
-                "Set with LANEWORK_API_URL. Shown here so a connection problem can be told apart from a sign-in problem.",
-              keywords: "api origin server url",
-              control: <SettingsValue>{session?.apiUrl ?? "—"}</SettingsValue>,
-            },
-            {
-              label: "Status",
-              description: checkedAt
-                ? `Last checked at ${checkedAt}.`
-                : "Checked in the background about once a minute.",
-              keywords: "verdict connection online heartbeat",
-              control: (
-                <SettingsValue>
-                  {session?.verdict
-                    ? VERDICT_LABEL[session.verdict]
-                    : "Not checked yet"}
-                </SettingsValue>
-              ),
             },
           ],
         },

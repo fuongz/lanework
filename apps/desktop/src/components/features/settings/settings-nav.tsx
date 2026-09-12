@@ -16,19 +16,16 @@ export function SettingsNav() {
 
   if (groups.length === 0)
     return (
-      <p className="text-muted-foreground px-2.5 py-6 text-[13px]">
+      <p className="text-muted-foreground px-2 py-6 text-[13px]">
         No settings match “{query.trim()}”.
       </p>
     );
 
   return (
-    <nav
-      aria-label="Settings sections"
-      className="flex flex-col gap-5 pt-1 pb-4"
-    >
+    <nav aria-label="Settings sections" className="flex flex-col pt-1 pb-4">
       {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-0.5">
-          <span className="text-muted-foreground px-2.5 pb-1 text-[13px]">
+          <span className="text-muted-foreground px-2 pt-4 pb-1 text-[11px] font-medium tracking-wide uppercase">
             {group.label}
           </span>
           {group.items.map((item) => (
@@ -40,7 +37,7 @@ export function SettingsNav() {
               // `(0,1,0)`, so hovering the current section used to make it
               // LIGHTER — and a hovered neighbour at 4% was indistinguishable
               // from the open one at 5.5%. Widened to 8% for the same reason.
-              className="group flex h-[34px] items-center gap-2.5 rounded-lg px-2.5 text-sm transition-[background-color,scale] duration-150 ease-out [&:not([aria-current])]:hover:bg-foreground/[0.04] active:scale-[0.96]"
+              className="group flex h-[30px] items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out [&:not([aria-current])]:hover:bg-foreground/[0.04] active:scale-[0.98]"
               activeProps={{
                 className: "bg-foreground/[0.08]",
                 "aria-current": "page",

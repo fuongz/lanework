@@ -1,8 +1,10 @@
 import { type ReactNode, useEffect } from "react";
+import { Onboarding } from "#/components/features/welcome/onboarding";
+import { SignIn } from "#/components/shared/auth/sign-in";
 import { StartupLoading } from "#/components/shared/loading/startup-loading";
+import { usePreferences } from "#/stores/preferences";
 import { useSession } from "#/stores/session";
 import { lockState } from "../../../../shared/policy";
-import { SignIn } from "./sign-in";
 
 /**
  * Renders the app only for a session allowed to use it.
@@ -22,14 +24,39 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const ready = useSession((state) => state.ready);
   const session = useSession((state) => state.session);
   const hydrate = useSession((state) => state.hydrate);
+  const hydrated = usePreferences((state) => state.hydrated);
+  const onboarded = usePreferences((state) => state.onboarded);
+  const completeOnboarding = usePreferences(
+    (state) => state.completeOnboarding,
+  );
 
   useEffect(() => {
     hydrate();
   }, [hydrate]);
 
-  if (!ready) return <StartupLoading />;
-  if (!session) return <SignIn lock={null} />;
+  const lock = session ? lockState(session) : null;
+  const open = ready && hydrated && lock?.locked === false;
 
-  const lock = lockState(session);
-  return lock.locked ? <SignIn lock={lock} /> : children;
+  // ⚠️ Reaching the app counts as having been onboarded, even for a machine
+  // that never walked the flow — a credential seeded from elsewhere, or an
+  // install from before this screen existed. Without it, signing out would hand
+  // a long-standing user "Welcome to Lanework" as if the app had never met them.
+  useEffect(() => {
+    if (open && !onboarded) completeOnboarding();
+  }, [open, onboarded, completeOnboarding]);
+
+  // ⚠️ Waits on the PREFERENCES read too, not just the session. `onboarded`
+  // reads false until `localStorage` has been rehydrated, so deciding any
+  // earlier flashes the welcome screen at machines that finished with it months
+  // ago. Both reads are local and settle in the same beat.
+  if (!ready || !hydrated) return <StartupLoading />;
+  // No desktop bridge at all: nothing to sign in with, and nothing to onboard.
+  if (!lock) return <SignIn lock={null} />;
+  if (!lock.locked) return children;
+
+  // Which of the two locked screens this is — the first-run flow or the bare
+  // gate — is `Onboarding`'s to decide, and it decides once. Choosing here
+  // would mean re-choosing on every render of a flow that changes the very
+  // flag the choice reads.
+  return <Onboarding lock={lock} />;
 }

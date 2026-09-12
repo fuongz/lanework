@@ -125,6 +125,30 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* The ONE chromatic accent, for selection and focus. Everything else on this
+     board stays neutral — colour that means something has to be scarce, and a
+     board where lanes, categories, priorities and the cursor are all coloured
+     is a board where none of them reads. */
+  --accent-brand: oklch(0.52 0.2 285);
+  --accent-brand-foreground: oklch(0.985 0 0);
+
+  /* Board tones. The board NAMES these — `column.tone` and `category.tone` — so
+     the set is fixed by the service rather than chosen here.
+
+     ⚠️ They are carried by dots and icons beside a text label, never by the
+     label itself, so the bar is WCAG's 3:1 for non-text. Each is checked against
+     its own theme's page background: light sits near L 0.52 (~4:1 on white),
+     dark near L 0.72 (~7:1 on the dark ground). A single value for both themes
+     cannot clear either bar without failing the other. */
+  --tone-neutral: oklch(0.55 0 0);
+  --tone-violet: oklch(0.52 0.2 290);
+  --tone-amber: oklch(0.55 0.13 75);
+  --tone-blue: oklch(0.52 0.18 255);
+  --tone-sky: oklch(0.53 0.13 230);
+  --tone-emerald: oklch(0.52 0.13 155);
+  --tone-teal: oklch(0.52 0.1 185);
+  --tone-rose: oklch(0.54 0.2 20);
 }
 
 .dark {
@@ -164,6 +188,18 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  --accent-brand: oklch(0.7 0.17 285);
+  --accent-brand-foreground: oklch(0.145 0 0);
+
+  --tone-neutral: oklch(0.7 0 0);
+  --tone-violet: oklch(0.72 0.16 290);
+  --tone-amber: oklch(0.78 0.13 75);
+  --tone-blue: oklch(0.7 0.14 255);
+  --tone-sky: oklch(0.72 0.12 230);
+  --tone-emerald: oklch(0.72 0.13 155);
+  --tone-teal: oklch(0.72 0.1 185);
+  --tone-rose: oklch(0.71 0.17 20);
 }
 
 @theme inline {
@@ -210,6 +246,16 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-accent-brand: var(--accent-brand);
+  --color-accent-brand-foreground: var(--accent-brand-foreground);
+  --color-tone-neutral: var(--tone-neutral);
+  --color-tone-violet: var(--tone-violet);
+  --color-tone-amber: var(--tone-amber);
+  --color-tone-blue: var(--tone-blue);
+  --color-tone-sky: var(--tone-sky);
+  --color-tone-emerald: var(--tone-emerald);
+  --color-tone-teal: var(--tone-teal);
+  --color-tone-rose: var(--tone-rose);
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
@@ -253,6 +299,25 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  /* ⚠️ `MotionConfig reducedMotion="user"` only covers motion/react. The board's
+     drag feedback, hovers and the palette are CSS transitions, and a user who
+     asked the OS for less motion asked for less of all of it. */
+  /* ⚠️ UNLAYERED on purpose, and that is what replaces `!important` here.
+     Tailwind's utilities live in `@layer utilities`, and an unlayered rule beats
+     every layered one no matter how specific — so this wins without the sledge-
+     hammer a linter is right to complain about. Move it inside `@layer base`
+     and every hover transition quietly comes back. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
+  }
+}
+
 @layer base {
   /* A drag handle and traffic-light clearance for full-window views that have
      no app header of their own. Zero height off macOS, where the window keeps
@@ -273,8 +338,73 @@
      result was a sidebar whose colour depended on whatever the window happened
      to be composited over: fine in light, a washed mid-grey in dark. Settings
      is a full-window view; it paints its own surfaces. */
-  .settings-sidebar {
+  .settings-sidebar,
+  .app-sidebar {
     background-color: var(--sidebar);
     border-inline-end: 1px solid var(--sidebar-border);
+  }
+  /* The app's own sidebar carries the window controls, exactly as the settings
+     one does — same reservation, same drag handle, same escape hatch for the
+     controls inside it. Base rule FIRST: the vibrancy variant is the more
+     specific selector, and a stylesheet that states it before the base is one
+     where the base silently wins. */
+  .app-sidebar-titlebar {
+    height: 0;
+  }
+  html[data-vibrancy="true"] .app-sidebar-titlebar {
+    height: 36px;
+    app-region: drag;
+  }
+  .app-sidebar a,
+  .app-sidebar button {
+    app-region: no-drag;
+  }
+}
+
+@layer base {
+  /* Scrollbars the app draws itself, so every OS shows the same one.
+
+     ⚠️ `::-webkit-scrollbar`, not `scrollbar-width`/`scrollbar-color`. The two
+     standard properties keep each platform's own bar and only retint it — which
+     is the opposite of what is wanted here, because the platforms disagree about
+     the SHAPE: Windows and most Linux themes draw a stepper arrow at each end
+     and a filled track behind the thumb, and neither of those is reachable from
+     the standard properties. The renderer is Chromium on all three platforms,
+     so the legacy pseudo-elements are the portable answer, not the hack.
+
+     ⚠️ The trade this makes is on macOS: styling the pseudo-elements at all
+     turns Chromium's OVERLAY scrollbar into a classic one, so the bar stops
+     fading out and starts taking 10px of layout width. That is the cost of one
+     scrollbar everywhere. The thumb is pitched low enough to read as an overlay
+     until it is pointed at. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  /* No track and no corner: the ground behind a scrollbar is whatever the pane
+     it belongs to is painted in, and a track drawn here would be a grey stripe
+     down every panel in the app. */
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+  ::-webkit-scrollbar-thumb {
+    /* A 6px thumb in a 10px gutter. The border is transparent and the fill stops
+       at the padding box, which is how a scrollbar gets its inset without a
+       track to hold it — `width: 6px` alone would put the bar hard against the
+       edge of the pane. */
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 9999px;
+    background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 32%, transparent);
+  }
+  ::-webkit-scrollbar-thumb:active {
+    background-color: color-mix(in oklab, var(--foreground) 45%, transparent);
   }
 }
