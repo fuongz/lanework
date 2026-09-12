@@ -259,20 +259,33 @@ export async function planMigration(root: string): Promise<MigrationPlan> {
       card.updatedAt ?? (card.date ? `${card.date}T00:00:00.000Z` : null);
     const checkedAtSource = card.updatedAt ? "file-mtime" : "card-date";
 
+    // ⚠️ An ordinal is minted only for an item that carries NO handle, and it
+    // skips every handle the card already claims — the same rule the board's
+    // API applies to a `null` key. Handing out the plain position instead put a
+    // second `D2` on a card whose section D already had one, and the board
+    // refuses a checklist with two items keyed alike: one such card took the
+    // other 49 records in its batch down with it.
+    const taken = new Set(card.items.map((item) => item.id).filter(Boolean));
     const seen = { decisions: 0, verify: 0 };
+    const mintKey = (section: "decisions" | "verify"): string => {
+      const prefix = section === "verify" ? "V" : "D";
+      let key: string;
+      do {
+        seen[section] += 1;
+        key = `${prefix}${seen[section]}`;
+      } while (taken.has(key));
+      taken.add(key);
+      return key;
+    };
     const checklist: ImportChecklistRow[] = card.items.map((item) => {
-      seen[item.section] += 1;
       checklistItems += 1;
       if (item.checked && inferredAt) inferredCheckedAt += 1;
       if (item.group) groups += 1;
       if (item.dropped) dropped += 1;
       return {
-        // ⚠️ A positional fallback rather than an empty key: the id is what a
-        // later tick is addressed by, and a row the cloud cannot address is a
-        // row nobody can ever check off.
-        key:
-          item.id ||
-          `${item.section === "verify" ? "V" : "D"}${seen[item.section]}`,
+        // ⚠️ Never an empty key: the key is what a later tick is addressed by,
+        // and a row the cloud cannot address is a row nobody can check off.
+        key: item.id || mintKey(item.section),
         section: item.section,
         text: item.text,
         ...(item.checked && inferredAt

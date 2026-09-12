@@ -1,10 +1,19 @@
 import { can } from "../../../shared/policy";
 import {
+  type BoardCard,
+  type BoardCardDraft,
+  type BoardCardPatch,
+  type BoardChanges,
+  type BoardChecklistDraft,
+  type BoardPlacement,
   type BoardView,
   type BoardWrite,
+  CHECKLIST_LIMITS,
+  CHECKLIST_SECTIONS,
   type ImportPreview,
   type ImportReport,
   type LocalFolderState,
+  type PickedFolder,
   type WorkspaceSnapshot,
   workspaceChannels,
 } from "../../../shared/workspaces";
@@ -13,18 +22,32 @@ import { resolveApi } from "../auth/client";
 import { type MachineRecord, readRecord } from "../auth/store";
 import { handle } from "../ipc";
 import {
+  archiveCard,
   createCard,
   createWorkspace,
+  deleteWorkspace,
   fetchBoardConfig,
+  fetchCard,
   fetchCards,
+  fetchChanges,
   fetchWorkspaces,
   importRecords,
+  lookupCard,
   moveCard,
   putBoardConfig,
+  renameWorkspace,
+  replaceChecklist,
   sealBoardMigration,
   toggleChecklistItem,
+  updateCard,
 } from "./client";
-import { pickFolder, revealFolder } from "./folder-chooser";
+import {
+  chooseFolders,
+  folderFor,
+  pickFolder,
+  registerFolder,
+  revealFolder,
+} from "./folder-chooser";
 import { folderExists, readLocalFolder } from "./local-folder";
 import { IMPORT_BATCH, planMigration } from "./review-import";
 import { slugify } from "./slug";
@@ -35,11 +58,19 @@ import {
   readMigrationRun,
   writeActive,
   writeBoardCache,
-  writeFolder,
+  writeFolders,
   writeMigrationRun,
 } from "./store";
 
-async function authorizedRecord(): Promise<MachineRecord> {
+/**
+ * The credential this window is allowed to act with, or a refusal.
+ *
+ * ⚠️ Exported for `../git`, which needs exactly the same gate: its handlers
+ * file state per Lanework account, so they have to agree with this file on
+ * which account is asking. A second copy of this check is a second place for
+ * the answer to drift.
+ */
+export async function authorizedRecord(): Promise<MachineRecord> {
   const session = await currentSession();
   if (
     !can(session.principal, "app:use") ||
@@ -71,10 +102,10 @@ async function assertSameSession(record: MachineRecord): Promise<void> {
 /**
  * The workspace list, and which one is selected.
  *
- * ⚠️ Selection is by CLOUD WORKSPACE ID. A slug is a display key a rename can
- * move, and every board call is `/v1/boards/:workspaceId/…`; keying the
- * selection on the slug is how a renamed project silently becomes "no workspace
- * selected". A `v1` file that still names a slug is resolved once and rewritten.
+ * ⚠️ Selection is by CLOUD WORKSPACE ID, because every board call is
+ * `/v1/boards/:workspaceId/…` — remembering the slug instead would mean
+ * resolving it to an id on every start, from a list that may not have loaded
+ * yet. A `v1` file that still names a slug is resolved once and rewritten.
  */
 async function load(id?: string): Promise<WorkspaceSnapshot> {
   const record = await authorizedRecord();
@@ -120,6 +151,7 @@ async function load(id?: string): Promise<WorkspaceSnapshot> {
  */
 async function board(workspaceId: string): Promise<BoardView> {
   const record = await authorizedRecord();
+  const startedAt = Date.now();
   try {
     const [config, cards] = await Promise.all([
       fetchBoardConfig(record, workspaceId),
@@ -138,6 +170,16 @@ async function board(workspaceId: string): Promise<BoardView> {
     await writeBoardCache(record, workspaceId, view);
     return view;
   } catch (error) {
+    // ⚠️ Logged even though the caller is answered normally. Serving the cache
+    // is the right answer and a SILENT one: "Offline — showing a saved board"
+    // reads identically for a dropped connection, an HTTP 500, a 15s timeout
+    // and a changed session, and this catch is the last place that still knows
+    // which of them it was. The elapsed time is here for the same reason — a
+    // failure at ~15000ms is the request timing out, not the network being off.
+    console.error(
+      `Board ${workspaceId} fell back to the cache after ${Date.now() - startedAt}ms:`,
+      error,
+    );
     const cached = await readBoardCache(record, workspaceId);
     if (cached) return cached;
     throw error;
@@ -153,12 +195,15 @@ async function board(workspaceId: string): Promise<BoardView> {
  */
 async function folderState(slug: string): Promise<LocalFolderState> {
   const record = await authorizedRecord();
-  const path = (await readFolders(record))[slug];
+  // ⚠️ The PRIMARY, which is the first. Every surface below this one — the
+  // migration reader, "open in file manager" — is about one folder, and the
+  // list says which one that is.
+  const [path, ...others] = (await readFolders(record))[slug] ?? [];
   if (!path) return { kind: "none" };
   // `readLocalFolder` can describe a folder that is not a project; a folder
   // that is not THERE is the one case it cannot, so it is checked first.
   if (!(await folderExists(path))) return { kind: "missing", path };
-  return { kind: "linked", summary: await readLocalFolder(path) };
+  return { kind: "linked", summary: await readLocalFolder(path), others };
 }
 
 const NO_FOLDER =
@@ -178,7 +223,7 @@ async function planFor(workspaceId: string): Promise<{
     (entry) => entry.id === workspaceId || entry.slug === workspaceId,
   );
   const folder = workspace
-    ? ((await readFolders(record))[workspace.slug] ?? null)
+    ? ((await readFolders(record))[workspace.slug]?.[0] ?? null)
     : null;
   if (!folder) return { plan: null, folder: null };
   return { plan: await planMigration(folder), folder };
@@ -199,6 +244,202 @@ function sealableCount(summary: Record<string, number>): number {
   );
 }
 
+/**
+ * Read an edit off the wire, field by field.
+ *
+ * ⚠️ An allow-list, not a shape check. The renderer is a web origin: whatever
+ * it sends reaches the board under this machine's credential, so the set of
+ * fields a person can change from a window is decided HERE and nowhere else.
+ * An unknown key is a refusal rather than something to drop quietly — a caller
+ * sending one has a bug, and silently ignoring it hides the bug in a write that
+ * appears to work.
+ */
+function parsePatch(value: unknown): BoardCardPatch {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("An edit is required");
+  const row = value as Record<string, unknown>;
+  const allowed = ["title", "body", "priority", "tags", "categoryKey"];
+  const keys = Object.keys(row);
+  if (!keys.length) throw new Error("An edit must change something");
+  for (const key of keys)
+    if (!allowed.includes(key)) throw new Error(`Cannot change "${key}"`);
+
+  const patch: BoardCardPatch = {};
+  if ("title" in row) {
+    if (
+      typeof row.title !== "string" ||
+      !row.title.trim() ||
+      row.title.length > 500
+    )
+      throw new Error("A card needs a title");
+    patch.title = row.title.trim();
+  }
+  if ("body" in row) {
+    if (typeof row.body !== "string" || row.body.length > 100_000)
+      throw new Error("That description is too long");
+    patch.body = row.body;
+  }
+  if ("priority" in row) {
+    if (
+      !(
+        row.priority === null ||
+        row.priority === "low" ||
+        row.priority === "medium" ||
+        row.priority === "high"
+      )
+    )
+      throw new Error("That priority is not one this board uses");
+    patch.priority = row.priority;
+  }
+  if ("tags" in row) {
+    if (
+      !Array.isArray(row.tags) ||
+      row.tags.length > 20 ||
+      !row.tags.every(
+        (tag) => typeof tag === "string" && tag.length > 0 && tag.length <= 100,
+      )
+    )
+      throw new Error("Those tags cannot be used");
+    patch.tags = row.tags as string[];
+  }
+  if ("categoryKey" in row) {
+    if (
+      !(
+        row.categoryKey === null ||
+        (typeof row.categoryKey === "string" &&
+          row.categoryKey.trim().length > 0 &&
+          row.categoryKey.length <= 200)
+      )
+    )
+      throw new Error("That category cannot be used");
+    patch.categoryKey = row.categoryKey as string | null;
+  }
+  return patch;
+}
+
+/**
+ * A whole checklist on the way to the board.
+ *
+ * ⚠️ The board's own limits, restated rather than deferred to. The API answers a
+ * malformed list with `checklist[7].text is 2311 characters` — a good message,
+ * and one that arrives after a round trip that was never going to succeed.
+ * Refusing here is the same answer, sooner, and it keeps a renderer bug from
+ * looking like a service failure.
+ */
+function parseChecklistDraft(value: unknown): BoardChecklistDraft[] {
+  if (!Array.isArray(value)) throw new Error("A checklist must be a list");
+  if (value.length > CHECKLIST_LIMITS.items)
+    throw new Error(
+      `A checklist holds at most ${CHECKLIST_LIMITS.items} items`,
+    );
+  const keys = new Set<string>();
+  return value.map((entry, index) => {
+    const at = `Checklist item ${index + 1}`;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry))
+      throw new Error(`${at} is not an item`);
+    const row = entry as Record<string, unknown>;
+    for (const key of Object.keys(row))
+      if (!["key", "section", "text", "checked", "note", "group"].includes(key))
+        throw new Error(`${at} cannot carry "${key}"`);
+
+    if (typeof row.text !== "string" || !row.text.trim())
+      throw new Error(`${at} needs text`);
+    // ⚠️ Two messages, not one. "needs text" for something 2311 characters long
+    // sends the reader looking for an empty field that is not there.
+    if (row.text.trim().length > CHECKLIST_LIMITS.text)
+      throw new Error(
+        `${at} is ${row.text.trim().length} characters; the limit is ${CHECKLIST_LIMITS.text}`,
+      );
+
+    const draft: BoardChecklistDraft = { text: row.text.trim() };
+    if (row.key !== undefined && row.key !== null) {
+      if (
+        typeof row.key !== "string" ||
+        !row.key.trim() ||
+        row.key.length > CHECKLIST_LIMITS.key
+      )
+        throw new Error(`${at} has a malformed key`);
+      // A duplicate key would silently drop one of the two rows on the board.
+      if (keys.has(row.key))
+        throw new Error(`Two items are keyed "${row.key}"`);
+      keys.add(row.key);
+      draft.key = row.key;
+    }
+    if (row.section !== undefined) {
+      if (
+        !CHECKLIST_SECTIONS.includes(
+          row.section as (typeof CHECKLIST_SECTIONS)[number],
+        )
+      )
+        throw new Error(`${at} must be in ${CHECKLIST_SECTIONS.join(" or ")}`);
+      draft.section = row.section as BoardChecklistDraft["section"];
+    }
+    if (row.checked !== undefined) {
+      if (typeof row.checked !== "boolean")
+        throw new Error(`${at} has an invalid state`);
+      draft.checked = row.checked;
+    }
+    if (row.note !== undefined && row.note !== null) {
+      if (
+        typeof row.note !== "string" ||
+        row.note.length > CHECKLIST_LIMITS.note
+      )
+        throw new Error(`${at} has an invalid note`);
+      draft.note = row.note;
+    }
+    if (row.group !== undefined && row.group !== null) {
+      if (
+        typeof row.group !== "string" ||
+        !row.group.trim() ||
+        row.group.length > CHECKLIST_LIMITS.key
+      )
+        throw new Error(`${at} has an invalid group`);
+      draft.group = row.group;
+    }
+    return draft;
+  });
+}
+
+/**
+ * The folders a create call names, resolved to paths.
+ *
+ * ⚠️ An id this run never handed out is a REFUSAL, not a folder to skip. The
+ * only way to hold one is to have picked the folder in this app, so an unknown
+ * id means the window is asking for something a person never chose — and a
+ * project quietly created with fewer folders than the dialog listed is worse
+ * than one that was not created at all.
+ */
+function parseFolderIds(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 20)
+    throw new Error("Those source folders cannot be used");
+  return value.map((id) => {
+    if (typeof id !== "string" || !id.trim())
+      throw new Error("Those source folders cannot be used");
+    const path = folderFor(id);
+    if (!path)
+      throw new Error(
+        "One of those folders is no longer available. Add it again.",
+      );
+    return path;
+  });
+}
+
+/** `{after}` or `{before}` and nothing else — exactly one neighbour. */
+function parsePlacement(value: unknown): BoardPlacement | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== "object" || Array.isArray(value))
+    throw new Error("A placement must name one neighbouring card");
+  const row = value as Record<string, unknown>;
+  const keys = Object.keys(row);
+  if (keys.length !== 1 || !(keys[0] === "after" || keys[0] === "before"))
+    throw new Error("A placement must name one neighbouring card");
+  const id = row[keys[0]];
+  if (typeof id !== "string" || !id.trim() || id.length > 200)
+    throw new Error("A placement must name one neighbouring card");
+  return keys[0] === "after" ? { after: id } : { before: id };
+}
+
 function requireId(args: unknown[], count: number): string[] {
   if (
     args.length !== count ||
@@ -208,6 +449,75 @@ function requireId(args: unknown[], count: number): string[] {
   )
     throw new Error("A valid workspace and card are required");
   return args as string[];
+}
+
+/**
+ * A card draft off the wire, checked field by field.
+ *
+ * ⚠️ The caps are the SERVICE's own — title 200, body 120000, keys 40, tags 32 ×
+ * 40 — because a renderer that has been tampered with is exactly what this
+ * boundary exists for, and a limit invented here would either refuse what the
+ * board accepts or forward what it will refuse.
+ *
+ * ⚠️ Unknown fields are DROPPED rather than forwarded. Only what this app's own
+ * composer can set may reach the board through it: passing the object straight
+ * through would make this channel a way to set `parentId`, `metadata` or a
+ * `source` that no screen in the app can show.
+ */
+/** The board's own key shape, mirrored from the service's `board-input.ts`. */
+const KEY = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+function parseDraft(value: unknown): BoardCardDraft {
+  if (!value || typeof value !== "object")
+    throw new Error("A card needs a title");
+  const raw = value as Record<string, unknown>;
+
+  const title = typeof raw.title === "string" ? raw.title.trim() : "";
+  if (!title || title.length > 200)
+    throw new Error("A card needs a title of 1-200 characters");
+
+  const key = (input: unknown, field: string): string | undefined => {
+    if (input === undefined || input === null || input === "") return undefined;
+    if (typeof input !== "string" || input.length > 40 || !KEY.test(input))
+      throw new Error(`That ${field} is not a key this board can use`);
+    return input;
+  };
+
+  const body = typeof raw.body === "string" ? raw.body.trim() : "";
+  if (body.length > 120_000) throw new Error("That description is too long");
+
+  const priority =
+    raw.priority === "low" ||
+    raw.priority === "medium" ||
+    raw.priority === "high"
+      ? raw.priority
+      : undefined;
+  if (raw.priority !== undefined && raw.priority !== null && !priority)
+    throw new Error("Priority must be low, medium or high");
+
+  let tags: string[] | undefined;
+  if (raw.tags !== undefined && raw.tags !== null) {
+    if (!Array.isArray(raw.tags)) throw new Error("Tags must be a list");
+    tags = raw.tags.map((tag) => {
+      if (typeof tag !== "string" || !tag.trim() || tag.length > 40)
+        throw new Error("Each tag must be 1-40 characters");
+      return tag.trim();
+    });
+    if (tags.length > 32) throw new Error("That is too many tags");
+  }
+
+  return {
+    title,
+    ...(body ? { body } : {}),
+    ...(key(raw.categoryKey, "category") !== undefined
+      ? { categoryKey: key(raw.categoryKey, "category") }
+      : {}),
+    ...(key(raw.columnKey, "status") !== undefined
+      ? { columnKey: key(raw.columnKey, "status") }
+      : {}),
+    ...(priority ? { priority } : {}),
+    ...(tags ? { tags } : {}),
+  };
 }
 
 export function registerWorkspaces(devUrl?: string): void {
@@ -224,17 +534,33 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<WorkspaceSnapshot> => {
       if (
-        args.length !== 1 ||
+        args.length > 2 ||
         typeof args[0] !== "string" ||
         !args[0].trim() ||
         args[0].length > 200
       )
         throw new Error("A project name is required");
       const name = args[0].trim();
-      const created = await createWorkspace(await authorizedRecord(), {
+      // ⚠️ Ids, resolved HERE against folders this app's own chooser handed
+      // out. A create call cannot name a path, so it cannot link a folder the
+      // user never picked — see `folder-chooser.ts`.
+      const paths = parseFolderIds(args[1]);
+      const record = await authorizedRecord();
+      const created = await createWorkspace(record, {
         slug: slugify(name),
         name,
+        // ⚠️ The PRIMARY folder, so the account records where this project
+        // lives on this machine from the moment it exists. Every other surface
+        // reads that back as `workspace.path`; leaving it unset would make a
+        // project created here look, to a second machine, like one nobody has
+        // a checkout of.
+        ...(paths[0] ? { path: paths[0] } : {}),
       });
+      // ⚠️ Linked under the slug the SERVICE answered with, not the one this
+      // app derived. They are the same today and the folder link is keyed by
+      // slug; deriving it twice is how the two would eventually disagree, and a
+      // link under a slug nothing looks up is a folder that vanished.
+      if (paths.length) await writeFolders(record, created.slug, paths);
       // ⚠️ Created AND opened, in one act. A project that appeared in the list
       // and left the user to click "Open" would be two steps for one intention,
       // and `load` is what writes the selection down — so this also survives a
@@ -242,14 +568,140 @@ export function registerWorkspaces(devUrl?: string): void {
       return load(created.id);
     },
   );
+  handle(
+    workspaceChannels.renameWorkspace,
+    devUrl,
+    async (args): Promise<WorkspaceSnapshot> => {
+      // Its own check rather than `requireId`: that helper's message names a
+      // workspace and a card, and the second argument here is a human's typing.
+      if (
+        args.length !== 2 ||
+        !args.every(
+          (arg) => typeof arg === "string" && arg.trim() && arg.length <= 200,
+        )
+      )
+        throw new Error("A project and a new name are required");
+      const [id, name] = args as [string, string];
+      const record = await authorizedRecord();
+      await renameWorkspace(record, id, name.trim());
+      // ⚠️ `load()`, NOT `load(id)`. Passing the id would write it down as the
+      // selection, so renaming a project from Settings would quietly open it —
+      // and the one being renamed is usually not the one on screen. Nothing
+      // local needs rewriting either, unlike the delete below: the service will
+      // not change a slug, so the folder link and the saved selection still
+      // name this project.
+      return load();
+    },
+  );
+  handle(
+    workspaceChannels.deleteWorkspace,
+    devUrl,
+    async (args): Promise<WorkspaceSnapshot> => {
+      // ⚠️ BOTH keys, and they are not redundant. The service deletes by cloud
+      // id — a slug is refused with a 400 — while the folder link on this
+      // machine is keyed by slug, and main holds no id→slug map to derive one
+      // from without asking the account a second time.
+      const [id, slug] = requireId(args, 2);
+      const record = await authorizedRecord();
+      await deleteWorkspace(record, id);
+      // `load` re-reads the account and drops a saved selection that no longer
+      // exists, which is exactly the state deleting the open project leaves.
+      const snapshot = await load();
+      // ⚠️ Checked BEFORE the local link is dropped, and this is not
+      // belt-and-braces. A service one release behind still answers the
+      // slug-keyed route, whose validator ACCEPTS a uuid — so it removes nothing
+      // and replies 200. Trusting that would report a success that never
+      // happened and take the folder link with it, leaving a project on the
+      // account that this machine can no longer point at anything.
+      if (snapshot.workspaces.some((workspace) => workspace.id === id))
+        throw new Error(
+          "The service did not delete that project. Update it, then try again.",
+        );
+      // ⚠️ The local link goes with it. A folder still linked to a slug the
+      // account no longer has is a row that can never be reached again — and
+      // the next project to take that slug would inherit somebody else's
+      // folder.
+      await writeFolders(record, slug, null);
+      return snapshot;
+    },
+  );
   handle(workspaceChannels.board, devUrl, (args) => {
     const [workspaceId] = requireId(args, 1);
     return board(workspaceId);
   });
-  handle(workspaceChannels.move, devUrl, async (args): Promise<BoardWrite> => {
-    const [workspaceId, cardId, columnKey] = requireId(args, 3);
-    return moveCard(await authorizedRecord(), workspaceId, cardId, columnKey);
+  handle(workspaceChannels.card, devUrl, async (args): Promise<BoardCard> => {
+    const [workspaceId, cardId] = requireId(args, 2);
+    return fetchCard(await authorizedRecord(), workspaceId, cardId);
   });
+  handle(
+    workspaceChannels.lookup,
+    devUrl,
+    async (args): Promise<BoardCard | null> => {
+      const [workspaceId, taskId] = requireId(args, 2);
+      return lookupCard(await authorizedRecord(), workspaceId, taskId);
+    },
+  );
+  handle(
+    workspaceChannels.update,
+    devUrl,
+    async (args): Promise<BoardWrite> => {
+      if (
+        args.length !== 4 ||
+        typeof args[3] !== "number" ||
+        !Number.isInteger(args[3])
+      )
+        throw new Error("A card, an edit and a revision are required");
+      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      // ⚠️ Parsed BEFORE the session is resolved. Inline as an argument it ran
+      // after `await authorizedRecord()`, so a malformed edit from a signed-out
+      // window was answered "sign in" — advice that cannot fix it, and which
+      // hides a caller's bug behind a state the caller will eventually leave.
+      const patch = parsePatch(args[2]);
+      return updateCard(
+        await authorizedRecord(),
+        workspaceId,
+        cardId,
+        patch,
+        args[3],
+      );
+    },
+  );
+  handle(workspaceChannels.move, devUrl, async (args): Promise<BoardWrite> => {
+    // ⚠️ Four arguments always. `columnKey` is null for a reorder inside one
+    // lane and `placement` is null for an append, and a channel whose argument
+    // count varied would make "is this call well-formed?" unanswerable here.
+    if (args.length !== 4)
+      throw new Error("A card and a destination are required");
+    if (!(args[2] === null || typeof args[2] === "string"))
+      throw new Error("A card and a destination are required");
+    const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+    const columnKey = args[2] === null ? null : requireId([args[2]], 1)[0];
+    const placement = parsePlacement(args[3]);
+    if (columnKey === null && !placement)
+      throw new Error("A move needs a column or a placement");
+    return moveCard(
+      await authorizedRecord(),
+      workspaceId,
+      cardId,
+      columnKey,
+      placement,
+    );
+  });
+  handle(
+    workspaceChannels.changes,
+    devUrl,
+    async (args): Promise<BoardChanges> => {
+      if (
+        args.length !== 2 ||
+        typeof args[1] !== "number" ||
+        !Number.isInteger(args[1]) ||
+        args[1] < 0
+      )
+        throw new Error("A workspace and a cursor are required");
+      const [workspaceId] = requireId(args.slice(0, 1), 1);
+      return fetchChanges(await authorizedRecord(), workspaceId, args[1]);
+    },
+  );
   handle(
     workspaceChannels.toggle,
     devUrl,
@@ -275,18 +727,39 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.create,
+    workspaceChannels.setChecklist,
     devUrl,
     async (args): Promise<BoardWrite> => {
       if (
-        args.length !== 2 ||
-        typeof args[0] !== "string" ||
-        typeof args[1] !== "string" ||
-        !args[1].trim() ||
-        args[1].length > 200
+        args.length !== 4 ||
+        typeof args[3] !== "number" ||
+        !Number.isInteger(args[3])
       )
+        throw new Error("A card, a checklist and a revision are required");
+      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      // Shape first, session second — a malformed list is the caller's bug and
+      // must not be reported as "sign in".
+      const items = parseChecklistDraft(args[2]);
+      return replaceChecklist(
+        await authorizedRecord(),
+        workspaceId,
+        cardId,
+        items,
+        args[3],
+      );
+    },
+  );
+  handle(workspaceChannels.archive, devUrl, async (args): Promise<void> => {
+    const [workspaceId, cardId] = requireId(args, 2);
+    return archiveCard(await authorizedRecord(), workspaceId, cardId);
+  });
+  handle(
+    workspaceChannels.create,
+    devUrl,
+    async (args): Promise<BoardWrite> => {
+      if (args.length !== 2 || typeof args[0] !== "string" || !args[0].trim())
         throw new Error("A workspace and a title are required");
-      return createCard(await authorizedRecord(), args[0], args[1].trim());
+      return createCard(await authorizedRecord(), args[0], parseDraft(args[1]));
     },
   );
   handle(
@@ -423,6 +896,18 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
+    workspaceChannels.folderChoose,
+    devUrl,
+    async (args): Promise<PickedFolder[]> => {
+      if (args.length) throw new Error("This operation takes no arguments");
+      // ⚠️ Authorized like everything else here even though it writes nothing:
+      // a signed-out window has no business opening a chooser, and a folder
+      // picked before sign-in belongs to no account.
+      await authorizedRecord();
+      return chooseFolders("Add source folders");
+    },
+  );
+  handle(
     workspaceChannels.folderPick,
     devUrl,
     async (args): Promise<LocalFolderState> => {
@@ -436,8 +921,35 @@ export function registerWorkspaces(devUrl?: string): void {
       // chose it, and the screen has to be able to say "this folder has no
       // .agents" about the folder they are looking at — a link this app
       // silently refused to remember would read as the picker doing nothing.
-      await writeFolder(record, slug, chosen);
-      return { kind: "linked", summary: await readLocalFolder(chosen) };
+      await writeFolders(record, slug, [chosen]);
+      return {
+        kind: "linked",
+        summary: await readLocalFolder(chosen),
+        others: [],
+      };
+    },
+  );
+  handle(
+    workspaceChannels.folderList,
+    devUrl,
+    async (args): Promise<PickedFolder[]> => {
+      const [slug] = requireId(args, 1);
+      const record = await authorizedRecord();
+      return ((await readFolders(record))[slug] ?? []).map(registerFolder);
+    },
+  );
+  handle(
+    workspaceChannels.folderLink,
+    devUrl,
+    async (args): Promise<LocalFolderState> => {
+      if (args.length !== 2)
+        throw new Error("A workspace and folders are required");
+      const [slug] = requireId(args.slice(0, 1), 1);
+      // Shape first, session second — a malformed list is the caller's bug and
+      // must not be reported as "sign in".
+      const paths = parseFolderIds(args[1]);
+      await writeFolders(await authorizedRecord(), slug, paths);
+      return folderState(slug);
     },
   );
   handle(
@@ -445,7 +957,7 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<LocalFolderState> => {
       const [slug] = requireId(args, 1);
-      await writeFolder(await authorizedRecord(), slug, null);
+      await writeFolders(await authorizedRecord(), slug, null);
       return { kind: "none" };
     },
   );
@@ -454,7 +966,7 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<void> => {
       const [slug] = requireId(args, 1);
-      const path = (await readFolders(await authorizedRecord()))[slug];
+      const path = (await readFolders(await authorizedRecord()))[slug]?.[0];
       // ⚠️ The path comes from this app's own file, never from the renderer. A
       // channel that opened a path it was handed is a channel that opens
       // anything the user can read.

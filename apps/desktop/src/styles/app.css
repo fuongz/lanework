@@ -19,27 +19,57 @@
   app-region: drag;
 }
 
-@keyframes startup-lane {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scaleY(0.75);
+/* Sweep a translucent band through the image itself, preserving its alpha
+   and revealing the current background in both light and dark themes. */
+@keyframes startup-shimmer {
+  from {
+    mask-position: 100% 0;
   }
-  50% {
-    opacity: 1;
-    transform: scaleY(1);
+  to {
+    mask-position: 0% 0;
+  }
+}
+
+@keyframes startup-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.startup-loading img {
+  mask-image: linear-gradient(100deg, #000 35%, rgb(0 0 0 / 35%) 50%, #000 65%);
+  mask-size: 300% 100%;
+  mask-position: 100% 0;
+  mask-repeat: no-repeat;
+}
+
+.startup-loading-shine {
+  display: none;
+}
+
+/* Unlayered to beat the global border reset as well as utility defaults. */
+.startup-loading-spinner {
+  border-color: color-mix(in oklab, var(--foreground) 20%, transparent);
+  border-top-color: color-mix(in oklab, var(--foreground) 75%, transparent);
+}
+
+/* Keep a complete logo and a distinct static ring for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .startup-loading img {
+    mask-image: none;
+  }
+  .startup-loading-spinner {
+    border-top-color: var(--color-foreground);
+    opacity: 0.75;
   }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .startup-loading-lane {
-    animation: startup-lane 1.6s ease-in-out infinite;
+  .startup-loading img {
+    animation: startup-shimmer 0.9s linear infinite;
   }
-  .startup-loading-lane:nth-child(2) {
-    animation-delay: 0.16s;
-  }
-  .startup-loading-lane:nth-child(3) {
-    animation-delay: 0.32s;
+  .startup-loading-spinner {
+    animation: startup-spin 0.7s linear infinite;
   }
 }
 
