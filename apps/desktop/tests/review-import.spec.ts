@@ -7,7 +7,8 @@
 // rules that live data does not currently exercise — a fenced checkbox, a
 // quoted one, a `> note`, `*(dropped)*`, a wrapped item — because those are the
 // exact cases four disagreeing regexes got wrong in the board's own history.
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
@@ -242,6 +243,47 @@ test("a card's fields come from its front matter, and its title from the heading
   expect(card.custom).toEqual({ handoff_from: "someone" });
 });
 
+test("an unnumbered option never takes a key the card already uses", async () => {
+  // ⚠️ The refusal this prevents, and it cost two migration runs: a legacy card
+  // numbers its decisions per section and leaves its "pick ONE" branches
+  // unnumbered. Keyed by POSITION, the first unnumbered branch asked for `D2` —
+  // which the `**D2.**` in section D already owns — and the board refuses a
+  // checklist with two items keyed alike, taking the other 49 records in the
+  // same batch with it.
+  const md = [
+    "# Review: Remove the dead memory store",
+    "",
+    "## A2. Dead subsystem cleanup — pick ONE",
+    "",
+    "- [x] **(Recommended) Delete the dead code now.** The whole subsystem.",
+    "- [ ] **Leave it dormant.** Only drop the column.",
+    "",
+    "## D. Keep (do NOT touch)",
+    "",
+    "- [x] **D1.** The shared memory-store helpers.",
+    "- [x] **D2.** The campaign store and the `resources` block.",
+    "",
+  ].join("\n");
+
+  const root = await mkdtemp(join(tmpdir(), "lanework-keys-"));
+  await mkdir(join(root, ".agents", "reviews", "done"), { recursive: true });
+  await writeFile(
+    join(root, ".agents", "reviews", "done", "memory-store.md"),
+    md,
+  );
+
+  const plan = await planMigration(root);
+  const record = plan.records[0];
+  if (!record) throw new Error("the card was not read");
+
+  const keys = record.restore.checklist.map((row) => row.key);
+  expect(new Set(keys).size).toBe(keys.length);
+  // The handles the card wrote keep their own keys; the two unnumbered branches
+  // take the next free ordinals, stepping over `D1` and `D2`.
+  expect(keys).toEqual(["D3", "D4", "D1", "D2"]);
+  await rm(root, { recursive: true, force: true });
+});
+
 test("a card written before the document schema keeps its notes", () => {
   const md = [
     "---",
@@ -266,15 +308,17 @@ test("a card written before the document schema keeps its notes", () => {
   });
 
   expect(card.structured).toBe(false);
-  // ⚠️ Positional ids, because this card never had any — and the note survives,
-  // which is the whole reason the legacy path reads blocks.
+  // ⚠️ NO id, because this card never had one — the key is minted in
+  // `planMigration`, where the handles the rest of the card claims are in view.
+  // Inventing `D1`/`D2` here is what collided with a card's own `**D2.**`.
+  // The note survives, which is the whole reason the legacy path reads blocks.
   expect(card.items).toEqual([
     expect.objectContaining({
-      id: "D1",
+      id: "",
       checked: true,
       note: "a note that must not be lost",
     }),
-    expect.objectContaining({ id: "D2", checked: false, note: null }),
+    expect.objectContaining({ id: "", checked: false, note: null }),
   ]);
 });
 

@@ -24,23 +24,29 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       if (message.type() === "error") console.error(message.text());
     });
     await expect(
-      page.getByRole("heading", { name: "Your workspaces" }),
+      page.getByRole("button", { name: /^Switch project/ }),
     ).toBeVisible();
     if (process.platform === "darwin") {
-      // Keep content beyond the native window buttons, including after CSS bundling.
+      // ⚠️ Clearance is VERTICAL now: the window buttons sit over the top of the
+      // rail, so the first control in it has to start below them rather than to
+      // the right of them. Same bug class as before, different geometry.
       await expect
         .poll(async () => {
           const bounds = await page
-            .getByRole("link", { name: "lanework", exact: true })
+            .getByRole("button", { name: /^Switch project/ })
             .boundingBox();
-          return bounds?.x ?? 0;
+          return bounds?.y ?? 0;
         })
-        .toBeGreaterThanOrEqual(104);
+        .toBeGreaterThanOrEqual(36);
       await expect(page.locator("body")).toHaveCSS(
         "background-color",
         "rgba(0, 0, 0, 0)",
       );
-      await expect(page.locator('[data-slot="card"]').first()).not.toHaveCSS(
+      // ⚠️ The rail stays OPAQUE under vibrancy. `.settings-sidebar` was
+      // translucent once and its colour then depended on whatever the window
+      // happened to be composited over — fine in light, a washed mid-grey in
+      // dark. The app's own rail must not repeat it.
+      await expect(page.locator("aside.app-sidebar")).not.toHaveCSS(
         "background-color",
         "rgba(0, 0, 0, 0)",
       );
@@ -74,7 +80,7 @@ test("production SPA supports native IPC, navigation and persisted preferences",
 
     await page.getByRole("link", { name: "Back to app" }).click();
     await expect(
-      page.getByRole("heading", { name: "Your workspaces" }),
+      page.getByRole("button", { name: /^Switch project/ }),
     ).toBeVisible();
     expect(
       await page.evaluate(
@@ -91,6 +97,7 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       "onThemeChange",
       "auth",
       "workspaces",
+      "git",
     ]);
     expect(
       await page.evaluate(

@@ -4,7 +4,14 @@ export default defineConfig({
   outputDir: "../../.agents/artifacts/test-results",
   workers: 1,
   projects: [
-    { name: "production", testIgnore: ["dev.spec.ts", "packaged.spec.ts"] },
+    // ⚠️ `gallery.spec.ts` is excluded from `production`. It is not a test — it
+    // asserts nothing and writes ~30 PNGs — so running it with the suite would
+    // slow every run and rewrite artifacts nobody asked for.
+    {
+      name: "production",
+      testIgnore: ["dev.spec.ts", "packaged.spec.ts", "gallery.spec.ts"],
+    },
+    { name: "gallery", testMatch: "gallery.spec.ts", timeout: 180_000 },
     { name: "development", testMatch: "dev.spec.ts" },
     { name: "packaged", testMatch: "packaged.spec.ts" },
   ],
