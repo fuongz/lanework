@@ -114,7 +114,15 @@ recur.
 
 - Never mark a task complete without proving it works. Run the project's
   typecheck/build; for behavior changes, boot the app and verify.
-- If verification can't run, explain why and state the remaining risk.
+- **Do not run the test suite for ordinary work — however large the task.** It
+  runs when the user says **"commit"** (or "commit + push"), and not before.
+  Typecheck is cheap and stays; a full Playwright run is ~60s of output nobody
+  asked for in the middle of iterating.
+- **A spec written in this session runs alone** — `playwright test
+  tests/<file>.spec.ts` — never as the whole suite. New test cases are worth
+  checking as they are written; re-running everything else is not.
+- If verification can't run — or was deliberately not run under the rule above —
+  **say so plainly** rather than implying it passed, and state the remaining risk.
 - End every completed task with a **"What's next for you"** handoff (follow-up
   commands, manual checks, open decisions).
 

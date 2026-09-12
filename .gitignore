@@ -7,3 +7,6 @@ release/
 .DS_Store
 apps/desktop/src/routeTree.gen.ts
 .agents/artifacts/
+
+# Personal Claude Code settings for this checkout
+.claude/settings.local.json
