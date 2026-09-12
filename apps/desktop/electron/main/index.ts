@@ -3,6 +3,7 @@ import { app, BrowserWindow, nativeTheme, protocol, session } from "electron";
 import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
 import { registerAuth } from "./auth";
 import { broadcast, handle } from "./ipc";
+import { registerGit } from "./git";
 import { registerAppProtocol } from "./protocol";
 import { appOrigin, isTrustedUrl } from "./security";
 import { registerWorkspaces } from "./workspaces";
@@ -103,6 +104,7 @@ app
     );
     registerAuth(devUrl);
     registerWorkspaces(devUrl);
+    registerGit(devUrl);
     createWindow();
     app.on("activate", () => {
       if (!BrowserWindow.getAllWindows().length) createWindow();

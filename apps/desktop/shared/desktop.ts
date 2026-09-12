@@ -1,4 +1,5 @@
 import type { DesktopAuthApi } from "./auth";
+import type { DesktopGitApi } from "./git";
 import type { DesktopWorkspacesApi } from "./workspaces";
 
 export const channels = {
@@ -42,4 +43,5 @@ export interface DesktopApi {
   onThemeChange: (listener: (dark: boolean) => void) => () => void;
   auth: DesktopAuthApi;
   workspaces: DesktopWorkspacesApi;
+  git: DesktopGitApi;
 }
