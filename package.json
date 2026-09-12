@@ -16,7 +16,9 @@
     "package": "bun run --cwd apps/desktop package",
     "test": "bun run --cwd apps/desktop test",
     "test:dev": "bun run --cwd apps/desktop test:dev",
-    "test:packaged": "bun run --cwd apps/desktop test:packaged"
+    "test:packaged": "bun run --cwd apps/desktop test:packaged",
+    "gallery": "bun run --cwd apps/desktop gallery",
+    "gallery:index": "bun run --cwd apps/desktop gallery:index"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
