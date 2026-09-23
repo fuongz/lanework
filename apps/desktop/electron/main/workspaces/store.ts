@@ -6,8 +6,15 @@ import { resolveApi } from "../auth/client";
 import type { MachineRecord } from "../auth/store";
 import { appHomeDir } from "../paths";
 
-/** Include the origin so identical IDs on another control plane cannot share state. */
-function accountKey(record: MachineRecord): string {
+/**
+ * Include the origin so identical IDs on another control plane cannot share state.
+ *
+ * ⚠️ Exported so state OUTSIDE this folder is filed under the same key — the
+ * GitHub connection in `../git/store.ts` is per Lanework account for the same
+ * reason a folder link is. A second copy of this function would eventually
+ * disagree, and then one account would be reading another's rows.
+ */
+export function accountKey(record: MachineRecord): string {
   return createHash("sha256")
     .update(
       JSON.stringify([
@@ -68,7 +75,11 @@ export async function readActive(
   }
 }
 
-async function writeAtomic(file: string, contents: string): Promise<void> {
+/** Write a file with no torn reads, and never leave the temporary behind. */
+export async function writeAtomic(
+  file: string,
+  contents: string,
+): Promise<void> {
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {
     await mkdir(join(file, ".."), { recursive: true, mode: 0o700 });
@@ -130,9 +141,32 @@ export async function readBoardCache(
     ) as { v?: unknown; view?: BoardView };
     if (data?.v !== 1 || !data.view || data.view.workspaceId !== workspaceId)
       return null;
-    // Whatever it said when it was written, reading it back is by definition
-    // serving a copy.
-    return { ...data.view, stale: true };
+    // ⚠️ Fields added to `BoardView` after a cache was written are ABSENT from
+    // it, and the read above is a cast rather than a parse — so `labels` comes
+    // back `undefined` and the first `.map` on it takes the offline board down.
+    // Filled in here rather than by bumping `v`, which would throw away every
+    // existing cache and leave a user with no board at all on the one launch
+    // they have no network for.
+    //
+    // ⚠️ The card fields are filled with `null`, not `[]`/`false`. A cached
+    // board is a LIST read, where those five are legitimately "not asked" — and
+    // `false` there would draw "Subscribe" on a card the reader follows.
+    return {
+      ...data.view,
+      labels: data.view.labels ?? [],
+      members: data.view.members ?? [],
+      cards: (data.view.cards ?? []).map((card) => ({
+        ...card,
+        subscribers: card.subscribers ?? null,
+        subscribed: card.subscribed ?? null,
+        favorite: card.favorite ?? null,
+        commentCount: card.commentCount ?? null,
+        attachments: card.attachments ?? null,
+      })),
+      // Whatever it said when it was written, reading it back is by definition
+      // serving a copy.
+      stale: true,
+    };
   } catch {
     // A missing or corrupt cache is not an error: the caller's own failure is
     // the one worth reporting.
@@ -159,14 +193,24 @@ function foldersFile(record: MachineRecord): string {
 }
 
 /**
- * Which folder on this machine holds each workspace's cards, by SLUG.
+ * Which folders on this machine a workspace is assembled from, by SLUG.
+ *
+ * ⚠️ A LIST, primary first. A project is created against the folders a person
+ * picked in one chooser — several of them, for a repo split across checkouts —
+ * and `paths[0]` is the one every single-folder surface means: the migration
+ * reader, "open in file manager", the rail's label. Order carries that fact
+ * rather than a second field, so there is no way to store a primary that is not
+ * in the list.
+ *
+ * ⚠️ A `v1` file holds ONE path per slug and is read as a list of one. Dropping
+ * it would silently unlink every folder every existing user has chosen.
  *
  * ⚠️ By slug, and that is not the same choice `readActive` makes. The cloud
  * workspace id is absent exactly when this feature matters most — a service
  * that predates the field sends none, which is the screen that tells the user
  * their board cannot be opened — so an id-keyed link would be unavailable in
- * its own main case. A renamed slug loses the link and the user picks the
- * folder again; that is a smaller cost than not being able to link one.
+ * its own main case. And the slug is safe to key on: no route on the service
+ * can change one, so a rename cannot strand a link written here.
  *
  * ⚠️ Per account and per API origin, like everything else in this file: two
  * accounts on one machine may have projects with the same slug in different
@@ -175,19 +219,28 @@ function foldersFile(record: MachineRecord): string {
  */
 export async function readFolders(
   record: MachineRecord,
-): Promise<Record<string, string>> {
+): Promise<Record<string, string[]>> {
   try {
     const data = JSON.parse(await readFile(foldersFile(record), "utf8")) as {
       v?: unknown;
       folders?: unknown;
     };
-    if (data?.v !== 1 || !data.folders || typeof data.folders !== "object")
+    if (
+      (data?.v !== 1 && data?.v !== 2) ||
+      !data.folders ||
+      typeof data.folders !== "object"
+    )
       return {};
-    const out: Record<string, string> = {};
-    for (const [slug, path] of Object.entries(
+    const out: Record<string, string[]> = {};
+    for (const [slug, entry] of Object.entries(
       data.folders as Record<string, unknown>,
-    ))
-      if (typeof path === "string" && path) out[slug] = path;
+    )) {
+      // `v1`: one path per slug. `v2`: the list, primary first.
+      const paths = (Array.isArray(entry) ? entry : [entry]).filter(
+        (path): path is string => typeof path === "string" && path.length > 0,
+      );
+      if (paths.length) out[slug] = paths;
+    }
     return out;
   } catch (error) {
     if (
@@ -199,16 +252,24 @@ export async function readFolders(
   }
 }
 
-/** Link a folder to a workspace, or unlink it when `path` is null. */
-export async function writeFolder(
+/**
+ * Link folders to a workspace — primary first — or unlink it with `null`.
+ *
+ * ⚠️ A REPLACE, not an append. Every caller states the whole set it means: the
+ * create dialog knows what was picked, "Change folder" means one folder now,
+ * and an append would make "I chose the wrong one" unfixable from either.
+ * Duplicates are dropped, because the same folder twice is one folder.
+ */
+export async function writeFolders(
   record: MachineRecord,
   slug: string,
-  path: string | null,
-): Promise<Record<string, string>> {
+  paths: string[] | null,
+): Promise<Record<string, string[]>> {
   const folders = await readFolders(record);
-  if (path === null) delete folders[slug];
-  else folders[slug] = path;
-  await writeAtomic(foldersFile(record), JSON.stringify({ v: 1, folders }));
+  const unique = paths ? [...new Set(paths.filter(Boolean))] : [];
+  if (!unique.length) delete folders[slug];
+  else folders[slug] = unique;
+  await writeAtomic(foldersFile(record), JSON.stringify({ v: 2, folders }));
   return folders;
 }
 

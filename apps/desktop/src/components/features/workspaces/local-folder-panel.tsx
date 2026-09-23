@@ -28,13 +28,13 @@ function message(cause: unknown, fallback: string): string {
 const plural = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
 
-/** `{ done: 9, todo: 5 }` → "9 done · 5 todo", biggest lane first. */
+/** `{ done: 9, todo: 5 }` → "9 done, 5 todo", biggest lane first. */
 function tally(counts: Record<string, number>, limit = 4): string {
   return Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
     .map(([key, n]) => `${n} ${key}`)
-    .join(" · ");
+    .join(", ");
 }
 
 /** What the run did, in the one sentence a person actually needs. */
@@ -56,7 +56,7 @@ function runMessage(report: ImportReport): string {
 type FolderState =
   | { kind: "loading" }
   | { kind: "none" }
-  | { kind: "linked"; summary: LocalFolderSummary }
+  | { kind: "linked"; summary: LocalFolderSummary; others: string[] }
   | { kind: "missing"; path: string };
 
 /**
@@ -76,9 +76,20 @@ type FolderState =
  */
 export function LocalFolderPanel({
   workspace,
+  boardMigrated = false,
   onMigrated,
 }: {
   workspace: Workspace;
+  /**
+   * Whether the CLOUD already owns this project's cards.
+   *
+   * ⚠️ It used to be enough that this panel only appeared on un-migrated
+   * boards — the gate lived in the screen that rendered it. The panel is
+   * permanently reachable now (FE-08 D14), so the gate has to live in here:
+   * after a cutover the files on disk are a frozen copy, and offering to send
+   * them again points somebody at the version that stopped being true.
+   */
+  boardMigrated?: boolean;
   /** Called after a cutover, so the board around this panel re-reads itself. */
   onMigrated?: () => void;
 }) {
@@ -142,11 +153,19 @@ export function LocalFolderPanel({
     !preview?.blocked;
   const sealable = !!report && !report.error && !report.migratedAt;
   const migratedAt = report?.migratedAt ?? null;
+  // Either this session sealed it, or it was already sealed before this window
+  // opened. Both mean the same thing to everything below.
+  const handedOver = boardMigrated || migratedAt !== null;
 
   return (
-    <div className="flex w-full flex-col gap-3 rounded-md border p-4">
+    // ⚠️ No border and no padding of its own: this panel lives inside a dialog
+    // that already draws both, and two frames around one thing reads as a card
+    // that failed to fill its container.
+    <div className="flex w-full flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h3 className="text-sm font-medium">This project on this machine</h3>
+        <h3 className="text-[13px] font-medium">
+          This project on this machine
+        </h3>
         <p className="text-xs text-muted-foreground">
           {state.kind === "none"
             ? // ⚠️ The account's own path is named when it has one: it is the
@@ -161,6 +180,23 @@ export function LocalFolderPanel({
         </p>
       </div>
 
+      {/* ⚠️ The other folders are LISTED, not counted and not read. A project
+          can be created from several folders; only the primary holds the cards
+          this panel is about, and a folder that was chosen at creation and then
+          never appears anywhere reads as one the app forgot. */}
+      {state.kind === "linked" && state.others.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          <p className="text-xs font-medium">Also in this project</p>
+          <ul className="text-muted-foreground flex flex-col text-xs">
+            {state.others.map((path) => (
+              <li key={path} className="truncate" title={path}>
+                {path}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {state.kind === "linked" && <FolderFacts summary={state.summary} />}
 
       {state.kind === "linked" && state.summary.cards > 0 && (
@@ -168,6 +204,7 @@ export function LocalFolderPanel({
           preview={preview}
           workspaceHasId={!!workspaceId}
           migratedAt={migratedAt}
+          handedOver={handedOver}
           report={report}
         />
       )}
@@ -200,7 +237,7 @@ export function LocalFolderPanel({
               : "Change folder"}
         </Button>
 
-        {canMigrate && !migratedAt && (
+        {canMigrate && !handedOver && (
           <Button
             size="sm"
             disabled={busy !== null}
@@ -384,7 +421,7 @@ function FolderFacts({ summary }: { summary: LocalFolderSummary }) {
             : "",
         ]
           .filter(Boolean)
-          .join(" · ")}
+          .join(", ")}
       </p>
       {summary.capped && (
         <p className="text-xs text-muted-foreground">
@@ -408,19 +445,24 @@ function MigrateLines({
   preview,
   workspaceHasId,
   migratedAt,
+  handedOver,
   report,
 }: {
   preview: ImportPreview | null;
   workspaceHasId: boolean;
   migratedAt: string | null;
+  /** True when the cloud owns these cards, whoever sealed it and whenever. */
+  handedOver: boolean;
   report: ImportReport | null;
 }) {
-  if (migratedAt)
+  if (handedOver)
     return (
       <p className="text-xs text-muted-foreground">
-        The cloud has owned this project's cards since{" "}
-        {new Date(migratedAt).toLocaleString()}. The files are still on disk so
-        you can compare them, and nothing writes to them again.
+        {migratedAt
+          ? `The cloud has owned this project's cards since ${new Date(migratedAt).toLocaleString()}.`
+          : "The cloud owns this project's cards."}{" "}
+        The files are still on disk so you can compare them, and nothing writes
+        to them again.
       </p>
     );
 
@@ -456,7 +498,7 @@ function MigrateLines({
               : "",
           ]
             .filter(Boolean)
-            .join(" · ")}
+            .join(", ")}
         </p>
       )}
       {report && (

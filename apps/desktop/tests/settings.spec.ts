@@ -35,8 +35,12 @@ async function open(options: { owner?: boolean } = {}): Promise<{
   // issued while the initial `app://lanework/` load is still in flight aborts
   // it, and the navigation times out — the failure looks like a broken route
   // rather than a race.
+  //
+  // The rail's project switcher is the signal: it is on screen for every state
+  // the app can be in — no projects, one open, or a list to choose from — which
+  // a heading from any single one of those is not.
   await page
-    .getByRole("heading", { name: "Your workspaces" })
+    .getByRole("button", { name: /^Switch project/ })
     .waitFor({ state: "visible", timeout: 15_000 });
   return {
     app,
@@ -84,7 +88,7 @@ test("settings is a full window, and every section deep-links", async () => {
 
     await page.getByRole("link", { name: "Back to app" }).click();
     await expect(
-      page.getByRole("heading", { name: "Your workspaces" }),
+      page.getByRole("button", { name: /^Switch project/ }),
     ).toBeVisible();
   } finally {
     await cleanup();

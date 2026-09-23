@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { matches } from "#/lib/settings-catalog";
+import { cn } from "#/lib/utils";
 import { useSettingsSearch } from "#/stores/settings-search";
 
 export interface SettingsRowSpec {
@@ -75,7 +76,7 @@ export function SettingsPage({
           <section key={section.title} className="mt-9 flex flex-col gap-3">
             <h2 className="text-[15px] font-medium">{section.title}</h2>
             {section.content ?? (
-              <div className="divide-border bg-card shadow-card divide-y rounded-xl">
+              <SettingsCard>
                 {section.rows.map((row) => (
                   <div
                     key={row.label}
@@ -96,11 +97,38 @@ export function SettingsPage({
                     ) : null}
                   </div>
                 ))}
-              </div>
+              </SettingsCard>
             )}
           </section>
         ))
       )}
+    </div>
+  );
+}
+
+/**
+ * The card a settings section's rows sit in.
+ *
+ * ⚠️ Exported so a `content` section — a list this component cannot describe as
+ * rows — draws the SAME container instead of restating the classes. Two
+ * hand-written copies is how one settings page ends up with a card and the next
+ * with a bare list, which is the state this app has already been in once.
+ */
+export function SettingsCard({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "divide-border bg-card shadow-card divide-y rounded-xl",
+        className,
+      )}
+    >
+      {children}
     </div>
   );
 }

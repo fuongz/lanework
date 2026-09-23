@@ -7,7 +7,11 @@ import { DEAD_API, removeProfile, seedCredential } from "./auth-fixtures";
 
 test("renderer HMR preserves the page; main and preload changes restart Electron", async () => {
   test.setTimeout(60_000);
-  const source = "src/components/features/workspaces/workspace-home.tsx";
+  // ⚠️ The rail, not a page. Whatever this test edits has to be on screen in
+  // EVERY state the app can boot into, and it boots here against a dead API —
+  // so a string from a board or a picker would be a string that is sometimes
+  // absent for reasons that have nothing to do with HMR.
+  const source = "src/components/features/shell/app-sidebar.tsx";
   const main = "electron/main/index.ts";
   const preload = "electron/preload/index.ts";
   const originals = await Promise.all(
@@ -52,26 +56,20 @@ test("renderer HMR preserves the page; main and preload changes restart Electron
     const browser = await chromium.connectOverCDP("http://127.0.0.1:9223");
     const page = browser.contexts()[0]?.pages()[0];
     if (!page) throw new Error("No Electron renderer page");
-    await expect(
-      page.getByRole("heading", { name: "Your workspaces" }),
-    ).toBeVisible();
+    await expect(page.getByText("Search…", { exact: true })).toBeVisible();
     await page.evaluate(() => {
       (globalThis as { hmrProbe?: string }).hmrProbe = "preserved";
     });
     await writeFile(
       source,
-      originals[0].replace("Your workspaces", "Your live workspaces"),
+      originals[0].replace(">Search…<", ">Live search…<"),
     );
-    await expect(
-      page.getByRole("heading", { name: "Your live workspaces" }),
-    ).toBeVisible();
+    await expect(page.getByText("Live search…", { exact: true })).toBeVisible();
     expect(
       await page.evaluate(() => (globalThis as { hmrProbe?: string }).hmrProbe),
     ).toBe("preserved");
     await writeFile(source, originals[0]);
-    await expect(
-      page.getByRole("heading", { name: "Your workspaces" }),
-    ).toBeVisible();
+    await expect(page.getByText("Search…", { exact: true })).toBeVisible();
     const initialStarts = (logs.match(/Electron started/g) ?? []).length;
     await writeFile(main, `${originals[1]}\n// HMR verification\n`);
     await expect

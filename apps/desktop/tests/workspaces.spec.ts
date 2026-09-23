@@ -1,7 +1,12 @@
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { _electron as electron, expect, test } from "@playwright/test";
+import {
+  _electron as electron,
+  expect,
+  type Page,
+  test,
+} from "@playwright/test";
 import type { MachineRecord } from "../electron/main/auth/store";
 import {
   parseBoardConfig,
@@ -13,7 +18,7 @@ import { slugify } from "../electron/main/workspaces/slug";
 import {
   readActive,
   writeActive,
-  writeFolder,
+  writeFolders,
 } from "../electron/main/workspaces/store";
 import type { DesktopApi } from "../shared/desktop";
 import type { Workspace } from "../shared/workspaces";
@@ -40,6 +45,44 @@ const workspaces: Workspace[] = [
     baseBranch: null,
   },
 ];
+
+/** Open a project the way a person does: through the rail's switcher. */
+async function switchTo(page: Page, name: string): Promise<void> {
+  await page.getByRole("button", { name: /^Switch project/ }).click();
+  // ⚠️ Not `exact`: a project row now carries its ⌘N shortcut, so its
+  // accessible name is "Lanework ⌘1" rather than "Lanework".
+  await page.getByRole("option", { name }).first().click();
+  await expect(
+    page.getByRole("button", { name: `Switch project — currently ${name}` }),
+  ).toBeVisible();
+  // ⚠️ The rail's label changes BEFORE main has written the selection down —
+  // the store sets the active project, then awaits `select`. Waiting only for
+  // the label and then relaunching races that write, and the app reopens the
+  // PREVIOUS project. The board's own state is the first thing that can only
+  // appear after `select` resolved.
+  await expect(
+    page
+      .getByText(/^(Live|Saved copy)$/)
+      .or(page.getByText("Board not available yet"))
+      .or(page.getByText("Could not load this board", { exact: true }))
+      .first(),
+  ).toBeVisible();
+}
+
+/**
+ * Open one project's import panel from Settings → Projects.
+ *
+ * ⚠️ Not the rail any more: linking a folder and sending it to the cloud is a
+ * per-project act, so it lives next to the project it acts on (see
+ * `ImportLocalDialog`). Every test that used to click "Local folder" in the
+ * rail comes through here.
+ */
+async function openImport(page: Page, project: string): Promise<void> {
+  await page.goto("app://lanework/settings/workspaces");
+  await page
+    .getByRole("button", { name: `Import from local into ${project}` })
+    .click();
+}
 
 test("workspace responses reject malformed lists and only return display fields", () => {
   expect(parseWorkspaces({ workspaces: [] })).toEqual([]);
@@ -139,7 +182,7 @@ test("active workspace persists separately for each account, machine and API ori
   }
 });
 
-test("home loads the picker, saves a selection across relaunch and clears a removed workspace", async () => {
+test("the rail remembers a project across relaunch, and never falls back silently", async () => {
   const plane = await startStubPlane({ workspaces });
   // Keep the loading state observable without slowing every request.
   plane.setWorkspaceResponse(200, undefined, 400);
@@ -152,16 +195,14 @@ test("home loads the picker, saves a selection across relaunch and clears a remo
     let page = await app.firstWindow();
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    await expect(page.getByRole("status")).toHaveText(
-      "Loading your workspaces…",
-    );
-    await expect(page.getByRole("list", { name: "Workspaces" })).toBeVisible();
+
+    // ⚠️ With nothing remembered the app ASKS. Opening whichever project happens
+    // to be first would put somebody on a board they did not choose, and the
+    // only clue would be a name in the corner.
     await expect(
-      page.getByText("Active workspace", { exact: true }),
-    ).toBeHidden();
-    // ⚠️ Was "No local folder linked on this machine". A workspace with no
-    // folder is a COMPLETE workspace — its cards are in the cloud — so the row
-    // names it by slug instead of reporting a missing folder (FE-06 D1).
+      page.getByRole("heading", { name: "Choose a project" }),
+    ).toBeVisible();
+    await expect(page.getByRole("list", { name: "Projects" })).toBeVisible();
     await expect(
       page.getByText("cloud-project", { exact: true }),
     ).toBeVisible();
@@ -174,17 +215,12 @@ test("home loads the picker, saves a selection across relaunch and clears a remo
       style: "html { background: var(--background) !important; }",
     });
 
-    await page.getByRole("button", { name: "Open Cloud project" }).click();
+    await page.getByRole("link", { name: /Cloud project/ }).click();
     await expect(
-      page.getByRole("button", { name: "Open Lanework" }),
-    ).toBeDisabled();
-    await expect(
-      page.getByText("Active workspace", { exact: true }),
+      page.getByRole("button", {
+        name: "Switch project — currently Cloud project",
+      }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Cloud project", exact: true }),
-    ).toBeVisible();
-    await expect(page.getByRole("list", { name: "Workspaces" })).toBeHidden();
     expect(errors).toEqual([]);
     await page.screenshot({
       path: "../../.agents/artifacts/2026-09-08-workspace-active.png",
@@ -192,44 +228,31 @@ test("home loads the picker, saves a selection across relaunch and clears a remo
     });
     await app.close();
 
+    // The choice survives a relaunch — that is what remembering it buys.
     plane.setWorkspaces(workspaces);
     app = await electron.launch({ args: [process.cwd()], env });
     page = await app.firstWindow();
     await expect(
-      page.getByText("Active workspace", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Cloud project", exact: true }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Change workspace" }).click();
-    await page.getByRole("button", { name: "Open Lanework" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Lanework", exact: true }),
-    ).toBeVisible();
-    // ⚠️ Was `Branch: main`. The active view is the BOARD now, and a base branch
-    // is a fact about a checkout — it belongs where code runs, not in the header
-    // of a card list (FE-06 D1/D4). What must be there instead is the board's
-    // own state, even when this stub serves no board for the workspace.
-    await expect(
-      page
-        .getByRole("button", { name: "Try again" })
-        .or(page.getByRole("status")),
+      page.getByRole("button", {
+        name: "Switch project — currently Cloud project",
+      }),
     ).toBeVisible();
 
-    // A removed selection does not silently fall back to the first project.
+    await switchTo(page, "Lanework");
+
+    // ⚠️ A selection whose project has been removed becomes a QUESTION, not a
+    // different project. Main clears the pointer; the app asks again.
     plane.setWorkspaces([workspaces[1]]);
     await page.reload();
-    await expect(page.getByRole("list", { name: "Workspaces" })).toBeVisible();
     await expect(
-      page.getByText("Active workspace", { exact: true }),
-    ).toBeHidden();
-    // Restoring that project does not resurrect a stale active pointer.
+      page.getByRole("heading", { name: "Choose a project" }),
+    ).toBeVisible();
+    // Restoring it does not resurrect a stale pointer either.
     plane.setWorkspaces(workspaces);
     await page.reload();
-    await expect(page.getByRole("list", { name: "Workspaces" })).toBeVisible();
     await expect(
-      page.getByText("Active workspace", { exact: true }),
-    ).toBeHidden();
+      page.getByRole("heading", { name: "Choose a project" }),
+    ).toBeVisible();
   } finally {
     await app.close();
     await plane.close();
@@ -237,7 +260,7 @@ test("home loads the picker, saves a selection across relaunch and clears a remo
   }
 });
 
-test("home distinguishes service errors from empty and selection failures never replace active", async () => {
+test("a service error is told apart from an empty account, and a bad selection keeps the old one", async () => {
   const plane = await startStubPlane({ workspaces });
   plane.setWorkspaceResponse(503);
   const profile = await mkdtemp(join(tmpdir(), "lanew-workspace-errors-"));
@@ -249,48 +272,57 @@ test("home distinguishes service errors from empty and selection failures never 
   });
   try {
     const page = await app.firstWindow();
-    await expect(page.getByRole("alert")).toContainText("HTTP 503");
+    // ⚠️ "I could not ask" must never render as "you have none". Somebody who
+    // believes the second creates a project they already have.
+    // ⚠️ The failure is the whole screen now, not a banner on one — so it is
+    // addressed by what it SAYS rather than by `role="alert"`, which belongs to
+    // a message interrupting something that still works.
+    await expect(page.getByText("Could not load your projects")).toBeVisible();
+    await expect(page.getByText(/HTTP 503/)).toBeVisible();
     await expect(
-      page.getByText("No workspaces yet", { exact: true }),
+      page.getByText("No projects yet", { exact: true }),
     ).toBeHidden();
+
     plane.setWorkspaces([]);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(
-      page.getByText("No workspaces yet", { exact: true }),
+      page.getByText("No projects yet", { exact: true }),
     ).toBeVisible();
+
     plane.setWorkspaceResponse(200, { workspaces: "invalid" });
-    await page.getByRole("button", { name: "Refresh list" }).click();
-    await expect(page.getByRole("alert")).toContainText(
-      "invalid workspace list",
-    );
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(page.getByText(/invalid workspace list/)).toBeVisible();
     await expect(
-      page.getByText("No workspaces yet", { exact: true }),
+      page.getByText("No projects yet", { exact: true }),
     ).toBeHidden();
+
     plane.setWorkspaces(workspaces);
     await page.getByRole("button", { name: "Try again" }).click();
-    await page.getByRole("button", { name: "Open Lanework" }).click();
-    await page.getByRole("button", { name: "Change workspace" }).click();
+    await expect(page.getByRole("list", { name: "Projects" })).toBeVisible();
+    await page.getByRole("link", { name: /Lanework/ }).click();
     await expect(
-      page.getByRole("button", { name: "Open Cloud project" }),
+      page.getByRole("button", { name: "Switch project — currently Lanework" }),
     ).toBeVisible();
-    plane.setWorkspaces([workspaces[0]]);
-    await page.getByRole("button", { name: "Open Cloud project" }).click();
-    await expect(page.getByRole("alert")).toContainText("no longer available");
-    await page.reload();
-    await expect(
-      page.getByText("Active workspace", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Lanework", exact: true }),
-    ).toBeVisible();
-    // An offline launch reports an error and preserves the saved selection.
+
+    // An offline relaunch reports the failure and keeps the saved selection.
     plane.setWorkspaceResponse(503);
     await page.reload();
-    await expect(page.getByRole("alert")).toContainText("HTTP 503");
+    // ⚠️ The failure is the whole screen now, not a banner on one — so it is
+    // addressed by what it SAYS rather than by `role="alert"`, which belongs to
+    // a message interrupting something that still works.
+    //
+    // ⚠️ The PROJECT's failure, and the project's URL, rather than the picker's.
+    // A reload with a project open used to be answered by sending somebody to
+    // the list of projects — which is built from the list that just failed, so
+    // it could not draw either, and it navigated back the moment it could.
+    await expect(page.getByText("Could not open this project")).toBeVisible();
+    await expect(page.getByText(/HTTP 503/)).toBeVisible();
+    expect(page.url()).toContain("/w/lanework/issues");
+    plane.setWorkspaceResponse(200);
     plane.setWorkspaces(workspaces);
-    await page.getByRole("button", { name: "Try again" }).click();
+    await page.reload();
     await expect(
-      page.getByText("Active workspace", { exact: true }),
+      page.getByRole("button", { name: "Switch project — currently Lanework" }),
     ).toBeVisible();
   } finally {
     await app.close();
@@ -307,8 +339,10 @@ test("workspace IPC rejects invalid selections and signed-out callers", async ()
   });
   try {
     const page = await app.firstWindow();
+    // A machine with no credential opens on the first-run flow; what matters
+    // here is only that it is not inside the app.
     await expect(
-      page.getByRole("heading", { name: "Sign in to continue" }),
+      page.getByRole("heading", { name: "Welcome to Lanework" }),
     ).toBeVisible();
     const failures = await page.evaluate(async () => {
       const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
@@ -319,6 +353,45 @@ test("workspace IPC rejects invalid selections and signed-out callers", async ()
         () => api.select("ws-lanework"),
         () => api.select(""),
         () => api.select(42 as unknown as string),
+        // ⚠️ The write surface too. Every channel here reaches the board under
+        // this machine's credential, so "there is no signed-in machine" has to
+        // be the first thing each one says — a new channel that skipped
+        // `authorizedRecord` would be reachable from any window.
+        () => api.board.card("ws-lanework", "card-1"),
+        () => api.board.lookup("ws-lanework", "FE-01"),
+        () => api.board.update("ws-lanework", "card-1", { title: "x" }, 1),
+        () => api.board.move("ws-lanework", "card-1", "todo"),
+        () => api.board.changes("ws-lanework", 0),
+        () =>
+          api.board.setChecklist("ws-lanework", "card-1", [{ text: "One" }], 1),
+        // Shapes the handler must refuse before it ever asks who is calling.
+        () => api.board.update("ws-lanework", "card-1", {}, 1),
+        () =>
+          api.board.update("ws-lanework", "card-1", { rank: "V" } as never, 1),
+        () =>
+          api.board.move("ws-lanework", "card-1", null, {
+            after: "",
+          } as never),
+        () => api.board.changes("ws-lanework", -1 as number),
+        () =>
+          api.board.setChecklist("ws-lanework", "card-1", [{ text: "" }], 1),
+        () =>
+          api.board.setChecklist(
+            "ws-lanework",
+            "card-1",
+            [
+              { key: "D1", text: "One" },
+              { key: "D1", text: "Two" },
+            ],
+            1,
+          ),
+        () =>
+          api.board.setChecklist(
+            "ws-lanework",
+            "card-1",
+            [{ text: "One", section: "notes" as never }],
+            1,
+          ),
       ]) {
         try {
           await call();
@@ -333,6 +406,15 @@ test("workspace IPC rejects invalid selections and signed-out callers", async ()
     expect(failures[1]).toContain("Sign in");
     expect(failures[2]).toContain("valid workspace");
     expect(failures[3]).toContain("valid workspace");
+    for (const message of failures.slice(4, 10))
+      expect(message).toContain("Sign in");
+    expect(failures[10]).toContain("must change something");
+    expect(failures[11]).toContain("Cannot change");
+    expect(failures[12]).toContain("neighbouring card");
+    expect(failures[13]).toContain("cursor");
+    expect(failures[14]).toContain("needs text");
+    expect(failures[15]).toContain('keyed "D1"');
+    expect(failures[16]).toContain("decisions or verify");
   } finally {
     await app.close();
     await removeProfile(profile);
@@ -431,6 +513,51 @@ test("a card is dropped rather than guessed when its identity is missing", () =>
   expect(parseCard({ ...card, priority: "urgent" })?.priority).toBeNull();
 });
 
+test("a card read from a list has no checklist, and a card read alone does", () => {
+  // ⚠️ The distinction this pins is the one that shipped broken. `GET /items`
+  // serializes WITHOUT parts, so a card from a board read carries no checklist
+  // key at all — and the old parser turned that into `[]`, which is the same
+  // value a card with genuinely no decisions has. The board rendered "no
+  // decisions" for every card on it and nothing said otherwise.
+  const listed = {
+    id: "item-1",
+    revision: 3,
+    columnKey: "todo",
+    title: "A card",
+    rank: "V",
+  };
+  expect(parseCard(listed)?.checklist).toBeNull();
+  expect(parseCard(listed)?.assignees).toBeNull();
+
+  // Asked for and genuinely empty — a different answer, and it has to look
+  // different.
+  expect(parseCard({ ...listed, checklist: [] })?.checklist).toEqual([]);
+  expect(
+    parseCard({ ...listed, assignees: { users: [], agents: [] } })?.assignees,
+  ).toEqual({ users: [], agents: [] });
+
+  // The hierarchy fields, which the board has always sent and this app used to
+  // drop on the floor.
+  expect(
+    parseCard({
+      ...listed,
+      type: "epic",
+      parentId: "item-0",
+      estimate: 3,
+      dueAt: "2026-09-30T00:00:00.000Z",
+    }),
+  ).toMatchObject({
+    type: "epic",
+    parentId: "item-0",
+    estimate: 3,
+    dueAt: "2026-09-30T00:00:00.000Z",
+  });
+
+  // `issue` when the board says nothing — the type every card has by default.
+  expect(parseCard(listed)?.type).toBe("issue");
+  expect(parseCard({ ...listed, estimate: "3" })?.estimate).toBeNull();
+});
+
 test("a board with no columns is an error, not an empty screen", () => {
   // The same call the API's own validator makes: a board with no lanes cannot
   // be drawn at all, so answering with zero columns would render a blank page
@@ -505,25 +632,37 @@ test("opening a workspace shows its cloud board, and a tick carries the revision
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
 
-    await page.getByRole("button", { name: "Open Cloud project" }).click();
-    await expect(
-      page
-        .getByRole("region", { name: "To-Do column" })
-        .or(page.getByLabel("To-Do column")),
-    ).toBeVisible();
-    await expect(
-      page.getByText("FE-01 · Cache the composer input"),
-    ).toBeVisible();
-    await expect(page.getByText("Live ·")).toBeVisible();
+    await switchTo(page, "Cloud project");
+    // The list is the default view: the card's key and title on one row.
+    await expect(page.getByText("FE-01", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cache the composer input")).toBeVisible();
+    await expect(page.getByText("Live", { exact: true })).toBeVisible();
 
-    // ⚠️ `click`, not `check`: the box is a CONTROLLED input, so it does not
-    // flip until the server has confirmed — which is FE-06 D2's "only confirm
-    // the save when the server succeeded", and exactly what `check()` refuses to
-    // wait for. A tick sends the revision the screen is showing, as `If-Match`.
+    // ⚠️ No checkbox on the LIST, and there never could have been: a board is
+    // read through `GET /items`, which serializes without parts, so no card
+    // here carries a checklist. The stub used to send one anyway, which is how
+    // this assertion's ancestor stayed green against a UI that could not work
+    // in production. The checklist lives on the card's own screen, below.
+    await expect(page.getByRole("checkbox")).toHaveCount(0);
+
+    // ⚠️ But the row DOES say how far through that checklist the card is. The
+    // count rides on the list read as its own `{ done, total }` key, which is
+    // the whole point: a lane draws `0/1` without the board shipping a single
+    // checklist row. This assertion is the one that would have caught the
+    // `3/7` beside a row being dead code for as long as it was.
+    await expect(page.getByTitle("0 of 1 checked")).toBeVisible();
+
+    // The card's own screen reads it again, WITH its parts — and a tick there
+    // sends the revision the screen is showing, as `If-Match`.
+    await page.getByRole("link", { name: /Cache the composer input/ }).click();
+    await expect(
+      page.getByRole("heading", { name: "Decisions" }),
+    ).toBeVisible();
     await page.getByRole("checkbox").first().click();
     await expect
       .poll(() => plane.boardPreconditions)
       .toEqual(expect.arrayContaining(["4"]));
+    await expect(page.getByRole("checkbox").first()).toBeChecked();
 
     // A lost race shows both sides instead of "try again".
     plane.setChecklistConflict(true);
@@ -533,11 +672,19 @@ test("opening a workspace shows its cloud board, and a tick carries the revision
     ).toBeVisible();
     plane.setChecklistConflict(false);
 
-    // A move is one request and the card lands in the other lane.
+    // Back on the board, a move is one request and the card changes lane.
+    // ⚠️ The card's breadcrumb names the PROJECT, not "Issues" — it reads
+    // "Cloud project › FE-01", the way the design draws it. The sidebar's own
+    // Issues link carries a count in its accessible name, so it is not an exact
+    // match for "Issues" either.
     await page
-      .getByRole("button", { name: /^Move .* to In Progress$/ })
-      .first()
+      .getByRole("link", { name: "Cloud project", exact: true })
       .click();
+    await page.getByRole("link", { name: "Board", exact: true }).click();
+    await page
+      .getByRole("combobox", { name: /^Move Cache the composer input/ })
+      .click();
+    await page.getByRole("option", { name: "In Progress" }).click();
     await expect(
       page.getByLabel("In Progress column").getByText(/Cache the composer/),
     ).toBeVisible();
@@ -546,13 +693,334 @@ test("opening a workspace shows its cloud board, and a tick carries the revision
     // a label rather than an empty board — the failure that invites somebody to
     // re-create a card that already exists.
     plane.setBoardOffline(true);
-    await page.getByRole("button", { name: "Refresh" }).click();
+    await page.getByRole("button", { name: "Refresh board" }).click();
+    // ⚠️ One bar across the pane, not a boxed alert: the condition belongs to
+    // the window, so it reads as chrome rather than as a message about a card.
     await expect(
-      page.getByText("You are looking at a saved copy"),
+      page.getByText(/^Offline — showing a saved board/),
     ).toBeVisible();
     await expect(page.getByText(/Cache the composer/)).toBeVisible();
 
     expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await removeProfile(profile);
+    await plane.close();
+  }
+});
+
+test("the board write surface edits, reorders, looks up and follows changes", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", {
+    migratedAt: "2026-09-08T05:00:00.000Z",
+    columns: [
+      { key: "todo", name: "To-Do", role: "start" },
+      { key: "processing", name: "In Progress", role: "active" },
+    ],
+    cards: [
+      {
+        id: "card-a",
+        revision: 1,
+        title: "First",
+        body: "",
+        columnKey: "todo",
+        categoryKey: "frontend",
+        taskId: "FE-01",
+        priority: null,
+        tags: [],
+        rank: "0001",
+        createdAt: null,
+        updatedAt: null,
+        checklist: [
+          {
+            key: "D1",
+            section: "decisions",
+            text: "One",
+            checked: false,
+            checkedAt: null,
+            note: null,
+          },
+        ],
+      },
+      {
+        id: "card-b",
+        revision: 1,
+        title: "Second",
+        body: "",
+        columnKey: "todo",
+        categoryKey: null,
+        taskId: "FE-02",
+        priority: null,
+        tags: [],
+        rank: "0002",
+        createdAt: null,
+        updatedAt: null,
+        checklist: [],
+      },
+    ],
+  });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-write-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Cloud project");
+    await expect(page.getByText("Live", { exact: true })).toBeVisible();
+
+    const result = await page.evaluate(async () => {
+      const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
+        .workspaces.board;
+      const ws = "ws-cloud-project";
+      const fail = async (run: () => Promise<unknown>) => {
+        try {
+          await run();
+          return "unexpected success";
+        } catch (error) {
+          return (error as Error).message;
+        }
+      };
+
+      // A card read on its own carries what the list cannot.
+      const alone = await api.card(ws, "card-a");
+      const listed = (await api.load(ws)).cards.find((c) => c.id === "card-a");
+
+      // Addressed the way a human says it, and null — not a failure — when
+      // nothing carries that id.
+      const found = await api.lookup(ws, "FE-02");
+      const missing = await api.lookup(ws, "ZZ-99");
+
+      // An edit against the revision on screen. Five tags, a board that keeps
+      // three: the write succeeds and says which two did not land.
+      const edited = await api.update(
+        ws,
+        "card-a",
+        { title: "Renamed", tags: ["UI", "Electron", "cloud", "api", "auth"] },
+        alone.revision,
+      );
+
+      // The same edit again, against the revision that is now stale.
+      const raced = await api.update(
+        ws,
+        "card-a",
+        { title: "Later" },
+        alone.revision,
+      );
+
+      // Fields the server owns cannot be named from here at all.
+      const refusedField = await fail(() =>
+        api.update(ws, "card-a", { taskId: "XX-9" } as never, 1),
+      );
+      const refusedRevision = await fail(() =>
+        api.update(ws, "card-a", { title: "x" }, 1.5),
+      );
+      const refusedMove = await fail(() => api.move(ws, "card-a", null));
+
+      // A pure reorder: no lane named, card-b placed before card-a.
+      await api.move(ws, "card-b", null, { before: "card-a" });
+      const order = (await api.load(ws)).cards
+        .filter((c) => c.columnKey === "todo")
+        .map((c) => c.id);
+
+      const first = await api.changes(ws, 0);
+      const caughtUp = await api.changes(ws, first.nextSince);
+
+      return {
+        aloneChecklist: alone.checklist?.length ?? null,
+        // ⚠️ `?? "absent"` would swallow the very thing under test: the value
+        // this asserts on IS null, so the fallback has to distinguish "no such
+        // card" from "that card's checklist is null".
+        listedChecklist: listed ? listed.checklist : "no card",
+        foundTitle: found?.title ?? null,
+        missing,
+        edited,
+        raced,
+        refusedField,
+        refusedRevision,
+        refusedMove,
+        order,
+        firstCards: first.cards.length,
+        caughtUpCards: caughtUp.cards.length,
+        cursorMoved: first.nextSince > 0,
+      };
+    });
+
+    // The read that has parts, beside the read that does not.
+    expect(result.aloneChecklist).toBe(1);
+    expect(result.listedChecklist).toBeNull();
+
+    expect(result.foundTitle).toBe("Second");
+    // ⚠️ Null, not a thrown error: a deep link naming a task id nobody minted
+    // is a thing that happens, and it must not look like a board that failed.
+    expect(result.missing).toBeNull();
+
+    expect(result.edited).toMatchObject({ kind: "ok" });
+    if (result.edited.kind === "ok") {
+      expect(result.edited.card.title).toBe("Renamed");
+      expect(result.edited.card.tags).toEqual(["ui", "electron", "cloud"]);
+      // ⚠️ Reported in the words the user typed. "api and auth were dropped"
+      // is about what they wrote; the normalized form would send them looking
+      // for a tag they never entered.
+      expect(result.edited.droppedTags).toEqual(["api", "auth"]);
+    }
+
+    // The lost race carries the server's copy, so both sides can be shown.
+    expect(result.raced).toMatchObject({ kind: "conflict" });
+    if (result.raced.kind === "conflict")
+      expect(result.raced.current.title).toBe("Renamed");
+
+    expect(result.refusedField).toContain("Cannot change");
+    expect(result.refusedRevision).toContain("revision");
+    // A move that names neither a lane nor a neighbour is not a move.
+    expect(result.refusedMove).toContain("column or a placement");
+
+    // ⚠️ The order the SERVER decided, read back from a fresh board read — not
+    // the order this app hoped for. `placement` is the whole reason drag to
+    // reorder can persist at all.
+    expect(result.order).toEqual(["card-b", "card-a"]);
+
+    // Every write above is in the first delta; asking again from the cursor the
+    // server returned is caught up.
+    expect(result.firstCards).toBeGreaterThan(0);
+    expect(result.caughtUpCards).toBe(0);
+    expect(result.cursorMoved).toBe(true);
+
+    // ⚠️ Both edits sent `If-Match: 1`, and that is the point rather than a
+    // duplicate: each carried the revision ITS CALLER had read, and the second
+    // caller had read revision 1 too. That is exactly how it loses the race —
+    // a client that quietly re-sent the current revision would have won it and
+    // overwritten the first edit.
+    expect(plane.boardPreconditions).toEqual(["1", "1"]);
+  } finally {
+    await app.close();
+    await removeProfile(profile);
+    await plane.close();
+  }
+});
+
+test("a checklist is rewritten whole, and ticked boxes survive the rewrite", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", {
+    migratedAt: "2026-09-08T05:00:00.000Z",
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    cards: [
+      {
+        id: "card-a",
+        revision: 1,
+        title: "First",
+        body: "",
+        columnKey: "todo",
+        categoryKey: null,
+        taskId: "FE-01",
+        priority: null,
+        tags: [],
+        rank: "0001",
+        createdAt: null,
+        updatedAt: null,
+        checklist: [
+          {
+            key: "D1",
+            section: "decisions",
+            text: "Keep the draft in the store",
+            checked: true,
+            checkedAt: "2026-09-01T00:00:00.000Z",
+            note: null,
+          },
+          {
+            key: "D2",
+            section: "decisions",
+            text: "Drop this one",
+            checked: false,
+            checkedAt: null,
+            note: null,
+          },
+        ],
+      },
+    ],
+  });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-checklist-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Cloud project");
+    await expect(page.getByText("Live", { exact: true })).toBeVisible();
+
+    const result = await page.evaluate(async () => {
+      const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
+        .workspaces.board;
+      const ws = "ws-cloud-project";
+      const before = await api.card(ws, "card-a");
+
+      // A rewrite that: rewords D1 (ticked), DELETES D2, ADDS a new row with no
+      // key, and files a pair under one "pick ONE" group.
+      const written = await api.setChecklist(
+        ws,
+        "card-a",
+        [
+          { key: "D1", section: "decisions", text: "Keep the draft, reworded" },
+          { section: "decisions", text: "A brand new decision" },
+          { section: "verify", text: "Option A", group: "g1" },
+          { section: "verify", text: "Option B", group: "g1" },
+        ],
+        before.revision,
+      );
+
+      const after = await api.card(ws, "card-a");
+      // The same write again, against the revision that is now stale.
+      const raced = await api.setChecklist(
+        ws,
+        "card-a",
+        [{ key: "D1", text: "Later" }],
+        before.revision,
+      );
+      return {
+        beforeTexts: (before.checklist ?? []).map((i) => i.text),
+        writtenKind: written.kind,
+        afterTexts: (after.checklist ?? []).map((i) => i.text),
+        // ⚠️ The assertion this test exists for.
+        d1StillTicked:
+          (after.checklist ?? []).find((i) => i.key === "D1")?.checked ?? null,
+        d2Gone: !(after.checklist ?? []).some((i) => i.key === "D2"),
+        groups: (after.checklist ?? []).map((i) => i.group),
+        sections: (after.checklist ?? []).map((i) => i.section),
+        racedKind: raced.kind,
+      };
+    });
+
+    expect(result.beforeTexts).toEqual([
+      "Keep the draft in the store",
+      "Drop this one",
+    ]);
+    expect(result.writtenKind).toBe("ok");
+    expect(result.afterTexts).toEqual([
+      "Keep the draft, reworded",
+      "A brand new decision",
+      "Option A",
+      "Option B",
+    ]);
+    // ⚠️ Reworded and still ticked. The keys travel back with the rewrite and
+    // the board matches on them — send none and every approval on the card is
+    // silently cleared, which is the failure this pins down.
+    expect(result.d1StillTicked).toBe(true);
+    expect(result.d2Gone).toBe(true);
+    // A "pick ONE" pair survives as a pair; the rest carry no group.
+    expect(result.groups).toEqual([null, null, "g1", "g1"]);
+    expect(result.sections).toEqual([
+      "decisions",
+      "decisions",
+      "verify",
+      "verify",
+    ]);
+    // A rewrite that lost the race is a conflict, not a silent overwrite.
+    expect(result.racedKind).toBe("conflict");
   } finally {
     await app.close();
     await removeProfile(profile);
@@ -582,22 +1050,524 @@ test("a selection is honoured whether the service sends ids or not", async () =>
   let app = await electron.launch({ args: [process.cwd()], env });
   try {
     let page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open Cloud project" }).click();
-    await expect(
-      page.getByText("Active workspace", { exact: true }),
-    ).toBeVisible();
-    // The board says which half is missing rather than failing the screen.
-    await expect(
-      page.getByText("This board is not available yet"),
-    ).toBeVisible();
+    await switchTo(page, "Cloud project");
+    // The app says which half is missing rather than failing the screen.
+    await expect(page.getByText("Board not available yet")).toBeVisible();
+    // ⚠️ And it still says WHICH project — in the sentence rather than in a
+    // heading of its own, because the rail already carries the name. What must
+    // not happen is a screen that reports a problem without naming its subject.
+    await expect(page.getByText(/no id for Cloud project/)).toBeVisible();
 
     // And the choice survives a relaunch, which is what remembering a slug buys.
     await app.close();
     app = await electron.launch({ args: [process.cwd()], env });
     page = await app.firstWindow();
     await expect(
-      page.getByRole("heading", { name: "Cloud project", exact: true }),
+      page.getByRole("button", {
+        name: "Switch project — currently Cloud project",
+      }),
     ).toBeVisible();
+    await expect(page.getByText("Board not available yet")).toBeVisible();
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("an issue is written on its own page, and the board mints its key", async () => {
+  // ⚠️ The KEY is what this page exists for. The quick-add can only send a
+  // title, and the board mints `taskId` from a card's CATEGORY — so every card
+  // made in this app was unkeyed: blank in the column each list reserves for it,
+  // unreachable by ⌘K, and impossible to deep-link.
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", bigBoard(2));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-new-issue-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await switchTo(page, "Cloud project");
+
+    // ⌘N, the shortcut the rail's button prints. A hint that does nothing is
+    // worse than no hint — it teaches the reader that the hints are decoration.
+    await page.keyboard.press("ControlOrMeta+n");
+    const title = page.getByRole("textbox", { name: "Issue title" });
+    await expect(title).toBeFocused();
+    // Nothing to save until there is something to save.
+    await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    // Said in the rail, not discovered after the fact: no category, no key.
+    await expect(
+      page.getByText(/No category means no issue key/),
+    ).toBeVisible();
+
+    await title.fill("Composer lands with a key");
+    await page
+      .getByRole("textbox", { name: "Description" })
+      .fill("## Context\n\nWritten on the page, not in a one-line field.");
+    await page.getByRole("combobox", { name: "Category" }).click();
+    await page.getByRole("option", { name: "Frontend" }).click();
+    await page.getByRole("combobox", { name: "Priority" }).click();
+    await page.getByRole("option", { name: "High" }).click();
+    await page.getByRole("combobox", { name: "Status" }).click();
+    await page.getByRole("option", { name: "In Progress" }).click();
+    // ⚠️ One entry of "ui, electron" becomes TWO chips, not one tag with a
+    // comma in it. `normalizeTag` turns spaces into hyphens and leaves commas
+    // alone, so a field that took the whole string would have made `ui,-electron`.
+    await page.getByRole("button", { name: "Add label" }).click();
+    await page.getByRole("textbox", { name: "New label" }).fill("ui, electron");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Remove ui" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Remove electron" }),
+    ).toBeVisible();
+    await expect(page.getByText(/No category means no issue key/)).toBeHidden();
+
+    await page.getByRole("button", { name: "Save" }).click();
+
+    // ⚠️ It lands ON the card it just made, addressed by the key the BOARD
+    // minted — `FE-02`, the second frontend card. Following a card with no key
+    // there would land on "No card called …", which is why the page checks.
+    // ⚠️ `.first()`: the key is in the breadcrumb AND at the top of the
+    // properties rail, which is deliberate — the rail's header is where the
+    // copy-id and copy-branch buttons hang off it.
+    await expect(
+      page.getByText("FE-02", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Card title" })).toHaveValue(
+      "Composer lands with a key",
+    );
+    // Every field travelled: the rail reads them back off the board, not off
+    // the form that has since been unmounted.
+    // ⚠️ By text, not by heading role: `markdown-body` renders `##` as a bold
+    // paragraph on purpose, so the page keeps one heading hierarchy of its own.
+    await expect(
+      page.getByText("Written on the page, not in a one-line field."),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("combobox", { name: "Priority" }),
+    ).toContainText("High");
+    await expect(page.getByRole("combobox", { name: "Status" })).toContainText(
+      "In Progress",
+    );
+    // ⚠️ Chips on the detail rail, read back off the BOARD rather than off the
+    // form that has since been unmounted. The control is the same one the
+    // composer carries — labels are one field with one control on both rails —
+    // so this is the board's own answer, not the draft's.
+    await expect(page.getByRole("button", { name: "Remove ui" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Remove electron" }),
+    ).toBeVisible();
+
+    // And Cancel leaves a draft behind rather than writing it.
+    await page.keyboard.press("ControlOrMeta+n");
+    await page.getByRole("textbox", { name: "Issue title" }).fill("Abandoned");
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("button", { name: /Abandoned/ })).toHaveCount(
+      0,
+    );
+
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("the description is a markdown editor: lists continue, ⌘↵ saves, Escape leaves", async () => {
+  // ⚠️ The three things a textarea could not do, and the reason the composer
+  // carries an editor at all. ⌘↵ and Escape matter twice over: CodeMirror's
+  // default keymap binds BOTH — Mod-Enter inserts a blank line, Escape
+  // simplifies the selection — so without the bindings this pins, the field a
+  // person types in would be the one field those two keys stopped working in.
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", bigBoard(2));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-md-editor-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await switchTo(page, "Cloud project");
+
+    await page.keyboard.press("ControlOrMeta+n");
+    const body = page.getByRole("textbox", { name: "Description" });
+    await body.click();
+    await page.keyboard.type("- first");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("second");
+    // The bullet came back on its own — `markdownKeymap`, not a plain newline.
+    await expect(body).toContainText("- second");
+
+    // Escape leaves from INSIDE the editor, draft and all.
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
+
+    // And ⌘↵ saves from inside it, without touching the mouse.
+    await page.keyboard.press("ControlOrMeta+n");
+    await page
+      .getByRole("textbox", { name: "Issue title" })
+      .fill("Saved by ⌘↵");
+    await page.getByRole("textbox", { name: "Description" }).click();
+    await page.keyboard.type("Written and filed without leaving the keyboard.");
+    await page.keyboard.press("ControlOrMeta+Enter");
+
+    // No category, so the card has no key to be opened by — the list is where
+    // it is reachable, and that is where the composer sends it.
+    await expect(
+      page.getByRole("heading", { name: "All issues" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("listitem").filter({ hasText: "Saved by ⌘↵" }),
+    ).toBeVisible();
+
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("labels are picked from the board's vocabulary, and free text still lands", async () => {
+  // ⚠️ Driven on the NEW ISSUE page, where the same control sits. Labels are one
+  // field with one control on both rails — `properties.tsx` states why — so this
+  // covers the composer and `issue-detail.spec.ts` covers the card that exists.
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", {
+    ...bigBoard(2),
+    labels: [{ key: "ui-polish", name: "UI Polish", tone: "violet" }],
+  });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-tags-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await switchTo(page, "Cloud project");
+    await page.getByRole("button", { name: /^New issue/ }).click();
+
+    // A label the board has named is picked, and the chip says its NAME.
+    await page.getByRole("button", { name: "Add label" }).click();
+    await page.getByRole("menuitem", { name: "UI Polish" }).click();
+    await expect(
+      page.getByRole("button", { name: "Remove UI Polish" }),
+    ).toBeVisible();
+
+    // ⚠️ And free text still lands, because the vocabulary is a PALETTE rather
+    // than a whitelist — the service accepts any tag, and a picker that only
+    // offered the named ones would make every other tag unreachable.
+    //
+    // ⚠️ The chip carries what the BOARD will store, not what was typed: a
+    // comma ends a tag, which is how people type a list, and `normalizeTag` is
+    // the same mirror the main process compares against.
+    const field = page.getByRole("textbox", { name: "New label" });
+    await field.click();
+    await page.keyboard.type("Electron App,");
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("button", { name: "Remove electron-app" }),
+    ).toBeVisible();
+
+    // The × takes one back off and leaves the other alone.
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Remove UI Polish" }).click();
+    await expect(
+      page.getByRole("button", { name: "Remove UI Polish" }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Remove electron-app" }),
+    ).toBeVisible();
+
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a card is deleted from its context menu, in the list and on the board", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", bigBoard(4));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-delete-card-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await switchTo(page, "Cloud project");
+
+    const row = page.getByRole("listitem").filter({ hasText: "Card number 1" });
+    await expect(row).toBeVisible();
+    await row.click({ button: "right" });
+
+    // ⚠️ The menu NAMES the card. On a dense list the row under the cursor and
+    // the row somebody meant are one pixel apart, and this is the last place
+    // that gap can be caught.
+    await expect(page.getByText("FE-01", { exact: true }).last()).toBeVisible();
+    await page.getByRole("menuitem", { name: /^Delete/ }).click();
+
+    // The confirmation says what actually happens, and only then does it.
+    await expect(
+      page.getByText(/comes off the board for everyone/),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Delete card" }).click();
+
+    await expect(row).toHaveCount(0);
+    expect(plane.calls).toContain(
+      "DELETE /v1/boards/ws-cloud-project/items/card-0",
+    );
+
+    // ⚠️ And again on the lanes, where the same menu has to survive a card that
+    // is also a drag handle and a drop target. A wrapper element around it would
+    // break dnd-kit's measuring; the menu renders the card's own `li` instead.
+    await page.getByRole("link", { name: /^Board$/ }).click();
+    const card = page
+      .getByRole("listitem")
+      .filter({ hasText: "Card number 2" });
+    await expect(card).toBeVisible();
+    await card.click({ button: "right" });
+    await page.getByRole("menuitem", { name: /^Delete/ }).click();
+    await page.getByRole("button", { name: "Delete card" }).click();
+
+    await expect(card).toHaveCount(0);
+    expect(plane.calls).toContain(
+      "DELETE /v1/boards/ws-cloud-project/items/card-1",
+    );
+
+    // Cancel leaves the card where it is — the gesture is one right click away
+    // from the wrong row, so the way out has to work.
+    const kept = page
+      .getByRole("listitem")
+      .filter({ hasText: "Card number 4" });
+    await kept.click({ button: "right" });
+    await page.getByRole("menuitem", { name: /^Delete/ }).click();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(kept).toBeVisible();
+
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+/** A board big enough that a card wall stops being readable. */
+function bigBoard(count: number) {
+  return {
+    migratedAt: "2026-09-08T05:00:00.000Z",
+    columns: [
+      { key: "todo", name: "To-Do", role: "start" },
+      { key: "processing", name: "In Progress", role: "active" },
+      { key: "done", name: "Done", role: "done" },
+    ],
+    categories: [
+      { key: "frontend", name: "Frontend", prefix: "FE", tone: "sky" },
+      { key: "backend", name: "Backend", prefix: "BE", tone: "emerald" },
+    ],
+    cards: Array.from({ length: count }, (_, i) => ({
+      id: `card-${i}`,
+      revision: 1,
+      title: `Card number ${i + 1}`,
+      body: "",
+      columnKey: ["todo", "processing", "done"][i % 3],
+      categoryKey: i % 2 ? "backend" : "frontend",
+      taskId: `${i % 2 ? "BE" : "FE"}-${String(i + 1).padStart(2, "0")}`,
+      priority: (["high", "medium", "low", null] as const)[i % 4],
+      tags: i % 2 ? ["ui"] : ["cloud"],
+      rank: String(i).padStart(4, "0"),
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-08T07:00:00.000Z",
+      checklist: [],
+    })),
+  };
+}
+
+test("a long board is readable: groups fold, filters cut, and ⌘K jumps by key", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", bigBoard(33));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-long-board-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await switchTo(page, "Cloud project");
+
+    // ⚠️ 33 cards is the case the old card wall could not render usefully. Two
+    // lanes are open and the finished one starts folded — the largest lane on
+    // any board that has been running a while, and the least often read.
+    const rows = page.getByRole("listitem");
+    await expect.poll(async () => await rows.count()).toBe(22);
+    await expect(
+      page.getByRole("button", { name: /^Done/, expanded: false }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /^Done/ }).click();
+    await expect.poll(async () => await rows.count()).toBe(33);
+    await page.getByRole("button", { name: /^Done/ }).click();
+
+    // ⚠️ ONE filter button, then a field, then a searchable list of its values.
+    // Everything a board can be cut by goes through the same door.
+    await page.getByRole("button", { name: "Filter" }).click();
+    // ⚠️ HOVER, not click. The submenu opens on hover — a click that also had
+    // to open it would be a second interaction for the same intent, and this is
+    // the gesture the menu is actually built around.
+    await page.getByRole("menuitem", { name: "Category" }).hover();
+    await page.getByRole("option", { name: "Backend" }).click();
+    await expect.poll(async () => await rows.count()).toBe(11);
+    await expect(page.getByText("FE-01", { exact: true })).toBeHidden();
+    await expect(page.getByText("BE-02", { exact: true })).toBeVisible();
+
+    // The filter in play reads as a sentence, and its VALUE is a control: the
+    // commonest edit is swapping one value for another, not rebuilding it.
+    // ⚠️ Asserted on WHICH cards, not how many: both categories happen to leave
+    // eleven rows on screen once the finished lane is folded, so a count would
+    // pass without the filter having changed at all.
+    await page.getByRole("button", { name: "Change Category filter" }).click();
+    await page.getByRole("option", { name: "Frontend" }).click();
+    await expect(page.getByText("FE-01", { exact: true })).toBeVisible();
+    await expect(page.getByText("BE-02", { exact: true })).toBeHidden();
+
+    await page.getByRole("button", { name: "Remove Category filter" }).click();
+    await expect.poll(async () => await rows.count()).toBe(22);
+
+    // Grouping is the second axis, and it drops empty groups rather than
+    // drawing a board that looks like it has states it does not.
+    await page.getByRole("combobox", { name: "Group by" }).click();
+    await page.getByRole("option", { name: "Priority" }).click();
+    await expect(page.getByRole("button", { name: /^High/ })).toBeVisible();
+    await page.getByRole("combobox", { name: "Group by" }).click();
+    await page.getByRole("option", { name: "Status" }).click();
+
+    // ⌘K finds a card by the key a person says out loud, and lands on it.
+    await page.keyboard.press("ControlOrMeta+k");
+    await page.getByRole("option", { name: /BE-02/ }).first().waitFor();
+    await page.keyboard.type("BE-02");
+    await page.keyboard.press("Enter");
+    await expect(
+      page
+        .getByRole("heading", { name: "Card properties" })
+        .or(page.getByLabel("Card title")),
+    ).toBeVisible();
+    await expect(page.getByLabel("Card title")).toHaveValue("Card number 2");
+
+    // ⚠️ And the card's own URL is the address, so a deep link works cold —
+    // this is `lookup` earning its keep, on a card the list was never read for.
+    await page.goto("app://lanework/w/cloud-project/issues/FE-05");
+    await expect(page.getByLabel("Card title")).toHaveValue("Card number 5");
+
+    // A key nobody minted is a plain answer, not a broken screen.
+    await page.goto("app://lanework/w/cloud-project/issues/ZZ-99");
+    await expect(page.getByText(/^No card called/)).toBeVisible();
+
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("dragging a card reorders its lane, and the order outlives a reload", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", bigBoard(6));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-dnd-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await switchTo(page, "Cloud project");
+    await page.getByRole("link", { name: "Board", exact: true }).click();
+
+    const lane = page.getByLabel("To-Do column").getByRole("listitem");
+    const titles = () => lane.allInnerTexts();
+    // ⚠️ Wait for the lane to be FULLY drawn before measuring it. Grabbing a
+    // bounding box while the board is still loading gives coordinates for a
+    // card that is about to move, and the drop then lands nowhere — the failure
+    // looks like broken drag-and-drop rather than a race in the test.
+    await expect(lane).toHaveCount(2);
+    expect((await titles()).join("|")).toMatch(
+      /Card number 1[\s\S]*Card number 4/,
+    );
+
+    // ⚠️ The drop lands ABOVE the first card, so this is a reorder inside one
+    // lane — the case `rank` exists for and the one a `columnKey`-only move
+    // could never express.
+    // ⚠️ A REAL pointer gesture, which is the whole reason the board is on
+    // dnd-kit rather than HTML5 drag-and-drop. Chromium only turns a mouse
+    // gesture into `dragstart` through its own drag interception, which
+    // Playwright cannot drive inside an Electron window — so this used to be
+    // three dispatched events with a hand-made `DataTransfer`, testing the
+    // handlers while the gesture that reaches them went untested. A pointer
+    // sensor listens to the events Playwright can actually send.
+    const from = await lane.nth(1).boundingBox();
+    const to = await lane.nth(0).boundingBox();
+    if (!from || !to) throw new Error("the lane's cards are not on screen");
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    // ⚠️ Two moves, and the first one only has to clear the 6px the sensor
+    // waits for. A single jump to the destination is one event that both starts
+    // the drag and ends it, and dnd-kit resolves the target from the move AFTER
+    // activation — so the drop would land on nothing.
+    await page.mouse.move(
+      from.x + from.width / 2,
+      from.y + from.height / 2 + 12,
+    );
+    // Above the first card's midpoint, so the drop lands BEFORE it.
+    await page.mouse.move(to.x + to.width / 2, to.y + 3, { steps: 8 });
+    await page.mouse.up();
+    await expect
+      .poll(async () => (await titles())[0])
+      .toContain("Card number 4");
+
+    // ⚠️ Read back from the SERVER, not from the screen it was dropped on. The
+    // position is optimistic while the request is in flight; what this proves
+    // is that the board agreed.
+    await page.reload();
+    await page.getByRole("link", { name: "Board", exact: true }).click();
+    await expect(lane).toHaveCount(2);
+    await expect
+      .poll(async () => (await titles())[0])
+      .toContain("Card number 4");
+
+    expect(errors).toEqual([]);
   } finally {
     await app.close();
     await plane.close();
@@ -787,7 +1757,7 @@ test("a workspace with no cloud board can still be read from its folder", async 
   // will read it.
   const previous = process.env.LANEWORK_HOME;
   process.env.LANEWORK_HOME = home;
-  await writeFolder(
+  await writeFolders(
     {
       machineId: "test-machine",
       userId: "test-user",
@@ -797,7 +1767,7 @@ test("a workspace with no cloud board can still be read from its folder", async 
       owner: null,
     } satisfies MachineRecord,
     "cloud-project",
-    repo,
+    [repo],
   );
   if (previous === undefined) delete process.env.LANEWORK_HOME;
   else process.env.LANEWORK_HOME = previous;
@@ -809,14 +1779,17 @@ test("a workspace with no cloud board can still be read from its folder", async 
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
 
-    await page.getByRole("button", { name: "Open Cloud project" }).click();
-    await expect(
-      page.getByText("This board is not available yet"),
-    ).toBeVisible();
+    await switchTo(page, "Cloud project");
+    await expect(page.getByText("Board not available yet")).toBeVisible();
+
+    // ⚠️ Reachable whatever the board is doing — not only from a board that
+    // failed to load (FE-08 D14). The door moved to Settings → Projects, where
+    // it sits against the project it acts on.
+    await openImport(page, "Cloud project");
 
     // What the folder holds, from front matter only.
     await expect(page.getByText("4 review cards")).toBeVisible();
-    await expect(page.getByText("3 done · 1 todo")).toBeVisible();
+    await expect(page.getByText("3 done, 1 todo")).toBeVisible();
     await expect(page.getByText(/newest 2026-09-08/)).toBeVisible();
     // ⚠️ And the sentence that stops somebody waiting for this to become a
     // board: it names where the migration actually happens.
@@ -875,16 +1848,19 @@ test("a project can be created from the app, and opens straight away", async () 
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
 
+    await page.getByRole("button", { name: /^Switch project/ }).click();
+    // ⚠️ The field is behind a row now: a menu people open to SWITCH should
+    // not lead with a text input.
+    await page.getByRole("button", { name: "New project" }).click();
     await page.getByLabel("New project name").fill("Dự án của tôi");
     await page.getByRole("button", { name: "Create project" }).click();
 
     // ⚠️ Created AND opened: the new project is the active one, without a
-    // second click. The heading is the name the user typed, not the slug.
+    // second click. The rail names it by what the user typed, not by the slug.
     await expect(
-      page.getByRole("heading", { name: "Dự án của tôi", exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByText("Active workspace", { exact: true }),
+      page.getByRole("button", {
+        name: "Switch project — currently Dự án của tôi",
+      }),
     ).toBeVisible();
     // The slug this app minted is what the service was asked for.
     expect(plane.calls).toContain("POST /v1/sync/state/workspace");
@@ -895,7 +1871,298 @@ test("a project can be created from the app, and opens straight away", async () 
     app = await electron.launch({ args: [process.cwd()], env });
     page = await app.firstWindow();
     await expect(
-      page.getByRole("heading", { name: "Dự án của tôi", exact: true }),
+      page.getByRole("button", {
+        name: "Switch project — currently Dự án của tôi",
+      }),
+    ).toBeVisible();
+
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a project is created from the folders a person picked, primary first", async () => {
+  const plane = await startStubPlane({ workspaces });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-create-folders-"));
+  const home = join(profile, "home");
+  const repo = join(profile, "repo");
+  const extra = join(profile, "extra");
+  await seedRepo(repo);
+  await mkdir(extra, { recursive: true });
+  await seedCredential(home, plane.origin);
+  // ⚠️ The native chooser is the one control Playwright cannot drive, so the
+  // app is told what a person would have picked. Everything after the chooser —
+  // the ids, the order, what is written down — is the real code path.
+  const env = {
+    ...launchEnv({ profile, home, apiUrl: plane.origin }),
+    LANEWORK_TEST_FOLDERS: `${repo}:${extra}`,
+  };
+  let app = await electron.launch({ args: [process.cwd()], env });
+  try {
+    let page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+
+    await page.getByRole("button", { name: /^Switch project/ }).click();
+    await page.getByRole("button", { name: "New project" }).click();
+    await page.getByLabel("New project name").fill("Repo Project");
+    await page.getByRole("button", { name: /^Add folders/ }).click();
+
+    // Both folders are listed, by name and by path — two checkouts of one repo
+    // have the same basename, so the path is what tells them apart.
+    const rows = page
+      .getByRole("list", { name: "Source folders" })
+      .getByRole("listitem");
+    await expect(rows.filter({ hasText: repo })).toBeVisible();
+    await expect(rows.filter({ hasText: extra })).toBeVisible();
+    // The first one picked is primary until somebody says otherwise.
+    await expect(page.getByText("Primary", { exact: true })).toBeVisible();
+
+    // ⚠️ Making a folder primary MOVES it: the order carries the fact, so the
+    // primary is always the row the eye lands on first.
+    await page
+      .getByRole("button", { name: "Make extra the primary folder" })
+      .click();
+    await expect(rows.first()).toContainText(extra);
+
+    await page.getByRole("button", { name: "Create project" }).click();
+    await expect(
+      page.getByRole("button", {
+        name: "Switch project — currently Repo Project",
+      }),
+    ).toBeVisible();
+
+    // ⚠️ The projects page names the PRIMARY, and the panel names the rest. A
+    // folder chosen at creation that never appears again is one the app forgot.
+    await openImport(page, "Repo Project");
+    await expect(page.getByText("Also in this project")).toBeVisible();
+    await expect(page.getByText(repo, { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    // The row names the primary and counts the rest: "<extra> + 1 more".
+    await expect(page.getByText(`${extra} + 1 more`)).toBeVisible();
+
+    // And the link survives a relaunch, which is what makes it a link rather
+    // than something the dialog remembered.
+    await app.close();
+    app = await electron.launch({ args: [process.cwd()], env });
+    page = await app.firstWindow();
+    // The window has to finish its first load before a navigation will stick.
+    await page
+      .getByRole("button", { name: /^Switch project/ })
+      .waitFor({ state: "visible", timeout: 15_000 });
+    await page.goto("app://lanework/settings/workspaces");
+    await expect(page.getByText(`${extra} + 1 more`)).toBeVisible();
+
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("projects are managed from settings: folders changed, deleted, created", async () => {
+  const plane = await startStubPlane({ workspaces });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-settings-projects-"));
+  const home = join(profile, "home");
+  const repo = join(profile, "repo");
+  await seedRepo(repo);
+  await seedCredential(home, plane.origin);
+  const env = {
+    ...launchEnv({ profile, home, apiUrl: plane.origin }),
+    LANEWORK_TEST_FOLDERS: repo,
+  };
+  const app = await electron.launch({ args: [process.cwd()], env });
+  try {
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page
+      .getByRole("button", { name: /^Switch project/ })
+      .waitFor({ state: "visible", timeout: 15_000 });
+
+    await page.goto("app://lanework/settings/workspaces");
+    await expect(
+      page.getByRole("heading", { name: "Projects", exact: true }),
+    ).toBeVisible();
+    // Every project on the ACCOUNT, not just the one that is open.
+    await expect(page.getByText("Cloud project")).toBeVisible();
+    // Neither project has a folder on this machine yet, and the page says so
+    // per row rather than once for the page.
+    await expect(page.getByText("No folder on this machine")).toHaveCount(2);
+
+    // Folders and the name are two buttons, not one "edit": the folders are
+    // this machine's, the name is the account's.
+    await page
+      .getByRole("button", { name: "Source folders for Cloud project" })
+      .click();
+    await page.getByRole("button", { name: /^Add folders/ }).click();
+    await page.getByRole("button", { name: "Save folders" }).click();
+    await expect(page.getByText(repo, { exact: true })).toBeVisible();
+
+    // Deleting says what it does, and only then does it.
+    await page.getByRole("button", { name: "Delete Lanework" }).click();
+    await expect(
+      page.getByText(/removes the project and its cloud board/),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Delete project" }).click();
+    await expect(
+      page.getByRole("button", { name: "Delete Lanework" }),
+    ).toBeHidden();
+    // ⚠️ By ID, not by the slug on screen. The stub refuses a slug with a 400,
+    // as the service does — the mix-up used to be a 200 that deleted nothing.
+    expect(plane.calls).toContain(
+      "DELETE /v1/sync/state/workspace/ws-lanework",
+    );
+
+    // And a project can be created from here too, with the same dialog.
+    await page.getByRole("button", { name: "New project" }).click();
+    await page.getByLabel("New project name").fill("From Settings");
+    await page.getByRole("button", { name: "Create project" }).click();
+    await expect(page.getByText("from-settings")).toBeVisible();
+
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a project with no cloud id says why it cannot be renamed or deleted", async () => {
+  // ⚠️ Both buttons are DISABLED WITH A REASON, not hidden. Delete used to reach
+  // a project like this one — the machine surface took its slug — and it moved to
+  // the cloud id because a uuid matches the service's slug shape, so the two keys
+  // could not be told apart and an id sent to the old route removed nothing while
+  // answering 200. Losing this row's delete is the price of that being loud, and
+  // a button that quietly vanished would leave nothing to explain why.
+  const plane = await startStubPlane({
+    workspaces: [
+      ...workspaces,
+      {
+        id: null,
+        slug: "legacy",
+        name: "Legacy project",
+        path: null,
+        baseBranch: null,
+      },
+    ],
+  });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-no-id-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const env = launchEnv({ profile, home, apiUrl: plane.origin });
+  const app = await electron.launch({ args: [process.cwd()], env });
+  try {
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page
+      .getByRole("button", { name: /^Switch project/ })
+      .waitFor({ state: "visible", timeout: 15_000 });
+
+    await page.goto("app://lanework/settings/workspaces");
+    const remove = page.getByRole("button", { name: "Delete Legacy project" });
+    await expect(remove).toBeDisabled();
+    await expect(remove).toHaveAttribute("title", /no cloud id/);
+    await expect(
+      page.getByRole("button", { name: "Rename Legacy project" }),
+    ).toBeDisabled();
+
+    // ⚠️ And nothing reached the service. The gate exists so a slug is never
+    // sent to a route that would answer 200 having deleted nothing.
+    expect(plane.calls.some((call) => call.startsWith("DELETE "))).toBe(false);
+
+    // The project the account DID give an id is untouched by the gate.
+    await expect(
+      page.getByRole("button", { name: "Delete Lanework" }),
+    ).toBeEnabled();
+
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a project is renamed from settings, and its key does not move", async () => {
+  const plane = await startStubPlane({ workspaces });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-rename-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const env = launchEnv({ profile, home, apiUrl: plane.origin });
+  const app = await electron.launch({ args: [process.cwd()], env });
+  try {
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page
+      .getByRole("button", { name: /^Switch project/ })
+      .waitFor({ state: "visible", timeout: 15_000 });
+
+    // A project is OPEN before the rename, so the test can prove a rename does
+    // not move the selection — the whole reason main answers with `load()`.
+    await switchTo(page, "Lanework");
+
+    await page.goto("app://lanework/settings/workspaces");
+    await page.getByRole("button", { name: "Rename Cloud project" }).click();
+
+    // The field arrives holding the current name — a rename is an edit, not an
+    // entry — and the dialog names the key that is NOT going to change.
+    const field = page.getByLabel("New name for Cloud project");
+    await expect(field).toHaveValue("Cloud project");
+    await expect(
+      page.getByText(/The key cloud-project stays as it is/),
+    ).toBeVisible();
+    // Nothing to save until something is different.
+    await expect(
+      page.getByRole("button", { name: "Save name" }),
+    ).toBeDisabled();
+
+    await field.fill("Cloud project renamed");
+    await page.getByRole("button", { name: "Save name" }).click();
+
+    // ⚠️ The new name is awaited BEFORE `plane.calls` is read. `calls` is a
+    // plain array on the stub, so asserting it straight after a click reads it
+    // before the request has necessarily arrived — which passes on a fast run
+    // and fails in a full suite.
+    await expect(
+      page.getByRole("button", { name: "Rename Cloud project renamed" }),
+    ).toBeVisible();
+    // ⚠️ By ID, as the sibling DELETE now is too. They were split for one
+    // release — rename by id, delete by slug — and a uuid matches the slug
+    // shape, so the mix-up could not be seen from either side.
+    expect(plane.calls).toContain(
+      "PATCH /v1/sync/state/workspace/ws-cloud-project",
+    );
+    // ⚠️ The KEY is untouched, which is what the folder link and the saved
+    // selection are both keyed by.
+    await expect(
+      page.getByText("cloud-project", { exact: true }),
+    ).toBeVisible();
+
+    // A name that is only whitespace never reaches the service: there is
+    // nothing to save, so there is nothing to refuse.
+    await page.getByRole("button", { name: "Rename Lanework" }).click();
+    await page.getByLabel("New name for Lanework").fill("   ");
+    await expect(
+      page.getByRole("button", { name: "Save name" }),
+    ).toBeDisabled();
+    await page.getByRole("button", { name: "Cancel" }).click();
+
+    // ⚠️ And the project that was OPEN is still the one that is open. Renaming
+    // reads the account back with `load()`, not `load(id)` — passing the id
+    // would quietly select whichever project was renamed, from a Settings page
+    // that shows no board at all.
+    await page.getByRole("link", { name: "Back to app" }).click();
+    await expect(
+      page.getByRole("button", {
+        name: "Switch project — currently Lanework",
+      }),
     ).toBeVisible();
 
     expect(errors).toEqual([]);
@@ -917,6 +2184,8 @@ test("a taken key and an old service are told apart, and the name is kept", asyn
     const page = await app.firstWindow();
 
     // A name that slugifies onto a project the account already has.
+    await page.getByRole("button", { name: /^Switch project/ }).click();
+    await page.getByRole("button", { name: "New project" }).click();
     await page.getByLabel("New project name").fill("Cloud Project");
     await page.getByRole("button", { name: "Create project" }).click();
     await expect(page.getByText(/already uses the key/)).toBeVisible();
@@ -956,7 +2225,7 @@ async function migrationFixture(name: string) {
 
   const previous = process.env.LANEWORK_HOME;
   process.env.LANEWORK_HOME = home;
-  await writeFolder(
+  await writeFolders(
     {
       machineId: "test-machine",
       userId: "test-user",
@@ -966,7 +2235,7 @@ async function migrationFixture(name: string) {
       owner: null,
     } satisfies MachineRecord,
     "cloud-project",
-    repo,
+    [repo],
   );
   if (previous === undefined) delete process.env.LANEWORK_HOME;
   else process.env.LANEWORK_HOME = previous;
@@ -985,8 +2254,10 @@ test("a linked folder is migrated to the cloud from here, then handed over", asy
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
 
-    await page.getByRole("button", { name: "Open Cloud project" }).click();
-    // The board is empty and not migrated, so the folder panel is the answer.
+    await switchTo(page, "Cloud project");
+    // ⚠️ A migration starts from the same place every time — Settings →
+    // Projects — not only from an empty board (FE-08 D14).
+    await openImport(page, "Cloud project");
     await expect(page.getByText("This project on this machine")).toBeVisible();
     // ⚠️ The lossy number is on screen BEFORE the button: markdown says `- [x]`
     // and never when, so every ticked box arrives with a derived date.
@@ -1026,12 +2297,15 @@ test("a linked folder is migrated to the cloud from here, then handed over", asy
     expect(plane.sealed[0].items).toBe(4);
     expect(plane.sealed[0].manifest).toMatch(/^[0-9a-f]{64}$/);
 
-    // And the board re-reads itself: it is migrated now, so the folder panel
-    // is gone rather than still offering to send the same files.
-    await expect(page.getByText("Cards not migrated yet")).not.toBeVisible();
+    // ⚠️ The panel STAYS — it is reachable whatever the board's state (FE-08
+    // D14) — but the offer to send does not. After a cutover the files on disk are a frozen
+    // copy, and a button that would send them again points somebody at the
+    // version that stopped being true.
+    await expect(page.getByText("This project on this machine")).toBeVisible();
     await expect(
-      page.getByText("This project on this machine"),
-    ).not.toBeVisible();
+      page.getByRole("button", { name: /^(Sync to cloud|Send again)$/ }),
+    ).toHaveCount(0);
+    await expect(page.getByText(/cloud has owned this project/)).toBeVisible();
 
     expect(errors).toEqual([]);
   } finally {
@@ -1051,7 +2325,8 @@ test("a stopped run keeps what landed, and a refused seal names both numbers", a
   });
   try {
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open Cloud project" }).click();
+    await switchTo(page, "Cloud project");
+    await openImport(page, "Cloud project");
     await expect(page.getByText("This project on this machine")).toBeVisible();
 
     // ⚠️ A batch that fails stops the run and SAYS so. Nothing is lost by
@@ -1079,6 +2354,57 @@ test("a stopped run keeps what landed, and a refused seal names both numbers", a
     ).toBeVisible();
     // Still not migrated, so the panel is still offering the cutover.
     await expect(page.getByText("This project on this machine")).toBeVisible();
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a project URL whose list will not load asks once and stays put", async () => {
+  const plane = await startStubPlane({ workspaces });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-workspace-loop-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await expect(page.getByRole("list", { name: "Projects" })).toBeVisible();
+
+    const reads = () =>
+      plane.calls.filter((call) => call === "GET /v1/sync/state").length;
+
+    plane.setWorkspaceResponse(500);
+    const before = reads();
+    await page.goto("app://lanework/w/lanework/issues");
+
+    // ⚠️ ONE read for one navigation. It used to be three: the layout hydrated,
+    // `open` hydrated again because the failed list had no such slug, then the
+    // picker it bounced to hydrated a third time — and main logs every one of
+    // them as an unhandled handler error.
+    await expect(page.getByText("Could not open this project")).toBeVisible();
+    await expect(page.getByText(/HTTP 500/)).toBeVisible();
+    expect(reads() - before).toBe(1);
+
+    // ⚠️ And it STAYS on the project's URL. A list that failed to load is not
+    // evidence the project is gone, so sending somebody to the picker is wrong
+    // twice over: the picker is built from the same list, and it navigates
+    // straight back — a loop that sat on "Opening your project…" and asked
+    // again every lap.
+    expect(page.url()).toContain("/w/lanework/issues");
+    await page.waitForTimeout(1500);
+    expect(reads() - before).toBe(1);
+    expect(page.url()).toContain("/w/lanework/issues");
+
+    // Try again is the way out, and it is the only thing that asks again.
+    plane.setWorkspaceResponse(200);
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(
+      page.getByRole("button", { name: "Switch project — currently Lanework" }),
+    ).toBeVisible();
   } finally {
     await app.close();
     await plane.close();

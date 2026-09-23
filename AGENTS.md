@@ -114,7 +114,20 @@ recur.
 
 - Never mark a task complete without proving it works. Run the project's
   typecheck/build; for behavior changes, boot the app and verify.
-- If verification can't run, explain why and state the remaining risk.
+- **Do not run the test suite for ordinary work — however large the task.** It
+  runs when the user says **"commit"** (or "commit + push"), and not before.
+  Typecheck is cheap and stays; a full Playwright run is ~60s of output nobody
+  asked for in the middle of iterating.
+- **While iterating, run only the CASES the change touches** — `playwright test
+  tests/<file>.spec.ts -g "<name>" --project=production`. Not the suite, and not
+  the whole spec file either: a one-line UI change does not earn every Electron
+  boot in that file. The full file, and the suite, run on **"commit"**.
+- **`bun run build` before any Playwright run**, including a single `-g` case.
+  The specs boot `dist/` and `playwright.config.ts` has no build step, so a run
+  started without building tests the previous bundle and reports green for code
+  that was never exercised.
+- If verification can't run — or was deliberately not run under the rule above —
+  **say so plainly** rather than implying it passed, and state the remaining risk.
 - End every completed task with a **"What's next for you"** handoff (follow-up
   commands, manual checks, open decisions).
 

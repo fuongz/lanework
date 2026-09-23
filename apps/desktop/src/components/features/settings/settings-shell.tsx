@@ -23,13 +23,13 @@ export function SettingsShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen">
-      <aside className="settings-sidebar flex w-[272px] shrink-0 flex-col overflow-y-auto px-3">
+      <aside className="settings-sidebar flex w-60 shrink-0 flex-col overflow-y-auto px-2.5">
         {/* Clears the native traffic lights and gives the window a drag handle,
             which the app header would otherwise have provided. */}
         <div className="settings-titlebar shrink-0" aria-hidden="true" />
         <Link
           to="/"
-          className="hover:bg-foreground/[0.04] mt-3 flex h-[34px] shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-[background-color,scale] duration-150 ease-out active:scale-[0.96]"
+          className="hover:bg-foreground/[0.04] mt-2 flex h-[30px] shrink-0 items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out active:scale-[0.98]"
         >
           <HugeiconsIcon
             icon={ArrowLeft02Icon}
@@ -38,10 +38,10 @@ export function SettingsShell({ children }: { children: ReactNode }) {
           />
           Back to app
         </Link>
-        <div className="relative my-2 shrink-0">
+        <div className="relative mt-1 mb-1 shrink-0">
           <HugeiconsIcon
             icon={Search01Icon}
-            className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+            className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2"
             strokeWidth={1.5}
           />
           <Input
@@ -52,7 +52,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
             // `border-0` rather than a transparent border: the base
             // Input's `border-input` wins the colour, and a transparent
             // border still leaves a 1px gap under `bg-clip-padding`.
-            className="bg-foreground/[0.05] h-8 rounded-lg border-0 pl-8 text-sm md:text-sm"
+            className="bg-foreground/[0.035] h-[30px] rounded-md border-0 pl-7.5 text-[13px] md:text-[13px]"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />

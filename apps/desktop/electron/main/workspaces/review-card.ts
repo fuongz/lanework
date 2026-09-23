@@ -300,7 +300,15 @@ function legacyItems(md: string): CardItem[] {
       .filter(Boolean)
       .join(" ");
     return {
-      id: block.task.id ?? `D${index + 1}`,
+      // ⚠️ `""` for an item with no `**D2.**` handle, exactly as
+      // `parseCardItems` writes it — NOT the `D<n>` its position suggests.
+      // Inventing that number here is what refused a whole 50-record batch: a
+      // card numbers its decisions per section (`## A`, `## B`, `## D`) and
+      // leaves its "pick ONE" branches unnumbered, so the invented `D2` landed
+      // on the key the `**D2.**` further down the same card already owned.
+      // Minting a free key is `planMigration`'s job, where the whole card is
+      // in view.
+      id: block.task.id ?? "",
       section: "decisions" as const,
       text: block.task.content.trim() || `item ${index + 1}`,
       checked: block.task.checked && !block.dropped,
