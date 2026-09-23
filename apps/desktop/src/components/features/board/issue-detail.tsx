@@ -1,13 +1,31 @@
-import { ArrowLeft02Icon } from "@hugeicons/core-free-icons";
+import {
+  ArrowDown01Icon,
+  ArrowRight01Icon,
+  Attachment01Icon,
+  File01Icon,
+  GitBranchIcon,
+  Link01Icon,
+  MoreHorizontalIcon,
+  StarIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
-import type { BoardCard, BoardChecklistItem } from "#/../shared/workspaces";
+import type {
+  BoardAttachment,
+  BoardCard,
+  BoardChecklistItem,
+  BoardMember,
+} from "#/../shared/workspaces";
 import {
   CategoryDot,
   PriorityIcon,
   StatusIcon,
 } from "#/components/shared/board/glyphs";
+import { DeleteIssueDialog } from "#/components/shared/board/issue-menu";
+import { LabelChip } from "#/components/shared/board/label-chip";
+import { LabelPicker } from "#/components/shared/board/label-picker";
+import { Avatar, memberOf } from "#/components/shared/board/people";
 import {
   NONE,
   PRIORITY_LABEL,
@@ -19,9 +37,16 @@ import {
   IssueDetailSkeleton,
   PropertiesSkeleton,
 } from "#/components/shared/board/skeletons";
-import { TagsInput } from "#/components/shared/board/tags-input";
 import { ErrorState } from "#/components/shared/common/error-state";
+import { MarkdownBody } from "#/components/shared/common/markdown-body";
+import { Button } from "#/components/ui/button";
 import { Checkbox } from "#/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "#/components/ui/dropdown-menu";
 import { Input } from "#/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group";
 import {
@@ -32,9 +57,14 @@ import {
   SelectValue,
 } from "#/components/ui/select";
 import { Separator } from "#/components/ui/separator";
-import { categoryOf, columnOf, subIssues } from "#/lib/board-view";
+import {
+  categoryOf,
+  columnOf,
+  subIssueProgress,
+  subIssues,
+} from "#/lib/board-view";
 import { useBoard } from "#/stores/board";
-import { MarkdownBody } from "./markdown-body";
+import { IssueActivity } from "./issue-activity";
 
 export function IssueDetail() {
   const { slug, taskId } = useParams({ from: "/_app/w/$slug/issues/$taskId" });
@@ -65,29 +95,21 @@ export function IssueDetail() {
             scrollbar gutter starts — so its `border-b` ended 10px short of the
             divider and left a notch in the line between the two panes. Out here
             the bar owns the pane's full width, and the scroll region starts
-            under it instead of running behind it.
-
-            This is what the header's `backdrop-blur` was for and why it is
-            gone: nothing passes beneath this bar any more, so there was nothing
-            left for it to filter. */}
-        <header className="border-border flex h-11 shrink-0 items-center gap-2 border-b px-6">
+            under it instead of running behind it. */}
+        <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b px-6">
           <Link
             to="/w/$slug/issues"
             params={{ slug }}
             search={{}}
-            className="hover:bg-foreground/[0.05] -ml-2 flex h-7 items-center gap-1.5 rounded-md px-2 text-[13px] transition-colors"
+            className="hover:bg-foreground/[0.05] -ml-2 flex h-7 min-w-0 items-center rounded-md px-2 text-[13px] transition-colors"
           >
-            <HugeiconsIcon
-              icon={ArrowLeft02Icon}
-              className="size-4"
-              strokeWidth={1.5}
-              aria-hidden="true"
-            />
-            Issues
+            <span className="truncate">{active?.name ?? "Issues"}</span>
           </Link>
-          <span className="text-muted-foreground font-mono text-xs">
+          <span className="text-muted-foreground shrink-0 text-[13px]">›</span>
+          <span className="text-muted-foreground shrink-0 px-1 font-mono text-xs">
             {taskId}
           </span>
+          {card && <HeaderActions card={card} />}
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -112,13 +134,198 @@ export function IssueDetail() {
       >
         {/* The rail's own header band, the same height as the one beside it, so
             the divider between the panels has one unbroken line to draw. */}
-        <header className="border-border flex h-11 shrink-0 items-center border-b px-4">
-          <span className="text-[13px] font-medium">Details</span>
+        <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b px-4">
+          <span className="text-muted-foreground font-mono text-xs">
+            {card?.taskId ?? taskId}
+          </span>
+          {card && <RailActions card={card} />}
         </header>
         <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
           {card ? <Fields card={card} /> : !error && <PropertiesSkeleton />}
         </div>
       </aside>
+    </div>
+  );
+}
+
+/**
+ * Put something on the clipboard and say so, briefly.
+ *
+ * ⚠️ The confirmation is the whole feature. A copy button that looks identical
+ * before and after being pressed is one people press twice, and then paste
+ * whatever was there before.
+ */
+function useCopy(): [string | null, (key: string, value: string) => void] {
+  const [copied, setCopied] = useState<string | null>(null);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(null), 1600);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return [
+    copied,
+    (key, value) => {
+      void navigator.clipboard.writeText(value).then(
+        () => setCopied(key),
+        // A clipboard that refuses is not worth an error banner over a card;
+        // the button simply does not confirm, which is the honest signal.
+        () => setCopied(null),
+      );
+    },
+  ];
+}
+
+/**
+ * The branch name a card would be worked on.
+ *
+ * ⚠️ Derived from the task id and the title, not from the card's uuid. The point
+ * is a branch a human reads — `be-06-issue-detail-activity` — and one carrying a
+ * uuid tells nobody what it is for.
+ */
+function branchName(card: BoardCard): string {
+  const words = card.title
+    .toLowerCase()
+    .normalize("NFD")
+    // Marks only: this strips the accents off a Vietnamese title rather than
+    // the letters, so "Kết nối git" becomes `ket-noi-git` and not `k-t-n-i-git`.
+    .replace(/\p{M}+/gu, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .split("-")
+    .filter(Boolean)
+    .slice(0, 6)
+    .join("-");
+  const prefix = card.taskId?.toLowerCase();
+  return [prefix, words].filter(Boolean).join("-") || card.id;
+}
+
+/** The star and the `…` beside the breadcrumb. */
+function HeaderActions({ card }: { card: BoardCard }) {
+  const setFavorite = useBoard((state) => state.setFavorite);
+  const stale = useBoard((state) => state.view?.stale ?? false);
+  const busy = useBoard((state) => state.busy);
+  const [confirming, setConfirming] = useState(false);
+
+  return (
+    <>
+      {/* ⚠️ `favorite === null` means nobody asked — a list read. It draws
+          nothing rather than an empty star, which would invite a click that
+          silently means the opposite of what it looks like. */}
+      {card.favorite !== null && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label={
+            card.favorite ? "Remove from favorites" : "Add to favorites"
+          }
+          aria-pressed={card.favorite}
+          onClick={() => void setFavorite(card.id, !card.favorite)}
+        >
+          <HugeiconsIcon
+            icon={StarIcon}
+            className={
+              card.favorite
+                ? "text-tone-amber size-4"
+                : "text-muted-foreground size-4"
+            }
+            // A filled star and an outline of one are the same glyph at two
+            // weights; colour alone would not survive being read without it.
+            strokeWidth={card.favorite ? 2.5 : 1.8}
+          />
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Issue actions"
+              className="ml-auto size-7"
+            />
+          }
+        >
+          <HugeiconsIcon
+            icon={MoreHorizontalIcon}
+            className="text-muted-foreground size-4"
+            strokeWidth={1.8}
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem
+            variant="destructive"
+            // Off while the board is a saved copy, like every other write: a
+            // delete that appeared to work offline would be a card gone from
+            // this screen and still on everybody else's.
+            disabled={stale || busy === card.id}
+            onClick={() => setConfirming(true)}
+          >
+            Delete…
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DeleteIssueDialog
+        card={card}
+        open={confirming}
+        onOpenChange={setConfirming}
+      />
+    </>
+  );
+}
+
+/**
+ * The two copy buttons at the top of the rail.
+ *
+ * ⚠️ Neither of them copies a URL, and that is deliberate. This app registers no
+ * deep-link scheme, so a "copy link" would hand somebody a string that opens
+ * nothing. The issue id is what people actually say to each other and what every
+ * agent tool takes; the branch name is what the id is for next.
+ */
+function RailActions({ card }: { card: BoardCard }) {
+  const [copied, copy] = useCopy();
+  const id = card.taskId;
+  return (
+    <div className="ml-auto flex items-center gap-0.5">
+      {id && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label={`Copy issue id ${id}`}
+          title={copied === "id" ? "Copied" : `Copy ${id}`}
+          onClick={() => copy("id", id)}
+        >
+          <HugeiconsIcon
+            icon={Link01Icon}
+            className={
+              copied === "id"
+                ? "text-tone-emerald size-4"
+                : "text-muted-foreground size-4"
+            }
+            strokeWidth={1.8}
+          />
+        </Button>
+      )}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-7"
+        aria-label="Copy branch name"
+        title={copied === "branch" ? "Copied" : branchName(card)}
+        onClick={() => copy("branch", branchName(card))}
+      >
+        <HugeiconsIcon
+          icon={GitBranchIcon}
+          className={
+            copied === "branch"
+              ? "text-tone-emerald size-4"
+              : "text-muted-foreground size-4"
+          }
+          strokeWidth={1.8}
+        />
+      </Button>
     </div>
   );
 }
@@ -136,7 +343,6 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
   const save = (patch: Parameters<typeof update>[1]) =>
     void update(card.id, patch, card.revision);
 
-  const children = view ? subIssues(view.cards, card.id) : [];
   const parent = view?.cards.find((entry) => entry.id === card.parentId);
 
   return (
@@ -176,37 +382,181 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
         }}
       />
       <MarkdownBody source={card.body} />
+      <Attachments card={card} />
       <Checklist card={card} />
-      {children.length > 0 && (
-        <section className="flex flex-col gap-1">
-          <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            Sub-issues
-          </h2>
-          <ul className="flex flex-col">
-            {children.map((child) => (
-              <li key={child.id}>
-                <Link
-                  to="/w/$slug/issues/$taskId"
-                  params={{ slug, taskId: child.taskId ?? child.id }}
-                  className="hover:bg-foreground/[0.03] -mx-2 flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px]"
-                >
-                  <StatusIcon
-                    column={columnOf(view?.columns ?? [], child.columnKey)}
-                  />
-                  {child.taskId && (
-                    <span className="text-muted-foreground w-14 shrink-0 font-mono text-xs">
-                      {child.taskId}
-                    </span>
-                  )}
-                  <span className="truncate">{child.title}</span>
-                  <PriorityIcon priority={child.priority} className="ml-auto" />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <SubIssues card={card} slug={slug} />
+      <IssueActivity card={card} />
     </article>
+  );
+}
+
+/** `5.11 MB` — a file size as a person reads one. */
+function fileSize(bytes: number | null): string | null {
+  if (bytes === null || !Number.isFinite(bytes) || bytes < 0) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value < 10 ? 2 : 1)} ${units[unit]}`;
+}
+
+/**
+ * The files a card refers to.
+ *
+ * ⚠️ METADATA and a reference — the service stores no bytes and serves none, so
+ * there is nothing here to download. A row states what was recorded and copies
+ * the reference, which is the most this can honestly offer until content
+ * hosting is its own feature.
+ */
+function Attachments({ card }: { card: BoardCard }) {
+  const [copied, copy] = useCopy();
+  const files = card.attachments;
+  if (!files?.length) return null;
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {files.map((file) => (
+        <AttachmentRow
+          key={file.id}
+          file={file}
+          copied={copied === file.id}
+          onCopy={() => copy(file.id, file.reference)}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function AttachmentRow({
+  file,
+  copied,
+  onCopy,
+}: {
+  file: BoardAttachment;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  const size = fileSize(file.sizeBytes);
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onCopy}
+        title={file.reference}
+        className="border-border hover:bg-foreground/[0.03] flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors"
+      >
+        <HugeiconsIcon
+          icon={File01Icon}
+          className="text-muted-foreground size-5 shrink-0"
+          strokeWidth={1.5}
+        />
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-[13px]">{file.name}</span>
+          <span className="text-muted-foreground truncate text-xs">
+            {copied
+              ? "Reference copied"
+              : [size, file.mimeType].filter(Boolean).join(" · ") ||
+                file.reference}
+          </span>
+        </span>
+        <HugeiconsIcon
+          icon={Attachment01Icon}
+          className="text-muted-foreground ml-auto size-4 shrink-0"
+          strokeWidth={1.5}
+        />
+      </button>
+    </li>
+  );
+}
+
+/**
+ * The cards filed under this one.
+ *
+ * ⚠️ Collapsible, and collapsed state is remembered PER CARD in this session
+ * only. A card with fourteen sub-issues pushes its own activity off the screen;
+ * a card with two does not, and one preference applied to both would be wrong
+ * for one of them every time.
+ */
+function SubIssues({ card, slug }: { card: BoardCard; slug: string }) {
+  const view = useBoard((state) => state.view);
+  const [collapsed, setCollapsed] = useState(false);
+  const children = view ? subIssues(view.cards, card.id) : [];
+  const progress = view
+    ? subIssueProgress(view.cards, card.id, view.columns)
+    : null;
+  if (!children.length) return null;
+
+  const members = view?.members ?? [];
+  const labels = view?.labels ?? [];
+
+  return (
+    <section className="border-border flex flex-col gap-1 rounded-lg border p-2">
+      <div className="flex items-center gap-2 px-1">
+        <button
+          type="button"
+          onClick={() => setCollapsed((value) => !value)}
+          aria-expanded={!collapsed}
+          className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-xs font-medium transition-colors"
+        >
+          {/* The same disclosure arrow the issue list folds its groups with.
+              One gesture, one glyph — a second shape for "this collapses" is a
+              second thing to learn. */}
+          <HugeiconsIcon
+            icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon}
+            className="size-3.5"
+            strokeWidth={2}
+            aria-hidden="true"
+          />
+          Sub-issues
+        </button>
+        {progress && (
+          <span className="text-muted-foreground text-xs tabular-nums">
+            {progress.done}/{progress.total}
+          </span>
+        )}
+      </div>
+      {!collapsed && (
+        <ul className="flex flex-col">
+          {children.map((child) => (
+            <li key={child.id}>
+              <Link
+                to="/w/$slug/issues/$taskId"
+                params={{ slug, taskId: child.taskId ?? child.id }}
+                className="hover:bg-foreground/[0.03] flex h-9 items-center gap-2.5 rounded-md px-2 text-[13px]"
+              >
+                <StatusIcon
+                  column={columnOf(view?.columns ?? [], child.columnKey)}
+                />
+                {child.taskId && (
+                  <span className="text-muted-foreground w-14 shrink-0 font-mono text-xs">
+                    {child.taskId}
+                  </span>
+                )}
+                <span className="truncate">{child.title}</span>
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  {/* Two at most: a row is not a place to read six labels, and
+                      the card's own page is one click away. */}
+                  {child.tags.slice(0, 2).map((tag) => (
+                    <LabelChip key={tag} tag={tag} labels={labels} />
+                  ))}
+                  <PriorityIcon priority={child.priority} />
+                  {/* ⚠️ `assignees` is null on a board read — every card here
+                      came from one — so this draws the unassigned outline
+                      rather than claiming nobody is on it. */}
+                  <Avatar
+                    member={memberOf(members, child.assignees?.users[0])}
+                    size="sm"
+                  />
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -236,11 +586,83 @@ function Stamp({ value }: { value: string | null }) {
 }
 
 /**
+ * Who the card is on.
+ *
+ * ⚠️ Writes BOTH lists every time, because the service replaces the whole set.
+ * Sending only `users` would clear every agent assignment as a side effect of
+ * naming a person — and the agents on a card are how work is dispatched.
+ */
+function AssigneeRow({
+  card,
+  members,
+  disabled,
+  onChange,
+}: {
+  card: BoardCard;
+  members: BoardMember[];
+  disabled: boolean;
+  onChange: (users: string[]) => void;
+}) {
+  const users = card.assignees?.users ?? [];
+  const on = new Set(users);
+  const first = memberOf(members, users[0]);
+  const label =
+    users.length === 0
+      ? "Unassigned"
+      : users.length === 1
+        ? (first?.name ?? users[0])
+        : `${first?.name ?? users[0]} +${users.length - 1}`;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        disabled={disabled}
+        className="hover:bg-foreground/[0.06] focus-visible:ring-accent-brand flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-[13px] transition-colors focus-visible:ring-2 disabled:opacity-50"
+      >
+        <Avatar member={first} size="sm" />
+        <span className="truncate">{label}</span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-56">
+        <DropdownMenuItem closeOnClick={false} onClick={() => onChange([])}>
+          <Avatar size="sm" />
+          Unassigned
+        </DropdownMenuItem>
+        {members.map((member) => (
+          <DropdownMenuItem
+            key={member.userId}
+            // Three people on one card is one task; a menu that shut after each
+            // would make it three.
+            closeOnClick={false}
+            onClick={() =>
+              onChange(
+                on.has(member.userId)
+                  ? users.filter((id) => id !== member.userId)
+                  : [...users, member.userId],
+              )
+            }
+          >
+            <Avatar member={member} size="sm" />
+            <span className="truncate">{member.name}</span>
+            {on.has(member.userId) && (
+              <span className="text-muted-foreground ml-auto text-xs">✓</span>
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
  * The card's properties, in the rail's own shape.
  *
- * ⚠️ Status, Priority, Category, Tags — the order the New issue page uses. The
- * two rails are read as one panel by anyone who creates a card and then opens
- * it, and a field that moves between them is a field they look for twice.
+ * ⚠️ Status, Priority, Assignee, Labels — the order the design draws, and the
+ * order the New issue page follows. The two rails are read as one panel by
+ * anyone who creates a card and then opens it, and a field that moves between
+ * them is a field they look for twice.
+ *
+ * ⚠️ Category stays, though the design has no such row: it is what MINTS a
+ * card's task id. Dropping it to match a screenshot would take `BE-06` with it.
  */
 function Fields({ card }: { card: BoardCard }) {
   const view = useBoard((state) => state.view);
@@ -248,6 +670,8 @@ function Fields({ card }: { card: BoardCard }) {
   const busy = useBoard((state) => state.busy);
   const stale = view?.stale ?? false;
   const writing = stale || busy === card.id;
+  const members = view?.members ?? [];
+  const labels = view?.labels ?? [];
 
   const save = (patch: Parameters<typeof update>[1]) =>
     void update(card.id, patch, card.revision);
@@ -314,6 +738,47 @@ function Fields({ card }: { card: BoardCard }) {
         </Select>
       </Row>
 
+      <Row label="Assignee">
+        <AssigneeRow
+          card={card}
+          members={members}
+          disabled={writing}
+          onChange={(users) =>
+            save({
+              assignees: { users, agents: card.assignees?.agents ?? [] },
+            })
+          }
+        />
+      </Row>
+
+      <Row label="Labels">
+        {/* ⚠️ Disabled by `stale` ONLY, unlike the menus above it. Binding this
+            to `busy` as well made the control go dead for the length of each
+            round trip, which on a board being edited is most of the time. A
+            second label chosen before the first write lands can still lose the
+            revision race; that is what the conflict banner is for. */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+          {card.tags.map((tag) => (
+            <LabelChip
+              key={tag}
+              tag={tag}
+              labels={labels}
+              onRemove={
+                stale
+                  ? undefined
+                  : () => save({ tags: card.tags.filter((t) => t !== tag) })
+              }
+            />
+          ))}
+          <LabelPicker
+            tags={card.tags}
+            labels={labels}
+            disabled={stale}
+            onChange={(tags) => save({ tags })}
+          />
+        </div>
+      </Row>
+
       <Row label="Category">
         <CategoryDot
           category={categoryOf(view?.categories ?? [], card.categoryKey)}
@@ -351,22 +816,6 @@ function Fields({ card }: { card: BoardCard }) {
             ))}
           </SelectContent>
         </Select>
-      </Row>
-
-      <Row label="Tags">
-        {/* ⚠️ Disabled by `stale` ONLY, unlike the menus above it. Binding this
-            to `busy` as well made the field go dead for the length of each
-            round trip — and a disabled input blurs, so adding one tag took the
-            caret out of the box you were about to type the next one in. A
-            second tag entered before the first write lands can still lose the
-            revision race; that is what the conflict banner is for, and it is a
-            better trade than a field that stops accepting text every time it is
-            used. */}
-        <TagsInput
-          tags={card.tags}
-          disabled={stale}
-          onChange={(tags) => save({ tags })}
-        />
       </Row>
 
       {/* Facts, not fields — but read as the same table, so they keep the row. */}

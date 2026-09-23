@@ -1,5 +1,8 @@
 import { can } from "../../../shared/policy";
 import {
+  type BoardActivityPage,
+  type BoardAttachment,
+  type BoardAttachmentDraft,
   type BoardCard,
   type BoardCardDraft,
   type BoardCardPatch,
@@ -23,9 +26,15 @@ import { type MachineRecord, readRecord } from "../auth/store";
 import { handle } from "../ipc";
 import {
   archiveCard,
+  attachFile,
   createCard,
+  createComment,
   createWorkspace,
+  deleteComment,
   deleteWorkspace,
+  detachFile,
+  editComment,
+  fetchActivity,
   fetchBoardConfig,
   fetchCard,
   fetchCards,
@@ -38,6 +47,8 @@ import {
   renameWorkspace,
   replaceChecklist,
   sealBoardMigration,
+  setFavorite,
+  setSubscription,
   toggleChecklistItem,
   updateCard,
 } from "./client";
@@ -162,6 +173,8 @@ async function board(workspaceId: string): Promise<BoardView> {
       workspaceId,
       columns: config.columns,
       categories: config.categories,
+      labels: config.labels,
+      members: config.members,
       cards,
       migrated: Boolean(config.migratedAt),
       fetchedAt: new Date().toISOString(),
@@ -258,7 +271,18 @@ function parsePatch(value: unknown): BoardCardPatch {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("An edit is required");
   const row = value as Record<string, unknown>;
-  const allowed = ["title", "body", "priority", "tags", "categoryKey"];
+  const allowed = [
+    "title",
+    "body",
+    "priority",
+    "tags",
+    "categoryKey",
+    "assignees",
+    "parentId",
+    "dueAt",
+    "estimate",
+    "type",
+  ];
   const keys = Object.keys(row);
   if (!keys.length) throw new Error("An edit must change something");
   for (const key of keys)
@@ -314,7 +338,139 @@ function parsePatch(value: unknown): BoardCardPatch {
       throw new Error("That category cannot be used");
     patch.categoryKey = row.categoryKey as string | null;
   }
+  if ("assignees" in row) {
+    // ⚠️ BOTH lists are required, even when only one is changing. The service
+    // replaces the whole set, so accepting `{ users }` alone would clear every
+    // agent assignment as a side effect of naming a person.
+    const value = row.assignees;
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("An assignment needs users and agents");
+    const each = value as Record<string, unknown>;
+    const list = (raw: unknown) =>
+      Array.isArray(raw) &&
+      raw.length <= 50 &&
+      raw.every(
+        (ref) => typeof ref === "string" && ref.length > 0 && ref.length <= 200,
+      )
+        ? (raw as string[])
+        : null;
+    const users = list(each.users);
+    const agents = list(each.agents);
+    if (!users || !agents) throw new Error("Those assignees cannot be used");
+    patch.assignees = { users, agents };
+  }
+  if ("parentId" in row) {
+    if (
+      !(
+        row.parentId === null ||
+        (typeof row.parentId === "string" &&
+          row.parentId.trim().length > 0 &&
+          row.parentId.length <= 200)
+      )
+    )
+      throw new Error("That parent cannot be used");
+    patch.parentId = row.parentId as string | null;
+  }
+  if ("dueAt" in row) {
+    // ⚠️ Parsed, not just shape-checked. The service takes an instant, and a
+    // string it cannot read comes back as a 400 for a field the user set from a
+    // date picker — which is a bug they can do nothing about.
+    if (
+      !(
+        row.dueAt === null ||
+        (typeof row.dueAt === "string" &&
+          Number.isFinite(Date.parse(row.dueAt)))
+      )
+    )
+      throw new Error("That due date cannot be used");
+    patch.dueAt = row.dueAt as string | null;
+  }
+  if ("estimate" in row) {
+    if (
+      !(
+        row.estimate === null ||
+        (typeof row.estimate === "number" &&
+          Number.isInteger(row.estimate) &&
+          row.estimate >= 0 &&
+          row.estimate <= 1000)
+      )
+    )
+      throw new Error("That estimate cannot be used");
+    patch.estimate = row.estimate as number | null;
+  }
+  if ("type" in row) {
+    if (row.type !== "epic" && row.type !== "issue" && row.type !== "task")
+      throw new Error("That card type is not one this board uses");
+    patch.type = row.type;
+  }
   return patch;
+}
+
+/**
+ * A comment body from the renderer.
+ *
+ * ⚠️ Its own check rather than `requireId`, whose message names a workspace and
+ * a card — this argument is a sentence somebody typed, and being told "a card is
+ * required" for an empty comment box explains nothing.
+ *
+ * ⚠️ The cap mirrors the service's `MAX_COMMENT`. Refusing here is the same
+ * answer, sooner, and without a round trip that was never going to succeed.
+ */
+function commentBody(args: unknown[], expected: number): string {
+  if (args.length !== expected) throw new Error("A comment is required");
+  const value = args[expected - 1];
+  if (typeof value !== "string" || !value.trim())
+    throw new Error("A comment cannot be empty");
+  if (value.length > 20_000) throw new Error("That comment is too long");
+  return value.trim();
+}
+
+/**
+ * A file reference on its way to a card.
+ *
+ * ⚠️ A REFERENCE, and this channel never reads it. The service stores metadata
+ * and hands the string back untouched, so nothing here opens, stats or resolves
+ * what the renderer names — which is what keeps this from being a channel that
+ * reads any file the renderer can spell.
+ */
+function parseAttachmentDraft(value: unknown): BoardAttachmentDraft {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("A file is required");
+  const row = value as Record<string, unknown>;
+  const name = row.name;
+  const reference = row.reference;
+  if (typeof name !== "string" || !name.trim() || name.length > 200)
+    throw new Error("That file needs a name");
+  if (
+    typeof reference !== "string" ||
+    !reference.trim() ||
+    reference.length > 2000
+  )
+    throw new Error("That file needs a path or a link");
+  const sizeBytes = row.sizeBytes;
+  if (
+    sizeBytes !== undefined &&
+    sizeBytes !== null &&
+    !(
+      typeof sizeBytes === "number" &&
+      Number.isInteger(sizeBytes) &&
+      sizeBytes >= 0
+    )
+  )
+    throw new Error("That file size cannot be used");
+  const mimeType = row.mimeType;
+  if (
+    mimeType !== undefined &&
+    mimeType !== null &&
+    !(typeof mimeType === "string" && mimeType.length <= 200)
+  )
+    throw new Error("That file type cannot be used");
+  return {
+    name: name.trim(),
+    reference: reference.trim(),
+    mimeType: (mimeType as string | null | undefined) ?? null,
+    sizeBytes: (sizeBytes as number | null | undefined) ?? null,
+  };
 }
 
 /**
@@ -749,6 +905,104 @@ export function registerWorkspaces(devUrl?: string): void {
       );
     },
   );
+  handle(
+    workspaceChannels.activity,
+    devUrl,
+    async (args): Promise<BoardActivityPage> => {
+      // ⚠️ Three arguments always, with `null` for "the first page". The sender
+      // check reads argument COUNT, so a call that sometimes sends two and
+      // sometimes three is one no rule here can state.
+      if (
+        args.length !== 3 ||
+        !(args[2] === null || typeof args[2] === "string")
+      )
+        throw new Error("A card and a cursor are required");
+      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      return fetchActivity(
+        await authorizedRecord(),
+        workspaceId,
+        cardId,
+        args[2],
+      );
+    },
+  );
+  handle(
+    workspaceChannels.comment,
+    devUrl,
+    async (args): Promise<{ id: string }> => {
+      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      const body = commentBody(args, 3);
+      return createComment(await authorizedRecord(), workspaceId, cardId, body);
+    },
+  );
+  handle(workspaceChannels.commentEdit, devUrl, async (args): Promise<void> => {
+    const [workspaceId, cardId, commentId] = requireId(args.slice(0, 3), 3);
+    const body = commentBody(args, 4);
+    return editComment(
+      await authorizedRecord(),
+      workspaceId,
+      cardId,
+      commentId,
+      body,
+    );
+  });
+  handle(
+    workspaceChannels.commentDelete,
+    devUrl,
+    async (args): Promise<void> => {
+      const [workspaceId, cardId, commentId] = requireId(args, 3);
+      return deleteComment(
+        await authorizedRecord(),
+        workspaceId,
+        cardId,
+        commentId,
+      );
+    },
+  );
+  handle(
+    workspaceChannels.subscribe,
+    devUrl,
+    async (args): Promise<boolean> => {
+      if (args.length !== 3 || typeof args[2] !== "boolean")
+        throw new Error("A card and a state are required");
+      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      return setSubscription(
+        await authorizedRecord(),
+        workspaceId,
+        cardId,
+        args[2],
+      );
+    },
+  );
+  handle(workspaceChannels.favorite, devUrl, async (args): Promise<boolean> => {
+    if (args.length !== 3 || typeof args[2] !== "boolean")
+      throw new Error("A card and a state are required");
+    const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+    return setFavorite(await authorizedRecord(), workspaceId, cardId, args[2]);
+  });
+  handle(
+    workspaceChannels.attach,
+    devUrl,
+    async (args): Promise<BoardAttachment> => {
+      if (args.length !== 3) throw new Error("A card and a file are required");
+      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      return attachFile(
+        await authorizedRecord(),
+        workspaceId,
+        cardId,
+        parseAttachmentDraft(args[2]),
+      );
+    },
+  );
+  handle(workspaceChannels.detach, devUrl, async (args): Promise<void> => {
+    const [workspaceId, cardId, attachmentId] = requireId(args, 3);
+    return detachFile(
+      await authorizedRecord(),
+      workspaceId,
+      cardId,
+      attachmentId,
+    );
+  });
   handle(workspaceChannels.archive, devUrl, async (args): Promise<void> => {
     const [workspaceId, cardId] = requireId(args, 2);
     return archiveCard(await authorizedRecord(), workspaceId, cardId);

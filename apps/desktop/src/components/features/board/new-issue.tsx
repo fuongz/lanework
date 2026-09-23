@@ -6,13 +6,15 @@ import {
   PriorityIcon,
   StatusIcon,
 } from "#/components/shared/board/glyphs";
+import { LabelChip } from "#/components/shared/board/label-chip";
+import { LabelPicker } from "#/components/shared/board/label-picker";
 import {
   NONE,
   PRIORITY_LABEL,
   RAIL,
   Row,
 } from "#/components/shared/board/properties";
-import { TagsInput } from "#/components/shared/board/tags-input";
+import { MarkdownEditor } from "#/components/shared/common/markdown-editor";
 import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
 import {
@@ -24,7 +26,6 @@ import {
 } from "#/components/ui/select";
 import { categoryOf, columnOf } from "#/lib/board-view";
 import { useBoard } from "#/stores/board";
-import { MarkdownEditor } from "./markdown-editor";
 
 /**
  * Compose one issue.
@@ -286,10 +287,32 @@ export function NewIssue() {
             </Select>
           </Row>
 
-          <Row label="Tags">
-            {/* The same control the detail rail carries — a card's tags are the
-                same thing whether it exists yet or not. */}
-            <TagsInput tags={tags} onChange={setTags} disabled={stale} />
+          <Row label="Labels">
+            {/* ⚠️ The same control AND the same word the detail rail uses. A
+                card's labels are the same thing whether it exists yet or not,
+                and the two rails are read as one panel by anyone who creates a
+                card and then opens it — a field that changes name between them
+                is a field they look for twice. */}
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+              {tags.map((tag) => (
+                <LabelChip
+                  key={tag}
+                  tag={tag}
+                  labels={view?.labels ?? []}
+                  onRemove={
+                    stale
+                      ? undefined
+                      : () => setTags(tags.filter((entry) => entry !== tag))
+                  }
+                />
+              ))}
+              <LabelPicker
+                tags={tags}
+                labels={view?.labels ?? []}
+                disabled={stale}
+                onChange={setTags}
+              />
+            </div>
           </Row>
 
           {/* ⚠️ Said in the rail rather than discovered afterwards. Without a

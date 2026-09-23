@@ -72,10 +72,28 @@ function createWindow() {
 app
   .whenReady()
   .then(() => {
+    /**
+     * Everything is refused except writing text to the clipboard.
+     *
+     * ⚠️ `clipboard-sanitized-write` is what `navigator.clipboard.writeText`
+     * asks for, and a blanket `false` here is not a no-op: it makes every Copy
+     * button in the app REJECT SILENTLY. That is how the device-code copy on
+     * the GitHub connect panel shipped doing nothing at all.
+     *
+     * ⚠️ Sanitized WRITE, and only that. It cannot read what is already on the
+     * clipboard — `clipboard-read` stays refused with the rest — so this hands
+     * out the ability to put a filename somewhere the user asked for it, and
+     * nothing else. Camera, microphone, geolocation, notifications and the
+     * clipboard's contents are all still denied.
+     */
+    const allowed = (permission: string) =>
+      permission === "clipboard-sanitized-write";
     session.defaultSession.setPermissionRequestHandler(
-      (_contents, _permission, callback) => callback(false),
+      (_contents, permission, callback) => callback(allowed(permission)),
     );
-    session.defaultSession.setPermissionCheckHandler(() => false);
+    session.defaultSession.setPermissionCheckHandler((_contents, permission) =>
+      allowed(permission),
+    );
     registerAppProtocol(join(__dirname, "../../client"));
     handle(channels.appInfo, devUrl, (args): AppInfo => {
       if (args.length) throw new Error("This operation takes no arguments");

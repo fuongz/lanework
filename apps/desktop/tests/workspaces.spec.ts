@@ -310,8 +310,14 @@ test("a service error is told apart from an empty account, and a bad selection k
     // ⚠️ The failure is the whole screen now, not a banner on one — so it is
     // addressed by what it SAYS rather than by `role="alert"`, which belongs to
     // a message interrupting something that still works.
-    await expect(page.getByText("Could not load your projects")).toBeVisible();
+    //
+    // ⚠️ The PROJECT's failure, and the project's URL, rather than the picker's.
+    // A reload with a project open used to be answered by sending somebody to
+    // the list of projects — which is built from the list that just failed, so
+    // it could not draw either, and it navigated back the moment it could.
+    await expect(page.getByText("Could not open this project")).toBeVisible();
     await expect(page.getByText(/HTTP 503/)).toBeVisible();
+    expect(page.url()).toContain("/w/lanework/issues");
     plane.setWorkspaceResponse(200);
     plane.setWorkspaces(workspaces);
     await page.reload();
@@ -667,7 +673,13 @@ test("opening a workspace shows its cloud board, and a tick carries the revision
     plane.setChecklistConflict(false);
 
     // Back on the board, a move is one request and the card changes lane.
-    await page.getByRole("link", { name: "Issues", exact: true }).click();
+    // ⚠️ The card's breadcrumb names the PROJECT, not "Issues" — it reads
+    // "Cloud project › FE-01", the way the design draws it. The sidebar's own
+    // Issues link carries a count in its accessible name, so it is not an exact
+    // match for "Issues" either.
+    await page
+      .getByRole("link", { name: "Cloud project", exact: true })
+      .click();
     await page.getByRole("link", { name: "Board", exact: true }).click();
     await page
       .getByRole("combobox", { name: /^Move Cache the composer input/ })
@@ -1106,10 +1118,13 @@ test("an issue is written on its own page, and the board mints its key", async (
     await page.getByRole("option", { name: "High" }).click();
     await page.getByRole("combobox", { name: "Status" }).click();
     await page.getByRole("option", { name: "In Progress" }).click();
-    // ⚠️ One `fill` of "ui, electron" becomes TWO chips, not one tag with a
+    // ⚠️ One entry of "ui, electron" becomes TWO chips, not one tag with a
     // comma in it. `normalizeTag` turns spaces into hyphens and leaves commas
     // alone, so a field that took the whole string would have made `ui,-electron`.
-    await page.getByRole("textbox", { name: "Tags" }).fill("ui, electron");
+    await page.getByRole("button", { name: "Add label" }).click();
+    await page.getByRole("textbox", { name: "New label" }).fill("ui, electron");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Remove ui" })).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Remove electron" }),
@@ -1121,7 +1136,12 @@ test("an issue is written on its own page, and the board mints its key", async (
     // ⚠️ It lands ON the card it just made, addressed by the key the BOARD
     // minted — `FE-02`, the second frontend card. Following a card with no key
     // there would land on "No card called …", which is why the page checks.
-    await expect(page.getByText("FE-02", { exact: true })).toBeVisible();
+    // ⚠️ `.first()`: the key is in the breadcrumb AND at the top of the
+    // properties rail, which is deliberate — the rail's header is where the
+    // copy-id and copy-branch buttons hang off it.
+    await expect(
+      page.getByText("FE-02", { exact: true }).first(),
+    ).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Card title" })).toHaveValue(
       "Composer lands with a key",
     );
@@ -1138,10 +1158,10 @@ test("an issue is written on its own page, and the board mints its key", async (
     await expect(page.getByRole("combobox", { name: "Status" })).toContainText(
       "In Progress",
     );
-    // ⚠️ Chips on the detail rail, not the comma-separated string the composer
-    // sent. The two fields are different controls on purpose — one composes a
-    // card, the other edits one — and this is where the board's own answer
-    // shows up as things rather than as text.
+    // ⚠️ Chips on the detail rail, read back off the BOARD rather than off the
+    // form that has since been unmounted. The control is the same one the
+    // composer carries — labels are one field with one control on both rails —
+    // so this is the board's own answer, not the draft's.
     await expect(page.getByRole("button", { name: "Remove ui" })).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Remove electron" }),
@@ -1223,9 +1243,15 @@ test("the description is a markdown editor: lists continue, ⌘↵ saves, Escape
   }
 });
 
-test("tags on a card are chips: entered one at a time, removed one at a time", async () => {
+test("labels are picked from the board's vocabulary, and free text still lands", async () => {
+  // ⚠️ Driven on the NEW ISSUE page, where the same control sits. Labels are one
+  // field with one control on both rails — `properties.tsx` states why — so this
+  // covers the composer and `issue-detail.spec.ts` covers the card that exists.
   const plane = await startStubPlane({ workspaces });
-  plane.setBoard("ws-cloud-project", bigBoard(2));
+  plane.setBoard("ws-cloud-project", {
+    ...bigBoard(2),
+    labels: [{ key: "ui-polish", name: "UI Polish", tone: "violet" }],
+  });
   const profile = await mkdtemp(join(tmpdir(), "lanew-tags-"));
   const home = join(profile, "home");
   await seedCredential(home, plane.origin);
@@ -1238,55 +1264,38 @@ test("tags on a card are chips: entered one at a time, removed one at a time", a
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await switchTo(page, "Cloud project");
-    await page.getByRole("link", { name: /FE-01/ }).first().click();
+    await page.getByRole("button", { name: /^New issue/ }).click();
 
-    const field = page.getByRole("textbox", { name: "Tags" });
+    // A label the board has named is picked, and the chip says its NAME.
+    await page.getByRole("button", { name: "Add label" }).click();
+    await page.getByRole("menuitem", { name: "UI Polish" }).click();
+    await expect(
+      page.getByRole("button", { name: "Remove UI Polish" }),
+    ).toBeVisible();
+
+    // ⚠️ And free text still lands, because the vocabulary is a PALETTE rather
+    // than a whitelist — the service accepts any tag, and a picker that only
+    // offered the named ones would make every other tag unreachable.
+    //
+    // ⚠️ The chip carries what the BOARD will store, not what was typed: a
+    // comma ends a tag, which is how people type a list, and `normalizeTag` is
+    // the same mirror the main process compares against.
+    const field = page.getByRole("textbox", { name: "New label" });
     await field.click();
-    await page.keyboard.type("UI Polish");
+    await page.keyboard.type("Electron App,");
     await page.keyboard.press("Enter");
-
-    // ⚠️ The chip carries what the BOARD will store, not what was typed. The
-    // normalizer is the same mirror the main process compares against, so a
-    // card cannot show "UI Polish" over a tag stored as `ui-polish`.
     await expect(
-      page.getByRole("button", { name: "Remove ui-polish" }),
+      page.getByRole("button", { name: "Remove electron-app" }),
     ).toBeVisible();
 
-    // Entered, not merely typed: it went to the board on Enter.
-    expect(
-      plane.calls.filter((call) =>
-        call.startsWith("PATCH /v1/boards/ws-cloud-project/items/card-0"),
-      ),
-    ).toHaveLength(1);
-
-    // A comma ends a tag too — it is how people type a list.
-    await page.keyboard.type("electron,");
+    // The × takes one back off and leaves the other alone.
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Remove UI Polish" }).click();
     await expect(
-      page.getByRole("button", { name: "Remove electron" }),
-    ).toBeVisible();
-
-    // ⚠️ Clicking the field must not DELETE anything. A `label` with no `for`
-    // controls its first labelable descendant — and the first one here is a
-    // chip's × button, so clicking the box handed the click to it and a tag
-    // vanished for having been aimed at.
-    // The BOX, not the input inside it — its padding is what a label forwards.
-    const box = field.locator("..");
-    await box.click({ position: { x: 3, y: 3 } });
-    await expect(field).toBeFocused();
-    await expect(
-      page.getByRole("button", { name: "Remove ui-polish" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Remove electron" }),
-    ).toBeVisible();
-
-    // And the × takes one back off.
-    await page.getByRole("button", { name: "Remove ui-polish" }).click();
-    await expect(
-      page.getByRole("button", { name: "Remove ui-polish" }),
+      page.getByRole("button", { name: "Remove UI Polish" }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Remove electron" }),
+      page.getByRole("button", { name: "Remove electron-app" }),
     ).toBeVisible();
 
     expect(errors).toEqual([]);
@@ -2345,6 +2354,57 @@ test("a stopped run keeps what landed, and a refused seal names both numbers", a
     ).toBeVisible();
     // Still not migrated, so the panel is still offering the cutover.
     await expect(page.getByText("This project on this machine")).toBeVisible();
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a project URL whose list will not load asks once and stays put", async () => {
+  const plane = await startStubPlane({ workspaces });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-workspace-loop-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await expect(page.getByRole("list", { name: "Projects" })).toBeVisible();
+
+    const reads = () =>
+      plane.calls.filter((call) => call === "GET /v1/sync/state").length;
+
+    plane.setWorkspaceResponse(500);
+    const before = reads();
+    await page.goto("app://lanework/w/lanework/issues");
+
+    // ⚠️ ONE read for one navigation. It used to be three: the layout hydrated,
+    // `open` hydrated again because the failed list had no such slug, then the
+    // picker it bounced to hydrated a third time — and main logs every one of
+    // them as an unhandled handler error.
+    await expect(page.getByText("Could not open this project")).toBeVisible();
+    await expect(page.getByText(/HTTP 500/)).toBeVisible();
+    expect(reads() - before).toBe(1);
+
+    // ⚠️ And it STAYS on the project's URL. A list that failed to load is not
+    // evidence the project is gone, so sending somebody to the picker is wrong
+    // twice over: the picker is built from the same list, and it navigates
+    // straight back — a loop that sat on "Opening your project…" and asked
+    // again every lap.
+    expect(page.url()).toContain("/w/lanework/issues");
+    await page.waitForTimeout(1500);
+    expect(reads() - before).toBe(1);
+    expect(page.url()).toContain("/w/lanework/issues");
+
+    // Try again is the way out, and it is the only thing that asks again.
+    plane.setWorkspaceResponse(200);
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(
+      page.getByRole("button", { name: "Switch project — currently Lanework" }),
+    ).toBeVisible();
   } finally {
     await app.close();
     await plane.close();

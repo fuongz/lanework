@@ -44,7 +44,6 @@ export function IssueMenu({
   render: ReactElement;
   children: ReactNode;
 }) {
-  const archiveCard = useBoard((state) => state.archiveCard);
   const stale = useBoard((state) => state.view?.stale ?? false);
   const busy = useBoard((state) => state.busy);
   const [confirming, setConfirming] = useState(false);
@@ -72,44 +71,69 @@ export function IssueMenu({
         </ContextMenuContent>
       </ContextMenu>
 
-      <AlertDialog
+      <DeleteIssueDialog
+        card={card}
         open={confirming}
-        onOpenChange={(open) => !open && setConfirming(false)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {name}?</AlertDialogTitle>
-            {/* ⚠️ It says what actually happens, which is not quite "delete".
+        onOpenChange={setConfirming}
+      />
+    </>
+  );
+}
+
+/**
+ * The confirmation, on its own so two menus can share it.
+ *
+ * ⚠️ Extracted rather than copied when the detail page grew a `…` button. Two
+ * dialogs for one destructive action drift a sentence at a time, and the
+ * sentence here is the only place a person is told that nothing in this app can
+ * bring the card back.
+ */
+export function DeleteIssueDialog({
+  card,
+  open,
+  onOpenChange,
+}: {
+  card: BoardCard;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const archiveCard = useBoard((state) => state.archiveCard);
+  const name = card.taskId ?? card.title;
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {name}?</AlertDialogTitle>
+          {/* ⚠️ It says what actually happens, which is not quite "delete".
                 The service archives the card — a tombstone with its own change
                 seq, which is how every other machine is told it went — but
                 nothing in this app can bring one back, so from here it is gone.
                 Promising an undo this app cannot perform would be worse than
                 the plain sentence. */}
-            <AlertDialogDescription>
-              “{card.title}” comes off the board for everyone on this account.
-              The service keeps an archived copy, but nothing in this app can
-              restore it.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              // The registry button pairs `border border-transparent` with
-              // `bg-clip-padding`, so the fill stops short of the edge and the
-              // popup shows through as a 1px ring — the same `border-0` every
-              // other destructive confirmation in this app carries.
-              className="border-0"
-              onClick={() => {
-                setConfirming(false);
-                void archiveCard(card.id);
-              }}
-            >
-              Delete card
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+          <AlertDialogDescription>
+            “{card.title}” comes off the board for everyone on this account. The
+            service keeps an archived copy, but nothing in this app can restore
+            it.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            // The registry button pairs `border border-transparent` with
+            // `bg-clip-padding`, so the fill stops short of the edge and the
+            // popup shows through as a 1px ring — the same `border-0` every
+            // other destructive confirmation in this app carries.
+            className="border-0"
+            onClick={() => {
+              onOpenChange(false);
+              void archiveCard(card.id);
+            }}
+          >
+            Delete card
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

@@ -71,7 +71,7 @@ export function AppSidebar() {
       : "";
 
   return (
-    <aside className="app-sidebar flex w-60 shrink-0 flex-col px-2.5">
+    <aside className="app-sidebar flex min-h-0 flex-1 flex-col px-2.5">
       {/* Clears the native traffic lights and gives the window a drag handle. */}
       <div className="app-sidebar-titlebar shrink-0" aria-hidden="true" />
       <ProjectSwitcher />

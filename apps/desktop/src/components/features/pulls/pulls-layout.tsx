@@ -1,5 +1,13 @@
 import { Outlet, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { usePanelRef } from "react-resizable-panels";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  usePersistedLayout,
+} from "#/components/ui/resizable";
+import { useLayout } from "#/stores/layout";
 import { usePulls } from "#/stores/pulls";
 import { PullsList } from "./pulls-list";
 
@@ -20,6 +28,14 @@ export function PullsLayout() {
   const open = usePulls((state) => state.open);
   const refresh = usePulls((state) => state.refresh);
   const watch = usePulls((state) => state.watch);
+  const focusMode = useLayout((state) => state.focusMode);
+  const exitFocusMode = useLayout((state) => state.exitFocusMode);
+  const listRef = usePanelRef();
+
+  const { defaultLayout, onLayoutChanged } = usePersistedLayout(
+    "lanework:pulls",
+    ["list", "detail"],
+  );
 
   useEffect(() => {
     void open(slug, status);
@@ -33,10 +49,48 @@ export function PullsLayout() {
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
+  // ⚠️ Focus mode is left behind when this screen is. It collapses the rail,
+  // which lives in the other panel group and has no control of its own — so a
+  // mode that outlived the screen that offers the toggle would strand somebody
+  // on Issues with no sidebar and nothing to click.
+  useEffect(() => exitFocusMode, [exitFocusMode]);
+
+  useEffect(() => {
+    const panel = listRef.current;
+    if (!panel) return;
+    if (focusMode) panel.collapse();
+    else panel.expand();
+  }, [focusMode, listRef]);
+
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden">
-      <PullsList />
-      <Outlet />
-    </div>
+    <ResizablePanelGroup
+      id="lanework:pulls"
+      defaultLayout={defaultLayout}
+      onLayoutChanged={onLayoutChanged}
+    >
+      <ResizablePanel
+        id="list"
+        panelRef={listRef}
+        defaultSize="320px"
+        minSize="16%"
+        maxSize="40%"
+        collapsible
+        collapsedSize="0px"
+        groupResizeBehavior="preserve-pixel-size"
+      >
+        <PullsList />
+      </ResizablePanel>
+      <ResizableHandle aria-label="Resize pull request list" />
+
+      {/* ⚠️ ONE panel for the whole pull request, and the file tree is no longer
+          a sibling of it. The tree used to be a full-height column of the window
+          — which put it alongside the pull request's TITLE, a row that says
+          nothing about files. It is now a panel inside the detail pane, below
+          that title row, so the header spans the width it describes and the
+          tree begins where the diff does. See `PullDetail`. */}
+      <ResizablePanel id="detail" minSize="40%">
+        <Outlet />
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

@@ -216,6 +216,44 @@ export function checklistProgress(
 }
 
 /**
+ * "8 days ago", "just now" — an age written out, for prose.
+ *
+ * ⚠️ A second formatter beside `shortAge`, not a replacement for it. They serve
+ * two different jobs: a lane row has space for `3d` and nothing more, while an
+ * activity line is a SENTENCE — "decio created the issue. 3d" does not read as
+ * one. `Intl.RelativeTimeFormat` so the wording follows the user's locale
+ * instead of an English template.
+ *
+ * ⚠️ `now` is a parameter for the same reason it is on `shortAge`: a function
+ * that reads the clock cannot be tested at the boundary where this kind of
+ * formatter goes wrong.
+ */
+export function relativeTime(iso: string | null, now: number): string {
+  if (!iso) return "";
+  const at = new Date(iso).getTime();
+  if (Number.isNaN(at)) return "";
+  const seconds = Math.round((now - at) / 1000);
+  // Clock skew between this machine and the service can put an event a few
+  // seconds in the future; "in 4 seconds" about something that just happened is
+  // worse than rounding it to now.
+  if (seconds < 45) return "just now";
+  const format = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  const scales: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["year", 31_536_000],
+    ["month", 2_592_000],
+    ["week", 604_800],
+    ["day", 86_400],
+    ["hour", 3600],
+    ["minute", 60],
+  ];
+  for (const [unit, size] of scales) {
+    if (seconds >= size)
+      return format.format(-Math.floor(seconds / size), unit);
+  }
+  return "just now";
+}
+
+/**
  * "2h", "3d", "just now" — the age of a card at a glance.
  *
  * ⚠️ `now` is a parameter rather than `Date.now()`. A function that reads the

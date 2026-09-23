@@ -1,8 +1,16 @@
 import {
+  type CheckState,
+  type CommitDiff,
   type FileText,
   type GitInstallation,
+  MAX_PULL_CHECKS,
   MAX_PULL_FILES,
   MAX_REPO_OPTIONS,
+  MAX_TIMELINE_ITEMS,
+  type PullActivity,
+  type PullCheck,
+  type PullChecks,
+  type PullCommit,
   type PullDetail,
   type PullFile,
   type PullFileStatus,
@@ -10,6 +18,7 @@ import {
   type PullState,
   type PullStatus,
   type PullsView,
+  type PullTimelineItem,
   type RepoOption,
   type RepoOptions,
   type RepoRef,
@@ -613,6 +622,111 @@ export async function fetchPull(
   };
 }
 
+/**
+ * How many commits of one pull request this app lists.
+ *
+ * ⚠️ A cap, and a menu-sized one. This feeds a dropdown somebody scrolls with a
+ * pointer; a branch with four hundred commits does not become more reviewable
+ * for having all four hundred in a list, and the pull request's own diff is
+ * what that person wants anyway.
+ */
+const MAX_PULL_COMMITS = 250;
+
+/**
+ * The commits in a pull request, oldest first.
+ *
+ * ⚠️ GitHub's own order, not sorted here. REST returns them in topological
+ * order, which is the order they were written — re-sorting by date would put a
+ * rebased or cherry-picked commit in a position its branch never had.
+ */
+export async function fetchPullCommits(
+  token: string,
+  ref: RepoRef,
+  number: number,
+): Promise<PullCommit[]> {
+  const base = `${api()}/repos/${ref.owner}/${ref.repo}/pulls/${number}/commits`;
+  const commits: PullCommit[] = [];
+  for (let page = 1; commits.length < MAX_PULL_COMMITS; page++) {
+    const rows = await json(
+      await request(token, `${base}?per_page=100&page=${page}`),
+    );
+    if (!Array.isArray(rows) || rows.length === 0) break;
+    for (const row of rows) {
+      const commit = toCommit(row);
+      if (commit) commits.push(commit);
+    }
+    if (rows.length < 100) break;
+  }
+  return commits.slice(0, MAX_PULL_COMMITS);
+}
+
+function toCommit(entry: unknown): PullCommit | null {
+  const row = record(entry);
+  const sha = str(row?.sha);
+  if (!sha) return null;
+  const commit = record(row?.commit);
+  const message = str(commit?.message) ?? "";
+  // ⚠️ `commit.author` is who WROTE it and is always present; `author` is the
+  // GitHub account it was matched to and is null for an unmatched email. The
+  // login is the better label when there is one, and the written name is the
+  // only thing there is when there is not.
+  const account = record(row?.author);
+  const written = record(commit?.author);
+  return {
+    sha,
+    shortSha: sha.slice(0, 7),
+    // The subject line. A commit with no message at all still needs a label,
+    // and its sha is already beside it.
+    subject: message.split("\n", 1)[0].trim() || "(no message)",
+    authorLogin: str(account?.login) ?? str(written?.name),
+    committedAt: str(written?.date) ?? "",
+  };
+}
+
+/**
+ * One commit's diff, against its parent.
+ *
+ * ⚠️ `/commits/{sha}`, which answers with the same `files[]` shape the pull
+ * request's file list uses — so `toFile` is shared and the renderer cannot tell
+ * the two apart. A `compare` call would give a different shape for the same
+ * information and a second parser to keep in step.
+ */
+export async function fetchCommitDiff(
+  token: string,
+  ref: RepoRef,
+  sha: string,
+): Promise<CommitDiff> {
+  const url = `${api()}/repos/${ref.owner}/${ref.repo}/commits/${encodeURIComponent(sha)}`;
+  const data = record(await json(await request(token, url)));
+  if (!data)
+    throw new GitHubError(0, "GitHub returned an unreadable response.");
+
+  const headSha = str(data.sha) ?? sha;
+  const parents = Array.isArray(data.parents) ? data.parents : [];
+  // ⚠️ The FIRST parent. On a merge commit the second parent is the branch that
+  // was merged in, and diffing against it would present the whole of the other
+  // side as this commit's work.
+  const baseSha = str(record(parents[0])?.sha) ?? "";
+
+  const rows = Array.isArray(data.files) ? data.files : [];
+  const files: PullFile[] = [];
+  for (const row of rows) {
+    const file = toFile(row);
+    if (file) files.push(file);
+  }
+
+  return {
+    sha: headSha,
+    headSha,
+    baseSha,
+    files: files.slice(0, MAX_PULL_FILES),
+    // ⚠️ GitHub itself caps this response at 300 files and says so only by
+    // sending 300; there is no flag. The cap is the same number this app uses,
+    // so a commit at it is reported as truncated rather than as complete.
+    truncated: files.length >= MAX_PULL_FILES,
+  };
+}
+
 /** A file big enough that reading it whole is not worth it for context lines. */
 const MAX_BLOB_BYTES = 2 * 1024 * 1024;
 
@@ -685,5 +799,235 @@ export async function submitReview(
       method: "POST",
       body: JSON.stringify({ event: verdict, body: body.trim() || undefined }),
     },
+  );
+}
+
+/**
+ * A pull request's timeline, its comments and its CI, in one query.
+ *
+ * ⚠️ ONE request rather than three REST calls (`/issues/{n}/timeline`,
+ * `/issues/{n}/comments`, `/commits/{sha}/check-runs`). All three live on the
+ * same GraphQL `PullRequest`, and this screen is behind an hourly budget.
+ *
+ * ⚠️ `timelineItems` asks for the LAST hundred. A pull request open for months
+ * has its interesting end at the recent one, and paging forwards from the day
+ * it opened would spend requests arriving there.
+ *
+ * ⚠️ Only four item types are requested. Asking for the rest and dropping them
+ * in the parser would pay for them in the response; a dependabot pull request's
+ * timeline is mostly `labeled` and `review_requested`.
+ */
+const ACTIVITY_QUERY = `query($owner:String!,$name:String!,$number:Int!,$items:Int!,$checks:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      createdAt
+      author{login}
+      timelineItems(last:$items,itemTypes:[ISSUE_COMMENT,PULL_REQUEST_REVIEW,PULL_REQUEST_COMMIT]){
+        totalCount
+        nodes{
+          __typename
+          ... on IssueComment{id createdAt body author{login}}
+          ... on PullRequestReview{id createdAt body state author{login}}
+          ... on PullRequestCommit{id commit{committedDate author{user{login}}}}
+        }
+      }
+      commits(last:1){
+        nodes{
+          commit{
+            statusCheckRollup{
+              state
+              contexts(first:$checks){
+                totalCount
+                nodes{
+                  __typename
+                  ... on CheckRun{id name conclusion status detailsUrl}
+                  ... on StatusContext{id context state targetUrl}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+/** GitHub's two check vocabularies, narrowed to the four a reviewer acts on. */
+function toCheckState(raw: string | null): CheckState {
+  switch ((raw ?? "").toUpperCase()) {
+    case "SUCCESS":
+      return "success";
+    case "FAILURE":
+    case "ERROR":
+    case "TIMED_OUT":
+    case "STARTUP_FAILURE":
+      return "failure";
+    case "QUEUED":
+    case "IN_PROGRESS":
+    case "PENDING":
+    case "WAITING":
+    case "REQUESTED":
+      return "pending";
+    default:
+      // ACTION_REQUIRED, CANCELLED, NEUTRAL, SKIPPED, STALE, EXPECTED — none of
+      // them is a pass or a failure, and none is still running.
+      return "neutral";
+  }
+}
+
+function toChecks(commitNode: Record<string, unknown> | null): PullChecks {
+  const rollup = record(record(commitNode?.commit)?.statusCheckRollup);
+  // ⚠️ No rollup means NO CHECKS, not a failed read — see `PullChecks.state`.
+  if (!rollup) return { state: null, checks: [], truncated: false };
+
+  const contexts = record(rollup.contexts);
+  const nodes = Array.isArray(contexts?.nodes) ? contexts.nodes : [];
+  const checks: PullCheck[] = [];
+  for (const raw of nodes) {
+    const node = record(raw);
+    if (!node) continue;
+    const id = str(node.id);
+    if (id === null) continue;
+    if (node.__typename === "CheckRun") {
+      // A run that has not finished has no conclusion; its `status` is what
+      // says it is still going.
+      const conclusion = str(node.conclusion);
+      checks.push({
+        id,
+        name: str(node.name) ?? "Check",
+        state: toCheckState(conclusion ?? str(node.status)),
+        url: str(node.detailsUrl),
+      });
+      continue;
+    }
+    if (node.__typename === "StatusContext")
+      checks.push({
+        id,
+        name: str(node.context) ?? "Status",
+        state: toCheckState(str(node.state)),
+        url: str(node.targetUrl),
+      });
+  }
+  return {
+    state: toCheckState(str(rollup.state)),
+    checks,
+    truncated: num(contexts?.totalCount) > checks.length,
+  };
+}
+
+export async function fetchPullActivity(
+  token: string,
+  ref: RepoRef,
+  number: number,
+): Promise<PullActivity> {
+  const data = await graphql(token, ACTIVITY_QUERY, {
+    owner: ref.owner,
+    name: ref.repo,
+    number,
+    items: MAX_TIMELINE_ITEMS,
+    checks: MAX_PULL_CHECKS,
+  });
+
+  const pull = record(record(data.repository)?.pullRequest);
+  if (!pull) throw new GitHubError(404, "That pull request no longer exists.");
+
+  const items: PullTimelineItem[] = [];
+  // ⚠️ Synthesised, not read from the timeline. "Opened" is not a timeline
+  // item on GitHub — it is the pull request's own `createdAt` — and a timeline
+  // that began at the first comment would read as if it had no beginning.
+  items.push({
+    kind: "opened",
+    id: `opened-${number}`,
+    actor: str(record(pull.author)?.login),
+    at: str(pull.createdAt) ?? new Date().toISOString(),
+  });
+
+  const timeline = record(pull.timelineItems);
+  const nodes = Array.isArray(timeline?.nodes) ? timeline.nodes : [];
+  for (const raw of nodes) {
+    const node = record(raw);
+    if (!node) continue;
+    const id = str(node.id);
+    if (id === null) continue;
+
+    if (node.__typename === "IssueComment") {
+      items.push({
+        kind: "comment",
+        id,
+        actor: str(record(node.author)?.login),
+        at: str(node.createdAt) ?? "",
+        body: str(node.body) ?? "",
+      });
+      continue;
+    }
+
+    if (node.__typename === "PullRequestReview") {
+      items.push({
+        kind: "review",
+        id,
+        actor: str(record(node.author)?.login),
+        at: str(node.createdAt) ?? "",
+        verdict: str(node.state),
+        body: str(node.body) ?? "",
+      });
+      continue;
+    }
+
+    if (node.__typename === "PullRequestCommit") {
+      const commit = record(node.commit);
+      const at = str(commit?.committedDate) ?? "";
+      const actor = str(record(record(commit?.author)?.user)?.login);
+      // ⚠️ Folded into the PREVIOUS entry when that entry is also commits, so a
+      // push of twelve becomes one `12 commits` row. Without this a dependabot
+      // pull request's timeline is a wall of identical lines, and the commit
+      // menu in the diff header is where individual commits are chosen anyway.
+      const last = items[items.length - 1];
+      if (last?.kind === "commits") {
+        last.count += 1;
+        last.at = at || last.at;
+        continue;
+      }
+      items.push({ kind: "commits", id, actor, at, count: 1 });
+    }
+    // Anything else is skipped rather than drawn as a blank row.
+  }
+
+  // The rollup hangs off the HEAD commit, which is why the query asks for
+  // `commits(last:1)` — checks belong to what is currently proposed, not to
+  // whatever the branch looked like when it opened.
+  const headNodes = record(pull.commits)?.nodes;
+  const head = Array.isArray(headNodes) ? record(headNodes[0]) : null;
+
+  return {
+    number,
+    items,
+    truncated: num(timeline?.totalCount) > nodes.length,
+    checks: toChecks(head),
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Leave an ordinary comment on a pull request.
+ *
+ * ⚠️ The ISSUES endpoint, deliberately. A pull request is an issue to this API,
+ * and `/pulls/{n}/reviews` — the one `submitReview` uses — would attach a
+ * verdict that can block a merge. Two different acts, two different calls.
+ */
+export async function addComment(
+  token: string,
+  ref: RepoRef,
+  number: number,
+  body: string,
+): Promise<void> {
+  const text = body.trim();
+  // Said here rather than passed through as GitHub's 422: an empty comment is
+  // a mistake the screen can name before it spends a request on it.
+  if (!text) throw new GitHubError(422, "A comment needs something in it.");
+
+  await request(
+    token,
+    `${api()}/repos/${ref.owner}/${ref.repo}/issues/${number}/comments`,
+    { method: "POST", body: JSON.stringify({ body: text }) },
   );
 }

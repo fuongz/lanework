@@ -1,5 +1,9 @@
 import {
+  type BoardActivity,
+  type BoardActivityPage,
   type BoardAssignees,
+  type BoardAttachment,
+  type BoardAttachmentDraft,
   type BoardCard,
   type BoardCardDraft,
   type BoardCardPatch,
@@ -9,6 +13,8 @@ import {
   type BoardChecklistItem,
   type BoardChecklistProgress,
   type BoardColumn,
+  type BoardLabel,
+  type BoardMember,
   type BoardPlacement,
   type BoardWrite,
   normalizeTag,
@@ -212,7 +218,44 @@ export function parseCard(value: unknown): BoardCard | null {
     // it has no decisions, which is the exact bug the comment above records.
     checklistProgress: parseProgress(row.checklistProgress),
     assignees: "assignees" in row ? parseAssignees(row.assignees) : null,
+    // ⚠️ Every one of these five keys on the same rule as `checklist` above:
+    // PRESENCE decides, not truthiness. A list read serializes without parts, so
+    // reading an absent `subscribed` as `false` would draw "Subscribe" on a card
+    // the reader is in fact following — and one click would then unfollow it.
+    subscribers: "subscribers" in row ? strings(row.subscribers) : null,
+    subscribed: "subscribed" in row ? row.subscribed === true : null,
+    favorite: "favorite" in row ? row.favorite === true : null,
+    commentCount:
+      typeof row.commentCount === "number" &&
+      Number.isInteger(row.commentCount) &&
+      row.commentCount >= 0
+        ? row.commentCount
+        : null,
+    attachments:
+      "attachments" in row ? parseAttachments(row.attachments) : null,
   };
+}
+
+function parseAttachments(value: unknown): BoardAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const row = entry as Record<string, unknown>;
+    if (!text(row.id) || !text(row.name) || !text(row.reference)) return [];
+    return [
+      {
+        id: row.id,
+        name: row.name,
+        reference: row.reference,
+        mimeType: text(row.mimeType) ? row.mimeType : null,
+        sizeBytes:
+          typeof row.sizeBytes === "number" && Number.isFinite(row.sizeBytes)
+            ? row.sizeBytes
+            : null,
+        sourceKind: text(row.sourceKind) ? row.sourceKind : null,
+      },
+    ];
+  });
 }
 
 /**
@@ -239,6 +282,8 @@ function parseProgress(value: unknown): BoardChecklistProgress | null {
 export function parseBoardConfig(value: unknown): {
   columns: BoardColumn[];
   categories: BoardCategory[];
+  labels: BoardLabel[];
+  members: BoardMember[];
   migratedAt: string | null;
 } {
   const board =
@@ -286,9 +331,47 @@ export function parseBoardConfig(value: unknown): {
     ];
   });
 
+  // ⚠️ An empty list here is a perfectly healthy board, unlike `columns` above:
+  // a board nobody has given colours to still draws every tag, in neutral.
+  const labels = (Array.isArray(board.labels) ? board.labels : []).flatMap(
+    (entry, index) => {
+      if (!entry || typeof entry !== "object") return [];
+      const row = entry as Record<string, unknown>;
+      if (!text(row.key)) return [];
+      return [
+        {
+          key: row.key,
+          name: text(row.name) ? row.name : row.key,
+          tone: text(row.tone) ? row.tone : "neutral",
+          position: typeof row.position === "number" ? row.position : index,
+        },
+      ];
+    },
+  );
+
+  const members = (Array.isArray(board.members) ? board.members : []).flatMap(
+    (entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const row = entry as Record<string, unknown>;
+      if (!text(row.userId)) return [];
+      return [
+        {
+          userId: row.userId,
+          // The id is a worse name than a name and a better one than nothing —
+          // it is exactly what the audit log says happened.
+          name: text(row.name) ? row.name : row.userId,
+          image: text(row.image) ? row.image : null,
+          role: text(row.role) ? row.role : "member",
+        },
+      ];
+    },
+  );
+
   return {
     columns: [...columns].sort((a, b) => a.position - b.position),
     categories,
+    labels: [...labels].sort((a, b) => a.position - b.position),
+    members,
     migratedAt: text(board.migratedAt) ? board.migratedAt : null,
   };
 }
@@ -642,6 +725,273 @@ export async function createCard(
     }),
     draft.tags,
   );
+}
+
+/**
+ * One entry of a card's history, from the merged feed.
+ *
+ * ⚠️ A row this cannot read is DROPPED rather than defaulted. An activity line
+ * is a claim about what somebody did — "decio set priority to Urgent" — and a
+ * half-parsed one would put a sentence on screen that nothing actually says.
+ */
+function parseActivity(value: unknown): BoardActivity | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (!text(row.id) || !text(row.at)) return null;
+
+  if (row.kind === "comment") {
+    return {
+      kind: "comment",
+      id: row.id,
+      authorKind: text(row.authorKind) ? row.authorKind : "user",
+      authorRef: text(row.authorRef) ? row.authorRef : "",
+      authorUserId: text(row.authorUserId) ? row.authorUserId : null,
+      // ⚠️ Null is MEANINGFUL here — a retracted comment — so it is kept rather
+      // than turned into an empty string the thread would render as a blank.
+      body: typeof row.body === "string" ? row.body : null,
+      at: row.at,
+      editedAt: text(row.editedAt) ? row.editedAt : null,
+      deletedAt: text(row.deletedAt) ? row.deletedAt : null,
+    };
+  }
+  if (row.kind !== "audit" || !text(row.verb)) return null;
+  return {
+    kind: "audit",
+    id: row.id,
+    seq: typeof row.seq === "number" ? row.seq : 0,
+    verb: row.verb,
+    actorKind: text(row.actorKind) ? row.actorKind : "user",
+    actorUserId: text(row.actorUserId) ? row.actorUserId : null,
+    actorMachineId: text(row.actorMachineId) ? row.actorMachineId : null,
+    diff:
+      row.diff && typeof row.diff === "object" && !Array.isArray(row.diff)
+        ? (row.diff as Record<string, unknown>)
+        : null,
+    at: row.at,
+  };
+}
+
+/**
+ * One page of a card's activity, oldest first.
+ *
+ * ⚠️ The cursor is the SERVICE's and travels back verbatim. It is keyed on
+ * `(createdAt, id)` across two tables, so there is nothing here that could
+ * compute the next one — and a client that tried would page itself through the
+ * same stretch of a conversation forever.
+ */
+export async function fetchActivity(
+  record: MachineRecord,
+  workspaceId: string,
+  cardId: string,
+  cursor?: string | null,
+): Promise<BoardActivityPage> {
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/items/${cardId}/activity${
+      cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""
+    }`,
+  );
+  if (!response.ok)
+    throw new Error(
+      `Could not load this card's activity (HTTP ${response.status}). Try again.`,
+    );
+  const payload = (await body(response)) as {
+    events?: unknown[];
+    cursor?: unknown;
+  };
+  return {
+    events: (payload.events ?? []).flatMap((entry) => {
+      const parsed = parseActivity(entry);
+      return parsed ? [parsed] : [];
+    }),
+    cursor: text(payload.cursor) ? payload.cursor : null,
+  };
+}
+
+/**
+ * Say something on a card.
+ *
+ * ⚠️ No `If-Match`, unlike every card edit. A comment is an append: two people
+ * writing at once both succeed, and neither has an earlier version to overwrite.
+ */
+export async function createComment(
+  record: MachineRecord,
+  workspaceId: string,
+  cardId: string,
+  text_: string,
+): Promise<{ id: string }> {
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/items/${cardId}/comments`,
+    { method: "POST", body: JSON.stringify({ body: text_ }) },
+  );
+  if (!response.ok)
+    throw new Error(
+      `Could not post that comment (HTTP ${response.status}). Try again.`,
+    );
+  const payload = (await body(response)) as { comment?: { id?: unknown } };
+  const id = payload.comment?.id;
+  if (!text(id)) throw new Error("The service returned an invalid comment.");
+  return { id };
+}
+
+/** Reword your own comment. The service refuses anybody else's with a 403. */
+export async function editComment(
+  record: MachineRecord,
+  workspaceId: string,
+  cardId: string,
+  commentId: string,
+  text_: string,
+): Promise<void> {
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/items/${cardId}/comments/${commentId}`,
+    { method: "PATCH", body: JSON.stringify({ body: text_ }) },
+  );
+  if (response.status === 403)
+    throw new Error("Only the author can edit that comment.");
+  if (response.status === 409) throw new Error("That comment was deleted.");
+  if (!response.ok)
+    throw new Error(
+      `Could not save that comment (HTTP ${response.status}). Try again.`,
+    );
+}
+
+/** Retract your own comment. A tombstone on the service, not a row removal. */
+export async function deleteComment(
+  record: MachineRecord,
+  workspaceId: string,
+  cardId: string,
+  commentId: string,
+): Promise<void> {
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/items/${cardId}/comments/${commentId}`,
+    { method: "DELETE" },
+  );
+  if (response.status === 403)
+    throw new Error("Only the author can delete that comment.");
+  if (!response.ok)
+    throw new Error(
+      `Could not delete that comment (HTTP ${response.status}). Try again.`,
+    );
+}
+
+/**
+ * Follow or unfollow a card; star or unstar it.
+ *
+ * ⚠️ `PUT`/`DELETE` rather than a toggle, so a retry after a lost response is
+ * harmless. Both answer with the state that now holds, which is what the caller
+ * renders — never the value it asked for.
+ */
+async function setFlag(
+  record: MachineRecord,
+  workspaceId: string,
+  cardId: string,
+  path: "subscription" | "favorite",
+  on: boolean,
+  field: "subscribed" | "favorite",
+  noun: string,
+): Promise<boolean> {
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/items/${cardId}/${path}`,
+    { method: on ? "PUT" : "DELETE" },
+  );
+  if (!response.ok)
+    throw new Error(
+      `Could not ${on ? "" : "un"}${noun} that card (HTTP ${response.status}). Try again.`,
+    );
+  const payload = (await body(response)) as Record<string, unknown>;
+  return typeof payload[field] === "boolean" ? payload[field] : on;
+}
+
+export const setSubscription = (
+  record: MachineRecord,
+  workspaceId: string,
+  cardId: string,
+  subscribed: boolean,
+): Promise<boolean> =>
+  setFlag(
+    record,
+    workspaceId,
+    cardId,
+    "subscription",
+    subscribed,
+    "subscribed",
+    "follow",
+  );
+
+export const setFavorite = (
+  record: MachineRecord,
+  workspaceId: string,
+  cardId: string,
+  favorite: boolean,
+): Promise<boolean> =>
+  setFlag(
+    record,
+    workspaceId,
+    cardId,
+    "favorite",
+    favorite,
+    "favorite",
+    "star",
+  );
+
+/**
+ * Record a file this card refers to.
+ *
+ * ⚠️ METADATA ONLY. Nothing is uploaded and nothing is fetched — the service
+ * stores the reference a caller states and hands it back untouched, so opening
+ * one later is this machine's job.
+ */
+export async function attachFile(
+  record: MachineRecord,
+  workspaceId: string,
+  cardId: string,
+  file: BoardAttachmentDraft,
+): Promise<BoardAttachment> {
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/items/${cardId}/attachments`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name: file.name,
+        reference: file.reference,
+        ...(file.mimeType ? { mimeType: file.mimeType } : {}),
+        ...(typeof file.sizeBytes === "number"
+          ? { sizeBytes: file.sizeBytes }
+          : {}),
+        sourceKind: "desktop",
+      }),
+    },
+  );
+  if (!response.ok)
+    throw new Error(
+      `Could not attach that file (HTTP ${response.status}). Try again.`,
+    );
+  const payload = (await body(response)) as { attachment?: unknown };
+  const [parsed] = parseAttachments([payload.attachment]);
+  if (!parsed) throw new Error("The service returned an invalid attachment.");
+  return parsed;
+}
+
+export async function detachFile(
+  record: MachineRecord,
+  workspaceId: string,
+  cardId: string,
+  attachmentId: string,
+): Promise<void> {
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/items/${cardId}/attachments/${attachmentId}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok)
+    throw new Error(
+      `Could not remove that file (HTTP ${response.status}). Try again.`,
+    );
 }
 
 /**

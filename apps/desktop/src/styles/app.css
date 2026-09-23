@@ -149,6 +149,41 @@
   --tone-emerald: oklch(0.52 0.13 155);
   --tone-teal: oklch(0.52 0.1 185);
   --tone-rose: oklch(0.54 0.2 20);
+
+  /* File-type icon hues, for the `@pierre/trees` icon set the pull-request
+     screen draws — in its file tree AND, through the same sprite, in each
+     diff's file header.
+
+     ⚠️ A SEPARATE palette from `--tone-*`, not an extension of it. The board
+     tones are named by the service (`column.tone`, `category.tone`) and that
+     set is fixed; these thirteen are named by the icon library, which colours
+     JSON and JavaScript differently and would collapse into one amber if it
+     had to borrow from a palette of eight.
+
+     ⚠️ The library's own values are `light-dark()` literals, and this app
+     switches theme with a `.dark` CLASS rather than `color-scheme` — so its
+     palette would be stuck in light mode here (see `use-theme.ts` for why the
+     media query cannot be trusted in this Electron build). Restating the hues
+     as tokens is what makes the dark theme work at all; matching the app's own
+     token discipline is the second reason.
+
+     Same bar as the board tones — a coloured glyph beside a text label, so
+     WCAG's 3:1 for non-text, measured per theme against that theme's page
+     background. Every value is inside sRGB; chroma is capped where the hue ran
+     out of gamut at this lightness rather than left to the browser to clip. */
+  --file-icon-gray: oklch(0.55 0 0); /* 4.85:1 */
+  --file-icon-red: oklch(0.54 0.2 25); /* 5.61:1 */
+  --file-icon-vermilion: oklch(0.58 0.162 45); /* 4.58:1 */
+  --file-icon-orange: oklch(0.6 0.131 65); /* 4.08:1 */
+  --file-icon-yellow: oklch(0.6 0.12 90); /* 3.96:1 */
+  --file-icon-green: oklch(0.55 0.14 150); /* 4.55:1 */
+  --file-icon-teal: oklch(0.55 0.093 190); /* 4.63:1 */
+  --file-icon-cyan: oklch(0.57 0.098 215); /* 4.31:1 */
+  --file-icon-blue: oklch(0.53 0.17 255); /* 5.36:1 */
+  --file-icon-indigo: oklch(0.5 0.2 280); /* 6.48:1 */
+  --file-icon-purple: oklch(0.52 0.2 305); /* 6.11:1 */
+  --file-icon-pink: oklch(0.55 0.2 350); /* 5.43:1 */
+  --file-icon-mauve: oklch(0.5 0.05 320); /* 6.14:1 */
 }
 
 .dark {
@@ -200,6 +235,21 @@
   --tone-emerald: oklch(0.72 0.13 155);
   --tone-teal: oklch(0.72 0.1 185);
   --tone-rose: oklch(0.71 0.17 20);
+
+  /* Measured against the 0.145 ground, not lightened from the light values. */
+  --file-icon-gray: oklch(0.7 0 0); /* 7.41:1 */
+  --file-icon-red: oklch(0.72 0.16 25); /* 7.44:1 */
+  --file-icon-vermilion: oklch(0.74 0.14 45); /* 8.18:1 */
+  --file-icon-orange: oklch(0.78 0.13 65); /* 9.63:1 */
+  --file-icon-yellow: oklch(0.82 0.13 90); /* 11.31:1 */
+  --file-icon-green: oklch(0.75 0.15 150); /* 9.43:1 */
+  --file-icon-teal: oklch(0.75 0.1 190); /* 9.29:1 */
+  --file-icon-cyan: oklch(0.76 0.1 215); /* 9.52:1 */
+  --file-icon-blue: oklch(0.72 0.14 255); /* 7.97:1 */
+  --file-icon-indigo: oklch(0.7 0.157 280); /* 7.14:1 */
+  --file-icon-purple: oklch(0.72 0.16 305); /* 7.51:1 */
+  --file-icon-pink: oklch(0.74 0.15 350); /* 7.99:1 */
+  --file-icon-mauve: oklch(0.68 0.05 320); /* 6.73:1 */
 }
 
 @theme inline {

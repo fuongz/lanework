@@ -1,16 +1,50 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
 import type {
+  CommitDiff,
   GitAccount,
   GitAppAccess,
   GitConnectProgress,
+  PullActivity,
+  PullCommit,
   PullDetail,
+  PullFile,
   PullStatus,
   PullsView,
   RepoOption,
   RepoState,
   ReviewVerdict,
 } from "../../shared/git";
+
+/**
+ * What the diff and the file tree are BOTH looking at.
+ *
+ * ⚠️ One function, called from both, rather than each deciding for itself. The
+ * tree is a separate panel now — it does not descend from the diff — and two
+ * independent answers to "which files are on screen" is a tree listing the
+ * pull request while the diff shows one commit.
+ */
+export function diffSource(
+  commit: string | null,
+  commitDiff: CommitDiff | null,
+  detail: PullDetail | null,
+): { files: PullFile[]; headSha: string; baseSha: string } | null {
+  if (commit !== null)
+    return (
+      commitDiff && {
+        files: commitDiff.files,
+        headSha: commitDiff.headSha,
+        baseSha: commitDiff.baseSha,
+      }
+    );
+  return (
+    detail && {
+      files: detail.files,
+      headSha: detail.headSha,
+      baseSha: detail.baseSha,
+    }
+  );
+}
 
 const api = () => {
   const surface = window.desktop?.git;
@@ -27,7 +61,7 @@ const api = () => {
  * without a ticket the OLDER one wins. Pressing refresh while a slow failure is
  * still running is exactly how that happens.
  */
-const ticket = { pulls: 0, detail: 0 };
+const ticket = { pulls: 0, detail: 0, commitDiff: 0, activity: 0 };
 
 interface PullsState {
   /** The project these fields describe. Everything below resets when it changes. */
@@ -73,6 +107,51 @@ interface PullsState {
   /** The verdict being submitted, so exactly one button shows as busy. */
   reviewBusy: ReviewVerdict | null;
 
+  /**
+   * The open pull request's commits. `null` until the menu is first opened.
+   *
+   * ⚠️ "Nobody has asked yet" and "there are none" have to stay different, the
+   * same distinction `repoOptions` draws — the menu says "Loading…" for the
+   * first and nothing at all for the second.
+   */
+  commits: PullCommit[] | null;
+  commitsLoading: boolean;
+  commitsError: string | null;
+  /**
+   * Which commit the diff is showing, or `null` for the whole pull request.
+   *
+   * ⚠️ The DEFAULT is the whole pull request, and it stays that way across a
+   * refresh. A review is of the change as a whole; one commit is a lens you
+   * pick up and put down.
+   */
+  commit: string | null;
+  commitDiff: CommitDiff | null;
+  commitDiffLoading: boolean;
+  commitDiffError: string | null;
+  /**
+   * The open pull request's timeline and CI.
+   *
+   * ⚠️ Null until the SUMMARY is opened, and it carries its own `number` so a
+   * stale read cannot be drawn under a different pull request. This is the one
+   * read on this screen that most sessions never make — the screen lands on the
+   * diff — so attaching it to the detail read would charge every open for it.
+   */
+  activity: PullActivity | null;
+  activityLoading: boolean;
+  activityError: string | null;
+  commentBusy: boolean;
+
+  /** Whether the file tree shares the window with the diff. */
+  filesOpen: boolean;
+  /**
+   * The file the tree last asked the diff to show.
+   *
+   * ⚠️ Carries `at` as well as the path, because picking the SAME file twice
+   * has to scroll twice. A bare path would be an unchanged value the second
+   * time, and the effect watching it would not run.
+   */
+  focus: { path: string; at: number } | null;
+
   /** Read the account and this project's repo, then its pull requests. */
   open: (slug: string, status: PullStatus) => Promise<void>;
   refresh: () => Promise<void>;
@@ -99,6 +178,32 @@ interface PullsState {
   openAppConfig: (installationId: number | null) => Promise<void>;
   unlink: () => Promise<void>;
   openPull: (number: number) => Promise<void>;
+  /** Read the open pull request's commits. Safe to call again; it re-reads. */
+  loadCommits: (number: number) => Promise<void>;
+  /** Show one commit's diff, or the whole pull request with `null`. */
+  selectCommit: (sha: string | null) => Promise<void>;
+  /**
+   * Read the open pull request's timeline and checks.
+   *
+   * ⚠️ Safe to call on every render of the summary: a read already answered for
+   * this pull request is skipped unless `refresh` says otherwise. The tab is
+   * mounted and unmounted every time somebody switches back and forth, and a
+   * request per switch is a request per switch.
+   */
+  loadActivity: (number: number, refresh?: boolean) => Promise<void>;
+  /** Leave an ordinary comment. Re-reads the timeline on success. */
+  postComment: (number: number, body: string) => Promise<{ error?: string }>;
+  toggleFiles: () => void;
+  /**
+   * Say outright whether the files panel is open.
+   *
+   * ⚠️ Beside `toggleFiles` rather than instead of it. Dragging the panel's
+   * handle onto the edge reports a STATE, and feeding that through a toggle
+   * inverts whatever the store happened to hold — which is how a panel and
+   * its button end up disagreeing about which one is right.
+   */
+  setFilesOpen: (open: boolean) => void;
+  focusFile: (path: string) => void;
   review: (
     number: number,
     verdict: ReviewVerdict,
@@ -129,6 +234,19 @@ export const usePulls = create<PullsState>((set, get) => ({
   detailLoading: false,
   detailError: null,
   reviewBusy: null,
+  commits: null,
+  commitsLoading: false,
+  commitsError: null,
+  commit: null,
+  commitDiff: null,
+  commitDiffLoading: false,
+  commitDiffError: null,
+  activity: null,
+  activityLoading: false,
+  activityError: null,
+  commentBusy: false,
+  filesOpen: true,
+  focus: null,
 
   open: async (slug, status) => {
     const state = get();
@@ -289,7 +407,20 @@ export const usePulls = create<PullsState>((set, get) => ({
     try {
       const detail = await api().pull(slug, number);
       if (mine !== ticket.detail) return;
-      set({ detail, detailLoading: false });
+      // ⚠️ Everything about the LAST pull request goes with it. A commit list
+      // and a selected sha belong to one pull request, and leaving them in
+      // place would show the previous one's commits in this one's menu — and,
+      // worse, keep the diff pinned to a commit that is not in it.
+      set({
+        detail,
+        detailLoading: false,
+        commits: null,
+        commitsError: null,
+        commit: null,
+        commitDiff: null,
+        commitDiffError: null,
+        focus: null,
+      });
     } catch (error) {
       if (mine !== ticket.detail) return;
       set({
@@ -299,6 +430,104 @@ export const usePulls = create<PullsState>((set, get) => ({
       });
     }
   },
+
+  loadCommits: async (number) => {
+    const { slug, commitsLoading } = get();
+    if (!slug || commitsLoading) return;
+    set({ commitsLoading: true, commitsError: null });
+    try {
+      const commits = await api().commits(slug, number);
+      set({ commits, commitsLoading: false });
+    } catch (error) {
+      set({
+        commitsLoading: false,
+        // ⚠️ `commits` is left alone. A failed re-read of a list already on
+        // screen must not empty the menu somebody has open.
+        commitsError: ipcMessage(error, "Could not load the commits."),
+      });
+    }
+  },
+
+  selectCommit: async (sha) => {
+    const { slug } = get();
+    if (!slug) return;
+    // ⚠️ The ticket moves even for the whole-pull-request case, so a commit
+    // read that is still in flight cannot land afterwards and put the screen
+    // back on a commit the user just left.
+    const mine = ++ticket.commitDiff;
+    if (sha === null) {
+      set({
+        commit: null,
+        commitDiff: null,
+        commitDiffLoading: false,
+        commitDiffError: null,
+        focus: null,
+      });
+      return;
+    }
+    set({
+      commit: sha,
+      commitDiff: null,
+      commitDiffLoading: true,
+      commitDiffError: null,
+      focus: null,
+    });
+    try {
+      const commitDiff = await api().commitDiff(slug, sha);
+      if (mine !== ticket.commitDiff) return;
+      set({ commitDiff, commitDiffLoading: false });
+    } catch (error) {
+      if (mine !== ticket.commitDiff) return;
+      set({
+        commitDiffLoading: false,
+        commitDiffError: ipcMessage(error, "Could not load that commit."),
+      });
+    }
+  },
+
+  loadActivity: async (number, refresh = false) => {
+    const { slug, activity, activityLoading } = get();
+    if (!slug) return;
+    if (!refresh && activity?.number === number) return;
+    if (activityLoading && activity?.number === number) return;
+    const mine = ++ticket.activity;
+    set({ activityLoading: true, activityError: null });
+    try {
+      const next = await api().activity(slug, number);
+      if (mine !== ticket.activity) return;
+      set({ activity: next, activityLoading: false });
+    } catch (error) {
+      if (mine !== ticket.activity) return;
+      set({
+        activityLoading: false,
+        activityError: ipcMessage(error, "Could not load this activity."),
+      });
+    }
+  },
+
+  postComment: async (number, body) => {
+    const { slug } = get();
+    if (!slug) return { error: "Open a project first." };
+    set({ commentBusy: true });
+    try {
+      await api().comment(slug, number, body);
+      // ⚠️ Re-read rather than append. Writing the comment into the timeline
+      // here would mean inventing its id, its timestamp and its author — three
+      // things that would each be wrong in their own way, on a row that then
+      // looks exactly like one the server sent.
+      await get().loadActivity(number, true);
+      set({ commentBusy: false });
+      return {};
+    } catch (error) {
+      set({ commentBusy: false });
+      return { error: ipcMessage(error, "Could not post that comment.") };
+    }
+  },
+
+  toggleFiles: () => set((state) => ({ filesOpen: !state.filesOpen })),
+  setFilesOpen: (filesOpen) => set({ filesOpen }),
+
+  focusFile: (path) => set({ focus: { path, at: Date.now() } }),
 
   review: async (number, verdict, body) => {
     const { slug } = get();

@@ -1,10 +1,13 @@
 import { shell } from "electron";
 import {
+  type CommitDiff,
   type FileText,
   type GitAccount,
   type GitAppAccess,
   gitChannels,
   PULL_STATUSES,
+  type PullActivity,
+  type PullCommit,
   type PullDetail,
   type PullStatus,
   type PullsView,
@@ -19,9 +22,13 @@ import { broadcast, handle } from "../ipc";
 import { authorizedRecord } from "../workspaces";
 import { readFolders } from "../workspaces/store";
 import {
+  addComment,
+  fetchCommitDiff,
   fetchFileText,
   fetchInstallations,
   fetchPull,
+  fetchPullActivity,
+  fetchPullCommits,
   fetchPulls,
   fetchRepoOptions,
   fetchViewer,
@@ -168,6 +175,15 @@ function positive(value: unknown): number {
     throw new Error("That is not a valid number.");
   return value;
 }
+
+/**
+ * A commit, as a URL will accept it.
+ *
+ * ⚠️ Hex and nothing else. Every sha here arrives from the renderer and is
+ * pasted into a path main fetches, so the shape is checked rather than trusted
+ * — the same rule `parseRepoRef` states for a repository name.
+ */
+const COMMIT_SHA = /^[0-9a-f]{7,64}$/i;
 
 const VERDICTS = new Set<ReviewVerdict>([
   "APPROVE",
@@ -350,6 +366,29 @@ export function registerGit(devUrl?: string): void {
     );
   });
 
+  handle(gitChannels.commits, devUrl, async (args): Promise<PullCommit[]> => {
+    if (args.length !== 2) throw new Error("A pull request is required.");
+    const slug = text(args[0], 200);
+    const number = positive(args[1]);
+    const record = await authorizedRecord();
+    const ref = await linkedRepo(record, slug);
+    return withToken(record, (token) =>
+      fetchPullCommits(token.token, ref, number),
+    );
+  });
+
+  handle(gitChannels.commitDiff, devUrl, async (args): Promise<CommitDiff> => {
+    if (args.length !== 2) throw new Error("A commit is required.");
+    const slug = text(args[0], 200);
+    const sha = text(args[1], 100);
+    // ⚠️ The same guard `fileText` states, for the same reason: this value is
+    // the renderer's, and it goes straight into a URL main fetches.
+    if (!COMMIT_SHA.test(sha)) throw new Error("That is not a valid commit.");
+    const record = await authorizedRecord();
+    const ref = await linkedRepo(record, slug);
+    return withToken(record, (token) => fetchCommitDiff(token.token, ref, sha));
+  });
+
   handle(
     gitChannels.fileText,
     devUrl,
@@ -358,9 +397,7 @@ export function registerGit(devUrl?: string): void {
       const slug = text(args[0], 200);
       const path = text(args[1], 1000);
       const sha = text(args[2], 100);
-      // A commit is a hex object id and nothing else — it goes into a URL.
-      if (!/^[0-9a-f]{7,64}$/i.test(sha))
-        throw new Error("That is not a valid commit.");
+      if (!COMMIT_SHA.test(sha)) throw new Error("That is not a valid commit.");
       const record = await authorizedRecord();
       const ref = await linkedRepo(record, slug);
       return withToken(record, (token) =>
@@ -381,6 +418,35 @@ export function registerGit(devUrl?: string): void {
     const ref = await linkedRepo(record, slug);
     await withToken(record, (token) =>
       submitReview(token.token, ref, number, verdict, body),
+    );
+  });
+
+  // ⚠️ Keyed by `slug`, like every other read here — the renderer never names a
+  // repository. `linkedRepo` is what turns a project into an `owner/repo`, in
+  // main, from something a person confirmed once at connect time.
+  handle(gitChannels.activity, devUrl, async (args): Promise<PullActivity> => {
+    if (args.length !== 2) throw new Error("A pull request is required.");
+    const slug = text(args[0], 200);
+    const number = positive(args[1]);
+    const record = await authorizedRecord();
+    const ref = await linkedRepo(record, slug);
+    return withToken(record, (token) =>
+      fetchPullActivity(token.token, ref, number),
+    );
+  });
+
+  handle(gitChannels.comment, devUrl, async (args): Promise<void> => {
+    if (args.length !== 3) throw new Error("A comment is required.");
+    const slug = text(args[0], 200);
+    const number = positive(args[1]);
+    const body = typeof args[2] === "string" ? args[2] : "";
+    // The same ceiling `review` applies. A body this long is a paste accident,
+    // and GitHub would refuse it after we had spent the request.
+    if (body.length > 60_000) throw new Error("That comment is too long.");
+    const record = await authorizedRecord();
+    const ref = await linkedRepo(record, slug);
+    await withToken(record, (token) =>
+      addComment(token.token, ref, number, body),
     );
   });
 }

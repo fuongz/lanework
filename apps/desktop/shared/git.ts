@@ -316,6 +316,144 @@ export interface FileText {
   text: string;
 }
 
+/**
+ * One commit in a pull request.
+ *
+ * ⚠️ The subject line only, not the whole message. This is menu text, and a
+ * commit body is paragraphs — the full thing belongs on GitHub, which the
+ * header already links to.
+ */
+export interface PullCommit {
+  sha: string;
+  /** The seven characters a human reads a commit by. */
+  shortSha: string;
+  /** The first line of the message. */
+  subject: string;
+  authorLogin: string | null;
+  committedAt: string;
+}
+
+/**
+ * One commit's own diff — what it changed, against its parent.
+ *
+ * ⚠️ Carries `baseSha` and `headSha` the same way `PullDetail` does, because
+ * the renderer expands unchanged lines from BOTH sides and must read them at
+ * this commit's parent rather than the pull request's base. Expanding a
+ * one-commit view against the pull request's base would show lines that the
+ * commit on screen never touched as if it had.
+ *
+ * ⚠️ `baseSha` is empty for a root commit, which has no parent. That is the
+ * same "expansion is not available" answer `PullDetail` gives, not a failure.
+ */
+export interface CommitDiff {
+  sha: string;
+  headSha: string;
+  baseSha: string;
+  files: PullFile[];
+  truncated: boolean;
+}
+
+/**
+ * Where a CI check stands, in four words rather than GitHub's fourteen.
+ *
+ * ⚠️ A deliberate narrowing. GraphQL reports a check as a `status` plus a
+ * `conclusion`, across two enums with eleven values between them — and a screen
+ * that shows a row per file does not need to distinguish `STALE` from
+ * `SKIPPED`. What a reviewer acts on is: did it pass, did it fail, is it still
+ * going, or is it none of those.
+ */
+export type CheckState = "success" | "failure" | "pending" | "neutral";
+
+export interface PullCheck {
+  id: string;
+  name: string;
+  state: CheckState;
+  /** Where to read the log. Null when GitHub reports a check with no page. */
+  url: string | null;
+}
+
+/**
+ * The CI on a pull request's head commit.
+ *
+ * ⚠️ `state: null` means THERE ARE NO CHECKS, which is not the same as a read
+ * that failed — the caller reports the second as an error and this as the
+ * sentence "No CI checks". A repository with no CI is a normal repository, and
+ * a screen that showed it a spinner or an error would be lying about it.
+ */
+export interface PullChecks {
+  state: CheckState | null;
+  checks: PullCheck[];
+  /** True when the list stopped at `MAX_PULL_CHECKS`. */
+  truncated: boolean;
+}
+
+export const MAX_PULL_CHECKS = 50;
+
+/**
+ * How many timeline entries one read brings back.
+ *
+ * ⚠️ The LAST hundred, not the first. A long-running pull request's interesting
+ * end is the recent one — "what happened since I last looked" — and paging
+ * forwards from the day it opened would spend requests to arrive there.
+ */
+export const MAX_TIMELINE_ITEMS = 100;
+
+/**
+ * One thing that happened on a pull request.
+ *
+ * ⚠️ FOUR kinds, and the rest are dropped rather than drawn. GitHub's timeline
+ * also carries labelled/unlabelled, renamed, review-requested, assigned,
+ * milestoned and a dozen more; on a dependabot pull request those outnumber the
+ * real events several to one. These four are what somebody reads a pull request
+ * to find out. An unrecognised kind is skipped — never rendered as a blank row.
+ *
+ * ⚠️ `commits` is GROUPED: a run of pushes becomes one `N commits` entry rather
+ * than N rows. The commit menu in the diff header is where individual commits
+ * are chosen; repeating them here would make the timeline mostly commits.
+ */
+export type PullTimelineItem =
+  | { kind: "opened"; id: string; actor: string | null; at: string }
+  | {
+      kind: "commits";
+      id: string;
+      actor: string | null;
+      at: string;
+      count: number;
+    }
+  | {
+      kind: "review";
+      id: string;
+      actor: string | null;
+      at: string;
+      /** The verdict as GitHub states it, or null for a plain review. */
+      verdict: string | null;
+      body: string;
+    }
+  | {
+      kind: "comment";
+      id: string;
+      actor: string | null;
+      at: string;
+      body: string;
+    };
+
+/**
+ * A pull request's activity and CI, as of one read.
+ *
+ * ⚠️ Read LAZILY — when the summary is opened, never with the diff. The pull
+ * request screen lands on the diff (see the `view` search param), so attaching
+ * this to `fetchPull` would make every open pay for a timeline most opens never
+ * show. Cached per pull request, the same way a commit's diff is.
+ */
+export interface PullActivity {
+  number: number;
+  items: PullTimelineItem[];
+  /** True when the timeline stopped at `MAX_TIMELINE_ITEMS`. */
+  truncated: boolean;
+  checks: PullChecks;
+  fetchedAt: string;
+}
+
 export const gitChannels = {
   account: "git:account",
   connect: "git:connect",
@@ -331,8 +469,12 @@ export const gitChannels = {
   unlinkRepo: "git:repo:unlink",
   pulls: "git:pulls",
   pull: "git:pull",
+  commits: "git:pull:commits",
+  commitDiff: "git:commit",
   fileText: "git:pull:file",
   review: "git:pull:review",
+  activity: "git:pull:activity",
+  comment: "git:pull:comment",
 } as const;
 
 /**
@@ -433,6 +575,22 @@ export interface DesktopGitApi {
   ) => Promise<PullsView>;
   pull: (slug: string, number: number) => Promise<PullDetail>;
   /**
+   * The commits in one pull request, oldest first.
+   *
+   * ⚠️ A read of its own, not a field on `PullDetail`. Nothing needs it until
+   * somebody opens the commit menu, and a pull request's diff is already two
+   * round trips before this one would add a third to every open.
+   */
+  commits: (slug: string, number: number) => Promise<PullCommit[]>;
+  /**
+   * What ONE commit changed, against its parent.
+   *
+   * ⚠️ Keyed by sha rather than by `(number, index)`: a force-push rewrites a
+   * pull request's commits, and an index would then quietly name a different
+   * change than the one that was picked.
+   */
+  commitDiff: (slug: string, sha: string) => Promise<CommitDiff>;
+  /**
    * One file's full contents at a commit, or null when it cannot be read.
    *
    * ⚠️ Fetched on demand and never with the diff. A pull request touching forty
@@ -457,4 +615,22 @@ export interface DesktopGitApi {
     verdict: ReviewVerdict,
     body: string,
   ) => Promise<void>;
+  /**
+   * A pull request's timeline and CI checks.
+   *
+   * ⚠️ One request, not three. The timeline, the comments and the check rollup
+   * are all fields of the same GraphQL `PullRequest`, so this reads them
+   * together rather than making a screen wait on three round trips against an
+   * hourly budget.
+   */
+  activity: (slug: string, number: number) => Promise<PullActivity>;
+  /**
+   * Leave an ordinary comment on a pull request.
+   *
+   * ⚠️ NOT `review`. GitHub separates an issue comment from a pull request
+   * review, and so does this: a review carries a verdict that can block a
+   * merge. Routing "I have a question" through the same call that can say
+   * "changes requested" is how somebody blocks a pull request by accident.
+   */
+  comment: (slug: string, number: number, body: string) => Promise<void>;
 }

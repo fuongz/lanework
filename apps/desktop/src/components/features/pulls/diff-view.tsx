@@ -1,14 +1,15 @@
-import { ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import {
   type CodeViewItem,
   type FileDiffLoadedFiles,
   type FileDiffMetadata,
   parsePatchFiles,
 } from "@pierre/diffs";
-import { CodeView } from "@pierre/diffs/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { PullDetail, PullFile } from "../../../../shared/git";
+import { CodeView, type CodeViewHandle } from "@pierre/diffs/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePulls } from "#/stores/pulls";
+import type { PullFile } from "../../../../shared/git";
+import { DiffFileHeader } from "./diff-file-header";
+import { useDark } from "./diff-view.theme";
 
 /**
  * A pull request's diff, rendered by `@pierre/diffs`.
@@ -62,37 +63,25 @@ function toUnifiedPatch(files: PullFile[]): string {
   return parts.length ? `${parts.join("\n")}\n` : "";
 }
 
-/**
- * Whether the window is in dark mode, kept in step.
- *
- * ⚠️ Read from the `dark` class on `<html>`, NOT from `prefers-color-scheme`.
- * `use-theme.ts` documents why: that media query does not follow
- * `nativeTheme.themeSource` in this Electron build, so main resolves the theme
- * and the class is the only thing in the renderer that is reliably true. The
- * library's own `themeType: 'system'` would consult the broken query.
- */
-function useDark(): boolean {
-  const [dark, setDark] = useState(() =>
-    typeof document === "undefined"
-      ? false
-      : document.documentElement.classList.contains("dark"),
-  );
-  useEffect(() => {
-    const root = document.documentElement;
-    const observer = new MutationObserver(() =>
-      setDark(root.classList.contains("dark")),
-    );
-    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
-  return dark;
-}
-
 export function DiffView({
-  detail,
+  files,
+  headSha,
+  baseSha,
   slug,
 }: {
-  detail: PullDetail;
+  /**
+   * The files on screen — the whole pull request's, or one commit's.
+   *
+   * ⚠️ A file list rather than the `PullDetail` this used to take. The commit
+   * picker means the diff is no longer always showing the pull request, and a
+   * component that read `detail.files` itself could not be pointed anywhere
+   * else. `diffSource` in the store is what decides; this draws what it says.
+   */
+  files: PullFile[];
+  /** The commit the new side is read at, when unchanged lines are expanded. */
+  headSha: string;
+  /** The commit the old side is read at. Empty when there is nothing to expand. */
+  baseSha: string;
   slug: string;
 }) {
   const dark = useDark();
@@ -104,12 +93,34 @@ export function DiffView({
    * flips it — the library ships neither.
    */
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const patch = useMemo(() => toUnifiedPatch(detail.files), [detail.files]);
+  const patch = useMemo(() => toUnifiedPatch(files), [files]);
+
+  /**
+   * The handle the tree steers.
+   *
+   * ⚠️ `scrollTo` is the only way to reach a file that virtualization has not
+   * rendered yet. An anchor or a `scrollIntoView` on the header element works
+   * for the three files on screen and silently does nothing for the other
+   * thirty-seven.
+   */
+  const view = useRef<CodeViewHandle<undefined, undefined>>(null);
 
   /** Files GitHub sent no diff for; they cannot be in the patch at all. */
   const undiffable = useMemo(
-    () => detail.files.filter((file) => file.patch === null),
-    [detail.files],
+    () => files.filter((file) => file.patch === null),
+    [files],
+  );
+
+  /**
+   * GitHub's own line counts, by path.
+   *
+   * ⚠️ Taken from the file list rather than summed from the parsed hunks. They
+   * are the numbers the pull request header already shows, and a file whose
+   * patch GitHub truncated has hunks that add up to less than what changed.
+   */
+  const counts = useMemo(
+    () => new Map(files.map((file) => [file.path, file])),
+    [files],
   );
 
   /**
@@ -125,10 +136,10 @@ export function DiffView({
       const newPath = fileDiff.name;
       const oldPath = fileDiff.prevName ?? fileDiff.name;
       const [oldFile, newFile] = await Promise.all([
-        detail.baseSha
-          ? api().fileText(slug, oldPath, detail.baseSha)
+        baseSha
+          ? api().fileText(slug, oldPath, baseSha)
           : Promise.resolve(null),
-        api().fileText(slug, newPath, detail.headSha),
+        api().fileText(slug, newPath, headSha),
       ]);
       if (!oldFile || !newFile)
         throw new Error("Those lines cannot be loaded for this file.");
@@ -137,7 +148,7 @@ export function DiffView({
         newFile: { name: newPath, contents: newFile.text },
       };
     },
-    [detail.baseSha, detail.headSha, slug],
+    [baseSha, headSha, slug],
   );
 
   const options = useMemo(
@@ -151,6 +162,14 @@ export function DiffView({
       // `script-src 'self'` with no `wasm-unsafe-eval` (see `protocol.ts`), so
       // the wasm engine would be blocked — silently, at highlight time.
       preferredHighlighter: "shiki-js" as const,
+      // ⚠️ `paddingTop: 0` so the list starts directly under the pull request's
+      // header rather than 8px below it, and `gap: 0` so the files read as one
+      // list instead of a column of loose cards. The gap was doing nothing a
+      // rule between the rows does not do better: on a 40-file pull request it
+      // was 312px of nothing, which is a screenful of scrolling to see the same
+      // names. Separation now comes from the hairline on each header — see
+      // `DiffFileHeader`.
+      layout: { paddingTop: 0, paddingBottom: 8, gap: 0 },
       loadDiffFiles,
     }),
     [dark, loadDiffFiles],
@@ -184,39 +203,68 @@ export function DiffView({
     });
   }, [patch, collapsed]);
 
+  /** Every file's item id, so the tree can name one by path. */
+  const idByPath = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of items)
+      if (item.type === "diff") map.set(item.fileDiff.name, item.id);
+    return map;
+  }, [items]);
+
   /**
-   * The fold control, drawn into each file's header.
+   * The whole file header, ours rather than the library's.
    *
-   * ⚠️ A real `<button>` with `aria-expanded` and the file's name in its label.
-   * A bare chevron is unreachable by keyboard and says nothing to a screen
-   * reader — and this is the control that decides whether a reviewer can see a
-   * file at all.
+   * ⚠️ `renderCustomHeader`, not the three slot renderers beside it. The file
+   * type icon replaces the library's change symbol, the directory is a
+   * different colour from the filename, and the row carries actions — none of
+   * which is an addition to the default header, so there is nothing left of it
+   * to keep.
    */
-  const renderHeaderPrefix = useCallback(
+  const renderCustomHeader = useCallback(
     (item: CodeViewItem<undefined>) => {
-      const shut = collapsed[item.id] === true;
-      const name = item.type === "diff" ? item.fileDiff.name : item.id;
+      if (item.type !== "diff") return null;
+      const path = item.fileDiff.name;
+      const file = counts.get(path);
       return (
-        <button
-          type="button"
-          aria-expanded={!shut}
-          aria-label={`${shut ? "Expand" : "Collapse"} ${name}`}
-          onClick={() =>
-            setCollapsed((current) => ({ ...current, [item.id]: !shut }))
+        <DiffFileHeader
+          path={path}
+          previousPath={item.fileDiff.prevName ?? null}
+          additions={file?.additions ?? 0}
+          deletions={file?.deletions ?? 0}
+          collapsed={collapsed[item.id] === true}
+          onToggle={() =>
+            setCollapsed((current) => ({
+              ...current,
+              [item.id]: current[item.id] !== true,
+            }))
           }
-          className="hover:bg-foreground/[0.08] focus-visible:ring-accent-brand -ml-1 flex size-5 items-center justify-center rounded transition-colors outline-none focus-visible:ring-2"
-        >
-          <HugeiconsIcon
-            icon={shut ? ArrowRight01Icon : ArrowDown01Icon}
-            className="size-3.5 opacity-70"
-            strokeWidth={2}
-            aria-hidden="true"
-          />
-        </button>
+        />
       );
     },
-    [collapsed],
+    [collapsed, counts],
   );
+
+  /**
+   * Put a file on screen when the tree asks for one.
+   *
+   * ⚠️ Driven by store state rather than by a callback the tree holds. The tree
+   * is a sibling panel, not a child — there is no prop between them — and a
+   * function parked in the store for it to call would be state that cannot be
+   * serialised, compared or replayed. A path and a timestamp can.
+   *
+   * ⚠️ Unfolding is part of the answer. Landing on a collapsed header would
+   * look exactly like a click that did nothing.
+   */
+  const focus = usePulls((state) => state.focus);
+  useEffect(() => {
+    if (!focus) return;
+    const id = idByPath.get(focus.path);
+    if (id === undefined) return;
+    setCollapsed((current) =>
+      current[id] === true ? { ...current, [id]: false } : current,
+    );
+    view.current?.scrollTo({ type: "item", id, align: "start" });
+  }, [focus, idByPath]);
 
   const notes =
     undiffable.length > 0 ? (
@@ -233,17 +281,16 @@ export function DiffView({
     return (
       <div className="flex flex-col gap-3 p-4">
         {notes}
-        <p className="text-muted-foreground text-xs">
-          No file changes in this pull request.
-        </p>
+        <p className="text-muted-foreground text-xs">Nothing to show here.</p>
       </div>
     );
 
   return (
     <CodeView
+      ref={view}
       items={items}
       options={options}
-      renderHeaderPrefix={renderHeaderPrefix}
+      renderCustomHeader={renderCustomHeader}
       // ⚠️ `overflow-y-auto` HERE, on CodeView's own root. It virtualizes
       // against this element, so it must be the scroller — but it does not set
       // `overflow` itself, and without this the root computes `visible`, the
@@ -251,7 +298,7 @@ export function DiffView({
       // it. The diff then simply cannot be scrolled. Equally, it must not be
       // nested inside a second scroller, which would leave it no viewport to
       // measure and make it render every line of every file.
-      className="min-h-0 flex-1 overflow-y-auto"
+      className="min-h-0 min-w-0 flex-1 overflow-y-auto"
       renderCodeViewHeader={
         notes ? () => <div className="p-4 pb-0">{notes}</div> : undefined
       }

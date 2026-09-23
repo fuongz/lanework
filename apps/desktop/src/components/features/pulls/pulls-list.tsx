@@ -32,35 +32,15 @@ import {
 } from "#/components/ui/empty";
 import { Input } from "#/components/ui/input";
 import { shortAge } from "#/lib/board-view";
+import { PULL_TABS, type PullSearch, type PullTab } from "#/lib/pull-search";
 import { cn } from "#/lib/utils";
 import { usePulls } from "#/stores/pulls";
 import {
   formatRepoRef,
-  PULL_STATUSES,
   type PullRequest,
   type PullStatus,
 } from "../../../../shared/git";
 import { ConnectPanel } from "./connect-panel";
-
-export const PULL_TABS = ["all", "reviewing", "authored"] as const;
-export type PullTab = (typeof PULL_TABS)[number];
-
-export interface PullSearch {
-  tab: PullTab;
-  status: PullStatus;
-}
-
-/** Unknown values fall back rather than throw: a link from an older build must still open. */
-export function parsePullSearch(raw: Record<string, unknown>): PullSearch {
-  const tab = raw.tab;
-  const status = raw.status;
-  return {
-    tab: PULL_TABS.includes(tab as PullTab) ? (tab as PullTab) : "all",
-    status: PULL_STATUSES.includes(status as PullStatus)
-      ? (status as PullStatus)
-      : "open",
-  };
-}
 
 /**
  * ⚠️ Real words, not `text-transform: capitalize` over the raw values. CSS
@@ -298,7 +278,7 @@ export function PullsList() {
     : null;
 
   return (
-    <div className="border-sidebar-border flex w-80 shrink-0 flex-col border-r">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {connected ? (
         <>
           <div className="flex h-9 shrink-0 items-center gap-1 px-2">

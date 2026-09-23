@@ -45,7 +45,8 @@ const git: DesktopGitApi = {
   disconnect: () => ipcRenderer.invoke(gitChannels.disconnect),
   onConnectProgress: (listener) =>
     subscribe(gitChannels.connectProgress, listener),
-  onAccountChange: (listener) => subscribe(gitChannels.accountChanged, listener),
+  onAccountChange: (listener) =>
+    subscribe(gitChannels.accountChanged, listener),
   repo: (slug) => ipcRenderer.invoke(gitChannels.repo, slug),
   repoOptions: () => ipcRenderer.invoke(gitChannels.repoOptions),
   appAccess: () => ipcRenderer.invoke(gitChannels.appAccess),
@@ -59,10 +60,18 @@ const git: DesktopGitApi = {
   pulls: (slug, status, refresh) =>
     ipcRenderer.invoke(gitChannels.pulls, slug, status, refresh === true),
   pull: (slug, number) => ipcRenderer.invoke(gitChannels.pull, slug, number),
+  commits: (slug, number) =>
+    ipcRenderer.invoke(gitChannels.commits, slug, number),
+  commitDiff: (slug, sha) =>
+    ipcRenderer.invoke(gitChannels.commitDiff, slug, sha),
   fileText: (slug, path, sha) =>
     ipcRenderer.invoke(gitChannels.fileText, slug, path, sha),
   review: (slug, number, verdict, body) =>
     ipcRenderer.invoke(gitChannels.review, slug, number, verdict, body),
+  activity: (slug, number) =>
+    ipcRenderer.invoke(gitChannels.activity, slug, number),
+  comment: (slug, number, body) =>
+    ipcRenderer.invoke(gitChannels.comment, slug, number, body),
 };
 
 const desktop: DesktopApi = {
@@ -139,6 +148,63 @@ const desktop: DesktopApi = {
           cardId,
           items,
           revision,
+        ),
+      // ⚠️ `cursor` is passed through as `null` when absent rather than
+      // omitted, for the same reason `move` sends a null placement: the handler
+      // validates on argument COUNT.
+      activity: (workspaceId, cardId, cursor) =>
+        ipcRenderer.invoke(
+          workspaceChannels.activity,
+          workspaceId,
+          cardId,
+          cursor ?? null,
+        ),
+      comment: (workspaceId, cardId, body) =>
+        ipcRenderer.invoke(
+          workspaceChannels.comment,
+          workspaceId,
+          cardId,
+          body,
+        ),
+      editComment: (workspaceId, cardId, commentId, body) =>
+        ipcRenderer.invoke(
+          workspaceChannels.commentEdit,
+          workspaceId,
+          cardId,
+          commentId,
+          body,
+        ),
+      deleteComment: (workspaceId, cardId, commentId) =>
+        ipcRenderer.invoke(
+          workspaceChannels.commentDelete,
+          workspaceId,
+          cardId,
+          commentId,
+        ),
+      subscribe: (workspaceId, cardId, subscribed) =>
+        ipcRenderer.invoke(
+          workspaceChannels.subscribe,
+          workspaceId,
+          cardId,
+          subscribed,
+        ),
+      favorite: (workspaceId, cardId, favorite) =>
+        ipcRenderer.invoke(
+          workspaceChannels.favorite,
+          workspaceId,
+          cardId,
+          favorite,
+        ),
+      // ⚠️ A file REFERENCE — a path or a URL — never bytes and never a handle.
+      // Main does not open what is named here; the service stores the string.
+      attach: (workspaceId, cardId, file) =>
+        ipcRenderer.invoke(workspaceChannels.attach, workspaceId, cardId, file),
+      detach: (workspaceId, cardId, attachmentId) =>
+        ipcRenderer.invoke(
+          workspaceChannels.detach,
+          workspaceId,
+          cardId,
+          attachmentId,
         ),
       create: (workspaceId, draft) =>
         ipcRenderer.invoke(workspaceChannels.create, workspaceId, draft),

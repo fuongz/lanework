@@ -141,9 +141,32 @@ export async function readBoardCache(
     ) as { v?: unknown; view?: BoardView };
     if (data?.v !== 1 || !data.view || data.view.workspaceId !== workspaceId)
       return null;
-    // Whatever it said when it was written, reading it back is by definition
-    // serving a copy.
-    return { ...data.view, stale: true };
+    // ⚠️ Fields added to `BoardView` after a cache was written are ABSENT from
+    // it, and the read above is a cast rather than a parse — so `labels` comes
+    // back `undefined` and the first `.map` on it takes the offline board down.
+    // Filled in here rather than by bumping `v`, which would throw away every
+    // existing cache and leave a user with no board at all on the one launch
+    // they have no network for.
+    //
+    // ⚠️ The card fields are filled with `null`, not `[]`/`false`. A cached
+    // board is a LIST read, where those five are legitimately "not asked" — and
+    // `false` there would draw "Subscribe" on a card the reader follows.
+    return {
+      ...data.view,
+      labels: data.view.labels ?? [],
+      members: data.view.members ?? [],
+      cards: (data.view.cards ?? []).map((card) => ({
+        ...card,
+        subscribers: card.subscribers ?? null,
+        subscribed: card.subscribed ?? null,
+        favorite: card.favorite ?? null,
+        commentCount: card.commentCount ?? null,
+        attachments: card.attachments ?? null,
+      })),
+      // Whatever it said when it was written, reading it back is by definition
+      // serving a copy.
+      stale: true,
+    };
   } catch {
     // A missing or corrupt cache is not an error: the caller's own failure is
     // the one worth reporting.

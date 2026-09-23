@@ -5,6 +5,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { ErrorState } from "#/components/shared/common/error-state";
 import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
 import { Button } from "#/components/ui/button";
 import {
@@ -28,7 +29,6 @@ export function WorkspaceLayout() {
   const { slug } = useParams({ from: "/_app/w/$slug" });
   const open = useBoard((state) => state.open);
   const poll = useBoard((state) => state.poll);
-  const hydrate = useBoard((state) => state.hydrate);
   const error = useBoard((state) => state.error);
   const conflict = useBoard((state) => state.conflict);
   const dismiss = useBoard((state) => state.dismiss);
@@ -37,15 +37,19 @@ export function WorkspaceLayout() {
   const notFound = useBoard((state) => state.notFound);
   const navigate = useNavigate();
 
+  // ⚠️ `open` refreshes the list itself. This used to be
+  // `hydrate().then(() => open(slug))` while `open` ALSO hydrated when the slug
+  // was unknown, so a control plane that was down was asked twice per
+  // navigation and logged twice.
   useEffect(() => {
-    void hydrate().then(() => open(slug));
-  }, [hydrate, open, slug]);
+    void open(slug);
+  }, [open, slug]);
 
   // A URL naming a project this account does not have is answered with the
   // picker, not with a board that will never load.
   useEffect(() => {
-    if (notFound) void navigate({ to: "/", replace: true });
-  }, [navigate, notFound]);
+    if (notFound === slug) void navigate({ to: "/", replace: true });
+  }, [navigate, notFound, slug]);
 
   // ⚠️ On focus, not on a timer. A desktop window that is not being looked at
   // has nobody to show a change to, and a poll it fires anyway is a request per
@@ -61,6 +65,23 @@ export function WorkspaceLayout() {
   // list over it, and the fix was to keep the project openable and say exactly
   // which half is missing. The rail's folder item is the other half — the cards
   // are on disk the whole time.
+  // ⚠️ The list could not be read, so there is no project to draw and no
+  // picker worth sending anybody to — the picker is built from the same list.
+  // One screen with one Try again, rather than an empty board under a banner
+  // or, as it was, a bounce back to "Opening your project…" and round again.
+  if (!active && error)
+    return (
+      <div className="grid flex-1 place-items-center p-10">
+        <div className="w-full max-w-md">
+          <ErrorState
+            title="Could not open this project"
+            message={error}
+            onRetry={() => void open(slug)}
+          />
+        </div>
+      </div>
+    );
+
   if (active && active.id === null)
     return (
       <div className="flex min-h-0 flex-1 flex-col">

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { byRank } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
 import type {
+  BoardActivity,
   BoardCard,
   BoardCardDraft,
   BoardCardPatch,
@@ -29,6 +30,9 @@ const api = () => {
  */
 const ticket = { workspaces: 0, board: 0, detail: 0 };
 
+/** The workspace read in flight, so overlapping callers share one request. */
+let inflight: Promise<void> | null = null;
+
 interface BoardState {
   /** True once the workspace list has settled, successfully or not. */
   ready: boolean;
@@ -49,13 +53,41 @@ interface BoardState {
   busy: string | null;
   /** The change cursor, echoed from the server. Never derived. */
   cursor: number;
-  /** True when the URL names a project this account does not have. */
-  notFound: boolean;
+  /**
+   * The slug the account does not have, or null.
+   *
+   * ⚠️ The SLUG, not a boolean. As a flag it outlived the project it was about:
+   * it is set while one URL is open and read on the next screen's first render,
+   * so opening a project that exists could still be bounced straight back to
+   * the picker by an answer about a different one. A value that names what it
+   * is about cannot be read as being about something else.
+   */
+  notFound: string | null;
+  /**
+   * True once a workspace list was actually READ, successfully, at least once.
+   *
+   * ⚠️ Distinct from `ready`, which only means the first attempt SETTLED — it
+   * is true after a failure too. The difference decides whether "this project
+   * is not in the list" is a fact about the account or just a request that did
+   * not come back, and those two have to be answered differently.
+   */
+  listLoaded: boolean;
 
   /** The open card, WITH its checklist — a read the board list cannot give. */
   detail: BoardCard | null;
   detailLoading: boolean;
   detailError: string | null;
+
+  /**
+   * The open card's history and thread, oldest first.
+   *
+   * ⚠️ Keyed by CARD ID alongside the entries, because the feed and the card are
+   * two reads that land separately: without it, opening a second card shows the
+   * first one's activity for as long as the new read takes.
+   */
+  activity: { cardId: string; events: BoardActivity[] } | null;
+  activityCursor: string | null;
+  activityLoading: boolean;
 
   hydrate: () => Promise<void>;
   open: (slug: string) => Promise<void>;
@@ -130,6 +162,20 @@ interface BoardState {
   openIssue: (taskId: string) => Promise<void>;
   /** Re-read the open card by id, after a write that changed its parts. */
   refreshDetail: (cardId: string) => Promise<void>;
+  /** Read the card's activity. `more` appends the next page instead of replacing. */
+  loadActivity: (cardId: string, more?: boolean) => Promise<void>;
+  comment: (cardId: string, body: string) => Promise<{ error?: string }>;
+  editComment: (
+    cardId: string,
+    commentId: string,
+    body: string,
+  ) => Promise<{ error?: string }>;
+  deleteComment: (
+    cardId: string,
+    commentId: string,
+  ) => Promise<{ error?: string }>;
+  setSubscribed: (cardId: string, subscribed: boolean) => Promise<void>;
+  setFavorite: (cardId: string, favorite: boolean) => Promise<void>;
   closeIssue: () => void;
   dismiss: () => void;
 }
@@ -197,28 +243,51 @@ export const useBoard = create<BoardState>()((set, get) => ({
   conflict: null,
   busy: null,
   cursor: 0,
-  notFound: false,
+  notFound: null,
+  listLoaded: false,
   detail: null,
   detailLoading: false,
   detailError: null,
+  activity: null,
+  activityCursor: null,
+  activityLoading: false,
 
   hydrate: async () => {
+    // ⚠️ Everyone waiting on the list waits on the SAME read. Two screens can
+    // ask at once — the landing page and the project layout do exactly that on
+    // a cold navigation — and two requests for one answer is two entries in
+    // main's log when the service is down, for no more information.
+    if (inflight !== null) return inflight;
     const mine = ++ticket.workspaces;
+    inflight = (async () => {
+      try {
+        const snapshot = await api().load();
+        if (mine !== ticket.workspaces) return;
+        set({
+          ready: true,
+          listLoaded: true,
+          workspaces: snapshot.workspaces,
+          active: snapshot.active,
+          error: null,
+        });
+      } catch (error) {
+        if (mine !== ticket.workspaces) return;
+        // ⚠️ `workspaces` is left alone, and `listLoaded` with it. A read that
+        // failed says nothing about the list it could not fetch, and the last
+        // one this app did read is still the best answer it has.
+        set({
+          ready: true,
+          error: ipcMessage(
+            error,
+            "Could not load your workspaces. Try again.",
+          ),
+        });
+      }
+    })();
     try {
-      const snapshot = await api().load();
-      if (mine !== ticket.workspaces) return;
-      set({
-        ready: true,
-        workspaces: snapshot.workspaces,
-        active: snapshot.active,
-        error: null,
-      });
-    } catch (error) {
-      if (mine !== ticket.workspaces) return;
-      set({
-        ready: true,
-        error: ipcMessage(error, "Could not load your workspaces. Try again."),
-      });
+      await inflight;
+    } finally {
+      inflight = null;
     }
   },
 
@@ -230,17 +299,29 @@ export const useBoard = create<BoardState>()((set, get) => ({
    * other happens here, once, rather than in every screen.
    */
   open: async (slug) => {
-    const known =
-      get().workspaces.find((workspace) => workspace.slug === slug) ?? null;
-    if (!known) await get().hydrate();
+    // ⚠️ The refresh lives HERE, not in the layout that calls this. It used to
+    // be both: the layout ran `hydrate().then(() => open(slug))` and `open`
+    // ran its own `hydrate()` whenever the slug was missing — so every failed
+    // load asked twice and logged twice.
+    await get().hydrate();
     const workspace =
       get().workspaces.find((entry) => entry.slug === slug) ?? null;
     if (!workspace) {
+      // ⚠️ "Gone" is a claim about the ACCOUNT, and only a list this app has
+      // actually read can support it. Concluding it from a read that failed
+      // sent the picker a project that exists — and the picker navigates
+      // straight back to it, which is a loop: one pair of requests per lap,
+      // "Opening your project…" on screen for as long as it ran, and main's
+      // log filling with the same failure. Leave the error on screen instead.
+      if (!get().listLoaded) {
+        set({ view: null, loading: false });
+        return;
+      }
       // ⚠️ A flag rather than an error banner. The project in the URL is gone —
       // usually because it was deleted on the account, sometimes because a
       // remembered selection was cleared — and the useful answer is the picker,
       // not a red box on a board that cannot load.
-      set({ active: null, view: null, notFound: true });
+      set({ active: null, view: null, notFound: slug });
       return;
     }
     set({
@@ -248,7 +329,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
       view: null,
       cursor: 0,
       error: null,
-      notFound: false,
+      notFound: null,
     });
     // Remembered on this machine, so the next launch opens the same project.
     await api()
@@ -326,7 +407,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
         workspaces: snapshot.workspaces,
         active: snapshot.active,
         busy: null,
-        notFound: false,
+        notFound: null,
       });
       return { workspace: snapshot.active };
     } catch (error) {
@@ -613,7 +694,15 @@ export const useBoard = create<BoardState>()((set, get) => ({
         detail: card,
         detailLoading: false,
         detailError: card ? null : `No card called ${taskId}.`,
+        // ⚠️ Cleared here, not only in `closeIssue`. Opening a card straight
+        // from another one — a sub-issue link — never unmounts the page, so a
+        // stale thread would sit under the new card until its own read landed.
+        activity: null,
+        activityCursor: null,
       });
+      // The thread is a second read, deliberately: the card draws as soon as it
+      // arrives rather than waiting for a history that can run for pages.
+      if (card) void get().loadActivity(card.id);
     } catch (error) {
       if (mine !== ticket.detail) return;
       set({
@@ -623,6 +712,159 @@ export const useBoard = create<BoardState>()((set, get) => ({
     }
   },
 
-  closeIssue: () => set({ detail: null, detailError: null }),
+  /**
+   * One page of the open card's activity.
+   *
+   * ⚠️ Guarded by the same `ticket.detail` the card read uses, and by the card
+   * id on the way in. Two cards opened in quick succession would otherwise race,
+   * and the loser's thread would be appended to the winner's card.
+   */
+  loadActivity: async (cardId, more = false) => {
+    const workspace = get().active;
+    if (!workspace?.id) return;
+    const cursor = more ? get().activityCursor : null;
+    // "More" with nothing more to read is a no-op, not a re-read of page one.
+    if (more && !cursor) return;
+    const mine = ticket.detail;
+    set({ activityLoading: true });
+    try {
+      const page = await api().board.activity(workspace.id, cardId, cursor);
+      if (mine !== ticket.detail || get().detail?.id !== cardId) return;
+      set((state) => ({
+        activity: {
+          cardId,
+          events:
+            more && state.activity?.cardId === cardId
+              ? [...state.activity.events, ...page.events]
+              : page.events,
+        },
+        activityCursor: page.cursor,
+        activityLoading: false,
+      }));
+    } catch {
+      if (mine !== ticket.detail) return;
+      // ⚠️ Silent, and the thread already on screen is kept. Activity is
+      // context around a card rather than the card itself; replacing a
+      // conversation with an error banner loses more than it explains.
+      set({ activityLoading: false });
+    }
+  },
+
+  comment: async (cardId, body) => {
+    const workspace = get().active;
+    if (!workspace?.id) return { error: "No project is open." };
+    set({ busy: `${cardId}:comment`, error: null });
+    try {
+      await api().board.comment(workspace.id, cardId, body);
+      // ⚠️ Re-read rather than appended locally. The service stamps the moment
+      // and the author, and a comment spliced in here would sit in the feed at a
+      // time this machine's clock invented — next to audit rows the server
+      // ordered against its own.
+      await get().loadActivity(cardId);
+      await get().refreshDetail(cardId);
+      return {};
+    } catch (error) {
+      const message = ipcMessage(
+        error,
+        "That comment did not post. Try again.",
+      );
+      set({ error: message });
+      return { error: message };
+    } finally {
+      set({ busy: null });
+    }
+  },
+
+  editComment: async (cardId, commentId, body) => {
+    const workspace = get().active;
+    if (!workspace?.id) return { error: "No project is open." };
+    set({ busy: `${cardId}:${commentId}`, error: null });
+    try {
+      await api().board.editComment(workspace.id, cardId, commentId, body);
+      await get().loadActivity(cardId);
+      return {};
+    } catch (error) {
+      const message = ipcMessage(error, "That edit did not save. Try again.");
+      set({ error: message });
+      return { error: message };
+    } finally {
+      set({ busy: null });
+    }
+  },
+
+  deleteComment: async (cardId, commentId) => {
+    const workspace = get().active;
+    if (!workspace?.id) return { error: "No project is open." };
+    set({ busy: `${cardId}:${commentId}`, error: null });
+    try {
+      await api().board.deleteComment(workspace.id, cardId, commentId);
+      await get().loadActivity(cardId);
+      await get().refreshDetail(cardId);
+      return {};
+    } catch (error) {
+      const message = ipcMessage(error, "That comment was not deleted.");
+      set({ error: message });
+      return { error: message };
+    } finally {
+      set({ busy: null });
+    }
+  },
+
+  /**
+   * Follow or star the open card.
+   *
+   * ⚠️ These two ARE written optimistically, unlike every other write in this
+   * store. They are the caller's own state, idempotent on the service and
+   * carrying no revision, so there is no race to lose and nothing to overwrite —
+   * and a star that waits for a round trip before filling in is the one control
+   * on this page that feels broken. The server's answer still wins.
+   */
+  setSubscribed: async (cardId, subscribed) => {
+    const workspace = get().active;
+    if (!workspace?.id) return;
+    const flip = (value: boolean | null) =>
+      set((state) =>
+        state.detail?.id === cardId
+          ? { detail: { ...state.detail, subscribed: value } }
+          : {},
+      );
+    flip(subscribed);
+    try {
+      const now = await api().board.subscribe(workspace.id, cardId, subscribed);
+      flip(now);
+      await get().refreshDetail(cardId);
+    } catch (error) {
+      flip(!subscribed);
+      set({
+        error: ipcMessage(error, "That did not save. Try again."),
+      });
+    }
+  },
+
+  setFavorite: async (cardId, favorite) => {
+    const workspace = get().active;
+    if (!workspace?.id) return;
+    const flip = (value: boolean | null) =>
+      set((state) =>
+        state.detail?.id === cardId
+          ? { detail: { ...state.detail, favorite: value } }
+          : {},
+      );
+    flip(favorite);
+    try {
+      flip(await api().board.favorite(workspace.id, cardId, favorite));
+    } catch (error) {
+      flip(!favorite);
+      set({ error: ipcMessage(error, "That did not save. Try again.") });
+    }
+  },
+
+  closeIssue: () =>
+    set({
+      detail: null,
+      detailError: null,
+      activity: null,
+      activityCursor: null,
+    }),
   dismiss: () => set({ error: null, conflict: null }),
 }));

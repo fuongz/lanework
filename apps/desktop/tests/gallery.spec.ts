@@ -450,7 +450,15 @@ test("ui gallery", async () => {
       await page.getByRole("combobox", { name: "Priority" }).click();
       await page.waitForTimeout(300);
       await page.getByRole("option", { name: "High" }).click();
-      await page.getByRole("textbox", { name: "Tags" }).fill("ui, electron");
+      // Labels are picked, not typed into a bare field — the same control the
+      // card's own rail carries.
+      await page.getByRole("button", { name: "Add label" }).click();
+      await page.waitForTimeout(300);
+      await page
+        .getByRole("textbox", { name: "New label" })
+        .fill("ui, electron");
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Escape");
       await page.waitForTimeout(400);
       await capture(page, "new issue filled");
 

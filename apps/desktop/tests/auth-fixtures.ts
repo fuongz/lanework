@@ -114,6 +114,48 @@ export interface StubCard {
     note: string | null;
     group?: string | null;
   }[];
+  parentId?: string | null;
+  assignees?: { users: string[]; agents: string[] };
+  /**
+   * The per-reader state, and the thread.
+   *
+   * ⚠️ Served ONLY from the single-card read, the same way the real service
+   * does. A stub that put them on `GET /items` too would let the desktop's
+   * "absent means not asked" branch pass as the normal case in every test —
+   * exactly the failure `checklist` here is commented against.
+   */
+  subscribers?: string[];
+  favorite?: boolean;
+  attachments?: {
+    id: string;
+    name: string;
+    reference: string;
+    mimeType?: string | null;
+    sizeBytes?: number | null;
+  }[];
+  comments?: StubComment[];
+}
+
+export interface StubComment {
+  id: string;
+  authorUserId: string;
+  body: string;
+  at: string;
+  editedAt?: string | null;
+  deletedAt?: string | null;
+}
+
+export interface StubLabel {
+  key: string;
+  name: string;
+  tone: string;
+}
+
+export interface StubMember {
+  userId: string;
+  name: string;
+  image?: string | null;
+  role?: string;
 }
 
 /**
@@ -156,9 +198,13 @@ export async function startStubPlane(
       migratedAt?: string | null;
       columns: { key: string; name: string; role?: string | null }[];
       categories?: StubCategory[];
+      labels?: StubLabel[];
+      members?: StubMember[];
       cards: StubCard[];
     },
   ) => void;
+  /** One card as the stub now holds it, so a test can assert what a write did. */
+  readCard: (workspaceId: string, cardId: string) => StubCard | undefined;
   /** Make the next checklist write answer 409 with the server's copy. */
   setChecklistConflict: (value: boolean) => void;
   /** Fail every board read, so the app has to fall back to its saved copy. */
@@ -190,11 +236,16 @@ export async function startStubPlane(
       migratedAt: string | null;
       columns: { key: string; name: string; role?: string | null }[];
       categories: StubCategory[];
+      labels: StubLabel[];
+      members: StubMember[];
       cards: StubCard[];
       /** Monotonic per board, the way `changeSeq` is on a real one. */
       seq: number;
     }
   >();
+  // Who the stub's machine credential belongs to — the "me" every per-reader
+  // field on a card answers for.
+  const VIEWER = "u-viewer";
   let checklistConflict = false;
   let boardOffline = false;
   let createMissing = false;
@@ -378,6 +429,32 @@ export async function startStubPlane(
           .writeHead(status, { "Content-Type": "application/json" })
           .end(JSON.stringify(body));
 
+      /**
+       * One card as a SINGLE-card read states it — with its parts.
+       *
+       * ⚠️ Used by `/lookup` and by every single-card WRITE response too, not
+       * only `/items/:id`, because the real service serializes all of them the
+       * same way. The stub answered `/lookup` with the bare row for a while, and
+       * since a deep link opens a card through `lookup`, every per-reader field
+       * arrived absent: the page drew no star and no Unsubscribe, and a fixture
+       * stingier than the API had made that look correct.
+       */
+      const withParts = (entry: StubCard) => ({
+        ...entry,
+        checklistProgress: summarize(entry.checklist),
+        assignees: entry.assignees ?? { users: [], agents: [] },
+        subscribers: entry.subscribers ?? [],
+        subscribed: (entry.subscribers ?? []).includes(VIEWER),
+        favorite: entry.favorite ?? false,
+        commentCount: (entry.comments ?? []).filter((c) => !c.deletedAt).length,
+        attachments: (entry.attachments ?? []).map((file) => ({
+          mimeType: null,
+          sizeBytes: null,
+          sourceKind: null,
+          ...file,
+        })),
+      });
+
       if (req.method === "GET" && rest === "/config") {
         json(200, {
           board: {
@@ -395,6 +472,15 @@ export async function startStubPlane(
               position,
             })),
             categories: state.categories,
+            labels: state.labels.map((label, position) => ({
+              ...label,
+              position,
+            })),
+            members: state.members.map((member) => ({
+              ...member,
+              image: member.image ?? null,
+              role: member.role ?? "member",
+            })),
           },
         });
         return;
@@ -466,7 +552,7 @@ export async function startStubPlane(
           return json(404, {
             error: "no card on this board carries that identity",
           });
-        return json(200, { item: card });
+        return json(200, { item: withParts(card) });
       }
       if (req.method === "PUT" && rest === "/config") {
         let raw = "";
@@ -581,10 +667,120 @@ export async function startStubPlane(
           }
           card.revision += 1;
           card.seq = ++state.seq;
-          json(200, { item: card });
+          json(200, { item: withParts(card) });
         });
         return;
       }
+      // ── The card surfaces a person reads ──────────────────────────────────
+      //
+      // ⚠️ Matched BEFORE `/^\/items\/([^/]+)$/` below, because `/items/x/…` is
+      // not that pattern but `rest.startsWith` checks written the other way
+      // round would swallow it.
+      const social =
+        /^\/items\/([^/]+)\/(subscription|favorite|activity|comments)(\/([^/]+))?$/.exec(
+          rest,
+        );
+      if (social) {
+        const card = state.cards.find((entry) => entry.id === social[1]);
+        if (!card) return json(404, { error: "not found" });
+        const what = social[2];
+        const commentId = social[4];
+
+        if (what === "subscription" || what === "favorite") {
+          const on = req.method === "PUT";
+          if (req.method !== "PUT" && req.method !== "DELETE") {
+            return json(405, { error: "method not allowed" });
+          }
+          if (what === "favorite") {
+            card.favorite = on;
+            return json(200, { favorite: on });
+          }
+          const following = new Set(card.subscribers ?? []);
+          if (on) following.add(VIEWER);
+          else following.delete(VIEWER);
+          card.subscribers = [...following];
+          return json(200, { subscribed: on });
+        }
+
+        if (what === "activity" && req.method === "GET") {
+          // ⚠️ ONE ordered sequence, the way the real route merges the audit
+          // log with the thread. A stub that served the comments alone would
+          // let a feed that dropped every audit line pass as green.
+          const events = [
+            {
+              kind: "audit",
+              id: `${card.id}-created`,
+              seq: 1,
+              verb: "created",
+              actorKind: "user",
+              actorUserId: VIEWER,
+              actorMachineId: null,
+              diff: null,
+              at: card.createdAt ?? new Date(0).toISOString(),
+            },
+            ...(card.comments ?? []).map((comment) => ({
+              kind: "comment",
+              id: comment.id,
+              authorKind: "user",
+              authorRef: comment.authorUserId,
+              authorUserId: comment.authorUserId,
+              body: comment.deletedAt ? null : comment.body,
+              at: comment.at,
+              editedAt: comment.deletedAt ? null : (comment.editedAt ?? null),
+              deletedAt: comment.deletedAt ?? null,
+            })),
+          ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+          return json(200, { events, cursor: null });
+        }
+
+        if (what === "comments") {
+          let raw = "";
+          req.on("data", (chunk) => {
+            raw += chunk;
+          });
+          req.on("end", () => {
+            const body = JSON.parse(raw || "{}") as { body?: string };
+            card.comments = card.comments ?? [];
+            if (req.method === "POST") {
+              const id = `c-${card.comments.length + 1}`;
+              card.comments.push({
+                id,
+                authorUserId: VIEWER,
+                body: body.body ?? "",
+                at: new Date().toISOString(),
+              });
+              // Commenting subscribes you, as the service does.
+              card.subscribers = [
+                ...new Set([...(card.subscribers ?? []), VIEWER]),
+              ];
+              return json(201, { comment: { id } });
+            }
+            const comment = card.comments.find(
+              (entry) => entry.id === commentId,
+            );
+            if (!comment) return json(404, { error: "not found" });
+            // Only the author, the way the service decides it.
+            if (comment.authorUserId !== VIEWER) {
+              return json(403, { error: "only the author may edit a comment" });
+            }
+            if (req.method === "PATCH") {
+              if (comment.deletedAt)
+                return json(409, { error: "that comment was deleted" });
+              comment.body = body.body ?? comment.body;
+              comment.editedAt = new Date().toISOString();
+              return json(200, { comment: { id: comment.id } });
+            }
+            if (req.method === "DELETE") {
+              comment.deletedAt = new Date().toISOString();
+              return json(200, { deleted: comment.id });
+            }
+            return json(405, { error: "method not allowed" });
+          });
+          return;
+        }
+        return json(405, { error: "method not allowed" });
+      }
+
       const one = /^\/items\/([^/]+)$/.exec(rest);
       if (req.method === "GET" && one) {
         const card = state.cards.find((entry) => entry.id === one[1]);
@@ -593,9 +789,10 @@ export async function startStubPlane(
         // along too, exactly as the real route states it: one shape everywhere,
         // so a client never computes the same fraction two different ways.
         if (!card) return json(404, { error: "not found" });
-        return json(200, {
-          item: { ...card, checklistProgress: summarize(card.checklist) },
-        });
+        // ⚠️ Stated on a single-card read only, as the real route does:
+        // `subscribed` and `favorite` answer for the CALLER rather than about
+        // the card, so they cannot come off a list.
+        return json(200, { item: withParts(card) });
       }
       if (req.method === "PATCH" && one) {
         const precondition = req.headers["if-match"];
@@ -623,7 +820,21 @@ export async function startStubPlane(
             priority?: StubCard["priority"];
             tags?: string[];
             categoryKey?: string | null;
+            assignees?: { users: string[]; agents: string[] };
           };
+          if (parsed.assignees !== undefined) {
+            card.assignees = parsed.assignees;
+            // Being assigned subscribes you, as the service does — and only for
+            // people the board actually knows.
+            card.subscribers = [
+              ...new Set([
+                ...(card.subscribers ?? []),
+                ...parsed.assignees.users.filter((id) =>
+                  state.members.some((member) => member.userId === id),
+                ),
+              ]),
+            ];
+          }
           if (parsed.title !== undefined) card.title = parsed.title;
           if (parsed.body !== undefined) card.body = parsed.body;
           if (parsed.priority !== undefined) card.priority = parsed.priority;
@@ -643,7 +854,7 @@ export async function startStubPlane(
             ].slice(0, 3);
           card.revision += 1;
           card.seq = ++state.seq;
-          json(200, { item: card });
+          json(200, { item: withParts(card) });
         });
         return;
       }
@@ -703,7 +914,7 @@ export async function startStubPlane(
           });
           card.revision += 1;
           card.seq = ++state.seq;
-          json(200, { item: card });
+          json(200, { item: withParts(card) });
         });
         return;
       }
@@ -731,7 +942,7 @@ export async function startStubPlane(
           if (item) item.checked = parsed.checked ?? item.checked;
           card.revision += 1;
           card.seq = ++state.seq;
-          json(200, { item: card });
+          json(200, { item: withParts(card) });
         });
         return;
       }
@@ -795,7 +1006,7 @@ export async function startStubPlane(
             seq: ++state.seq,
           };
           state.cards.push(card);
-          json(201, { item: card });
+          json(201, { item: withParts(card) });
         });
         return;
       }
@@ -853,11 +1064,17 @@ export async function startStubPlane(
       workspaceBody = undefined;
       workspaceDelay = 0;
     },
+    readCard: (workspaceId, cardId) =>
+      boards.get(workspaceId)?.cards.find((card) => card.id === cardId),
     setBoard: (workspaceId, board) => {
       boards.set(workspaceId, {
         migratedAt: board.migratedAt ?? null,
         columns: board.columns,
         categories: board.categories ?? [],
+        labels: board.labels ?? [],
+        members: board.members ?? [
+          { userId: VIEWER, name: "Viewer", image: null, role: "owner" },
+        ],
         // Every seeded card starts at seq 1, so `changes?since=0` returns the
         // whole board — which is what a real first poll does.
         cards: board.cards.map((card) => ({ seq: 1, ...card })),

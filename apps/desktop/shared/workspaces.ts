@@ -50,6 +50,84 @@ export interface BoardCategory {
 }
 
 /**
+ * One entry of the board's label vocabulary — a tag that has been given a name
+ * and a colour.
+ *
+ * ⚠️ This is NOT the list of tags in use. A card may carry a tag no label
+ * describes, and that is a normal board rather than a broken one: the chip is
+ * drawn neutral and the tag still filters. Treating the vocabulary as closed
+ * here would hide tags the service happily stores.
+ */
+export interface BoardLabel {
+  key: string;
+  name: string;
+  tone: string;
+  position: number;
+}
+
+/**
+ * Somebody who can see this board, as the config states them.
+ *
+ * ⚠️ The directory exists because everything else names a person by ID — a
+ * comment's author, an audit row's actor, a card's assignee — and an id is not a
+ * face. `name` falls back to the id itself for an account that no longer exists,
+ * which is still what the log says happened.
+ *
+ * ⚠️ No email, by design: the service does not send one. See `BoardMember` on
+ * the API side for why a machine credential must not widen to it.
+ */
+export interface BoardMember {
+  userId: string;
+  name: string;
+  image: string | null;
+  role: string;
+}
+
+/**
+ * One entry in a card's history — the log and the thread as one sequence.
+ *
+ * ⚠️ Merged BY THE SERVICE, not here. Two independently-paged reads stitched
+ * together on this side are correct only while both fit in one page; past that
+ * the seam silently drops whatever fell between them.
+ */
+export type BoardActivity =
+  | {
+      kind: "audit";
+      id: string;
+      seq: number;
+      /** `created` | `patched` | `moved` | `checklist` | … — free text. */
+      verb: string;
+      actorKind: string;
+      /** The account behind the actor, resolvable against `BoardView.members`. */
+      actorUserId: string | null;
+      actorMachineId: string | null;
+      /** `{ field: [before, after] }`, or whatever that verb records. */
+      diff: Record<string, unknown> | null;
+      at: string;
+    }
+  | {
+      kind: "comment";
+      id: string;
+      authorKind: string;
+      /** A user id, a machine id or an agent slug — read with `authorKind`. */
+      authorRef: string;
+      /** The account it was written for, whichever door it came through. */
+      authorUserId: string | null;
+      /** NULL for a retracted comment, which keeps its place in the thread. */
+      body: string | null;
+      at: string;
+      /** Null while it stands as written. */
+      editedAt: string | null;
+      deletedAt: string | null;
+    };
+
+export interface BoardActivityPage {
+  events: BoardActivity[];
+  /** Null when this page is the end of the feed. */
+  cursor: string | null;
+}
+
+/**
  * The two sections a checklist row can belong to.
  *
  * ⚠️ The board's own closed set, not free text: a row filed under anything else
@@ -162,6 +240,52 @@ export interface BoardCard {
   checklistProgress: BoardChecklistProgress | null;
   /** Null for the same reason as `checklist`: absent from a list read. */
   assignees: BoardAssignees | null;
+  /**
+   * Who is following this card. Null on a list read, like `assignees`.
+   *
+   * ⚠️ User ids, to be resolved against `BoardView.members` — the same
+   * indirection every other person-shaped field uses, so one directory serves
+   * the whole screen instead of each row carrying a copy of somebody's name.
+   */
+  subscribers: string[] | null;
+  /**
+   * Whether the person at this machine follows it / has starred it.
+   *
+   * ⚠️ Answers about the CALLER, not about the card, which is why they are not
+   * derivable from `subscribers` alone and why the service sends them. Null on a
+   * list read: "not asked" rather than "no".
+   */
+  subscribed: boolean | null;
+  favorite: boolean | null;
+  /** Live comments, tombstones excluded. Null on a list read. */
+  commentCount: number | null;
+  /**
+   * The files this card refers to. Null on a list read.
+   *
+   * ⚠️ METADATA and a reference — the service stores no bytes and serves none.
+   * A row here is a path or a URL somebody recorded, so opening one is this
+   * machine's job, not a download.
+   */
+  attachments: BoardAttachment[] | null;
+}
+
+/** A file reference on its way to a card. */
+export interface BoardAttachmentDraft {
+  name: string;
+  reference: string;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+}
+
+/** A file a card points at. The service never holds its content. */
+export interface BoardAttachment {
+  id: string;
+  name: string;
+  /** A repo-relative path or a URL, exactly as it was recorded. */
+  reference: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  sourceKind: string | null;
 }
 
 /** A card's checklist as one fraction. */
@@ -184,6 +308,19 @@ export interface BoardCardPatch {
   priority?: "low" | "medium" | "high" | null;
   tags?: string[];
   categoryKey?: string | null;
+  /**
+   * Who the card is on — REPLACED, never merged, like `tags`.
+   *
+   * ⚠️ Both lists travel together even when only one is being changed. The
+   * service replaces the whole set, so sending `{ users: [...] }` alone would
+   * clear every agent assignment as a side effect of naming a person.
+   */
+  assignees?: BoardAssignees;
+  /** The card this one hangs under; `null` promotes it to the top level. */
+  parentId?: string | null;
+  dueAt?: string | null;
+  estimate?: number | null;
+  type?: string;
 }
 
 /**
@@ -200,6 +337,10 @@ export interface BoardView {
   workspaceId: string;
   columns: BoardColumn[];
   categories: BoardCategory[];
+  /** The label vocabulary. Empty is normal — see `BoardLabel`. */
+  labels: BoardLabel[];
+  /** Everyone who can see this board, for turning ids into faces. */
+  members: BoardMember[];
   cards: BoardCard[];
   /** True when this board has been migrated and the cloud owns its cards. */
   migrated: boolean;
@@ -460,6 +601,14 @@ export const workspaceChannels = {
   importRun: "workspaces:import:run",
   importSeal: "workspaces:import:seal",
   update: "workspaces:board:update",
+  activity: "workspaces:board:activity",
+  comment: "workspaces:board:comment",
+  commentEdit: "workspaces:board:comment:edit",
+  commentDelete: "workspaces:board:comment:delete",
+  subscribe: "workspaces:board:subscribe",
+  favorite: "workspaces:board:favorite",
+  attach: "workspaces:board:attach",
+  detach: "workspaces:board:detach",
   card: "workspaces:board:card",
   lookup: "workspaces:board:lookup",
   changes: "workspaces:board:changes",
@@ -571,6 +720,82 @@ export interface DesktopBoardApi {
    * rest.
    */
   archive: (workspaceId: string, cardId: string) => Promise<void>;
+  /**
+   * One page of a card's history and thread, oldest first.
+   *
+   * ⚠️ `cursor` is the service's, echoed back verbatim. It is keyed on
+   * `(createdAt, id)` across two tables, so nothing on this side can derive the
+   * next one from what it just read.
+   */
+  activity: (
+    workspaceId: string,
+    cardId: string,
+    cursor?: string | null,
+  ) => Promise<BoardActivityPage>;
+  /**
+   * Say something on a card. Answers the new comment's id.
+   *
+   * ⚠️ No `revision` and no `If-Match`, unlike every card edit. A comment is an
+   * append: two people writing at once both succeed, and there is no earlier
+   * version for either of them to overwrite.
+   */
+  comment: (
+    workspaceId: string,
+    cardId: string,
+    body: string,
+  ) => Promise<{ id: string }>;
+  /** Reword your own comment. The service refuses anybody else's. */
+  editComment: (
+    workspaceId: string,
+    cardId: string,
+    commentId: string,
+    body: string,
+  ) => Promise<void>;
+  /**
+   * Retract your own comment.
+   *
+   * ⚠️ A TOMBSTONE on the service — the row keeps its place with its body gone,
+   * so a thread that referred to it still reads as a conversation.
+   */
+  deleteComment: (
+    workspaceId: string,
+    cardId: string,
+    commentId: string,
+  ) => Promise<void>;
+  /**
+   * Follow or unfollow a card, and star or unstar it.
+   *
+   * ⚠️ Idempotent and carrying no revision, because neither is an edit to the
+   * card: they are facts about the person at this machine. Calling either twice
+   * with the same value is the state the caller asked for, not an error.
+   */
+  subscribe: (
+    workspaceId: string,
+    cardId: string,
+    subscribed: boolean,
+  ) => Promise<boolean>;
+  favorite: (
+    workspaceId: string,
+    cardId: string,
+    favorite: boolean,
+  ) => Promise<boolean>;
+  /**
+   * Record a file this card refers to — a path or a URL, never bytes.
+   *
+   * ⚠️ Nothing is uploaded. The service stores metadata and a reference and
+   * hands it back untouched; hosting content is a separate feature with its own
+   * storage, quota and signed URLs.
+   */
+  attach: (
+    workspaceId: string,
+    cardId: string,
+    file: BoardAttachmentDraft,
+  ) => Promise<BoardAttachment>;
+  detach: (
+    workspaceId: string,
+    cardId: string,
+    attachmentId: string,
+  ) => Promise<void>;
   importPreview: (workspaceId: string) => Promise<ImportPreview>;
   importRun: (workspaceId: string) => Promise<ImportReport>;
   /**
