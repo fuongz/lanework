@@ -4,15 +4,19 @@
   "type": "module",
   "packageManager": "bun@1.3.11",
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "dev": "bun run --cwd apps/desktop dev",
+    "dev:mcp": "bun run --cwd apps/mcp dev",
     "build": "bun run --cwd apps/desktop build",
-    "typecheck": "bun run --cwd apps/desktop typecheck",
+    "//build:mcp": "`wrangler deploy --dry-run` bundles the Worker without deploying and without credentials. It is a separate script from `build` because it catches what tsc cannot: an import with no Workers implementation resolves fine for the typechecker and fails at bundle time.",
+    "build:mcp": "bun run --cwd apps/mcp build",
+    "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd apps/mcp typecheck && bun run --cwd apps/desktop typecheck",
     "lint": "biome check . && node scripts/audit-layout.mjs",
     "format": "biome check --write .",
-    "gate": "bun run build && bun run lint && bun run typecheck",
+    "gate": "bun run build && bun run build:mcp && bun run lint && bun run typecheck",
     "package": "bun run --cwd apps/desktop package",
     "test": "bun run --cwd apps/desktop test",
     "test:dev": "bun run --cwd apps/desktop test:dev",
@@ -27,5 +31,8 @@
   "trustedDependencies": [
     "electron",
     "esbuild"
-  ]
+  ],
+  "dependencies": {
+    "wrangler": "^4.137.0"
+  }
 }

@@ -10,3 +10,11 @@ apps/desktop/src/routeTree.gen.ts
 
 # Personal Claude Code settings for this checkout
 .claude/settings.local.json
+
+# Worker secrets for `wrangler dev`.
+.dev.vars
+
+
+# Cloudflare API credentials for wrangler, and its local dev state (D1, KV, caches).
+.env
+.wrangler/
