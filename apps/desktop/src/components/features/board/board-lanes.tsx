@@ -13,12 +13,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import {
-  Link,
-  useNavigate,
-  useParams,
-  useSearch,
-} from "@tanstack/react-router";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { motion } from "motion/react";
 import { memo, useCallback, useMemo, useState } from "react";
 import type {
@@ -29,12 +24,12 @@ import type {
 import {
   CategoryDot,
   ChecklistProgress,
+  Fraction,
   PriorityIcon,
   StatusIcon,
 } from "#/components/shared/board/glyphs";
 import { IssueMenu } from "#/components/shared/board/issue-menu";
 import { BoardLanesSkeleton } from "#/components/shared/board/skeletons";
-import { ViewToolbar } from "#/components/shared/board/view-toolbar";
 import { Empty, EmptyDescription, EmptyHeader } from "#/components/ui/empty";
 import {
   Select,
@@ -122,9 +117,8 @@ const DROP_ANIMATION: DropAnimation = {
 const DRAG_PX = 6;
 
 export function BoardLanes() {
-  const { slug } = useParams({ from: "/_app/w/$slug/board" });
-  const search = useSearch({ from: "/_app/w/$slug/board" });
-  const navigate = useNavigate();
+  const { slug } = useParams({ from: "/_app/w/$slug/issues/" });
+  const search = useSearch({ from: "/_app/w/$slug/issues/" });
   const view = useBoard((state) => state.view);
   const loading = useBoard((state) => state.loading);
   const move = useBoard((state) => state.move);
@@ -289,19 +283,6 @@ export function BoardLanes() {
 
   return (
     <>
-      <ViewToolbar
-        title="Board"
-        search={search}
-        grouping={false}
-        onSearch={(next) =>
-          void navigate({
-            to: "/w/$slug/board",
-            params: { slug },
-            search: next,
-            replace: true,
-          })
-        }
-      />
       <DndContext
         sensors={sensors}
         collisionDetection={collisionDetection}
@@ -683,12 +664,12 @@ function CardFace({
           <CategoryDot category={categoryOf(categories, card.categoryKey)} />
         )}
         {subs && (
-          <span
-            className="text-muted-foreground text-[11px] tabular-nums"
+          <Fraction
+            done={subs.done}
+            total={subs.total}
             title={`${subs.done} of ${subs.total} sub-issues done`}
-          >
-            {subs.done}/{subs.total}
-          </span>
+            className="text-[11px]"
+          />
         )}
         {/* ⚠️ A tooltip on BOTH fractions, not just this one. Two bare `3/7`s
             side by side on a card are two different questions with the same

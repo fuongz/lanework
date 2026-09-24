@@ -416,7 +416,7 @@ test("ui gallery", async () => {
       await page.getByRole("button", { name: "Remove Status filter" }).click();
       await page.waitForTimeout(400);
 
-      await page.getByRole("link", { name: /^Board$/ }).click();
+      await page.getByRole("button", { name: "Board", exact: true }).click();
       await page.waitForTimeout(700);
       await capture(page, "board lanes");
 
@@ -504,7 +504,7 @@ test("ui gallery", async () => {
         .click();
       await page.waitForTimeout(1000);
       await capture(page, "issues empty");
-      await page.getByRole("link", { name: /^Board$/ }).click();
+      await page.getByRole("button", { name: "Board", exact: true }).click();
       await page.waitForTimeout(600);
       await capture(page, "board empty");
       await page.getByRole("button", { name: /^Switch project/ }).click();

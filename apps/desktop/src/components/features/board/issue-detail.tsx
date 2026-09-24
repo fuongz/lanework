@@ -9,8 +9,8 @@ import {
   StarIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link, useParams } from "@tanstack/react-router";
-import { useEffect, useId, useState } from "react";
+import { Link, useBlocker, useParams } from "@tanstack/react-router";
+import { useEffect, useId, useMemo, useState } from "react";
 import type {
   BoardAttachment,
   BoardCard,
@@ -39,6 +39,16 @@ import {
 } from "#/components/shared/board/skeletons";
 import { ErrorState } from "#/components/shared/common/error-state";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
 import { Checkbox } from "#/components/ui/checkbox";
 import {
@@ -83,6 +93,16 @@ export function IssueDetail() {
     return () => closeIssue();
   }, [active?.id, closeIssue, openIssue, taskId]);
 
+  // ⚠️ Leaving with unsaved ticks asks first (FE-13/D7). The draft is only in
+  // this window's memory; a click on the breadcrumb or a ⌘K jump would drop
+  // decisions somebody had just made without a word.
+  const dirty = useChecklistDraft(card).dirty.size > 0;
+  const blocker = useBlocker({
+    shouldBlockFn: () => dirty,
+    enableBeforeUnload: () => dirty,
+    withResolver: true,
+  });
+
   // ⚠️ Two panes side by side, each scrolling on its own — the shape the New
   // issue page already had. A card's properties are a fixed, short list; letting
   // them scroll away with a body that can run for pages meant the rail was off
@@ -111,6 +131,32 @@ export function IssueDetail() {
           </span>
           {card && <HeaderActions card={card} />}
         </header>
+        <AlertDialog
+          open={blocker.status === "blocked"}
+          onOpenChange={(open) => {
+            if (!open) blocker.reset?.();
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The ticks you made on {taskId} have not been saved. Leaving now
+                drops them.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep editing</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                className="border-0"
+                onClick={() => blocker.proceed?.()}
+              >
+                Discard
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {loading && !card && <IssueDetailSkeleton />}
@@ -205,7 +251,24 @@ function HeaderActions({ card }: { card: BoardCard }) {
   const setFavorite = useBoard((state) => state.setFavorite);
   const stale = useBoard((state) => state.view?.stale ?? false);
   const busy = useBoard((state) => state.busy);
+  const saveDraft = useBoard((state) => state.saveDraft);
+  const discardDraft = useBoard((state) => state.discardDraft);
   const [confirming, setConfirming] = useState(false);
+  const changes = useChecklistDraft(card).dirty.size;
+  const saving = busy === `${card.id}:checklist`;
+
+  // ⌘S saves, the way every editor this sits beside does.
+  useEffect(() => {
+    if (!changes) return;
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (!stale && !saving) void saveDraft();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [changes, saveDraft, saving, stale]);
 
   return (
     <>
@@ -236,36 +299,62 @@ function HeaderActions({ card }: { card: BoardCard }) {
           />
         </Button>
       )}
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
+      {/* ⚠️ Only while there IS something to save (FE-13/D7). A Save button
+          that is always there, greyed out, reads as "this page has unsaved
+          state somewhere" — the one thing it must never say when it is false. */}
+      <div className="ml-auto flex items-center gap-1">
+        {changes > 0 && (
+          <>
             <Button
               variant="ghost"
-              size="icon"
-              aria-label="Issue actions"
-              className="ml-auto size-7"
-            />
-          }
-        >
-          <HugeiconsIcon
-            icon={MoreHorizontalIcon}
-            className="text-muted-foreground size-4"
-            strokeWidth={1.8}
-          />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem
-            variant="destructive"
-            // Off while the board is a saved copy, like every other write: a
-            // delete that appeared to work offline would be a card gone from
-            // this screen and still on everybody else's.
-            disabled={stale || busy === card.id}
-            onClick={() => setConfirming(true)}
+              size="sm"
+              disabled={saving}
+              onClick={discardDraft}
+            >
+              Discard
+            </Button>
+            <Button
+              size="sm"
+              disabled={stale || saving}
+              onClick={() => void saveDraft()}
+            >
+              {saving
+                ? "Saving…"
+                : `Save ${changes === 1 ? "change" : `${changes} changes`}`}
+            </Button>
+          </>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Issue actions"
+                className="size-7"
+              />
+            }
           >
-            Delete…
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <HugeiconsIcon
+              icon={MoreHorizontalIcon}
+              className="text-muted-foreground size-4"
+              strokeWidth={1.8}
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem
+              variant="destructive"
+              // Off while the board is a saved copy, like every other write: a
+              // delete that appeared to work offline would be a card gone from
+              // this screen and still on everybody else's.
+              disabled={stale || busy === card.id}
+              onClick={() => setConfirming(true)}
+            >
+              Delete…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
       <DeleteIssueDialog
         card={card}
         open={confirming}
@@ -665,6 +754,7 @@ function AssigneeRow({
  * card's task id. Dropping it to match a screenshot would take `BE-06` with it.
  */
 function Fields({ card }: { card: BoardCard }) {
+  const checklist = useChecklistDraft(card).items;
   const view = useBoard((state) => state.view);
   const update = useBoard((state) => state.update);
   const busy = useBoard((state) => state.busy);
@@ -824,7 +914,7 @@ function Fields({ card }: { card: BoardCard }) {
           its own now, so this is the one place a card's progress stays on screen
           while a body that runs for pages is being read — which is the whole
           reason not to hide either section behind a tab. */}
-      {sections(card.checklist ?? []).map(({ section, rows, done }) => (
+      {sections(checklist).map(({ section, rows, done }) => (
         <Row key={section} label={SECTION_NAME[section] ?? section}>
           <RailValue>
             {done}/{rows.length}
@@ -900,16 +990,54 @@ function alternatives(rows: BoardChecklistItem[]) {
   return runs;
 }
 
+/**
+ * The open card's checklist as the person currently has it: the server's ticks
+ * with the unsaved draft laid over them, plus which keys differ.
+ *
+ * ⚠️ Derived on every read, never stored. A box the draft says "on" that a poll
+ * shows is already on is simply not a change any more — the Save button, the
+ * marker and the leave prompt all agree about that without anyone pruning.
+ */
+function useChecklistDraft(card: BoardCard | null) {
+  const draft = useBoard((state) => state.draft);
+  return useMemo(() => {
+    const items = card?.checklist ?? [];
+    const dirty = new Set<string>();
+    if (!card || draft?.cardId !== card.id) return { items, dirty };
+    const next = items.map((item) => {
+      const want = draft.checked[item.key];
+      if (want === undefined || want === item.checked) return item;
+      dirty.add(item.key);
+      return { ...item, checked: want };
+    });
+    return { items: next, dirty };
+  }, [card, draft]);
+}
+
 /** One row's text: its key, the decision, and the note under it. */
 function RowLabel({
   htmlFor,
   item,
+  unsaved = false,
 }: {
   htmlFor: string;
   item: BoardChecklistItem;
+  unsaved?: boolean;
 }) {
   return (
     <label htmlFor={htmlFor} className="cursor-pointer">
+      {/* ⚠️ A mark on the ROW, not only the Save button's count: on a card with
+          thirty boxes, "3 changes" does not say which three. */}
+      {unsaved && (
+        <>
+          <span
+            aria-hidden="true"
+            className="bg-tone-amber mr-1.5 inline-block size-1.5 -translate-y-px rounded-full align-middle"
+            title="Not saved yet"
+          />
+          <span className="sr-only">Not saved yet: </span>
+        </>
+      )}
       <span className="text-muted-foreground mr-1.5 font-mono text-xs">
         {item.key}
       </span>
@@ -932,20 +1060,23 @@ function RowLabel({
  * were approved.
  */
 function Checklist({ card }: { card: BoardCard }) {
-  const toggle = useBoard((state) => state.toggle);
+  const stageTick = useBoard((state) => state.stageTick);
+  const stagePick = useBoard((state) => state.stagePick);
   const busy = useBoard((state) => state.busy);
   const view = useBoard((state) => state.view);
   const uid = useId();
+  const { items, dirty } = useChecklistDraft(card);
   const stale = view?.stale ?? false;
-  const items = card.checklist;
-  if (!items?.length) return null;
+  if (!items.length) return null;
 
   // ⚠️ Prefixed, not the bare `item.key`. Every card's checklist starts at `D1`,
   // and the detail pane is not the only thing on the page — a duplicated id
   // points a label at whichever box the document happens to hold first.
   const rowId = (item: BoardChecklistItem) => `${uid}-${item.key}`;
-  const rowBusy = (item: BoardChecklistItem) =>
-    stale || busy === `${card.id}:${item.key}`;
+  // While a save is running every box holds still: a tick made mid-save would
+  // be neither in the request being sent nor safely in the draft after it.
+  const rowBusy = (_item: BoardChecklistItem) =>
+    stale || busy === `${card.id}:checklist`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -967,24 +1098,23 @@ function Checklist({ card }: { card: BoardCard }) {
                   return (
                     <li key={first.key} className={ROW}>
                       <Checkbox
-                        // ⚠️ Controlled, so it does not flip until the server
-                        // has confirmed. The one optimistic write in this app is
-                        // a card's position while it is being dragged; an
-                        // approval is never shown as saved before it is.
+                        // ⚠️ A tick goes into the DRAFT, not to the server
+                        // (FE-13/D7): decisions are made as a set and sent with
+                        // Save. The row's mark says it is not saved yet — an
+                        // approval is still never shown as saved before it is.
                         id={rowId(first)}
                         checked={first.checked}
                         disabled={rowBusy(first)}
                         className="mt-0.5"
                         onCheckedChange={(checked) =>
-                          void toggle(
-                            card.id,
-                            first.key,
-                            checked,
-                            card.revision,
-                          )
+                          stageTick(card.id, first.key, checked)
                         }
                       />
-                      <RowLabel htmlFor={rowId(first)} item={first} />
+                      <RowLabel
+                        htmlFor={rowId(first)}
+                        item={first}
+                        unsaved={dirty.has(first.key)}
+                      />
                     </li>
                   );
                 return (
@@ -998,10 +1128,14 @@ function Checklist({ card }: { card: BoardCard }) {
                       value={
                         run.items.find((item) => item.checked)?.key ?? null
                       }
-                      disabled={stale}
+                      disabled={rowBusy(first)}
                       className="gap-1.5"
                       onValueChange={(value) =>
-                        void toggle(card.id, String(value), true, card.revision)
+                        stagePick(
+                          card.id,
+                          run.items.map((item) => item.key),
+                          String(value),
+                        )
                       }
                     >
                       {run.items.map((item) => (
@@ -1012,7 +1146,11 @@ function Checklist({ card }: { card: BoardCard }) {
                             disabled={rowBusy(item)}
                             className="mt-0.5"
                           />
-                          <RowLabel htmlFor={rowId(item)} item={item} />
+                          <RowLabel
+                            htmlFor={rowId(item)}
+                            item={item}
+                            unsaved={dirty.has(item.key)}
+                          />
                         </div>
                       ))}
                     </RadioGroup>

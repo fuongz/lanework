@@ -5,22 +5,17 @@ import {
   FilterIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Link,
-  useNavigate,
-  useParams,
-  useSearch,
-} from "@tanstack/react-router";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   CategoryDot,
   ChecklistProgress,
+  Fraction,
   PriorityIcon,
   StatusIcon,
 } from "#/components/shared/board/glyphs";
 import { IssueMenu } from "#/components/shared/board/issue-menu";
 import { IssuesListSkeleton } from "#/components/shared/board/skeletons";
-import { ViewToolbar } from "#/components/shared/board/view-toolbar";
 import {
   Empty,
   EmptyDescription,
@@ -40,7 +35,6 @@ import { useBoard } from "#/stores/board";
 export function IssuesList() {
   const { slug } = useParams({ from: "/_app/w/$slug/issues/" });
   const search = useSearch({ from: "/_app/w/$slug/issues/" });
-  const navigate = useNavigate();
   const view = useBoard((state) => state.view);
   const loading = useBoard((state) => state.loading);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -55,18 +49,6 @@ export function IssuesList() {
 
   return (
     <>
-      <ViewToolbar
-        title="All issues"
-        search={search}
-        onSearch={(next) =>
-          void navigate({
-            to: "/w/$slug/issues",
-            params: { slug },
-            search: next,
-            replace: true,
-          })
-        }
-      />
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!view && loading && <IssuesListSkeleton />}
         {view && groups.every((group) => group.cards.length === 0) && (
@@ -108,7 +90,7 @@ export function IssuesList() {
                 onClick={() =>
                   setCollapsed((state) => ({ ...state, [group.key]: !shut }))
                 }
-                className="bg-background/95 hover:bg-foreground/[0.03] sticky top-0 z-10 flex h-9 w-full items-center gap-2 px-6 text-left backdrop-blur"
+                className="bg-background/95 hover:bg-foreground/[0.03] sticky top-0 z-10 flex h-9 w-full items-center gap-2 pr-6 pl-3 text-left backdrop-blur"
               >
                 <HugeiconsIcon
                   icon={shut ? ArrowRight01Icon : ArrowDown01Icon}
@@ -173,12 +155,11 @@ export function IssuesList() {
                               />
                             )}
                             {subs && (
-                              <span
-                                className="text-muted-foreground text-xs tabular-nums"
+                              <Fraction
+                                done={subs.done}
+                                total={subs.total}
                                 title={`${subs.done} of ${subs.total} sub-issues done`}
-                              >
-                                {subs.done}/{subs.total}
-                              </span>
+                              />
                             )}
                             <ChecklistProgress card={card} />
                             <PriorityIcon priority={card.priority} />

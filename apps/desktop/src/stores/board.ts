@@ -159,6 +159,23 @@ interface BoardState {
     items: BoardChecklistDraft[],
     revision: number,
   ) => Promise<void>;
+  /**
+   * Checklist ticks made on the open card and not saved yet (FE-13/D7).
+   *
+   * ⚠️ The DESIRED state per key, compared against the card when it is read —
+   * never a list of clicks. A tick that is flipped back, or that a poll shows
+   * someone else already made, stops being a change on its own; nothing has to
+   * prune it. And it lives beside `detail`, not inside it, so a poll that
+   * re-reads the card cannot overwrite what is being decided.
+   */
+  draft: { cardId: string; checked: Record<string, boolean> } | null;
+  /** Tick or untick one box in the draft. */
+  stageTick: (cardId: string, key: string, checked: boolean) => void;
+  /** Pick one option of a "pick ONE" group in the draft; the rest go off. */
+  stagePick: (cardId: string, group: string[], key: string) => void;
+  discardDraft: () => void;
+  /** Send the draft, one box at a time (FE-13/D8). */
+  saveDraft: () => Promise<void>;
   openIssue: (taskId: string) => Promise<void>;
   /** Re-read the open card by id, after a write that changed its parts. */
   refreshDetail: (cardId: string) => Promise<void>;
@@ -246,6 +263,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
   notFound: null,
   listLoaded: false,
   detail: null,
+  draft: null,
   detailLoading: false,
   detailError: null,
   activity: null,
@@ -670,6 +688,114 @@ export const useBoard = create<BoardState>()((set, get) => ({
     }
   },
 
+  stageTick: (cardId, key, checked) =>
+    set((state) => {
+      const same = state.draft?.cardId === cardId;
+      return {
+        draft: {
+          cardId,
+          checked: { ...(same ? state.draft?.checked : {}), [key]: checked },
+        },
+      };
+    }),
+
+  stagePick: (cardId, group, key) =>
+    set((state) => {
+      const same = state.draft?.cardId === cardId;
+      const checked = { ...(same ? state.draft?.checked : {}) };
+      for (const option of group) checked[option] = option === key;
+      return { draft: { cardId, checked } };
+    }),
+
+  discardDraft: () => set({ draft: null }),
+
+  saveDraft: async () => {
+    const workspace = get().active;
+    const { draft, detail } = get();
+    if (!workspace?.id || !draft || detail?.id !== draft.cardId) return;
+    // ⚠️ Only boxes that DIFFER from the card as last read, in the order the
+    // card lists them. The ticks go before the unticks so that, for a "pick
+    // ONE" group, the new choice lands before the old one is cleared — a
+    // failure between the two leaves both ticked (visible, fixable) rather
+    // than neither (an approval that silently vanished).
+    const pending = (detail.checklist ?? [])
+      .filter(
+        (item) =>
+          item.key in draft.checked && draft.checked[item.key] !== item.checked,
+      )
+      .sort(
+        (a, b) => Number(draft.checked[b.key]) - Number(draft.checked[a.key]),
+      );
+    if (!pending.length) {
+      set({ draft: null });
+      return;
+    }
+
+    set({ busy: `${detail.id}:checklist`, error: null, conflict: null });
+    // ⚠️ Each PATCH carries the revision the PREVIOUS one returned. The first
+    // carries the one on screen — the revision the person decided against —
+    // so an edit made elsewhere since then is caught before anything lands.
+    let revision = detail.revision;
+    let saved = 0;
+    try {
+      for (const item of pending) {
+        const result = await api().board.toggle(
+          workspace.id,
+          detail.id,
+          item.key,
+          draft.checked[item.key],
+          revision,
+        );
+        if (result.kind === "ok") {
+          revision = result.card.revision;
+          saved += 1;
+          continue;
+        }
+        // Stop at the first refusal. What already landed is real; what did not
+        // stays in the draft, still marked, for the person to look at again.
+        if (result.kind === "conflict") set({ conflict: result });
+        else
+          set({
+            error: saved
+              ? `Saved ${saved} of ${pending.length}. ${result.message}`
+              : result.message,
+          });
+        break;
+      }
+    } catch (error) {
+      set({
+        error: ipcMessage(
+          error,
+          saved
+            ? `Saved ${saved} of ${pending.length}; the rest did not. Try again.`
+            : "Those ticks did not save. Try again.",
+        ),
+      });
+    } finally {
+      await get().refreshDetail(detail.id);
+      // Whatever now matches the card is no longer a change; if that is all of
+      // it, the draft is gone and the Save button with it.
+      set((state) => {
+        const card = state.detail;
+        if (!state.draft || !card || state.draft.cardId !== card.id)
+          return { busy: null };
+        const left = Object.fromEntries(
+          Object.entries(state.draft.checked).filter(
+            ([key, checked]) =>
+              card.checklist?.find((item) => item.key === key)?.checked !==
+              checked,
+          ),
+        );
+        return {
+          busy: null,
+          draft: Object.keys(left).length
+            ? { cardId: card.id, checked: left }
+            : null,
+        };
+      });
+    }
+  },
+
   refreshDetail: async (cardId) => {
     const workspace = get().active;
     if (!workspace?.id || get().detail?.id !== cardId) return;
@@ -692,6 +818,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
       if (mine !== ticket.detail) return;
       set({
         detail: card,
+        // A draft belongs to the card it was made on; the page only gets here
+        // for a different card once the leave-without-saving prompt let it.
+        draft: null,
         detailLoading: false,
         detailError: card ? null : `No card called ${taskId}.`,
         // ⚠️ Cleared here, not only in `closeIssue`. Opening a card straight
@@ -862,6 +991,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
   closeIssue: () =>
     set({
       detail: null,
+      draft: null,
       detailError: null,
       activity: null,
       activityCursor: null,

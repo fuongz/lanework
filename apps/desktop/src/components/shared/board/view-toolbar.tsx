@@ -1,9 +1,12 @@
 import {
   Add01Icon,
   CloudSavingDone01Icon,
+  GridViewIcon,
+  Menu01Icon,
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { motion } from "motion/react";
 import { useState } from "react";
 // ⚠️ `shared/` importing `features/` is legal and deliberate: the buckets
 // encode how many importers a file has, not a layering. This toolbar has two
@@ -21,6 +24,7 @@ import {
 } from "#/components/ui/select";
 import { GROUP_BY, type GroupBy } from "#/lib/board-view";
 import type { IssueSearch } from "#/lib/issue-search";
+import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 
 const when = (iso: string): string => {
@@ -78,6 +82,81 @@ function Freshness({ stale, at }: { stale: boolean; at: string }) {
 }
 
 /**
+ * List or lanes — the same issues, drawn two ways (FE-13/D4).
+ *
+ * ⚠️ Switching keeps every filter, and the list's grouping too: the group is
+ * simply not read on the lanes, so coming back to the list finds it where it
+ * was. Two buttons with `aria-pressed` rather than a tab list, because what
+ * they switch is how THIS region is drawn, not which panel is shown.
+ *
+ * ⚠️ Labelled, not icon-only: two glyphs side by side made you hover to learn
+ * which was which. The pill SLIDES between them (a shared `layoutId`) inside a
+ * bar that stays mounted across the switch (`IssuesView` owns it), so it only
+ * ever glides between its own two positions — never in from wherever a
+ * previous page left it. `MotionConfig reducedMotion="user"` at the root turns the glide into a jump
+ * for anyone who asked for less motion.
+ */
+function ViewSwitch({
+  search,
+  onSearch,
+}: {
+  search: IssueSearch;
+  onSearch: (next: IssueSearch) => void;
+}) {
+  const current = search.view ?? "list";
+  const options = [
+    { value: "list", label: "List", icon: Menu01Icon },
+    { value: "board", label: "Board", icon: GridViewIcon },
+  ] as const;
+  return (
+    <div
+      role="group"
+      aria-label="View"
+      className="bg-foreground/[0.05] flex items-center gap-0.5 rounded-full p-0.5"
+    >
+      {options.map((option) => {
+        const on = current === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={on}
+            onClick={() => {
+              if (on) return;
+              onSearch({
+                ...search,
+                view: option.value === "board" ? "board" : undefined,
+              });
+            }}
+            className={cn(
+              "focus-visible:ring-ring/40 relative flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors duration-150 outline-none focus-visible:ring-2",
+              on
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {on && (
+              <motion.span
+                layoutId="issue-view-pill"
+                aria-hidden="true"
+                className="bg-background dark:bg-foreground/15 absolute inset-0 rounded-full shadow-sm"
+                transition={{ type: "spring", duration: 0.35, bounce: 0.18 }}
+              />
+            )}
+            <HugeiconsIcon
+              icon={option.icon}
+              className="relative size-3.5"
+              strokeWidth={1.6}
+            />
+            <span className="relative">{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * The bar every board view wears: what it is, how it is cut, and how fresh.
  *
  * ⚠️ `grouping` is optional because the lanes view has exactly one sensible
@@ -105,9 +184,14 @@ export function ViewToolbar({
   return (
     <div className="border-border flex shrink-0 flex-col gap-2 border-b px-6 pt-4 pb-3">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="mr-auto text-[15px] font-semibold tracking-tight">
-          {title}
-        </h1>
+        <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
+        {/* ⚠️ Beside the title, not with the controls on the right. "Group"
+            only exists on the list, so on the right the switch jumped sideways
+            by that select's width every time it was pressed — the one control
+            that must not move is the one you just clicked. */}
+        <div className="mr-auto">
+          <ViewSwitch search={search} onSearch={onSearch} />
+        </div>
 
         {grouping && (
           <Select

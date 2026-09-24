@@ -104,9 +104,9 @@ export function CommandPalette() {
           icon: Grid2X2Icon,
           run: () =>
             void navigate({
-              to: "/w/$slug/board",
+              to: "/w/$slug/issues",
               params: { slug },
-              search: {},
+              search: { view: "board" },
             }),
         },
         {

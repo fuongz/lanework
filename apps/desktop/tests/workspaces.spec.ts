@@ -658,29 +658,45 @@ test("opening a workspace shows its cloud board, and a tick carries the revision
     await expect(
       page.getByRole("heading", { name: "Decisions" }),
     ).toBeVisible();
+    // ⚠️ A tick is a DRAFT until Save (FE-13/D7): the box shows it, the row is
+    // marked, and the header offers to save — but nothing has been sent.
+    const sent = plane.boardPreconditions.length;
     await page.getByRole("checkbox").first().click();
+    await expect(page.getByRole("checkbox").first()).toBeChecked();
+    await expect(page.getByText("Not saved yet:")).toHaveCount(1);
+    const save = page.getByRole("button", { name: "Save change" });
+    await expect(save).toBeVisible();
+    expect(plane.boardPreconditions.length).toBe(sent);
+    await save.click();
     await expect
       .poll(() => plane.boardPreconditions)
       .toEqual(expect.arrayContaining(["4"]));
     await expect(page.getByRole("checkbox").first()).toBeChecked();
+    await expect(save).toHaveCount(0);
 
-    // A lost race shows both sides instead of "try again".
+    // A lost race shows both sides instead of "try again" — sent with ⌘S.
     plane.setChecklistConflict(true);
     await page.getByRole("checkbox").first().click();
+    await page.keyboard.press("ControlOrMeta+s");
     await expect(
       page.getByText("Someone else changed this card"),
     ).toBeVisible();
     plane.setChecklistConflict(false);
+
+    // The refused untick is still a draft, so leaving asks before dropping it.
+    await page
+      .getByRole("link", { name: "Cloud project", exact: true })
+      .click();
+    const leave = page.getByRole("alertdialog", { name: "Discard changes?" });
+    await expect(leave).toBeVisible();
+    await leave.getByRole("button", { name: "Discard" }).click();
 
     // Back on the board, a move is one request and the card changes lane.
     // ⚠️ The card's breadcrumb names the PROJECT, not "Issues" — it reads
     // "Cloud project › FE-01", the way the design draws it. The sidebar's own
     // Issues link carries a count in its accessible name, so it is not an exact
     // match for "Issues" either.
-    await page
-      .getByRole("link", { name: "Cloud project", exact: true })
-      .click();
-    await page.getByRole("link", { name: "Board", exact: true }).click();
+    await page.getByRole("button", { name: "Board", exact: true }).click();
     await page
       .getByRole("combobox", { name: /^Move Cache the composer input/ })
       .click();
@@ -1346,7 +1362,7 @@ test("a card is deleted from its context menu, in the list and on the board", as
     // ⚠️ And again on the lanes, where the same menu has to survive a card that
     // is also a drag handle and a drop target. A wrapper element around it would
     // break dnd-kit's measuring; the menu renders the card's own `li` instead.
-    await page.getByRole("link", { name: /^Board$/ }).click();
+    await page.getByRole("button", { name: "Board", exact: true }).click();
     const card = page
       .getByRole("listitem")
       .filter({ hasText: "Card number 2" });
@@ -1514,7 +1530,7 @@ test("dragging a card reorders its lane, and the order outlives a reload", async
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await switchTo(page, "Cloud project");
-    await page.getByRole("link", { name: "Board", exact: true }).click();
+    await page.getByRole("button", { name: "Board", exact: true }).click();
 
     const lane = page.getByLabel("To-Do column").getByRole("listitem");
     const titles = () => lane.allInnerTexts();
@@ -1561,12 +1577,31 @@ test("dragging a card reorders its lane, and the order outlives a reload", async
     // position is optimistic while the request is in flight; what this proves
     // is that the board agreed.
     await page.reload();
-    await page.getByRole("link", { name: "Board", exact: true }).click();
+    // ⚠️ No click: the lanes are a VIEW of the issues now (FE-13/D4), and the
+    // URL carries it, so a reload comes back to the board by itself.
     await expect(lane).toHaveCount(2);
     await expect
       .poll(async () => (await titles())[0])
       .toContain("Card number 4");
 
+    // ⚠️ The rail's "Issues" reopens the view last used for THIS project
+    // (FE-13/D5): someone who works from the lanes is not sent to the list
+    // every time they come back.
+    await page.getByRole("button", { name: "List", exact: true }).click();
+    await expect(page.getByLabel("To-Do column")).toHaveCount(0);
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+    await page.getByRole("link", { name: /^Issues/ }).click();
+    await expect(lane).toHaveCount(2);
+    await expect(
+      page.getByRole("button", { name: "Board", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    // The old /board path still lands on the lanes, filters kept, rather than
+    // on a "not found" — links and ⌘K history from older builds name it.
+    await page.goto("app://lanework/w/cloud-project/board?priority=high");
+    await expect(page).toHaveURL(/\/w\/cloud-project\/issues\?/);
+    expect(new URL(page.url()).searchParams.get("view")).toBe("board");
+    expect(new URL(page.url()).searchParams.get("priority")).toBe("high");
     expect(errors).toEqual([]);
   } finally {
     await app.close();

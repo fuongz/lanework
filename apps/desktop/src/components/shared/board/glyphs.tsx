@@ -140,10 +140,47 @@ export function CategoryDot({
 }
 
 /**
- * `3/7`, or nothing at all.
+ * `03/07`: a count of done out of total, always at least two digits a side.
+ *
+ * ⚠️ Padded so the column lines up (FE-13/D1). `5/5` beside `15/17` made every
+ * row's right edge a different width, and the eye read the jitter before the
+ * numbers. Past 99 the number is printed whole — a width jump there is rarer
+ * than a truncated count is wrong.
+ *
+ * ⚠️ The DONE half is muted until it reaches the total, and the total never
+ * is: the unfinished part is the half to look at, and a finished `07/07`
+ * reads as one solid value at a glance.
+ */
+export function Fraction({
+  done,
+  total,
+  title,
+  className,
+}: {
+  done: number;
+  total: number;
+  title: string;
+  className?: string;
+}) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    <span
+      className={cn("text-foreground shrink-0 text-xs tabular-nums", className)}
+      title={title}
+    >
+      <span className={done < total ? "text-muted-foreground" : undefined}>
+        {pad(done)}
+      </span>
+      /{pad(total)}
+    </span>
+  );
+}
+
+/**
+ * `03/07`, or nothing at all.
  *
  * ⚠️ Renders NOTHING when the checklist is null, and that is not the same as
- * rendering `0/0`. A card read from a board list carries no checklist — saying
+ * rendering `00/00`. A card read from a board list carries no checklist — saying
  * "0 of 0 done" about a card with seven decisions is a confident lie.
  */
 export function ChecklistProgress({
@@ -156,14 +193,11 @@ export function ChecklistProgress({
   const progress = checklistProgress(card);
   if (!progress || progress.total === 0) return null;
   return (
-    <span
-      className={cn(
-        "text-muted-foreground shrink-0 text-xs tabular-nums",
-        className,
-      )}
+    <Fraction
+      done={progress.done}
+      total={progress.total}
       title={`${progress.done} of ${progress.total} checked`}
-    >
-      {progress.done}/{progress.total}
-    </span>
+      className={className}
+    />
   );
 }

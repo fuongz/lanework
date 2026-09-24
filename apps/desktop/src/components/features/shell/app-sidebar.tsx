@@ -1,6 +1,5 @@
 import {
   GitPullRequestIcon,
-  Grid2X2Icon,
   ListViewIcon,
   PencilEdit02Icon,
   Search01Icon,
@@ -12,6 +11,7 @@ import { useEffect } from "react";
 import { Kbd } from "#/components/ui/kbd";
 import { useBoard } from "#/stores/board";
 import { useCommandPalette } from "#/stores/command-palette";
+import { useIssueView } from "#/stores/issue-view";
 import { usePulls } from "#/stores/pulls";
 import { useSession } from "#/stores/session";
 import { AccountOrb } from "./account-orb";
@@ -41,6 +41,9 @@ export function AppSidebar() {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const view = useBoard((state) => state.view);
+  const lastView = useIssueView((state) =>
+    slug ? state.bySlug[slug] : undefined,
+  );
   const open = useCommandPalette((state) => state.open);
   // Null until the pull-request screen has been opened once — a rail entry
   // that fetched to draw its own badge would read GitHub on every start.
@@ -128,8 +131,9 @@ export function AppSidebar() {
               // ⚠️ The filters are cleared on the way in. "Issues" has to mean
               // every issue; a rail entry that silently kept the last category
               // filter would show a board that is missing work with no visible
-              // reason why.
-              search={{}}
+              // reason why. The VIEW is kept (FE-13/D5): list or lanes is how
+              // you read, not what you are looking for.
+              search={lastView === "board" ? { view: "board" } : {}}
               className={ROW}
               activeOptions={{ exact: true, includeSearch: false }}
               activeProps={ACTIVE}
@@ -146,21 +150,6 @@ export function AppSidebar() {
                   {view.cards.length}
                 </span>
               )}
-            </Link>
-            <Link
-              to="/w/$slug/board"
-              params={{ slug }}
-              search={{}}
-              className={ROW}
-              activeProps={ACTIVE}
-            >
-              <HugeiconsIcon
-                icon={Grid2X2Icon}
-                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              />
-              Board
             </Link>
             <Link
               to="/w/$slug/pulls"

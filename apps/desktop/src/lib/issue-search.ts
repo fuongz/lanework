@@ -1,7 +1,15 @@
 import { type GroupBy, isGroupBy } from "./board-view";
 
+/** How a project's issues are drawn: rows, or lanes (FE-13/D4). */
+export type IssueView = "list" | "board";
+
 /** The view state a URL carries. Every field optional; every field a plain string. */
 export interface IssueSearch {
+  /**
+   * Absent means the list. Only `"board"` is ever written, so the list's URL
+   * stays the bare one every older link already points at.
+   */
+  view?: "board";
   group?: GroupBy;
   status?: string;
   category?: string;
@@ -27,6 +35,7 @@ const PRIORITIES = ["high", "medium", "low", "none"];
 export function parseIssueSearch(raw: Record<string, unknown>): IssueSearch {
   const priority = text(raw.priority);
   return {
+    view: raw.view === "board" ? "board" : undefined,
     group: isGroupBy(raw.group) ? raw.group : undefined,
     status: text(raw.status),
     category: text(raw.category),
