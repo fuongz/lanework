@@ -221,7 +221,7 @@ test("a comment can be written, reworded and retracted, and the thread keeps the
     await page.keyboard.type("Looks right to me.");
     // ⚠️ `exact`, because "Comment actions" — the per-comment `…` menu — is a
     // prefix match for this name and there is one of those per comment already.
-    await page.getByRole("button", { name: "Comment", exact: true }).click();
+    await page.getByRole("button", { name: "Post comment" }).click();
 
     // ⚠️ Read back from the SERVICE, not spliced in locally. The composer is
     // deliberately not optimistic — the server stamps the moment and orders the
@@ -232,7 +232,7 @@ test("a comment can be written, reworded and retracted, and the thread keeps the
     // being textless: an empty CodeMirror renders its placeholder as real text,
     // so `toHaveText("")` fails on a composer that did clear.
     await expect(
-      page.getByRole("button", { name: "Comment", exact: true }),
+      page.getByRole("button", { name: "Post comment" }),
     ).toBeDisabled();
     await expect
       .poll(() =>

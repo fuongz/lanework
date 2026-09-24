@@ -22,6 +22,7 @@ import type {
 } from "#/../shared/workspaces";
 import { labelOf } from "#/components/shared/board/label-chip";
 import { Avatar, memberOf, personName } from "#/components/shared/board/people";
+import { ComposerCard } from "#/components/shared/common/composer-card";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { MarkdownEditor } from "#/components/shared/common/markdown-editor";
 import { Button } from "#/components/ui/button";
@@ -33,6 +34,7 @@ import {
 } from "#/components/ui/dropdown-menu";
 import { columnOf, relativeTime } from "#/lib/board-view";
 import { useBoard } from "#/stores/board";
+import { useSession } from "#/stores/session";
 
 const PRIORITY_NAME: Record<string, string> = {
   high: "High",
@@ -444,6 +446,13 @@ function Composer({ card }: { card: BoardCard }) {
   const stale = useBoard((state) => state.view?.stale ?? false);
   const [draft, setDraft] = useState("");
   const writing = busy === `${card.id}:comment`;
+  // Whose reply it is — the account that owns this machine, as the control
+  // plane named it. Null when it never said, and the card draws "?".
+  const owner = useSession((state) =>
+    state.session?.principal.kind === "machine"
+      ? state.session.principal.owner
+      : null,
+  );
 
   const send = () => {
     const body = draft.trim();
@@ -458,25 +467,26 @@ function Composer({ card }: { card: BoardCard }) {
   return (
     <div className="flex gap-2.5 pt-1">
       <span className="w-5 shrink-0" />
-      <div className="border-border focus-within:border-foreground/20 min-w-0 flex-1 rounded-lg border transition-colors">
-        <MarkdownEditor
-          value={draft}
-          onChange={setDraft}
-          onSubmit={send}
-          label="Leave a comment"
-          placeholder="Leave a comment…"
-          readOnly={stale}
-          className="min-h-20"
-        />
-        <div className="flex items-center justify-end gap-2 px-2 pb-2">
-          <Button
-            size="sm"
-            disabled={!draft.trim() || writing || stale}
-            onClick={send}
-          >
-            {writing ? "Posting…" : "Comment"}
-          </Button>
-        </div>
+      <div className="min-w-0 flex-1">
+        <ComposerCard
+          initial={owner?.name ?? owner?.email ?? null}
+          who={owner?.name ?? owner?.email}
+          ready={draft.trim() !== "" && !writing && !stale}
+          sending={writing}
+          onSend={send}
+        >
+          {/* ⚠️ `-mx-1.5` cancels CodeMirror's own 6px content padding, so the
+              text starts where the pull request's textarea does. */}
+          <MarkdownEditor
+            value={draft}
+            onChange={setDraft}
+            onSubmit={send}
+            label="Leave a comment"
+            placeholder="Leave a comment"
+            readOnly={stale}
+            className="-mx-1.5 min-h-12"
+          />
+        </ComposerCard>
       </div>
     </div>
   );
