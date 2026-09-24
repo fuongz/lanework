@@ -1236,8 +1236,14 @@ test("hands over the file path, once you point at the file", async () => {
       });
     expect(await opacity()).toBe("0");
 
-    await header.hover();
-    await expect.poll(opacity).toBe("1");
+    // ⚠️ Hover INSIDE the retry, not once before it. The diff finishes
+    // highlighting after the header is already visible and the layout shifts
+    // under a pointer that stays put — one hover then lands on whatever moved
+    // into its place, and polling the opacity waits for a hover that is over.
+    await expect(async () => {
+      await header.hover();
+      expect(await opacity()).toBe("1");
+    }).toPass({ timeout: 10_000 });
 
     await copy.click();
     // The tick only appears once `writeText` RESOLVES, so waiting for it is
