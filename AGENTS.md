@@ -1,34 +1,63 @@
 # Instructions for AI agents
 
 This file tells AI coding agents (Claude Code, Codex, Cursor, …) how to record
-their work so it shows up on a **lanework** board. lanework visualizes the
-`.agents/reviews/` folder in this repo as a Kanban board — the review files you
-write here are exactly what the board renders.
+their work so it shows up on this repo's **lanework** board. The board lives in
+the cloud and is reached ONLY through the remote Lanework MCP server
+(`https://mcp.lanework.dev/v1`) — there are no card files in this repo.
 
 Follow these conventions for code-related tasks, while always respecting the
 user's latest explicit instructions.
 
+## Finding the board
+
+Every tool takes a `board_id`. Run `git remote get-url origin` and call
+`list_boards({ repo })` with the output as is: exactly one board → use it; none
+or several → ask the user (and `link_repo` once they answer). Never pick a board
+by its name.
+
 ## Task-card creation — Lanework MCP only
 
-When an agent creates a task/review card, it **must** call the configured
-`lanework_mcp` tool `create_review` (or the MCP `handoff` flow for a successor
-card). Never create or write a file under `.agents/reviews/` directly, and do not
-use a raw filesystem writer as a fallback. If the Lanework MCP is unavailable,
-report the blocker and ask the user to restore it; do not create the card by
-another route.
+When an agent creates a task/review card, it **must** call the Lanework MCP tool
+`create_review` (pass `parent_id` for a successor card). If the Lanework MCP is
+unavailable, report the blocker and ask the user to restore it; do not create
+the card by another route — in particular, never write a card as a local file.
+
+## `.agents/reviews/` is gone (BE-09)
+
+Until 2026-09-24 cards were also markdown files under `.agents/reviews/`. Every
+one of them was imported to the cloud board and the folder was removed; it is
+still in git history before that commit. Do not recreate it.
+
+Some local cards carried a task id the cloud had already given to another card.
+Commits and notes written before BE-09 use the **local** id; this is where each
+one lives now:
+
+| Local id (old commits) | Card | Cloud id |
+| --- | --- | --- |
+| BE-05 | Checklist progress trên board list read | **BE-10** |
+| BE-06 | Issue detail theo design: activity, comment, assignee | **BE-11** |
+| BE-07 | Remote MCP server (packages/db, Hono, OAuth 2.1 + DCR) | **BE-06** |
+| FE-09 | Kết nối git repo và quản lý pull request | **FE-12** |
+| FE-10 | Pull requests: resizable panels, Summary/Code | FE-10 (unchanged) |
+| FE-11 | Summary tab: description, checks, activity | FE-11 (unchanged) |
+
+Every other local id (INF-01, BE-01…BE-04, FE-01…FE-08) is the same card on the
+cloud. The cloud's own BE-05, BE-07 and FE-09 are different cards from the
+local ones of that id.
 
 ## Required card metadata
 
 Every new task/review card **must explicitly include `category`, `tags`, and
 `priority`** in the `create_review` call. Do not omit them, leave them empty,
-or rely on server defaults. This also applies to successor/handoff cards.
+or rely on server defaults. This also applies to successor cards.
 
 - **Category:** choose the main implementation area: `product-design`,
   `frontend`, `backend`, `infrastructure`, or `documentation`. The agent is
   authorized to choose based on the task; follow an explicit user choice when
   given. For cross-repo cards, classify the work in the target repo.
-- **Tags:** use 1–3 relevant tags. Call `list_reviews` first and reuse the
-  board's vocabulary; add a short tag only when no existing tag fits.
+- **Tags:** use 1–3 relevant tags. Read `board_summary` (or `list_reviews`)
+  first and reuse the board's vocabulary; add a short tag only when no existing
+  tag fits.
 - **Priority:** choose `high` for blockers, critical fixes, or prerequisites
   for the agreed release; `medium` for normal planned work; `low` for optional
   polish. Always pass the value explicitly.
@@ -36,69 +65,55 @@ or rely on server defaults. This also applies to successor/handoff cards.
 After creating or updating a card, verify through `get_review` or
 `list_reviews` that all three fields are populated and valid, and that the MCP
 assigned a task ID. Correct omissions with `update_review` before handing off.
-Never invent or write `task_id` yourself; the MCP assigns it from the category.
-Use `update_review` for metadata and `set_status` for lifecycle changes; do not
-rewrite review files directly. Metadata changes do not approve checklist items
-or change the card's status.
+Never invent a task id yourself; the MCP assigns it from the category.
+Use `update_review` for metadata, `toggle_item` for checklist boxes and notes,
+and `set_status` for lifecycle changes. Metadata changes do not approve
+checklist items or change the card's status.
 
 ## Where artifacts go
 
-All agent working files live under `.agents/`. Use **`YYYY-MM-DD`** for every
-dated filename (it sorts chronologically).
+Agent working files (test results, scratch output) live under `.agents/`. Use
+**`YYYY-MM-DD`** for every dated filename (it sorts chronologically).
 
-| Artifact | Path | When to write it |
+| Artifact | Where | When |
 | --- | --- | --- |
-| Plan | **`save_plan` (Lanework MCP)** | Before any substantial edit (3–5 concrete steps). |
-| Review checklist | `.agents/reviews/YYYY-MM-DD/NN-<slug>.md` | Behavior-changing work with real design decisions. |
+| Plan | The agent's own session plan/todo tool | Before any substantial edit (3–5 concrete steps). |
+| Review checklist | A card via `create_review` | Behavior-changing work with real design decisions. |
 
 ⚠️ The plan is **not** a shared `.agents/todo.md`. One mutable file that every
 session appends to loses a plan to last-writer-wins as soon as two agents run at
-once; `save_plan` writes one plan per session and drops it when the session ends.
+once.
 
-For **read-only requests** (review, explanation, translation), do not create,
-edit, or delete these files unless the user explicitly authorizes it.
+For **read-only requests** (review, explanation, translation), do not create or
+change cards or files unless the user explicitly authorizes it.
 
 ## Review gate for behavior-changing work
 
-Before implementing behavior-changing work, write a review checklist to
-`.agents/reviews/YYYY-MM-DD/NN-<slug>.md` and wait for the user to check every
-box. **Implementation starts ONLY after all gating boxes are `[x]`.**
+Before implementing behavior-changing work, open a review card with
+`create_review` and wait for the user to tick every gating box. **Implementation
+starts ONLY after all gating boxes are ticked.**
 
-Each checklist has a **status** — its board column:
+Each card has a **status** — its board lane:
 
 | `status` | Meaning |
 | --- | --- |
-| `todo` | Plan written, boxes not all checked — awaiting review. **New checklists start here.** |
-| `processing` | Approved (all gating boxes `[x]`) and being implemented. |
+| `todo` | Plan written, boxes not all ticked — awaiting review. **New cards start here.** |
+| `processing` | Approved (all gating boxes ticked) and being implemented. |
 | `done` | Shipped and verified. |
 | `dropped` | Superseded or abandoned. |
 
-Advance a review with the MCP `set_status` tool. In frontmatter mode it updates
-`status:` in place — the file never moves.
+Advance a card with `set_status`.
 
-**Frontmatter** (the board reads these): start each file with YAML, then a
-`# Review: …` heading:
-
-```yaml
----
-status: todo                       # todo | processing | done | dropped
-agent_assignee: ["code-reviewer"]   # the card's agent PIC — one agent, start to finish
-created_at: YYYY-MM-DD 00:00:00Z   # the date for this card
-category: frontend                # required; one of the five board categories
-priority: medium                   # low | medium | high
-tags: ["ui", "electron"]          # required: 1–3 tags from the board vocabulary
----
-```
-
-After the frontmatter, add a short "How to review" note (flip `- [ ]` → `- [x]`,
-write `> notes` under any disagreement), group checklist items by topic, and
-include Context, an explicit **out of scope** section, and a **files touched**
-table. Make mutually-exclusive options separate "pick ONE" boxes with a
-recommendation. Treat direct user edits to the checklist as decisions.
+The card is a `body` (markdown) plus a `checklist`. Put Context, an explicit
+**out of scope** section and a **files touched** table in the body. Checklist
+items go in `decisions` (what the user approves) or `verify` (how you will prove
+it). Give mutually-exclusive options the same `group` so they read as "pick
+ONE", and mark the recommendation. Treat the user's own ticks and notes on the
+card as decisions.
 
 What does **not** need a review: read-only requests, single-file obvious fixes,
 or tasks where the user specified the exact shape. Those only need a
-`save_plan` call.
+plan.
 
 ## Reusable scripts
 

@@ -1,7 +1,7 @@
 // The gate on the ported reader — the one that catches a drift from the board.
 //
-// ⚠️ Two halves, and both are needed. The first runs the reader over THIS
-// repo's own `.agents/reviews/**`: real cards, written by the Lanework board
+// ⚠️ Two halves, and both are needed. The first runs the reader over a
+// snapshot of this repo's own `.agents/reviews/**` (see `REPO`): real cards, written by the Lanework board
 // itself, so a rule this port got wrong shows up as a real card read wrongly
 // rather than as a fixture disagreeing with a fixture. The second states the
 // rules that live data does not currently exercise — a fenced checkbox, a
@@ -28,8 +28,16 @@ import {
 } from "../electron/main/workspaces/review-location";
 import { scanTaskBlocks } from "../electron/main/workspaces/review-scan";
 
-/** The repo this test file lives in — `apps/desktop` is the cwd. */
-const REPO = join(process.cwd(), "..", "..");
+/**
+ * A frozen copy of THIS repo's own `.agents/reviews/**` as it stood when the
+ * board moved to the cloud (BE-09) — `apps/desktop` is the cwd.
+ *
+ * ⚠️ A snapshot, not the live folder: the repo no longer keeps its cards on
+ * disk, so reading `../..` would find nothing. The files are still real cards
+ * the board wrote, which is the whole point of the first test below. Do not
+ * "tidy" them — a hand-edited fixture stops being evidence.
+ */
+const REPO = join(process.cwd(), "tests", "fixtures", "review-repo");
 
 test("this repo's own cards read as import records", async () => {
   const plan = await planMigration(REPO);
