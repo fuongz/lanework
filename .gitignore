@@ -6,6 +6,7 @@ release/
 *.tsbuildinfo
 .DS_Store
 apps/desktop/src/routeTree.gen.ts
+apps/landing/src/routeTree.gen.ts
 .agents/artifacts/
 
 # Personal Claude Code settings for this checkout
