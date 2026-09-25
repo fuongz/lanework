@@ -16,7 +16,6 @@
     "build:api": "bun run --cwd apps/api build",
     "build:mcp": "bun run --cwd apps/mcp build",
     "build:landing": "bun run --cwd apps/landing build",
-    "//deploy:api": "A schema change is `db:generate` in packages/db, then `bun run --cwd packages/db db:migrate:remote`, and only then this — the Worker must never run against columns the database does not have yet.",
     "deploy:api": "bun run --cwd apps/api deploy",
     "deploy:mcp": "bun run --cwd apps/mcp deploy",
     "deploy:landing": "bun run --cwd apps/landing deploy",
