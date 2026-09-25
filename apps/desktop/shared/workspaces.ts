@@ -597,6 +597,7 @@ export const workspaceChannels = {
   setChecklist: "workspaces:board:checklist",
   create: "workspaces:board:create",
   archive: "workspaces:board:archive",
+  purge: "workspaces:board:purge",
   importPreview: "workspaces:import:preview",
   importRun: "workspaces:import:run",
   importSeal: "workspaces:import:seal",
@@ -720,6 +721,18 @@ export interface DesktopBoardApi {
    * rest.
    */
   archive: (workspaceId: string, cardId: string) => Promise<void>;
+  /**
+   * Permanently remove EVERY card on a board (FE-14).
+   *
+   * ⚠️ A real delete, unlike `archive`: cards, checklists, comments and their
+   * history go, and nothing in this app can bring them back. The project, its
+   * lanes, categories and members stay, and the migration seal is lifted.
+   *
+   * ⚠️ Takes the SLUG as well as the id, and the service checks it: the id
+   * says which board, the slug says the person meant that one. Resolves to the
+   * number of cards removed.
+   */
+  purge: (workspaceId: string, slug: string) => Promise<{ deleted: number }>;
   /**
    * One page of a card's history and thread, oldest first.
    *

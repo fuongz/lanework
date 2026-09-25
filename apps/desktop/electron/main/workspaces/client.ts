@@ -995,6 +995,44 @@ export async function detachFile(
 }
 
 /**
+ * Remove every card on a board, permanently (FE-14).
+ *
+ * ⚠️ 404 means the SERVICE is older than this app, not that the board is
+ * gone — `openBoard` answers 404 for a board you cannot see, and this app only
+ * offers the action on a board it just read. Saying "cannot remove issues yet"
+ * is the honest reading; "not found" would send someone looking for a board
+ * that is right there.
+ */
+export async function purgeIssues(
+  record: MachineRecord,
+  workspaceId: string,
+  slug: string,
+): Promise<{ deleted: number }> {
+  const response = await call(record, `/v1/boards/${workspaceId}/purge`, {
+    method: "POST",
+    body: JSON.stringify({ confirm: slug }),
+  });
+  if (response.status === 404)
+    throw new Error(
+      "This Lanework service cannot remove issues yet. Update the service, then try again.",
+    );
+  if (response.status === 403)
+    throw new Error("Only the project's owner can remove its issues.");
+  if (!response.ok) {
+    const detail = (
+      (await body(response).catch(() => null)) as { error?: string } | null
+    )?.error;
+    throw new Error(
+      `Could not remove the issues (HTTP ${response.status})${detail ? `: ${detail}` : ""}.`,
+    );
+  }
+  const payload = (await body(response)) as { deleted?: unknown };
+  return {
+    deleted: typeof payload.deleted === "number" ? payload.deleted : 0,
+  };
+}
+
+/**
  * Archive one card — what "Delete" does on this board.
  *
  * ⚠️ `DELETE` on this route is a TOMBSTONE. The service stamps `archivedAt`,

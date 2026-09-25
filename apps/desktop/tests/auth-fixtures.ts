@@ -209,6 +209,8 @@ export async function startStubPlane(
   setChecklistConflict: (value: boolean) => void;
   /** Fail every board read, so the app has to fall back to its saved copy. */
   setBoardOffline: (value: boolean) => void;
+  /** Answer `POST /purge` with 404, the way a service older than FE-14 does. */
+  setPurgeMissing: (value: boolean) => void;
   /** `If-Match` headers the board saw, so a test can prove the precondition. */
   boardPreconditions: string[];
   /**
@@ -248,6 +250,10 @@ export async function startStubPlane(
   const VIEWER = "u-viewer";
   let checklistConflict = false;
   let boardOffline = false;
+  let purgeMissing = false;
+  // Board-level events (`purged`) per board, the way the service keeps them:
+  // audit rows with no card, reported by the feed above the client's cursor.
+  const boardEvents = new Map<string, { seq: number; verb: string }[]>();
   let createMissing = false;
   let importBroken = false;
   let sealMismatch: number | null = null;
@@ -536,7 +542,35 @@ export async function startStubPlane(
               ...card,
               checklistProgress: summarize(checklist),
             })),
-          events: [],
+          events: (boardEvents.get(board[1]) ?? []).filter(
+            (event) => event.seq > since,
+          ),
+        });
+        return;
+      }
+      // ⚠️ A real removal, unlike the archive below — and the only change the
+      // feed can carry for it is the board-level event, exactly as the service
+      // does it. `confirm` must be the project's slug, or nothing goes.
+      if (req.method === "POST" && rest === "/purge") {
+        let raw = "";
+        req.on("data", (chunk) => (raw += chunk));
+        req.on("end", () => {
+          if (purgeMissing) return json(404, { error: "not found" });
+          const slug = workspaces.find((entry) => entry.id === board[1])?.slug;
+          const confirm = (JSON.parse(raw || "{}") as { confirm?: unknown })
+            .confirm;
+          if (!slug || confirm !== slug)
+            return json(400, {
+              error: "confirm must be this project's slug, exactly",
+            });
+          const deleted = state.cards.length;
+          state.cards = [];
+          state.seq += 1;
+          boardEvents.set(board[1], [
+            ...(boardEvents.get(board[1]) ?? []),
+            { seq: state.seq, verb: "purged" },
+          ]);
+          json(200, { deleted, seq: state.seq });
         });
         return;
       }
@@ -1092,6 +1126,9 @@ export async function startStubPlane(
     },
     setBoardOffline: (value) => {
       boardOffline = value;
+    },
+    setPurgeMissing: (value) => {
+      purgeMissing = value;
     },
     setCreateMissing: (value) => {
       createMissing = value;

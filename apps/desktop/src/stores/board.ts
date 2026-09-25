@@ -120,6 +120,16 @@ interface BoardState {
    */
   deleteProject: (id: string, slug: string) => Promise<{ error?: string }>;
   /**
+   * Permanently remove every issue on a project's board (FE-14).
+   *
+   * Busy as `purge:<slug>`. Resolves with how many cards went, or the reason
+   * nothing did.
+   */
+  purgeIssues: (
+    id: string,
+    slug: string,
+  ) => Promise<{ error?: string; deleted?: number }>;
+  /**
    * Put a new card on the board.
    *
    * ⚠️ Answers with the card the board minted rather than just succeeding. The
@@ -476,6 +486,25 @@ export const useBoard = create<BoardState>()((set, get) => ({
       set({ busy: null });
       return {
         error: ipcMessage(error, "Could not delete that project. Try again."),
+      };
+    }
+  },
+
+  purgeIssues: async (id, slug) => {
+    set({ busy: `purge:${slug}`, error: null });
+    try {
+      const { deleted } = await api().board.purge(id, slug);
+      set({ busy: null });
+      // ⚠️ Re-read when it was the open board, rather than emptying `view`
+      // here. The lanes, categories and counts come back from the service —
+      // an empty copy invented locally would be right about the cards and
+      // silent about everything else the read carries.
+      if (get().active?.id === id) await get().reload();
+      return { deleted };
+    } catch (error) {
+      set({ busy: null });
+      return {
+        error: ipcMessage(error, "Could not remove the issues. Try again."),
       };
     }
   },

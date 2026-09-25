@@ -210,6 +210,8 @@ const desktop: DesktopApi = {
         ipcRenderer.invoke(workspaceChannels.create, workspaceId, draft),
       archive: (workspaceId, cardId) =>
         ipcRenderer.invoke(workspaceChannels.archive, workspaceId, cardId),
+      purge: (workspaceId, slug) =>
+        ipcRenderer.invoke(workspaceChannels.purge, workspaceId, slug),
       importPreview: (workspaceId) =>
         ipcRenderer.invoke(workspaceChannels.importPreview, workspaceId),
       importRun: (workspaceId) =>

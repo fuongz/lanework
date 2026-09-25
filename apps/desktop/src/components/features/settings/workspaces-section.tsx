@@ -1,5 +1,6 @@
-import { Add01Icon, Folder01Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import type { Workspace } from "#/../shared/workspaces";
 import { ImportLocalDialog } from "#/components/features/workspaces/import-local-dialog";
@@ -22,7 +23,9 @@ import {
   AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
+import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
+import { SelectedProjectSection } from "./selected-project-section";
 
 /**
  * The folders linked to each project on this machine, primary first.
@@ -88,7 +91,6 @@ export function WorkspacesSection() {
   const workspaces = useBoard((state) => state.workspaces);
   const active = useBoard((state) => state.active);
   const ready = useBoard((state) => state.ready);
-  const busy = useBoard((state) => state.busy);
   const hydrate = useBoard((state) => state.hydrate);
   const deleteProject = useBoard((state) => state.deleteProject);
 
@@ -105,6 +107,15 @@ export function WorkspacesSection() {
   >(null);
   const [failed, setFailed] = useState<string | null>(null);
   const { paths, refresh } = useFolderPaths(workspaces);
+  // ⚠️ The project this page is MANAGING, which starts as the one that is open
+  // and follows a click on a row below (FE-14). Page-local on purpose: picking
+  // a project to look after is not the same as switching to it.
+  const [picked, setPicked] = useState<string | null>(null);
+  const selected =
+    workspaces.find((workspace) => workspace.slug === picked) ??
+    workspaces.find((workspace) => workspace.slug === active?.slug) ??
+    workspaces[0] ??
+    null;
 
   // Settings can be opened straight from a cold start, with nothing loaded.
   useEffect(() => {
@@ -117,6 +128,25 @@ export function WorkspacesSection() {
         title="Projects"
         description="Every project on your lanework account, and where each one lives on this machine."
         sections={[
+          {
+            title: "Selected project",
+            keywords:
+              "selected project rename folders import danger remove all issues purge delete clear reset",
+            content: (
+              <SelectedProjectSection
+                // A fresh section per project, so a "Removed 12 issues" line
+                // never follows the selection onto a different board.
+                key={selected?.slug ?? "none"}
+                workspace={selected}
+                folders={selected ? (paths[selected.slug] ?? []) : []}
+                onRename={setRenaming}
+                onFolders={setEditing}
+                onImport={setImporting}
+                onDelete={setConfirming}
+                onFailed={setFailed}
+              />
+            ),
+          },
           {
             title: "On this account",
             keywords:
@@ -142,12 +172,26 @@ export function WorkspacesSection() {
                   ) : (
                     workspaces.map((workspace) => {
                       const linked = paths[workspace.slug] ?? [];
+                      const isSelected = workspace.slug === selected?.slug;
                       return (
                         <div
                           key={workspace.slug}
-                          className="flex items-center justify-between gap-6 px-4 py-3.5"
+                          className={cn(
+                            "flex items-center justify-between gap-6 px-4 py-3.5 transition-colors",
+                            isSelected && "bg-foreground/[0.03]",
+                          )}
                         >
-                          <div className="flex min-w-0 flex-col gap-1">
+                          {/* ⚠️ The whole left side is the SELECT control, so
+                              a row is picked the way a list item is — but it
+                              is a real button, reachable by keyboard and named
+                              for what it does. */}
+                          <button
+                            type="button"
+                            aria-label={`Select ${workspace.name}`}
+                            aria-pressed={isSelected}
+                            onClick={() => setPicked(workspace.slug)}
+                            className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1 text-left outline-none focus-visible:underline"
+                          >
                             <span className="truncate text-sm font-medium">
                               {workspace.name}
                               {workspace.slug === active?.slug && (
@@ -156,11 +200,6 @@ export function WorkspacesSection() {
                                 </span>
                               )}
                             </span>
-                            {/* ⚠️ The slug is shown because it is what the
-                                folder link is keyed by and what a URL names —
-                                not decoration. It no longer deletes anything:
-                                that moved to the cloud id, which is not a key a
-                                person should have to read. */}
                             <span className="text-muted-foreground truncate font-mono text-xs">
                               {workspace.slug}
                             </span>
@@ -174,92 +213,21 @@ export function WorkspacesSection() {
                                   ? linked[0]
                                   : `${linked[0]} + ${linked.length - 1} more`}
                             </span>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-1">
+                          </button>
+                          {workspace.slug !== active?.slug && (
                             <Button
                               variant="ghost"
-                              aria-label={`Rename ${workspace.name}`}
-                              // ⚠️ Disabled with a REASON, not hidden. A project
-                              // with no cloud id is a service older than that
-                              // field — the same state that stops its board from
-                              // opening — and a button that quietly vanished
-                              // would leave nothing to explain why.
-                              disabled={
-                                !workspace.id ||
-                                busy === `rename:${workspace.id}`
-                              }
-                              title={
-                                workspace.id
-                                  ? undefined
-                                  : "This project has no cloud id yet, so it cannot be renamed from here."
-                              }
-                              onClick={() =>
-                                workspace.id &&
-                                setRenaming({ ...workspace, id: workspace.id })
+                              aria-label={`Open ${workspace.name}`}
+                              render={
+                                <Link
+                                  to="/w/$slug/issues"
+                                  params={{ slug: workspace.slug }}
+                                />
                               }
                             >
-                              {busy === `rename:${workspace.id}`
-                                ? "Saving…"
-                                : "Rename"}
+                              Open
                             </Button>
-                            <Button
-                              variant="outline"
-                              aria-label={`Source folders for ${workspace.name}`}
-                              onClick={() => setEditing(workspace)}
-                            >
-                              <HugeiconsIcon
-                                icon={Folder01Icon}
-                                strokeWidth={1.5}
-                                data-icon="inline-start"
-                              />
-                              Folders
-                            </Button>
-                            {/* ⚠️ NOT disabled without a cloud id, unlike
-                                Rename and Delete. Those two cannot act at all;
-                                this panel still reads the folder and says what
-                                is in it — which is the one place that answers
-                                "where did my cards go?" when the service is too
-                                old to address a board. The panel itself withdraws
-                                the send, and says why. */}
-                            <Button
-                              variant="ghost"
-                              aria-label={`Import from local into ${workspace.name}`}
-                              onClick={() => setImporting(workspace)}
-                            >
-                              Import from local
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              className="text-destructive hover:text-destructive"
-                              aria-label={`Delete ${workspace.name}`}
-                              // ⚠️ Disabled with a REASON, like Rename. The
-                              // machine surface deletes by cloud id and refuses
-                              // a slug, so a project from a service older than
-                              // that field cannot be deleted here — and a button
-                              // that silently did nothing is the exact failure
-                              // the service moved keyspace to stop.
-                              disabled={
-                                !workspace.id ||
-                                busy === `delete:${workspace.slug}`
-                              }
-                              title={
-                                workspace.id
-                                  ? undefined
-                                  : "This project has no cloud id yet, so it cannot be deleted from here."
-                              }
-                              onClick={() =>
-                                workspace.id &&
-                                setConfirming({
-                                  ...workspace,
-                                  id: workspace.id,
-                                })
-                              }
-                            >
-                              {busy === `delete:${workspace.slug}`
-                                ? "Deleting…"
-                                : "Delete"}
-                            </Button>
-                          </div>
+                          )}
                         </div>
                       );
                     })

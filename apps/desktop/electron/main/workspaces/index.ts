@@ -43,6 +43,7 @@ import {
   importRecords,
   lookupCard,
   moveCard,
+  purgeIssues,
   putBoardConfig,
   renameWorkspace,
   replaceChecklist,
@@ -1006,6 +1007,10 @@ export function registerWorkspaces(devUrl?: string): void {
   handle(workspaceChannels.archive, devUrl, async (args): Promise<void> => {
     const [workspaceId, cardId] = requireId(args, 2);
     return archiveCard(await authorizedRecord(), workspaceId, cardId);
+  });
+  handle(workspaceChannels.purge, devUrl, async (args) => {
+    const [workspaceId, slug] = requireId(args, 2);
+    return purgeIssues(await authorizedRecord(), workspaceId, slug);
   });
   handle(
     workspaceChannels.create,

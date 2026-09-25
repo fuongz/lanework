@@ -1994,8 +1994,9 @@ test("a project is created from the folders a person picked, primary first", asy
     await expect(page.getByText("Also in this project")).toBeVisible();
     await expect(page.getByText(repo, { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
-    // The row names the primary and counts the rest: "<extra> + 1 more".
-    await expect(page.getByText(`${extra} + 1 more`)).toBeVisible();
+    // The row names the primary and counts the rest: "<extra> + 1 more" —
+    // and so does the selected-project section above it (FE-14).
+    await expect(page.getByText(`${extra} + 1 more`)).toHaveCount(2);
 
     // And the link survives a relaunch, which is what makes it a link rather
     // than something the dialog remembered.
@@ -2007,7 +2008,7 @@ test("a project is created from the folders a person picked, primary first", asy
       .getByRole("button", { name: /^Switch project/ })
       .waitFor({ state: "visible", timeout: 15_000 });
     await page.goto("app://lanework/settings/workspaces");
-    await expect(page.getByText(`${extra} + 1 more`)).toBeVisible();
+    await expect(page.getByText(`${extra} + 1 more`)).toHaveCount(2);
 
     expect(errors).toEqual([]);
   } finally {
@@ -2041,22 +2042,29 @@ test("projects are managed from settings: folders changed, deleted, created", as
     await expect(
       page.getByRole("heading", { name: "Projects", exact: true }),
     ).toBeVisible();
-    // Every project on the ACCOUNT, not just the one that is open.
-    await expect(page.getByText("Cloud project")).toBeVisible();
+    // Every project on the ACCOUNT, not just the one that is open — each a row
+    // that selects it for the section above (FE-14).
+    await expect(
+      page.getByRole("button", { name: "Select Cloud project" }),
+    ).toBeVisible();
     // Neither project has a folder on this machine yet, and the page says so
-    // per row rather than once for the page.
-    await expect(page.getByText("No folder on this machine")).toHaveCount(2);
+    // per row rather than once for the page — plus once in the section.
+    await expect(page.getByText("No folder on this machine")).toHaveCount(3);
 
     // Folders and the name are two buttons, not one "edit": the folders are
     // this machine's, the name is the account's.
+    await page.getByRole("button", { name: "Select Cloud project" }).click();
     await page
       .getByRole("button", { name: "Source folders for Cloud project" })
       .click();
     await page.getByRole("button", { name: /^Add folders/ }).click();
     await page.getByRole("button", { name: "Save folders" }).click();
-    await expect(page.getByText(repo, { exact: true })).toBeVisible();
+    // The row and the section both say where it lives now.
+    await expect(page.getByText(repo, { exact: true })).toHaveCount(2);
 
-    // Deleting says what it does, and only then does it.
+    // Deleting says what it does, and only then does it — and it reaches a
+    // project that is NOT open, by selecting it rather than switching to it.
+    await page.getByRole("button", { name: "Select Lanework" }).click();
     await page.getByRole("button", { name: "Delete Lanework" }).click();
     await expect(
       page.getByText(/removes the project and its cloud board/),
@@ -2075,7 +2083,9 @@ test("projects are managed from settings: folders changed, deleted, created", as
     await page.getByRole("button", { name: "New project" }).click();
     await page.getByLabel("New project name").fill("From Settings");
     await page.getByRole("button", { name: "Create project" }).click();
-    await expect(page.getByText("from-settings")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Select From Settings" }),
+    ).toBeVisible();
 
     expect(errors).toEqual([]);
   } finally {
@@ -2118,11 +2128,16 @@ test("a project with no cloud id says why it cannot be renamed or deleted", asyn
       .waitFor({ state: "visible", timeout: 15_000 });
 
     await page.goto("app://lanework/settings/workspaces");
+    await page.getByRole("button", { name: "Select Legacy project" }).click();
     const remove = page.getByRole("button", { name: "Delete Legacy project" });
     await expect(remove).toBeDisabled();
     await expect(remove).toHaveAttribute("title", /no cloud id/);
     await expect(
       page.getByRole("button", { name: "Rename Legacy project" }),
+    ).toBeDisabled();
+    // The purge is addressed by cloud id too, so it is gated the same way.
+    await expect(
+      page.getByRole("button", { name: "Remove all issues in Legacy project" }),
     ).toBeDisabled();
 
     // ⚠️ And nothing reached the service. The gate exists so a slug is never
@@ -2130,9 +2145,92 @@ test("a project with no cloud id says why it cannot be renamed or deleted", asyn
     expect(plane.calls.some((call) => call.startsWith("DELETE "))).toBe(false);
 
     // The project the account DID give an id is untouched by the gate.
+    await page.getByRole("button", { name: "Select Lanework" }).click();
     await expect(
       page.getByRole("button", { name: "Delete Lanework" }),
     ).toBeEnabled();
+
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("every issue is removed from settings, once the key is typed", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", bigBoard(3));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-purge-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await switchTo(page, "Cloud project");
+    await expect(page.getByText("Card number 1")).toBeVisible();
+
+    // The OPEN project is the one the section manages, without picking it.
+    // ⚠️ Reached by clicking through, not `goto`: a full reload would drop the
+    // board read, and the dialog would rightly say "every issue" instead of a
+    // count it never saw.
+    await page.getByRole("link", { name: /^Settings/ }).click();
+    await page.getByRole("link", { name: "Projects" }).click();
+    await page
+      .getByRole("button", { name: "Remove all issues in Cloud project" })
+      .click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText("Remove all 3 issues in Cloud project?");
+    const confirm = dialog.getByRole("button", {
+      name: "Remove 3 issues permanently",
+    });
+    // ⚠️ The button stays off until the KEY is typed exactly — not the name,
+    // and not something close. Nothing has been sent while it is off.
+    await expect(confirm).toBeDisabled();
+    await dialog
+      .getByLabel(/Type cloud-project to confirm/)
+      .fill("Cloud project");
+    await expect(confirm).toBeDisabled();
+    await dialog
+      .getByLabel(/Type cloud-project to confirm/)
+      .fill("cloud-project");
+    await expect(confirm).toBeEnabled();
+    expect(plane.calls.some((call) => call.includes("/purge"))).toBe(false);
+    await confirm.click();
+
+    await expect(page.getByText(/^Removed 3 issues\./)).toBeVisible();
+    expect(plane.calls.filter((call) => call.includes("/purge"))).toEqual([
+      "POST /v1/boards/ws-cloud-project/purge",
+    ]);
+
+    // The open board was re-read, not patched: its issues are gone.
+    await page.goto("app://lanework/w/cloud-project/issues");
+    await expect(page.getByText("No cards yet")).toBeVisible();
+    await expect(page.getByText("Card number 1")).toHaveCount(0);
+
+    // ⚠️ A service older than the route answers 404, and the page says what
+    // that means rather than "not found" about a board that is right there.
+    plane.setPurgeMissing(true);
+    await page.goto("app://lanework/settings/workspaces");
+    await page
+      .getByRole("button", { name: "Remove all issues in Cloud project" })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByLabel(/Type cloud-project to confirm/)
+      .fill("cloud-project");
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: /^Remove/ })
+      .click();
+    await expect(
+      page.getByText(/This Lanework service cannot remove issues yet/),
+    ).toBeVisible();
 
     expect(errors).toEqual([]);
   } finally {
@@ -2162,6 +2260,7 @@ test("a project is renamed from settings, and its key does not move", async () =
     await switchTo(page, "Lanework");
 
     await page.goto("app://lanework/settings/workspaces");
+    await page.getByRole("button", { name: "Select Cloud project" }).click();
     await page.getByRole("button", { name: "Rename Cloud project" }).click();
 
     // The field arrives holding the current name — a rename is an edit, not an
@@ -2193,13 +2292,15 @@ test("a project is renamed from settings, and its key does not move", async () =
       "PATCH /v1/sync/state/workspace/ws-cloud-project",
     );
     // ⚠️ The KEY is untouched, which is what the folder link and the saved
-    // selection are both keyed by.
-    await expect(
-      page.getByText("cloud-project", { exact: true }),
-    ).toBeVisible();
+    // selection are both keyed by. (Twice: the selected-project section and
+    // the project's own row.)
+    await expect(page.getByText("cloud-project", { exact: true })).toHaveCount(
+      2,
+    );
 
     // A name that is only whitespace never reaches the service: there is
     // nothing to save, so there is nothing to refuse.
+    await page.getByRole("button", { name: "Select Lanework" }).click();
     await page.getByRole("button", { name: "Rename Lanework" }).click();
     await page.getByLabel("New name for Lanework").fill("   ");
     await expect(
