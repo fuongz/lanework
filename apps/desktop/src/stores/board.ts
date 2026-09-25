@@ -1,15 +1,18 @@
 import { create } from "zustand";
 import { byRank } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
-import type {
-  BoardActivity,
-  BoardCard,
-  BoardCardDraft,
-  BoardCardPatch,
-  BoardChecklistDraft,
-  BoardConflict,
-  BoardView,
-  Workspace,
+import {
+  type BoardActivity,
+  type BoardCard,
+  type BoardCardDraft,
+  type BoardCardPatch,
+  type BoardChecklistDraft,
+  type BoardConflict,
+  type BoardQuery,
+  type BoardView,
+  boardQueryKey,
+  DEFAULT_BOARD_QUERY,
+  type Workspace,
 } from "../../shared/workspaces";
 
 const api = () => {
@@ -32,6 +35,28 @@ const ticket = { workspaces: 0, board: 0, detail: 0 };
 
 /** The workspace read in flight, so overlapping callers share one request. */
 let inflight: Promise<void> | null = null;
+
+/**
+ * The boards this window has shown, by workspace id, most recent last (FE-15/D2).
+ *
+ * ⚠️ In memory only, and never trusted on its own. Coming back to a project
+ * draws its last board at once and then asks the change feed what happened
+ * since its cursor — one small read instead of three, and no skeleton. A
+ * board-level event in that feed still re-reads everything, exactly as `poll`
+ * does. The saved copy on disk (for offline) is main's, and is a different
+ * thing.
+ */
+const boards = new Map<string, { view: BoardView; cursor: number }>();
+const MAX_BOARDS = 8;
+
+function remember(view: BoardView, cursor: number): void {
+  boards.delete(view.workspaceId);
+  boards.set(view.workspaceId, { view, cursor });
+  if (boards.size > MAX_BOARDS) {
+    const oldest = boards.keys().next().value;
+    if (oldest !== undefined) boards.delete(oldest);
+  }
+}
 
 interface BoardState {
   /** True once the workspace list has settled, successfully or not. */
@@ -89,10 +114,26 @@ interface BoardState {
   activityCursor: string | null;
   activityLoading: boolean;
 
+  /**
+   * What the open board is read under — its grouping and filters (FE-17). The
+   * issues screen sets it from its URL; every other screen reads the default.
+   */
+  query: BoardQuery;
+  /** The group whose next page is on its way, so one button shows busy. */
+  moreLoading: string | null;
   hydrate: () => Promise<void>;
   open: (slug: string) => Promise<void>;
   reload: () => Promise<void>;
   poll: () => Promise<void>;
+  /**
+   * Read the board under a new query, when it is the open one and the groups
+   * on screen were read under another.
+   */
+  setQuery: (slug: string, query: BoardQuery) => void;
+  /** The next page of one group — the "Load more" row at its end. */
+  loadMore: (group: string) => Promise<void>;
+  /** The counts again, after something on the board changed. */
+  refreshStats: () => Promise<void>;
   /**
    * ⚠️ Answers with the failure instead of parking it in `error`. The switcher
    * is a popover with the field still in it, and "that key is taken" belongs
@@ -272,6 +313,8 @@ export const useBoard = create<BoardState>()((set, get) => ({
   cursor: 0,
   notFound: null,
   listLoaded: false,
+  query: DEFAULT_BOARD_QUERY,
+  moreLoading: null,
   detail: null,
   draft: null,
   detailLoading: false,
@@ -331,9 +374,14 @@ export const useBoard = create<BoardState>()((set, get) => ({
     // be both: the layout ran `hydrate().then(() => open(slug))` and `open`
     // ran its own `hydrate()` whenever the slug was missing — so every failed
     // load asked twice and logged twice.
-    await get().hydrate();
-    const workspace =
-      get().workspaces.find((entry) => entry.slug === slug) ?? null;
+    // ⚠️ The list is read again only when it cannot answer (FE-15/D4): never
+    // read yet, or the slug is not on it — a project made on another machine
+    // since. Re-reading it on every switch was a round trip per click for the
+    // list already on screen. "Try again" reaches `hydrate` on its own.
+    const known = (entry: Workspace) => entry.slug === slug;
+    if (!get().listLoaded || !get().workspaces.some(known))
+      await get().hydrate();
+    const workspace = get().workspaces.find(known) ?? null;
     if (!workspace) {
       // ⚠️ "Gone" is a claim about the ACCOUNT, and only a list this app has
       // actually read can support it. Concluding it from a read that failed
@@ -352,10 +400,15 @@ export const useBoard = create<BoardState>()((set, get) => ({
       set({ active: null, view: null, notFound: slug });
       return;
     }
+    const cached = workspace.id ? boards.get(workspace.id) : undefined;
+    // ⚠️ A new ticket, so a read still in flight for the project being left
+    // cannot land on this one.
+    ++ticket.board;
     set({
       active: workspace,
-      view: null,
-      cursor: 0,
+      view: cached?.view ?? null,
+      cursor: cached?.cursor ?? 0,
+      loading: false,
       error: null,
       notFound: null,
     });
@@ -363,7 +416,13 @@ export const useBoard = create<BoardState>()((set, get) => ({
     await api()
       .select(workspace.id ?? workspace.slug)
       .catch(() => undefined);
-    await get().reload();
+    if (get().active?.id !== workspace.id) return;
+    // The board on screen is the cached one; the feed says what changed since.
+    // Cached under another grouping or filter, its groups are the wrong ones:
+    // it stays on screen while the right ones are read.
+    if (cached && cached.view.query === boardQueryKey(get().query))
+      await get().poll();
+    else await get().reload();
   },
 
   reload: async () => {
@@ -375,15 +434,21 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const mine = ++ticket.board;
     set({ loading: true });
     try {
-      const view = await api().board.load(workspace.id);
+      const view = await api().board.load(workspace.id, get().query);
       if (mine !== ticket.board) return;
       set({ view, loading: false, error: null });
       // The board read hands back a head; start the change cursor there so the
       // first poll reports what happened AFTER this read, not the whole board.
-      const changes = await api()
-        .board.changes(workspace.id, get().cursor)
-        .catch(() => null);
-      if (changes && mine === ticket.board) set({ cursor: changes.head });
+      // ⚠️ A grouped read already carries it (FE-17), and asking the feed from
+      // zero just to learn it would scan a page of the feed for one number.
+      if (typeof view.head === "number") set({ cursor: view.head });
+      else {
+        const changes = await api()
+          .board.changes(workspace.id, get().cursor)
+          .catch(() => null);
+        if (changes && mine === ticket.board) set({ cursor: changes.head });
+      }
+      if (mine === ticket.board) remember(view, get().cursor);
     } catch (error) {
       if (mine !== ticket.board) return;
       set({
@@ -402,14 +467,21 @@ export const useBoard = create<BoardState>()((set, get) => ({
   poll: async () => {
     const { active, view, cursor } = get();
     if (!active?.id || !view || get().loading) return;
+    const mine = ticket.board;
     try {
       const changes = await api().board.changes(active.id, cursor);
-      if (changes.events.length) {
+      // ⚠️ The project may have changed while this was in flight; its cards
+      // must not be merged into the next one's board.
+      if (mine !== ticket.board || get().active?.id !== active.id) return;
+      // More than one page behind — a cached board after a long absence — is
+      // cheaper and safer to read whole than to page through.
+      if (changes.events.length || changes.hasMore) {
         await get().reload();
         return;
       }
       if (!changes.cards.length) {
         set({ cursor: changes.nextSince });
+        remember(view, changes.nextSince);
         return;
       }
       const byId = new Map(changes.cards.map((card) => [card.id, card]));
@@ -417,14 +489,84 @@ export const useBoard = create<BoardState>()((set, get) => ({
       for (const card of changes.cards)
         if (!view.cards.some((entry) => entry.id === card.id))
           merged.push(card);
-      set({
-        view: { ...view, cards: merged },
-        cursor: changes.nextSince,
-      });
+      // ⚠️ A tombstone leaves the board. The feed is the only place a card
+      // archived elsewhere is reported, and merging it back in drew a card
+      // that no longer exists until the next whole-board read.
+      const next = {
+        ...view,
+        cards: merged.filter((card) => !card.archivedAt),
+      };
+      set({ view: next, cursor: changes.nextSince });
+      remember(next, changes.nextSince);
+      // Cards moved, arrived or left: the counts are stale now.
+      await get().refreshStats();
     } catch {
       // A failed poll is not an error the user has to see: the board on screen
       // is still the last thing the server actually said.
     }
+  },
+
+  setQuery: (slug, query) => {
+    if (boardQueryKey(query) === boardQueryKey(get().query)) return;
+    set({ query });
+    const { active, view } = get();
+    // ⚠️ Only the OPEN board is re-read, and only once it has one. On the way
+    // into a project the issues screen sets its query before the layout has
+    // opened anything, and `open` reads under it anyway.
+    if (active?.slug === slug && view && view.query !== boardQueryKey(query))
+      void get().reload();
+  },
+
+  loadMore: async (group) => {
+    const { active, view, query, moreLoading } = get();
+    const cursor = view?.groups?.[group]?.cursor;
+    if (!active?.id || !view || !cursor || moreLoading) return;
+    const mine = ticket.board;
+    set({ moreLoading: group });
+    try {
+      const page = await api().board.more(active.id, query, group, cursor);
+      const current = get().view;
+      if (mine !== ticket.board || !current || current.query !== view.query)
+        return;
+      const known = new Set(current.cards.map((card) => card.id));
+      const next: BoardView = {
+        ...current,
+        cards: [
+          ...current.cards,
+          ...page.cards.filter((card) => !known.has(card.id)),
+        ],
+        groups: {
+          ...current.groups,
+          [group]: {
+            limit: current.groups?.[group]?.limit ?? page.cards.length,
+            cursor: page.cursor,
+          },
+        },
+      };
+      set({ view: next });
+      remember(next, get().cursor);
+    } catch (error) {
+      set({
+        error: ipcMessage(error, "Could not load more cards. Try again."),
+      });
+    } finally {
+      set({ moreLoading: null });
+    }
+  },
+
+  refreshStats: async () => {
+    const { active, view, query } = get();
+    if (!active?.id || !view || view.stats === undefined || view.stats === null)
+      return;
+    const mine = ticket.board;
+    const counts = await api()
+      .board.stats(active.id, query)
+      .catch(() => null);
+    const current = get().view;
+    if (!counts || mine !== ticket.board || !current) return;
+    const next = { ...current, stats: counts.stats, total: counts.total };
+    set({ view: next });
+    remember(next, get().cursor);
   },
 
   createProject: async (name, folders) => {
@@ -472,6 +614,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     set({ busy: `delete:${slug}`, error: null });
     try {
       const snapshot = await api().remove(id, slug);
+      boards.delete(id);
       set({
         workspaces: snapshot.workspaces,
         active: snapshot.active,
@@ -527,7 +670,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
         set({
           error: `Tags capped at 3 — ${result.droppedTags.join(", ")} not saved.`,
         });
-      await get().reload();
+      // ⚠️ The change feed, not a whole-board read (FE-17): the new card is on
+      // it, and a re-read would fold every group someone opened with "Load
+      // more" back to its first page.
+      await get().poll();
       return { card: result.card };
     } catch (error) {
       const message = ipcMessage(
@@ -547,10 +693,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
     set({ busy: cardId, error: null, conflict: null });
     try {
       await api().board.archive(workspace.id, cardId);
-      // ⚠️ A full re-read, NOT a splice. An archive moves every rank and count
-      // below it, and a client that removed one row from its own copy would be
-      // guessing at the rest of a board it can simply ask for.
-      await get().reload();
+      // ⚠️ The server's word, NOT a splice: the feed carries the tombstone and
+      // `poll` takes it off the board, then the counts are asked again. A
+      // client that removed the row itself would be guessing (FE-17 made this
+      // the feed rather than a whole-board read, which reset "Load more").
+      await get().poll();
       return {};
     } catch (error) {
       const message = ipcMessage(
@@ -608,7 +755,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
         placement,
       );
       if (result.kind === "ok") {
-        await get().reload();
+        await get().poll();
         return;
       }
       // Put it back exactly where it was, then say what happened.
@@ -655,7 +802,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
             ? `Tags capped at 3 — ${result.droppedTags.join(", ")} not saved.`
             : null,
         }));
-        await get().reload();
+        await get().poll();
       } else if (result.kind === "conflict") {
         set({ conflict: result });
         await get().reload();
@@ -831,9 +978,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
         activity: null,
         activityCursor: null,
       });
-      // The thread is a second read, deliberately: the card draws as soon as it
-      // arrives rather than waiting for a history that can run for pages.
-      if (card) void get().loadActivity(card.id);
+      // ⚠️ The thread is NOT read here (FE-15/D5). `IssueActivity` reads it
+      // when it mounts under this card, and again when the card id changes;
+      // reading it here too sent every open twice. It stays a second read, so
+      // the card draws without waiting for a history that can run for pages.
     } catch (error) {
       if (mine !== ticket.detail) return;
       set({

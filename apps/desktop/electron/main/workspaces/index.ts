@@ -9,14 +9,19 @@ import {
   type BoardChanges,
   type BoardChecklistDraft,
   type BoardPlacement,
+  type BoardQuery,
+  type BoardStats,
   type BoardView,
   type BoardWrite,
+  boardQueryKey,
   CHECKLIST_LIMITS,
   CHECKLIST_SECTIONS,
+  DEFAULT_BOARD_QUERY,
   type ImportPreview,
   type ImportReport,
   type LocalFolderState,
   type PickedFolder,
+  type Workspace,
   type WorkspaceSnapshot,
   workspaceChannels,
 } from "../../../shared/workspaces";
@@ -39,7 +44,11 @@ import {
   fetchCard,
   fetchCards,
   fetchChanges,
+  fetchGroup,
+  fetchStats,
   fetchWorkspaces,
+  type GroupSpec,
+  groupSpecs,
   importRecords,
   lookupCard,
   moveCard,
@@ -48,6 +57,7 @@ import {
   renameWorkspace,
   replaceChecklist,
   sealBoardMigration,
+  searchCards,
   setFavorite,
   setSubscription,
   toggleChecklistItem,
@@ -119,9 +129,34 @@ async function assertSameSession(record: MachineRecord): Promise<void> {
  * resolving it to an id on every start, from a list that may not have loaded
  * yet. A `v1` file that still names a slug is resolved once and rewritten.
  */
+/**
+ * The list the last `load` read, and the session it was read under.
+ *
+ * ⚠️ Only SELECTING reuses it (FE-15/D4). Switching projects used to fetch the
+ * whole list again just to write down which one was chosen — a round trip per
+ * switch for an answer the renderer already had. Every other read still asks
+ * the service, and the session key means a different account never sees it.
+ */
+let lastList: { session: string; workspaces: Workspace[] } | null = null;
+
+const sessionKey = (record: MachineRecord) =>
+  [record.apiUrl, record.machineId, record.userId, record.secret].join("\n");
+
 async function load(id?: string): Promise<WorkspaceSnapshot> {
   const record = await authorizedRecord();
-  const workspaces = await fetchWorkspaces(record);
+  const session = sessionKey(record);
+  const known =
+    id !== undefined && lastList?.session === session
+      ? lastList.workspaces
+      : null;
+  // A selection the remembered list does not know is read fresh: it may be a
+  // project made on another machine since.
+  const workspaces = known?.some(
+    (workspace) => workspace.id === id || workspace.slug === id,
+  )
+    ? known
+    : await fetchWorkspaces(record);
+  lastList = { session, workspaces };
   const saved = await readActive(record);
   await assertSameSession(record);
 
@@ -161,14 +196,97 @@ async function load(id?: string): Promise<WorkspaceSnapshot> {
  * the cache exists: a board that reads as empty invites somebody to start typing
  * a card that already exists, and no error dialog undoes that.
  */
-async function board(workspaceId: string): Promise<BoardView> {
+/** The counts under `query`, and the unfiltered total the rail shows. */
+async function countsFor(
+  record: MachineRecord,
+  workspaceId: string,
+  query: BoardQuery,
+): Promise<{ stats: BoardStats; total: number } | null> {
+  const filtered = Object.values(query.filters).some(Boolean);
+  const [stats, all] = await Promise.all([
+    fetchStats(record, workspaceId, query.filters),
+    filtered ? fetchStats(record, workspaceId, {}) : null,
+  ]);
+  if (!stats) return null;
+  return { stats, total: (all ?? stats).total };
+}
+
+/**
+ * A board, read one group at a time (FE-17): the counts, and the first page of
+ * every group `query` draws — all at once, not one after another.
+ *
+ * ⚠️ The groups are planned from the SAVED copy's lanes when there is one, so
+ * they go out alongside the config instead of waiting for it. A lane the config
+ * then adds is read right after; one it no longer has is dropped.
+ *
+ * ⚠️ A service without `/stats` gets the old whole-board read. Its counts can
+ * only come from having every card, and the board stays correct against an
+ * API that has not been deployed yet.
+ */
+async function board(
+  workspaceId: string,
+  query: BoardQuery = DEFAULT_BOARD_QUERY,
+): Promise<BoardView> {
   const record = await authorizedRecord();
   const startedAt = Date.now();
   try {
-    const [config, cards] = await Promise.all([
-      fetchBoardConfig(record, workspaceId),
-      fetchCards(record, workspaceId),
-    ]);
+    const saved = await readBoardCache(record, workspaceId);
+    const configRead = fetchBoardConfig(record, workspaceId);
+    const countsRead = countsFor(record, workspaceId, query);
+    // Settled into the read below; a failure here must not go unhandled while
+    // the groups are still out.
+    configRead.catch(() => undefined);
+    countsRead.catch(() => undefined);
+
+    const read = (specs: GroupSpec[]) =>
+      Promise.all(
+        specs.map(async (spec) => ({
+          spec,
+          page: await fetchGroup(record, workspaceId, spec),
+        })),
+      );
+    const planned = saved
+      ? groupSpecs(query, saved.columns, saved.categories)
+      : groupSpecs(
+          query,
+          (await configRead).columns,
+          (await configRead).categories,
+        );
+    const firstPages = read(planned);
+    firstPages.catch(() => undefined);
+
+    const [config, counts] = await Promise.all([configRead, countsRead]);
+    let cards: BoardCard[];
+    let groups: BoardView["groups"];
+    let head: number | null = null;
+    if (counts) {
+      const wanted = groupSpecs(query, config.columns, config.categories);
+      const have = new Set(planned.map((spec) => spec.key));
+      const pages = [
+        ...(await firstPages),
+        ...(await read(wanted.filter((spec) => !have.has(spec.key)))),
+      ].filter(({ spec }) => wanted.some((entry) => entry.key === spec.key));
+      const byId = new Map<string, BoardCard>();
+      for (const { page } of pages)
+        for (const card of page.cards) byId.set(card.id, card);
+      cards = [...byId.values()];
+      const heads = pages.flatMap(({ page }) =>
+        page.head === null ? [] : [page.head],
+      );
+      head =
+        heads.length === pages.length && heads.length
+          ? Math.min(...heads)
+          : null;
+      groups = Object.fromEntries(
+        pages.map(({ spec, page }) => [
+          spec.key,
+          { cursor: page.cursor, limit: spec.limit },
+        ]),
+      );
+    } else {
+      cards = await fetchCards(record, workspaceId);
+      groups = undefined;
+    }
     await assertSameSession(record);
     const view: BoardView = {
       workspaceId,
@@ -180,6 +298,11 @@ async function board(workspaceId: string): Promise<BoardView> {
       migrated: Boolean(config.migratedAt),
       fetchedAt: new Date().toISOString(),
       stale: false,
+      stats: counts?.stats ?? null,
+      total: counts?.total ?? null,
+      query: boardQueryKey(query),
+      groups,
+      head,
     };
     await writeBoardCache(record, workspaceId, view);
     return view;
@@ -198,6 +321,36 @@ async function board(workspaceId: string): Promise<BoardView> {
     if (cached) return cached;
     throw error;
   }
+}
+
+/**
+ * A board query off the wire, checked field by field.
+ *
+ * ⚠️ Every value ends up in a URL the service parses, so each is held to a key's
+ * shape here; an unknown grouping or a field this app never sends is dropped.
+ */
+function requireQuery(value: unknown): BoardQuery {
+  if (value === undefined) return DEFAULT_BOARD_QUERY;
+  if (!value || typeof value !== "object")
+    throw new Error("A valid board query is required");
+  const raw = value as { groupBy?: unknown; filters?: unknown };
+  const groupBy =
+    raw.groupBy === "category" || raw.groupBy === "priority"
+      ? raw.groupBy
+      : "status";
+  const filters: BoardQuery["filters"] = {};
+  const given =
+    raw.filters && typeof raw.filters === "object"
+      ? (raw.filters as Record<string, unknown>)
+      : {};
+  for (const field of ["status", "category", "priority", "tag"] as const) {
+    const entry = given[field];
+    if (entry === undefined || entry === null || entry === "") continue;
+    if (typeof entry !== "string" || entry.length > 40 || !entry.trim())
+      throw new Error("A valid board query is required");
+    filters[field] = entry;
+  }
+  return { groupBy, filters };
 }
 
 /**
@@ -783,8 +936,44 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(workspaceChannels.board, devUrl, (args) => {
-    const [workspaceId] = requireId(args, 1);
-    return board(workspaceId);
+    if (args.length < 1 || args.length > 2)
+      throw new Error("A valid workspace is required");
+    const [workspaceId] = requireId(args.slice(0, 1), 1);
+    return board(workspaceId, requireQuery(args[1]));
+  });
+  handle(workspaceChannels.search, devUrl, async (args) => {
+    const [workspaceId, query] = requireId(args, 2);
+    if (query.trim().length < 2 || query.length > 100)
+      throw new Error("A search is 2 to 100 characters");
+    return searchCards(await authorizedRecord(), workspaceId, query.trim());
+  });
+  handle(workspaceChannels.more, devUrl, async (args) => {
+    if (args.length !== 4) throw new Error("A valid board group is required");
+    const [workspaceId, group, cursor] = requireId(
+      [args[0], args[2], args[3]],
+      3,
+    );
+    const query = requireQuery(args[1]);
+    const record = await authorizedRecord();
+    // ⚠️ The group is re-derived from the board's lanes rather than trusted as
+    // a URL fragment: a renderer can only ask for a group its query draws.
+    const config = await readBoardCache(record, workspaceId);
+    const spec = groupSpecs(
+      query,
+      config?.columns ?? [],
+      config?.categories ?? [],
+    ).find((entry) => entry.key === group);
+    if (!spec) throw new Error("That group is not on this board");
+    return fetchGroup(record, workspaceId, spec, cursor);
+  });
+  handle(workspaceChannels.stats, devUrl, async (args) => {
+    if (args.length !== 2) throw new Error("A valid workspace is required");
+    const [workspaceId] = requireId(args.slice(0, 1), 1);
+    return countsFor(
+      await authorizedRecord(),
+      workspaceId,
+      requireQuery(args[1]),
+    );
   });
   handle(workspaceChannels.card, devUrl, async (args): Promise<BoardCard> => {
     const [workspaceId, cardId] = requireId(args, 2);

@@ -13,10 +13,14 @@ import {
   type BoardChecklistItem,
   type BoardChecklistProgress,
   type BoardColumn,
+  type BoardGroupPage,
   type BoardLabel,
   type BoardMember,
   type BoardPlacement,
+  type BoardQuery,
+  type BoardStats,
   type BoardWrite,
+  matchesSearch,
   normalizeTag,
   type Workspace,
 } from "../../../shared/workspaces";
@@ -207,6 +211,7 @@ export function parseCard(value: unknown): BoardCard | null {
         ? row.estimate
         : null,
     dueAt: text(row.dueAt) ? row.dueAt : null,
+    archivedAt: text(row.archivedAt) ? row.archivedAt : null,
     // ⚠️ Keyed on the field being PRESENT, not on it being a non-empty array.
     // A list read serializes without parts, so `checklist` is absent — and
     // reading that as `[]` is what made every card on the board render as
@@ -409,6 +414,171 @@ export async function fetchCards(
     if (!cursor) break;
   }
   return cards;
+}
+
+/**
+ * `GET /items?q=` — the board's own search (FE-18), at most 20 cards.
+ *
+ * ⚠️ Every card the service returns is checked against the query again here.
+ * A service older than `q` ignores the parameter and answers with the first
+ * page of the board, and showing that as "results" would be twenty cards that
+ * have nothing to do with what was typed.
+ */
+export async function searchCards(
+  record: MachineRecord,
+  workspaceId: string,
+  query: string,
+): Promise<BoardCard[]> {
+  const params = new URLSearchParams({ q: query, limit: "20" });
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/items?${params.toString()}`,
+  );
+  if (!response.ok)
+    throw new Error(`Could not search this board (HTTP ${response.status}).`);
+  const payload = (await body(response)) as { items?: unknown[] };
+  const cards: BoardCard[] = [];
+  for (const entry of payload.items ?? []) {
+    const card = parseCard(entry);
+    if (card && matchesSearch(card, query)) cards.push(card);
+  }
+  return cards;
+}
+
+/** The To-Do lane's first page — the lane people work from (FE-17/D2). */
+const START_LANE_PAGE = 50;
+/** Every other group's first page, and every "Load more" after it. */
+const GROUP_PAGE = 20;
+
+/** One group of a query, as the list endpoint is asked for it. */
+export type GroupSpec = { key: string; params: URLSearchParams; limit: number };
+
+/** Every group `query` draws, given the board's lanes and categories. */
+export function groupSpecs(
+  query: BoardQuery,
+  columns: BoardColumn[],
+  categories: BoardCategory[],
+): GroupSpec[] {
+  const { status, category, priority, tag } = query.filters;
+  // The query's own filters ride on every group; the one on the grouped
+  // dimension instead narrows WHICH groups there are.
+  const base = (): URLSearchParams => {
+    const params = new URLSearchParams();
+    if (status && query.groupBy !== "status") params.set("column", status);
+    if (category && query.groupBy !== "category")
+      params.set("category", category);
+    if (priority && query.groupBy !== "priority")
+      params.set("priority", priority);
+    if (tag) params.set("tag", tag);
+    return params;
+  };
+  const spec = (key: string, field: string, limit: number): GroupSpec => {
+    const params = base();
+    params.set(field, key);
+    return { key, params, limit };
+  };
+
+  if (query.groupBy === "status")
+    return columns
+      .filter((column) => !status || column.key === status)
+      .map((column) =>
+        spec(
+          column.key,
+          "column",
+          column.role === "start" ? START_LANE_PAGE : GROUP_PAGE,
+        ),
+      );
+  if (query.groupBy === "priority")
+    return ["high", "medium", "low", "none"]
+      .filter((key) => !priority || key === priority)
+      .map((key) => spec(key, "priority", GROUP_PAGE));
+  return [...categories.map((entry) => entry.key), "none"]
+    .filter((key) => !category || key === category)
+    .map((key) => spec(key, "category", GROUP_PAGE));
+}
+
+/** One page of one group. */
+export async function fetchGroup(
+  record: MachineRecord,
+  workspaceId: string,
+  group: GroupSpec,
+  cursor: string | null = null,
+): Promise<BoardGroupPage> {
+  const params = new URLSearchParams(group.params);
+  params.set("limit", String(group.limit));
+  if (cursor) params.set("cursor", cursor);
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/items?${params.toString()}`,
+  );
+  if (!response.ok)
+    throw new Error(
+      `Could not load this board (HTTP ${response.status}). Try again.`,
+    );
+  const payload = (await body(response)) as {
+    items?: unknown[];
+    cursor?: unknown;
+    head?: unknown;
+  };
+  const cards: BoardCard[] = [];
+  for (const entry of payload.items ?? []) {
+    const card = parseCard(entry);
+    if (card) cards.push(card);
+  }
+  return {
+    cards,
+    cursor: text(payload.cursor) ? payload.cursor : null,
+    head:
+      typeof payload.head === "number" && Number.isInteger(payload.head)
+        ? payload.head
+        : null,
+  };
+}
+
+function parseCounts(value: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (value && typeof value === "object")
+    for (const [key, n] of Object.entries(value))
+      if (typeof n === "number" && Number.isFinite(n) && n >= 0) out[key] = n;
+  return out;
+}
+
+/**
+ * The board's counts under `filters`, or null from a service older than
+ * `/stats` (FE-17) — the caller then reads the whole board, as it used to.
+ */
+export async function fetchStats(
+  record: MachineRecord,
+  workspaceId: string,
+  filters: BoardQuery["filters"],
+): Promise<BoardStats | null> {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("column", filters.status);
+  if (filters.category) params.set("category", filters.category);
+  if (filters.priority) params.set("priority", filters.priority);
+  if (filters.tag) params.set("tag", filters.tag);
+  const query = params.toString();
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/stats${query ? `?${query}` : ""}`,
+  );
+  if (response.status === 404) {
+    // ⚠️ 404 is ALSO what an unknown board answers. That board's own reads
+    // fail right after this and say so; here it only means "no counts".
+    return null;
+  }
+  if (!response.ok)
+    throw new Error(
+      `Could not load this board (HTTP ${response.status}). Try again.`,
+    );
+  const payload = (await body(response)) as { stats?: Record<string, unknown> };
+  const stats = payload.stats ?? {};
+  return {
+    total: typeof stats.total === "number" ? stats.total : 0,
+    byColumn: parseCounts(stats.byColumn),
+    byCategory: parseCounts(stats.byCategory),
+    byPriority: parseCounts(stats.byPriority),
+  };
 }
 
 export async function fetchBoardConfig(

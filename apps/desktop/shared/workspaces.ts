@@ -193,6 +193,12 @@ export interface BoardAssignees {
 
 /** A card, trimmed to what this app renders and writes. */
 export interface BoardCard {
+  /**
+   * When the card was taken off the board, on a change-feed row (FE-17). A live
+   * read never carries one; a tombstone in `changes` does, and it is the only
+   * way a client learns a card it is drawing is gone.
+   */
+  archivedAt?: string | null;
   id: string;
   /** The precondition an edit must carry. See `BoardConflict`. */
   revision: number;
@@ -353,6 +359,75 @@ export interface BoardView {
    */
   fetchedAt: string;
   stale: boolean;
+  /**
+   * The service's counts for the query this board was read under (FE-17), or
+   * absent from a service older than `/stats` — then the loaded cards ARE the
+   * board, and counting them is right.
+   *
+   * ⚠️ Optional, like every field added after a Saved copy could exist: a
+   * cache written before it reads back without it.
+   */
+  stats?: BoardStats | null;
+  /** Every live card on the board, unfiltered — the rail's number. */
+  total?: number | null;
+  /** `boardQueryKey` of the query the groups below were read under. */
+  query?: string;
+  /**
+   * Each group read so far, by its key (a lane, a priority, a category), and
+   * where its next page starts. `cursor: null` means the group is complete.
+   * Absent when the whole board was read in one go.
+   */
+  groups?: Record<string, { cursor: string | null; limit: number }>;
+  /**
+   * The change head the read started from — the LOWEST any group page
+   * reported, so a change that landed between two of them is replayed by the
+   * feed rather than skipped. Absent from a whole-board read.
+   */
+  head?: number | null;
+}
+
+/** What a board screen groups by. The lanes always group by status. */
+export type BoardGroupBy = "status" | "category" | "priority";
+
+/**
+ * What a board is read under (FE-17): its grouping, and the filters the
+ * service applies to every group's query and to the counts.
+ */
+export interface BoardQuery {
+  groupBy: BoardGroupBy;
+  filters: {
+    status?: string;
+    category?: string;
+    priority?: string;
+    tag?: string;
+  };
+}
+
+export const DEFAULT_BOARD_QUERY: BoardQuery = {
+  groupBy: "status",
+  filters: {},
+};
+
+/** A stable key for a query, so two equal ones compare equal. */
+export function boardQueryKey(query: BoardQuery): string {
+  const { status, category, priority, tag } = query.filters;
+  return JSON.stringify([query.groupBy, status, category, priority, tag]);
+}
+
+/** `GET /v1/boards/:id/stats`. `"none"` keys the cards with no value. */
+export interface BoardStats {
+  total: number;
+  byColumn: Record<string, number>;
+  byCategory: Record<string, number>;
+  byPriority: Record<string, number>;
+}
+
+/** The next page of one group. */
+export interface BoardGroupPage {
+  cards: BoardCard[];
+  cursor: string | null;
+  /** The board's change head when this page was read, if the service said. */
+  head: number | null;
 }
 
 /**
@@ -399,6 +474,36 @@ export interface BoardCardDraft {
  * become. Two copies of this function would eventually disagree, and the screen
  * would promise a tag the board does not store.
  */
+/**
+ * The words of a search, folded the way the service's FTS index folds them
+ * (FE-18): lower case, diacritics dropped, split on anything that is not a
+ * letter or a digit. "Dự án FE-1" is `["du", "an", "fe", "1"]`.
+ */
+export function searchTokens(raw: string): string[] {
+  return raw
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+/**
+ * Whether a card answers a search: every word is the START of a word in its
+ * title or task id — the rule the service's prefix query applies, so the
+ * palette's instant local answer and the service's agree.
+ */
+export function matchesSearch(
+  card: Pick<BoardCard, "title" | "taskId">,
+  query: string,
+): boolean {
+  const wanted = searchTokens(query);
+  if (!wanted.length) return false;
+  const have = searchTokens(`${card.title} ${card.taskId ?? ""}`);
+  return wanted.every((word) => have.some((token) => token.startsWith(word)));
+}
+
 export function normalizeTag(raw: string): string {
   return raw
     .trim()
@@ -592,6 +697,8 @@ export const workspaceChannels = {
   load: "workspaces:load",
   select: "workspaces:select",
   board: "workspaces:board",
+  more: "workspaces:board:more",
+  stats: "workspaces:board:stats",
   move: "workspaces:board:move",
   toggle: "workspaces:board:toggle",
   setChecklist: "workspaces:board:checklist",
@@ -612,6 +719,7 @@ export const workspaceChannels = {
   detach: "workspaces:board:detach",
   card: "workspaces:board:card",
   lookup: "workspaces:board:lookup",
+  search: "workspaces:board:search",
   changes: "workspaces:board:changes",
   createWorkspace: "workspaces:new",
   renameWorkspace: "workspaces:rename",
@@ -626,7 +734,23 @@ export const workspaceChannels = {
 } as const;
 
 export interface DesktopBoardApi {
-  load: (workspaceId: string) => Promise<BoardView>;
+  /**
+   * A board, read one group at a time under `query` (FE-17): the counts, and
+   * the first page of every group the query draws.
+   */
+  load: (workspaceId: string, query?: BoardQuery) => Promise<BoardView>;
+  /** The next page of one group, from where the last one stopped. */
+  more: (
+    workspaceId: string,
+    query: BoardQuery,
+    group: string,
+    cursor: string,
+  ) => Promise<BoardGroupPage>;
+  /** The counts again, after something changed. Null from an older service. */
+  stats: (
+    workspaceId: string,
+    query: BoardQuery,
+  ) => Promise<{ stats: BoardStats; total: number } | null>;
   /**
    * One card WITH its checklist and assignees, by id.
    *
@@ -644,6 +768,11 @@ export interface DesktopBoardApi {
    * a read that failed.
    */
   lookup: (workspaceId: string, taskId: string) => Promise<BoardCard | null>;
+  /**
+   * Cards whose title or task id answer `query`, from the SERVICE (FE-18) —
+   * not only the ones this window has loaded. At most 20.
+   */
+  search: (workspaceId: string, query: string) => Promise<BoardCard[]>;
   /**
    * Edit a card, against the revision the caller is looking at.
    *

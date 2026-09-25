@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import type { Workspace } from "../shared/workspaces";
+import { matchesSearch, type Workspace } from "../shared/workspaces";
 
 /** A port nothing listens on, so a probe fails fast instead of reaching prod. */
 export const DEAD_API = "http://127.0.0.1:1";
@@ -103,6 +103,8 @@ export interface StubCard {
   priority: "low" | "medium" | "high" | null;
   tags: string[];
   rank: string;
+  /** Set by the stub's DELETE: the card is a tombstone from then on. */
+  archivedAt?: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   checklist?: {
@@ -173,6 +175,59 @@ function summarize(checklist: StubCard["checklist"]) {
   };
 }
 
+/**
+ * Whether a card matches the list's filters, the way the real route reads
+ * them — `none` included, for the "No priority" and "No category" groups.
+ */
+function matches(card: StubCard, query: URLSearchParams): boolean {
+  const column = query.get("column");
+  const category = query.get("category");
+  const priority = query.get("priority");
+  const tag = query.get("tag");
+  const q = query.get("q");
+  return (
+    // FE-18's search, by the same prefix rule the FTS query and the app use.
+    (!q || matchesSearch(card, q)) &&
+    (!column || card.columnKey === column) &&
+    (!category ||
+      (category === "none"
+        ? card.categoryKey === null
+        : card.categoryKey === category)) &&
+    (!priority ||
+      (priority === "none"
+        ? card.priority === null
+        : card.priority === priority)) &&
+    (!tag || card.tags.includes(tag))
+  );
+}
+
+/**
+ * One page of `GET /items`: filtered, ordered by (column, rank, id), and cut at
+ * `limit` with an opaque cursor — the way the real route pages (FE-17). Without
+ * a `limit` it still answers at most 50, the service's default.
+ */
+function listPage(cards: StubCard[], url: string) {
+  const query = new URL(url, "http://x").searchParams;
+  const limit = Math.min(Number(query.get("limit") ?? "50") || 50, 200);
+  const offset = Number(query.get("cursor")?.replace(/^o:/, "") ?? "0") || 0;
+  const live = cards
+    .filter((card) => !card.archivedAt && matches(card, query))
+    .sort(
+      (a, b) =>
+        a.columnKey.localeCompare(b.columnKey) ||
+        a.rank.localeCompare(b.rank) ||
+        a.id.localeCompare(b.id),
+    );
+  const page = live.slice(offset, offset + limit);
+  return {
+    items: page.map(({ checklist, ...card }) => ({
+      ...card,
+      checklistProgress: summarize(checklist),
+    })),
+    cursor: offset + limit < live.length ? `o:${offset + limit}` : null,
+  };
+}
+
 export async function startStubPlane(
   options: {
     /** Omit the owner block, standing in for a control plane older than it. */
@@ -203,6 +258,11 @@ export async function startStubPlane(
       cards: StubCard[];
     },
   ) => void;
+  /**
+   * A card written by someone else — it lands on the change feed with a new
+   * seq, the way another machine's create does.
+   */
+  addCard: (workspaceId: string, card: StubCard) => void;
   /** One card as the stub now holds it, so a test can assert what a write did. */
   readCard: (workspaceId: string, cardId: string) => StubCard | undefined;
   /** Make the next checklist write answer 409 with the server's copy. */
@@ -211,6 +271,10 @@ export async function startStubPlane(
   setBoardOffline: (value: boolean) => void;
   /** Answer `POST /purge` with 404, the way a service older than FE-14 does. */
   setPurgeMissing: (value: boolean) => void;
+  /** Answer `GET /stats` with 404, the way a service older than FE-17 does. */
+  setStatsMissing: (value: boolean) => void;
+  /** Fail every `GET /items?q=` with 500, so search has to fall back. */
+  setSearchFailing: (value: boolean) => void;
   /** `If-Match` headers the board saw, so a test can prove the precondition. */
   boardPreconditions: string[];
   /**
@@ -251,6 +315,8 @@ export async function startStubPlane(
   let checklistConflict = false;
   let boardOffline = false;
   let purgeMissing = false;
+  let statsMissing = false;
+  let searchFailing = false;
   // Board-level events (`purged`) per board, the way the service keeps them:
   // audit rows with no card, reported by the feed above the client's cursor.
   const boardEvents = new Map<string, { seq: number; verb: string }[]>();
@@ -492,6 +558,11 @@ export async function startStubPlane(
         return;
       }
       if (req.method === "GET" && rest === "/items") {
+        if (
+          searchFailing &&
+          new URL(req.url ?? "", "http://x").searchParams.has("q")
+        )
+          return json(500, { error: "search is down" });
         // ⚠️ WITHOUT the checklist, because the real `GET /items` serializes
         // without `parts`. This stub used to send it, and that is exactly how
         // the app shipped a board whose checkboxes could never appear: the
@@ -508,19 +579,36 @@ export async function startStubPlane(
           // `orderBy` is. A stub that answered in insertion order would let a
           // reorder that never touched the rank pass as green — which is
           // precisely the bug `placement` exists to prevent.
-          items: [...state.cards]
-            .sort(
-              (a, b) =>
-                a.columnKey.localeCompare(b.columnKey) ||
-                a.rank.localeCompare(b.rank) ||
-                a.id.localeCompare(b.id),
-            )
-            .map(({ checklist, ...card }) => ({
-              ...card,
-              checklistProgress: summarize(checklist),
-            })),
-          cursor: null,
+          ...listPage(state.cards, req.url ?? ""),
           head: state.seq,
+        });
+        return;
+      }
+      // FE-17's counts. Absent (404) while `statsMissing` is set, the way a
+      // service older than the route answers — the app then reads the whole
+      // board, as it used to.
+      if (req.method === "GET" && rest === "/stats") {
+        if (statsMissing) return json(404, { error: "not found" });
+        const query = new URL(req.url ?? "", "http://x").searchParams;
+        const counted = state.cards.filter(
+          (card) => !card.archivedAt && matches(card, query),
+        );
+        const tally = (key: (card: StubCard) => string) => {
+          const out: Record<string, number> = {};
+          for (const card of counted)
+            out[key(card)] = (out[key(card)] ?? 0) + 1;
+          return out;
+        };
+        json(200, {
+          stats: {
+            total: counted.length,
+            byColumn: {
+              ...Object.fromEntries(state.columns.map((c) => [c.key, 0])),
+              ...tally((card) => card.columnKey),
+            },
+            byCategory: tally((card) => card.categoryKey ?? "none"),
+            byPriority: tally((card) => card.priority ?? "none"),
+          },
         });
         return;
       }
@@ -563,7 +651,7 @@ export async function startStubPlane(
             return json(400, {
               error: "confirm must be this project's slug, exactly",
             });
-          const deleted = state.cards.length;
+          const deleted = state.cards.filter((card) => !card.archivedAt).length;
           state.cards = [];
           state.seq += 1;
           boardEvents.set(board[1], [
@@ -993,8 +1081,15 @@ export async function startStubPlane(
       // still succeeds.
       if (req.method === "DELETE" && /^\/items\/[^/]+$/.test(rest)) {
         const id = rest.slice("/items/".length);
-        state.cards = state.cards.filter((entry) => entry.id !== id);
+        // ⚠️ A TOMBSTONE, as the service keeps: the card stays with
+        // `archivedAt` and a new seq, so the change feed reports it — which is
+        // the only way another window learns it is gone.
+        const gone = state.cards.find((entry) => entry.id === id);
         state.seq += 1;
+        if (gone) {
+          gone.archivedAt = new Date().toISOString();
+          gone.seq = state.seq;
+        }
         json(200, { archived: id, seq: state.seq });
         return;
       }
@@ -1104,6 +1199,11 @@ export async function startStubPlane(
       workspaceBody = undefined;
       workspaceDelay = 0;
     },
+    addCard: (workspaceId, card) => {
+      const state = boards.get(workspaceId);
+      if (!state) throw new Error(`no board seeded for ${workspaceId}`);
+      state.cards.push({ ...card, seq: ++state.seq });
+    },
     readCard: (workspaceId, cardId) =>
       boards.get(workspaceId)?.cards.find((card) => card.id === cardId),
     setBoard: (workspaceId, board) => {
@@ -1126,6 +1226,12 @@ export async function startStubPlane(
     },
     setBoardOffline: (value) => {
       boardOffline = value;
+    },
+    setSearchFailing: (value) => {
+      searchFailing = value;
+    },
+    setStatsMissing: (value) => {
+      statsMissing = value;
     },
     setPurgeMissing: (value) => {
       purgeMissing = value;

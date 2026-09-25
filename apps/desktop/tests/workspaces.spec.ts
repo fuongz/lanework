@@ -2565,3 +2565,354 @@ test("a project URL whose list will not load asks once and stays put", async () 
     await removeProfile(profile);
   }
 });
+
+/**
+ * Watch for the thing that reads as "loading again": a skeleton, or a lane
+ * card mounting at `opacity: 0` because it is about to fade in (FE-15).
+ */
+async function watchForReload(page: Page): Promise<void> {
+  // ⚠️ A string, not a function: this project's test tsconfig has no DOM lib,
+  // and the observer has to run in the page.
+  await page.evaluate(`(() => {
+    const seen = { skeleton: false, fade: false };
+    globalThis.__reload = seen;
+    new MutationObserver(() => {
+      if (document.querySelector('[data-slot="skeleton"]')) seen.skeleton = true;
+      if (document.querySelector('li.shadow-card[style*="opacity: 0"]'))
+        seen.fade = true;
+    }).observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["style"],
+    });
+  })()`);
+}
+
+const sawReload = (page: Page) =>
+  page.evaluate<{ skeleton: boolean; fade: boolean }>("globalThis.__reload");
+
+test("coming back to a project draws its board at once and reads only what changed", async () => {
+  const plane = await startStubPlane({ workspaces });
+  // Every Cloud card is To-Do, so the list shows them all unfolded, and named
+  // so nothing on Lanework's board can match them.
+  const cloud = bigBoard(2);
+  cloud.cards = cloud.cards.map((card, i) => ({
+    ...card,
+    title: `Cloud card ${i + 1}`,
+    columnKey: "todo",
+  }));
+  plane.setBoard("ws-cloud-project", cloud);
+  plane.setBoard("ws-lanework", bigBoard(2));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-board-cache-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Cloud project");
+    await expect(page.getByText("Cloud card 2")).toBeVisible();
+    await switchTo(page, "Lanework");
+    await expect(page.getByText("Cloud card 2")).toHaveCount(0);
+
+    // Written on another machine while this window was on Lanework.
+    plane.addCard("ws-cloud-project", {
+      ...cloud.cards[0],
+      id: "card-elsewhere",
+      title: "Made elsewhere",
+      taskId: "FE-09",
+      rank: "0009",
+    });
+
+    const mark = plane.calls.length;
+    await watchForReload(page);
+    await switchTo(page, "Cloud project");
+    await expect(page.getByText("Cloud card 2")).toBeVisible();
+    // ⚠️ The delta, not a re-read: the card made elsewhere arrives through
+    // the change feed from the cached cursor.
+    await expect(page.getByText("Made elsewhere")).toBeVisible();
+
+    const since = plane.calls.slice(mark);
+    expect(await sawReload(page)).toEqual({ skeleton: false, fade: false });
+    expect(since.filter((call) => call.includes("/v1/sync/state"))).toEqual([]);
+    expect(
+      since.filter((call) =>
+        /\/v1\/boards\/ws-cloud-project\/(items\?|config)/.test(call),
+      ),
+    ).toEqual([]);
+    expect(
+      since.some((call) =>
+        /\/v1\/boards\/ws-cloud-project\/changes\?since=[1-9]/.test(call),
+      ),
+    ).toBe(true);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a card opens with one activity read, and the lanes do not fade in again on the way back", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", bigBoard(3));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-board-back-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Cloud project");
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+    await expect(page.locator("li.shadow-card")).toHaveCount(3);
+
+    const mark = plane.calls.length;
+    await page.getByText("Card number 1").click();
+    await expect(page).toHaveURL(/\/issues\/FE-01/);
+    await expect(page.getByRole("textbox", { name: "Card title" })).toHaveValue(
+      "Card number 1",
+    );
+    const activity = () =>
+      plane.calls
+        .slice(mark)
+        .filter((call) => call.includes("/items/card-0/activity")).length;
+    await expect.poll(activity).toBe(1);
+    // Settled at one, not on its way to two.
+    await page.waitForTimeout(500);
+    expect(activity()).toBe(1);
+
+    await watchForReload(page);
+    await page.goBack();
+    await expect(page.locator("li.shadow-card")).toHaveCount(3);
+    expect(await sawReload(page)).toEqual({ skeleton: false, fade: false });
+    // Nothing was read to draw it: the board was already in memory.
+    expect(
+      plane.calls.slice(mark).filter((call) => /\/(items\?|config)/.test(call)),
+    ).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a big board opens one group at a time, counted by the service", async () => {
+  const plane = await startStubPlane({ workspaces });
+  // 300 cards, 100 a lane: To-Do is the start lane, so it reads 50; the
+  // others 20.
+  plane.setBoard("ws-cloud-project", bigBoard(300));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-big-board-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    const mark = plane.calls.length;
+    await switchTo(page, "Cloud project");
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+    const lane = (name: string) =>
+      page.getByRole("region", { name: `${name} column` });
+    await expect(lane("To-Do").locator("li.shadow-card")).toHaveCount(50);
+    await expect(lane("In Progress").locator("li.shadow-card")).toHaveCount(20);
+    await expect(lane("Done").locator("li.shadow-card")).toHaveCount(20);
+    // The counts are the service's, not the page on screen.
+    await expect(lane("Done").locator("header")).toContainText("100");
+    await expect(page.getByRole("link", { name: /^Issues/ })).toContainText(
+      "300",
+    );
+
+    const reads = plane.calls
+      .slice(mark)
+      .filter((call) => call.includes("/v1/boards/ws-cloud-project/items"));
+    // ⚠️ One query per lane, never the whole board.
+    expect(reads.every((call) => /[?&]column=/.test(call))).toBe(true);
+    expect(reads.some((call) => /column=todo.*limit=50/.test(call))).toBe(true);
+    expect(reads.some((call) => /column=done.*limit=20/.test(call))).toBe(true);
+    expect(
+      plane.calls.slice(mark).some((call) => call.includes("/stats")),
+    ).toBe(true);
+
+    await page
+      .getByRole("button", { name: "Load more in In Progress" })
+      .click();
+    await expect(lane("In Progress").locator("li.shadow-card")).toHaveCount(40);
+    await expect(
+      page.getByRole("button", { name: "Load more in In Progress" }),
+    ).toContainText("60 left");
+    expect(
+      plane.calls.some((call) =>
+        /items\?.*column=processing.*cursor=/.test(call),
+      ),
+    ).toBe(true);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a filter is the service's, and ⌘K opens a card that is not loaded", async () => {
+  const plane = await startStubPlane({ workspaces });
+  const big = bigBoard(300);
+  // Deep in a lane, far past its first page.
+  big.cards[298] = { ...big.cards[298], tags: ["needle"] };
+  plane.setBoard("ws-cloud-project", big);
+  const profile = await mkdtemp(join(tmpdir(), "lanew-big-filter-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Cloud project");
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+    await expect(
+      page.getByText("Card number 1", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Card number 299")).toHaveCount(0);
+
+    const mark = plane.calls.length;
+    await page.goto(
+      "app://lanework/w/cloud-project/issues?view=board&tag=needle",
+    );
+    await expect(page.getByText("Card number 299")).toBeVisible();
+    expect(
+      plane.calls.slice(mark).some((call) => /items\?.*tag=needle/.test(call)),
+    ).toBe(true);
+
+    // ⌘K on a key no loaded card has: the card page asks the service.
+    await page.goto("app://lanework/w/cloud-project/issues?view=board");
+    await expect(
+      page.getByText("Card number 1", { exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Meta+k");
+    await page
+      .getByPlaceholder("Jump to a card, a project, or a command…")
+      .fill("FE-297");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/issues\/FE-297/);
+    await expect(page.getByRole("textbox", { name: "Card title" })).toHaveValue(
+      "Card number 297",
+    );
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a service without stats still gets the whole board", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setStatsMissing(true);
+  plane.setBoard("ws-cloud-project", bigBoard(150));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-old-stats-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Cloud project");
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+    const lane = (name: string) =>
+      page.getByRole("region", { name: `${name} column` });
+    // Every card, as before FE-17, and no "Load more" to press.
+    await expect(lane("Done").locator("li.shadow-card")).toHaveCount(50);
+    await expect(page.getByRole("button", { name: /^Load more/ })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole("link", { name: /^Issues/ })).toContainText(
+      "150",
+    );
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("⌘K finds a card that is not loaded, asking the service once per pause", async () => {
+  const plane = await startStubPlane({ workspaces });
+  const big = bigBoard(300);
+  // Far past its lane's first page, so only the service can find it.
+  big.cards[289] = { ...big.cards[289], title: "Zebra migration plan" };
+  plane.setBoard("ws-cloud-project", big);
+  const profile = await mkdtemp(join(tmpdir(), "lanew-search-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Cloud project");
+    await expect(page.getByText("Zebra migration plan")).toHaveCount(0);
+
+    const mark = plane.calls.length;
+    await page.keyboard.press("Meta+k");
+    const field = page.getByPlaceholder(
+      "Jump to a card, a project, or a command…",
+    );
+    // Typed faster than the debounce: one pause, one request.
+    await field.pressSequentially("zebra mig", { delay: 30 });
+    const option = page.getByRole("option", { name: /Zebra migration plan/ });
+    await expect(option).toBeVisible();
+    const searches = () =>
+      plane.calls.slice(mark).filter((call) => /items\?q=/.test(call));
+    expect(searches()).toHaveLength(1);
+    expect(searches()[0]).toContain("q=zebra+mig");
+
+    await option.click();
+    await expect(page).toHaveURL(/\/issues\/BE-290/);
+    await expect(page.getByRole("textbox", { name: "Card title" })).toHaveValue(
+      "Zebra migration plan",
+    );
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a search the service cannot answer keeps the loaded matches, and says so", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", bigBoard(3));
+  plane.setSearchFailing(true);
+  const profile = await mkdtemp(join(tmpdir(), "lanew-search-down-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Cloud project");
+    await expect(page.getByText("Card number 2")).toBeVisible();
+    await page.keyboard.press("Meta+k");
+    await page
+      .getByPlaceholder("Jump to a card, a project, or a command…")
+      .fill("card number 2");
+    await expect(page.getByText("Showing loaded cards only")).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: /Card number 2/ }),
+    ).toBeVisible();
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});

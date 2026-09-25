@@ -15,6 +15,7 @@ import {
   StatusIcon,
 } from "#/components/shared/board/glyphs";
 import { IssueMenu } from "#/components/shared/board/issue-menu";
+import { LoadMore } from "#/components/shared/board/load-more";
 import { IssuesListSkeleton } from "#/components/shared/board/skeletons";
 import {
   Empty,
@@ -43,9 +44,18 @@ export function IssuesList() {
   // two clocks disagreeing on the same screen.
   const now = view ? new Date(view.fetchedAt).getTime() : Date.now();
 
-  const groups = view
-    ? groupIssues(view, search.group ?? "status", search)
-    : [];
+  const groupBy = search.group ?? "status";
+  const groups = view ? groupIssues(view, groupBy, search) : [];
+  // ⚠️ The SERVICE's counts when it sent them (FE-17): a group holds one page
+  // of its cards, and the header counting those would say "20" for 226.
+  const counts =
+    groupBy === "status"
+      ? view?.stats?.byColumn
+      : groupBy === "priority"
+        ? view?.stats?.byPriority
+        : view?.stats?.byCategory;
+  // "No cards yet" is about the BOARD, not the page of it on screen.
+  const empty = view ? (view.total ?? view.cards.length) === 0 : false;
 
   return (
     <>
@@ -56,7 +66,7 @@ export function IssuesList() {
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <HugeiconsIcon
-                  icon={view.cards.length === 0 ? Add01Icon : FilterIcon}
+                  icon={empty ? Add01Icon : FilterIcon}
                   strokeWidth={1.8}
                 />
               </EmptyMedia>
@@ -64,18 +74,15 @@ export function IssuesList() {
                   with different ways out: one wants a card, the other wants the
                   filter loosened. One sentence for both would be advice that is
                   wrong half the time. */}
-              <EmptyTitle>
-                {view.cards.length === 0 ? "No cards yet" : "No matches"}
-              </EmptyTitle>
+              <EmptyTitle>{empty ? "No cards yet" : "No matches"}</EmptyTitle>
               <EmptyDescription>
-                {view.cards.length === 0
-                  ? "Add one above."
-                  : "Try fewer filters."}
+                {empty ? "Add one above." : "Try fewer filters."}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
         )}
         {groups.map((group) => {
+          const count = counts?.[group.key] ?? group.cards.length;
           // Finished work starts folded away: it is the largest lane on any
           // board that has been running a while, and the least often read.
           const shut =
@@ -105,7 +112,7 @@ export function IssuesList() {
                 ) : null}
                 <span className="text-[13px] font-medium">{group.name}</span>
                 <span className="text-muted-foreground text-xs tabular-nums">
-                  {group.cards.length}
+                  {count}
                 </span>
               </button>
               {!shut && (
@@ -171,6 +178,14 @@ export function IssuesList() {
                       </IssueMenu>
                     );
                   })}
+                  <li className="px-3 empty:hidden">
+                    <LoadMore
+                      group={group.key}
+                      loaded={group.cards.length}
+                      count={count}
+                      label={group.name}
+                    />
+                  </li>
                 </ul>
               )}
             </section>

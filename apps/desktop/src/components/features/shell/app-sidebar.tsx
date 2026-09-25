@@ -147,7 +147,7 @@ export function AppSidebar() {
               Issues
               {view && (
                 <span className="text-muted-foreground ml-auto text-xs tabular-nums">
-                  {view.cards.length}
+                  {view.total ?? view.cards.length}
                 </span>
               )}
             </Link>

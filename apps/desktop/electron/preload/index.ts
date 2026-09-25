@@ -104,12 +104,24 @@ const desktop: DesktopApi = {
     remove: (id, slug) =>
       ipcRenderer.invoke(workspaceChannels.deleteWorkspace, id, slug),
     board: {
-      load: (workspaceId) =>
-        ipcRenderer.invoke(workspaceChannels.board, workspaceId),
+      load: (workspaceId, query) =>
+        ipcRenderer.invoke(workspaceChannels.board, workspaceId, query),
+      more: (workspaceId, query, group, cursor) =>
+        ipcRenderer.invoke(
+          workspaceChannels.more,
+          workspaceId,
+          query,
+          group,
+          cursor,
+        ),
+      stats: (workspaceId, query) =>
+        ipcRenderer.invoke(workspaceChannels.stats, workspaceId, query),
       card: (workspaceId, cardId) =>
         ipcRenderer.invoke(workspaceChannels.card, workspaceId, cardId),
       lookup: (workspaceId, taskId) =>
         ipcRenderer.invoke(workspaceChannels.lookup, workspaceId, taskId),
+      search: (workspaceId, query) =>
+        ipcRenderer.invoke(workspaceChannels.search, workspaceId, query),
       update: (workspaceId, cardId, patch, revision) =>
         ipcRenderer.invoke(
           workspaceChannels.update,

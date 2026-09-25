@@ -103,7 +103,9 @@ export function SelectedProjectSection({
   // other project the dialog says "every issue" rather than a number this page
   // never read.
   const count =
-    active?.slug === workspace.slug && view ? view.cards.length : null;
+    active?.slug === workspace.slug && view
+      ? (view.total ?? view.cards.length)
+      : null;
   const working = busy === `purge:${workspace.slug}`;
 
   return (

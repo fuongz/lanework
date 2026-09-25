@@ -8,6 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { type BoardCard, matchesSearch } from "#/../shared/workspaces";
 import { StatusIcon } from "#/components/shared/board/glyphs";
 import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
 import { columnOf } from "#/lib/board-view";
@@ -25,14 +26,18 @@ interface Command {
   run: () => void;
 }
 
+/** How long typing has to pause before the service is asked (FE-18/D4). */
+const SEARCH_DEBOUNCE_MS = 250;
+
 /**
  * ⌘K.
  *
- * ⚠️ Cards are matched from the board already in memory rather than through
- * `lookup`. The board read pages until the cursor runs out, so the list is
- * complete — and a keystroke-per-request palette would be slower and wrong the
- * moment the network hiccups. `lookup` earns its keep on the detail route,
- * where a deep link can name a card no list has been read for.
+ * ⚠️ Cards are searched on the SERVICE once two characters are typed (FE-18).
+ * The board is read one page per group now (FE-17), so the cards in memory are
+ * a fraction of it, and a search over them alone would miss the old ones —
+ * exactly the ones you open a palette to find. The loaded matches still show
+ * at once, so the palette never waits on the network to answer something it
+ * already knows, and they are what is left when the service cannot be asked.
  */
 export function CommandPalette() {
   const isOpen = useCommandPalette((state) => state.isOpen);
@@ -47,6 +52,33 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [at, setAt] = useState(0);
+  const workspaceId = useBoard((state) => state.active?.id ?? null);
+  /** The service's answer, for the query it answered — never a stale one. */
+  const [remote, setRemote] = useState<{
+    query: string;
+    cards: BoardCard[] | null;
+  } | null>(null);
+  const trimmed = query.trim();
+  const searching = Boolean(slug && workspaceId) && trimmed.length >= 2;
+
+  // ⚠️ One request per PAUSE, not per keystroke, and an answer only counts for
+  // the query it was asked for: typing on drops whatever was in flight.
+  useEffect(() => {
+    if (!isOpen || !searching || !workspaceId) return;
+    let live = true;
+    const timer = setTimeout(() => {
+      const surface = window.desktop?.workspaces;
+      if (!surface) return;
+      surface.board
+        .search(workspaceId, trimmed)
+        .then((cards) => live && setRemote({ query: trimmed, cards }))
+        .catch(() => live && setRemote({ query: trimmed, cards: null }));
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [isOpen, searching, trimmed, workspaceId]);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -72,20 +104,6 @@ export function CommandPalette() {
   const commands = useMemo<Command[]>(() => {
     const out: Command[] = [];
     if (slug) {
-      for (const card of view?.cards ?? [])
-        out.push({
-          id: `card:${card.id}`,
-          label: card.title,
-          hint: card.taskId ?? undefined,
-          lane: card.columnKey,
-          run: () => {
-            if (!card.taskId) return;
-            void navigate({
-              to: "/w/$slug/issues/$taskId",
-              params: { slug, taskId: card.taskId },
-            });
-          },
-        });
       out.push(
         {
           id: "nav:issues",
@@ -149,14 +167,72 @@ export function CommandPalette() {
       },
     );
     return out;
-  }, [navigate, setTheme, slug, theme, view, workspaces]);
+  }, [navigate, setTheme, slug, theme, workspaces]);
 
-  const needle = query.trim().toLowerCase();
-  const matches = needle
-    ? commands.filter((command) =>
-        `${command.hint ?? ""} ${command.label}`.toLowerCase().includes(needle),
-      )
-    : commands.slice(0, 12);
+  const answered = remote?.query === trimmed ? remote : null;
+  const cardCommands = useMemo<Command[]>(() => {
+    if (!slug) return [];
+    const loaded = view?.cards ?? [];
+    const hits = searching
+      ? [
+          ...(answered?.cards ?? []),
+          ...loaded.filter((card) => matchesSearch(card, trimmed)),
+        ]
+      : loaded;
+    const seen = new Set<string>();
+    return hits
+      .filter((card) => !seen.has(card.id) && seen.add(card.id))
+      .slice(0, searching ? 20 : undefined)
+      .map((card) => ({
+        id: `card:${card.id}`,
+        label: card.title,
+        hint: card.taskId ?? undefined,
+        lane: card.columnKey,
+        run: () => {
+          if (!card.taskId) return;
+          void navigate({
+            to: "/w/$slug/issues/$taskId",
+            params: { slug, taskId: card.taskId },
+          });
+        },
+      }));
+  }, [answered, navigate, searching, slug, trimmed, view]);
+  // Loaded cards only: the service was asked for this query and could not say.
+  const offline = searching && answered !== null && answered.cards === null;
+
+  const needle = trimmed.toLowerCase();
+  const byText = (command: Command) =>
+    `${command.hint ?? ""} ${command.label}`.toLowerCase().includes(needle);
+  const found = !needle
+    ? [...cardCommands, ...commands].slice(0, 12)
+    : searching
+      ? [...cardCommands, ...commands.filter(byText)]
+      : [...cardCommands, ...commands].filter(byText);
+  // ⚠️ A task id that is not among the loaded cards still opens (FE-17/D4). A
+  // board is read one page per group now, so "not loaded" is not "not there":
+  // the card page asks the service for it by that id, and says so if it is
+  // not a card.
+  const taskId = /^[a-z][a-z0-9]*-\d+$/i.test(needle)
+    ? query.trim().toUpperCase()
+    : null;
+  const matches =
+    slug &&
+    taskId &&
+    !cardCommands.some((command) => command.hint?.toUpperCase() === taskId)
+      ? [
+          {
+            id: `jump:${taskId}`,
+            label: `Open ${taskId}`,
+            hint: taskId,
+            run: () =>
+              void navigate({
+                to: "/w/$slug/issues/$taskId",
+                params: { slug, taskId },
+              }),
+          } satisfies Command,
+          ...found,
+        ]
+      : found;
   const cursor = Math.min(at, Math.max(0, matches.length - 1));
 
   const pick = (command: Command | undefined) => {
@@ -206,6 +282,11 @@ export function CommandPalette() {
           aria-label="Results"
           className="flex max-h-80 flex-col overflow-y-auto p-1.5"
         >
+          {offline && (
+            <p className="text-muted-foreground px-2.5 pt-1 pb-1.5 text-[11px]">
+              Showing loaded cards only
+            </p>
+          )}
           {matches.length === 0 && (
             <p className="text-muted-foreground px-2.5 py-6 text-center text-[13px]">
               Nothing matches “{query.trim()}”.

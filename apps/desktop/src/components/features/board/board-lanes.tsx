@@ -15,7 +15,15 @@ import {
 } from "@dnd-kit/core";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { motion } from "motion/react";
-import { memo, useCallback, useMemo, useState } from "react";
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import type {
   BoardCard,
   BoardCategory,
@@ -29,6 +37,7 @@ import {
   StatusIcon,
 } from "#/components/shared/board/glyphs";
 import { IssueMenu } from "#/components/shared/board/issue-menu";
+import { LoadMore } from "#/components/shared/board/load-more";
 import { BoardLanesSkeleton } from "#/components/shared/board/skeletons";
 import { Empty, EmptyDescription, EmptyHeader } from "#/components/ui/empty";
 import {
@@ -116,6 +125,17 @@ const DROP_ANIMATION: DropAnimation = {
 /** How far the pointer travels before it is a drag rather than a click. */
 const DRAG_PX = 6;
 
+/**
+ * Whether the board has finished its first paint (FE-15/D1).
+ *
+ * ⚠️ A card fades in only when it mounts AFTER that — created here, synced in
+ * from elsewhere, or dropped into another lane. The lanes remount every time
+ * this page is opened (coming back from a card, switching the view), and when
+ * every card faded up at once the board looked like it was loading again
+ * while not one request had gone out.
+ */
+const Settled = createContext(false);
+
 export function BoardLanes() {
   const { slug } = useParams({ from: "/_app/w/$slug/issues/" });
   const search = useSearch({ from: "/_app/w/$slug/issues/" });
@@ -138,6 +158,15 @@ export function BoardLanes() {
     () => (view ? new Date(view.fetchedAt).getTime() : Date.now()),
     [view],
   );
+
+  // Settled one frame after the first board is on screen, so every card of
+  // that paint mounts before the flag flips.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!view || settled) return;
+    const frame = requestAnimationFrame(() => setSettled(true));
+    return () => cancelAnimationFrame(frame);
+  }, [view, settled]);
 
   // A small threshold, so a plain click still opens the card.
   const sensors = useSensors(
@@ -283,58 +312,66 @@ export function BoardLanes() {
 
   return (
     <>
-      <DndContext
-        sensors={sensors}
-        collisionDetection={collisionDetection}
-        onDragStart={onDragStart}
-        onDragMove={onDragMove}
-        onDragEnd={onDragEnd}
-        onDragCancel={onDragCancel}
-      >
-        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
-          {!view && loading && <BoardLanesSkeleton />}
-          <div className="flex h-full min-w-max gap-3 px-6 py-4">
-            {(view?.columns ?? []).map((column) => (
-              <Lane
-                key={column.key}
-                column={column}
-                cards={lanes.get(column.key) ?? EMPTY_CARDS}
-                slug={slug}
-                now={now}
-                columns={view?.columns ?? EMPTY_COLUMNS}
-                categories={view?.categories ?? EMPTY_CATEGORIES}
-                stale={view?.stale ?? false}
-                busy={busy}
-                held={held?.id ?? null}
-                target={target?.columnKey === column.key ? target : null}
-                progress={progress}
-              />
-            ))}
+      <Settled.Provider value={settled}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={collisionDetection}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+          onDragCancel={onDragCancel}
+        >
+          <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
+            {!view && loading && <BoardLanesSkeleton />}
+            <div className="flex h-full min-w-max gap-3 px-6 py-4">
+              {(view?.columns ?? []).map((column) => (
+                <Lane
+                  key={column.key}
+                  column={column}
+                  cards={lanes.get(column.key) ?? EMPTY_CARDS}
+                  // ⚠️ The SERVICE's count (FE-17): a lane holds one page of
+                  // its cards, and counting those would say "20" for 226.
+                  count={
+                    view?.stats?.byColumn[column.key] ??
+                    (lanes.get(column.key) ?? EMPTY_CARDS).length
+                  }
+                  slug={slug}
+                  now={now}
+                  columns={view?.columns ?? EMPTY_COLUMNS}
+                  categories={view?.categories ?? EMPTY_CATEGORIES}
+                  stale={view?.stale ?? false}
+                  busy={busy}
+                  held={held?.id ?? null}
+                  target={target?.columnKey === column.key ? target : null}
+                  progress={progress}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-        <DragOverlay dropAnimation={DROP_ANIMATION}>
-          {held ? (
-            // The pickup: the card lifts off the lane with a spring rather than
-            // snapping to a tilt. A touch of bounce belongs here — this is a
-            // physical gesture the person is driving, not a state change.
-            <motion.div
-              initial={{ transform: "scale(1) rotate(0deg)" }}
-              animate={{ transform: "scale(1.03) rotate(1.5deg)" }}
-              transition={{ type: "spring", duration: 0.35, bounce: 0.25 }}
-              style={{ width: heldWidth ?? undefined }}
-              className="bg-card shadow-card cursor-grabbing rounded-lg p-2.5 shadow-2xl shadow-black/15"
-            >
-              <CardFace
-                card={held}
-                now={now}
-                columns={view?.columns ?? EMPTY_COLUMNS}
-                categories={view?.categories ?? EMPTY_CATEGORIES}
-                subs={progress.get(held.id) ?? null}
-              />
-            </motion.div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
+          <DragOverlay dropAnimation={DROP_ANIMATION}>
+            {held ? (
+              // The pickup: the card lifts off the lane with a spring rather than
+              // snapping to a tilt. A touch of bounce belongs here — this is a
+              // physical gesture the person is driving, not a state change.
+              <motion.div
+                initial={{ transform: "scale(1) rotate(0deg)" }}
+                animate={{ transform: "scale(1.03) rotate(1.5deg)" }}
+                transition={{ type: "spring", duration: 0.35, bounce: 0.25 }}
+                style={{ width: heldWidth ?? undefined }}
+                className="bg-card shadow-card cursor-grabbing rounded-lg p-2.5 shadow-2xl shadow-black/15"
+              >
+                <CardFace
+                  card={held}
+                  now={now}
+                  columns={view?.columns ?? EMPTY_COLUMNS}
+                  categories={view?.categories ?? EMPTY_CATEGORIES}
+                  subs={progress.get(held.id) ?? null}
+                />
+              </motion.div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      </Settled.Provider>
     </>
   );
 }
@@ -347,6 +384,7 @@ const EMPTY_CATEGORIES: BoardCategory[] = [];
 function Lane({
   column,
   cards,
+  count,
   slug,
   now,
   columns,
@@ -359,6 +397,8 @@ function Lane({
 }: {
   column: BoardColumn;
   cards: BoardCard[];
+  /** How many cards the lane holds on the service, loaded or not. */
+  count: number;
   slug: string;
   now: number;
   columns: BoardColumn[];
@@ -378,6 +418,9 @@ function Lane({
   // invisible from the corner of the eye, and it has nothing to draw at all
   // when the lane is empty.
   const over = isOver || target !== null;
+  const more = useBoard((state) =>
+    Boolean(state.view?.groups?.[column.key]?.cursor),
+  );
 
   return (
     <section
@@ -388,7 +431,7 @@ function Lane({
         <StatusIcon column={column} />
         <span className="text-[13px] font-medium">{column.name}</span>
         <span className="text-muted-foreground text-xs tabular-nums">
-          {cards.length}
+          {count}
         </span>
       </header>
       {/* ⚠️ `p-1` inside the SCROLL container, not margin outside it. A card's
@@ -449,6 +492,16 @@ function Lane({
             subs={progress.get(card.id) ?? null}
           />
         ))}
+        {more && (
+          <li>
+            <LoadMore
+              group={column.key}
+              loaded={cards.length}
+              count={count}
+              label={column.name}
+            />
+          </li>
+        )}
       </ul>
     </section>
   );
@@ -490,6 +543,7 @@ const LaneCard = memo(function LaneCard({
   subs: { done: number; total: number } | null;
 }) {
   const move = useBoard((state) => state.move);
+  const settled = useContext(Settled);
   // ⚠️ A card is not draggable while the board is a saved copy. Dragging one
   // would move it on screen and then put it back, which reads as the app losing
   // the change rather than as being offline.
@@ -539,7 +593,7 @@ const LaneCard = memo(function LaneCard({
            * lying.
            */
           layout
-          initial={{ opacity: 0, y: 6 }}
+          initial={settled ? { opacity: 0, y: 6 } : false}
           // The slot left behind: dimmed and set back a hair, so the lane reads
           // as "this place is spoken for" rather than "the card is still here".
           animate={{ opacity: held ? 0.4 : 1, y: 0, scale: held ? 0.98 : 1 }}

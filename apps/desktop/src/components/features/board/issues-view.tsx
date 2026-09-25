@@ -1,5 +1,6 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { useBoard } from "#/stores/board";
 import { useIssueView } from "#/stores/issue-view";
 import { BoardLanes } from "./board-lanes";
 import { IssuesList } from "./issues-list";
@@ -24,10 +25,25 @@ export function IssuesView() {
   const search = useSearch({ from: "/_app/w/$slug/issues/" });
   const navigate = useNavigate();
   const remember = useIssueView((state) => state.remember);
+  const setQuery = useBoard((state) => state.setQuery);
   const view = search.view ?? "list";
 
   // What the URL says is what the rail's "Issues" row reopens next time.
   useEffect(() => remember(slug, view), [remember, slug, view]);
+
+  // ⚠️ The URL IS the board's query (FE-17): the service reads one page per
+  // group, under these filters, so changing either is a new read — not a new
+  // filter over the cards already here. The lanes always group by status.
+  const groupBy = view === "board" ? "status" : (search.group ?? "status");
+  const { status, category, priority, tag } = search;
+  useEffect(
+    () =>
+      setQuery(slug, {
+        groupBy,
+        filters: { status, category, priority, tag },
+      }),
+    [setQuery, slug, groupBy, status, category, priority, tag],
+  );
 
   return (
     <>
