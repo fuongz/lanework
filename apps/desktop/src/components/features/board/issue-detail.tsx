@@ -1025,7 +1025,12 @@ function RowLabel({
   unsaved?: boolean;
 }) {
   return (
-    <label htmlFor={htmlFor} className="cursor-pointer">
+    // ⚠️ `relative`, and it is load-bearing: the `sr-only` text below is
+    // `position: absolute`, and with no positioned ancestor it was placed
+    // against the PAGE at its row's offset inside the scrolled pane — below the
+    // window's bottom edge. That made the document itself taller than the
+    // window, and the whole app scrolled up under a grey band.
+    <label htmlFor={htmlFor} className="relative cursor-pointer">
       {/* ⚠️ A mark on the ROW, not only the Save button's count: on a card with
           thirty boxes, "3 changes" does not say which three. */}
       {unsaved && (

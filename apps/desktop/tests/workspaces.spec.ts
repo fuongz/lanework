@@ -667,10 +667,28 @@ test("opening a workspace shows its cloud board, and a tick carries the revision
     const save = page.getByRole("button", { name: "Save change" });
     await expect(save).toBeVisible();
     expect(plane.boardPreconditions.length).toBe(sent);
+    // ⚠️ The unsaved marker's screen-reader text must not make the WINDOW
+    // scrollable — it once sat outside every positioned box, and the whole app
+    // slid up under a grey band.
+    expect(
+      await page.evaluate(() => {
+        const root = (
+          globalThis as unknown as {
+            document: {
+              scrollingElement: { scrollHeight: number; clientHeight: number };
+            };
+          }
+        ).document.scrollingElement;
+        return root.scrollHeight - root.clientHeight;
+      }),
+    ).toBeLessThanOrEqual(0);
     await save.click();
     await expect
       .poll(() => plane.boardPreconditions)
       .toEqual(expect.arrayContaining(["4"]));
+    // ⚠️ ONE write for the whole draft — the card's activity once got a line
+    // per box.
+    expect(plane.boardPreconditions.length).toBe(sent + 1);
     await expect(page.getByRole("checkbox").first()).toBeChecked();
     await expect(save).toHaveCount(0);
 

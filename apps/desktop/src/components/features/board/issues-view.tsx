@@ -1,9 +1,9 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { ViewToolbar } from "#/components/shared/board/view-toolbar";
 import { useIssueView } from "#/stores/issue-view";
 import { BoardLanes } from "./board-lanes";
 import { IssuesList } from "./issues-list";
+import { ViewToolbar } from "./view-toolbar";
 
 /**
  * A project's issues, as rows or as lanes — one page, two ways to draw it.

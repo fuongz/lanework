@@ -8,11 +8,6 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { useState } from "react";
-// ⚠️ `shared/` importing `features/` is legal and deliberate: the buckets
-// encode how many importers a file has, not a layering. This toolbar has two
-// consumers, the filter bar has one — and moving the filter bar up here to
-// "fix" the edge would just relocate a file nobody else reads.
-import { FilterBar } from "#/components/features/board/filter-bar";
 import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
 import {
@@ -26,6 +21,7 @@ import { GROUP_BY, type GroupBy } from "#/lib/board-view";
 import type { IssueSearch } from "#/lib/issue-search";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
+import { FilterBar } from "./filter-bar";
 
 const when = (iso: string): string => {
   const at = new Date(iso);

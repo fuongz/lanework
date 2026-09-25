@@ -867,6 +867,12 @@ export async function startStubPlane(
         req.on("data", (chunk) => (raw += chunk));
         req.on("end", () => {
           if (!card) return json(404, { error: "not found" });
+          if (checklistConflict)
+            return json(409, {
+              error: "that card changed since you read it",
+              revision: card.revision + 1,
+              item: { ...card, revision: card.revision + 1 },
+            });
           if (precondition === undefined)
             return json(428, {
               error: "If-Match with the revision you read is required",

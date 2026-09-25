@@ -713,86 +713,59 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const workspace = get().active;
     const { draft, detail } = get();
     if (!workspace?.id || !draft || detail?.id !== draft.cardId) return;
-    // ⚠️ Only boxes that DIFFER from the card as last read, in the order the
-    // card lists them. The ticks go before the unticks so that, for a "pick
-    // ONE" group, the new choice lands before the old one is cleared — a
-    // failure between the two leaves both ticked (visible, fixable) rather
-    // than neither (an approval that silently vanished).
-    const pending = (detail.checklist ?? [])
-      .filter(
-        (item) =>
-          item.key in draft.checked && draft.checked[item.key] !== item.checked,
-      )
-      .sort(
-        (a, b) => Number(draft.checked[b.key]) - Number(draft.checked[a.key]),
-      );
-    if (!pending.length) {
+    const items = detail.checklist ?? [];
+    const changed = items.filter(
+      (item) =>
+        item.key in draft.checked && draft.checked[item.key] !== item.checked,
+    );
+    if (!changed.length) {
       set({ draft: null });
       return;
     }
 
+    // ⚠️ ONE request for the whole set: `PUT …/checklist` with the revision on
+    // screen as `If-Match`. It replaced a PATCH per box, which wrote one
+    // "updated the checklist" line per tick into the card's activity and could
+    // leave half a decision applied when a later box failed.
+    //
+    // ⚠️ Every row goes back, but `checked` ONLY on the boxes this draft
+    // changed. The service reads an absent `checked` as "keep what it says" —
+    // tick and timestamp — and an absent `note` the same way, so a box nobody
+    // touched here keeps the moment it was approved, and an edit made through
+    // the MCP a second ago to a note is not flattened.
+    const wanted = new Set(changed.map((item) => item.key));
+    const payload: BoardChecklistDraft[] = items.map((item) => ({
+      key: item.key,
+      // The card only ever holds these two; anything else would be refused.
+      section: item.section === "verify" ? "verify" : "decisions",
+      text: item.text,
+      group: item.group,
+      ...(wanted.has(item.key) ? { checked: draft.checked[item.key] } : {}),
+    }));
+
     set({ busy: `${detail.id}:checklist`, error: null, conflict: null });
-    // ⚠️ Each PATCH carries the revision the PREVIOUS one returned. The first
-    // carries the one on screen — the revision the person decided against —
-    // so an edit made elsewhere since then is caught before anything lands.
-    let revision = detail.revision;
-    let saved = 0;
     try {
-      for (const item of pending) {
-        const result = await api().board.toggle(
-          workspace.id,
-          detail.id,
-          item.key,
-          draft.checked[item.key],
-          revision,
-        );
-        if (result.kind === "ok") {
-          revision = result.card.revision;
-          saved += 1;
-          continue;
-        }
-        // Stop at the first refusal. What already landed is real; what did not
-        // stays in the draft, still marked, for the person to look at again.
-        if (result.kind === "conflict") set({ conflict: result });
-        else
-          set({
-            error: saved
-              ? `Saved ${saved} of ${pending.length}. ${result.message}`
-              : result.message,
-          });
-        break;
+      const result = await api().board.setChecklist(
+        workspace.id,
+        detail.id,
+        payload,
+        detail.revision,
+      );
+      if (result.kind === "ok") {
+        set({ detail: result.card, draft: null });
+        return;
       }
+      // Refused as a whole, so nothing landed: the draft stays exactly as it
+      // was, still marked, for the person to look at against the new card.
+      if (result.kind === "conflict") set({ conflict: result });
+      else set({ error: result.message });
+      await get().refreshDetail(detail.id);
     } catch (error) {
       set({
-        error: ipcMessage(
-          error,
-          saved
-            ? `Saved ${saved} of ${pending.length}; the rest did not. Try again.`
-            : "Those ticks did not save. Try again.",
-        ),
+        error: ipcMessage(error, "Those ticks did not save. Try again."),
       });
     } finally {
-      await get().refreshDetail(detail.id);
-      // Whatever now matches the card is no longer a change; if that is all of
-      // it, the draft is gone and the Save button with it.
-      set((state) => {
-        const card = state.detail;
-        if (!state.draft || !card || state.draft.cardId !== card.id)
-          return { busy: null };
-        const left = Object.fromEntries(
-          Object.entries(state.draft.checked).filter(
-            ([key, checked]) =>
-              card.checklist?.find((item) => item.key === key)?.checked !==
-              checked,
-          ),
-        );
-        return {
-          busy: null,
-          draft: Object.keys(left).length
-            ? { cardId: card.id, checked: left }
-            : null,
-        };
-      });
+      set({ busy: null });
     }
   },
 
