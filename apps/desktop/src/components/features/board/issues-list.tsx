@@ -76,7 +76,11 @@ export function IssuesList() {
                   wrong half the time. */}
               <EmptyTitle>{empty ? "No cards yet" : "No matches"}</EmptyTitle>
               <EmptyDescription>
-                {empty ? "Add one above." : "Try fewer filters."}
+                {/* The quick-add field that "above" pointed at is gone; New
+                    issue is the way in now. */}
+                {empty
+                  ? "Create one with New issue (⌘N)."
+                  : "Try fewer filters."}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
