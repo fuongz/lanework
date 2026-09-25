@@ -50,7 +50,7 @@ function summarise(checks: PullChecks): string {
   // ⚠️ Counts, not "All checks passed". A rollup can be `SUCCESS` while several
   // checks were skipped, and a sentence claiming they all passed would be the
   // one thing somebody reads before approving.
-  return parts.length ? parts.join(" · ") : `${checks.checks.length} checks`;
+  return parts.length ? parts.join(", ") : `${checks.checks.length} checks`;
 }
 
 export function PullChecksSection({ checks }: { checks: PullChecks }) {

@@ -123,7 +123,7 @@ export function NewIssue() {
       }}
     >
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="border-border flex h-11 shrink-0 items-center gap-2 border-b px-6">
+        <header className="border-border flex h-11 shrink-0 items-center gap-2 border-b pe-6 ps-[max(1.5rem,var(--titlebar-clear,0px))]">
           <span className="bg-foreground/[0.06] text-muted-foreground truncate rounded px-1.5 py-0.5 text-xs">
             {active?.name ?? "Project"}
           </span>

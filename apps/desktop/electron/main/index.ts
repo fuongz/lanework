@@ -43,7 +43,10 @@ function createWindow() {
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hidden",
-          trafficLightPosition: { x: 20, y: 20 },
+          // ⚠️ y 15 puts the (14pt) lights' centre on the 22pt line every
+          // header row sits on — the h-11 bars, the issues toolbar and the
+          // sidebar button beside them (FE-20) — the line Codex uses too.
+          trafficLightPosition: { x: 20, y: 15 },
           vibrancy: "under-window",
           visualEffectState: "active",
           backgroundColor: "#00000000",

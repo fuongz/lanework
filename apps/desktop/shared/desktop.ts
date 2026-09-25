@@ -7,7 +7,12 @@ export const channels = {
   appInfo: "app:get-info",
   setTheme: "app:set-theme",
   themeChanged: "app:theme-changed",
+  /** Main → renderer: a View-menu command for the window's layout. */
+  viewCommand: "app:view-command",
 } as const;
+
+/** What the View menu can ask of the window's layout (FE-20). */
+export type ViewCommand = "toggle-sidebar";
 
 /**
  * Which appearance the window should follow.
@@ -42,6 +47,17 @@ export interface DesktopApi {
   setTheme: (source: ThemeSource) => Promise<boolean>;
   /** Fires when the resolved theme changes, including from the OS. */
   onThemeChange: (listener: (dark: boolean) => void) => () => void;
+  /** View › Toggle Sidebar (⌘B), and whatever else the View menu grows. */
+  onViewCommand: (listener: (command: ViewCommand) => void) => () => void;
+  /**
+   * The page's zoom, as Electron holds it (1 is 100%).
+   *
+   * ⚠️ Asked of Electron, not worked out from `outerWidth / innerWidth`: the
+   * two are updated at different moments while the window is resized, and the
+   * ratio wobbled by a few percent on every step of a drag — which moved
+   * everything placed by it.
+   */
+  zoomFactor: () => number;
   auth: DesktopAuthApi;
   workspaces: DesktopWorkspacesApi;
   git: DesktopGitApi;

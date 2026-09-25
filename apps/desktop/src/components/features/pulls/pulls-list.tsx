@@ -281,7 +281,7 @@ export function PullsList() {
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {connected ? (
         <>
-          <div className="flex h-9 shrink-0 items-center gap-1 px-2">
+          <div className="flex h-9 shrink-0 items-center gap-1 pe-2 ps-[max(0.5rem,var(--titlebar-clear,0px))]">
             {PULL_TABS.map((value) => (
               <button
                 key={value}

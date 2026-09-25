@@ -1587,7 +1587,7 @@ test("focus mode puts the other columns away, and gives them back", async () => 
       .toBeGreaterThan(0);
     await expect
       .poll(async () => (await sidebar.boundingBox())?.width ?? 0)
-      .toBeGreaterThan(0);
+      .toBeGreaterThan(100);
   } finally {
     await cleanup();
   }
@@ -1664,7 +1664,7 @@ test("checks are counted rather than summed into a verdict", async () => {
     // ⚠️ Counts, not "all checks passed". A rollup can read SUCCESS while
     // several checks were skipped, and that sentence is the one somebody reads
     // immediately before approving.
-    await expect(page.getByText("1 failing · 1 passing")).toBeVisible();
+    await expect(page.getByText("1 failing, 1 passing")).toBeVisible();
   } finally {
     await cleanup();
   }

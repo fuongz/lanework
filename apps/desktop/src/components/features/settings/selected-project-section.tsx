@@ -130,7 +130,7 @@ export function SelectedProjectSection({
         <Row
           label="Folders on this machine"
           description={
-            <span title={folders.join(" · ")}>
+            <span title={folders.join("\n")}>
               {folders.length === 0
                 ? "No folder on this machine"
                 : folders.length === 1

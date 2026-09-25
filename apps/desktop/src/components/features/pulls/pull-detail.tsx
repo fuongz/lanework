@@ -177,7 +177,15 @@ export function PullDetail() {
           from and what is being shown of it — so it is drawn only when a diff is
           what is on screen. Held in one row, as it was, `#20 · @author ·
           +798 −425` sat among the controls and read as if it were one. */}
-      <header className="border-sidebar-border grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b px-3">
+      <header
+        className={cn(
+          "border-sidebar-border grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b pe-3",
+          // Beside the rail only in focus mode, with the list shut; the
+          // rest of the time the list is what keeps it clear of the window
+          // controls.
+          focusMode ? "ps-[max(0.75rem,var(--titlebar-clear,0px))]" : "ps-3",
+        )}
+      >
         <div className="flex min-w-0 items-center gap-2">
           <HugeiconsIcon
             icon={GitPullRequestIcon}

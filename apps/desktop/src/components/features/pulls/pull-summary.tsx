@@ -1,5 +1,6 @@
 import {
   ArrowDown01Icon,
+  Clock01Icon,
   GitBranchIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
@@ -159,8 +160,20 @@ export function PullSummary({ detail }: { detail: PullDetail }) {
           </h1>
           <p className="text-muted-foreground flex items-center gap-2 text-xs">
             {pull.author && <span>{pull.author.login}</span>}
-            {pull.author && age && <span aria-hidden="true">·</span>}
-            {age && <span>{age}</span>}
+            {/* The age behind a clock rather than a "·": it says what the
+                number is, which a separator never did. */}
+            {age && (
+              <span className="flex items-center gap-1">
+                <HugeiconsIcon
+                  icon={Clock01Icon}
+                  className="size-3.5"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+                <span className="sr-only">opened</span>
+                {age}
+              </span>
+            )}
           </p>
         </div>
 

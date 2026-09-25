@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webFrame } from "electron";
 import { authChannels, type DesktopAuthApi } from "../../shared/auth";
 import { channels, type DesktopApi } from "../../shared/desktop";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
@@ -188,6 +188,8 @@ const desktop: DesktopApi = {
   getAppInfo: () => ipcRenderer.invoke(channels.appInfo),
   setTheme: (source) => ipcRenderer.invoke(channels.setTheme, source),
   onThemeChange: (listener) => subscribe(channels.themeChanged, listener),
+  onViewCommand: (listener) => subscribe(channels.viewCommand, listener),
+  zoomFactor: () => webFrame.getZoomFactor(),
   auth,
   workspaces: {
     load: () => ipcRenderer.invoke(workspaceChannels.load),

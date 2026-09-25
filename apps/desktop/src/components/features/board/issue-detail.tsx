@@ -10,7 +10,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useBlocker, useParams } from "@tanstack/react-router";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type {
   BoardAttachment,
   BoardCard,
@@ -76,6 +76,7 @@ import {
   subIssueProgress,
   subIssues,
 } from "#/lib/board-view";
+import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { IssueActivity } from "./issue-activity";
 
@@ -119,7 +120,7 @@ export function IssueDetail() {
             divider and left a notch in the line between the two panes. Out here
             the bar owns the pane's full width, and the scroll region starts
             under it instead of running behind it. */}
-        <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b px-6">
+        <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b pe-6 ps-[max(1.5rem,var(--titlebar-clear,0px))]">
           <Link
             to="/w/$slug/issues"
             params={{ slug }}
@@ -437,6 +438,22 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
 
   const parent = view?.cards.find((entry) => entry.id === card.parentId);
 
+  // Whether the title has scrolled up to the header and is sitting under it.
+  // A marker where the title starts in the page: once it is out of view, the
+  // title is stuck. The marker sits ABOVE the title, so the title growing or
+  // shrinking cannot move it and flip the answer back.
+  const titleMark = useRef<HTMLDivElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const mark = titleMark.current;
+    if (!mark) return;
+    const watch = new IntersectionObserver(([entry]) =>
+      setStuck(entry ? !entry.isIntersecting : false),
+    );
+    watch.observe(mark);
+    return () => watch.disconnect();
+  }, []);
+
   return (
     <article className="flex min-w-0 flex-1 flex-col gap-5 px-6 py-6">
       {parent && (
@@ -452,27 +469,42 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
           <span className="truncate">{parent.title}</span>
         </Link>
       )}
-      <Input
-        aria-label="Card title"
-        value={title}
-        maxLength={500}
-        disabled={stale}
-        // ⚠️ `dark:bg-transparent` as well as `bg-transparent`. The base Input
-        // carries `dark:bg-input/30`, a DIFFERENT variant that class merging
-        // does not cancel — so in dark mode this field kept a filled box that
-        // light mode never showed.
-        className="h-auto rounded-md border-0 bg-transparent px-1.5 text-xl font-semibold tracking-tight shadow-none transition-colors focus-visible:border-0 focus-visible:bg-foreground/[0.04] focus-visible:ring-0 md:text-xl dark:bg-transparent dark:focus-visible:bg-foreground/[0.06]"
-        onChange={(event) => setTitle(event.target.value)}
-        onBlur={() => {
-          const next = title.trim();
-          if (next && next !== card.title) save({ title: next });
-          else setTitle(card.title);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
-          if (event.key === "Escape") setTitle(card.title);
-        }}
-      />
+      {/* `-mb-5` cancels the article's gap: the marker takes no room. */}
+      <div ref={titleMark} aria-hidden="true" className="-mb-5 h-0" />
+      {/* ⚠️ Row two under the header once the page scrolls: the title stays
+          in view, smaller, over frosted glass — the page showing through,
+          blurred, as the app's popovers do. It is its own row rather than
+          part of the header, so the header keeps one height on every
+          screen. */}
+      <div
+        data-stuck={stuck || undefined}
+        className="bg-background/70 sticky top-0 z-10 -mx-6 px-6 py-1.5 backdrop-blur-xl backdrop-saturate-150"
+      >
+        <Input
+          aria-label="Card title"
+          value={title}
+          maxLength={500}
+          disabled={stale}
+          // ⚠️ `dark:bg-transparent` as well as `bg-transparent`. The base Input
+          // carries `dark:bg-input/30`, a DIFFERENT variant that class merging
+          // does not cancel — so in dark mode this field kept a filled box that
+          // light mode never showed.
+          className={cn(
+            "h-auto rounded-md border-0 bg-transparent px-1.5 font-semibold tracking-tight shadow-none transition-[color,background-color,font-size] duration-150 focus-visible:border-0 focus-visible:bg-foreground/[0.04] focus-visible:ring-0 dark:bg-transparent dark:focus-visible:bg-foreground/[0.06]",
+            stuck ? "text-[15px] md:text-[15px]" : "text-xl md:text-xl",
+          )}
+          onChange={(event) => setTitle(event.target.value)}
+          onBlur={() => {
+            const next = title.trim();
+            if (next && next !== card.title) save({ title: next });
+            else setTitle(card.title);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") setTitle(card.title);
+          }}
+        />
+      </div>
       <MarkdownBody source={card.body} />
       <Attachments card={card} />
       <Checklist card={card} />
@@ -550,7 +582,7 @@ function AttachmentRow({
           <span className="text-muted-foreground truncate text-xs">
             {copied
               ? "Reference copied"
-              : [size, file.mimeType].filter(Boolean).join(" · ") ||
+              : [size, file.mimeType].filter(Boolean).join(", ") ||
                 file.reference}
           </span>
         </span>

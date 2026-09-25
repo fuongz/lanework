@@ -138,6 +138,65 @@ async function openIssue(page: Page): Promise<string[]> {
   return errors;
 }
 
+test("the title stays in view as row two while the issue scrolls", async () => {
+  const plane = await startStubPlane({ workspaces });
+  const long = Array.from(
+    { length: 80 },
+    (_, i) => `Paragraph ${i + 1} of a long description.`,
+  ).join("\n\n");
+  plane.setBoard("ws-cloud-project", {
+    ...board,
+    cards: board.cards.map((entry) =>
+      entry.taskId === "FE-11" ? { ...entry, body: long } : entry,
+    ),
+  });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-issue-sticky-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    await openIssue(page);
+    const title = page.getByLabel("Card title");
+    const header = await page.locator("main header").first().boundingBox();
+    if (!header) throw new Error("no issue header");
+    const below = header.y + header.height;
+
+    await page
+      .getByText("Paragraph 60 of a long description.")
+      .scrollIntoViewIfNeeded();
+    // The page did scroll: its first paragraph is gone above…
+    await expect(
+      page.getByText("Paragraph 1 of a long description.", { exact: true }),
+    ).not.toBeInViewport();
+    // …and the title is still there, stuck right under the header.
+    await expect(title).toBeInViewport();
+    const stuck = (await title.boundingBox())?.y ?? -1;
+    expect(stuck).toBeGreaterThanOrEqual(below - 1);
+    expect(stuck).toBeLessThan(below + 12);
+    // Smaller while it is stuck, over frosted glass rather than a flat fill.
+    const size = () => title.evaluate((el) => getComputedStyle(el).fontSize);
+    await expect.poll(size).toBe("15px");
+    expect(
+      await title.evaluate(
+        (el) => getComputedStyle(el.parentElement as Element).backdropFilter,
+      ),
+    ).toContain("blur");
+    // Back at the top it is the page's title again, full size.
+    await page
+      .getByText("Paragraph 1 of a long description.", { exact: true })
+      .scrollIntoViewIfNeeded();
+    await expect.poll(size).toBe("20px");
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
 test("the issue page carries the card's labels, people, files and sub-issues", async () => {
   const plane = await startStubPlane({ workspaces });
   plane.setBoard("ws-cloud-project", board);

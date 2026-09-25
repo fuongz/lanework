@@ -94,16 +94,21 @@ export function AppSidebar() {
             slug &&
             void navigate({ to: "/w/$slug/issues/new", params: { slug } })
           }
-          className="hover:bg-foreground/[0.06] bg-foreground/[0.035] flex h-[30px] flex-1 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors duration-150 disabled:opacity-50"
+          // ⚠️ A size container, so the ⌘N hint can step aside before the label
+          // has to: at the rail's narrowest there is room for "New issue" or
+          // for the hint, and the words are the one worth keeping.
+          className="hover:bg-foreground/[0.06] bg-foreground/[0.035] @container flex h-[30px] min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors duration-150 disabled:opacity-50"
         >
           <HugeiconsIcon
             icon={PencilEdit02Icon}
-            className="text-muted-foreground size-4"
+            className="text-muted-foreground size-4 shrink-0"
             strokeWidth={1.5}
             aria-hidden="true"
           />
-          <span>New issue</span>
-          <Kbd className="ml-auto">⌘N</Kbd>
+          <span className="min-w-0 truncate">New issue</span>
+          <Kbd className="ml-auto hidden shrink-0 @[8.5rem]:inline-flex">
+            ⌘N
+          </Kbd>
         </button>
         <button
           type="button"
@@ -140,13 +145,13 @@ export function AppSidebar() {
             >
               <HugeiconsIcon
                 icon={ListViewIcon}
-                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4"
+                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
                 strokeWidth={1.5}
                 aria-hidden="true"
               />
-              Issues
+              <span className="min-w-0 truncate">Issues</span>
               {view && (
-                <span className="text-muted-foreground ml-auto text-xs tabular-nums">
+                <span className="text-muted-foreground ml-auto shrink-0 text-xs tabular-nums">
                   {view.total ?? view.cards.length}
                 </span>
               )}
@@ -160,13 +165,13 @@ export function AppSidebar() {
             >
               <HugeiconsIcon
                 icon={GitPullRequestIcon}
-                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4"
+                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
                 strokeWidth={1.5}
                 aria-hidden="true"
               />
-              Pull requests
+              <span className="min-w-0 truncate">Pull requests</span>
               {pulls && (
-                <span className="text-muted-foreground ml-auto text-xs tabular-nums">
+                <span className="text-muted-foreground ml-auto shrink-0 text-xs tabular-nums">
                   {pulls.pulls.length}
                 </span>
               )}
@@ -175,20 +180,23 @@ export function AppSidebar() {
         )}
       </div>
 
-      <div className="border-sidebar-border mt-2 shrink-0 border-t pt-2 pb-2.5">
+      <div className="mt-2 shrink-0 pt-2 pb-2.5">
         <Link to="/settings" className={ROW}>
           <HugeiconsIcon
             icon={Settings01Icon}
-            className="text-muted-foreground size-4"
+            className="text-muted-foreground size-4 shrink-0"
             strokeWidth={1.5}
             aria-hidden="true"
           />
-          Settings
+          <span className="min-w-0 truncate">Settings</span>
           {accountSeed && (
             // ⚠️ Hidden from the accessible name. A mark appended to "Settings"
             // tells a screen-reader user nothing and makes the link impossible
             // to address by the word on it.
-            <AccountOrb seed={accountSeed} className="ml-auto size-5" />
+            <AccountOrb
+              seed={accountSeed}
+              className="ml-auto size-5 shrink-0"
+            />
           )}
         </Link>
       </div>

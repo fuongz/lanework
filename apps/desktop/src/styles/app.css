@@ -319,11 +319,13 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-* {
-  border-color: var(--color-border);
-}
-
 @layer base {
+  /* ⚠️ The default border colour lives HERE, in the base layer, and nowhere
+     else. An unlayered copy of it sat above this block from the scaffold on,
+     and an unlayered rule outranks every layered one: it beat Tailwind's
+     `border-transparent` and every other border-colour utility, so each ghost
+     button and badge wore a grey outline, and a focus ring, an invalid field
+     or a drop target never showed its own colour. */
   * {
     @apply border-border outline-ring/50;
   }
@@ -422,6 +424,37 @@
   }
   .app-sidebar a,
   .app-sidebar button {
+    app-region: no-drag;
+  }
+  /* ⚠️ A hidden rail (FE-20) leaves the window controls, and the sidebar
+     button beside them, drawn over whatever header now starts at the window's
+     edge — so that header keeps its first item clear of both. Headers read it
+     through `max(own padding, var(--titlebar-clear, 0px))`: with the rail
+     shown the clearance is 0 and nothing moves.
+     ⚠️ Worked out from the rail's DRAWN width (`--rail-width`, kept by a
+     ResizeObserver) rather than a hidden/shown flag, so it is right in the
+     very frame the rail goes — a flag set by a re-render lagged that frame
+     and let the header's title flash under the controls.
+     ⚠️ And from the ZOOM: the controls sit at fixed points while the page
+     zooms, so `--titlebar-reach` is set in CSS px by the shell. */
+  html[data-vibrancy="true"] {
+    --titlebar-clear: max(
+      0px,
+      calc(var(--titlebar-reach, 130px) - var(--rail-width, 240px))
+    );
+  }
+  /* The sidebar button (FE-20), beside the window controls — so macOS only.
+     Its display lives HERE, not in a utility: a `grid` class would outrank
+     this `none` and draw it on every platform. */
+  .sidebar-toggle {
+    display: none;
+  }
+  html[data-vibrancy="true"] .sidebar-toggle {
+    display: grid;
+    position: fixed;
+    z-index: 60;
+    left: var(--sidebar-toggle-left, 94px);
+    top: var(--sidebar-toggle-top, 10px);
     app-region: no-drag;
   }
 }

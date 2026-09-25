@@ -205,7 +205,7 @@ export function WorkspacesSection() {
                             </span>
                             <span
                               className="text-muted-foreground truncate text-[13px] leading-relaxed"
-                              title={linked.join(" · ")}
+                              title={linked.join("\n")}
                             >
                               {linked.length === 0
                                 ? "No folder on this machine"

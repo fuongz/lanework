@@ -1,3 +1,5 @@
+import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "#/components/ui/button";
 import { useBoard } from "#/stores/board";
 
@@ -32,12 +34,28 @@ export function LoadMore({
     <Button
       variant="ghost"
       size="sm"
-      className="text-muted-foreground w-full justify-center text-xs"
+      className="text-muted-foreground w-full justify-center gap-1.5 text-xs"
       disabled={loading}
       aria-label={`Load more in ${label}`}
       onClick={() => void loadMore(group)}
     >
-      {loading ? "Loading…" : left ? `Load more · ${left} left` : "Load more"}
+      {loading ? (
+        "Loading…"
+      ) : (
+        <>
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            className="size-3.5"
+            strokeWidth={2}
+            aria-hidden="true"
+          />
+          Load more
+          {/* How many are left, set apart by weight rather than a "·". */}
+          {left > 0 && (
+            <span className="tabular-nums opacity-60">{left} left</span>
+          )}
+        </>
+      )}
     </Button>
   );
 }

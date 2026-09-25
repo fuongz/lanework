@@ -1,5 +1,13 @@
-import { Menu, type MenuItemConstructorOptions } from "electron";
+import { BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
+import { channels, type ViewCommand } from "../../shared/desktop";
 import { sendTerminalCommand } from "./terminal";
+
+/** A View command for the window in front — or the only one, when none is. */
+function sendViewCommand(command: ViewCommand): void {
+  const window =
+    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  window?.webContents.send(channels.viewCommand, command);
+}
 
 /**
  * The application menu: Electron's default, with the terminal in View.
@@ -24,6 +32,10 @@ import { sendTerminalCommand } from "./terminal";
  * a tab — in a terminal, in a browser — took the whole app off the screen.
  * Close Window stays in File, without a key; the window's own close button
  * is untouched.
+ *
+ * ⚠️ Toggle Sidebar is ⌘B (FE-20/D5, as VS Code has it). Nothing in the app
+ * claims it: the one editor, CodeMirror, binds no Mod-B, and a key the page
+ * does handle never reaches the menu anyway.
  */
 export function installMenu(): void {
   const mac = process.platform === "darwin";
@@ -65,6 +77,13 @@ export function installMenu(): void {
     {
       label: "View",
       submenu: [
+        {
+          id: "sidebar-toggle",
+          label: "Toggle Sidebar",
+          accelerator: "CommandOrControl+B",
+          click: () => sendViewCommand("toggle-sidebar"),
+        },
+        { type: "separator" },
         {
           id: "terminal-toggle",
           label: "Toggle Terminal",
