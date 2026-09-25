@@ -38,7 +38,10 @@ import {
   PropertiesSkeleton,
 } from "#/components/shared/board/skeletons";
 import { ErrorState } from "#/components/shared/common/error-state";
-import { MarkdownBody } from "#/components/shared/common/markdown-body";
+import {
+  InlineMarkdown,
+  MarkdownBody,
+} from "#/components/shared/common/markdown-body";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1046,10 +1049,18 @@ function RowLabel({
       <span className="text-muted-foreground mr-1.5 font-mono text-xs">
         {item.key}
       </span>
-      {item.text}
+      {/* ⚠️ Rendered, not printed: cards are written in markdown, and a
+          decision that reads `**Tool \`create_board\`**` as literal asterisks
+          and backticks is noise around the one sentence being approved. */}
+      <InlineMarkdown source={item.text} />
       {item.note && (
         <span className="text-muted-foreground mt-0.5 block text-xs">
-          {item.note}
+          {item.note.split("\n").map((line, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a note's lines are positional and never reorder.
+            <span key={index} className="block">
+              <InlineMarkdown source={line} />
+            </span>
+          ))}
         </span>
       )}
     </label>

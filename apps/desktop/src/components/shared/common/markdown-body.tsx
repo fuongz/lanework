@@ -34,6 +34,18 @@ function Spans({ spans }: { spans: Inline[] }) {
   );
 }
 
+/**
+ * One line of markdown's INLINE marks — `**bold**`, `*em*`, `` `code` `` — with
+ * no block structure, for short text that sits inside something else: a
+ * checklist item, a note under it.
+ *
+ * ⚠️ Built from the same parser as `MarkdownBody`, so a decision written
+ * `**D1.** use \`foo\`` reads the same in the body and in the checklist.
+ */
+export function InlineMarkdown({ source }: { source: string }) {
+  return <Spans spans={inlines(source)} />;
+}
+
 /** A card's body, built as elements — never as HTML. See `lib/markdown`. */
 export function MarkdownBody({ source }: { source: string }) {
   if (!source.trim())
