@@ -3,6 +3,10 @@ import { createRequire } from "node:module";
 import { context } from "esbuild";
 import { createServer } from "vite";
 import { brandDevBundle } from "./brand-dev-bundle.mjs";
+import {
+  electronBuildOptions,
+  stageNativeModules,
+} from "./electron-bundle.mjs";
 
 const require = createRequire(import.meta.url);
 const electron = brandDevBundle(require("electron"));
@@ -11,19 +15,10 @@ await server.listen();
 let child;
 let shuttingDown = false;
 let restarting = false;
+// node-pty is copied once; it only changes with the lockfile, not with a save.
+await stageNativeModules();
 const ctx = await context({
-  entryPoints: {
-    "main/index": "electron/main/index.ts",
-    "preload/index": "electron/preload/index.ts",
-  },
-  bundle: true,
-  platform: "node",
-  format: "cjs",
-  target: "node22",
-  external: ["electron"],
-  outdir: "dist/electron",
-  outExtension: { ".js": ".cjs" },
-  sourcemap: true,
+  ...electronBuildOptions,
   plugins: [
     {
       name: "restart-electron",

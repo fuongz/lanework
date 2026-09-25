@@ -2,10 +2,12 @@ import { join } from "node:path";
 import { app, BrowserWindow, nativeTheme, protocol, session } from "electron";
 import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
 import { registerAuth } from "./auth";
-import { broadcast, handle } from "./ipc";
 import { registerGit } from "./git";
+import { broadcast, handle } from "./ipc";
+import { installMenu } from "./menu";
 import { registerAppProtocol } from "./protocol";
 import { appOrigin, isTrustedUrl } from "./security";
+import { registerTerminal } from "./terminal";
 import { registerWorkspaces } from "./workspaces";
 
 app.setName("Lanework");
@@ -123,6 +125,8 @@ app
     registerAuth(devUrl);
     registerWorkspaces(devUrl);
     registerGit(devUrl);
+    registerTerminal(devUrl);
+    installMenu();
     createWindow();
     app.on("activate", () => {
       if (!BrowserWindow.getAllWindows().length) createWindow();

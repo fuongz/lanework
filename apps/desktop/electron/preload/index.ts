@@ -2,6 +2,14 @@ import { contextBridge, ipcRenderer } from "electron";
 import { authChannels, type DesktopAuthApi } from "../../shared/auth";
 import { channels, type DesktopApi } from "../../shared/desktop";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
+import {
+  type DesktopTerminalApi,
+  type TerminalClientMessage,
+  type TerminalCommand,
+  type TerminalHostMessage,
+  type TerminalViewHandlers,
+  terminalChannels,
+} from "../../shared/terminal";
 import { workspaceChannels } from "../../shared/workspaces";
 
 /** Subscribe to a main→renderer channel, returning an unsubscribe function. */
@@ -73,6 +81,108 @@ const git: DesktopGitApi = {
   comment: (slug, number, body) =>
     ipcRenderer.invoke(gitChannels.comment, slug, number, body),
 };
+
+/**
+ * The terminal surface (FE-19).
+ *
+ * ⚠️ The port to the pty host lives HERE and never crosses into the page. The
+ * page gets named operations — attach this session, type this, resize to that
+ * — and callbacks; it cannot post an arbitrary message to the host, and it
+ * cannot reach another channel through the port.
+ *
+ * ⚠️ Connected on first use, and again after the host goes away: main says so
+ * on `hostExited`, and the next call asks for a fresh port.
+ */
+function createTerminal(): DesktopTerminalApi {
+  let port: MessagePort | null = null;
+  let connecting: Promise<MessagePort> | null = null;
+  const views = new Map<string, TerminalViewHandlers>();
+  const changeListeners = new Set<(workspace: string) => void>();
+
+  const notify = (workspace: string) => {
+    for (const listener of changeListeners) listener(workspace);
+  };
+
+  const route = (event: MessageEvent) => {
+    const message = event.data as TerminalHostMessage | null;
+    if (!message || typeof message !== "object") return;
+    if (message.t === "changed") return notify(message.workspace);
+    const view = views.get(message.id);
+    if (!view) return;
+    if (message.t === "snapshot") view.onSnapshot(message.data);
+    else if (message.t === "data") view.onData(message.data);
+    else if (message.t === "exit") view.onExit(message.code, message.signal);
+  };
+
+  const connect = (): Promise<MessagePort> => {
+    if (port) return Promise.resolve(port);
+    if (connecting) return connecting;
+    connecting = new Promise<MessagePort>((resolve, reject) => {
+      const onPort = (event: Electron.IpcRendererEvent) => {
+        ipcRenderer.off(terminalChannels.port, onPort);
+        const [received] = event.ports;
+        if (!received) return reject(new Error("No terminal port"));
+        received.onmessage = route;
+        received.start();
+        port = received;
+        resolve(received);
+      };
+      ipcRenderer.on(terminalChannels.port, onPort);
+      ipcRenderer.invoke(terminalChannels.connect).catch((error: unknown) => {
+        ipcRenderer.off(terminalChannels.port, onPort);
+        reject(error);
+      });
+    }).finally(() => {
+      connecting = null;
+    });
+    return connecting;
+  };
+
+  ipcRenderer.on(terminalChannels.hostExited, () => {
+    port?.close();
+    port = null;
+    // The sessions went with the host; the panel re-lists and drops them.
+    views.clear();
+    notify("*");
+  });
+
+  // ⚠️ Every message waits on the same connection, so they leave in the order
+  // they were posted even while the port is still being set up.
+  const post = (message: TerminalClientMessage) => {
+    void connect()
+      .then((ready) => ready.postMessage(message))
+      .catch(() => undefined);
+  };
+
+  return {
+    list: (workspace) => ipcRenderer.invoke(terminalChannels.list, workspace),
+    spawn: (workspace, cols, rows, kind = "shell") =>
+      ipcRenderer.invoke(terminalChannels.spawn, workspace, cols, rows, kind),
+    agents: () => ipcRenderer.invoke(terminalChannels.agents),
+    kill: (id) => ipcRenderer.invoke(terminalChannels.kill, id),
+    reorder: (workspace, ids) =>
+      ipcRenderer.invoke(terminalChannels.reorder, workspace, ids),
+    attach: (id, cols, rows, handlers) => {
+      views.set(id, handlers);
+      post({ t: "attach", id, cols, rows });
+      return () => {
+        if (views.get(id) !== handlers) return;
+        views.delete(id);
+        post({ t: "detach", id });
+      };
+    },
+    input: (id, data) => post({ t: "input", id, data }),
+    resize: (id, cols, rows) => post({ t: "resize", id, cols, rows }),
+    onChange: (listener) => {
+      changeListeners.add(listener);
+      return () => {
+        changeListeners.delete(listener);
+      };
+    },
+    onCommand: (listener) =>
+      subscribe<TerminalCommand>(terminalChannels.command, listener),
+  };
+}
 
 const desktop: DesktopApi = {
   getAppInfo: () => ipcRenderer.invoke(channels.appInfo),
@@ -247,5 +357,6 @@ const desktop: DesktopApi = {
     },
   },
   git,
+  terminal: createTerminal(),
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

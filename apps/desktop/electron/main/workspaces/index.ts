@@ -142,6 +142,32 @@ let lastList: { session: string; workspaces: Workspace[] } | null = null;
 const sessionKey = (record: MachineRecord) =>
   [record.apiUrl, record.machineId, record.userId, record.secret].join("\n");
 
+/**
+ * The folder a terminal for `key` opens in (FE-19/D7): the workspace's PRIMARY
+ * folder on this machine, or null — the home folder — when it has none here or
+ * it has moved.
+ *
+ * ⚠️ Resolved HERE, from the links this process wrote down, never from the
+ * renderer. The terminal panel names a workspace and nothing else, so a
+ * renderer cannot open a shell in a folder of its choosing.
+ *
+ * ⚠️ `key` is the cloud id or, for a service that sends none, the slug — the
+ * same either-or `load(id)` accepts — while the folder link is keyed by slug.
+ */
+export async function terminalFolder(key: string): Promise<string | null> {
+  const record = await authorizedRecord();
+  const known =
+    lastList?.session === sessionKey(record)
+      ? lastList.workspaces
+      : await fetchWorkspaces(record);
+  const workspace = known.find(
+    (entry) => entry.id === key || entry.slug === key,
+  );
+  if (!workspace) throw new Error("That project is not on this account.");
+  const [primary] = (await readFolders(record))[workspace.slug] ?? [];
+  return primary && (await folderExists(primary)) ? primary : null;
+}
+
 async function load(id?: string): Promise<WorkspaceSnapshot> {
   const record = await authorizedRecord();
   const session = sessionKey(record);

@@ -7,6 +7,14 @@ files:
   - dist/electron/**/*
   - dist/client/**/*
   - package.json
+# FE-19: node-pty's `.node` binary cannot be loaded from inside an asar, and
+# its `spawn-helper` cannot be executed from one. Both are staged into
+# dist/electron/node_modules by `scripts/electron-bundle.mjs`.
+asarUnpack:
+  - "**/node_modules/@lydell/**"
+# The pty binary is a prebuilt N-API module: it runs under Electron's Node as
+# is, and there is nothing here for electron-rebuild to compile.
+npmRebuild: false
 mac:
   icon: build/icon.icns
   identity: null

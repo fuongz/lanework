@@ -1,0 +1,92 @@
+// Which agent CLIs this machine has (FE-19): what the terminal's + menu offers
+// beside a plain shell. Runs in the pty host, next to the shells it predicts.
+import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { TERMINAL_AGENTS, type TerminalAgent } from "../../../shared/terminal";
+import { defaultShell, type ShellChoice, shellEnv } from "./sessions";
+
+export interface AgentProbeOptions {
+  /** Pin the shell (tests); otherwise `defaultShell()`. */
+  shell?: ShellChoice;
+  env?: NodeJS.ProcessEnv;
+  /** How long a shell that never answers is waited for. */
+  timeoutMs?: number;
+  /** How long an answer is reused before the shell is asked again. */
+  ttlMs?: number;
+}
+
+/** Printed by the probe for each CLI it finds; nothing else counts. */
+const found = (agent: TerminalAgent) => `__lanework_found_${agent}__`;
+
+/**
+ * Ask the user's own shell which agent CLIs it can run.
+ *
+ * ⚠️ The SHELL is asked, not this process's PATH. An app opened from the Dock
+ * has launchd's four-directory PATH, while the tab runs a login shell with
+ * the user's whole profile — and Claude's own installer puts `claude` there
+ * as an ALIAS in `.zshrc`, which no PATH lookup finds. So it is the tab's
+ * shell, login AND interactive, running `command -v`: whatever it finds, a
+ * tab can run.
+ *
+ * ⚠️ A marker per CLI rather than the exit status or "any output": the
+ * profile runs first, and a profile is free to print — or to fail on — lines
+ * of its own. Its stdin is /dev/null, so a prompt in it reads nothing and
+ * moves on instead of holding the probe until it times out.
+ *
+ * ⚠️ Cached, and asked again only after `ttlMs`: an interactive profile can
+ * take a second to load, and the menu is opened far more often than a CLI is
+ * installed. A probe already running is shared, not started twice.
+ */
+export function createAgentProbe(options: AgentProbeOptions = {}) {
+  const ttlMs = options.ttlMs ?? 30_000;
+  let cached: { at: number; agents: TerminalAgent[] } | null = null;
+  let running: Promise<TerminalAgent[]> | null = null;
+
+  function probe(): Promise<TerminalAgent[]> {
+    // Out of scope for now (FE-19): a Windows shell has no `command -v`.
+    if (process.platform === "win32") return Promise.resolve([]);
+    const env = options.env ?? process.env;
+    const shell = options.shell ?? defaultShell(env);
+    const script = TERMINAL_AGENTS.map(
+      (agent) =>
+        `command -v ${agent} >/dev/null 2>&1 && printf '%s\\n' '${found(agent)}'`,
+    ).join("; ");
+    return new Promise((resolve) => {
+      let out = "";
+      const settle = () => {
+        clearTimeout(timer);
+        resolve(TERMINAL_AGENTS.filter((agent) => out.includes(found(agent))));
+      };
+      const child = spawn(shell.file, [...shell.args, "-i", "-c", script], {
+        cwd: homedir(),
+        env: shellEnv(env),
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const timer = setTimeout(
+        () => child.kill("SIGKILL"),
+        options.timeoutMs ?? 8_000,
+      );
+      child.stdout?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => {
+        out += chunk;
+      });
+      // A shell that could not start offers nothing but the plain terminal.
+      child.once("error", settle);
+      child.once("close", settle);
+    });
+  }
+
+  return function agents(): Promise<TerminalAgent[]> {
+    if (cached && Date.now() - cached.at < ttlMs)
+      return Promise.resolve(cached.agents);
+    running ??= probe()
+      .then((agents) => {
+        cached = { at: Date.now(), agents };
+        return agents;
+      })
+      .finally(() => {
+        running = null;
+      });
+    return running;
+  };
+}

@@ -98,6 +98,7 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       "auth",
       "workspaces",
       "git",
+      "terminal",
     ]);
     expect(
       await page.evaluate(
