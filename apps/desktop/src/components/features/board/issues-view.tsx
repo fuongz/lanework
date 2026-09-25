@@ -16,9 +16,9 @@ import { ViewToolbar } from "./view-toolbar";
  *
  * ⚠️ The toolbar lives HERE, above both, and only the body swaps. When each
  * view drew its own, switching remounted the bar: the List/Board pill had no
- * element to slide from, a half-typed "Add a card…" was thrown away, and the
- * filter chips blinked. One bar that stays put is the thing being switched
- * FROM, which is what makes the switch read as a change of view.
+ * element to slide from, and the filter chips blinked. One bar that stays put
+ * is the thing being switched FROM, which is what makes the switch read as a
+ * change of view.
  */
 export function IssuesView() {
   const { slug } = useParams({ from: "/_app/w/$slug/issues/" });

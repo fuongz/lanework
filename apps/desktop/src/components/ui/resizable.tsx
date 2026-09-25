@@ -64,7 +64,7 @@ function ResizableHandle({ className, ...props }: SeparatorProps) {
     <Separator
       data-slot="resizable-handle"
       className={cn(
-        "bg-sidebar-border relative shrink-0 transition-colors",
+        "bg-panel-rule relative shrink-0 transition-colors",
         "hover:bg-accent-brand/60 active:bg-accent-brand",
         "focus-visible:bg-accent-brand focus-visible:outline-none",
         // The separator in a horizontal group is a vertical rule, and the

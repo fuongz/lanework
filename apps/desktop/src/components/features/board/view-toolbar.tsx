@@ -1,5 +1,4 @@
 import {
-  Add01Icon,
   CloudSavingDone01Icon,
   GridViewIcon,
   Menu01Icon,
@@ -7,9 +6,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
-import { useState } from "react";
 import { Button } from "#/components/ui/button";
-import { Input } from "#/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -29,17 +26,6 @@ const when = (iso: string): string => {
     ? "an unknown time"
     : at.toLocaleTimeString();
 };
-
-/**
- * An input with no chrome of its own, and none on focus either.
- *
- * ⚠️ The ring is removed, NOT the focus indicator. A field that draws a box
- * around itself the moment you click it is exactly the chrome a borderless
- * field exists to avoid — but focus still has to be visible, so a faint ground
- * takes over the job. Dropping both would leave a keyboard user with nothing.
- */
-export const BORDERLESS_INPUT =
-  "h-7 rounded-md border-0 bg-transparent px-1.5 text-[13px] shadow-none transition-colors focus-visible:border-0 focus-visible:bg-foreground/[0.04] focus-visible:ring-0 md:text-[13px] dark:bg-transparent dark:focus-visible:bg-foreground/[0.06]";
 
 const GROUP_LABEL: Record<GroupBy, string> = {
   status: "Status",
@@ -172,10 +158,7 @@ export function ViewToolbar({
 }) {
   const view = useBoard((state) => state.view);
   const loading = useBoard((state) => state.loading);
-  const busy = useBoard((state) => state.busy);
   const reload = useBoard((state) => state.reload);
-  const createCard = useBoard((state) => state.createCard);
-  const [draft, setDraft] = useState("");
 
   return (
     <div className="border-border flex shrink-0 flex-col gap-2 border-b px-6 pt-4 pb-3">
@@ -242,39 +225,6 @@ export function ViewToolbar({
           />
         </Button>
       </div>
-
-      <form
-        className="flex items-center gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const title = draft.trim();
-          if (!title) return;
-          setDraft("");
-          // ⚠️ Title only, deliberately. This is the one-line quick-add; the
-          // fields a card needs to be findable — category above all — live on
-          // the New issue page, which the ⊕ button beside this field opens.
-          void createCard({ title });
-        }}
-      >
-        <HugeiconsIcon
-          icon={Add01Icon}
-          className="text-muted-foreground size-4 shrink-0"
-          strokeWidth={1.5}
-          aria-hidden="true"
-        />
-        <Input
-          aria-label="New card title"
-          placeholder="Add a card…"
-          value={draft}
-          // ⚠️ 200, the service's own `MAX_TITLE`. This said 500, so a longer
-          // title typed here was refused at the far end of a round trip by a
-          // guard that had already capped it at 200 on the way out.
-          maxLength={200}
-          disabled={view?.stale || busy === "create"}
-          className={BORDERLESS_INPUT}
-          onChange={(event) => setDraft(event.target.value)}
-        />
-      </form>
     </div>
   );
 }
