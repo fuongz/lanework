@@ -17,6 +17,7 @@
       // a snapshot changes files whose whole value is that they have not
       // changed — see packages/db/MIGRATIONS.md.
       "!!packages/db/drizzle",
+      "!!apps/api/worker-configuration.d.ts",
       "!!apps/mcp/worker-configuration.d.ts",
       "!!apps/landing/worker-configuration.d.ts"
     ]
