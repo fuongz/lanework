@@ -315,3 +315,37 @@ test("at its narrowest the rail keeps every label on one line, and a ghost butto
     await removeProfile(profile);
   }
 });
+
+test("one hover background slides from row to row, and fades once the pointer leaves the rail", async () => {
+  const { plane, profile, boot } = await seed();
+  const app = await boot();
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const hover = page.getByTestId("rail-hover");
+    const rail = page.getByRole("navigation", { name: "Repository" });
+    const top = async (locator: ReturnType<Page["locator"]>) =>
+      Math.round((await locator.boundingBox())?.y ?? -1);
+    const opacity = () =>
+      hover.evaluate((node) => Number(getComputedStyle(node).opacity));
+
+    const changes = rail.getByRole("link", { name: /^Changes/ });
+    const history = rail.getByRole("link", { name: "History" });
+    await changes.hover();
+    await expect.poll(() => top(hover)).toBe(await top(changes));
+    await expect.poll(opacity).toBe(1);
+
+    // To the next row: the SAME element goes there, it is not a second one.
+    await history.hover();
+    await expect.poll(() => top(hover)).toBe(await top(history));
+    await expect(hover).toHaveCount(1);
+
+    // Out of the rail: gone, not stuck on the last row.
+    await page.mouse.move(900, 400);
+    await expect.poll(opacity).toBe(0);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});

@@ -23,10 +23,16 @@ import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
 import { BranchSwitcher } from "./branch-switcher";
 import { ProjectSwitcher } from "./project-switcher";
+import { RAIL_ROW, RailHover } from "./rail-hover";
 
-/** One row of the rail. The hover/active language is `settings-nav`'s, on purpose. */
-const ROW =
-  "group flex h-[30px] items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out [&:not([aria-current])]:hover:bg-foreground/[0.04] active:scale-[0.98]";
+/**
+ * One row of the rail's scroll area. The active language is `settings-nav`'s,
+ * on purpose; the HOVER is `RailHover`'s one sliding background, not the row's.
+ */
+const ROW = `${RAIL_ROW} group relative flex h-[30px] items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out active:scale-[0.98]`;
+
+/** A row outside the scroll area — Settings — which lights on its own. */
+const LONE_ROW = `${ROW} [&:not([aria-current])]:hover:bg-foreground/[0.04]`;
 
 const ACTIVE = {
   className: "bg-foreground/[0.08]",
@@ -187,7 +193,7 @@ export function AppSidebar() {
           the 10px bar (app.css) then always takes exactly the padding it
           replaces, and the rows line up with New issue and Settings whether
           the list overflows or not. */}
-      <div className="-mr-2.5 min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+      <RailHover className="-mr-2.5 min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
         {slug && (
           <nav aria-label="Project" className="flex flex-col gap-0.5">
             <SectionLabel>Project</SectionLabel>
@@ -307,10 +313,10 @@ export function AppSidebar() {
             active={ACTIVE.className}
           />
         )}
-      </div>
+      </RailHover>
 
       <div className="mt-2 shrink-0 pt-2 pb-2.5">
-        <Link to="/settings" className={ROW}>
+        <Link to="/settings" className={LONE_ROW}>
           <HugeiconsIcon
             icon={Settings01Icon}
             className="text-muted-foreground size-4 shrink-0"
