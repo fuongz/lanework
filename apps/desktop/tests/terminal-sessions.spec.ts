@@ -372,3 +372,40 @@ test("closing a terminal stops its shell and forgets it", async () => {
     sessions.killAll();
   }
 });
+
+test("a late viewer gets the program's SGR mouse encoding back, or its wheel reaches nobody", async () => {
+  const sessions = createSessions({ shell: SH });
+  try {
+    const session = sessions.spawn({
+      workspace: "ws",
+      cwd: await folder(),
+      cols: 80,
+      rows: 24,
+    });
+    const first = viewer();
+    sessions.attach(first.sub, session.id, 80, 24);
+    // What a full-screen TUI asks for: drag tracking, SGR encoding.
+    sessions.input(
+      session.id,
+      "printf '\\033[?1002h\\033[?1006h'; echo mouse-$((6*7))\n",
+    );
+    await expect.poll(first.text).toContain("mouse-42");
+    sessions.detach(first.sub, session.id);
+
+    const late = viewer();
+    sessions.attach(late.sub, session.id, 80, 24);
+    await expect.poll(() => late.messages[0]?.t).toBe("snapshot");
+    expect(late.text()).toContain("\x1b[?1002h");
+    expect(late.text()).toContain("\x1b[?1006h");
+
+    // Turned off again: a snapshot no longer asks for it.
+    sessions.input(session.id, "printf '\\033[?1006l'; echo off-$((6*7))\n");
+    await expect.poll(late.text).toContain("off-42");
+    const after = viewer();
+    sessions.attach(after.sub, session.id, 80, 24);
+    await expect.poll(() => after.messages[0]?.t).toBe("snapshot");
+    expect(after.text()).not.toContain("\x1b[?1006h");
+  } finally {
+    sessions.killAll();
+  }
+});

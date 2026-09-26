@@ -119,6 +119,41 @@ interface Viewer {
   pending: string[] | null;
 }
 
+/** The mouse encodings xterm speaks besides its default one. */
+const MOUSE_ENCODINGS = [1006, 1016];
+
+/**
+ * Follow which mouse ENCODING the program in `mirror` asked for, and answer
+ * the sequence that asks for it again.
+ *
+ * ⚠️ The serialize addon restores mouse TRACKING (`?1000h`, `?1002h`) but not
+ * the encoding (`?1006h`, SGR). A view drawn from a snapshot then reports the
+ * wheel in the default encoding, which Claude's full-screen UI does not read:
+ * typing still works, scrolling is dead. So it is followed here and appended
+ * to every snapshot.
+ */
+function watchMouseEncoding(mirror: MirrorTerminal): () => string {
+  let encoding = 0;
+  const follow = (on: boolean) => (params: (number | number[])[]) => {
+    for (const param of params) {
+      const mode = typeof param === "number" ? param : param[0];
+      if (!MOUSE_ENCODINGS.includes(mode)) continue;
+      if (on) encoding = mode;
+      else if (encoding === mode) encoding = 0;
+    }
+    // Not handled: xterm's own handler still applies the mode.
+    return false;
+  };
+  mirror.parser.registerCsiHandler({ prefix: "?", final: "h" }, follow(true));
+  mirror.parser.registerCsiHandler({ prefix: "?", final: "l" }, follow(false));
+  // A full reset (RIS) drops it too.
+  mirror.parser.registerEscHandler({ final: "c" }, () => {
+    encoding = 0;
+    return false;
+  });
+  return () => (encoding ? `\x1b[?${encoding}h` : "");
+}
+
 interface Session {
   info: TerminalSession;
   /** Order of creation, for a stable tab order within one millisecond. */
@@ -126,6 +161,8 @@ interface Session {
   pty: IPty | null;
   mirror: MirrorTerminal;
   serializer: Serializer;
+  /** The mouse-encoding mode a snapshot must set again; see `watchMouseEncoding`. */
+  mouseEncoding: () => string;
   viewers: Map<Subscriber, Viewer>;
   /** Output read since the last flush, not yet sent to anybody. */
   outbox: string;
@@ -328,6 +365,7 @@ export function createSessions(options: SessionsOptions = {}) {
       pty,
       mirror,
       serializer,
+      mouseEncoding: watchMouseEncoding(mirror),
       viewers: new Map(),
       outbox: "",
       flushScheduled: false,
@@ -435,7 +473,9 @@ export function createSessions(options: SessionsOptions = {}) {
       if (session.viewers.get(sub) !== viewer) return;
       let data = "";
       try {
-        data = session.serializer.serialize({ scrollback });
+        data =
+          session.serializer.serialize({ scrollback }) +
+          session.mouseEncoding();
       } catch {
         data = "";
       }
