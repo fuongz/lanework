@@ -10,6 +10,7 @@
 import { UserIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { BoardMember } from "#/../shared/workspaces";
+import { UserAvatar } from "#/components/shared/common/user-avatar";
 import { cn } from "#/lib/utils";
 
 export const memberOf = (
@@ -34,21 +35,10 @@ export function personName(
   return memberOf(members, userId)?.name ?? fallback ?? userId ?? "Someone";
 }
 
-/** Two letters from a name, for an avatar with no image behind it. */
-function initials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return "?";
-  const letters =
-    words.length > 1
-      ? `${words[0][0]}${words[words.length - 1][0]}`
-      : words[0].slice(0, 2);
-  return letters.toUpperCase();
-}
-
 const SIZE = {
-  sm: "size-4 text-[8px]",
-  md: "size-5 text-[9px]",
-  lg: "size-6 text-[10px]",
+  sm: "size-4",
+  md: "size-5",
+  lg: "size-6",
 } as const;
 
 /**
@@ -57,6 +47,9 @@ const SIZE = {
  * ⚠️ `title` rather than `alt` text alone, because these are drawn in rows where
  * the name is not always beside them — a stack of subscribers, an assignee
  * column — and hovering is the only way to read who they are.
+ *
+ * ⚠️ A picture that fails to load — or was never set — becomes the person's
+ * orb (see `UserAvatar`), seeded by their user id so it matches everywhere.
  *
  * ⚠️ A missing person renders an outline, never a blank gap. "Unassigned" is a
  * state worth showing; an empty space reads as a rendering bug.
@@ -81,39 +74,20 @@ export function Avatar({
         aria-hidden="true"
         className={cn(
           "text-muted-foreground shrink-0 rounded-full",
-          SIZE[size].split(" ")[0],
+          SIZE[size],
           className,
         )}
         strokeWidth={1.8}
       />
     );
   }
-  if (member?.image) {
-    return (
-      <img
-        src={member.image}
-        alt=""
-        title={label}
-        className={cn(
-          "shrink-0 rounded-full object-cover",
-          SIZE[size].split(" ")[0],
-          className,
-        )}
-      />
-    );
-  }
   return (
-    <span
+    <UserAvatar
+      src={member?.image}
+      seed={member?.userId ?? label}
       title={label}
-      aria-hidden="true"
-      className={cn(
-        "bg-foreground/[0.08] text-muted-foreground flex shrink-0 items-center justify-center rounded-full font-medium",
-        SIZE[size],
-        className,
-      )}
-    >
-      {initials(label)}
-    </span>
+      className={cn(SIZE[size], className)}
+    />
   );
 }
 

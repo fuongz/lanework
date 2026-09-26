@@ -17,6 +17,7 @@ import {
 } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
+import { UserAvatar } from "#/components/shared/common/user-avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -121,13 +122,11 @@ function Row({
         <div className="text-muted-foreground flex items-center gap-1.5 pl-5.5 text-[11px]">
           {pull.author && (
             <>
-              {pull.author.avatarUrl ? (
-                <img
-                  src={pull.author.avatarUrl}
-                  alt=""
-                  className="size-3.5 rounded-full"
-                />
-              ) : null}
+              <UserAvatar
+                src={pull.author.avatarUrl}
+                seed={pull.author.login}
+                className="size-3.5"
+              />
               <span className="max-w-24 truncate">{pull.author.login}</span>
             </>
           )}
