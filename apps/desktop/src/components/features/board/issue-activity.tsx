@@ -12,7 +12,7 @@ import {
   PencilEdit02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   BoardActivity,
   BoardCard,
@@ -492,6 +492,10 @@ function Composer({ card }: { card: BoardCard }) {
   );
 }
 
+/** Entries shown when a card opens, and how many each "Show more" adds. */
+const RECENT = 3;
+const MORE = 10;
+
 export function IssueActivity({ card }: { card: BoardCard }) {
   const view = useBoard((state) => state.view);
   const activity = useBoard((state) => state.activity);
@@ -513,6 +517,32 @@ export function IssueActivity({ card }: { card: BoardCard }) {
   // previous card's history is not drawn under a new one while its read is in
   // flight.
   const events = activity?.cardId === card.id ? activity.events : [];
+  // How many of the newest entries are drawn. Reset per card for the same
+  // reason the read is: the page outlives the card under it.
+  const [shown, setShown] = useState(RECENT);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on a new card
+  useEffect(() => setShown(RECENT), [card.id]);
+  // ⚠️ The feed is OLDEST first and its cursor pages FORWARD in time, so the
+  // newest entries are on the last page. Every page is read before slicing —
+  // three rows off the end of page one would be three rows from the middle.
+  // A failed page leaves the cursor where it was; remembering which one was
+  // asked for keeps that from turning into a request loop.
+  const tried = useRef<string | null>(null);
+  const loaded = activity?.cardId === card.id;
+  useEffect(() => {
+    if (!loaded || !cursor || loading || tried.current === cursor) return;
+    tried.current = cursor;
+    void loadActivity(card.id, true);
+  }, [loaded, cursor, loading, card.id, loadActivity]);
+  // Counted in rows a reader sees: a `commented` audit row or an unknown verb
+  // draws nothing, and slicing before dropping them would show fewer than three.
+  const rows = events.filter(
+    (event) =>
+      event.kind === "comment" ||
+      sentence(event, columns, labels, members) !== null,
+  );
+  const visible = rows.slice(-shown);
+  const hidden = rows.length - visible.length;
   const subscribers = card.subscribers ?? [];
 
   return (
@@ -554,20 +584,19 @@ export function IssueActivity({ card }: { card: BoardCard }) {
         </div>
       </div>
 
-      {cursor && (
+      {hidden > 0 && (
         <Button
           variant="ghost"
           size="sm"
           className="text-muted-foreground self-start text-xs"
-          disabled={loading}
-          onClick={() => void loadActivity(card.id, true)}
+          onClick={() => setShown((n) => n + MORE)}
         >
-          {loading ? "Loading…" : "Show earlier activity"}
+          Show {Math.min(hidden, MORE)} more
         </Button>
       )}
 
       <ul className="flex flex-col gap-2.5">
-        {events.map((event) =>
+        {visible.map((event) =>
           event.kind === "comment" ? (
             <CommentEntry
               key={event.id}
