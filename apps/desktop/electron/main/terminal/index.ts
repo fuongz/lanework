@@ -23,8 +23,17 @@ import {
   terminalChannels,
 } from "../../../shared/terminal";
 import { assertTrustedSender, broadcast, handle } from "../ipc";
+import { appHomeDir } from "../paths";
 import { terminalFolder } from "../workspaces";
-import { listAgentSessions } from "./agent-sessions";
+import { watchAgentActivity } from "./agent-activity";
+import {
+  applyAgentMarks,
+  cleanAgentName,
+  keptKeys,
+  readAgentMarks,
+  updateAgentMark,
+} from "./agent-marks";
+import { agentKey, listAgentSessions } from "./agent-sessions";
 
 let host: UtilityProcess | null = null;
 let nextRequest = 1;
@@ -116,10 +125,82 @@ function agentHome(): string {
   return (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
 }
 
-/** The conversations `workspace`'s folder has; none without a folder here. */
+/** Lanework's names and pins for agent conversations (FE-24, FE-25). */
+function agentMarksFile(): string {
+  return join(appHomeDir(), "agent-sessions.json");
+}
+
+/**
+ * One transcript watcher per workspace that has been listed, restarted when
+ * its folder changes (FE-25/D3).
+ *
+ * ⚠️ Started by the LISTING, not by a subscribe call: the rail lists a
+ * project as soon as it shows it, which is exactly when its rows need to be
+ * able to spin. Capped, because every project somebody has ever looked at in
+ * this run would otherwise keep a watcher.
+ */
+const watching = new Map<string, { folder: string; stop: () => void }>();
+const WATCH_LIMIT = 8;
+
+function watchWorkspace(workspace: string, folder: string): void {
+  const current = watching.get(workspace);
+  if (current?.folder === folder) return;
+  current?.stop();
+  watching.delete(workspace);
+  if (watching.size >= WATCH_LIMIT) {
+    const [oldest] = watching.keys();
+    if (oldest !== undefined) {
+      watching.get(oldest)?.stop();
+      watching.delete(oldest);
+    }
+  }
+  const stop = watchAgentActivity(agentHome(), folder, (agent, id, working) =>
+    broadcast(terminalChannels.agentActivity, {
+      workspace,
+      agent,
+      id,
+      working,
+      at: Date.now(),
+    }),
+  );
+  watching.set(workspace, { folder, stop });
+}
+
+/**
+ * The conversations `workspace`'s folder has, with Lanework's names and pins
+ * laid over them; none without a folder here.
+ */
 async function agentSessionsOf(workspace: string): Promise<AgentSession[]> {
   const folder = await terminalFolder(workspace);
-  return folder ? listAgentSessions(agentHome(), folder) : [];
+  if (!folder) return [];
+  watchWorkspace(workspace, folder);
+  const marks = await readAgentMarks(agentMarksFile());
+  const listed = await listAgentSessions(agentHome(), folder, keptKeys(marks));
+  return applyAgentMarks(listed, marks);
+}
+
+/**
+ * The conversation a rename or pin names, checked against the listing.
+ *
+ * ⚠️ The same rule a resume follows: an id this workspace's own listing does
+ * not have is refused, so nothing can be written about a conversation the
+ * rail was never shown.
+ */
+async function markable(args: unknown[]): Promise<{
+  workspace: string;
+  key: string;
+}> {
+  const workspace = key(args[0], "workspace");
+  const agent = args[1];
+  const id = args[2];
+  if (agent !== "claude" && agent !== "codex")
+    throw new Error("A valid agent is required");
+  if (!isAgentSessionId(id))
+    throw new Error("A valid conversation is required");
+  const known = await agentSessionsOf(workspace);
+  if (!known.some((entry) => entry.agent === agent && entry.id === id))
+    throw new Error("That conversation is not one of this project's");
+  return { workspace, key: agentKey({ agent, id }) };
 }
 
 /** Tell the focused window the View menu asked for something. */
@@ -234,6 +315,37 @@ export function registerTerminal(devUrl?: string): void {
       return agentSessionsOf(key(args[0], "workspace"));
     },
   );
+  handle(
+    terminalChannels.agentSessionRename,
+    devUrl,
+    async (args): Promise<AgentSession[]> => {
+      if (args.length !== 4)
+        throw new Error("A workspace, a conversation and a name are required");
+      const { workspace, key: mark } = await markable(args);
+      const name = cleanAgentName(args[3]);
+      await updateAgentMark(agentMarksFile(), mark, (current) => ({
+        ...current,
+        // Empty is "back to the CLI's own title" (FE-24).
+        name: name || undefined,
+      }));
+      return agentSessionsOf(workspace);
+    },
+  );
+  handle(
+    terminalChannels.agentSessionPin,
+    devUrl,
+    async (args): Promise<AgentSession[]> => {
+      if (args.length !== 4 || typeof args[3] !== "boolean")
+        throw new Error("A workspace, a conversation and a pin are required");
+      const { workspace, key: mark } = await markable(args);
+      const pinned = args[3];
+      await updateAgentMark(agentMarksFile(), mark, (current) => ({
+        ...current,
+        pinnedAt: pinned ? (current.pinnedAt ?? Date.now()) : undefined,
+      }));
+      return agentSessionsOf(workspace);
+    },
+  );
   handle(terminalChannels.reorder, devUrl, async (args): Promise<void> => {
     if (args.length !== 2)
       throw new Error("A workspace and an order are required");
@@ -268,4 +380,15 @@ export function registerTerminal(devUrl?: string): void {
   app.on("will-quit", () => {
     host?.kill();
   });
+  // ⚠️ The dev launcher restarts the app with SIGTERM on every main-process
+  // save, and WAITS for it to exit. Asked "a terminal is still running?",
+  // that exit never came: the old build kept running, unseen, and a change
+  // looked like it had done nothing. A signal is not a person quitting — in
+  // an unpackaged run it stops without asking.
+  if (!app.isPackaged)
+    process.once("SIGTERM", () => {
+      quitting = true;
+      host?.kill();
+      app.exit(0);
+    });
 }

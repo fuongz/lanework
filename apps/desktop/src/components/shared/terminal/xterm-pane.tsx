@@ -43,9 +43,30 @@ function quotePath(path: string): string {
  * and only then serializes; a snapshot taken at another width replays wrapped
  * wrong, and a TUI comes back as garbage.
  */
-export function XtermPane({ session }: { session: TerminalSession }) {
+export function XtermPane({
+  session,
+  onExit,
+  onOutput,
+}: {
+  session: TerminalSession;
+  /**
+   * Who is told the shell exited. The panel's store by default; an agent's
+   * view (FE-26) keeps its sessions in a store of its own.
+   */
+  onExit?: (workspace: string, id: string, code: number) => void;
+  /**
+   * Told once, when the screen first has something on it — a snapshot with
+   * content, or the first live output. An agent's view keeps its spinner up
+   * until then (FE-26).
+   */
+  onOutput?: () => void;
+}) {
   const host = useRef<HTMLDivElement>(null);
-  const markExited = useTerminal((state) => state.markExited);
+  const terminalExited = useTerminal((state) => state.markExited);
+  const markExited = onExit ?? terminalExited;
+  // The latest callback, without restarting the pane when it changes.
+  const outputRef = useRef(onOutput);
+  outputRef.current = onOutput;
 
   useEffect(() => {
     const element = host.current;
@@ -101,8 +122,12 @@ export function XtermPane({ session }: { session: TerminalSession }) {
           onSnapshot: (data) => {
             term.reset();
             term.write(data);
+            if (data) outputRef.current?.();
           },
-          onData: (data) => term.write(data),
+          onData: (data) => {
+            term.write(data);
+            if (data) outputRef.current?.();
+          },
           onExit: (code) => markExited(session.workspace, session.id, code),
         }),
       );

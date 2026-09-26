@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
-  type AgentSession,
   TERMINAL_LIMITS,
   type TerminalAgent,
   type TerminalKind,
@@ -87,11 +86,6 @@ interface TerminalState {
     kind?: TerminalKind,
     resume?: string,
   ) => Promise<void>;
-  /**
-   * The rail's Agents group (FE-23): show the tab already resuming this
-   * conversation, or open one that resumes it.
-   */
-  resumeAgent: (workspace: string, session: AgentSession) => Promise<void>;
   close: (workspace: string, id: string) => Promise<void>;
   select: (workspace: string, id: string) => void;
   /** A tab dropped on another: it takes that tab's place (drag, at drop). */
@@ -184,7 +178,12 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
   refresh: async (workspace) => {
     const mine = revision.get(workspace) ?? 0;
     try {
-      const listed = await api().list(workspace);
+      // ⚠️ Shells only (FE-26/D6). The host runs agents too, but they are the
+      // main view's, listed by `useAgentTerminals` — a Claude started from
+      // the rail never turns up as a tab down here.
+      const listed = (await api().list(workspace)).filter(
+        (session) => session.kind === "shell",
+      );
       if ((revision.get(workspace) ?? 0) !== mine) return;
       set((state) => {
         const current = state.active[workspace];
@@ -236,19 +235,6 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     } finally {
       set({ spawning: false });
     }
-  },
-
-  resumeAgent: async (workspace, session) => {
-    set({ open: true, error: null });
-    await get().refresh(workspace);
-    // ⚠️ A live tab only: one whose CLI has exited is a transcript of the
-    // last run, and a click asks to carry on, not to look back (FE-23/D6).
-    const existing = (get().sessions[workspace] ?? []).find(
-      (entry) => entry.resume === session.id && !entry.exit,
-    );
-    if (existing) get().select(workspace, existing.id);
-    else await get().spawn(workspace, session.agent, session.id);
-    settle(workspace);
   },
 
   close: async (workspace, id) => {

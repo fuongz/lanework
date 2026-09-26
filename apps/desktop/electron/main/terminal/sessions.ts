@@ -39,6 +39,23 @@ const PROMPT_QUIET_MS = 150;
 /** An agent tab types its CLI by then, prompt or not. */
 const LAUNCH_DEADLINE_MS = 5_000;
 
+/**
+ * What an agent's launch line prints just before its CLI starts (FE-26): an
+ * OSC nobody answers, which xterm ignores even if one ever got through.
+ *
+ * ⚠️ The TYPED line is echoed as text — `\033]7771…` as backslashes and
+ * digits — so only the real bytes `printf` emits can match. The echo cannot
+ * end the curtain early.
+ */
+const LAUNCH_MARK = "\x1b]7771;lanework-launched\x07";
+/**
+ * Output held back while waiting for the mark, at most. A shell that prints
+ * this much before its prompt is saying something worth seeing.
+ */
+const CURTAIN_MAX = 64 * 1024;
+/** If the mark never comes, the held output is shown after this long. */
+const CURTAIN_DEADLINE_MS = LAUNCH_DEADLINE_MS + 10_000;
+
 type MirrorTerminal = InstanceType<typeof Mirror>;
 type Serializer = InstanceType<typeof SerializeAddon>;
 
@@ -121,6 +138,12 @@ interface Session {
   launchTimer: NodeJS.Timeout | null;
   /** When the pty last printed anything; 0 before its first output. */
   lastOutput: number;
+  /**
+   * An agent tab's output before its CLI starts, held back rather than shown
+   * (FE-26): the profile's noise, the prompt, the typed line. Null once the
+   * CLI is running — or for a plain shell, which hides nothing.
+   */
+  curtain: string | null;
 }
 
 export interface SessionsOptions {
@@ -180,8 +203,31 @@ export function createSessions(options: SessionsOptions = {}) {
     }
   }
 
+  /**
+   * Show what an agent tab held back, and stop holding: the mark came, the
+   * shell exited first, or it never came at all. In the last two cases the
+   * held text IS the explanation — "command not found", a profile error.
+   */
+  function lift(session: Session, shown: string) {
+    session.curtain = null;
+    if (shown) record(session, shown);
+  }
+
   function record(session: Session, data: string) {
     session.lastOutput = Date.now();
+    if (session.curtain !== null) {
+      const held = session.curtain + data;
+      const at = held.indexOf(LAUNCH_MARK);
+      if (at !== -1) {
+        // ⚠️ Everything before the mark is dropped for good: it is the shell
+        // getting ready, not the agent. The view starts at the CLI.
+        lift(session, held.slice(at + LAUNCH_MARK.length));
+        return;
+      }
+      if (held.length > CURTAIN_MAX) lift(session, held);
+      else session.curtain = held;
+      return;
+    }
     // ⚠️ The mirror sees everything, watched or not: it is what a view that
     // comes back later is drawn from. xterm refuses writes past its pending
     // limit, and losing the mirror is better than losing the shell.
@@ -205,12 +251,20 @@ export function createSessions(options: SessionsOptions = {}) {
   }
 
   function spawn(request: SpawnRequest): TerminalSession {
+    // ⚠️ Counted per SIDE (FE-26): shells for the panel, agents for the main
+    // view. They are separate lists on screen, so a project full of agents
+    // must not be why its panel cannot open a shell.
+    const agent = isTerminalKind(request.kind) && request.kind !== "shell";
     const count = [...sessions.values()].filter(
-      (session) => session.info.workspace === request.workspace,
+      (session) =>
+        session.info.workspace === request.workspace &&
+        (session.info.kind !== "shell") === agent,
     ).length;
     if (count >= limit)
       throw new Error(
-        `A project can have at most ${limit} terminals. Close one first.`,
+        agent
+          ? `A project can have at most ${limit} agents running. Stop one first.`
+          : `A project can have at most ${limit} terminals. Close one first.`,
       );
     const cols = clampGeometry(request.cols, 80);
     const rows = clampGeometry(request.rows, 24);
@@ -260,15 +314,30 @@ export function createSessions(options: SessionsOptions = {}) {
       flushScheduled: false,
       cols,
       rows,
+      // ⚠️ `printf` of the mark FIRST, then the CLI: the output is held
+      // back until the mark, so the prompt and this very line never show.
+      // ⚠️ `exec`, so the CLI REPLACES the shell (FE-26): `/exit` or ⌃C⌃C
+      // ends the session, rather than dropping somebody at a prompt they
+      // never asked for. An agent here is not a terminal. `|| exit 127`
+      // because an INTERACTIVE shell survives a failed `exec`: a CLI that
+      // cannot start must still end the session, with its error on screen.
       launch:
         kind === "shell"
           ? null
-          : `${(options.agentCommand ?? String)(kind)}${resume ? ` ${RESUME_ARGS[kind](resume)}` : ""}\r`,
+          : `printf '\\033]7771;lanework-launched\\007'; exec ${(options.agentCommand ?? String)(kind)}${resume ? ` ${RESUME_ARGS[kind](resume)}` : ""} || exit 127\r`,
       launchTimer: null,
       lastOutput: 0,
+      curtain: kind === "shell" ? null : "",
     };
     sessions.set(session.info.id, session);
     pty.onData((data) => record(session, data));
+    if (session.curtain !== null) {
+      // The mark never came — a shell that cannot run `printf`, a profile
+      // that hangs: show what there is rather than a spinner forever.
+      setTimeout(() => {
+        if (session.curtain !== null) lift(session, session.curtain);
+      }, CURTAIN_DEADLINE_MS).unref?.();
+    }
     pty.onExit(({ exitCode, signal: raw }) => {
       // Closed from the panel: the session is already gone, and nobody is
       // waiting to be told how it ended.
@@ -277,6 +346,8 @@ export function createSessions(options: SessionsOptions = {}) {
       const signal = raw ? raw : null;
       session.pty = null;
       session.info.exit = { code: exitCode, signal };
+      // Exited before its CLI ever started: what it printed says why.
+      if (session.curtain !== null) lift(session, session.curtain);
       // ⚠️ Written into the MIRROR, not only sent: a view that attaches after
       // the exit is drawn from the snapshot, and should say so too.
       record(
@@ -359,9 +430,9 @@ export function createSessions(options: SessionsOptions = {}) {
       // as they start, and only a mounted xterm can answer — unanswered,
       // Codex waits out the question and falls back to its light theme on a
       // dark panel. agents-kanban hit exactly that.
-      // ⚠️ TYPED into the shell rather than being the pty's process: on a
-      // machine where it is not found this prints "command not found" in a
-      // shell that still works, and quitting it leaves you at a prompt.
+      // ⚠️ TYPED into the shell (then `exec`ed), not spawned directly: the
+      // user's login shell is what knows their PATH and aliases, so the CLI
+      // is found wherever their own terminal would find it.
       launchAtPrompt(session);
     });
   }

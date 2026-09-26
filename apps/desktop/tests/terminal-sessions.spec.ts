@@ -230,9 +230,11 @@ test("an agent tab types its CLI once a view is attached — never before, never
     expect(snapshot?.t === "snapshot" ? snapshot.data : "").not.toContain(
       "claude-started",
     );
-    // Typed at the prompt, so the line is drawn once — not echoed ahead of
-    // the prompt by the terminal and then again behind it.
-    expect(view.text().split("claude started").length - 1).toBe(1);
+    // ⚠️ The shell getting ready is held back (FE-26): the typed line, the
+    // prompt, the launch mark — none of it reaches a view. Only the CLI does.
+    expect(view.text()).not.toContain("claude started");
+    expect(view.text()).not.toContain("7771");
+    expect(view.text().split("claude-started").length - 1).toBe(1);
 
     // A second view is shown it, and it is not typed again.
     const again = viewer();
@@ -240,6 +242,28 @@ test("an agent tab types its CLI once a view is attached — never before, never
     await expect.poll(again.text).toContain("claude-started");
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(view.text().split("claude-started").length - 1).toBe(1);
+  } finally {
+    sessions.killAll();
+  }
+});
+
+test("an agent whose CLI never starts shows what its shell said, instead of hiding it", async () => {
+  const sessions = createSessions({
+    // Says something and exits before any prompt: the launch never runs.
+    shell: { file: "/bin/sh", args: ["-c", "echo profile-broke; exit 3"] },
+    agentCommand: (agent) => agent,
+  });
+  try {
+    const session = sessions.spawn({
+      workspace: "ws",
+      cwd: await folder(),
+      cols: 80,
+      rows: 24,
+      kind: "claude",
+    });
+    const view = viewer();
+    sessions.attach(view.sub, session.id, 80, 24);
+    await expect.poll(view.text).toContain("profile-broke");
   } finally {
     sessions.killAll();
   }

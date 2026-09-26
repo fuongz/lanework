@@ -207,6 +207,24 @@ function createTerminal(): DesktopTerminalApi {
           ),
     agentSessions: (workspace) =>
       ipcRenderer.invoke(terminalChannels.agentSessions, workspace),
+    renameAgentSession: (workspace, agent, id, name) =>
+      ipcRenderer.invoke(
+        terminalChannels.agentSessionRename,
+        workspace,
+        agent,
+        id,
+        name,
+      ),
+    pinAgentSession: (workspace, agent, id, pinned) =>
+      ipcRenderer.invoke(
+        terminalChannels.agentSessionPin,
+        workspace,
+        agent,
+        id,
+        pinned,
+      ),
+    onAgentActivity: (listener) =>
+      subscribe(terminalChannels.agentActivity, listener),
     agents: () => ipcRenderer.invoke(terminalChannels.agents),
     kill: (id) => ipcRenderer.invoke(terminalChannels.kill, id),
     reorder: (workspace, ids) =>

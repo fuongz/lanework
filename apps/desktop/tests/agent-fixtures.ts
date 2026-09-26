@@ -32,6 +32,12 @@ export async function seedAgentHome(home: string, folder: string) {
         cwd: folder,
         message: { role: "user", content: "Fix the flaky login test" },
       },
+      // Answered, and the turn closed: not working (FE-25).
+      {
+        type: "assistant",
+        message: { role: "assistant", stop_reason: "end_turn", content: [] },
+      },
+      { type: "system", subtype: "turn_duration" },
       { type: "ai-title", aiTitle: "Early title", sessionId: CLAUDE_ID },
       { type: "ai-title", aiTitle: "Flaky login test", sessionId: CLAUDE_ID },
     ]),

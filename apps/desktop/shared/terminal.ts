@@ -59,11 +59,43 @@ export interface AgentSession {
   /** The CLI's own conversation id — always a UUID (`isAgentSessionId`). */
   id: string;
   agent: TerminalAgent;
-  /** Its title as the CLI named it, or its first prompt. */
+  /** What the rail shows: the name given in Lanework, else `cliTitle`. */
   title: string;
+  /**
+   * Its title as the CLI named it, or its first prompt (FE-23). Kept beside
+   * `title` so a rename can be undone back to it (FE-24).
+   */
+  cliTitle: string;
   /** When it was last written to, ISO. */
   updatedAt: string;
+  /** When it was pinned, epoch ms, or null (FE-25). */
+  pinnedAt: number | null;
+  /**
+   * Whether its agent is thinking or working right now: a turn is open in
+   * the transcript (FE-25). Not "was written lately" — opening a
+   * conversation writes to it too.
+   */
+  working: boolean;
 }
+
+/**
+ * A transcript changed, and this is whether its agent is now working
+ * (FE-25): a turn opened or closed.
+ *
+ * ⚠️ Pushed by main from a file watcher, never polled — the id straight from
+ * the file's name, the state from the transcript's end, so marking a row
+ * does not re-read the listing.
+ */
+export interface AgentActivity {
+  workspace: string;
+  agent: TerminalAgent;
+  id: string;
+  working: boolean;
+  /** Epoch ms. */
+  at: number;
+}
+/** The longest name a session may be given in Lanework. */
+export const AGENT_NAME_MAX = 120;
 
 export const AGENT_SESSION_LIMIT = 20;
 
@@ -105,6 +137,12 @@ export const terminalChannels = {
   agents: "terminal:agents",
   /** The agent conversations kept for a workspace's folder (FE-23). */
   agentSessions: "terminal:agent-sessions",
+  /** Name a conversation in Lanework only (FE-24/D1). */
+  agentSessionRename: "terminal:agent-sessions:rename",
+  /** Pin a conversation to the top of the group, or unpin it (FE-25). */
+  agentSessionPin: "terminal:agent-sessions:pin",
+  /** Main → renderer: a transcript was written (FE-25). */
+  agentActivity: "terminal:agent-activity",
   /** Main → renderer: a View-menu command. */
   command: "terminal:command",
 } as const;
@@ -157,6 +195,25 @@ export interface DesktopTerminalApi {
    * first; empty when the project has no folder here.
    */
   agentSessions: (workspace: string) => Promise<AgentSession[]>;
+  /**
+   * Give a conversation a name in Lanework (FE-24). The CLI's files are never
+   * touched; an empty name goes back to the CLI's own title. Answers the new
+   * listing. Main refuses an id that `agentSessions(workspace)` does not have.
+   */
+  renameAgentSession: (
+    workspace: string,
+    agent: TerminalAgent,
+    id: string,
+    name: string,
+  ) => Promise<AgentSession[]>;
+  /** Pin or unpin a conversation (FE-25). Answers the new listing. */
+  pinAgentSession: (
+    workspace: string,
+    agent: TerminalAgent,
+    id: string,
+    pinned: boolean,
+  ) => Promise<AgentSession[]>;
+  onAgentActivity: (listener: (activity: AgentActivity) => void) => () => void;
   /**
    * The agent CLIs this machine has, asked of the user's own shell: what the
    * + menu offers beside a plain terminal. Cached for a little while.

@@ -12,6 +12,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { Kbd } from "#/components/ui/kbd";
+import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { useCommandPalette } from "#/stores/command-palette";
@@ -81,12 +82,14 @@ export function AppSidebar() {
   );
   // The terminal's key for this project — the cloud id, or the slug — which
   // the Agents group resumes into.
-  const workspaceKey = useBoard((state) => {
-    const found = slug
-      ? state.workspaces.find((entry) => entry.slug === slug)
-      : undefined;
-    return found ? (found.id ?? found.slug) : null;
-  });
+  const workspaceKey = useWorkspaceKey(slug);
+  const hasFolder = useWorktree(
+    (state) =>
+      state.slug === slug &&
+      state.state !== null &&
+      state.state.kind !== "none" &&
+      state.state.kind !== "missing",
+  );
   const navigate = useNavigate();
   const peek = useWorktree((state) => state.peek);
 
@@ -293,8 +296,16 @@ export function AppSidebar() {
             </Link>
           </nav>
         )}
-        {workspaceKey && (
-          <AgentSessionsNav workspace={workspaceKey} row={ROW} />
+        {workspaceKey && slug && (
+          <AgentSessionsNav
+            workspace={workspaceKey}
+            slug={slug}
+            // ⚠️ The group shows for a project with a folder even before its
+            // first conversation, so its + has somewhere to live (FE-26/D3).
+            hasFolder={hasFolder}
+            row={ROW}
+            active={ACTIVE.className}
+          />
         )}
       </div>
 

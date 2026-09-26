@@ -1,7 +1,14 @@
 // The terminal panel end to end, with real shells in the real pty host
 // (FE-19 V2). What these pin is the reason the host exists: a shell outlives
 // every view of it — a hidden panel, another project, a reloaded window.
-import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  realpath,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
@@ -13,6 +20,7 @@ import {
 } from "@playwright/test";
 import type { MenuItem } from "electron";
 import type { MachineRecord } from "../electron/main/auth/store";
+import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
 import { writeFolders } from "../electron/main/workspaces/store";
 import type { Workspace } from "../shared/workspaces";
 import { CLAUDE_ID, CODEX_ID, seedAgentHome } from "./agent-fixtures";
@@ -22,6 +30,21 @@ import {
   seedCredential,
   startStubPlane,
 } from "./auth-fixtures";
+
+/**
+ * A stand-in for an agent's CLI: it prints what it was asked in a form the
+ * typed line does not contain, then stays running — as a real CLI does —
+ * until it is told `/exit`.
+ */
+async function standIn(dir: string, name: string, format: string) {
+  const file = join(dir, `${name}-stand-in.sh`);
+  await writeFile(
+    file,
+    `#!/bin/sh\nprintf '${format}\\n' ${name} "$@"\nwhile IFS= read -r line; do [ "$line" = "/exit" ] && exit 0; done\n`,
+    { mode: 0o755 },
+  );
+  return file;
+}
 
 test.skip(process.platform === "win32", "These drive a POSIX shell.");
 
@@ -476,35 +499,45 @@ test("dragging a tab moves it, leaves the shown one alone, and outlives a reload
   }
 });
 
-test("+ offers Claude or Codex only where this machine has it, and an agent tab starts its CLI", async () => {
+test("the Agents + offers only the CLIs this machine has, and a new agent opens in the main view — never as a panel tab", async () => {
   const plane = await startStubPlane({ workspaces });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
-  // Claude "installed", Codex not; and what a Claude tab types is a marker,
-  // not the real CLI (the printed line is not the typed one).
+  // Claude "installed", Codex not; and what it types is a marker, not the
+  // real CLI (the printed line is not the typed one).
   const app = await boot(profile, home, plane.origin, {
     LANEWORK_TERMINAL_AGENTS: "claude",
-    LANEWORK_CLAUDE_BIN: "printf '%s-%s\\n' claude started",
+    LANEWORK_CLAUDE_BIN: await standIn(profile, "claude", "%s-started"),
   });
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+
+    // The panel's + is shells only now (FE-26/D3).
     await menu(app, "terminal-toggle");
     await expect(tabs(page)).toHaveCount(1);
-
     await panel(page).getByRole("button", { name: "New terminal" }).click();
-    const items = page.getByRole("menuitem");
-    await expect(items).toHaveText([/^Terminal\s*⌘T$/, "Claude"]);
-    await page.getByRole("menuitem", { name: "Claude" }).click();
+    await expect(page.getByRole("menuitem")).toHaveText([/^Terminal\s*⌘T$/]);
+    await page.keyboard.press("Escape");
 
-    await expect(tabs(page)).toHaveCount(2);
+    // The Agents group has a folder to run in, so it shows — with its +.
+    const group = page.getByRole("navigation", { name: "Agents" });
+    await group.getByRole("button", { name: "New agent" }).click();
+    await expect(page.getByRole("menuitem")).toHaveText(["New Claude"]);
+    await page.getByRole("menuitem", { name: "New Claude" }).click();
+
+    const view = page.getByRole("region", {
+      name: "Claude — New Claude session",
+    });
+    await expect(view).toBeVisible();
+    await expect(view.locator(".xterm-rows")).toContainText("claude-started");
+    await expect(view).toContainText(basename(repo));
+    // Its own row, marked as the one on screen — and no tab in the panel.
     await expect(
-      tabs(page).nth(1).getByRole("button").first(),
-    ).toHaveAccessibleName(`Claude in ${basename(repo)}`);
-    // Typed into a shell once the tab's view is up: the CLI's output, then
-    // — the stand-in exits at once — the shell's prompt again.
-    await expect(screen(page)).toContainText("claude-started");
+      group.getByRole("button", { name: "Open new Claude session" }),
+    ).toHaveAttribute("aria-current", "page");
+    await expect(tabs(page)).toHaveCount(1);
   } finally {
     await app.close();
     await plane.close();
@@ -512,7 +545,38 @@ test("+ offers Claude or Codex only where this machine has it, and an agent tab 
   }
 });
 
-test("the rail's Agents group lists this project's conversations, and a click resumes one — or shows its tab", async () => {
+test("an agent whose CLI cannot start stays on screen to say why — only a clean exit closes it", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home } = await seedProfile(plane.origin);
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TERMINAL_AGENTS: "claude",
+    LANEWORK_CLAUDE_BIN: join(profile, "no-such-claude"),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const group = page.getByRole("navigation", { name: "Agents" });
+    await group.getByRole("button", { name: "New agent" }).click();
+    await page.getByRole("menuitem", { name: "New Claude" }).click();
+    const view = page.getByRole("region", {
+      name: "Claude — New Claude session",
+    });
+    // The shell's own words, shown rather than held back, and a way on.
+    await expect(view.locator(".xterm-rows")).toContainText("no-such-claude");
+    await expect(view.getByText("exited", { exact: true })).toBeVisible();
+    await expect(
+      view.getByRole("button", { name: "Start again" }),
+    ).toBeVisible();
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("an Agents row resumes its conversation in the main view, which outlives leaving it — and Stop ends it", async () => {
   const plane = await startStubPlane({ workspaces });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
@@ -522,58 +586,187 @@ test("the rail's Agents group lists this project's conversations, and a click re
   const app = await boot(profile, home, plane.origin, {
     LANEWORK_TEST_AGENT_HOME: agentHome,
     LANEWORK_TERMINAL_AGENTS: "claude,codex",
-    // Stand-ins that print what they were asked, in a form the typed line
-    // itself does not contain — so the echo cannot fake it.
-    LANEWORK_CLAUDE_BIN: "printf 'ran-%s-%s-%s\\n' claude",
-    LANEWORK_CODEX_BIN: "printf 'ran-%s-%s-%s\\n' codex",
+    LANEWORK_CLAUDE_BIN: await standIn(profile, "claude", "ran-%s-%s-%s"),
+    LANEWORK_CODEX_BIN: await standIn(profile, "codex", "ran-%s-%s-%s"),
   });
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
     const group = page.getByRole("navigation", { name: "Agents" });
-    const rows = group.getByRole("button", { name: /^Resume/ });
-    await expect(rows).toHaveCount(2);
-    await expect(
-      group.getByRole("button", {
-        name: "Resume “Flaky login test” in Claude",
-      }),
-    ).toBeVisible();
-    await expect(
-      group.getByRole("button", {
-        name: "Resume “Settings page cleanup” in Codex",
-      }),
-    ).toBeVisible();
+    const claudeRow = group.getByRole("button", {
+      name: "Resume “Flaky login test” in Claude",
+    });
+    await expect(group.getByRole("button", { name: /^Resume/ })).toHaveCount(2);
 
-    await group
-      .getByRole("button", { name: "Resume “Flaky login test” in Claude" })
-      .click();
+    await claudeRow.click();
+    const claude = page.getByRole("region", {
+      name: "Claude — Flaky login test",
+    });
+    await expect(claude.locator(".xterm-rows")).toContainText(
+      `ran-claude---resume-${CLAUDE_ID}`,
+    );
+    await expect(claudeRow).toHaveAttribute("aria-current", "page");
+    const first = page.url();
+
+    // The terminal panel is its own: no agent tab in it, and a shell opened
+    // there leaves the agent where it was (FE-26).
+    await menu(app, "terminal-toggle");
     await expect(tabs(page)).toHaveCount(1);
     await expect(
       tabs(page).first().getByRole("button").first(),
-    ).toHaveAccessibleName(`Claude in ${basename(repo)}`);
-    await expect(screen(page)).toContainText(
-      `ran-claude---resume-${CLAUDE_ID}`,
-    );
+    ).toHaveAccessibleName(/^(sh|zsh|bash) in /);
+    await expect(claude).toBeVisible();
 
     await group
       .getByRole("button", { name: "Resume “Settings page cleanup” in Codex" })
       .click();
-    await expect(tabs(page)).toHaveCount(2);
-    await expect(screen(page)).toContainText(`ran-codex-resume-${CODEX_ID}`);
+    const codex = page.getByRole("region", {
+      name: "Codex — Settings page cleanup",
+    });
+    await expect(codex.locator(".xterm-rows")).toContainText(
+      `ran-codex-resume-${CODEX_ID}`,
+    );
 
-    // ⚠️ Its tab is still open — a shell, back at its prompt — so a second
-    // click shows that tab rather than opening another (FE-23/D6).
-    await group
-      .getByRole("button", { name: "Resume “Flaky login test” in Claude" })
-      .click();
-    await expect(tabs(page)).toHaveCount(2);
+    // Back to Claude: the SAME agent, not a second resume (FE-23/D6), with
+    // its screen as it was.
+    await claudeRow.click();
+    await expect(page).toHaveURL(first);
+    await expect(claude.locator(".xterm-rows")).toContainText(
+      `ran-claude---resume-${CLAUDE_ID}`,
+    );
+
+    // Stop while its transcript is being written: asked first (FE-26/D5).
+    await appendFile(
+      join(
+        agentHome,
+        ".claude",
+        "projects",
+        claudeProjectDir(repo),
+        `${CLAUDE_ID}.jsonl`,
+      ),
+      `${JSON.stringify({ type: "assistant" })}\n`,
+    );
+    await expect(claude.getByLabel("Working")).toBeVisible();
+    await claude.getByRole("button", { name: "Stop" }).click();
+    const confirm = page.getByRole("alertdialog");
+    await expect(confirm).toContainText("while it is working");
+    await confirm.getByRole("button", { name: "Stop" }).click();
+    // Gone, back to the board; the row resumes it again.
+    await expect(claude).toHaveCount(0);
+    await claudeRow.click();
+    await expect(page).not.toHaveURL(first);
     await expect(
-      tabs(page).first().getByRole("button").first(),
-    ).toHaveAttribute("aria-current", "true");
+      page
+        .getByRole("region", { name: "Claude — Flaky login test" })
+        .locator(".xterm-rows"),
+    ).toContainText(`ran-claude---resume-${CLAUDE_ID}`);
 
-    // Another project has no conversations: no group at all.
+    // `/exit` ends the agent, and the SESSION with it (FE-26): no shell
+    // prompt left behind, the view closes, and the rail lets go of the row.
+    const again = page.getByRole("region", {
+      name: "Claude — Flaky login test",
+    });
+    await again.locator(".xterm").click();
+    await page.keyboard.type("/exit");
+    await page.keyboard.press("Enter");
+    await expect(again).toHaveCount(0);
+    await expect(page).toHaveURL(/\/issues/);
+    await expect(claudeRow).not.toHaveAttribute("aria-current", "page");
+
+    // Another project has no conversations and no folder: no group at all.
     await switchTo(page, "Beta");
     await expect(group).toHaveCount(0);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("an Agents row is renamed and pinned from its context menu, and spins while its transcript is written", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  const transcript = join(
+    agentHome,
+    ".claude",
+    "projects",
+    claudeProjectDir(repo),
+    `${CLAUDE_ID}.jsonl`,
+  );
+  // An hour old: nothing is working when the rail first lists them.
+  const old = new Date(Date.now() - 3_600_000);
+  await utimes(transcript, old, old);
+  const env = {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+  };
+  let app = await boot(profile, home, plane.origin, env);
+  try {
+    let page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const group = () => page.getByRole("navigation", { name: "Agents" });
+    const claude = () => group().getByRole("button", { name: /in Claude$/ });
+    await expect(claude()).toHaveAccessibleName(
+      "Resume “Flaky login test” in Claude",
+    );
+    await expect(claude()).not.toHaveAttribute("aria-busy", "true");
+
+    // Rename: Lanework's name, shown on the row.
+    await claude().click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Rename" }).click();
+    const field = page.getByRole("textbox", { name: "Session name" });
+    await expect(field).toHaveAttribute("placeholder", "Flaky login test");
+    await field.fill("Login fix");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(claude()).toHaveAccessibleName("Resume “Login fix” in Claude");
+
+    // Pin: first in the group, marked, and kept across a relaunch.
+    await claude().click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Pin" }).click();
+    const first = group()
+      .getByRole("button", { name: /^Resume/ })
+      .first();
+    await expect(first).toHaveAccessibleName("Resume “Login fix” in Claude");
+    await expect(group().getByLabel("Pinned")).toHaveCount(1);
+
+    await app.close();
+    app = await boot(profile, home, plane.origin, env);
+    page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    await expect(claude()).toHaveAccessibleName("Resume “Login fix” in Claude");
+    await expect(group().getByLabel("Pinned")).toHaveCount(1);
+
+    // Bookkeeping — what opening a conversation writes — is not work.
+    await appendFile(transcript, `${JSON.stringify({ type: "cost-state" })}\n`);
+    await page.waitForTimeout(1_000);
+    await expect(claude()).not.toHaveAttribute("aria-busy", "true");
+    // A prompt opens a turn: it spins, until the turn's closing line.
+    await appendFile(
+      transcript,
+      `${JSON.stringify({ type: "user", message: { content: "Go on" } })}\n`,
+    );
+    await expect(claude()).toHaveAttribute("aria-busy", "true");
+    await appendFile(
+      transcript,
+      `${JSON.stringify({ type: "system", subtype: "turn_duration" })}\n`,
+    );
+    await expect(claude()).not.toHaveAttribute("aria-busy", "true");
+
+    // Emptied, the name goes back to the CLI's; Unpin gives up the top.
+    await claude().click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Rename" }).click();
+    await page.getByRole("textbox", { name: "Session name" }).fill("");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(claude()).toHaveAccessibleName(
+      "Resume “Flaky login test” in Claude",
+    );
+    await claude().click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Unpin" }).click();
+    await expect(group().getByLabel("Pinned")).toHaveCount(0);
   } finally {
     await app.close();
     await plane.close();

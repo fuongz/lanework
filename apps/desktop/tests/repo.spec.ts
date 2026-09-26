@@ -40,6 +40,10 @@ async function makeRepo(): Promise<string> {
   git(repo, "init", "-q", "-b", "main");
   git(repo, "config", "user.email", "tester@example.com");
   git(repo, "config", "user.name", "Tester");
+  // ⚠️ The developer's global config may sign every commit (an SSH or GPG
+  // key behind an agent). A test repository must not wait on that agent —
+  // under a full run it timed out and failed the commit.
+  git(repo, "config", "commit.gpgsign", "false");
   await mkdir(join(repo, "src"));
   await writeFile(join(repo, "src", "router.tsx"), "a\nb\nc\n");
   await writeFile(join(repo, "notes.md"), "keep\n");

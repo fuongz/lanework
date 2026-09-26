@@ -8,7 +8,7 @@ import {
 } from "@dnd-kit/core";
 import { Add01Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 import {
   TERMINAL_LIMITS,
   type TerminalKind,
@@ -18,6 +18,7 @@ import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
+import { XtermPane } from "#/components/shared/terminal/xterm-pane";
 import { Button } from "#/components/ui/button";
 import {
   DropdownMenu,
@@ -28,7 +29,6 @@ import {
 } from "#/components/ui/dropdown-menu";
 import { useTerminal } from "#/stores/terminal";
 import { TerminalTab } from "./terminal-tab";
-import { XtermPane } from "./xterm-pane";
 
 /** Stable empty list: a selector that allocated one would re-render forever. */
 const NO_SESSIONS: TerminalSession[] = [];
@@ -58,8 +58,6 @@ export function TerminalPanel({ workspace }: { workspace: string }) {
   const error = useTerminal((state) => state.error);
   const spawning = useTerminal((state) => state.spawning);
   const spawn = useTerminal((state) => state.spawn);
-  const agents = useTerminal((state) => state.agents);
-  const loadAgents = useTerminal((state) => state.loadAgents);
   const close = useTerminal((state) => state.close);
   const select = useTerminal((state) => state.select);
   const reorderTab = useTerminal((state) => state.reorderTab);
@@ -69,14 +67,9 @@ export function TerminalPanel({ workspace }: { workspace: string }) {
   const active =
     sessions.find((session) => session.id === activeId) ?? sessions.at(-1);
   const full = sessions.length >= TERMINAL_LIMITS.perWorkspace;
-  // Asked as the panel comes up, so + already knows by the time it is
-  // clicked; opening the menu asks again (it is cached for a while).
-  useEffect(() => {
-    void loadAgents();
-  }, [loadAgents]);
-  // ⚠️ Terminal first, always there: the plain shell is what the panel is
-  // for. An agent row appears only where this machine has that CLI.
-  const kinds: TerminalKind[] = ["shell", ...agents];
+  // ⚠️ Shells only (FE-26/D3). Claude and Codex start from the rail's
+  // Agents group and run full size in the main view, not as tabs down here.
+  const kinds: TerminalKind[] = ["shell"];
 
   // A small threshold, so a plain click still picks the tab.
   const sensors = useSensors(
@@ -140,11 +133,7 @@ export function TerminalPanel({ workspace }: { workspace: string }) {
             ))}
           </ul>
         </DndContext>
-        <DropdownMenu
-          onOpenChange={(open) => {
-            if (open) void loadAgents();
-          }}
-        >
+        <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button
