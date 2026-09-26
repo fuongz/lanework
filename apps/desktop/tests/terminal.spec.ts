@@ -534,9 +534,12 @@ test("the Agents + offers only the CLIs this machine has, and a new agent opens 
     await expect(view).toBeVisible();
     await expect(view.locator(".xterm-rows")).toContainText("claude-started");
     await expect(view).toContainText(basename(repo));
-    // Its own row, marked as the one on screen — and no tab in the panel.
+    // Its own row, under Running, marked as the one on screen — and no tab
+    // in the panel.
     await expect(
-      group.getByRole("button", { name: "Open new Claude session" }),
+      page
+        .getByRole("navigation", { name: "Running" })
+        .getByRole("button", { name: "Open new Claude session" }),
     ).toHaveAttribute("aria-current", "page");
     await expect(tabs(page)).toHaveCount(1);
   } finally {
@@ -594,10 +597,13 @@ test("an Agents row resumes its conversation in the main view, which outlives le
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
     const group = page.getByRole("navigation", { name: "Agents" });
-    const claudeRow = group.getByRole("button", {
+    const runningGroup = page.getByRole("navigation", { name: "Running" });
+    // A row is in ONE group — Running while its agent is — so found by page.
+    const claudeRow = page.getByRole("button", {
       name: "Resume “Flaky login test” in Claude",
     });
     await expect(group.getByRole("button", { name: /^Resume/ })).toHaveCount(2);
+    await expect(runningGroup).toHaveCount(0);
 
     await claudeRow.click();
     const claude = page.getByRole("region", {
@@ -607,6 +613,11 @@ test("an Agents row resumes its conversation in the main view, which outlives le
       `ran-claude---resume-${CLAUDE_ID}`,
     );
     await expect(claudeRow).toHaveAttribute("aria-current", "page");
+    // Running now: it moved out of Agents, into Running.
+    await expect(
+      runningGroup.getByRole("button", { name: /^Resume/ }),
+    ).toHaveCount(1);
+    await expect(group.getByRole("button", { name: /^Resume/ })).toHaveCount(1);
     const first = page.url();
 
     // The terminal panel is its own: no agent tab in it, and a shell opened
@@ -618,7 +629,7 @@ test("an Agents row resumes its conversation in the main view, which outlives le
     ).toHaveAccessibleName(/^(sh|zsh|bash) in /);
     await expect(claude).toBeVisible();
 
-    await group
+    await page
       .getByRole("button", { name: "Resume “Settings page cleanup” in Codex" })
       .click();
     const codex = page.getByRole("region", {
@@ -635,6 +646,51 @@ test("an Agents row resumes its conversation in the main view, which outlives le
     await expect(claude.locator(".xterm-rows")).toContainText(
       `ran-claude---resume-${CLAUDE_ID}`,
     );
+
+    // A Running row has Stop in its context menu, and as a quick action on
+    // hover beside Pin.
+    const codexName = "Resume “Settings page cleanup” in Codex";
+    const codexRunning = runningGroup.getByRole("button", { name: codexName });
+    await codexRunning.click({ button: "right" });
+    await expect(page.getByRole("menuitem", { name: "Stop" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await codexRunning.hover();
+    const codexActions = codexRunning.locator("xpath=..");
+    await expect(
+      codexActions.getByRole("button", { name: "Pin" }),
+    ).toBeVisible();
+    // An idle agent's Stop ends it without asking, and its row goes back to
+    // Agents as a transcript — whose quick actions and menu have no Stop.
+    const stopAction = codexActions.getByRole("button", { name: "Stop" });
+    // Icon-only, so a tooltip names it before the click. ⚠️ Retried as a
+    // pair, as the Changes list's: it fades in under a hovered row, and a
+    // pointer that lands mid-fade can miss the tooltip's enter event.
+    const tip = page.locator('[data-slot="tooltip-content"]');
+    await expect(async () => {
+      await codexRunning.hover();
+      await stopAction.hover();
+      await expect(tip).toHaveText("Stop", { timeout: 1_500 });
+    }).toPass({ timeout: 10_000 });
+    await stopAction.click();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    const codexIdle = group.getByRole("button", { name: codexName });
+    await expect(codexIdle).toBeVisible();
+    await expect(
+      runningGroup.getByRole("button", { name: /^Resume/ }),
+    ).toHaveCount(1);
+    await codexIdle.hover();
+    const idleActions = codexIdle.locator("xpath=..");
+    await expect(
+      idleActions.getByRole("button", { name: "Pin" }),
+    ).toBeVisible();
+    await expect(idleActions.getByRole("button", { name: "Stop" })).toHaveCount(
+      0,
+    );
+    await codexIdle.click({ button: "right" });
+    await expect(page.getByRole("menuitem", { name: "Pin" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Stop" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(claude).toBeVisible();
 
     // Stop while its transcript is being written: asked first (FE-26/D5).
     await appendFile(
@@ -673,6 +729,7 @@ test("an Agents row resumes its conversation in the main view, which outlives le
     await expect(again).toHaveCount(0);
     await expect(page).toHaveURL(/\/issues/);
     await expect(claudeRow).not.toHaveAttribute("aria-current", "page");
+    await expect(runningGroup).toHaveCount(0);
 
     // Another project has no conversations and no folder: no group at all.
     await switchTo(page, "Beta");
@@ -710,7 +767,10 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
     let page = await app.firstWindow();
     await switchTo(page, "Alpha");
     const group = () => page.getByRole("navigation", { name: "Agents" });
-    const claude = () => group().getByRole("button", { name: /in Claude$/ });
+    const pinnedGroup = () => page.getByRole("navigation", { name: "Pinned" });
+    // A row changes group when pinned, so found across the rail's groups.
+    const claude = () =>
+      page.locator("nav").getByRole("button", { name: /in Claude$/ });
     await expect(claude()).toHaveAccessibleName(
       "Resume “Flaky login test” in Claude",
     );
@@ -725,21 +785,25 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
     await page.getByRole("button", { name: "Save" }).click();
     await expect(claude()).toHaveAccessibleName("Resume “Login fix” in Claude");
 
-    // Pin: first in the group, marked, and kept across a relaunch.
+    // Pin: its own group, out of Agents, and kept across a relaunch.
+    await expect(pinnedGroup()).toHaveCount(0);
     await claude().click({ button: "right" });
     await page.getByRole("menuitem", { name: "Pin" }).click();
-    const first = group()
-      .getByRole("button", { name: /^Resume/ })
-      .first();
-    await expect(first).toHaveAccessibleName("Resume “Login fix” in Claude");
-    await expect(group().getByLabel("Pinned")).toHaveCount(1);
+    await expect(
+      pinnedGroup().getByRole("button", { name: /^Resume/ }),
+    ).toHaveAccessibleName("Resume “Login fix” in Claude");
+    await expect(group().getByRole("button", { name: /^Resume/ })).toHaveCount(
+      1,
+    );
 
     await app.close();
     app = await boot(profile, home, plane.origin, env);
     page = await app.firstWindow();
     await switchTo(page, "Alpha");
     await expect(claude()).toHaveAccessibleName("Resume “Login fix” in Claude");
-    await expect(group().getByLabel("Pinned")).toHaveCount(1);
+    await expect(
+      pinnedGroup().getByRole("button", { name: /^Resume/ }),
+    ).toHaveCount(1);
 
     // Bookkeeping — what opening a conversation writes — is not work.
     await appendFile(transcript, `${JSON.stringify({ type: "cost-state" })}\n`);
@@ -765,9 +829,16 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
     await expect(claude()).toHaveAccessibleName(
       "Resume “Flaky login test” in Claude",
     );
-    await claude().click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Unpin" }).click();
-    await expect(group().getByLabel("Pinned")).toHaveCount(0);
+    // Unpin, from the row's hover quick action this time.
+    await claude().hover();
+    await claude()
+      .locator("xpath=..")
+      .getByRole("button", { name: "Unpin" })
+      .click();
+    await expect(pinnedGroup()).toHaveCount(0);
+    await expect(group().getByRole("button", { name: /^Resume/ })).toHaveCount(
+      2,
+    );
   } finally {
     await app.close();
     await plane.close();

@@ -1,3 +1,5 @@
+import { cn } from "#/lib/utils";
+
 /**
  * The ring of a 3×3 grid, clockwise from the top-left: the cells the light
  * travels through. The centre is never lit.
@@ -16,7 +18,10 @@ export function OrbitSpinner({ className = "" }: { className?: string }) {
   return (
     <span
       aria-hidden="true"
-      className={`orbit-spinner grid size-4 shrink-0 grid-cols-3 grid-rows-3 gap-[2px] p-px ${className}`}
+      className={cn(
+        "orbit-spinner grid size-4 shrink-0 grid-cols-3 grid-rows-3 gap-[2px] p-px",
+        className,
+      )}
     >
       {Array.from({ length: 9 }, (_, cell) => {
         const step = RING.indexOf(cell);
