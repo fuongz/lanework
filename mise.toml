@@ -1,0 +1,68 @@
+# Tasks for this repo: `mise tasks` lists them, `mise run <name>` runs one.
+# Each is a thin name over a package.json script, so the scripts stay the one
+# definition of how things are built and checked.
+
+[tasks.dev]
+description = "Desktop app in dev: renderer HMR, main/preload restart"
+run = "bun run dev"
+
+[tasks."dev:api"]
+description = "API worker, locally"
+run = "bun run dev:api"
+
+[tasks."dev:mcp"]
+description = "MCP worker, locally"
+run = "bun run dev:mcp"
+
+[tasks."dev:landing"]
+description = "Landing site, locally"
+run = "bun run dev:landing"
+
+[tasks.build]
+description = "Build the desktop app bundle (dist/)"
+run = "bun run build"
+
+[tasks."app:package"]
+description = "Build Lanework.app, unpacked, into apps/desktop/release/mac-arm64"
+run = "bun run package"
+
+[tasks."app:dmg"]
+description = "Build the macOS installer, apps/desktop/release/Lanework-<version>-arm64.dmg"
+dir = "apps/desktop"
+run = ["bun run build", "bunx electron-builder --mac"]
+
+[tasks."app:install"]
+description = "Build Lanework.app and replace the copy in /Applications"
+depends = ["app:package"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+app="apps/desktop/release/mac-arm64/Lanework.app"
+[ -d "$app" ] || { echo "No $app — the package step did not produce it." >&2; exit 1; }
+# Quit a running copy first: replacing an app that is open leaves the old
+# build running, which looks exactly like the update did nothing.
+osascript -e 'tell application "Lanework" to quit' >/dev/null 2>&1 || true
+rm -rf /Applications/Lanework.app
+cp -R "$app" /Applications/
+echo "Installed /Applications/Lanework.app"
+'''
+
+[tasks.typecheck]
+description = "Typecheck every package"
+run = "bun run typecheck"
+
+[tasks.lint]
+description = "Biome and the layout audit"
+run = "bun run lint"
+
+[tasks.gate]
+description = "Everything that must pass before a commit: builds, lint, typecheck"
+run = "bun run gate"
+
+[tasks.test]
+description = "Desktop Playwright suite (production build)"
+run = "bun run test"
+
+[tasks."test:packaged"]
+description = "Playwright against the packaged app"
+run = "bun run test:packaged"
