@@ -10,18 +10,18 @@ import {
   useState,
 } from "react";
 import {
+  FILE_TREE_ICONS,
+  TREE_ICON_TINT_CSS,
+  TREE_ICON_TONES,
+} from "#/components/shared/diff/diff-icons";
+import { useDark } from "#/components/shared/diff/use-dark";
+import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
 } from "#/components/ui/input-group";
 import { diffSource, usePulls } from "#/stores/pulls";
 import type { PullFile, PullFileStatus } from "../../../../shared/git";
-import {
-  FILE_TREE_ICONS,
-  TREE_ICON_TINT_CSS,
-  TREE_ICON_TONES,
-} from "./diff-view.icons";
-import { useDark } from "./diff-view.theme";
 
 /**
  * The files in the open pull request, as a tree, in a panel of its own.

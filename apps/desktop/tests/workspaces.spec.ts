@@ -62,7 +62,7 @@ async function switchTo(page: Page, name: string): Promise<void> {
   // appear after `select` resolved.
   await expect(
     page
-      .getByText(/^(Live|Saved copy)$/)
+      .getByRole("button", { name: /^Refresh board — (Live|Saved copy)/ })
       .or(page.getByText("Board not available yet"))
       .or(page.getByText("Could not load this board", { exact: true }))
       .first(),
@@ -636,7 +636,9 @@ test("opening a workspace shows its cloud board, and a tick carries the revision
     // The list is the default view: the card's key and title on one row.
     await expect(page.getByText("FE-01", { exact: true })).toBeVisible();
     await expect(page.getByText("Cache the composer input")).toBeVisible();
-    await expect(page.getByText("Live", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /^Refresh board — Live/ }),
+    ).toBeVisible();
 
     // ⚠️ No checkbox on the LIST, and there never could have been: a board is
     // read through `GET /items`, which serializes without parts, so no card
@@ -803,7 +805,9 @@ test("the board write surface edits, reorders, looks up and follows changes", as
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Cloud project");
-    await expect(page.getByText("Live", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /^Refresh board — Live/ }),
+    ).toBeVisible();
 
     const result = await page.evaluate(async () => {
       const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
@@ -985,7 +989,9 @@ test("a checklist is rewritten whole, and ticked boxes survive the rewrite", asy
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Cloud project");
-    await expect(page.getByText("Live", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /^Refresh board — Live/ }),
+    ).toBeVisible();
 
     const result = await page.evaluate(async () => {
       const api = (globalThis as unknown as { desktop: DesktopApi }).desktop

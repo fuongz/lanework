@@ -1,7 +1,7 @@
 // The terminal panel end to end, with real shells in the real pty host
 // (FE-19 V2). What these pin is the reason the host exists: a shell outlives
 // every view of it — a hidden panel, another project, a reloaded window.
-import { mkdir, mkdtemp, realpath } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
@@ -328,6 +328,82 @@ test("a closed tab stops its shell, and + starts another", async () => {
 });
 
 /** Drag one tab by its label and let go over another's far half. */
+test("⇧↩ sends a new line without submitting, and a dropped file is typed as its quoted path", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home } = await seedProfile(plane.origin);
+  const dropped = join(
+    await realpath(await mkdtemp(join(tmpdir(), "lanework-drop-"))),
+    "export (3).csv",
+  );
+  await writeFile(dropped, "a,b\n");
+  const app = await boot(profile, home, plane.origin);
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    await menu(app, "terminal-toggle");
+    await expect(tabs(page)).toHaveCount(1);
+
+    // Raw mode, so the bytes arrive as sent: ESC + CR for ⇧↩, and ONE CR —
+    // xterm's own Enter must not follow it.
+    await run(
+      page,
+      "stty raw -echo; echo raw-$((40+2)); head -c 4 | od -An -tx1; stty sane",
+    );
+    await expect(screen(page)).toContainText("raw-42");
+    await page.keyboard.type("a");
+    await page.keyboard.press("Shift+Enter");
+    await page.keyboard.type("b");
+    await expect(screen(page)).toContainText("61 1b 0d 62");
+
+    // A real file-backed File, the way Finder hands one over.
+    await run(page, "clear");
+    await panel(page).locator(".xterm").click();
+    await page.keyboard.type("echo ");
+    await page.evaluate(() => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.id = "drop-source";
+      input.hidden = true;
+      document.body.append(input);
+    });
+    await page.setInputFiles("#drop-source", dropped);
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>("#drop-source");
+      const target = document.querySelector(".xterm")?.parentElement;
+      const data = new DataTransfer();
+      for (const file of Array.from(input?.files ?? [])) data.items.add(file);
+      target?.dispatchEvent(
+        new DragEvent("dragover", {
+          dataTransfer: data,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      target?.dispatchEvent(
+        new DragEvent("drop", {
+          dataTransfer: data,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    // Typed quoted, and the shell reads it back as one argument.
+    await expect(screen(page)).toContainText("export (3).csv'");
+    await page.keyboard.press("Enter");
+    // The echoed line, then echo's output — the path again, unquoted.
+    const path = dropped.replace(/[()./]/g, "\\$&");
+    await expect(screen(page)).toContainText(
+      new RegExp(`'${path}'\\s*${path}(?!')`),
+    );
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
 async function dragTab(page: Page, from: number, to: number) {
   const start = await tabs(page)
     .nth(from)

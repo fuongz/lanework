@@ -157,8 +157,11 @@ const THEME = EditorView.theme({
   // panel, and a box drawn around one on focus reads as a form on a surface
   // meant to read as a document.
   "&.cm-focused": { outline: "none" },
+  // The content font (FE-21): what is written here is what `MarkdownBody`
+  // shows once saved, and should not change face on the way.
   ".cm-scroller": {
-    fontFamily: "inherit",
+    fontFamily: "var(--content-font)",
+    fontWeight: "var(--content-font-weight)",
     lineHeight: "1.65",
     overflow: "auto",
   },
@@ -185,7 +188,7 @@ const HIGHLIGHT = HighlightStyle.define([
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.link, color: "var(--accent-brand)" },
   { tag: tags.url, color: "var(--muted-foreground)" },
-  { tag: tags.monospace, fontFamily: "var(--font-mono, ui-monospace)" },
+  { tag: tags.monospace, fontFamily: "var(--code-font)" },
   { tag: tags.processingInstruction, color: "var(--muted-foreground)" },
   { tag: tags.quote, color: "var(--muted-foreground)" },
 ]);

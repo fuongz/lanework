@@ -1,11 +1,32 @@
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
 import { TERMINAL_LIMITS, type TerminalSession } from "#/../shared/terminal";
-import { readTerminalColors, terminalFontFamily } from "#/lib/terminal-theme";
+import { fontStack } from "#/lib/fonts";
+import { readTerminalColors } from "#/lib/terminal-theme";
+import { usePreferences } from "#/stores/preferences";
 import { useTerminal } from "#/stores/terminal";
 
 /** How long a drag has to settle before the shell is told its new size. */
 const RESIZE_SETTLE_MS = 60;
+
+/**
+ * What ⇧↩ sends: ESC + CR, the same bytes Claude Code's `/terminal-setup`
+ * binds it to. Claude Code and Codex read it as "new line, don't submit"; zsh
+ * inserts a literal newline. A bare CR would submit the prompt.
+ */
+const SHIFT_ENTER = "\x1b\r";
+
+/** Characters a shell never needs quoted — a path made only of these goes raw. */
+const SHELL_SAFE = /^[\w@%+=:,./-]+$/;
+
+/**
+ * A dropped path as Terminal.app types it: single-quoted when it needs it, so
+ * `export (3).csv` reaches the shell and an agent's prompt as ONE argument.
+ */
+function quotePath(path: string): string {
+  if (SHELL_SAFE.test(path)) return path;
+  return `'${path.replaceAll("'", `'\\''`)}'`;
+}
 
 /**
  * One terminal on screen: an xterm attached to a session in the pty host.
@@ -45,8 +66,16 @@ export function XtermPane({ session }: { session: TerminalSession }) {
       const reduced = window.matchMedia(
         "(prefers-reduced-motion: reduce)",
       ).matches;
+      // Loaded before xterm measures its cell: a family still loading is
+      // measured as the fallback, and every row is laid out that wide.
+      const code = usePreferences.getState().fonts.code;
+      await document.fonts
+        .load(`12.5px ${fontStack("code", code)}`)
+        .catch(() => undefined);
+      if (disposed) return;
       const term = new Terminal({
-        fontFamily: terminalFontFamily(),
+        fontFamily: fontStack("code", code),
+        fontWeight: code?.weight ?? 400,
         fontSize: 12.5,
         lineHeight: 1.2,
         cursorStyle: "bar",
@@ -80,6 +109,46 @@ export function XtermPane({ session }: { session: TerminalSession }) {
 
       const typing = term.onData((data) => surface.input(session.id, data));
       cleanup.push(() => typing.dispose());
+
+      // ⚠️ Returning false for EVERY event of a ⇧↩ — keydown and keypress —
+      // or xterm still sends its own CR from the one we let through.
+      term.attachCustomKeyEventHandler((event) => {
+        const shiftEnter =
+          event.key === "Enter" &&
+          event.shiftKey &&
+          !event.altKey &&
+          !event.ctrlKey &&
+          !event.metaKey;
+        if (!shiftEnter) return true;
+        if (event.type === "keydown") surface.input(session.id, SHIFT_ENTER);
+        return false;
+      });
+
+      // Files dragged in from Finder are typed as their paths, the way a
+      // terminal does it — what Claude Code and Codex take as an attachment.
+      const onDragOver = (event: DragEvent) => {
+        if (!event.dataTransfer?.types.includes("Files")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      };
+      const onDrop = (event: DragEvent) => {
+        const files = Array.from(event.dataTransfer?.files ?? []);
+        if (files.length === 0) return;
+        event.preventDefault();
+        const paths = files
+          .map((file) => surface.pathForFile(file))
+          .filter(Boolean)
+          .map(quotePath);
+        if (paths.length === 0) return;
+        surface.input(session.id, `${paths.join(" ")} `);
+        term.focus();
+      };
+      element.addEventListener("dragover", onDragOver);
+      element.addEventListener("drop", onDrop);
+      cleanup.push(() => {
+        element.removeEventListener("dragover", onDragOver);
+        element.removeEventListener("drop", onDrop);
+      });
 
       let settle: number | undefined;
       const resized = term.onResize(({ cols, rows }) => {
@@ -120,6 +189,30 @@ export function XtermPane({ session }: { session: TerminalSession }) {
         attributeFilter: ["class"],
       });
       cleanup.push(() => theme.disconnect());
+
+      // The code font picked in Settings, applied to a terminal already open
+      // (FE-21/D5). The cell size changes with it, so it is refitted — and the
+      // shell told — the way a drag would.
+      cleanup.push(
+        usePreferences.subscribe((state, previous) => {
+          const next = state.fonts.code;
+          if (next === previous.fonts.code) return;
+          const family = fontStack("code", next);
+          void document.fonts
+            .load(`12.5px ${family}`)
+            .catch(() => undefined)
+            .then(() => {
+              if (disposed) return;
+              term.options.fontFamily = family;
+              term.options.fontWeight = next?.weight ?? 400;
+              try {
+                fit.fit();
+              } catch {
+                // Hidden right now; the observer fits it when it shows.
+              }
+            });
+        }),
+      );
 
       term.focus();
     })();

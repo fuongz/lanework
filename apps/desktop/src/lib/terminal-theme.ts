@@ -127,13 +127,3 @@ export function readTerminalColors(
     ...(dark ? DARK_ANSI : LIGHT_ANSI),
   };
 }
-
-/** The app's monospace stack, with the fonts xterm can measure behind it. */
-export function terminalFontFamily(
-  root: HTMLElement = document.documentElement,
-): string {
-  const token = getComputedStyle(root).getPropertyValue("--font-mono").trim();
-  return [token || "ui-monospace", "SFMono-Regular", "Menlo", "monospace"].join(
-    ", ",
-  );
-}

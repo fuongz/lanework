@@ -57,7 +57,7 @@ export function MarkdownBody({ source }: { source: string }) {
       </Empty>
     );
   return (
-    <div className="flex flex-col gap-3 text-[13px] leading-relaxed">
+    <div className="font-content flex flex-col gap-3 text-[13px] leading-relaxed [font-weight:var(--content-font-weight)]">
       {parseMarkdown(source).map((block, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: a parsed document is positional and never reorders — the index is the block's identity.
         <BlockView key={`${block.kind}-${index}`} block={block} />

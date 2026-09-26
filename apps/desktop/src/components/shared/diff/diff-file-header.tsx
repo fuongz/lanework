@@ -5,8 +5,8 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
-import { FileTypeIcon } from "./diff-view.icons";
+import { type ReactNode, useEffect, useState } from "react";
+import { FileTypeIcon } from "./diff-icons";
 
 /**
  * The row that names one file in a diff.
@@ -85,6 +85,8 @@ export function DiffFileHeader({
   deletions,
   collapsed,
   onToggle,
+  leading,
+  actions,
 }: {
   path: string;
   previousPath: string | null;
@@ -92,6 +94,13 @@ export function DiffFileHeader({
   deletions: number;
   collapsed: boolean;
   onToggle: () => void;
+  /** Before the icon — the stage checkbox on a local change (FE-22). */
+  leading?: ReactNode;
+  /**
+   * After the counts, and ALWAYS visible — unlike copy and fold, which wait for
+   * hover. A local change's Restore is a thing somebody came to this row to do.
+   */
+  actions?: ReactNode;
 }) {
   const { dir, name } = splitPath(path);
 
@@ -104,6 +113,7 @@ export function DiffFileHeader({
     // is what separates them — 44px of height plus 8px of gap was a card, and a
     // list of forty of them scrolled like one.
     <div className="group hover:bg-foreground/[0.04] focus-within:bg-foreground/[0.04] border-sidebar-border flex h-9 min-w-0 items-center gap-2 border-b px-4">
+      {leading}
       <FileTypeIcon path={path} className="size-4 shrink-0" />
 
       {/* ⚠️ The whole name is the fold control, as it is in a file list — the
@@ -133,7 +143,11 @@ export function DiffFileHeader({
         </span>
       )}
 
-      <span className="shrink-0 font-mono text-[11px] tabular-nums">
+      {/* Pushed right only when there are actions to sit beside; the pull
+          request's header keeps its counts beside the name, as before. */}
+      <span
+        className={`${actions ? "ml-auto " : ""}shrink-0 font-mono text-[11px] tabular-nums`}
+      >
         {additions > 0 && (
           <span className="text-emerald-600 dark:text-emerald-400">
             +{additions}
@@ -166,6 +180,7 @@ export function DiffFileHeader({
           />
         </button>
       </span>
+      {actions}
     </div>
   );
 }

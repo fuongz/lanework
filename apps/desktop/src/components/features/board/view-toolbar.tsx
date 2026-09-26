@@ -5,7 +5,7 @@ import {
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { motion } from "motion/react";
+import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { Button } from "#/components/ui/button";
 import {
   Select,
@@ -14,9 +14,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "#/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "#/components/ui/tooltip";
 import { GROUP_BY, type GroupBy } from "#/lib/board-view";
 import type { IssueSearch } from "#/lib/issue-search";
-import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { FilterBar } from "./filter-bar";
 
@@ -34,7 +38,7 @@ const GROUP_LABEL: Record<GroupBy, string> = {
 };
 
 /**
- * How fresh the board is.
+ * How fresh the board is, as the refresh button's tooltip.
  *
  * ⚠️ Two states with two different glyphs and two different words, never one
  * string with a separator in it. "Nothing here" and "I could not ask" look
@@ -43,7 +47,7 @@ const GROUP_LABEL: Record<GroupBy, string> = {
  */
 function Freshness({ stale, at }: { stale: boolean; at: string }) {
   return (
-    <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+    <span className="flex items-center gap-1.5">
       {stale ? (
         <HugeiconsIcon
           icon={CloudSavingDone01Icon}
@@ -72,7 +76,7 @@ function Freshness({ stale, at }: { stale: boolean; at: string }) {
  * they switch is how THIS region is drawn, not which panel is shown.
  *
  * ⚠️ Labelled, not icon-only: two glyphs side by side made you hover to learn
- * which was which. The pill SLIDES between them (a shared `layoutId`) inside a
+ * which was which. The pill SLIDES between them (`SegmentedControl`) inside a
  * bar that stays mounted across the switch (`IssuesView` owns it), so it only
  * ever glides between its own two positions — never in from wherever a
  * previous page left it. `MotionConfig reducedMotion="user"` at the root turns the glide into a jump
@@ -85,56 +89,18 @@ function ViewSwitch({
   search: IssueSearch;
   onSearch: (next: IssueSearch) => void;
 }) {
-  const current = search.view ?? "list";
-  const options = [
-    { value: "list", label: "List", icon: Menu01Icon },
-    { value: "board", label: "Board", icon: GridViewIcon },
-  ] as const;
   return (
-    <div
-      role="group"
-      aria-label="View"
-      className="bg-foreground/[0.05] flex items-center gap-0.5 rounded-full p-0.5"
-    >
-      {options.map((option) => {
-        const on = current === option.value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={on}
-            onClick={() => {
-              if (on) return;
-              onSearch({
-                ...search,
-                view: option.value === "board" ? "board" : undefined,
-              });
-            }}
-            className={cn(
-              "focus-visible:ring-ring/40 relative flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors duration-150 outline-none focus-visible:ring-2",
-              on
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {on && (
-              <motion.span
-                layoutId="issue-view-pill"
-                aria-hidden="true"
-                className="bg-background dark:bg-foreground/15 absolute inset-0 rounded-full shadow-sm"
-                transition={{ type: "spring", duration: 0.35, bounce: 0.18 }}
-              />
-            )}
-            <HugeiconsIcon
-              icon={option.icon}
-              className="relative size-3.5"
-              strokeWidth={1.6}
-            />
-            <span className="relative">{option.label}</span>
-          </button>
-        );
-      })}
-    </div>
+    <SegmentedControl
+      label="View"
+      value={search.view ?? "list"}
+      options={[
+        { value: "list", label: "List", icon: Menu01Icon },
+        { value: "board", label: "Board", icon: GridViewIcon },
+      ]}
+      onChange={(value) =>
+        onSearch({ ...search, view: value === "board" ? "board" : undefined })
+      }
+    />
   );
 }
 
@@ -209,21 +175,46 @@ export function ViewToolbar({
 
         <FilterBar search={search} onSearch={onSearch} />
 
-        {view && <Freshness stale={view.stale} at={view.fetchedAt} />}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          aria-label="Refresh board"
-          disabled={loading}
-          onClick={() => void reload()}
-        >
-          <HugeiconsIcon
-            icon={Refresh01Icon}
-            className="size-4"
-            strokeWidth={1.5}
-          />
-        </Button>
+        {/* ⚠️ The freshness lives in the TOOLTIP now, and in the button's name
+            for anybody who cannot hover. A SAVED copy still marks the button
+            itself — the one state that must not wait for a hover to be seen. */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative size-7"
+                aria-label={
+                  view
+                    ? `Refresh board — ${view.stale ? "Saved copy" : "Live"}, ${when(view.fetchedAt)}`
+                    : "Refresh board"
+                }
+                disabled={loading}
+                onClick={() => void reload()}
+              />
+            }
+          >
+            <HugeiconsIcon
+              icon={Refresh01Icon}
+              className="size-4"
+              strokeWidth={1.5}
+            />
+            {view?.stale && (
+              <span
+                aria-hidden="true"
+                className="bg-tone-amber absolute top-1 right-1 size-1.5 rounded-full"
+              />
+            )}
+          </TooltipTrigger>
+          <TooltipContent>
+            {view ? (
+              <Freshness stale={view.stale} at={view.fetchedAt} />
+            ) : (
+              "Refresh board"
+            )}
+          </TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

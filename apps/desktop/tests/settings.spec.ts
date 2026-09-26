@@ -252,6 +252,69 @@ test("appearance switches the window between light, dark and the system", async 
   }
 });
 
+test("the code font is picked from this Mac's fonts, reaches the preview, and outlives a reload", async () => {
+  test.skip(process.platform !== "darwin", "Menlo ships with macOS only.");
+  const { page, cleanup } = await open();
+  try {
+    await page.goto("app://lanework/settings/appearance");
+    const family = page.getByRole("combobox", { name: "Code font family" });
+    const style = page.getByRole("combobox", { name: "Code font style" });
+    const preview = page.getByRole("figure", { name: "Code font preview" });
+    const codeFont = () =>
+      page.evaluate(() =>
+        document.documentElement.style.getPropertyValue("--code-font"),
+      );
+
+    // At its default there is no family, so no style to pick.
+    await expect(family).toHaveText(/Default/);
+    await expect(style).toBeDisabled();
+
+    // The list is the machine's own — queryLocalFonts, granted by main.
+    // Searchable: typing narrows hundreds of families, and hides the
+    // default — it is not a font a search should turn up.
+    await family.click();
+    await expect(page.getByRole("option", { name: "Default" })).toBeVisible();
+    await page.getByPlaceholder("Search fonts").fill("menl");
+    await expect(page.getByRole("option", { name: "Default" })).toHaveCount(0);
+    await page.getByRole("option", { name: "Menlo", exact: true }).click();
+    await expect(family).toHaveText(/Menlo/);
+    await expect(style).toBeEnabled();
+    await expect(style).toHaveText(/Regular/);
+    expect(await codeFont()).toContain('"Menlo"');
+    await expect
+      .poll(() =>
+        preview.evaluate(
+          (node) =>
+            getComputedStyle(node.firstElementChild as Element).fontFamily,
+        ),
+      )
+      .toContain("Menlo");
+
+    await style.click();
+    await page.getByRole("option", { name: "Bold", exact: true }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          document.documentElement.style.getPropertyValue("--code-font-weight"),
+        ),
+      )
+      .toBe("700");
+
+    await page.reload();
+    await expect(family).toHaveText(/Menlo/);
+    await expect(style).toHaveText(/Bold/);
+    expect(await codeFont()).toContain('"Menlo"');
+
+    // Back to the default clears the override rather than pinning a value.
+    await family.click();
+    await page.getByRole("option", { name: "Default", exact: true }).click();
+    await expect(style).toBeDisabled();
+    expect(await codeFont()).toBe("");
+  } finally {
+    await cleanup();
+  }
+});
+
 test("settings looks the way it was reviewed", async () => {
   const { page, cleanup } = await open();
   try {

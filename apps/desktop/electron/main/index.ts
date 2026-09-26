@@ -78,7 +78,8 @@ app
   .whenReady()
   .then(() => {
     /**
-     * Everything is refused except writing text to the clipboard.
+     * Everything is refused except writing text to the clipboard and listing
+     * the installed fonts.
      *
      * ⚠️ `clipboard-sanitized-write` is what `navigator.clipboard.writeText`
      * asks for, and a blanket `false` here is not a no-op: it makes every Copy
@@ -90,9 +91,15 @@ app
      * out the ability to put a filename somewhere the user asked for it, and
      * nothing else. Camera, microphone, geolocation, notifications and the
      * clipboard's contents are all still denied.
+     *
+     * `local-fonts` is `queryLocalFonts()`, which Settings → Appearance lists
+     * the font pickers from (FE-21). It names the fonts this Mac has — nothing
+     * a page could not already probe one family at a time — and the window
+     * only ever loads the app's own origin.
      */
     const allowed = (permission: string) =>
-      permission === "clipboard-sanitized-write";
+      permission === "clipboard-sanitized-write" ||
+      permission === "local-fonts";
     session.defaultSession.setPermissionRequestHandler(
       (_contents, permission, callback) => callback(allowed(permission)),
     );

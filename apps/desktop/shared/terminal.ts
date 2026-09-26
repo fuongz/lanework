@@ -140,6 +140,11 @@ export interface DesktopTerminalApi {
     handlers: TerminalViewHandlers,
   ) => () => void;
   input: (id: string, data: string) => void;
+  /**
+   * The absolute path of a file dropped on a view. Only the preload can read
+   * it (`webUtils`); a dropped `File` no longer carries `.path`.
+   */
+  pathForFile: (file: File) => string;
   resize: (id: string, cols: number, rows: number) => void;
   /** A workspace's sessions changed; `"*"` when every one may have. */
   onChange: (listener: (workspace: string) => void) => () => void;

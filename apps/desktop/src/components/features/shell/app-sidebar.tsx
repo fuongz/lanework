@@ -1,4 +1,6 @@
 import {
+  Clock01Icon,
+  GitCompareIcon,
   GitPullRequestIcon,
   ListViewIcon,
   PencilEdit02Icon,
@@ -8,13 +10,15 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { AccountOrb } from "#/components/shared/common/account-orb";
 import { Kbd } from "#/components/ui/kbd";
 import { useBoard } from "#/stores/board";
 import { useCommandPalette } from "#/stores/command-palette";
 import { useIssueView } from "#/stores/issue-view";
 import { usePulls } from "#/stores/pulls";
 import { useSession } from "#/stores/session";
-import { AccountOrb } from "./account-orb";
+import { useWorktree } from "#/stores/worktree";
+import { BranchSwitcher } from "./branch-switcher";
 import { ProjectSwitcher } from "./project-switcher";
 
 /** One row of the rail. The hover/active language is `settings-nav`'s, on purpose. */
@@ -49,7 +53,33 @@ export function AppSidebar() {
   // that fetched to draw its own badge would read GitHub on every start.
   const pulls = usePulls((state) => state.view);
   const session = useSession((state) => state.session);
+  // ⚠️ Two selectors returning numbers, not one returning `{ additions,
+  // deletions }`: a fresh object on every read is a new value to zustand, and
+  // the rail would re-render on every store change.
+  const added = useWorktree((state) =>
+    state.slug === slug && state.state?.kind === "ready"
+      ? state.state.files.reduce((sum, file) => sum + file.additions, 0)
+      : 0,
+  );
+  const removed = useWorktree((state) =>
+    state.slug === slug && state.state?.kind === "ready"
+      ? state.state.files.reduce((sum, file) => sum + file.deletions, 0)
+      : 0,
+  );
   const navigate = useNavigate();
+  const peek = useWorktree((state) => state.peek);
+
+  // ⚠️ Read with the board, not when Changes is opened: the badge is the reason
+  // to open Changes, so it cannot wait for it. `git status` only — the patch
+  // stays the Changes screen's to read — on project change and on focus, never
+  // on a timer.
+  useEffect(() => {
+    if (!slug) return;
+    void peek(slug);
+    const onFocus = () => void peek(slug);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [peek, slug]);
 
   // ⚠️ ⌘N is free on macOS: Electron's default menu binds ⌘W and ⌘Q, never ⌘N,
   // so nothing native swallows this before the window sees it.
@@ -155,6 +185,61 @@ export function AppSidebar() {
                   {view.total ?? view.cards.length}
                 </span>
               )}
+            </Link>
+          </nav>
+        )}
+        {/* The repository, not the board: its working tree, its history and its
+            pull requests (FE-22). */}
+        {slug && (
+          <nav aria-label="Repository" className="flex flex-col gap-0.5">
+            {/* ⚠️ The label keeps its own padding; the row only puts the branch
+                beside it, bottom-aligned so the two read as one line. */}
+            <div className="flex min-w-0 items-end justify-between gap-2 pr-1">
+              <SectionLabel>Repository</SectionLabel>
+              <BranchSwitcher slug={slug} />
+            </div>
+            <Link
+              to="/w/$slug/changes"
+              params={{ slug }}
+              className={ROW}
+              activeProps={ACTIVE}
+            >
+              <HugeiconsIcon
+                icon={GitCompareIcon}
+                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 truncate">Changes</span>
+              {(added > 0 || removed > 0) && (
+                <span className="ml-auto shrink-0 text-xs tabular-nums">
+                  {added > 0 && (
+                    <span className="text-emerald-600 dark:text-emerald-400">
+                      +{added}
+                    </span>
+                  )}
+                  {added > 0 && removed > 0 && " "}
+                  {removed > 0 && (
+                    <span className="text-rose-600 dark:text-rose-400">
+                      −{removed}
+                    </span>
+                  )}
+                </span>
+              )}
+            </Link>
+            <Link
+              to="/w/$slug/history"
+              params={{ slug }}
+              className={ROW}
+              activeProps={ACTIVE}
+            >
+              <HugeiconsIcon
+                icon={Clock01Icon}
+                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 truncate">History</span>
             </Link>
             <Link
               to="/w/$slug/pulls"

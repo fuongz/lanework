@@ -52,6 +52,7 @@ import {
   writeRepo,
   writeToken,
 } from "./store";
+import { registerWorktree } from "./worktree-ipc";
 
 /**
  * How long a pull-request read stays fresh.
@@ -192,6 +193,8 @@ const VERDICTS = new Set<ReviewVerdict>([
 ]);
 
 export function registerGit(devUrl?: string): void {
+  registerWorktree(devUrl);
+
   handle(gitChannels.account, devUrl, async (): Promise<GitAccount> => {
     return account(await readToken(await authorizedRecord()));
   });

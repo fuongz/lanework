@@ -2,9 +2,54 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { isThemeSource, type ThemeSource } from "../../shared/desktop";
 
+/** One installed font, as a picker saves it: the family and a style of it. */
+export interface FontChoice {
+  family: string;
+  /** The style's own name, as the font calls it — "Regular", "Medium"… */
+  style: string;
+  weight: number;
+}
+
+/** A role left `null` falls back: UI and code to the app's, content to UI's. */
+export interface FontPreferences {
+  ui: FontChoice | null;
+  content: FontChoice | null;
+  code: FontChoice | null;
+}
+
+export type FontRole = keyof FontPreferences;
+
+const NO_FONTS: FontPreferences = { ui: null, content: null, code: null };
+
+function isFontChoice(value: unknown): value is FontChoice {
+  if (!value || typeof value !== "object") return false;
+  const { family, style, weight } = value as Record<string, unknown>;
+  return (
+    typeof family === "string" &&
+    family.length > 0 &&
+    typeof style === "string" &&
+    typeof weight === "number" &&
+    weight >= 1 &&
+    weight <= 1000
+  );
+}
+
+function readFonts(value: unknown): FontPreferences {
+  if (!value || typeof value !== "object") return NO_FONTS;
+  const saved = value as Record<string, unknown>;
+  const pick = (role: FontRole) => {
+    const choice = saved[role];
+    return isFontChoice(choice) ? choice : null;
+  };
+  return { ui: pick("ui"), content: pick("content"), code: pick("code") };
+}
+
 interface Preferences {
   theme: ThemeSource;
   setTheme: (value: ThemeSource) => void;
+  /** Per machine, like the theme (FE-21). */
+  fonts: FontPreferences;
+  setFont: (role: FontRole, value: FontChoice | null) => void;
   /**
    * Whether the first-run tour has been walked through on this machine.
    *
@@ -30,6 +75,9 @@ export const usePreferences = create<Preferences>()(
     (set) => ({
       theme: "system",
       setTheme: (theme) => set({ theme }),
+      fonts: NO_FONTS,
+      setFont: (role, value) =>
+        set((state) => ({ fonts: { ...state.fonts, [role]: value } })),
       onboarded: false,
       completeOnboarding: () => set({ onboarded: true }),
       hydrated: false,
@@ -39,7 +87,11 @@ export const usePreferences = create<Preferences>()(
       version: 1,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
-      partialize: ({ theme, onboarded }) => ({ theme, onboarded }),
+      partialize: ({ theme, onboarded, fonts }) => ({
+        theme,
+        onboarded,
+        fonts,
+      }),
       onRehydrateStorage: () => () =>
         usePreferences.setState({ hydrated: true }),
       // ⚠️ Still version 1, and `compact` simply stops being read. A bump would
@@ -50,6 +102,9 @@ export const usePreferences = create<Preferences>()(
         return {
           ...current,
           theme: isThemeSource(saved?.theme) ? saved.theme : "system",
+          // A new key, so still version 1: a record without it reads as the
+          // defaults, and a malformed one as the defaults role by role.
+          fonts: readFonts(saved?.fonts),
           // A record that predates this key belongs to someone who has already
           // used the app; only a machine with NOTHING saved is actually new.
           // Otherwise shipping the tour would replay it for every existing

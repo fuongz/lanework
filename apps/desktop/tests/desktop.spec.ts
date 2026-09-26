@@ -100,6 +100,7 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       "auth",
       "workspaces",
       "git",
+      "worktree",
       "terminal",
     ]);
     expect(

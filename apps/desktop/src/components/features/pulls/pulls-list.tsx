@@ -16,6 +16,7 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -282,29 +283,23 @@ export function PullsList() {
       {connected ? (
         <>
           <div className="flex h-9 shrink-0 items-center gap-1 pe-2 ps-[max(0.5rem,var(--titlebar-clear,0px))]">
-            {PULL_TABS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                aria-current={tab === value ? "page" : undefined}
-                onClick={() =>
-                  void navigate({
-                    to: "/w/$slug/pulls",
-                    params: { slug },
-                    search: { tab: value, status },
-                    replace: true,
-                  })
-                }
-                className={cn(
-                  "h-6 rounded-md px-2 text-xs transition-colors",
-                  tab === value
-                    ? "bg-foreground/[0.08] text-foreground"
-                    : "text-muted-foreground hover:bg-foreground/[0.04]",
-                )}
-              >
-                {TAB_LABEL[value]}
-              </button>
-            ))}
+            <SegmentedControl
+              label="Pull requests"
+              semantics="current"
+              value={tab}
+              options={PULL_TABS.map((value) => ({
+                value,
+                label: TAB_LABEL[value],
+              }))}
+              onChange={(value) =>
+                void navigate({
+                  to: "/w/$slug/pulls",
+                  params: { slug },
+                  search: { tab: value, status },
+                  replace: true,
+                })
+              }
+            />
 
             <DropdownMenu>
               <DropdownMenuTrigger

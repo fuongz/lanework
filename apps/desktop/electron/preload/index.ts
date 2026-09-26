@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webFrame } from "electron";
+import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 import { authChannels, type DesktopAuthApi } from "../../shared/auth";
 import { channels, type DesktopApi } from "../../shared/desktop";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
@@ -11,6 +11,10 @@ import {
   terminalChannels,
 } from "../../shared/terminal";
 import { workspaceChannels } from "../../shared/workspaces";
+import {
+  type DesktopWorktreeApi,
+  worktreeChannels,
+} from "../../shared/worktree";
 
 /** Subscribe to a main→renderer channel, returning an unsubscribe function. */
 function subscribe<T>(
@@ -36,6 +40,34 @@ const auth: DesktopAuthApi = {
   cancelSignIn: () => ipcRenderer.invoke(authChannels.cancel),
   onSessionChange: (listener) => subscribe(authChannels.changed, listener),
   onSignInProgress: (listener) => subscribe(authChannels.progress, listener),
+};
+
+/**
+ * The local-repository surface (FE-22).
+ *
+ * ⚠️ Every call names a project, never a folder; main resolves it. Paths are
+ * the ones `status` answered, and main re-checks them against a fresh status
+ * before it acts.
+ */
+const worktree: DesktopWorktreeApi = {
+  status: (slug) => ipcRenderer.invoke(worktreeChannels.status, slug),
+  patch: (slug) => ipcRenderer.invoke(worktreeChannels.patch, slug),
+  fileText: (slug, path, side) =>
+    ipcRenderer.invoke(worktreeChannels.fileText, slug, path, side),
+  stage: (slug, paths) =>
+    ipcRenderer.invoke(worktreeChannels.stage, slug, paths),
+  unstage: (slug, paths) =>
+    ipcRenderer.invoke(worktreeChannels.unstage, slug, paths),
+  restore: (slug, paths) =>
+    ipcRenderer.invoke(worktreeChannels.restore, slug, paths),
+  commit: (slug, message, mode) =>
+    ipcRenderer.invoke(worktreeChannels.commit, slug, message, mode),
+  fetch: (slug) => ipcRenderer.invoke(worktreeChannels.fetch, slug),
+  log: (slug, skip) => ipcRenderer.invoke(worktreeChannels.log, slug, skip),
+  show: (slug, sha) => ipcRenderer.invoke(worktreeChannels.show, slug, sha),
+  branches: (slug) => ipcRenderer.invoke(worktreeChannels.branches, slug),
+  switchBranch: (slug, name) =>
+    ipcRenderer.invoke(worktreeChannels.switchBranch, slug, name),
 };
 
 /**
@@ -172,6 +204,7 @@ function createTerminal(): DesktopTerminalApi {
       };
     },
     input: (id, data) => post({ t: "input", id, data }),
+    pathForFile: (file) => webUtils.getPathForFile(file),
     resize: (id, cols, rows) => post({ t: "resize", id, cols, rows }),
     onChange: (listener) => {
       changeListeners.add(listener);
@@ -359,6 +392,7 @@ const desktop: DesktopApi = {
     },
   },
   git,
+  worktree,
   terminal: createTerminal(),
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

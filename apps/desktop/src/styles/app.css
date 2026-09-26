@@ -259,10 +259,28 @@
   --file-icon-mauve: oklch(0.68 0.05 320); /* 6.73:1 */
 }
 
+/* The three fonts Settings → Appearance picks (FE-21). `useFonts` overrides
+   them on <html>; these are the defaults it falls back to.
+   ⚠️ Plain properties, then mapped in `@theme inline` below. `inline` writes a
+   theme value straight into the utility, so overriding `--font-sans` itself at
+   runtime would change nothing — overriding what it points at does. */
+:root {
+  --ui-font: "Inter Variable", sans-serif;
+  --ui-font-weight: 400;
+  --content-font: var(--ui-font);
+  --content-font-weight: var(--ui-font-weight);
+  --code-font: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --code-font-weight: 400;
+  /* `@pierre/diffs` draws inside a shadow root; custom properties inherit
+     through it, so the PR diff follows the code font from here. */
+  --diffs-font-family: var(--code-font);
+}
+
 @theme inline {
-  --font-sans: "Inter Variable", sans-serif;
+  --font-sans: var(--ui-font);
   --font-heading: var(--font-sans);
-  --font-mono: ui-monospace, monospace;
+  --font-mono: var(--code-font);
+  --font-content: var(--content-font);
 
   --shadow-card: var(--elevation-card);
 
@@ -356,6 +374,7 @@
   }
   html {
     @apply font-sans;
+    font-weight: var(--ui-font-weight);
   }
 }
 

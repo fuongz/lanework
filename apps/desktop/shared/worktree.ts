@@ -1,0 +1,244 @@
+/**
+ * The project's LOCAL repository: its working tree, its index, its history
+ * (FE-22).
+ *
+ * ⚠️ Separate from `git.ts`, which is GitHub. Nothing here touches the network
+ * except `fetch`, nothing here needs a token, and a project with no GitHub
+ * connection at all still has a folder with changes in it.
+ *
+ * ⚠️ Every call names a PROJECT, never a folder. Main resolves the slug to the
+ * primary folder it wrote down itself, so no channel here can be pointed at an
+ * arbitrary directory on the machine.
+ */
+
+/** What happened to one file, in the working tree's own terms. */
+export type WorktreeFileStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "untracked"
+  | "conflicted";
+
+/**
+ * How much of a file's change is in the index.
+ *
+ * ⚠️ `partial` is real, not a rounding: a file staged and then edited again has
+ * one change in the index and another beside it. The checkbox shows it as
+ * indeterminate, and ticking it stages the rest.
+ */
+export type StagedState = "none" | "partial" | "full";
+
+export interface WorktreeFile {
+  path: string;
+  /** Set only on a rename, and then it is the name this file had before. */
+  previousPath: string | null;
+  status: WorktreeFileStatus;
+  staged: StagedState;
+  additions: number;
+  deletions: number;
+  /** True when git calls it binary — there are no lines to count or show. */
+  binary: boolean;
+}
+
+export interface CommitSummary {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  /** Everything after the subject line, trimmed. Empty for a one-line message. */
+  body: string;
+  authorName: string;
+  authorEmail: string;
+  /** ISO 8601, as git wrote it. */
+  authoredAt: string;
+}
+
+export interface BranchState {
+  /** Null when HEAD is detached. */
+  name: string | null;
+  /** Null when the branch has no upstream to be ahead of or behind. */
+  ahead: number | null;
+  behind: number | null;
+}
+
+/**
+ * What the project's folder turned out to be.
+ *
+ * ⚠️ Four ways to have nothing, each with its own sentence. "No folder linked",
+ * "the folder is gone", "not a git repository" and "git is not installed" need
+ * four different fixes, and one generic empty state would send somebody to the
+ * wrong one.
+ */
+export type WorktreeState =
+  | { kind: "none" }
+  | { kind: "missing"; path: string }
+  | { kind: "not-repo"; path: string }
+  | { kind: "no-git" }
+  | {
+      kind: "ready";
+      folder: string;
+      branch: BranchState;
+      files: WorktreeFile[];
+      /** The newest commit on HEAD, or null in a repository with none yet. */
+      head: CommitSummary | null;
+    };
+
+/**
+ * Every changed file as ONE unified patch, as git itself printed it.
+ *
+ * ⚠️ Full headers, unlike GitHub's per-file hunks. The viewer parses this as
+ * is; nothing has to rebuild `diff --git` lines the way the pull request screen
+ * does.
+ */
+export interface WorktreePatch {
+  patch: string;
+  /** Untracked files left out because there were too many to read. */
+  skipped: number;
+}
+
+export interface CommitHistory {
+  commits: CommitSummary[];
+  /** True when there is at least one more page. */
+  more: boolean;
+}
+
+export interface CommitChange {
+  commit: CommitSummary;
+  patch: string;
+  files: Pick<
+    WorktreeFile,
+    "path" | "previousPath" | "additions" | "deletions" | "binary"
+  >[];
+}
+
+/**
+ * The branches a project can switch to.
+ *
+ * ⚠️ `remote` leaves out every remote branch that already has a local branch of
+ * the same name: switching to `origin/main` when `main` exists would mean the
+ * local one, and listing both invites picking the wrong row.
+ */
+export interface BranchList {
+  /** Null when HEAD is detached. */
+  current: string | null;
+  /** Local branches, most recently committed first. */
+  local: string[];
+  /** `origin/name` form, most recently committed first. */
+  remote: string[];
+}
+
+/** One page of history. */
+export const HISTORY_PAGE = 100;
+
+/**
+ * Which side of a file to read, when the viewer expands unchanged lines.
+ *
+ * ⚠️ A revision the RENDERER names is only ever a sha it was given, or the
+ * literal `HEAD`. Main checks the shape before it reaches `git show`.
+ */
+export type FileSide = { kind: "worktree" } | { kind: "rev"; rev: string };
+
+/** How a commit is made: what is staged, or every tracked change. */
+export type CommitMode = "staged" | "tracked";
+
+export const worktreeChannels = {
+  status: "worktree:status",
+  patch: "worktree:patch",
+  fileText: "worktree:file",
+  stage: "worktree:stage",
+  unstage: "worktree:unstage",
+  restore: "worktree:restore",
+  commit: "worktree:commit",
+  fetch: "worktree:fetch",
+  log: "worktree:log",
+  show: "worktree:show",
+  branches: "worktree:branches",
+  switchBranch: "worktree:switch",
+} as const;
+
+/**
+ * The local-repository surface.
+ *
+ * ⚠️ Paths travel as the paths `status` answered, and main re-reads the status
+ * before acting on them: a path that is not a current change is refused rather
+ * than handed to `git`. That is what keeps `restore` — which deletes untracked
+ * files — from being a way to delete anything else.
+ */
+export interface DesktopWorktreeApi {
+  status: (slug: string) => Promise<WorktreeState>;
+  patch: (slug: string) => Promise<WorktreePatch>;
+  /** One side of one file in full, or null when that side does not exist. */
+  fileText: (
+    slug: string,
+    path: string,
+    side: FileSide,
+  ) => Promise<string | null>;
+  stage: (slug: string, paths: string[]) => Promise<WorktreeState>;
+  unstage: (slug: string, paths: string[]) => Promise<WorktreeState>;
+  /** Throw a change away. Untracked files are DELETED. */
+  restore: (slug: string, paths: string[]) => Promise<WorktreeState>;
+  commit: (
+    slug: string,
+    message: string,
+    mode: CommitMode,
+  ) => Promise<WorktreeState>;
+  fetch: (slug: string) => Promise<WorktreeState>;
+  log: (slug: string, skip: number) => Promise<CommitHistory>;
+  show: (slug: string, sha: string) => Promise<CommitChange>;
+  /** Null when the project has no repository to have branches in. */
+  branches: (slug: string) => Promise<BranchList | null>;
+  /**
+   * Check out a branch — a local name, or `origin/name` to start tracking one.
+   *
+   * ⚠️ Never forced. When uncommitted changes would be overwritten git refuses,
+   * and that refusal is the answer the screen shows.
+   */
+  switchBranch: (slug: string, name: string) => Promise<WorktreeState>;
+}
+
+/**
+ * Line counts per file, read straight off a unified patch.
+ *
+ * ⚠️ Counted from the patch rather than asked of `--numstat` separately. The
+ * numbers a row shows and the lines the viewer draws then come from ONE read,
+ * and cannot disagree because the tree changed between two.
+ */
+export function patchStats(
+  patch: string,
+): Map<string, { additions: number; deletions: number; binary: boolean }> {
+  const out = new Map<
+    string,
+    { additions: number; deletions: number; binary: boolean }
+  >();
+  let current: {
+    additions: number;
+    deletions: number;
+    binary: boolean;
+  } | null = null;
+  let inHunk = false;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      current = { additions: 0, deletions: 0, binary: false };
+      inHunk = false;
+      // The b/ side names the file as it is now; rename/new headers below may
+      // say it again, and the last word wins.
+      const match = / b\/(.*)$/.exec(line);
+      if (match?.[1]) out.set(match[1], current);
+      continue;
+    }
+    if (!current) continue;
+    if (!inHunk) {
+      if (line.startsWith("+++ ") && line !== "+++ /dev/null") {
+        const name = line.slice(4).replace(/^b\//, "");
+        for (const [key, value] of out)
+          if (value === current && key !== name) out.delete(key);
+        out.set(name, current);
+      } else if (line.startsWith("Binary files ")) current.binary = true;
+      else if (line.startsWith("@@")) inHunk = true;
+      continue;
+    }
+    if (line.startsWith("+")) current.additions++;
+    else if (line.startsWith("-")) current.deletions++;
+  }
+  return out;
+}

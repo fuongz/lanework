@@ -1,5 +1,7 @@
 import { ThemeChoice } from "#/components/shared/common/theme-choice";
 import { SettingsPage } from "#/components/shared/settings/settings-page";
+import { CodePreview } from "./code-preview";
+import { FontPicker } from "./font-picker";
 
 export function AppearanceSection() {
   return (
@@ -9,11 +11,42 @@ export function AppearanceSection() {
       sections={[
         {
           title: "Theme",
-          keywords: "theme dark light system colour color mode appearance",
+          keywords:
+            "theme dark light system colour color mode appearance preview",
           // The same control onboarding's second step draws, from
           // `shared/common/theme-choice`: one drawing of the three choices,
           // so tweaking it here cannot leave the first-run screen behind.
-          content: <ThemeChoice />,
+          // The preview under it shows the theme AND the code font picked
+          // below (FE-21/D4a), which is why it sits between the two.
+          content: (
+            <div className="flex flex-col gap-4">
+              <ThemeChoice />
+              <CodePreview />
+            </div>
+          ),
+        },
+        {
+          title: "Fonts",
+          rows: [
+            {
+              label: "UI font",
+              keywords: "font typeface family weight interface",
+              control: <FontPicker font="ui" label="UI font" />,
+            },
+            {
+              label: "Content font",
+              description:
+                "Issue descriptions, comments and pull request summaries.",
+              keywords: "font typeface family weight markdown body",
+              control: <FontPicker font="content" label="Content font" />,
+            },
+            {
+              label: "Code font",
+              description: "The terminal, diffs and code blocks.",
+              keywords: "font typeface family weight monospace terminal",
+              control: <FontPicker font="code" label="Code font" />,
+            },
+          ],
         },
       ]}
     />

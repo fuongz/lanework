@@ -1,0 +1,336 @@
+// Repository › Changes and History against a real git repository (FE-22 V2).
+// The first cases drive `worktree.ts` directly under Node; the rest boot the
+// app on a project linked to a temporary repository and click through it.
+import { execFileSync } from "node:child_process";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  _electron as electron,
+  expect,
+  type Page,
+  test,
+} from "@playwright/test";
+import type { MachineRecord } from "../electron/main/auth/store";
+import * as worktree from "../electron/main/git/worktree";
+import { writeFolders } from "../electron/main/workspaces/store";
+import type { Workspace } from "../shared/workspaces";
+import {
+  launchEnv,
+  removeProfile,
+  seedCredential,
+  startStubPlane,
+} from "./auth-fixtures";
+
+test.skip(process.platform === "win32", "These drive a POSIX git.");
+
+const git = (cwd: string, ...args: string[]) =>
+  execFileSync("git", args, { cwd, encoding: "utf8" });
+
+/** A repository with one commit, then a modified, a deleted and a new file. */
+async function makeRepo(): Promise<string> {
+  const repo = await realpath(await mkdtemp(join(tmpdir(), "lanew-git-")));
+  git(repo, "init", "-q", "-b", "main");
+  git(repo, "config", "user.email", "tester@example.com");
+  git(repo, "config", "user.name", "Tester");
+  await mkdir(join(repo, "src"));
+  await writeFile(join(repo, "src", "router.tsx"), "a\nb\nc\n");
+  await writeFile(join(repo, "notes.md"), "keep\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "init: first commit");
+  await writeFile(join(repo, "src", "router.tsx"), "a\nB\nc\nd\n");
+  await rm(join(repo, "notes.md"));
+  await writeFile(join(repo, "scratch.txt"), "new\n");
+  return repo;
+}
+
+test("status, stage, commit and restore on a real repository", async () => {
+  const repo = await makeRepo();
+  try {
+    const state = await worktree.status(repo);
+    if (state.kind !== "ready") throw new Error(state.kind);
+    expect(state.branch.name).toBe("main");
+    expect(
+      state.files.map((file) => [
+        file.path,
+        file.status,
+        file.additions,
+        file.deletions,
+      ]),
+    ).toEqual([
+      ["notes.md", "deleted", 0, 1],
+      ["scratch.txt", "untracked", 1, 0],
+      ["src/router.tsx", "modified", 2, 1],
+    ]);
+
+    // A path git did not just call changed is refused, never handed to git.
+    await expect(worktree.stage(repo, ["../outside"])).rejects.toThrow(
+      "has no change to act on",
+    );
+
+    await worktree.stage(repo, ["src/router.tsx"]);
+    await worktree.commit(repo, "feat: router\n\nwhy it changed", "staged");
+    const history = await worktree.log(repo, 0);
+    expect(history.commits.map((commit) => commit.subject)).toEqual([
+      "feat: router",
+      "init: first commit",
+    ]);
+    expect(history.commits[0]?.body).toBe("why it changed");
+
+    const shown = await worktree.show(repo, history.commits[0]?.sha ?? "");
+    expect(shown.files).toMatchObject([
+      { path: "src/router.tsx", additions: 2, deletions: 1 },
+    ]);
+
+    // Restore puts a tracked file back and DELETES an untracked one.
+    await worktree.restore(repo, ["notes.md", "scratch.txt"]);
+    const after = await worktree.status(repo);
+    expect(after.kind === "ready" && after.files).toEqual([]);
+    expect((await readdir(repo)).sort()).toEqual([".git", "notes.md", "src"]);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("lists branches and switches without forcing", async () => {
+  const repo = await makeRepo();
+  try {
+    git(repo, "stash", "-u");
+    git(repo, "branch", "feature/login");
+    const list = await worktree.branches(repo);
+    expect(list.current).toBe("main");
+    expect(list.local.sort()).toEqual(["feature/login", "main"]);
+
+    await worktree.switchBranch(repo, "feature/login");
+    expect((await worktree.branches(repo)).current).toBe("feature/login");
+
+    // Only a name the list just gave is accepted.
+    await expect(worktree.switchBranch(repo, "--orphan")).rejects.toThrow(
+      "is not a branch",
+    );
+
+    // Uncommitted work the other branch would overwrite: git refuses.
+    await writeFile(join(repo, "notes.md"), "edited on login\n");
+    git(repo, "commit", "-qam", "login notes");
+    git(repo, "switch", "-q", "main");
+    await writeFile(join(repo, "notes.md"), "edited on main\n");
+    await expect(worktree.switchBranch(repo, "feature/login")).rejects.toThrow(
+      /overwritten/,
+    );
+    expect((await worktree.branches(repo)).current).toBe("main");
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("a folder that is not a repository says so", async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), "lanew-plain-")));
+  try {
+    expect(await worktree.locate(folder)).toEqual({
+      kind: "not-repo",
+      path: folder,
+    });
+    expect(await worktree.locate(null)).toEqual({ kind: "none" });
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+const workspaces: Workspace[] = [
+  {
+    id: "ws-alpha",
+    slug: "alpha",
+    name: "Alpha",
+    path: null,
+    baseBranch: null,
+  },
+];
+
+async function open(folder: string) {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", {
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    cards: [],
+  });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-repo-ui-"));
+  const home = join(profile, "home");
+  await mkdir(home, { recursive: true });
+  await seedCredential(home, plane.origin);
+  const previous = process.env.LANEWORK_HOME;
+  process.env.LANEWORK_HOME = home;
+  await writeFolders(
+    {
+      machineId: "test-machine",
+      userId: "test-user",
+      apiUrl: plane.origin,
+      name: "test-machine",
+      secret: "lw_mch_test-secret",
+      owner: null,
+    } satisfies MachineRecord,
+    "alpha",
+    [folder],
+  );
+  if (previous === undefined) delete process.env.LANEWORK_HOME;
+  else process.env.LANEWORK_HOME = previous;
+
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  const page: Page = await app.firstWindow();
+  await page
+    .getByRole("button", { name: /^Switch project/ })
+    .waitFor({ state: "visible", timeout: 15_000 });
+  return {
+    page,
+    cleanup: async () => {
+      await app.close();
+      await plane.close();
+      await removeProfile(profile);
+    },
+  };
+}
+
+test("Changes stages and commits, and History shows the commit", async () => {
+  const repo = await makeRepo();
+  const { page, cleanup } = await open(repo);
+  try {
+    await page.goto("app://lanework/w/alpha/changes");
+    const list = page.getByRole("complementary", { name: "Changed files" });
+    await expect(list.getByText("router.tsx")).toBeVisible({ timeout: 15_000 });
+    await expect(list.getByText("+2").first()).toBeVisible();
+    // The diff is drawn by `@pierre/diffs` in an open shadow root.
+    await expect(page.getByText("B", { exact: true }).first()).toBeVisible();
+
+    // Nothing staged: the button commits every tracked change.
+    await expect(
+      page.getByRole("button", { name: /Commit Tracked/ }),
+    ).toBeVisible();
+    await list.getByRole("checkbox", { name: "Stage src/router.tsx" }).click();
+    await expect(
+      list.getByRole("checkbox", { name: "Unstage src/router.tsx" }),
+    ).toBeChecked();
+    await expect(page.getByRole("button", { name: /^Commit/ })).toHaveText(
+      /^Commit⌘↩$/,
+    );
+
+    // The placeholder is the message when the box is left empty.
+    await expect(page.getByLabel("Commit message")).toHaveAttribute(
+      "placeholder",
+      "Update router.tsx",
+    );
+    await page.getByLabel("Commit message").fill("feat: route B");
+    await page.getByLabel("Commit message").press("Meta+Enter");
+    await expect(list.getByText("router.tsx")).toHaveCount(0, {
+      timeout: 15_000,
+    });
+    expect(git(repo, "log", "-1", "--format=%s").trim()).toBe("feat: route B");
+
+    // Restoring a new file says it will be DELETED.
+    await list
+      .getByRole("button", { name: "Discard changes to scratch.txt" })
+      .click();
+    await expect(page.getByRole("alertdialog")).toContainText(
+      "deleted from disk",
+    );
+    await page.getByRole("button", { name: "Keep" }).click();
+
+    await page.getByRole("link", { name: "History" }).click();
+    await page.getByRole("link", { name: /feat: route B/ }).click();
+    await expect(page.getByRole("button", { name: "Commit SHA" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByText("tester@example.com")).toBeVisible();
+    await expect(page.getByText("src/").first()).toBeVisible();
+  } finally {
+    await cleanup();
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("the rail switches branch, folders fold, and restore has a tooltip", async () => {
+  const repo = await makeRepo();
+  git(repo, "branch", "feature/login");
+  const { page, cleanup } = await open(repo);
+  try {
+    await page.goto("app://lanework/w/alpha/changes");
+    const list = page.getByRole("complementary", { name: "Changed files" });
+    await expect(list.getByText("router.tsx")).toBeVisible({ timeout: 15_000 });
+
+    // A folder row folds its files away and says how many it is hiding.
+    await list.getByRole("button", { name: "Collapse src" }).click();
+    await expect(list.getByText("router.tsx")).toHaveCount(0);
+    await list.getByRole("button", { name: "Expand src" }).click();
+    await expect(list.getByText("router.tsx")).toBeVisible();
+
+    // ⚠️ Retried as a pair: the button only appears under a hovered row, and
+    // a pointer that lands on it mid-fade can miss the tooltip's enter event.
+    const restore = list.getByRole("button", {
+      name: "Discard changes to src/router.tsx",
+    });
+    const tip = page.locator('[data-slot="tooltip-content"]');
+    await expect(async () => {
+      await list.getByText("router.tsx").hover();
+      await restore.hover();
+      await expect(tip).toHaveText("Discard changes", { timeout: 1_500 });
+    }).toPass({ timeout: 10_000 });
+
+    const switcher = page.getByRole("button", {
+      name: "Switch branch — currently main",
+    });
+    await expect(switcher).toBeVisible();
+    await switcher.click();
+    await page.getByPlaceholder("Switch branch…").fill("login");
+    await page.getByRole("option", { name: "feature/login" }).click();
+    await expect(
+      page.getByRole("button", {
+        name: "Switch branch — currently feature/login",
+      }),
+    ).toBeVisible({ timeout: 15_000 });
+    expect(git(repo, "branch", "--show-current").trim()).toBe("feature/login");
+  } finally {
+    await cleanup();
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("the rail counts changes with the board, before Changes is opened", async () => {
+  const repo = await makeRepo();
+  const { page, cleanup } = await open(repo);
+  try {
+    await page.goto("app://lanework/w/alpha/issues");
+    // router.tsx +2 −1, notes.md −1, scratch.txt +1.
+    await expect(page.getByRole("link", { name: "Changes +3 −2" })).toBeVisible(
+      {
+        timeout: 15_000,
+      },
+    );
+  } finally {
+    await cleanup();
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("a project whose folder is not a repository gets an empty state", async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), "lanew-plain-")));
+  const { page, cleanup } = await open(folder);
+  try {
+    await page.goto("app://lanework/w/alpha/changes");
+    await expect(page.getByText("Not a git repository")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(
+      page.getByRole("link", { name: "Open Settings" }),
+    ).toBeVisible();
+  } finally {
+    await cleanup();
+    await rm(folder, { recursive: true, force: true });
+  }
+});

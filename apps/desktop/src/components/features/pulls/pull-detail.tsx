@@ -10,6 +10,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
+import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { Button } from "#/components/ui/button";
 import {
   ResizableHandle,
@@ -201,44 +202,32 @@ export function PullDetail() {
         {/* ⚠️ A `tablist` in the middle column of a three-column grid, so it is
             centred against the WINDOW rather than against whatever is left over
             after the title — which changes width with every pull request. */}
-        <div
-          role="tablist"
-          aria-label="Pull request view"
-          className="flex items-center gap-0.5"
-        >
-          {(["summary", "code"] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              role="tab"
-              aria-selected={view === value}
-              onClick={() =>
-                void navigate({
-                  to: ".",
-                  // ⚠️ An updater, not a literal. This route's search inherits
-                  // the list's `tab` and `status` from the parent, and a plain
-                  // object would drop them — switching tab would quietly reset
-                  // which pull requests the list beside it is showing.
-                  search: (prev) => ({
-                    ...prev,
-                    view: value === "summary" ? "summary" : undefined,
-                  }),
-                  // ⚠️ NOT `replace`. Replacing the entry makes Back leave the
-                  // pull request altogether instead of undoing the switch —
-                  // which is the whole reason this tab is in the URL.
-                })
-              }
-              className={cn(
-                "rounded-md px-2.5 py-1 text-xs transition-colors",
-                view === value
-                  ? "bg-foreground/[0.07] font-medium"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {value === "summary" ? "Summary" : "Code"}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          label="Pull request view"
+          semantics="tabs"
+          className="justify-self-center"
+          value={view}
+          options={[
+            { value: "summary", label: "Summary" },
+            { value: "code", label: "Code" },
+          ]}
+          onChange={(value) =>
+            void navigate({
+              to: ".",
+              // ⚠️ An updater, not a literal. This route's search inherits
+              // the list's `tab` and `status` from the parent, and a plain
+              // object would drop them — switching tab would quietly reset
+              // which pull requests the list beside it is showing.
+              search: (prev) => ({
+                ...prev,
+                view: value === "summary" ? "summary" : undefined,
+              }),
+              // ⚠️ NOT `replace`. Replacing the entry makes Back leave the
+              // pull request altogether instead of undoing the switch —
+              // which is the whole reason this tab is in the URL.
+            })
+          }
+        />
 
         <div className="flex items-center justify-end gap-0.5">
           <a

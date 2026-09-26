@@ -2,6 +2,7 @@ import type { DesktopAuthApi } from "./auth";
 import type { DesktopGitApi } from "./git";
 import type { DesktopTerminalApi } from "./terminal";
 import type { DesktopWorkspacesApi } from "./workspaces";
+import type { DesktopWorktreeApi } from "./worktree";
 
 export const channels = {
   appInfo: "app:get-info",
@@ -61,5 +62,7 @@ export interface DesktopApi {
   auth: DesktopAuthApi;
   workspaces: DesktopWorkspacesApi;
   git: DesktopGitApi;
+  /** The project's local repository — changes, commits, history (FE-22). */
+  worktree: DesktopWorktreeApi;
   terminal: DesktopTerminalApi;
 }
