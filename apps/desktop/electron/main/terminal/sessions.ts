@@ -12,6 +12,7 @@ import * as serializeModule from "@xterm/addon-serialize";
 import * as headlessModule from "@xterm/headless";
 import {
   clampGeometry,
+  isAgentSessionId,
   isTerminalKind,
   TERMINAL_LIMITS,
   type TerminalAgent,
@@ -140,7 +141,15 @@ export interface SpawnRequest {
   rows: number;
   /** A `TerminalKind`; anything else opens a plain shell. */
   kind?: unknown;
+  /** An agent conversation to continue (FE-23); ignored unless a UUID. */
+  resume?: unknown;
 }
+
+/** What follows the CLI's name to continue a conversation (FE-23). */
+const RESUME_ARGS: Record<TerminalAgent, (id: string) => string> = {
+  claude: (id) => `--resume ${id}`,
+  codex: (id) => `resume ${id}`,
+};
 
 export function createSessions(options: SessionsOptions = {}) {
   const sessions = new Map<string, Session>();
@@ -224,6 +233,12 @@ export function createSessions(options: SessionsOptions = {}) {
     // ⚠️ A kind it does not know is a plain shell, not a refusal — and never
     // a command: the only lines an agent tab can type are the ones below.
     const kind = isTerminalKind(request.kind) ? request.kind : "shell";
+    // ⚠️ Checked again here, not only in main: this line is typed into a
+    // shell, and a UUID is hex and dashes — nothing a shell reads as syntax.
+    const resume =
+      kind !== "shell" && isAgentSessionId(request.resume)
+        ? request.resume
+        : null;
     const session: Session = {
       info: {
         id: randomUUID(),
@@ -234,6 +249,7 @@ export function createSessions(options: SessionsOptions = {}) {
         pid: pty.pid,
         createdAt: Date.now(),
         exit: null,
+        resume,
       },
       seq: seq++,
       pty,
@@ -245,7 +261,9 @@ export function createSessions(options: SessionsOptions = {}) {
       cols,
       rows,
       launch:
-        kind === "shell" ? null : `${(options.agentCommand ?? String)(kind)}\r`,
+        kind === "shell"
+          ? null
+          : `${(options.agentCommand ?? String)(kind)}${resume ? ` ${RESUME_ARGS[kind](resume)}` : ""}\r`,
       launchTimer: null,
       lastOutput: 0,
     };

@@ -188,8 +188,25 @@ function createTerminal(): DesktopTerminalApi {
 
   return {
     list: (workspace) => ipcRenderer.invoke(terminalChannels.list, workspace),
-    spawn: (workspace, cols, rows, kind = "shell") =>
-      ipcRenderer.invoke(terminalChannels.spawn, workspace, cols, rows, kind),
+    spawn: (workspace, cols, rows, kind = "shell", resume) =>
+      resume === undefined
+        ? ipcRenderer.invoke(
+            terminalChannels.spawn,
+            workspace,
+            cols,
+            rows,
+            kind,
+          )
+        : ipcRenderer.invoke(
+            terminalChannels.spawn,
+            workspace,
+            cols,
+            rows,
+            kind,
+            resume,
+          ),
+    agentSessions: (workspace) =>
+      ipcRenderer.invoke(terminalChannels.agentSessions, workspace),
     agents: () => ipcRenderer.invoke(terminalChannels.agents),
     kill: (id) => ipcRenderer.invoke(terminalChannels.kill, id),
     reorder: (workspace, ids) =>

@@ -47,6 +47,36 @@ export interface TerminalSession {
   createdAt: number;
   /** Set once the shell has exited; the tab stays until it is closed. */
   exit: { code: number; signal: number | null } | null;
+  /** The agent conversation this tab resumed (FE-23), or null. */
+  resume: string | null;
+}
+
+/**
+ * One conversation an agent's CLI kept on disk for a project's folder (FE-23):
+ * what the rail's Agents group lists, and what a click resumes.
+ */
+export interface AgentSession {
+  /** The CLI's own conversation id — always a UUID (`isAgentSessionId`). */
+  id: string;
+  agent: TerminalAgent;
+  /** Its title as the CLI named it, or its first prompt. */
+  title: string;
+  /** When it was last written to, ISO. */
+  updatedAt: string;
+}
+
+export const AGENT_SESSION_LIMIT = 20;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Whether `value` can be put on a command line as a conversation id.
+ *
+ * ⚠️ The only shape a resume id may take: it is TYPED into a shell, so
+ * anything but hex and dashes would be a way to type something else.
+ */
+export function isAgentSessionId(value: unknown): value is string {
+  return typeof value === "string" && UUID.test(value);
 }
 
 export const TERMINAL_LIMITS = {
@@ -73,6 +103,8 @@ export const terminalChannels = {
   reorder: "terminal:reorder",
   /** Which agent CLIs this machine has, for the + menu. */
   agents: "terminal:agents",
+  /** The agent conversations kept for a workspace's folder (FE-23). */
+  agentSessions: "terminal:agent-sessions",
   /** Main → renderer: a View-menu command. */
   command: "terminal:command",
 } as const;
@@ -109,13 +141,22 @@ export interface DesktopTerminalApi {
    * Start a shell for `workspace`, in its project folder — with an agent's CLI
    * typed into it for an agent `kind`. The geometry is a first guess; the
    * view's attach sets the real one before anything is drawn.
+   *
+   * `resume` names one of `agentSessions(workspace)` to continue (FE-23); main
+   * refuses an id that listing does not have.
    */
   spawn: (
     workspace: string,
     cols: number,
     rows: number,
     kind?: TerminalKind,
+    resume?: string,
   ) => Promise<TerminalSession>;
+  /**
+   * The Claude and Codex conversations kept for `workspace`'s folder, newest
+   * first; empty when the project has no folder here.
+   */
+  agentSessions: (workspace: string) => Promise<AgentSession[]>;
   /**
    * The agent CLIs this machine has, asked of the user's own shell: what the
    * + menu offers beside a plain terminal. Cached for a little while.

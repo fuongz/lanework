@@ -81,7 +81,10 @@ export function BranchSwitcher({ slug }: { slug: string }) {
             variant="secondary"
             size="xs"
             aria-label={`Switch branch — currently ${branches.current ?? "detached HEAD"}`}
-            className="max-w-[9.5rem] min-w-0 gap-1 text-[11px]"
+            // ⚠️ `shrink` over the button's own `shrink-0`: a long branch name
+            // gives way — truncated — instead of pushing the row wider than
+            // the rail and scrolling it sideways.
+            className="max-w-[9.5rem] min-w-0 shrink gap-1 text-[11px]"
           >
             <HugeiconsIcon
               icon={GitBranchIcon}

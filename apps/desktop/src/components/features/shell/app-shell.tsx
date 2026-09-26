@@ -27,6 +27,8 @@ import { CommandPalette } from "./command-palette";
 const RAIL_DEFAULT_PX = 240;
 const RAIL_WIDTH_KEY = "lanework:rail-width";
 const RAIL_HIDDEN_KEY = "lanework:rail-hidden";
+/** How long the rail glides when its button, ⌘B or focus mode moves it. */
+const RAIL_GLIDE_MS = 240;
 
 /**
  * The width the rail comes back at: the last one it was dragged to.
@@ -92,6 +94,32 @@ export function AppShell() {
   const railElement = useRef<HTMLDivElement | null>(null);
   const [railHidden, setRailHidden] = useState(false);
   const railWidth = useRef(readRailWidth());
+  const glideTimer = useRef<number | undefined>(undefined);
+  /**
+   * Let the NEXT change of the rail's size animate.
+   *
+   * ⚠️ Only for the button, ⌘B and focus mode — never a drag, which has to
+   * follow the pointer exactly, and never the restore at launch. The flag goes
+   * on the group's element directly, BEFORE the size changes, so the
+   * transition is already in force when the library writes the new
+   * `flex-grow`; a React state would land in the same commit as the size and
+   * race it.
+   *
+   * ⚠️ `--rail-w` pins the sidebar's content at its full width while the
+   * panel narrows, so it slides out of view behind the edge instead of
+   * re-wrapping every label at each frame.
+   */
+  const glide = useCallback(() => {
+    const group = railElement.current?.parentElement;
+    if (!group) return;
+    group.style.setProperty("--rail-w", `${railWidth.current}px`);
+    group.dataset.railGliding = "true";
+    window.clearTimeout(glideTimer.current);
+    glideTimer.current = window.setTimeout(() => {
+      delete group.dataset.railGliding;
+    }, RAIL_GLIDE_MS + 60);
+  }, []);
+  useEffect(() => () => window.clearTimeout(glideTimer.current), []);
   const showRail = useCallback(() => {
     sidebarRef.current?.resize(`${railWidth.current}px`);
   }, [sidebarRef]);
@@ -100,10 +128,11 @@ export function AppShell() {
     const panel = sidebarRef.current;
     if (!panel) return;
     const hiding = !panel.isCollapsed();
+    glide();
     if (hiding) panel.collapse();
     else showRail();
     saveRailHidden(hiding);
-  }, [sidebarRef, showRail]);
+  }, [sidebarRef, showRail, glide]);
 
   // The rail as it was last LEFT, before the first paint.
   useLayoutEffect(() => {
@@ -222,12 +251,16 @@ export function AppShell() {
     if (!panel) return;
     if (focusMode) {
       railBeforeFocus.current = panel.isCollapsed() ? "hidden" : "shown";
+      if (!panel.isCollapsed()) glide();
       panel.collapse();
     } else if (railBeforeFocus.current) {
-      if (railBeforeFocus.current === "shown") showRail();
+      if (railBeforeFocus.current === "shown") {
+        glide();
+        showRail();
+      }
       railBeforeFocus.current = null;
     }
-  }, [focusMode, sidebarRef, showRail]);
+  }, [focusMode, sidebarRef, showRail, glide]);
 
   return (
     <div className="h-screen overflow-hidden">

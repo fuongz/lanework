@@ -445,6 +445,23 @@
   .app-sidebar button {
     app-region: no-drag;
   }
+  /* The rail glides when its button, ⌘B or focus mode hides or shows it
+     (`glide()` in app-shell.tsx sets the flag for one move, never for a
+     drag). The panels' size is their inline `flex-grow`, so that is what
+     transitions; the sidebar keeps its full width meanwhile and is clipped by
+     its panel instead of re-wrapping every label. */
+  [data-rail-gliding] > [data-panel] {
+    overflow: hidden;
+    transition: flex-grow 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  [data-rail-gliding] .app-sidebar {
+    min-width: var(--rail-w);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-rail-gliding] > [data-panel] {
+      transition: none;
+    }
+  }
   /* ⚠️ A hidden rail (FE-20) leaves the window controls, and the sidebar
      button beside them, drawn over whatever header now starts at the window's
      edge — so that header keeps its first item clear of both. Headers read it

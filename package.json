@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "wrangler": "bunx wrangler",
     "dev": "bun run --cwd apps/desktop dev",
     "dev:api": "bun run --cwd apps/api dev",
     "dev:mcp": "bun run --cwd apps/mcp dev",

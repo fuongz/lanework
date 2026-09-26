@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
+  type AgentSession,
   TERMINAL_LIMITS,
   type TerminalAgent,
   type TerminalKind,
@@ -81,7 +82,16 @@ interface TerminalState {
   loadAgents: () => Promise<void>;
   setOpen: (open: boolean) => void;
   refresh: (workspace: string) => Promise<void>;
-  spawn: (workspace: string, kind?: TerminalKind) => Promise<void>;
+  spawn: (
+    workspace: string,
+    kind?: TerminalKind,
+    resume?: string,
+  ) => Promise<void>;
+  /**
+   * The rail's Agents group (FE-23): show the tab already resuming this
+   * conversation, or open one that resumes it.
+   */
+  resumeAgent: (workspace: string, session: AgentSession) => Promise<void>;
   close: (workspace: string, id: string) => Promise<void>;
   select: (workspace: string, id: string) => void;
   /** A tab dropped on another: it takes that tab's place (drag, at drop). */
@@ -194,7 +204,7 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     }
   },
 
-  spawn: async (workspace, kind = "shell") => {
+  spawn: async (workspace, kind = "shell", resume) => {
     if (get().spawning) return;
     const count = get().sessions[workspace]?.length ?? 0;
     if (count >= TERMINAL_LIMITS.perWorkspace) {
@@ -207,7 +217,7 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     try {
       // A first guess at the size; the view's attach sets the real one before
       // anything is drawn.
-      const session = await api().spawn(workspace, 80, 24, kind);
+      const session = await api().spawn(workspace, 80, 24, kind, resume);
       bump(workspace);
       set((state) => ({
         sessions: {
@@ -226,6 +236,19 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     } finally {
       set({ spawning: false });
     }
+  },
+
+  resumeAgent: async (workspace, session) => {
+    set({ open: true, error: null });
+    await get().refresh(workspace);
+    // ⚠️ A live tab only: one whose CLI has exited is a transcript of the
+    // last run, and a click asks to carry on, not to look back (FE-23/D6).
+    const existing = (get().sessions[workspace] ?? []).find(
+      (entry) => entry.resume === session.id && !entry.exit,
+    );
+    if (existing) get().select(workspace, existing.id);
+    else await get().spawn(workspace, session.agent, session.id);
+    settle(workspace);
   },
 
   close: async (workspace, id) => {

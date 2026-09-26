@@ -12,12 +12,14 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { Kbd } from "#/components/ui/kbd";
+import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { useCommandPalette } from "#/stores/command-palette";
 import { useIssueView } from "#/stores/issue-view";
 import { usePulls } from "#/stores/pulls";
 import { useSession } from "#/stores/session";
 import { useWorktree } from "#/stores/worktree";
+import { AgentSessionsNav } from "./agent-sessions-nav";
 import { BranchSwitcher } from "./branch-switcher";
 import { ProjectSwitcher } from "./project-switcher";
 
@@ -30,9 +32,20 @@ const ACTIVE = {
   "aria-current": "page" as const,
 };
 
-function SectionLabel({ children }: { children: string }) {
+function SectionLabel({
+  children,
+  className,
+}: {
+  children: string;
+  className?: string;
+}) {
   return (
-    <span className="text-muted-foreground px-2 pt-4 pb-1 text-[11px] font-medium tracking-wide uppercase">
+    <span
+      className={cn(
+        "text-muted-foreground px-2 pt-4 pb-1 text-[11px] font-medium tracking-wide uppercase",
+        className,
+      )}
+    >
       {children}
     </span>
   );
@@ -66,6 +79,14 @@ export function AppSidebar() {
       ? state.state.files.reduce((sum, file) => sum + file.deletions, 0)
       : 0,
   );
+  // The terminal's key for this project — the cloud id, or the slug — which
+  // the Agents group resumes into.
+  const workspaceKey = useBoard((state) => {
+    const found = slug
+      ? state.workspaces.find((entry) => entry.slug === slug)
+      : undefined;
+    return found ? (found.id ?? found.slug) : null;
+  });
   const navigate = useNavigate();
   const peek = useWorktree((state) => state.peek);
 
@@ -156,7 +177,14 @@ export function AppSidebar() {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* ⚠️ `overflow-x-hidden`: nothing in the rail may scroll it sideways —
+          a row too wide for it truncates instead.
+          ⚠️ Pulled into the rail's right padding, so the scrollbar sits on the
+          window's edge rather than 10px in from it. The gutter is kept STABLE:
+          the 10px bar (app.css) then always takes exactly the padding it
+          replaces, and the rows line up with New issue and Settings whether
+          the list overflows or not. */}
+      <div className="-mr-2.5 min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
         {slug && (
           <nav aria-label="Project" className="flex flex-col gap-0.5">
             <SectionLabel>Project</SectionLabel>
@@ -192,10 +220,12 @@ export function AppSidebar() {
             pull requests (FE-22). */}
         {slug && (
           <nav aria-label="Repository" className="flex flex-col gap-0.5">
-            {/* ⚠️ The label keeps its own padding; the row only puts the branch
-                beside it, bottom-aligned so the two read as one line. */}
-            <div className="flex min-w-0 items-end justify-between gap-2 pr-1">
-              <SectionLabel>Repository</SectionLabel>
+            {/* ⚠️ The ROW takes the label's vertical padding, so the label and
+                the branch button share one box and centre on each other —
+                bottom-aligning them left the text sitting below the pill's
+                middle. */}
+            <div className="flex min-w-0 items-center justify-between gap-2 pt-4 pb-1 pr-1">
+              <SectionLabel className="shrink-0 py-0">Repository</SectionLabel>
               <BranchSwitcher slug={slug} />
             </div>
             <Link
@@ -262,6 +292,9 @@ export function AppSidebar() {
               )}
             </Link>
           </nav>
+        )}
+        {workspaceKey && (
+          <AgentSessionsNav workspace={workspaceKey} row={ROW} />
         )}
       </div>
 

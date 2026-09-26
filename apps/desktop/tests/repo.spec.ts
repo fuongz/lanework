@@ -318,6 +318,35 @@ test("the rail counts changes with the board, before Changes is opened", async (
   }
 });
 
+test("a long branch name truncates instead of scrolling the rail sideways", async () => {
+  const repo = await makeRepo();
+  git(
+    repo,
+    "switch",
+    "-q",
+    "-c",
+    "feat/meta-reels-publishing-with-a-very-long-name",
+  );
+  const { page, cleanup } = await open(repo);
+  try {
+    await page.goto("app://lanework/w/alpha/issues");
+    const nav = page.getByRole("navigation", { name: "Repository" });
+    await expect(
+      nav.getByRole("button", {
+        name: /^Switch branch — currently feat\/meta/,
+      }),
+    ).toBeVisible({ timeout: 15_000 });
+    const overflow = await nav.evaluate((el) => {
+      const scroller = el.parentElement as HTMLElement;
+      return scroller.scrollWidth - scroller.clientWidth;
+    });
+    expect(overflow).toBeLessThanOrEqual(0);
+  } finally {
+    await cleanup();
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
 test("a project whose folder is not a repository gets an empty state", async () => {
   const folder = await realpath(await mkdtemp(join(tmpdir(), "lanew-plain-")));
   const { page, cleanup } = await open(folder);

@@ -15,6 +15,7 @@ import type { MenuItem } from "electron";
 import type { MachineRecord } from "../electron/main/auth/store";
 import { writeFolders } from "../electron/main/workspaces/store";
 import type { Workspace } from "../shared/workspaces";
+import { CLAUDE_ID, CODEX_ID, seedAgentHome } from "./agent-fixtures";
 import {
   launchEnv,
   removeProfile,
@@ -504,6 +505,75 @@ test("+ offers Claude or Codex only where this machine has it, and an agent tab 
     // Typed into a shell once the tab's view is up: the CLI's output, then
     // — the stand-in exits at once — the shell's prompt again.
     await expect(screen(page)).toContainText("claude-started");
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("the rail's Agents group lists this project's conversations, and a click resumes one — or shows its tab", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+    // Stand-ins that print what they were asked, in a form the typed line
+    // itself does not contain — so the echo cannot fake it.
+    LANEWORK_CLAUDE_BIN: "printf 'ran-%s-%s-%s\\n' claude",
+    LANEWORK_CODEX_BIN: "printf 'ran-%s-%s-%s\\n' codex",
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const group = page.getByRole("navigation", { name: "Agents" });
+    const rows = group.getByRole("button", { name: /^Resume/ });
+    await expect(rows).toHaveCount(2);
+    await expect(
+      group.getByRole("button", {
+        name: "Resume “Flaky login test” in Claude",
+      }),
+    ).toBeVisible();
+    await expect(
+      group.getByRole("button", {
+        name: "Resume “Settings page cleanup” in Codex",
+      }),
+    ).toBeVisible();
+
+    await group
+      .getByRole("button", { name: "Resume “Flaky login test” in Claude" })
+      .click();
+    await expect(tabs(page)).toHaveCount(1);
+    await expect(
+      tabs(page).first().getByRole("button").first(),
+    ).toHaveAccessibleName(`Claude in ${basename(repo)}`);
+    await expect(screen(page)).toContainText(
+      `ran-claude---resume-${CLAUDE_ID}`,
+    );
+
+    await group
+      .getByRole("button", { name: "Resume “Settings page cleanup” in Codex" })
+      .click();
+    await expect(tabs(page)).toHaveCount(2);
+    await expect(screen(page)).toContainText(`ran-codex-resume-${CODEX_ID}`);
+
+    // ⚠️ Its tab is still open — a shell, back at its prompt — so a second
+    // click shows that tab rather than opening another (FE-23/D6).
+    await group
+      .getByRole("button", { name: "Resume “Flaky login test” in Claude" })
+      .click();
+    await expect(tabs(page)).toHaveCount(2);
+    await expect(
+      tabs(page).first().getByRole("button").first(),
+    ).toHaveAttribute("aria-current", "true");
+
+    // Another project has no conversations: no group at all.
+    await switchTo(page, "Beta");
+    await expect(group).toHaveCount(0);
   } finally {
     await app.close();
     await plane.close();

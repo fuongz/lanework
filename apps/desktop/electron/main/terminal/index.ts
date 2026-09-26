@@ -1,5 +1,6 @@
 // The main process's side of the terminal (FE-19): starting the pty host,
 // answering the panel's requests, and handing windows a port to it.
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   app,
@@ -11,7 +12,9 @@ import {
   utilityProcess,
 } from "electron";
 import {
+  type AgentSession,
   clampGeometry,
+  isAgentSessionId,
   isTerminalKind,
   TERMINAL_LIMITS,
   type TerminalAgent,
@@ -21,6 +24,7 @@ import {
 } from "../../../shared/terminal";
 import { assertTrustedSender, broadcast, handle } from "../ipc";
 import { terminalFolder } from "../workspaces";
+import { listAgentSessions } from "./agent-sessions";
 
 let host: UtilityProcess | null = null;
 let nextRequest = 1;
@@ -102,6 +106,22 @@ function key(value: unknown, what: string): string {
   return value;
 }
 
+/**
+ * Where Claude and Codex keep their conversations: the user's home.
+ *
+ * ⚠️ A test seam guarded the way `LANEWORK_TEST_USER_DATA` is: a spec points
+ * it at fixtures instead of reading the developer's own history.
+ */
+function agentHome(): string {
+  return (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
+}
+
+/** The conversations `workspace`'s folder has; none without a folder here. */
+async function agentSessionsOf(workspace: string): Promise<AgentSession[]> {
+  const folder = await terminalFolder(workspace);
+  return folder ? listAgentSessions(agentHome(), folder) : [];
+}
+
 /** Tell the focused window the View menu asked for something. */
 export function sendTerminalCommand(command: TerminalCommand): void {
   const window =
@@ -162,7 +182,7 @@ export function registerTerminal(devUrl?: string): void {
     terminalChannels.spawn,
     devUrl,
     async (args): Promise<TerminalSession> => {
-      if (args.length !== 3 && args.length !== 4)
+      if (args.length < 3 || args.length > 5)
         throw new Error("A workspace and a size are required");
       const workspace = key(args[0], "workspace");
       const cols = clampGeometry(args[1], 80);
@@ -171,6 +191,16 @@ export function registerTerminal(devUrl?: string): void {
       // decided by the host from the name, never sent (FE-19/D8).
       const kind = args[3] ?? "shell";
       if (!isTerminalKind(kind)) throw new Error("Unknown kind of terminal");
+      // ⚠️ A resume id is one this folder's listing has, for that agent —
+      // not merely one shaped right (FE-23). The host checks the shape again.
+      const resume = args[4];
+      if (resume !== undefined) {
+        if (kind === "shell" || !isAgentSessionId(resume))
+          throw new Error("Unknown conversation");
+        const known = await agentSessionsOf(workspace);
+        if (!known.some((entry) => entry.id === resume && entry.agent === kind))
+          throw new Error("That conversation is not in this project.");
+      }
       const cwd = await terminalFolder(workspace);
       return request<TerminalSession>({
         t: "spawn",
@@ -179,6 +209,7 @@ export function registerTerminal(devUrl?: string): void {
         cols,
         rows,
         kind,
+        resume,
       });
     },
   );
@@ -190,6 +221,17 @@ export function registerTerminal(devUrl?: string): void {
     async (args): Promise<TerminalAgent[]> => {
       if (args.length !== 0) throw new Error("No arguments are taken");
       return request<TerminalAgent[]>({ t: "agents" });
+    },
+  );
+  // ⚠️ Read in MAIN, not the pty host: listing files starts no process, and
+  // the rail asks for this on every project — most of which never open a
+  // terminal.
+  handle(
+    terminalChannels.agentSessions,
+    devUrl,
+    async (args): Promise<AgentSession[]> => {
+      if (args.length !== 1) throw new Error("A workspace is required");
+      return agentSessionsOf(key(args[0], "workspace"));
     },
   );
   handle(terminalChannels.reorder, devUrl, async (args): Promise<void> => {
