@@ -153,6 +153,15 @@ export interface StubLabel {
   tone: string;
 }
 
+/** One row of `GET /presence` (BE-16), as the real route serializes it. */
+export interface StubPresence {
+  workItemId: string;
+  userId: string;
+  agent: string;
+  machineId?: string | null;
+  lastSeenAt: string;
+}
+
 export interface StubMember {
   userId: string;
   name: string;
@@ -273,6 +282,8 @@ export async function startStubPlane(
   setPurgeMissing: (value: boolean) => void;
   /** Answer `GET /stats` with 404, the way a service older than FE-17 does. */
   setStatsMissing: (value: boolean) => void;
+  /** The agents `GET /presence` reports on one board (BE-16). */
+  setPresence: (workspaceId: string, rows: StubPresence[]) => void;
   /** Fail every `GET /items?q=` with 500, so search has to fall back. */
   setSearchFailing: (value: boolean) => void;
   /** `If-Match` headers the board saw, so a test can prove the precondition. */
@@ -316,6 +327,7 @@ export async function startStubPlane(
   let boardOffline = false;
   let purgeMissing = false;
   let statsMissing = false;
+  const presence = new Map<string, StubPresence[]>();
   let searchFailing = false;
   // Board-level events (`purged`) per board, the way the service keeps them:
   // audit rows with no card, reported by the feed above the client's cursor.
@@ -587,6 +599,17 @@ export async function startStubPlane(
       // FE-17's counts. Absent (404) while `statsMissing` is set, the way a
       // service older than the route answers — the app then reads the whole
       // board, as it used to.
+      // BE-16's presence: whatever the test seeded, already inside the TTL —
+      // the real route filters expired rows before answering.
+      if (req.method === "GET" && rest === "/presence") {
+        json(200, {
+          presence: (presence.get(board[1]) ?? []).map((row) => ({
+            machineId: null,
+            ...row,
+          })),
+        });
+        return;
+      }
       if (req.method === "GET" && rest === "/stats") {
         if (statsMissing) return json(404, { error: "not found" });
         const query = new URL(req.url ?? "", "http://x").searchParams;
@@ -1232,6 +1255,9 @@ export async function startStubPlane(
     },
     setStatsMissing: (value) => {
       statsMissing = value;
+    },
+    setPresence: (workspaceId, rows) => {
+      presence.set(workspaceId, rows);
     },
     setPurgeMissing: (value) => {
       purgeMissing = value;

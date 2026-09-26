@@ -296,6 +296,8 @@ const desktop: DesktopApi = {
         ),
       stats: (workspaceId, query) =>
         ipcRenderer.invoke(workspaceChannels.stats, workspaceId, query),
+      presence: (workspaceId) =>
+        ipcRenderer.invoke(workspaceChannels.presence, workspaceId),
       card: (workspaceId, cardId) =>
         ipcRenderer.invoke(workspaceChannels.card, workspaceId, cardId),
       lookup: (workspaceId, taskId) =>

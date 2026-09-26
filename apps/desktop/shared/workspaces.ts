@@ -84,6 +84,27 @@ export interface BoardMember {
 }
 
 /**
+ * An agent that called the Lanework MCP server about a card in the last few
+ * minutes (BE-16) — `GET /v1/boards/:id/presence`.
+ *
+ * ⚠️ "Called recently", not "is running": the server sees tool calls and
+ * nothing between them. This machine's own agents are known exactly from
+ * their transcripts (FE-27), which is why a row here that duplicates one of
+ * those is hidden rather than shown twice.
+ */
+export interface BoardPresence {
+  cardId: string;
+  /** Resolvable against `BoardView.members`. */
+  userId: string;
+  /** The OAuth client's slug — `claude-code`, `codex`, … */
+  agent: string;
+  /** The machine credential the call used; null over OAuth, which has none. */
+  machineId: string | null;
+  /** ISO timestamp of the last call the server recorded. */
+  lastSeenAt: string;
+}
+
+/**
  * One entry in a card's history — the log and the thread as one sequence.
  *
  * ⚠️ Merged BY THE SERVICE, not here. Two independently-paged reads stitched
@@ -699,6 +720,7 @@ export const workspaceChannels = {
   board: "workspaces:board",
   more: "workspaces:board:more",
   stats: "workspaces:board:stats",
+  presence: "workspaces:board:presence",
   move: "workspaces:board:move",
   toggle: "workspaces:board:toggle",
   setChecklist: "workspaces:board:checklist",
@@ -751,6 +773,11 @@ export interface DesktopBoardApi {
     workspaceId: string,
     query: BoardQuery,
   ) => Promise<{ stats: BoardStats; total: number } | null>;
+  /**
+   * The agents working on the board's cards, from every machine (BE-16).
+   * Empty from a service older than `/presence`.
+   */
+  presence: (workspaceId: string) => Promise<BoardPresence[]>;
   /**
    * One card WITH its checklist and assignees, by id.
    *

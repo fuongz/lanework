@@ -45,6 +45,7 @@ import {
   fetchCards,
   fetchChanges,
   fetchGroup,
+  fetchPresence,
   fetchStats,
   fetchWorkspaces,
   type GroupSpec,
@@ -1000,6 +1001,10 @@ export function registerWorkspaces(devUrl?: string): void {
       workspaceId,
       requireQuery(args[1]),
     );
+  });
+  handle(workspaceChannels.presence, devUrl, async (args) => {
+    const [workspaceId] = requireId(args, 1);
+    return fetchPresence(await authorizedRecord(), workspaceId);
   });
   handle(workspaceChannels.card, devUrl, async (args): Promise<BoardCard> => {
     const [workspaceId, cardId] = requireId(args, 2);

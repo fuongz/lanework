@@ -27,6 +27,7 @@ import { CLAUDE_ID, CODEX_ID, seedAgentHome } from "./agent-fixtures";
 import {
   launchEnv,
   removeProfile,
+  type StubCard,
   seedCredential,
   startStubPlane,
 } from "./auth-fixtures";
@@ -959,6 +960,124 @@ test("a card an agent is working on carries its spinner, on the board and in the
     );
     await expect(
       page.getByRole("button", { name: /^Open Claude · working/ }),
+    ).toHaveCount(0);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("an agent on another machine marks its card too, and this machine's own is not shown twice (BE-16)", async () => {
+  const plane = await startStubPlane({ workspaces });
+  const card = (
+    id: string,
+    taskId: string,
+    title: string,
+    rank: string,
+  ): StubCard => ({
+    id,
+    revision: 1,
+    title,
+    body: "",
+    columnKey: "todo",
+    categoryKey: "frontend",
+    taskId,
+    priority: "medium",
+    tags: [],
+    rank,
+    createdAt: null,
+    updatedAt: null,
+    checklist: [],
+  });
+  plane.setBoard("ws-alpha", {
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    members: [
+      { userId: "test-user", name: "Viewer", role: "owner" },
+      { userId: "u-decio", name: "Decio", role: "member" },
+    ],
+    cards: [
+      card("card-1", "FE-01", "Show who is working", "V"),
+      card("card-2", "FE-02", "Decio is on this one", "W"),
+    ],
+  });
+  plane.setBoard("ws-beta", board);
+  const now = new Date().toISOString();
+  plane.setPresence("ws-alpha", [
+    // Somebody else's agent, on another machine.
+    {
+      workItemId: "card-2",
+      userId: "u-decio",
+      agent: "claude-code",
+      lastSeenAt: now,
+    },
+    // The signed-in user's own Claude, over OAuth — the service's copy of the
+    // local session the transcript below puts on FE-01.
+    {
+      workItemId: "card-1",
+      userId: "test-user",
+      agent: "claude-code",
+      lastSeenAt: now,
+    },
+  ]);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  const transcript = join(
+    agentHome,
+    ".claude",
+    "projects",
+    claudeProjectDir(repo),
+    `${CLAUDE_ID}.jsonl`,
+  );
+  const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+  await appendFile(
+    transcript,
+    line({ type: "user", message: { content: "Pick up FE-01" } }) +
+      line({
+        type: "assistant",
+        message: {
+          stop_reason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              name: "mcp__lanework__get_review",
+              input: { board_id: "ws-alpha", card: "FE-01" },
+            },
+          ],
+        },
+      }),
+  );
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+    const lane = page.getByLabel("To-Do column").getByRole("listitem");
+    await expect(lane).toHaveCount(2);
+
+    // Decio's agent: the same spinner, and the name says whose.
+    await expect(lane.nth(1).locator('[data-card-agents="1"]')).toHaveCount(1);
+    await expect(
+      lane.nth(1).getByRole("combobox", { name: /^Move Decio is on this one/ }),
+    ).toHaveAccessibleName(/Claude · Decio · (just now|now)/);
+
+    // FE-01: the local session, once — not again as the service's copy.
+    await expect(lane.nth(0).locator('[data-card-agents="1"]')).toHaveCount(1);
+    await expect(
+      lane.nth(0).getByRole("combobox", { name: /^Move Show who is working/ }),
+    ).not.toHaveAccessibleName(/Viewer/);
+
+    // In the issue, Decio's agent is listed but is not something to open.
+    await lane.nth(1).getByRole("link").click();
+    const cloud = page.locator('[data-card-agent="cloud"]');
+    await expect(cloud).toHaveCount(1);
+    await expect(cloud).toContainText("Decio");
+    await expect(
+      page.getByRole("button", { name: /^Open Claude/ }),
     ).toHaveCount(0);
   } finally {
     await app.close();

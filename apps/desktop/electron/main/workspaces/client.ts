@@ -17,6 +17,7 @@ import {
   type BoardLabel,
   type BoardMember,
   type BoardPlacement,
+  type BoardPresence,
   type BoardQuery,
   type BoardStats,
   type BoardWrite,
@@ -579,6 +580,48 @@ export async function fetchStats(
     byCategory: parseCounts(stats.byCategory),
     byPriority: parseCounts(stats.byPriority),
   };
+}
+
+/**
+ * The board's agent presence (BE-16), or none from a service older than
+ * `/presence`.
+ *
+ * ⚠️ Malformed rows are dropped one by one rather than failing the read.
+ * Presence is a hint drawn on top of the board; one bad row must not cost the
+ * others.
+ */
+export async function fetchPresence(
+  record: MachineRecord,
+  workspaceId: string,
+): Promise<BoardPresence[]> {
+  const response = await call(record, `/v1/boards/${workspaceId}/presence`);
+  if (response.status === 404) return [];
+  if (!response.ok)
+    throw new Error(
+      `Could not load who is working on this board (HTTP ${response.status}).`,
+    );
+  const payload = (await body(response)) as { presence?: unknown };
+  const rows = Array.isArray(payload.presence) ? payload.presence : [];
+  const out: BoardPresence[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    if (
+      typeof r.workItemId !== "string" ||
+      typeof r.userId !== "string" ||
+      typeof r.agent !== "string" ||
+      typeof r.lastSeenAt !== "string"
+    )
+      continue;
+    out.push({
+      cardId: r.workItemId,
+      userId: r.userId,
+      agent: r.agent,
+      machineId: typeof r.machineId === "string" ? r.machineId : null,
+      lastSeenAt: r.lastSeenAt,
+    });
+  }
+  return out;
 }
 
 export async function fetchBoardConfig(
