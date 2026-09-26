@@ -47,7 +47,11 @@ export interface TerminalSession {
   createdAt: number;
   /** Set once the shell has exited; the tab stays until it is closed. */
   exit: { code: number; signal: number | null } | null;
-  /** The agent conversation this tab resumed (FE-23), or null. */
+  /**
+   * The agent conversation this tab resumed (FE-23) — or, for a new Claude
+   * tab, the id it was started under, so its transcript is known from the
+   * moment one is written. Null otherwise.
+   */
   resume: string | null;
 }
 

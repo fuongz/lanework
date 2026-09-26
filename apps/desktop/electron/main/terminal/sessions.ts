@@ -174,6 +174,18 @@ const RESUME_ARGS: Record<TerminalAgent, (id: string) => string> = {
   codex: (id) => `resume ${id}`,
 };
 
+/**
+ * What follows the CLI's name to start a NEW conversation under an id chosen
+ * here, for the CLIs that take one.
+ *
+ * ⚠️ Without it a new tab's `resume` stays null, so nothing ties it to the
+ * transcript the CLI writes once somebody types — and the rail shows the tab
+ * AND that transcript as two rows for one agent. Codex has no such flag.
+ */
+const NEW_ARGS: Partial<Record<TerminalAgent, (id: string) => string>> = {
+  claude: (id) => `--session-id ${id}`,
+};
+
 export function createSessions(options: SessionsOptions = {}) {
   const sessions = new Map<string, Session>();
   const listeners = new Set<(workspace: string) => void>();
@@ -289,10 +301,17 @@ export function createSessions(options: SessionsOptions = {}) {
     const kind = isTerminalKind(request.kind) ? request.kind : "shell";
     // ⚠️ Checked again here, not only in main: this line is typed into a
     // shell, and a UUID is hex and dashes — nothing a shell reads as syntax.
-    const resume =
+    const resumed =
       kind !== "shell" && isAgentSessionId(request.resume)
         ? request.resume
         : null;
+    const named = kind !== "shell" && !resumed ? NEW_ARGS[kind] : undefined;
+    const resume = resumed ?? (named ? randomUUID() : null);
+    const args = resumed
+      ? ` ${RESUME_ARGS[kind as TerminalAgent](resumed)}`
+      : named && resume
+        ? ` ${named(resume)}`
+        : "";
     const session: Session = {
       info: {
         id: randomUUID(),
@@ -324,7 +343,7 @@ export function createSessions(options: SessionsOptions = {}) {
       launch:
         kind === "shell"
           ? null
-          : `printf '\\033]7771;lanework-launched\\007'; exec ${(options.agentCommand ?? String)(kind)}${resume ? ` ${RESUME_ARGS[kind](resume)}` : ""} || exit 127\r`,
+          : `printf '\\033]7771;lanework-launched\\007'; exec ${(options.agentCommand ?? String)(kind)}${args} || exit 127\r`,
       launchTimer: null,
       lastOutput: 0,
       curtain: kind === "shell" ? null : "",

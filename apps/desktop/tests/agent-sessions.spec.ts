@@ -27,7 +27,7 @@ import {
   listAgentSessions,
 } from "../electron/main/terminal/agent-sessions";
 import { createSessions } from "../electron/main/terminal/sessions";
-import type { TerminalHostMessage } from "../shared/terminal";
+import { isAgentSessionId, type TerminalHostMessage } from "../shared/terminal";
 import { CLAUDE_ID, CODEX_ID, seedAgentHome } from "./agent-fixtures";
 
 async function tempDir(prefix: string): Promise<string> {
@@ -93,11 +93,17 @@ test("an agent tab resumes a conversation by its id — and never types anything
     expect(codex.resume).toBe(CODEX_ID);
     expect(typed[1]).toContain(`ran-codex-resume-${CODEX_ID}`);
 
-    // Not a UUID: a plain agent tab, with nothing appended.
+    // Not a UUID: a NEW conversation, under an id chosen here — never the
+    // one sent — so the rail can tie the tab to its transcript.
     const hostile = await run("claude", "x; echo pwned");
-    expect(hostile.resume).toBeNull();
-    expect(typed[2]).toContain("ran-claude--");
+    expect(isAgentSessionId(hostile.resume)).toBe(true);
+    expect(typed[2]).toContain(`ran-claude---session-id-${hostile.resume}`);
     expect(typed[2]).not.toContain("pwned");
+
+    // Codex takes no id for a new conversation: nothing appended.
+    const fresh = await run("codex", undefined);
+    expect(fresh.resume).toBeNull();
+    expect(typed[3]).toMatch(/ran-codex--\s/);
   } finally {
     sessions.killAll();
   }
