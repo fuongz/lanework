@@ -64,7 +64,55 @@
   }
 }
 
+/* The rail's "working" mark (OrbitSpinner): one light going round a 3×3
+   grid, brightest where it is, fading behind it. 8 cells × 100ms. */
+@keyframes orbit-spinner {
+  0% {
+    opacity: 1;
+  }
+  12.5% {
+    opacity: 0.65;
+  }
+  37.5% {
+    opacity: 0.2;
+  }
+  100% {
+    opacity: 0.15;
+  }
+}
+
+.orbit-spinner [data-orbit] {
+  opacity: 0.45;
+}
+
+/* A working agent's title (with OrbitSpinner): a band of the full ink
+   sweeping through muted text. Only with motion allowed — reduced motion keeps
+   the text as it is, readable, rather than a still gradient. */
+@keyframes text-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
+  .text-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      var(--muted-foreground) 40%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 60%
+    );
+    background-size: 300% 100%;
+    background-clip: text;
+    color: transparent;
+    animation: text-shimmer 2s linear infinite;
+  }
+  .orbit-spinner [data-orbit] {
+    animation: orbit-spinner 0.8s linear infinite;
+  }
   .startup-loading img {
     animation: startup-shimmer 0.9s linear infinite;
   }

@@ -1,6 +1,5 @@
 import {
   Add01Icon,
-  Loading03Icon,
   PencilEdit02Icon,
   PinIcon,
   PinOffIcon,
@@ -9,6 +8,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import type { AgentSession, TerminalSession } from "#/../shared/terminal";
+import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
@@ -243,12 +243,7 @@ export function AgentSessionsNav({
                   className="relative grid size-4 shrink-0 place-items-center"
                   data-working=""
                 >
-                  <HugeiconsIcon
-                    icon={Loading03Icon}
-                    className="text-muted-foreground size-4 animate-spin motion-reduce:hidden"
-                    strokeWidth={1.8}
-                    aria-hidden="true"
-                  />
+                  <OrbitSpinner className="text-foreground motion-reduce:hidden" />
                   <span
                     aria-hidden="true"
                     className="bg-tone-emerald hidden size-1.5 rounded-full motion-reduce:block"
@@ -260,7 +255,11 @@ export function AgentSessionsNav({
                   className="size-4 shrink-0"
                 />
               )}
-              <span className="min-w-0 flex-1 truncate">{session.title}</span>
+              <span
+                className={`min-w-0 flex-1 truncate ${working ? "text-shimmer" : ""}`}
+              >
+                {session.title}
+              </span>
               {isPinned && (
                 <HugeiconsIcon
                   icon={PinIcon}

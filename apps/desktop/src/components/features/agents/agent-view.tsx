@@ -12,6 +12,7 @@ import type {
   TerminalAgent,
   TerminalSession,
 } from "#/../shared/terminal";
+import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
@@ -165,16 +166,16 @@ export function AgentView() {
     >
       <header className="border-sidebar-border flex h-11 shrink-0 items-center gap-2.5 border-b ps-[max(0.75rem,var(--titlebar-clear,0px))] pe-3">
         {working ? (
-          <HugeiconsIcon
-            icon={Loading03Icon}
-            className="text-muted-foreground size-4 shrink-0 animate-spin motion-reduce:animate-none"
-            strokeWidth={1.8}
-            aria-label="Working"
-          />
+          <span role="img" aria-label="Working" className="flex shrink-0">
+            <OrbitSpinner className="text-foreground" />
+          </span>
         ) : (
           <TerminalKindIcon kind={agent} className="size-4 shrink-0" />
         )}
-        <h1 className="min-w-0 truncate text-[13px] font-medium" title={title}>
+        <h1
+          className={`min-w-0 truncate text-[13px] font-medium ${working ? "text-shimmer" : ""}`}
+          title={title}
+        >
           {title}
         </h1>
         <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
