@@ -7,6 +7,7 @@ import { open, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AGENT_SESSION_LIMIT,
+  type AgentCard,
   type AgentSession,
   isAgentSessionId,
 } from "../../../shared/terminal";
@@ -240,6 +241,137 @@ export async function transcriptWorking(
   }
 }
 
+/**
+ * How far back a transcript is read for the card its agent is on (FE-27): a
+ * card is named at a turn's start, and a long turn writes a lot after it.
+ */
+const CARD_SCAN = 4 * 1024 * 1024;
+
+/** `mcp__<server>__<tool>`, the name both CLIs give an MCP tool. */
+const MCP_TOOL = /^mcp__(.+)__[a-z_]+$/i;
+
+function cardOf(server: unknown, args: unknown): AgentCard | null {
+  if (typeof server !== "string" || !/lanework/i.test(server)) return null;
+  const { board_id: boardId, card } = (args ?? {}) as {
+    board_id?: unknown;
+    card?: unknown;
+  };
+  return typeof boardId === "string" &&
+    boardId &&
+    typeof card === "string" &&
+    card
+    ? { boardId, card }
+    : null;
+}
+
+/**
+ * The card a transcript line's Lanework MCP call names, if it is one that
+ * names a card — `get_review`, `set_status`, `toggle_item` and the like
+ * (FE-27/D1). A call without a `card` (`list_boards`, `board_summary`) is
+ * none.
+ *
+ * ⚠️ Matched on the MCP SERVER's name, not on one spelling of it: however it
+ * was added — `lanework`, `claude_ai_Lanework` — it is the Lanework server.
+ */
+export function laneworkCard(line: Line): AgentCard | null {
+  // Claude: an assistant message's `tool_use` parts.
+  if (line.type === "assistant") {
+    const content = (line.message as { content?: unknown } | undefined)
+      ?.content;
+    if (!Array.isArray(content)) return null;
+    for (let at = content.length - 1; at >= 0; at--) {
+      const part = content[at] as {
+        type?: unknown;
+        name?: unknown;
+        input?: unknown;
+      };
+      if (part?.type !== "tool_use" || typeof part.name !== "string") continue;
+      const found = cardOf(MCP_TOOL.exec(part.name)?.[1], part.input);
+      if (found) return found;
+    }
+    return null;
+  }
+  const payload = line.payload as Record<string, unknown> | null | undefined;
+  if (!payload) return null;
+  // Codex: an `McpToolCall` item, started or completed.
+  if (line.type === "event_msg") {
+    const item = payload.item as Record<string, unknown> | undefined;
+    if (item?.type === "McpToolCall")
+      return cardOf(item.server, item.arguments);
+    const call = payload.invocation as Record<string, unknown> | undefined;
+    return call ? cardOf(call.server, call.arguments) : null;
+  }
+  // Codex, older: a `function_call` whose arguments are a JSON string.
+  if (
+    line.type === "response_item" &&
+    payload.type === "function_call" &&
+    typeof payload.name === "string"
+  ) {
+    const server = MCP_TOOL.exec(payload.name)?.[1];
+    if (!server || typeof payload.arguments !== "string") return null;
+    try {
+      return cardOf(server, JSON.parse(payload.arguments));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * The last card named in `file` between byte `start` and `end`, and where
+ * the whole lines read end — the next read's `start` (FE-27).
+ *
+ * ⚠️ Only a line the newline after it has closed is read: a line being
+ * written is left for the next read, which starts where this one's whole
+ * lines ended. `aligned` says `start` is such a place; otherwise the first,
+ * cut line is skipped. Only lines that mention Lanework are parsed.
+ */
+export async function lastCardIn(
+  file: string,
+  start: number,
+  end: number,
+  aligned: boolean,
+): Promise<{ card: AgentCard | null; end: number }> {
+  const from = end - start > CARD_SCAN ? end - CARD_SCAN : start;
+  const whole = aligned && from === start;
+  const handle = await open(file, "r");
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.alloc(end - from);
+    const { bytesRead } = await handle.read(buffer, 0, end - from, from);
+    buffer = buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+  const last = buffer.lastIndexOf(0x0a);
+  if (last === -1) return { card: null, end: whole ? from : start };
+  let stop = last;
+  while (stop > 0) {
+    const begin = buffer.lastIndexOf(0x0a, stop - 1) + 1;
+    // The first piece of a read that began mid-line is not a line.
+    if (begin === 0 && !whole && from > 0) break;
+    const piece = buffer.subarray(begin, stop);
+    if (piece.includes("lanework") || piece.includes("Lanework")) {
+      const [line] = lines(`${piece.toString("utf8")}\n`, { head: true });
+      const card = line ? laneworkCard(line) : null;
+      if (card) return { card, end: from + last + 1 };
+    }
+    stop = begin - 1;
+  }
+  return { card: null, end: from + last + 1 };
+}
+
+/** The card the agent behind `file` last named, from its recent past. */
+async function transcriptCard(
+  file: string,
+  size: number,
+): Promise<AgentCard | null> {
+  return (
+    (await lastCardIn(file, 0, size, true).catch(() => null))?.card ?? null
+  );
+}
+
 async function claudeSession(
   file: string,
   id: string,
@@ -265,6 +397,9 @@ async function claudeSession(
   const title = named ? tidy(named) : prompt;
   // Nothing was ever asked in it: a CLI opened and closed, nothing to resume.
   if (!title) return null;
+  const working =
+    Date.now() - info.mtimeMs <= STALE_MS &&
+    claudeWorking(info.size > CHUNK ? tail : head);
   return {
     id,
     agent: "claude",
@@ -275,9 +410,9 @@ async function claudeSession(
       lastActivity(head, "claude") ??
       info.mtime.toISOString(),
     pinnedAt: null,
-    working:
-      Date.now() - info.mtimeMs <= STALE_MS &&
-      claudeWorking(info.size > CHUNK ? tail : head),
+    working,
+    // Read only for a working one: an idle agent is on no card (FE-27/D1).
+    card: working ? await transcriptCard(file, info.size) : null,
   };
 }
 
@@ -420,6 +555,8 @@ async function codexSessions(
         start === 0
           ? head
           : lines(await readRange(file, start, CHUNK), { head: false });
+      const working =
+        Date.now() - info.mtimeMs <= STALE_MS && codexWorking(tail);
       out.push({
         id: meta.id,
         agent: "codex",
@@ -430,7 +567,8 @@ async function codexSessions(
           lastActivity(head, "codex") ??
           info.mtime.toISOString(),
         pinnedAt: null,
-        working: Date.now() - info.mtimeMs <= STALE_MS && codexWorking(tail),
+        working,
+        card: working ? await transcriptCard(file, info.size) : null,
       });
     } catch {
       // A rollout being written, or gone: the next one.

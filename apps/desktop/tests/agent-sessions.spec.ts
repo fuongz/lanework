@@ -23,7 +23,9 @@ import {
   claudeProjectDir,
   claudeWorking,
   codexWorking,
+  laneworkCard,
   lastActivity,
+  lastCardIn,
   listAgentSessions,
 } from "../electron/main/terminal/agent-sessions";
 import { createSessions } from "../electron/main/terminal/sessions";
@@ -333,6 +335,179 @@ test("the watcher reports a turn opening and closing — this folder's only", as
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(seen.length).toBe(before);
     expect(seen.some((key) => key.includes("111111111111"))).toBe(false);
+  } finally {
+    stop();
+  }
+});
+
+test("the card an agent is on is its latest Lanework call that names one — this board's, from either CLI (FE-27)", async () => {
+  const claudeCall = (name: string, input: unknown) => ({
+    type: "assistant",
+    message: {
+      stop_reason: "tool_use",
+      content: [
+        { type: "text", text: "x" },
+        { type: "tool_use", name, input },
+      ],
+    },
+  });
+  expect(
+    laneworkCard(
+      claudeCall("mcp__lanework__set_status", { board_id: "b1", card: "FE-3" }),
+    ),
+  ).toEqual({ boardId: "b1", card: "FE-3" });
+  // However the server was added, and a uuid for the card.
+  expect(
+    laneworkCard(
+      claudeCall("mcp__claude_ai_Lanework__get_review", {
+        board_id: "b1",
+        card: "0a5b9807-036e-4feb-9d2f-03d1e6bad977",
+      }),
+    ),
+  ).toEqual({ boardId: "b1", card: "0a5b9807-036e-4feb-9d2f-03d1e6bad977" });
+  // A call that names no card, another server, no board: none.
+  expect(
+    laneworkCard(
+      claudeCall("mcp__lanework__board_summary", { board_id: "b1" }),
+    ),
+  ).toBeNull();
+  expect(
+    laneworkCard(
+      claudeCall("mcp__linear__get_issue", { board_id: "b1", card: "X" }),
+    ),
+  ).toBeNull();
+  expect(
+    laneworkCard(claudeCall("mcp__lanework__get_review", { card: "FE-3" })),
+  ).toBeNull();
+  // Codex: an McpToolCall item, and the older function_call.
+  expect(
+    laneworkCard({
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        item: {
+          type: "McpToolCall",
+          server: "lanework",
+          tool: "toggle_item",
+          arguments: { board_id: "b1", card: "BE-2", key: "V1" },
+        },
+      },
+    }),
+  ).toEqual({ boardId: "b1", card: "BE-2" });
+  expect(
+    laneworkCard({
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: "mcp__lanework__get_review",
+        arguments: JSON.stringify({ board_id: "b1", card: "BE-4" }),
+      },
+    }),
+  ).toEqual({ boardId: "b1", card: "BE-4" });
+
+  // In a file: the NEWEST wins, and a line still being written is not read.
+  const dir = await tempDir("lanew-card-");
+  const file = join(dir, "t.jsonl");
+  const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+  await writeFile(
+    file,
+    line(
+      claudeCall("mcp__lanework__get_review", { board_id: "b1", card: "FE-1" }),
+    ) +
+      line({ type: "user", message: { content: "more" } }) +
+      line(
+        claudeCall("mcp__lanework__set_status", {
+          board_id: "b1",
+          card: "FE-2",
+        }),
+      ) +
+      line({ type: "user", message: { content: "and more" } }),
+  );
+  const size = (await import("node:fs/promises").then((fs) => fs.stat(file)))
+    .size;
+  const first = await lastCardIn(file, 0, size, true);
+  expect(first).toEqual({ card: { boardId: "b1", card: "FE-2" }, end: size });
+  // A half-written call is left for the next read, which starts at `end`.
+  const half = JSON.stringify(
+    claudeCall("mcp__lanework__set_status", { board_id: "b1", card: "FE-9" }),
+  );
+  await appendFile(file, half.slice(0, 40));
+  const cut = await lastCardIn(file, first.end, size + 40, true);
+  expect(cut).toEqual({ card: null, end: size });
+  await appendFile(file, `${half.slice(40)}\n`);
+  const whole = await lastCardIn(file, cut.end, size + half.length + 1, true);
+  expect(whole.card).toEqual({ boardId: "b1", card: "FE-9" });
+  // Nothing of Lanework in it: none.
+  const plain = join(dir, "p.jsonl");
+  await writeFile(plain, line({ type: "user", message: { content: "hi" } }));
+  expect((await lastCardIn(plain, 0, 64, true)).card).toBeNull();
+});
+
+test("a listing and the watcher both say which card a working agent is on — and none once it is idle (FE-27)", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  await seedAgentHome(home, folder);
+  const claude = join(
+    home,
+    ".claude",
+    "projects",
+    claudeProjectDir(folder),
+    `${CLAUDE_ID}.jsonl`,
+  );
+  const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+  const call = (card: string) =>
+    line({
+      type: "assistant",
+      message: {
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            name: "mcp__lanework__get_review",
+            input: { board_id: "b1", card },
+          },
+        ],
+      },
+    });
+  const seen: string[] = [];
+  const stop = watchAgentActivity(home, folder, (agent, _id, working, card) =>
+    seen.push(`${agent}:${working}:${card?.card ?? "-"}`),
+  );
+  try {
+    await expect(async () => {
+      await appendFile(
+        claude,
+        line({ type: "user", message: { content: "Go" } }) + call("FE-1"),
+      );
+      await expect
+        .poll(() => seen.at(-1), { timeout: 1_500 })
+        .toBe("claude:true:FE-1");
+    }).toPass({ timeout: 15_000 });
+    const listed = await listAgentSessions(home, folder);
+    expect(listed.find((entry) => entry.agent === "claude")?.card).toEqual({
+      boardId: "b1",
+      card: "FE-1",
+    });
+    // Moving on to another card moves the mark (D5).
+    await appendFile(claude, call("FE-2"));
+    await expect.poll(() => seen.at(-1)).toBe("claude:true:FE-2");
+    // Writes that name no card keep the one it is on.
+    await appendFile(
+      claude,
+      line({ type: "user", message: { content: "ok" } }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(seen.at(-1)).toBe("claude:true:FE-2");
+    await appendFile(
+      claude,
+      line({ type: "system", subtype: "turn_duration" }),
+    );
+    await expect.poll(() => seen.at(-1)).toBe("claude:false:-");
+    expect(
+      (await listAgentSessions(home, folder)).find(
+        (entry) => entry.agent === "claude",
+      )?.card,
+    ).toBeNull();
   } finally {
     stop();
   }

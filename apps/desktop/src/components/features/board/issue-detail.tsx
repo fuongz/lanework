@@ -17,6 +17,7 @@ import type {
   BoardChecklistItem,
   BoardMember,
 } from "#/../shared/workspaces";
+import { CardAgentsLine } from "#/components/shared/board/card-agents";
 import {
   CategoryDot,
   PriorityIcon,
@@ -133,6 +134,7 @@ export function IssueDetail() {
           <span className="text-muted-foreground shrink-0 px-1 font-mono text-xs">
             {taskId}
           </span>
+          {card && <CardAgentsLine card={card} />}
           {card && <HeaderActions card={card} />}
         </header>
         <AlertDialog

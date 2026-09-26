@@ -4,11 +4,17 @@
 // ⚠️ Nothing here imports Electron, so a spec can drive it under plain Node
 // against a fake home folder.
 import { type FSWatcher, watch } from "node:fs";
+import { stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { isAgentSessionId, type TerminalAgent } from "../../../shared/terminal";
+import {
+  type AgentCard,
+  isAgentSessionId,
+  type TerminalAgent,
+} from "../../../shared/terminal";
 import {
   claudeProjectDir,
   codexRolloutOf,
+  lastCardIn,
   transcriptWorking,
 } from "./agent-sessions";
 
@@ -39,11 +45,34 @@ const TRAILING_ID =
 export function watchAgentActivity(
   home: string,
   folder: string,
-  onActivity: (agent: TerminalAgent, id: string, working: boolean) => void,
+  onActivity: (
+    agent: TerminalAgent,
+    id: string,
+    working: boolean,
+    card: AgentCard | null,
+  ) => void,
 ): () => void {
   const watchers: FSWatcher[] = [];
   const pending = new Map<string, NodeJS.Timeout>();
-  const said = new Map<string, boolean>();
+  const said = new Map<string, string>();
+  /**
+   * The card each conversation last named, and how far its transcript has
+   * been read for one (FE-27). Only the bytes written since are read again;
+   * the first read of a conversation goes back `CARD_SCAN`.
+   */
+  const cards = new Map<string, { card: AgentCard | null; end: number }>();
+  const cardOf = async (key: string, file: string) => {
+    const size = (await stat(file)).size;
+    const known = cards.get(key);
+    // Shorter than what was read: rewritten, so read it as new.
+    const from = known && known.end <= size ? known.end : 0;
+    const read = await lastCardIn(file, from, size, true);
+    // ⚠️ The NEWEST card wins (FE-27/D5): an agent that moves on to another
+    // card moves its mark with it; bytes naming none keep the one it had.
+    const next = { card: read.card ?? known?.card ?? null, end: read.end };
+    cards.set(key, next);
+    return next.card;
+  };
   let stopped = false;
   const report = (agent: TerminalAgent, id: string, file: string) => {
     const key = `${agent}:${id}`;
@@ -52,15 +81,22 @@ export function watchAgentActivity(
       key,
       setTimeout(() => {
         pending.delete(key);
-        void transcriptWorking(file, agent as "claude" | "codex").then(
-          (working) => {
-            // Only a CHANGE is news: a row already spinning is not told again
-            // on every write of the turn it is spinning for.
-            if (stopped || said.get(key) === working) return;
-            said.set(key, working);
-            onActivity(agent, id, working);
-          },
-        );
+        void (async () => {
+          const working = await transcriptWorking(
+            file,
+            agent as "claude" | "codex",
+          );
+          // Looked for only while working: an idle agent is on no card.
+          const card = working
+            ? await cardOf(key, file).catch(() => null)
+            : null;
+          // Only a CHANGE is news: a row already spinning is not told again
+          // on every write of the turn it is spinning for.
+          const news = `${working}:${card?.boardId}:${card?.card}`;
+          if (stopped || said.get(key) === news) return;
+          said.set(key, news);
+          onActivity(agent, id, working, card);
+        })();
       }, SETTLE_MS),
     );
   };

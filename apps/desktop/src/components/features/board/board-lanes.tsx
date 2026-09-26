@@ -30,6 +30,11 @@ import type {
   BoardColumn,
 } from "#/../shared/workspaces";
 import {
+  CardAgentsMark,
+  describeAgents,
+  useCardAgents,
+} from "#/components/shared/board/card-agents";
+import {
   CategoryDot,
   ChecklistProgress,
   Fraction,
@@ -654,6 +659,7 @@ function CardFace({
   busy?: boolean;
   onMove?: (cardId: string, columnKey: string | null) => unknown;
 }) {
+  const agents = useCardAgents(card);
   const title = (
     <>
       {card.taskId && (
@@ -695,10 +701,12 @@ function CardFace({
             <SelectTrigger
               size="sm"
               disabled={stale || busy}
-              aria-label={`Move ${card.title} to another column`}
+              aria-label={`Move ${card.title} to another column${agents.length ? ` — ${describeAgents(agents)}` : ""}`}
               className="hover:bg-foreground/[0.06] size-5 justify-center rounded border-0 bg-transparent p-0 shadow-none [&>svg:last-child]:hidden"
             >
-              <StatusIcon column={columnOf(columns, card.columnKey)} />
+              <CardAgentsMark card={card}>
+                <StatusIcon column={columnOf(columns, card.columnKey)} />
+              </CardAgentsMark>
             </SelectTrigger>
             <SelectContent>
               {columns.map((column) => (

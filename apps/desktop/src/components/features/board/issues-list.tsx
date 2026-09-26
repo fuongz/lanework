@@ -7,6 +7,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
+import { CardAgentsMark } from "#/components/shared/board/card-agents";
 import {
   CategoryDot,
   ChecklistProgress,
@@ -136,12 +137,14 @@ export function IssuesList() {
                           disabled={!card.taskId}
                           className="hover:bg-foreground/[0.03] focus-visible:ring-accent-brand flex h-8 items-center gap-2.5 px-6 text-[13px] outline-none focus-visible:ring-2 focus-visible:-ring-offset-1 aria-disabled:cursor-default"
                         >
-                          <StatusIcon
-                            column={columnOf(
-                              view?.columns ?? [],
-                              card.columnKey,
-                            )}
-                          />
+                          <CardAgentsMark card={card}>
+                            <StatusIcon
+                              column={columnOf(
+                                view?.columns ?? [],
+                                card.columnKey,
+                              )}
+                            />
+                          </CardAgentsMark>
                           {card.taskId && (
                             <span className="text-muted-foreground w-14 shrink-0 font-mono text-xs">
                               {card.taskId}

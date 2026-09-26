@@ -80,6 +80,23 @@ export interface AgentSession {
    * conversation writes to it too.
    */
   working: boolean;
+  /**
+   * The card its agent last named to the Lanework MCP — read only while it is
+   * working, null otherwise or when it never named one (FE-27).
+   */
+  card: AgentCard | null;
+}
+
+/**
+ * A card an agent is on, as its latest Lanework MCP call named it (FE-27/D1).
+ *
+ * ⚠️ `card` is what the AGENT typed — a task id (`FE-27`) or a card's uuid —
+ * so a renderer matches it against both, and only on the board `boardId`
+ * names. Read from the agent's own transcript; nothing is asked of the cloud.
+ */
+export interface AgentCard {
+  boardId: string;
+  card: string;
 }
 
 /**
@@ -95,6 +112,8 @@ export interface AgentActivity {
   agent: TerminalAgent;
   id: string;
   working: boolean;
+  /** The card it is on, as `AgentSession.card` (FE-27). */
+  card: AgentCard | null;
   /** Epoch ms. */
   at: number;
 }

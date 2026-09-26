@@ -154,14 +154,18 @@ function watchWorkspace(workspace: string, folder: string): void {
       watching.delete(oldest);
     }
   }
-  const stop = watchAgentActivity(agentHome(), folder, (agent, id, working) =>
-    broadcast(terminalChannels.agentActivity, {
-      workspace,
-      agent,
-      id,
-      working,
-      at: Date.now(),
-    }),
+  const stop = watchAgentActivity(
+    agentHome(),
+    folder,
+    (agent, id, working, card) =>
+      broadcast(terminalChannels.agentActivity, {
+        workspace,
+        agent,
+        id,
+        working,
+        card,
+        at: Date.now(),
+      }),
   );
   watching.set(workspace, { folder, stop });
 }

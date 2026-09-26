@@ -850,3 +850,119 @@ test("the panel opens tall, and at the height it was dragged to — after a hide
     await removeProfile(profile);
   }
 });
+
+test("a card an agent is working on carries its spinner, on the board and in the issue, until the turn closes (FE-27)", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", {
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    cards: [
+      {
+        id: "card-1",
+        revision: 1,
+        title: "Show who is working",
+        body: "",
+        columnKey: "todo",
+        categoryKey: "frontend",
+        taskId: "FE-01",
+        priority: "medium",
+        tags: [],
+        rank: "V",
+        createdAt: null,
+        updatedAt: null,
+        checklist: [],
+      },
+      {
+        id: "card-2",
+        revision: 1,
+        title: "Nobody on this one",
+        body: "",
+        columnKey: "todo",
+        categoryKey: "frontend",
+        taskId: "FE-02",
+        priority: "medium",
+        tags: [],
+        rank: "W",
+        createdAt: null,
+        updatedAt: null,
+        checklist: [],
+      },
+    ],
+  });
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  const transcript = join(
+    agentHome,
+    ".claude",
+    "projects",
+    claudeProjectDir(repo),
+    `${CLAUDE_ID}.jsonl`,
+  );
+  const old = new Date(Date.now() - 3_600_000);
+  await utimes(transcript, old, old);
+  const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+    const lane = page.getByLabel("To-Do column").getByRole("listitem");
+    await expect(lane).toHaveCount(2);
+    const marks = page.locator("[data-card-agents]");
+    await expect(marks).toHaveCount(0);
+
+    // A turn that named FE-01 — on THIS board — marks that card, and only it.
+    await appendFile(
+      transcript,
+      line({ type: "user", message: { content: "Pick up FE-01" } }) +
+        line({
+          type: "assistant",
+          message: {
+            stop_reason: "tool_use",
+            content: [
+              {
+                type: "tool_use",
+                name: "mcp__lanework__set_status",
+                input: {
+                  board_id: "ws-alpha",
+                  card: "FE-01",
+                  status: "processing",
+                },
+              },
+            ],
+          },
+        }),
+    );
+    await expect(lane.nth(0).locator("[data-card-agents]")).toHaveCount(1);
+    await expect(marks).toHaveCount(1);
+    // In the status icon's place, and said in the lane Select's name.
+    await expect(
+      lane.nth(0).getByRole("combobox", { name: /^Move Show who is working/ }),
+    ).toHaveAccessibleName(/Claude · working: Flaky login test/);
+
+    // The issue says who, and a click opens that agent.
+    await lane.nth(0).getByRole("link").click();
+    await expect(
+      page.getByRole("button", {
+        name: "Open Claude · working: Flaky login test",
+      }),
+    ).toBeVisible();
+
+    // The turn closes: the line goes with it.
+    await appendFile(
+      transcript,
+      line({ type: "system", subtype: "turn_duration" }),
+    );
+    await expect(
+      page.getByRole("button", { name: /^Open Claude · working/ }),
+    ).toHaveCount(0);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});

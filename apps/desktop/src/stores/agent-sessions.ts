@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   AgentActivity,
+  AgentCard,
   AgentSession,
   TerminalAgent,
 } from "../../shared/terminal";
@@ -17,6 +18,8 @@ interface AgentSessionsState {
    * `working` until the next listing, which clears it.
    */
   live: Record<string, boolean>;
+  /** The card each is on, by `agent:id`, as `live` is to `working` (FE-27). */
+  cards: Record<string, AgentCard | null>;
   load: (workspace: string) => Promise<void>;
   /** Name it in Lanework; empty goes back to the CLI's title (FE-24). */
   rename: (
@@ -41,6 +44,44 @@ export function agentKey(session: {
   return `${session.agent}:${session.id}`;
 }
 
+function sameCard(
+  a: AgentCard | null | undefined,
+  b: AgentCard | null | undefined,
+): boolean {
+  return a?.boardId === b?.boardId && a?.card === b?.card;
+}
+
+/**
+ * The conversations of `workspace` working on `card` right now (FE-27): the
+ * ones whose latest Lanework MCP call named it, on this board.
+ *
+ * ⚠️ `card` as the agent typed it may be the task id or the uuid, so both are
+ * matched — and only a call that named THIS board: `FE-3` is another card on
+ * every other board. Selected with `useShallow`, so a card that no agent is
+ * on keeps one empty list and does not redraw.
+ */
+export function workingOn(
+  state: Pick<AgentSessionsState, "byWorkspace" | "live" | "cards">,
+  workspace: string,
+  card: { id: string; taskId: string | null },
+): AgentSession[] {
+  const out: AgentSession[] = [];
+  for (const session of state.byWorkspace[workspace] ?? []) {
+    const key = agentKey(session);
+    if (!(state.live[key] ?? session.working)) continue;
+    const on = key in state.cards ? state.cards[key] : session.card;
+    if (
+      on &&
+      on.boardId === workspace &&
+      (on.card === card.id ||
+        (card.taskId !== null &&
+          on.card.toUpperCase() === card.taskId.toUpperCase()))
+    )
+      out.push(session);
+  }
+  return out;
+}
+
 /**
  * A read that started before a later one must not land after it — the rail
  * would flip back to the older list. The same counter idea as the terminal's.
@@ -54,6 +95,7 @@ const relisted = new Map<string, number>();
 export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   byWorkspace: {},
   live: {},
+  cards: {},
 
   rename: async (workspace, session, name) => {
     const surface = window.desktop?.terminal;
@@ -91,9 +133,13 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     return surface.onAgentActivity((activity: AgentActivity) => {
       const key = agentKey(activity);
       set((state) =>
-        state.live[key] === activity.working
+        state.live[key] === activity.working &&
+        sameCard(state.cards[key], activity.card)
           ? state
-          : { live: { ...state.live, [key]: activity.working } },
+          : {
+              live: { ...state.live, [key]: activity.working },
+              cards: { ...state.cards, [key]: activity.card },
+            },
       );
       // ⚠️ A conversation the rail has not listed yet is one that just
       // started: list again — but not on every write of it.
@@ -125,7 +171,8 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
             entry.title === listed[index]?.title &&
             entry.updatedAt === listed[index]?.updatedAt &&
             entry.pinnedAt === listed[index]?.pinnedAt &&
-            entry.working === listed[index]?.working,
+            entry.working === listed[index]?.working &&
+            sameCard(entry.card, listed[index]?.card),
         )
       )
         return;
@@ -133,10 +180,15 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       // conversations before it is older, and is dropped.
       set((state) => {
         const live = { ...state.live };
-        for (const entry of listed) delete live[agentKey(entry)];
+        const cards = { ...state.cards };
+        for (const entry of listed) {
+          delete live[agentKey(entry)];
+          delete cards[agentKey(entry)];
+        }
         return {
           byWorkspace: { ...state.byWorkspace, [workspace]: listed },
           live,
+          cards,
         };
       });
     } catch {
