@@ -349,6 +349,7 @@ test.describe("in the app", () => {
       .waitFor({ state: "visible", timeout: 15_000 });
     return {
       page,
+      plane,
       cleanup: async () => {
         await app.close();
         await plane.close();
@@ -408,6 +409,47 @@ test.describe("in the app", () => {
       await cleanup();
       await rm(broken, { recursive: true, force: true });
       await rm(fine, { recursive: true, force: true });
+    }
+  });
+
+  test("the board opens without waiting for the readiness check", async () => {
+    const folder = await makeFolder(false);
+    const { page, plane, cleanup } = await open({ alpha: folder });
+    try {
+      plane.setBoard("ws-alpha", {
+        columns: [{ key: "todo", name: "To-Do", role: "start" }],
+        cards: [
+          {
+            id: "card-1",
+            revision: 1,
+            title: "Visible before readiness",
+            body: "",
+            columnKey: "todo",
+            categoryKey: null,
+            taskId: null,
+            priority: null,
+            tags: [],
+            rank: "n",
+            createdAt: null,
+            updatedAt: null,
+          },
+        ],
+      });
+      // The check cannot finish until the service answers "which board is
+      // this repo linked to?" — held back well past the board's own reads.
+      plane.setRepoBoards([{ workspaceId: "ws-alpha", name: "Alpha" }], 4_000);
+      await page.goto("app://lanework/w/alpha/issues");
+
+      // The board is on screen while the check is still waiting…
+      await expect(page.getByText("Visible before readiness")).toBeVisible({
+        timeout: 3_000,
+      });
+      await expect(indicator(page)).toBeHidden();
+      // …and the check lands after, on its own.
+      await expect(indicator(page)).toHaveText("1", { timeout: 10_000 });
+    } finally {
+      await cleanup();
+      await rm(folder, { recursive: true, force: true });
     }
   });
 });

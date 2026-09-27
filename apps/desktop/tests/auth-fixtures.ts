@@ -299,9 +299,13 @@ export async function startStubPlane(
   setBoardOffline: (value: boolean) => void;
   /**
    * What `GET /v1/boards?repo=` answers (FE-30): the boards linked to any
-   * repo, by workspace id. Empty — linked to nothing — until set.
+   * repo, by workspace id. Empty — linked to nothing — until set. `delayMs`
+   * holds the answer back, to prove nothing else waits for it.
    */
-  setRepoBoards: (value: { workspaceId: string; name: string }[]) => void;
+  setRepoBoards: (
+    value: { workspaceId: string; name: string }[],
+    delayMs?: number,
+  ) => void;
   /** Answer `POST /purge` with 404, the way a service older than FE-14 does. */
   setPurgeMissing: (value: boolean) => void;
   /** Answer `GET /stats` with 404, the way a service older than FE-17 does. */
@@ -355,6 +359,7 @@ export async function startStubPlane(
   let checklistConflict = false;
   let boardOffline = false;
   let repoBoards: { workspaceId: string; name: string }[] = [];
+  let repoBoardsDelay = 0;
   let purgeMissing = false;
   let statsMissing = false;
   const presence = new Map<string, StubPresence[]>();
@@ -528,9 +533,14 @@ export async function startStubPlane(
 
     // `GET /v1/boards?repo=` — which boards a git remote is linked to (FE-30).
     if (/^\/v1\/boards\/?\?/.test(req.url ?? "") && !revoked) {
-      res
-        .writeHead(200, { "Content-Type": "application/json" })
-        .end(JSON.stringify({ repo: null, boards: repoBoards }));
+      const answer = repoBoards;
+      setTimeout(
+        () =>
+          res
+            .writeHead(200, { "Content-Type": "application/json" })
+            .end(JSON.stringify({ repo: null, boards: answer })),
+        repoBoardsDelay,
+      );
       return;
     }
 
@@ -1299,8 +1309,9 @@ export async function startStubPlane(
     setBoardOffline: (value) => {
       boardOffline = value;
     },
-    setRepoBoards: (value) => {
+    setRepoBoards: (value, delayMs = 0) => {
       repoBoards = value;
+      repoBoardsDelay = delayMs;
     },
     setSearchFailing: (value) => {
       searchFailing = value;
