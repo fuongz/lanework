@@ -32,6 +32,7 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -48,8 +49,8 @@ function parseArgs(argv: string[]) {
     const arg = argv[i] ?? "";
     if (!arg.startsWith("--")) {
       positional.push(arg);
-    } else if (arg === "--api") {
-      flags.set("api", argv[++i] ?? "");
+    } else if (arg === "--api" || arg === "--agent") {
+      flags.set(arg.slice(2), argv[++i] ?? "");
     } else {
       flags.set(arg.slice(2), true);
     }
@@ -65,9 +66,26 @@ const API = (
   process.env.LANEWORK_API_URL ||
   "https://api.lanework.dev"
 ).replace(/\/$/, "");
+/**
+ * Settings the app changes without touching the hook's command (FE-29/D3):
+ * Codex approves a hook by the hash of its command, so a switch flipped in
+ * Settings must not change the command it approved.
+ */
+function hookConfig(): { pushWip?: boolean } {
+  const file = process.env.LANEWORK_HOOK_CONFIG;
+  if (!file) return {};
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as { pushWip?: boolean };
+  } catch {
+    return {};
+  }
+}
+
 /** FE-28/D3: pushing unfinished code to the remote is opt-in. */
-const PUSH_WIP = ARGS.flags.has("push-wip");
-const AGENT = "claude-code";
+const PUSH_WIP = ARGS.flags.has("push-wip") || hookConfig().pushWip === true;
+/** Which CLI ran this turn — `claude-code` or `codex` (FE-29). */
+const AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : "claude-code";
+const AGENT_NAME = AGENT === "codex" ? "Codex" : "Claude Code";
 /** Keychain item holding this machine's credential (BE-17/D6). */
 const KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
 const STATE_DIR = join(homedir(), ".cache", "lanework", "checkpoint");
@@ -343,6 +361,236 @@ export function digest(transcript: string, root: string): Digest {
   };
 }
 
+// ── Codex (FE-29) ───────────────────────────────────────────────────────────
+
+/** A string in JS source: "…", '…' or `…`, escapes included. */
+const JS_STRING = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/
+  .source;
+/** `card: "BE-17"` in code-mode JS, or `"card":"BE-17"` in JSON arguments. */
+const CARD_ARG = new RegExp(/["']?\bcard["']?\s*:\s*/.source + JS_STRING, "g");
+const EXEC_CMD = new RegExp(
+  /exec_command\(\s*\{\s*["']?cmd["']?\s*:\s*/.source + JS_STRING,
+  "g",
+);
+const PATCH_FILE = /\*\*\* (?:Update|Add|Delete) File: ([^\n]+)/g;
+/** A tool call that talks to the Lanework MCP server, however it is spelled. */
+const LANEWORK_CALL =
+  /lanework|\b(?:get_review|toggle_item|update_review|set_status|review_card|create_review|list_reviews)\b/;
+
+/** The JS literal's value. `JSON.parse` covers "…"; the rest are unwrapped. */
+function unquote(literal: string): string {
+  if (literal.startsWith('"')) {
+    try {
+      return JSON.parse(literal) as string;
+    } catch {
+      return literal.slice(1, -1);
+    }
+  }
+  return literal.slice(1, -1).replace(/\\(.)/g, "$1");
+}
+
+/**
+ * The rollout file for a Codex session when the hook was not told one.
+ *
+ * ⚠️ Newest days first, and only the last few: a session that is still
+ * running wrote to one of them today or yesterday. Named
+ * `rollout-<time>-<session id>.jsonl`.
+ */
+function findCodexRollout(sessionId: string | undefined): string | null {
+  if (!sessionId) return null;
+  const base = join(
+    process.env.CODEX_HOME || join(homedir(), ".codex"),
+    "sessions",
+  );
+  const ls = (dir: string) => {
+    try {
+      return readdirSync(dir).sort().reverse();
+    } catch {
+      return [] as string[];
+    }
+  };
+  let days = 0;
+  for (const year of ls(base))
+    for (const month of ls(join(base, year)))
+      for (const day of ls(join(base, year, month))) {
+        if (++days > 3) return null;
+        const dir = join(base, year, month, day);
+        const hit = ls(dir).find((name) => name.endsWith(`${sessionId}.jsonl`));
+        if (hit) return join(dir, hit);
+      }
+  return null;
+}
+
+type CodexItem = {
+  type?: string;
+  content?: { text?: unknown }[];
+  command?: unknown;
+  exit_code?: unknown;
+  changes?: unknown;
+  server?: unknown;
+  tool?: unknown;
+  arguments?: unknown;
+  result?: unknown;
+};
+
+type CodexLine = {
+  type?: string;
+  payload?: {
+    type?: string;
+    role?: string;
+    name?: string;
+    arguments?: unknown;
+    input?: unknown;
+    call_id?: string;
+    output?: unknown;
+    item?: CodexItem;
+  };
+};
+
+const texts = (content: CodexItem["content"]): string =>
+  (Array.isArray(content) ? content : [])
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .join("\n")
+    .trim();
+
+/**
+ * Condense a Codex rollout the way `digest` does a Claude transcript.
+ *
+ * ⚠️ Read from `item_completed` events — `UserMessage`, `AgentMessage`,
+ * `CommandExecution` (with its exit code), `FileChange`, `McpToolCall` —
+ * which Codex writes for every item whatever mode it ran tools in. Only a
+ * rollout with none of them (an older Codex) falls back to reading the
+ * `exec` scripts of "code mode" by pattern. The final answer comes from the
+ * hook's stdin (`last_assistant_message`) when Codex sends it, which is exact.
+ */
+export function digestCodex(
+  transcript: string,
+  root: string,
+  lastMessage: string | null,
+): Digest {
+  let mcpTaskId: string | null = null;
+  let typedTaskId: string | null = null;
+  let request: string | null = null;
+  let replies: string[] = [];
+  let previousReplies: string[] = [];
+  let structured = false;
+  const files: string[] = [];
+  const commands: { command: string; ok: boolean | null }[] = [];
+  // The code-mode fallback, used only when no structured item was seen.
+  let scriptTaskId: string | null = null;
+  const scriptFiles: string[] = [];
+  const scriptCommands: { command: string; ok: boolean | null }[] = [];
+  const calls = new Map<string, string>();
+
+  const touch = (list: string[], path: string) => {
+    const trimmed = path.trim().replace(/^file:\/\//, "");
+    const rel = trimmed.startsWith(root) ? relative(root, trimmed) : trimmed;
+    if (!rel || rel.startsWith("..")) return;
+    const at = list.indexOf(rel);
+    if (at !== -1) list.splice(at, 1);
+    list.push(rel);
+  };
+  const typed = (text: string) => {
+    if (!text || text.startsWith("<") || text.startsWith("# AGENTS.md")) return;
+    request = text;
+    if (replies.length) previousReplies = replies;
+    replies = [];
+    for (const m of text.match(TASK_ID) ?? [])
+      if (!NOT_TASK_ID.test(m)) typedTaskId = m;
+  };
+
+  for (const raw of transcript.split("\n")) {
+    if (!raw.trim()) continue;
+    let line: CodexLine;
+    try {
+      line = JSON.parse(raw) as CodexLine;
+    } catch {
+      continue;
+    }
+    const p = line.payload ?? {};
+    const item = p.type === "item_completed" ? p.item : undefined;
+    if (item) {
+      structured = true;
+      if (item.type === "UserMessage") typed(texts(item.content));
+      else if (item.type === "AgentMessage") {
+        const text = texts(item.content);
+        if (text) replies.push(text);
+      } else if (item.type === "CommandExecution") {
+        const argv = Array.isArray(item.command) ? item.command : [];
+        const script = String(argv[argv.length - 1] ?? "");
+        commands.push({
+          command: clip(script.split("\n")[0] ?? "", 300),
+          ok: typeof item.exit_code === "number" ? item.exit_code === 0 : null,
+        });
+      } else if (item.type === "FileChange" && item.changes) {
+        for (const path of Object.keys(item.changes as object))
+          touch(files, path);
+      } else if (
+        item.type === "McpToolCall" &&
+        typeof item.server === "string" &&
+        item.server.includes("lanework")
+      ) {
+        const args = (item.arguments ?? {}) as { card?: unknown };
+        if (typeof args.card === "string") mcpTaskId = args.card;
+        if (item.tool === "create_review") {
+          const minted = /\\?"taskId\\?"\s*:\s*\\?"([^"\\]+)/.exec(
+            JSON.stringify(item.result ?? ""),
+          );
+          if (minted?.[1]) mcpTaskId = minted[1];
+        }
+      }
+      continue;
+    }
+    if (line.type !== "response_item") continue;
+    if (p.type === "message" && p.role === "user") {
+      // Only when there are no structured items; see `structured` below.
+      if (!structured) typed(texts((p as CodexItem).content));
+    } else if (p.type === "function_call" || p.type === "custom_tool_call") {
+      const source =
+        typeof p.input === "string"
+          ? p.input
+          : typeof p.arguments === "string"
+            ? p.arguments
+            : "";
+      const blob = `${p.name ?? ""}\n${source}`;
+      if (p.call_id) calls.set(p.call_id, blob);
+      if (LANEWORK_CALL.test(blob))
+        for (const m of blob.matchAll(CARD_ARG))
+          scriptTaskId = unquote(m[1] ?? "");
+      for (const m of blob.matchAll(PATCH_FILE)) touch(scriptFiles, m[1] ?? "");
+      for (const m of blob.matchAll(EXEC_CMD))
+        scriptCommands.push({
+          command: clip(unquote(m[1] ?? "").split("\n")[0] ?? "", 300),
+          ok: null,
+        });
+    } else if (
+      p.type === "function_call_output" ||
+      p.type === "custom_tool_call_output"
+    ) {
+      const call = (p.call_id && calls.get(p.call_id)) || "";
+      if (!call.includes("create_review")) continue;
+      const out =
+        typeof p.output === "string"
+          ? p.output
+          : JSON.stringify(p.output ?? "");
+      const minted = /\\?"taskId\\?"\s*:\s*\\?"([^"\\]+)/.exec(out);
+      if (minted?.[1]) scriptTaskId = minted[1];
+    }
+  }
+
+  const fromStdin = lastMessage?.trim() || null;
+  const turn = replies.length ? replies : previousReplies;
+  return {
+    taskId: (structured ? mcpTaskId : scriptTaskId) ?? typedTaskId,
+    request,
+    lastReply: fromStdin ?? (turn.join("\n\n") || null),
+    replyIsPrevious:
+      !fromStdin && !replies.length && previousReplies.length > 0,
+    files: (structured ? files : scriptFiles).slice(-100),
+    commands: (structured ? commands : scriptCommands).slice(-15),
+  };
+}
+
 // ── Credential and board ────────────────────────────────────────────────────
 
 function readSecret(): string | null {
@@ -465,8 +713,11 @@ export function snapshot(root: string, taskId: string): Wip {
 
 type HookInput = {
   session_id?: string;
-  transcript_path?: string;
+  /** Codex sends null when it has no rollout file to point at. */
+  transcript_path?: string | null;
   cwd?: string;
+  /** Codex only (FE-29): the turn's final answer, no transcript needed. */
+  last_assistant_message?: string | null;
 };
 
 type Wip = { wipRef: string | null; wipSha: string | null };
@@ -490,11 +741,11 @@ export function buildBody(
   },
 ) {
   const heading = d.replyIsPrevious
-    ? "Claude Code's last message, from the turn BEFORE the request below (it stopped before replying to that one):"
-    : "Claude Code's last message before it stopped:";
+    ? `${AGENT_NAME}'s last message, from the turn BEFORE the request below (it stopped before replying to that one):`
+    : `${AGENT_NAME}'s last message before it stopped:`;
   const summary = d.lastReply
     ? `${heading}\n\n${clip(redact(d.lastReply), 5000)}`
-    : "Claude Code stopped before writing any reply in this session.";
+    : `${AGENT_NAME} stopped before writing any reply in this session.`;
   return {
     summary,
     request: d.request ? clip(redact(d.request), 2000) : null,
@@ -510,13 +761,21 @@ export function buildBody(
 async function work(inputFile: string): Promise<void> {
   const input = readJson<HookInput>(inputFile, {});
   rmSync(inputFile, { force: true });
-  if (!input.transcript_path || !input.cwd) return;
+  if (!input.cwd) return;
+  const transcriptPath =
+    input.transcript_path ||
+    (AGENT === "codex" ? findCodexRollout(input.session_id) : null);
+  if (!transcriptPath) return;
 
   const root = tryGit(input.cwd, ["rev-parse", "--show-toplevel"]);
   const remote = root && tryGit(root, ["remote", "get-url", "origin"]);
   if (!root || !remote) return;
 
-  const d = digest(readFileSync(input.transcript_path, "utf8"), root);
+  const transcript = readFileSync(transcriptPath, "utf8");
+  const d =
+    AGENT === "codex"
+      ? digestCodex(transcript, root, input.last_assistant_message ?? null)
+      : digest(transcript, root);
   if (!d.taskId) {
     log(`session ${input.session_id}: no card in the transcript; nothing sent`);
     return;

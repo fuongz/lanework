@@ -17,7 +17,7 @@ import {
 
 /** An enrolled install talking to a stub, so every test starts past the gate. */
 async function open(
-  options: { owner?: boolean; claudeSettings?: unknown } = {},
+  options: { owner?: boolean; claudeSettings?: unknown; profile?: string } = {},
 ): Promise<{
   app: ElectronApplication;
   page: Page;
@@ -26,7 +26,8 @@ async function open(
   cleanup: () => Promise<void>;
 }> {
   const plane = await startStubPlane(options);
-  const profile = await mkdtemp(join(tmpdir(), "lanework-settings-"));
+  const profile =
+    options.profile ?? (await mkdtemp(join(tmpdir(), "lanework-settings-")));
   const home = join(profile, "home");
   await seedCredential(home, plane.origin);
   // `launchEnv` points CLAUDE_CONFIG_DIR here (FE-28).
@@ -378,14 +379,19 @@ test("Agents: the switch installs the hook and its credential, and removes only 
   const { page, profile, cleanup } = await open({ claudeSettings: theirs });
   const settingsFile = join(profile, "claude", "settings.json");
   const secretFile = join(profile, "hook-secret");
+  // `launchEnv` sets LANEWORK_HOME to <profile>/home, where the shim lives.
+  const shim = join(profile, "home", "hooks", "lanework-checkpoint");
+  const hookConfig = join(profile, "home", "hooks", "config.json");
   const read = async () => JSON.parse(await readFile(settingsFile, "utf8"));
   try {
     await page.getByRole("link", { name: "Settings", exact: true }).click();
     await page.getByRole("link", { name: "Agents" }).click();
-    await expect(page.getByRole("heading", { name: "Agents" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Agents", exact: true }),
+    ).toBeVisible();
 
     const main = page.getByRole("switch", {
-      name: "Save progress for the next agent",
+      name: "Save progress for the next agent — Claude Code",
     });
     const push = page.getByRole("switch", {
       name: "Also push unfinished code to GitHub",
@@ -405,25 +411,97 @@ test("Agents: the switch installs the hook and its credential, and removes only 
         group.hooks.map((hook) => hook.command),
     );
     expect(commands).toContain("notify.sh");
-    const ours = commands.find((c: string) =>
-      c.includes("lanework-checkpoint"),
+    // FE-29/D3: the command is the shim and the CLI, nothing that moves.
+    expect(commands).toContain(`'${shim}' --agent claude-code`);
+    expect(await readFile(shim, "utf8")).toContain(
+      "export ELECTRON_RUN_AS_NODE=1",
     );
-    expect(ours).toContain("ELECTRON_RUN_AS_NODE=1");
-    // D3: pushing code is off until chosen.
-    expect(ours).not.toContain("--push-wip");
     expect((await readFile(secretFile, "utf8")).trim()).toBe(
       "lw_mch_test-secret",
     );
 
+    // D3 (FE-28): pushing code is off until chosen — and choosing it changes
+    // a setting the hook reads, never the command.
     await expect(push).toBeEnabled();
     await push.click();
     await expect(push).toBeChecked();
-    expect(JSON.stringify(await read())).toContain("--push-wip");
+    expect(JSON.parse(await readFile(hookConfig, "utf8")).pushWip).toBe(true);
+    expect(await read()).toEqual(on);
 
     await main.click();
     await expect(main).not.toBeChecked();
     expect(await read()).toEqual(theirs);
     await expect(readFile(secretFile, "utf8")).rejects.toThrow();
+  } finally {
+    await cleanup();
+  }
+});
+
+// FE-29/V3: the Codex switch adds our hook beside supacode's, reports that
+// Codex has not approved it yet, notices the approval once Codex records it,
+// and removes only ours. config.toml is read, never written.
+test("Agents: the Codex switch installs its hook and waits for Codex's approval", async () => {
+  const supacode = {
+    hooks: {
+      Stop: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: "b # supacode-managed-hook",
+              timeout: 10,
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const profile = await mkdtemp(join(tmpdir(), "lanework-settings-codex-"));
+  const codexHome = join(profile, "codex");
+  const hooksFile = join(codexHome, "hooks.json");
+  const configFile = join(codexHome, "config.toml");
+  await mkdir(codexHome, { recursive: true });
+  await writeFile(hooksFile, JSON.stringify(supacode));
+  await writeFile(configFile, "[features]\nhooks = true\n");
+  const { page, cleanup } = await open({ profile });
+  try {
+    await page.goto("app://lanework/settings/agents");
+    const codex = page.getByRole("switch", {
+      name: "Save progress for the next agent — Codex",
+    });
+    await expect(codex).not.toBeChecked();
+    await codex.click();
+    await expect(codex).toBeChecked();
+    await expect(page.getByText("Waiting for approval")).toBeVisible();
+    // One click from here to Codex's own review (FE-29): the button opens
+    // Codex in the app; it is never an approval by itself.
+    await expect(
+      page.getByRole("button", { name: "Approve in Codex" }),
+    ).toBeVisible();
+    await expect(page.getByText("Hooks are off in Codex")).toHaveCount(0);
+
+    const on = JSON.parse(await readFile(hooksFile, "utf8"));
+    expect(on.hooks.Stop[0]).toEqual(supacode.hooks.Stop[0]);
+    const ours = on.hooks.Stop[1].hooks[0].command as string;
+    expect(ours).toMatch(/lanework-checkpoint' --agent codex$/);
+    const before = await readFile(configFile, "utf8");
+
+    // What Codex writes once the user approves the hook at Stop[1][0].
+    await writeFile(
+      configFile,
+      `${before}\n[hooks.state."${hooksFile}:stop:1:0"]\ntrusted_hash = "sha256:abc"\n`,
+    );
+    await page.reload();
+    await expect(page.getByText("Approved", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Approve in Codex" }),
+    ).toHaveCount(0);
+
+    await codex.click();
+    await expect(codex).not.toBeChecked();
+    expect(JSON.parse(await readFile(hooksFile, "utf8"))).toEqual(supacode);
+    // Never written by the app.
+    expect(await readFile(configFile, "utf8")).toContain("sha256:abc");
   } finally {
     await cleanup();
   }

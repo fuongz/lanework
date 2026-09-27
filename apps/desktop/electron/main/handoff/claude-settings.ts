@@ -1,5 +1,7 @@
 // Reading and rewriting Claude Code's user settings to add or remove OUR Stop
-// hook (FE-28), and nothing else.
+// hook (FE-28), and nothing else. Codex's `hooks.json` has the same shape —
+// `{ hooks: { Stop: [{ hooks: [{ type, command }] }] } }` — so every rule here
+// serves it too (FE-29, `codex.ts`).
 //
 // ⚠️ `~/.claude/settings.json` belongs to the user and to Claude Code. Every
 // rule below exists so that turning our switch on and off leaves that file
@@ -49,30 +51,63 @@ export function shellQuote(value: string): string {
 }
 
 /**
- * The command Claude Code runs after every turn.
+ * The script both CLIs' settings point at (FE-29/D3), rewritten by the app on
+ * every launch.
+ *
+ * ⚠️ Why a script and not the command itself: Codex runs a hook only after the
+ * user approves it, and it pins that approval to the hook's COMMAND. The paths
+ * that change — this app's binary, the bundled hook — live in here, so the
+ * command in the settings files never changes and one approval lasts.
  *
  * ⚠️ `ELECTRON_RUN_AS_NODE=1` turns the app binary into a plain Node (FE-28/D5)
  * — the people this is for have no bun and may have no node. The hook passes
  * the variable on to the worker it detaches, or that would boot as an app.
  */
-export function buildHookCommand(options: {
+export function buildShim(options: {
   execPath: string;
   hookPath: string;
   apiUrl: string;
-  pushWip: boolean;
+  configPath: string;
   secretFile?: string | null;
 }): string {
   return [
-    "ELECTRON_RUN_AS_NODE=1",
+    "#!/bin/sh",
+    "# Lanework's checkpoint hook (FE-29). The Lanework app rewrites this file",
+    "# on every launch; edits here are lost. Settings → Agents turns it off.",
+    "export ELECTRON_RUN_AS_NODE=1",
+    `export LANEWORK_HOOK_CONFIG=${shellQuote(options.configPath)}`,
     ...(options.secretFile
-      ? [`LANEWORK_HOOK_SECRET_FILE=${shellQuote(options.secretFile)}`]
+      ? [`export LANEWORK_HOOK_SECRET_FILE=${shellQuote(options.secretFile)}`]
       : []),
-    shellQuote(options.execPath),
-    shellQuote(options.hookPath),
-    "--api",
-    shellQuote(options.apiUrl),
-    ...(options.pushWip ? ["--push-wip"] : []),
-  ].join(" ");
+    `exec ${shellQuote(options.execPath)} ${shellQuote(options.hookPath)} --api ${shellQuote(options.apiUrl)} "$@"`,
+    "",
+  ].join("\n");
+}
+
+/** What goes in a CLI's settings: the shim, and which CLI is calling it. */
+export function buildHookCommand(options: {
+  shimPath: string;
+  agent: "claude-code" | "codex";
+}): string {
+  return `${shellQuote(options.shimPath)} --agent ${options.agent}`;
+}
+
+/**
+ * Where our hook sits — `Stop[group].hooks[index]`. Codex keys the approval of
+ * a hook by exactly this position (`<file>:stop:<group>:<index>`).
+ */
+export function findHookPosition(
+  settings: Json,
+): { group: number; index: number } | null {
+  const stop = isObject(settings.hooks) ? settings.hooks.Stop : undefined;
+  if (!Array.isArray(stop)) return null;
+  for (const [group, entry] of stop.entries()) {
+    const hooks = isObject(entry) ? (entry as HookGroup).hooks : undefined;
+    if (!Array.isArray(hooks)) continue;
+    const index = hooks.findIndex(isOurs);
+    if (index !== -1) return { group, index };
+  }
+  return null;
 }
 
 /** Our hook's command in these settings, or null. */

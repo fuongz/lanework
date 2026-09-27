@@ -82,8 +82,8 @@ const worktree: DesktopWorktreeApi = {
 /** Settings → Agents (FE-28): the checkpoint hook, on and off. */
 const handoff: DesktopHandoffApi = {
   status: () => ipcRenderer.invoke(handoffChannels.status),
-  enable: () => ipcRenderer.invoke(handoffChannels.enable),
-  disable: () => ipcRenderer.invoke(handoffChannels.disable),
+  enable: (agent) => ipcRenderer.invoke(handoffChannels.enable, agent),
+  disable: (agent) => ipcRenderer.invoke(handoffChannels.disable, agent),
   setPushWip: (on) => ipcRenderer.invoke(handoffChannels.setPushWip, on),
 };
 

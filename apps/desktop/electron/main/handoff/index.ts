@@ -1,30 +1,48 @@
-// Settings → Agents (FE-28): switch the checkpoint Stop hook (BE-17) on and
-// off for Claude Code on this machine, with no terminal and no token to paste.
+// Settings → Agents (FE-28, FE-29): switch the checkpoint Stop hook (BE-17) on
+// and off for Claude Code and for Codex on this machine, with no terminal and
+// no token to paste.
 //
-// On: the hook goes into `~/.claude/settings.json` (user level, so every repo
-// gets it) and this machine's credential goes into the Keychain item the hook
-// reads. Off: both are removed, and nothing else in the file is touched.
+// On: our entry goes into the CLI's own settings (`~/.claude/settings.json`,
+// `~/.codex/hooks.json` — user level, so every repo gets it) and this
+// machine's credential goes into the Keychain item the hook reads. Off: our
+// entry is removed, and nothing else in the file is touched.
 //
-// ⚠️ The command names absolute paths — this app's binary and the bundled
-// hook — and those move when the app is updated or dragged elsewhere. So an
-// installed hook is REWRITTEN on every launch (`syncHandoff`), and a stale one
-// never outlives the next start.
-import { readdir, readFile } from "node:fs/promises";
+// ⚠️ Both entries run ONE script, `~/.lanew/hooks/lanework-checkpoint`
+// (FE-29/D3), which names this app's binary and the bundled hook. Those paths
+// move when the app is updated or dragged elsewhere, so the script is
+// rewritten on every launch (`syncHandoff`) — and the commands in the CLIs'
+// files never change, which is what keeps Codex's one-time approval valid.
+import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
-import { type HandoffStatus, handoffChannels } from "../../../shared/handoff";
+import { dirname, join, sep } from "node:path";
+import {
+  type AgentHookStatus,
+  type HandoffStatus,
+  type HookAgent,
+  handoffChannels,
+} from "../../../shared/handoff";
 import { resolveApi } from "../auth/client";
 import { type MachineRecord, readRecord } from "../auth/store";
 import { handle } from "../ipc";
+import { appHomeDir } from "../paths";
 import {
   buildHookCommand,
+  buildShim,
   claudeSettingsPath,
   findHook,
+  findHookPosition,
   readSettings,
   withHook,
   withoutHook,
   writeSettings,
 } from "./claude-settings";
+import {
+  codexConfigPath,
+  codexHooksPath,
+  HOOKS_FEATURE_LINE,
+  readCodexConfig,
+  trustKey,
+} from "./codex";
 import {
   deleteHookSecret,
   readHookSecret,
@@ -34,6 +52,43 @@ import {
 
 /** Where the hook keeps its per-session state — named in the hook too. */
 const HOOK_STATE_DIR = join(homedir(), ".cache", "lanework", "checkpoint");
+
+const hooksDir = () => join(appHomeDir(), "hooks");
+const shimPath = () => join(hooksDir(), "lanework-checkpoint");
+const configPath = () => join(hooksDir(), "config.json");
+
+/**
+ * What the app remembers about the hooks, beside them.
+ *
+ * `pushWip` is read by the hook itself (FE-29/D3: a setting, not a flag in an
+ * approved command). `installed` is what makes "another tool removed ours"
+ * (FE-29/D8) knowable at all — without it, gone and never-added look alike.
+ */
+type HookConfig = {
+  pushWip: boolean;
+  installed: Partial<Record<HookAgent, boolean>>;
+};
+
+async function readConfig(): Promise<HookConfig> {
+  const raw = await readFile(configPath(), "utf8")
+    .then((text) => JSON.parse(text) as Partial<HookConfig>)
+    .catch(() => ({}) as Partial<HookConfig>);
+  return {
+    pushWip: raw.pushWip === true,
+    installed:
+      raw.installed && typeof raw.installed === "object" ? raw.installed : {},
+  };
+}
+
+async function writeConfig(config: HookConfig): Promise<void> {
+  await mkdir(hooksDir(), { recursive: true, mode: 0o700 });
+  await writeFile(configPath(), `${JSON.stringify(config, null, 2)}\n`, {
+    mode: 0o600,
+  });
+}
+
+const settingsPathFor = (agent: HookAgent) =>
+  agent === "codex" ? codexHooksPath() : claudeSettingsPath();
 
 /**
  * The bundled hook, outside the asar archive.
@@ -50,15 +105,25 @@ function hookPath(): string {
   );
 }
 
-function commandFor(record: MachineRecord | null, pushWip: boolean): string {
-  return buildHookCommand({
-    execPath: process.execPath,
-    hookPath: hookPath(),
-    apiUrl: resolveApi(record?.apiUrl),
-    pushWip,
-    secretFile: process.env.LANEWORK_HOOK_SECRET_FILE || null,
-  });
+/** Write the shim for this build of the app. Cheap, and done on every launch. */
+async function writeShim(record: MachineRecord | null): Promise<void> {
+  await mkdir(dirname(shimPath()), { recursive: true, mode: 0o700 });
+  await writeFile(
+    shimPath(),
+    buildShim({
+      execPath: process.execPath,
+      hookPath: hookPath(),
+      apiUrl: resolveApi(record?.apiUrl),
+      configPath: configPath(),
+      secretFile: process.env.LANEWORK_HOOK_SECRET_FILE || null,
+    }),
+    { mode: 0o700 },
+  );
+  await chmod(shimPath(), 0o700);
 }
+
+const commandFor = (agent: HookAgent) =>
+  buildHookCommand({ shimPath: shimPath(), agent });
 
 /** The newest session the hook recorded, from its own state files. */
 async function lastCheckpoint(): Promise<HandoffStatus["last"]> {
@@ -79,100 +144,176 @@ async function lastCheckpoint(): Promise<HandoffStatus["last"]> {
     : null;
 }
 
-export async function handoffStatus(): Promise<HandoffStatus> {
-  const record = await readRecord();
-  const read = await readSettings();
-  const command = read.ok ? findHook(read.settings) : null;
-  const stored = record
-    ? await readHookSecret(resolveApi(record.apiUrl))
-    : null;
+async function agentStatus(
+  agent: HookAgent,
+  config: HookConfig,
+): Promise<
+  AgentHookStatus & { position: { group: number; index: number } | null }
+> {
+  const path = settingsPathFor(agent);
+  const read = await readSettings(path);
+  const installed = read.ok && findHook(read.settings) !== null;
   return {
-    supported: secretStoreAvailable(),
-    signedIn: record !== null,
-    installed: command !== null,
-    credential: !!record && stored === record.secret,
-    pushWip: command?.includes("--push-wip") ?? false,
+    installed,
     settingsUnreadable: !read.ok,
-    settingsPath: claudeSettingsPath(),
-    last: await lastCheckpoint(),
+    settingsPath: path,
+    removedElsewhere: read.ok && !installed && config.installed[agent] === true,
+    position: read.ok ? findHookPosition(read.settings) : null,
   };
 }
 
-async function install(pushWip: boolean): Promise<HandoffStatus> {
+export async function handoffStatus(): Promise<HandoffStatus> {
+  const record = await readRecord();
+  const config = await readConfig();
+  const stored = record
+    ? await readHookSecret(resolveApi(record.apiUrl))
+    : null;
+  const { position: _, ...claude } = await agentStatus("claude-code", config);
+  const { position, ...codex } = await agentStatus("codex", config);
+  const codexConfig = await readCodexConfig();
+  return {
+    supported: secretStoreAvailable(),
+    signedIn: record !== null,
+    credential: !!record && stored === record.secret,
+    pushWip: config.pushWip,
+    last: await lastCheckpoint(),
+    claude,
+    codex: {
+      ...codex,
+      hooksEnabled: codexConfig.hooksEnabled,
+      approved:
+        position !== null &&
+        codexConfig.trusted.has(trustKey(codex.settingsPath, position)),
+      configPath: codexConfigPath(),
+    },
+    codexFeatureLine: HOOKS_FEATURE_LINE,
+  };
+}
+
+async function enable(agent: HookAgent): Promise<HandoffStatus> {
   if (!secretStoreAvailable())
     throw new Error("Handing work between agents needs macOS for now.");
   const record = await readRecord();
   if (!record) throw new Error("Sign in first, so the hook has a credential.");
-  const read = await readSettings();
+  const path = settingsPathFor(agent);
+  const read = await readSettings(path);
   if (!read.ok)
     throw new Error(
-      `${claudeSettingsPath()} is not valid JSON. Fix or remove it, then try again — Lanework will not overwrite it.`,
+      `${path} is not valid JSON. Fix or remove it, then try again — Lanework will not overwrite it.`,
     );
   await writeHookSecret(resolveApi(record.apiUrl), record.secret);
-  await writeSettings(withHook(read.settings, commandFor(record, pushWip)));
+  await writeShim(record);
+  // ⚠️ Rewritten only when the command actually differs. For Codex a new
+  // command is a new approval, so re-enabling an entry that is already right
+  // must leave the file — and the approval — exactly as they are.
+  if (findHook(read.settings) !== commandFor(agent))
+    await writeSettings(withHook(read.settings, commandFor(agent)), path);
+  const config = await readConfig();
+  await writeConfig({
+    ...config,
+    installed: { ...config.installed, [agent]: true },
+  });
   return handoffStatus();
 }
 
-export async function disableHandoff(): Promise<HandoffStatus> {
-  const record = await readRecord();
-  const read = await readSettings();
+async function disable(agent: HookAgent): Promise<HandoffStatus> {
+  const path = settingsPathFor(agent);
+  const read = await readSettings(path);
   if (read.ok && findHook(read.settings) !== null)
-    await writeSettings(withoutHook(read.settings));
-  await deleteHookSecret(resolveApi(record?.apiUrl));
+    await writeSettings(withoutHook(read.settings), path);
+  const config = await readConfig();
+  const installed = { ...config.installed, [agent]: false };
+  await writeConfig({ ...config, installed });
+  // The credential goes once no CLI uses it any more.
+  if (!installed["claude-code"] && !installed.codex) {
+    const record = await readRecord();
+    await deleteHookSecret(resolveApi(record?.apiUrl));
+  }
   return handoffStatus();
+}
+
+async function setPushWip(on: boolean): Promise<HandoffStatus> {
+  const config = await readConfig();
+  if (!config.installed["claude-code"] && !config.installed.codex)
+    throw new Error("Turn on handing work between agents first.");
+  await writeConfig({ ...config, pushWip: on });
+  return handoffStatus();
+}
+
+/** Kept for tests and for a FE-28 install that predates the config file. */
+export async function disableHandoff(): Promise<HandoffStatus> {
+  await disable("claude-code");
+  return disable("codex");
 }
 
 /**
  * The credential is gone from this machine (sign-out): take the hook's copy
- * with it. The hook stays installed and says "no credential" in its log until
- * someone signs in again, when `syncHandoff` hands it the new one.
+ * with it. The hooks stay installed and say "no credential" in their log until
+ * someone signs in again, when `syncHandoff` hands them the new one.
  */
 export async function forgetHookCredential(apiUrl: string): Promise<void> {
   await deleteHookSecret(resolveApi(apiUrl)).catch(() => undefined);
 }
 
 /**
- * Bring an installed hook up to date: this binary's path, this build's hook,
- * this machine's current credential. A no-op when the switch is off.
+ * Bring installed hooks up to date: the shim for this build, this machine's
+ * current credential, and — once — an entry from before the shim (FE-28),
+ * which named the binary directly. A no-op when both switches are off.
+ *
+ * ⚠️ Never RE-ADDS an entry another tool removed (FE-29/D8). A tool that owns
+ * a settings file and rewrites it on its own schedule would otherwise fight
+ * this app over it on every launch; Settings shows the removal instead.
  */
 export async function syncHandoff(): Promise<void> {
   if (!secretStoreAvailable()) return;
-  const read = await readSettings();
-  if (!read.ok) return;
-  const current = findHook(read.settings);
-  if (current === null) return;
+  const config = await readConfig();
+  const present: HookAgent[] = [];
+  for (const agent of ["claude-code", "codex"] as const) {
+    const path = settingsPathFor(agent);
+    const read = await readSettings(path);
+    if (!read.ok) continue;
+    const current = findHook(read.settings);
+    if (current === null) continue;
+    present.push(agent);
+    if (current !== commandFor(agent))
+      await writeSettings(withHook(read.settings, commandFor(agent)), path);
+  }
+  if (!present.length) return;
   const record = await readRecord();
-  const wanted = commandFor(record, current.includes("--push-wip"));
-  if (wanted !== current) await writeSettings(withHook(read.settings, wanted));
+  await writeShim(record);
+  const installed = { ...config.installed };
+  for (const agent of present) installed[agent] = true;
+  await writeConfig({ ...config, installed });
   if (!record) return;
   const account = resolveApi(record.apiUrl);
   if ((await readHookSecret(account)) !== record.secret)
     await writeHookSecret(account, record.secret);
 }
 
+const isAgent = (value: unknown): value is HookAgent =>
+  value === "claude-code" || value === "codex";
+
 export function registerHandoff(devUrl?: string): void {
   handle(handoffChannels.status, devUrl, (args) => {
     if (args.length) throw new Error("This operation takes no arguments");
     return handoffStatus();
   });
-  // FE-28/D3: pushing unfinished code is opt-in, so switching on never does.
   handle(handoffChannels.enable, devUrl, (args) => {
-    if (args.length) throw new Error("This operation takes no arguments");
-    return install(false);
+    if (args.length !== 1 || !isAgent(args[0]))
+      throw new Error('enable takes "claude-code" or "codex"');
+    return enable(args[0]);
   });
   handle(handoffChannels.disable, devUrl, (args) => {
-    if (args.length) throw new Error("This operation takes no arguments");
-    return disableHandoff();
+    if (args.length !== 1 || !isAgent(args[0]))
+      throw new Error('disable takes "claude-code" or "codex"');
+    return disable(args[0]);
   });
-  handle(handoffChannels.setPushWip, devUrl, async (args) => {
+  handle(handoffChannels.setPushWip, devUrl, (args) => {
     if (args.length !== 1 || typeof args[0] !== "boolean")
       throw new Error("push-wip takes one boolean");
-    const status = await handoffStatus();
-    if (!status.installed)
-      throw new Error("Turn on handing work between agents first.");
-    return install(args[0]);
+    return setPushWip(args[0]);
   });
   void syncHandoff().catch((error: unknown) =>
-    console.warn("could not bring the Claude Code hook up to date", error),
+    console.warn("could not bring the agent hooks up to date", error),
   );
 }

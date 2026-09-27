@@ -81,10 +81,14 @@ the cloud, never in a local file.
   done, what is verified and how, the next step, the files you changed. Never
   paste transcripts, secrets, tokens or `.env` values. A card keeps its last 5
   checkpoints; moving it to done or archiving it clears them.
-- **Claude Code does this by itself** after every turn, through the Stop hook
-  the desktop app installs: **Settings → Agents → Save progress for the next
-  agent** (FE-28). It goes into `~/.claude/settings.json`, so every repo gets
-  it, and runs under the app's own Node — no bun needed. It costs no model
+- **Claude Code and Codex do this by themselves** after every turn, through
+  the Stop hook the desktop app installs: **Settings → Agents**, one switch
+  per CLI (FE-28, FE-29). It goes into `~/.claude/settings.json` and
+  `~/.codex/hooks.json`, so every repo gets it, and both run one script the
+  app rewrites on each launch, `~/.lanew/hooks/lanework-checkpoint`, under the
+  app's own Node — no bun needed. Codex runs a new hook only after you approve
+  it in Codex, once; the app never approves it for you, and needs
+  `[features] hooks = true` in `~/.codex/config.toml`. It costs no model
   quota, redacts secrets on the machine, and uses the app's machine credential
   from the Keychain (revoking the machine revokes the hook). A second switch,
   off by default, also force-pushes the uncommitted working tree (tracked

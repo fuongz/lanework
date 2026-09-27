@@ -1,5 +1,7 @@
-// FE-28/V1: adding and removing OUR Stop hook in Claude Code's user settings
-// leaves everything else in that file exactly as it was.
+// FE-28/V1, FE-29/V1+V2: adding and removing OUR Stop hook in Claude Code's
+// settings and in Codex's hooks.json leaves everything else in those files
+// exactly as it was; Codex's config.toml is read correctly; and a Codex
+// rollout is condensed into the right checkpoint.
 //
 // ⚠️ No Electron here: `claude-settings.ts` is pure on purpose, and these are
 // the rules that decide whether turning a switch on can damage a file that
@@ -8,9 +10,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { buildBody, digestCodex } from "../electron/hook/lanework-checkpoint";
 import {
   buildHookCommand,
+  buildShim,
   findHook,
+  findHookPosition,
   parseSettings,
   readSettings,
   shellQuote,
@@ -18,14 +23,10 @@ import {
   withoutHook,
   writeSettings,
 } from "../electron/main/handoff/claude-settings";
+import { parseCodexConfig, trustKey } from "../electron/main/handoff/codex";
 
-const COMMAND = buildHookCommand({
-  execPath: "/Applications/Lanework.app/Contents/MacOS/Lanework",
-  hookPath:
-    "/Applications/Lanework.app/Contents/Resources/app.asar.unpacked/dist/electron/hook/lanework-checkpoint.cjs",
-  apiUrl: "https://api.lanework.dev",
-  pushWip: false,
-});
+const SHIM = "/Users/ana/.lanew/hooks/lanework-checkpoint";
+const COMMAND = buildHookCommand({ shimPath: SHIM, agent: "claude-code" });
 
 const OTHER = {
   hooks: {
@@ -64,16 +65,16 @@ test("other hooks, events and keys are passed through untouched", () => {
 test("switching on twice does not add a second copy, and replaces the command", () => {
   const once = withHook(OTHER, COMMAND);
   const newer = buildHookCommand({
-    execPath: "/Applications/Lanework 2.app/Contents/MacOS/Lanework",
-    hookPath: "/x/lanework-checkpoint.cjs",
-    apiUrl: "https://api.lanework.dev",
-    pushWip: true,
+    shimPath: "/Users/a b/.lanew/hooks/lanework-checkpoint",
+    agent: "codex",
   });
   const twice = withHook(once, newer);
   const commands = JSON.stringify(twice).match(/lanework-checkpoint/g) ?? [];
   expect(commands).toHaveLength(1);
   expect(findHook(twice)).toBe(newer);
-  expect(newer).toContain("--push-wip");
+  expect(newer).toBe(
+    "'/Users/a b/.lanew/hooks/lanework-checkpoint' --agent codex",
+  );
 });
 
 test("switching off removes only ours and restores the original shape", () => {
@@ -108,7 +109,7 @@ test("a file that is not a JSON object is refused, never rewritten", () => {
 
 test("paths with spaces and quotes are quoted for the shell", () => {
   expect(shellQuote("/Users/a b/it's")).toBe(`'/Users/a b/it'\\''s'`);
-  expect(COMMAND.startsWith("ELECTRON_RUN_AS_NODE=1 '")).toBe(true);
+  expect(COMMAND).toBe(`'${SHIM}' --agent claude-code`);
 });
 
 test("the file round-trips through disk, and a broken one is left alone", async () => {
@@ -125,4 +126,218 @@ test("the file round-trips through disk, and a broken one is left alone", async 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// ── FE-29 ──────────────────────────────────────────────────────────────────
+
+test("the shim runs the bundled hook under Electron's Node, paths quoted", () => {
+  const shim = buildShim({
+    execPath: "/Applications/Lane work.app/Contents/MacOS/Lanework",
+    hookPath: "/x/lanework-checkpoint.cjs",
+    apiUrl: "https://api.lanework.dev",
+    configPath: "/Users/ana/.lanew/hooks/config.json",
+  });
+  expect(shim.startsWith("#!/bin/sh\n")).toBe(true);
+  expect(shim).toContain("export ELECTRON_RUN_AS_NODE=1");
+  expect(shim).toContain(
+    "export LANEWORK_HOOK_CONFIG='/Users/ana/.lanew/hooks/config.json'",
+  );
+  expect(shim).toContain(
+    `exec '/Applications/Lane work.app/Contents/MacOS/Lanework' '/x/lanework-checkpoint.cjs' --api 'https://api.lanework.dev' "$@"`,
+  );
+});
+
+/** ~/.codex/hooks.json as supacode leaves it: three events, one Stop hook. */
+const SUPACODE = {
+  hooks: {
+    SessionStart: [
+      {
+        hooks: [
+          { type: "command", command: "a # supacode-managed-hook", timeout: 5 },
+        ],
+      },
+    ],
+    Stop: [
+      {
+        hooks: [
+          {
+            type: "command",
+            command: "b # supacode-managed-hook",
+            timeout: 10,
+          },
+        ],
+      },
+    ],
+    UserPromptSubmit: [
+      {
+        hooks: [
+          {
+            type: "command",
+            command: "c # supacode-managed-hook",
+            timeout: 10,
+          },
+        ],
+      },
+    ],
+  },
+};
+
+test("Codex: our hook goes after supacode's and comes out cleanly", () => {
+  const codex = buildHookCommand({ shimPath: SHIM, agent: "codex" });
+  const on = withHook(SUPACODE, codex);
+  expect(findHook(on)).toBe(codex);
+  // Codex keys approval by position: supacode's stays at 0, ours is group 1.
+  expect(findHookPosition(on)).toEqual({ group: 1, index: 0 });
+  const hooks = on.hooks as typeof SUPACODE.hooks;
+  expect(hooks.Stop[0]).toEqual(SUPACODE.hooks.Stop[0]);
+  expect(hooks.SessionStart).toEqual(SUPACODE.hooks.SessionStart);
+  expect(withoutHook(on)).toEqual(SUPACODE);
+});
+
+test("Codex: config.toml says whether hooks are on and what is approved", () => {
+  const hooksPath = "/Users/ana/.codex/hooks.json";
+  const key = trustKey(hooksPath, { group: 1, index: 0 });
+  expect(key).toBe("/Users/ana/.codex/hooks.json:stop:1:0");
+  const config = parseCodexConfig(
+    [
+      'model = "gpt-5"',
+      "",
+      "[features]",
+      "js_repl = false",
+      "hooks = true  # needed for hooks",
+      "",
+      "[hooks.state]",
+      "",
+      `[hooks.state."${hooksPath}:stop:0:0"]`,
+      'trusted_hash = "sha256:071a"',
+      "",
+      `[hooks.state."${key}"]`,
+      'trusted_hash = "sha256:ffff"',
+    ].join("\n"),
+  );
+  expect(config.hooksEnabled).toBe(true);
+  expect(config.trusted.has(key)).toBe(true);
+  expect(parseCodexConfig("[features]\nhooks = false").hooksEnabled).toBe(
+    false,
+  );
+  expect(parseCodexConfig("features.hooks = true").hooksEnabled).toBe(true);
+  // Nothing readable is "not set" — never a false "approved".
+  const empty = parseCodexConfig("");
+  expect(empty.hooksEnabled).toBe(false);
+  expect(empty.trusted.size).toBe(0);
+});
+
+/** A trimmed Codex rollout: the item_completed events the hook reads. */
+function rollout(items: unknown[]): string {
+  return items
+    .map((item) =>
+      JSON.stringify({
+        type: "event_msg",
+        payload: { type: "item_completed", item },
+      }),
+    )
+    .join("\n");
+}
+
+test("Codex: a rollout becomes the card, request, files and commands", () => {
+  const root = "/Users/ana/lanework";
+  const text = [
+    JSON.stringify({
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [
+          { type: "input_text", text: "# AGENTS.md instructions for x" },
+        ],
+      },
+    }),
+    rollout([
+      {
+        type: "UserMessage",
+        content: [
+          {
+            type: "text",
+            text: "resume FE-29, token sk-ant-api03-" + "x".repeat(40),
+          },
+        ],
+      },
+      {
+        type: "McpToolCall",
+        server: "lanework",
+        tool: "get_review",
+        arguments: { board_id: "b", card: "FE-29" },
+      },
+      {
+        type: "CommandExecution",
+        command: ["/bin/zsh", "-lc", "bun run typecheck\necho done"],
+        exit_code: 0,
+      },
+      {
+        type: "CommandExecution",
+        command: ["/bin/zsh", "-lc", "bun test"],
+        exit_code: 1,
+      },
+      {
+        type: "FileChange",
+        changes: { [`${root}/apps/desktop/x.ts`]: { type: "update" } },
+      },
+      {
+        type: "McpToolCall",
+        server: "node_repl",
+        tool: "js",
+        arguments: { card: "NOT-1" },
+      },
+      {
+        type: "AgentMessage",
+        content: [{ type: "Text", text: "Typecheck passes; tests fail." }],
+      },
+    ]),
+  ].join("\n");
+  const d = digestCodex(text, root, null);
+  expect(d.taskId).toBe("FE-29");
+  expect(d.request).toContain("resume FE-29");
+  expect(d.files).toEqual(["apps/desktop/x.ts"]);
+  expect(d.commands).toEqual([
+    { command: "bun run typecheck", ok: true },
+    { command: "bun test", ok: false },
+  ]);
+  expect(d.lastReply).toBe("Typecheck passes; tests fail.");
+
+  // The hook's stdin answer wins when Codex sends one.
+  expect(digestCodex(text, root, "From stdin.").lastReply).toBe("From stdin.");
+
+  const body = JSON.stringify(
+    buildBody(d, { host: "h", session: "s", git: {} }),
+  );
+  expect(body).not.toContain("x".repeat(40));
+  expect(body).toContain("[REDACTED]");
+});
+
+test("Codex: an older rollout (code mode only) still finds the card", () => {
+  const text = [
+    JSON.stringify({
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "look at BE-17" }],
+      },
+    }),
+    JSON.stringify({
+      type: "response_item",
+      payload: {
+        type: "custom_tool_call",
+        name: "exec",
+        call_id: "c1",
+        input:
+          'const r = await tools.mcp__lanework__get_review({ board_id: "b", card: "BE-17" });\nawait tools.exec_command({cmd:"git status"});\n*** Update File: /r/a.ts',
+      },
+    }),
+  ].join("\n");
+  const d = digestCodex(text, "/r", null);
+  expect(d.taskId).toBe("BE-17");
+  expect(d.request).toBe("look at BE-17");
+  expect(d.commands).toEqual([{ command: "git status", ok: null }]);
+  expect(d.files).toEqual(["a.ts"]);
 });

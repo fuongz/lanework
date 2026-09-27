@@ -66,6 +66,8 @@ export function launchEnv(options: {
     // `~/.claude` or Keychain — and startup sync reads them there too.
     CLAUDE_CONFIG_DIR: join(options.profile, "claude"),
     LANEWORK_HOOK_SECRET_FILE: join(options.profile, "hook-secret"),
+    // FE-29: and Codex's hooks.json / config.toml, read on every launch.
+    CODEX_HOME: join(options.profile, "codex"),
   };
   if (options.heartbeatMs)
     env.LANEWORK_HEARTBEAT_MS = String(options.heartbeatMs);
