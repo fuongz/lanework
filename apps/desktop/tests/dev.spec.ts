@@ -3,7 +3,12 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect, test } from "@playwright/test";
-import { DEAD_API, removeProfile, seedCredential } from "./auth-fixtures";
+import {
+  agentConfigEnv,
+  DEAD_API,
+  removeProfile,
+  seedCredential,
+} from "./auth-fixtures";
 
 test("renderer HMR preserves the page; main and preload changes restart Electron", async () => {
   test.setTimeout(60_000);
@@ -28,6 +33,7 @@ test("renderer HMR preserves the page; main and preload changes restart Electron
       ...process.env,
       LANEWORK_TEST_USER_DATA: profile,
       LANEWORK_HOME: home,
+      ...agentConfigEnv(profile),
       LANEWORK_API_URL: DEAD_API,
       LANEWORK_DEV_DEBUG_PORT: "9223",
     },

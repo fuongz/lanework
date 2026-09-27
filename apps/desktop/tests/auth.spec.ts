@@ -12,7 +12,7 @@ import {
 import { APP_HOME_NAME, appHomeDir } from "../electron/main/paths";
 import type { Principal, RedactedSession, Verdict } from "../shared/auth";
 import { can, lockState } from "../shared/policy";
-import { removeProfile } from "./auth-fixtures";
+import { agentConfigEnv, removeProfile } from "./auth-fixtures";
 
 // These modules are deliberately free of any `electron` import, so the whole
 // pure core is exercised here without booting the app.
@@ -226,6 +226,7 @@ test("the renderer gets a redacted session and no way to reach a credential", as
     ),
     LANEWORK_TEST_USER_DATA: profile,
     LANEWORK_HOME: home,
+    ...agentConfigEnv(profile),
   };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_RENDERER_URL;

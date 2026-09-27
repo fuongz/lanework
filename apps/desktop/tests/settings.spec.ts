@@ -506,3 +506,75 @@ test("Agents: the Codex switch installs its hook and waits for Codex's approval"
     await cleanup();
   }
 });
+
+// A launch never takes over another install's hook: an entry running some
+// other home's shim is left exactly as it is, while a FE-28 entry from before
+// shims existed is moved onto this home's shim. The first half is the bug a
+// test run once caused on a developer's real ~/.claude and ~/.codex.
+test("Agents: startup leaves another install's hook alone and upgrades a pre-shim one", async () => {
+  const foreign = {
+    hooks: {
+      Stop: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command:
+                "'/Users/someone/.lanew/hooks/lanework-checkpoint' --agent claude-code",
+              timeout: 10,
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const legacyCodex = {
+    hooks: {
+      Stop: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command:
+                "ELECTRON_RUN_AS_NODE=1 '/Old/Lanework' '/Old/lanework-checkpoint.cjs' --api 'https://api.lanework.dev'",
+              timeout: 10,
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const profile = await mkdtemp(join(tmpdir(), "lanework-settings-sync-"));
+  await mkdir(join(profile, "codex"), { recursive: true });
+  await writeFile(
+    join(profile, "codex", "hooks.json"),
+    JSON.stringify(legacyCodex),
+  );
+  const { page, cleanup } = await open({ profile, claudeSettings: foreign });
+  try {
+    await page.goto("app://lanework/settings/agents");
+    const shim = join(profile, "home", "hooks", "lanework-checkpoint");
+    await expect
+      .poll(
+        async () =>
+          JSON.parse(
+            await readFile(join(profile, "codex", "hooks.json"), "utf8"),
+          ).hooks.Stop[0].hooks[0].command,
+      )
+      .toBe(`'${shim}' --agent codex`);
+    expect(
+      JSON.parse(
+        await readFile(join(profile, "claude", "settings.json"), "utf8"),
+      ),
+    ).toEqual(foreign);
+    // Still reads as on — a Lanework hook is in the file — but startup left
+    // its command alone.
+    await expect(
+      page.getByRole("switch", {
+        name: "Save progress for the next agent — Claude Code",
+      }),
+    ).toBeChecked();
+  } finally {
+    await cleanup();
+  }
+});

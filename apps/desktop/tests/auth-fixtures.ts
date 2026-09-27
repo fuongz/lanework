@@ -38,6 +38,24 @@ export async function seedCredential(
 }
 
 /**
+ * Where a launched app may read and write the coding agents' own config
+ * (FE-28, FE-29): Claude Code's settings, Codex's hooks.json / config.toml,
+ * and the hook's credential — all inside `profile`.
+ *
+ * ⚠️ EVERY launch needs this, including one that builds its env by hand. The
+ * app rewrites these files at startup, and a launch that skipped it once
+ * pointed a developer's real `~/.claude` and `~/.codex` hooks at a temp dir
+ * the test then deleted.
+ */
+export function agentConfigEnv(profile: string): Record<string, string> {
+  return {
+    CLAUDE_CONFIG_DIR: join(profile, "claude"),
+    CODEX_HOME: join(profile, "codex"),
+    LANEWORK_HOOK_SECRET_FILE: join(profile, "hook-secret"),
+  };
+}
+
+/**
  * The environment an Electron launch needs to stay off the real control plane
  * and out of the developer's real `~/.lanew`.
  *
@@ -61,13 +79,7 @@ export function launchEnv(options: {
     LANEWORK_TEST_USER_DATA: options.profile,
     LANEWORK_HOME: options.home,
     LANEWORK_API_URL: options.apiUrl ?? DEAD_API,
-    // FE-28: Settings → Agents writes Claude Code's settings and the hook's
-    // credential. Both land inside the profile, never in the developer's real
-    // `~/.claude` or Keychain — and startup sync reads them there too.
-    CLAUDE_CONFIG_DIR: join(options.profile, "claude"),
-    LANEWORK_HOOK_SECRET_FILE: join(options.profile, "hook-secret"),
-    // FE-29: and Codex's hooks.json / config.toml, read on every launch.
-    CODEX_HOME: join(options.profile, "codex"),
+    ...agentConfigEnv(options.profile),
   };
   if (options.heartbeatMs)
     env.LANEWORK_HEARTBEAT_MS = String(options.heartbeatMs);

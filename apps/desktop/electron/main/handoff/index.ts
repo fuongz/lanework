@@ -274,8 +274,17 @@ export async function syncHandoff(): Promise<void> {
     if (!read.ok) continue;
     const current = findHook(read.settings);
     if (current === null) continue;
+    // ⚠️ Only OUR hook is ours to touch: the one that runs this app home's
+    // shim, or a FE-28 entry from before shims existed (it named the binary
+    // directly, so it carries `ELECTRON_RUN_AS_NODE=1`). An entry running some
+    // OTHER home's shim belongs to another install of this app — a second copy,
+    // or a test run with its own LANEWORK_HOME — and repointing it at ours is
+    // how one test run once took over a user's real ~/.claude and ~/.codex.
+    const mine = current === commandFor(agent);
+    const legacy = current.includes("ELECTRON_RUN_AS_NODE=1");
+    if (!mine && !legacy) continue;
     present.push(agent);
-    if (current !== commandFor(agent))
+    if (legacy)
       await writeSettings(withHook(read.settings, commandFor(agent)), path);
   }
   if (!present.length) return;
