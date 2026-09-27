@@ -40,6 +40,19 @@ import {
 } from "node:fs";
 import { arch, homedir, hostname, platform, tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
+import {
+  config,
+  desktopHookInstalled,
+  login,
+  logout,
+  pluginConfigPath,
+  status,
+} from "./cli";
+import {
+  credentialLocation,
+  readSecret as readCredential,
+  writeSecret,
+} from "./credential";
 
 /** `--flag value` / `--flag` anywhere; everything else is positional. */
 function parseArgs(argv: string[]) {
@@ -72,7 +85,10 @@ const API = (
  * Settings must not change the command it approved.
  */
 function hookConfig(): { pushWip?: boolean } {
-  const file = process.env.LANEWORK_HOOK_CONFIG;
+  // The app's shim names its file; the plugin keeps one in ~/.config/lanework.
+  const file =
+    process.env.LANEWORK_HOOK_CONFIG ||
+    (ARGS.flags.has("plugin") ? pluginConfigPath() : null);
   if (!file) return {};
   try {
     return JSON.parse(readFileSync(file, "utf8")) as { pushWip?: boolean };
@@ -86,8 +102,6 @@ const PUSH_WIP = ARGS.flags.has("push-wip") || hookConfig().pushWip === true;
 /** Which CLI ran this turn — `claude-code` or `codex` (FE-29). */
 const AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : "claude-code";
 const AGENT_NAME = AGENT === "codex" ? "Codex" : "Claude Code";
-/** Keychain item holding this machine's credential (BE-17/D6). */
-const KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
 const STATE_DIR = join(homedir(), ".cache", "lanework", "checkpoint");
 const LOG = join(STATE_DIR, "hook.log");
 /** BE-17/D10: an unchanged turn inside this window writes nothing. */
@@ -593,27 +607,8 @@ export function digestCodex(
 
 // ── Credential and board ────────────────────────────────────────────────────
 
-function readSecret(): string | null {
-  // A file instead of the Keychain, for tests and for machines without one.
-  // The desktop app honours the same variable when it writes the credential.
-  const file = process.env.LANEWORK_HOOK_SECRET_FILE;
-  if (file) {
-    try {
-      return readFileSync(file, "utf8").trim() || null;
-    } catch {
-      return null;
-    }
-  }
-  try {
-    return execFileSync(
-      "security",
-      ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", API, "-w"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    ).trim();
-  } catch {
-    return null;
-  }
-}
+/** This machine's credential, wherever this install keeps it (`credential.ts`). */
+const readSecret = () => readCredential(API);
 
 async function http(
   path: string,
@@ -878,17 +873,13 @@ async function setup(token: string | undefined): Promise<void> {
     machineId: string;
     secret: string;
   };
-  execFileSync("security", ["-i"], {
-    input: `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "${API}" -w "${secret}"\n`,
-    stdio: ["pipe", "ignore", "inherit"],
-  });
+  writeSecret(API, secret);
   if (readSecret() !== secret) {
-    console.error("the credential could not be read back from the Keychain");
+    console.error("the credential could not be read back");
     process.exit(1);
   }
   console.log(
-    `enrolled as machine ${machineId}; credential saved to the Keychain ` +
-      `(service ${KEYCHAIN_SERVICE}). Revoke it at ${API}/setup.`,
+    `enrolled as machine ${machineId}; credential saved to ${credentialLocation()}. Revoke it at ${API}/setup.`,
   );
 }
 
@@ -898,8 +889,25 @@ async function setup(token: string | undefined): Promise<void> {
 const SELF = process.argv[1] ?? "";
 
 async function main(): Promise<void> {
-  const [mode, arg] = ARGS.positional;
+  const [mode, arg, value] = ARGS.positional;
   if (mode === "setup") return setup(arg);
+  // INF-03: the plugin's `lanework` command.
+  try {
+    if (mode === "login")
+      return await login(
+        API,
+        ARGS.flags.has("device"),
+        ARGS.flags.has("force"),
+      );
+    if (mode === "logout") return await logout(API);
+    if (mode === "status")
+      return await status(API, STATE_DIR, desktopHookInstalled());
+    if (mode === "config") return config(arg, value);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+    return;
+  }
   if (mode === "worker" && arg) {
     try {
       await work(arg);
@@ -910,6 +918,9 @@ async function main(): Promise<void> {
   }
 
   // The hook proper: hand stdin to a detached worker and get out of the way.
+  // INF-03/D8: the plugin's copy stands down when the desktop app's hook is
+  // installed, or every turn would be checkpointed twice.
+  if (ARGS.flags.has("plugin") && desktopHookInstalled()) return;
   try {
     const stdin = readFileSync(0, "utf8");
     mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });

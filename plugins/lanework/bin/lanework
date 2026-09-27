@@ -1,0 +1,28 @@
+#!/bin/sh
+# lanework — the Lanework plugin's command and its Claude Code Stop hook
+# (INF-03). The plugin puts this directory on PATH, so inside Claude Code:
+#
+#   ! lanework login     sign this machine in (opens the browser)
+#   ! lanework status
+#   ! lanework logout
+#   ! lanework config push-wip on|off
+#
+# Runs the bundled hook with the `node` on PATH (INF-03/D3). Without Node 18+
+# the hook stays silent — a missing runtime must never break a session — and
+# says why in its log; the commands say it out loud.
+DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+LOG_DIR="$HOME/.cache/lanework/checkpoint"
+
+if ! command -v node >/dev/null 2>&1 ||
+  ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) < 18 ? 1 : 0)' 2>/dev/null; then
+  if [ "$1" = "hook" ]; then
+    mkdir -p "$LOG_DIR" 2>/dev/null &&
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) plugin hook skipped: needs Node.js 18+ on PATH (https://nodejs.org)" >>"$LOG_DIR/hook.log"
+    cat >/dev/null
+    exit 0
+  fi
+  echo "lanework needs Node.js 18 or newer on PATH: https://nodejs.org" >&2
+  exit 1
+fi
+
+exec node "$DIR/lanework-checkpoint.cjs" --plugin "$@"

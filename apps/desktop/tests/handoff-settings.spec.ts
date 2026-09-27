@@ -341,3 +341,69 @@ test("Codex: an older rollout (code mode only) still finds the card", () => {
   expect(d.commands).toEqual([{ command: "git status", ok: null }]);
   expect(d.files).toEqual(["a.ts"]);
 });
+
+// ── INF-03 ─────────────────────────────────────────────────────────────────
+
+test("plugin: the hook stands down only when the desktop app's hook is installed", async () => {
+  const { desktopHookInstalled } = await import("../electron/hook/cli");
+  const dir = await mkdtemp(join(tmpdir(), "lanework-plugin-claude-"));
+  const saved = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = dir;
+  try {
+    expect(desktopHookInstalled()).toBe(false);
+    await writeSettings(OTHER, join(dir, "settings.json"));
+    expect(desktopHookInstalled()).toBe(false);
+    await writeSettings(withHook(OTHER, COMMAND), join(dir, "settings.json"));
+    expect(desktopHookInstalled()).toBe(true);
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = saved;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("plugin: push-wip is a setting in ~/.config/lanework, off until chosen", async () => {
+  const { config, pluginConfigPath } = await import("../electron/hook/cli");
+  const dir = await mkdtemp(join(tmpdir(), "lanework-plugin-xdg-"));
+  const saved = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = dir;
+  const log = console.log;
+  console.log = () => {};
+  try {
+    expect(pluginConfigPath()).toBe(join(dir, "lanework", "hook.json"));
+    config("push-wip", "on");
+    expect(JSON.parse(await readFile(pluginConfigPath(), "utf8"))).toEqual({
+      pushWip: true,
+    });
+    config("push-wip", "off");
+    expect(JSON.parse(await readFile(pluginConfigPath(), "utf8")).pushWip).toBe(
+      false,
+    );
+  } finally {
+    console.log = log;
+    if (saved === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = saved;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("plugin: on Linux the credential is a 0600 file under ~/.config/lanework", async () => {
+  const credential = await import("../electron/hook/credential");
+  const dir = await mkdtemp(join(tmpdir(), "lanework-plugin-cred-"));
+  const file = join(dir, "credential");
+  const saved = process.env.LANEWORK_HOOK_SECRET_FILE;
+  process.env.LANEWORK_HOOK_SECRET_FILE = file;
+  try {
+    expect(credential.readSecret("https://api.test")).toBeNull();
+    credential.writeSecret("https://api.test", "lw_mch_abc");
+    expect(credential.readSecret("https://api.test")).toBe("lw_mch_abc");
+    const { stat } = await import("node:fs/promises");
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    credential.deleteSecret("https://api.test");
+    expect(credential.readSecret("https://api.test")).toBeNull();
+  } finally {
+    if (saved === undefined) delete process.env.LANEWORK_HOOK_SECRET_FILE;
+    else process.env.LANEWORK_HOOK_SECRET_FILE = saved;
+    await rm(dir, { recursive: true, force: true });
+  }
+});

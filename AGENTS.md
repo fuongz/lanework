@@ -95,10 +95,14 @@ the cloud, never in a local file.
   changes plus untracked, non-ignored files) to `refs/lanework/wip/<task-id>`
   — a ref on no branch; your branch, index and history are never touched.
   Failures go to `~/.cache/lanework/checkpoint/hook.log`, never to the session.
-  The source is `apps/desktop/electron/hook/lanework-checkpoint.ts`; without
-  the app, enrol by hand with
-  `bun apps/desktop/electron/hook/lanework-checkpoint.ts setup <lw_reg_…>` and
-  add it to your Claude settings yourself. This repo no longer carries its own
+  The source is `apps/desktop/electron/hook/lanework-checkpoint.ts`. Without
+  the app, Claude Code users install the **plugin** (INF-03,
+  `plugins/lanework/`): `/plugin marketplace add fuongz/lw`,
+  `/plugin install lanework@lanework`, then `! lanework login`. The plugin's
+  hook stays quiet when the app's hook is installed. Its bundle,
+  `plugins/lanework/bin/lanework-checkpoint.cjs`, is committed — rebuild it
+  with `bun run build:plugin` after changing the hook; `bun run gate` fails
+  when it is stale. This repo no longer carries its own
   copy of the hook — two installs would checkpoint every turn twice.
 - **Resume ("resume BE-17").** `get_review` the card and read `checkpoint`.
   If `checkpoint.git.wipRef` is set and you are NOT in the checkout it came

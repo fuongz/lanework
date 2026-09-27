@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "lanework": {
+      "type": "http",
+      "url": "https://mcp.lanework.dev/v1"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "lanework",
+  "version": "0.1.0",
+  "description": "Lanework's board in Claude Code: the MCP tools, and a checkpoint on your card after every turn so another agent can pick the work up.",
+  "author": { "name": "fuongz" },
+  "homepage": "https://lanework.dev",
+  "keywords": ["kanban", "handoff", "checkpoint", "mcp"]
+}
