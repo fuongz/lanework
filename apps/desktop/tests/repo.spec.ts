@@ -147,6 +147,71 @@ test("a folder that is not a repository says so", async () => {
   }
 });
 
+/** `makeRepo` with a bare `origin` it has pushed `main` to and tracks. */
+async function makeTrackedRepo(): Promise<{ repo: string; origin: string }> {
+  const repo = await makeRepo();
+  const origin = await realpath(await mkdtemp(join(tmpdir(), "lanew-origin-")));
+  git(origin, "init", "-q", "--bare", "-b", "main");
+  git(repo, "remote", "add", "origin", origin);
+  git(repo, "push", "-q", "-u", "origin", "main");
+  return { repo, origin };
+}
+
+test("sync publishes a new branch, pushes, pulls and refuses bad remotes", async () => {
+  const { repo, origin } = await makeTrackedRepo();
+  try {
+    const state = await worktree.status(repo);
+    if (state.kind !== "ready") throw new Error(state.kind);
+    expect(state.remotes).toEqual(["origin"]);
+    expect(state.branch).toMatchObject({ ahead: 0, behind: 0 });
+
+    await expect(
+      worktree.sync(repo, "fetch", "--upload-pack=x"),
+    ).rejects.toThrow("is not a remote");
+
+    // A branch with no upstream is published, and tracks what it was pushed to.
+    git(repo, "switch", "-q", "-c", "feature");
+    git(repo, "commit", "-qam", "feat: on a branch");
+    await worktree.sync(repo, "push", null);
+    expect(git(repo, "rev-parse", "--abbrev-ref", "@{u}").trim()).toBe(
+      "origin/feature",
+    );
+    expect(git(origin, "log", "-1", "--format=%s", "feature").trim()).toBe(
+      "feat: on a branch",
+    );
+
+    // Somebody else pushes; a fetch shows it behind, a pull brings it in.
+    const other = await realpath(await mkdtemp(join(tmpdir(), "lanew-other-")));
+    try {
+      git(other, "clone", "-q", "-b", "feature", origin, ".");
+      git(
+        other,
+        "-c",
+        "user.email=o@example.com",
+        "-c",
+        "user.name=O",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "chore: theirs",
+      );
+      git(other, "push", "-q");
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
+    await worktree.sync(repo, "fetch", "origin");
+    const behind = await worktree.status(repo);
+    expect(behind.kind === "ready" && behind.branch.behind).toBe(1);
+    git(repo, "stash", "-q", "-u");
+    await worktree.sync(repo, "pull-rebase", null);
+    expect(git(repo, "log", "-1", "--format=%s").trim()).toBe("chore: theirs");
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+    await rm(origin, { recursive: true, force: true });
+  }
+});
+
 const workspaces: Workspace[] = [
   {
     id: "ws-alpha",
@@ -256,6 +321,40 @@ test("Changes stages and commits, and History shows the commit", async () => {
   } finally {
     await cleanup();
     await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("the sync button pushes local commits, then offers Fetch", async () => {
+  const { repo, origin } = await makeTrackedRepo();
+  git(repo, "commit", "-qam", "feat: unpushed");
+  const { page, cleanup } = await open(repo);
+  try {
+    await page.goto("app://lanework/w/alpha/changes");
+    const push = page.getByRole("button", { name: "↑1 Push" });
+    await expect(push).toBeVisible({ timeout: 15_000 });
+    await push.click();
+    await expect(page.getByRole("button", { name: "Fetch" })).toBeVisible({
+      timeout: 15_000,
+    });
+    expect(git(origin, "log", "-1", "--format=%s", "main").trim()).toBe(
+      "feat: unpushed",
+    );
+
+    // The rest lives in the menu; Force Push asks before it does anything.
+    await page.getByRole("button", { name: "More sync actions" }).click();
+    for (const item of ["Pull", "Pull (Rebase)", "Push", "Force Push"])
+      await expect(
+        page.getByRole("menuitem", { name: item, exact: true }),
+      ).toBeVisible();
+    await page.getByRole("menuitem", { name: "Force Push" }).click();
+    await expect(page.getByRole("alertdialog")).toContainText(
+      "Force push main?",
+    );
+    await page.getByRole("button", { name: "Cancel" }).click();
+  } finally {
+    await cleanup();
+    await rm(repo, { recursive: true, force: true });
+    await rm(origin, { recursive: true, force: true });
   }
 });
 

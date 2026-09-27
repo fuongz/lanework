@@ -1,10 +1,32 @@
 import {
+  ArrowDown01Icon,
   CloudDownloadIcon,
   GitBranchIcon,
   GitCommitIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "#/components/ui/dropdown-menu";
 import { Kbd } from "#/components/ui/kbd";
 import { Textarea } from "#/components/ui/textarea";
 import { useWorktree } from "#/stores/worktree";
@@ -12,6 +34,7 @@ import type {
   BranchState,
   CommitMode,
   CommitSummary,
+  SyncAction,
   WorktreeFile,
 } from "../../../../shared/worktree";
 
@@ -40,19 +63,191 @@ export function commitPlan(files: WorktreeFile[]): {
   return { mode, scope, placeholder };
 }
 
+const RUNNING: Record<SyncAction, string> = {
+  fetch: "Fetching…",
+  pull: "Pulling…",
+  "pull-rebase": "Rebasing…",
+  push: "Pushing…",
+  "force-push": "Pushing…",
+};
+
+/**
+ * Fetch, pull and push, as one split button.
+ *
+ * ⚠️ The main half is PUSH while there are local commits the upstream lacks,
+ * and FETCH otherwise — the one thing worth doing next, the way a Git client's
+ * toolbar reads. Everything else sits in the menu, where Force Push asks first.
+ */
+function SyncButton({
+  branch,
+  remotes,
+}: {
+  branch: BranchState;
+  remotes: string[];
+}) {
+  const sync = useWorktree((state) => state.sync);
+  const busy = useWorktree((state) => state.busy);
+  const [confirmForce, setConfirmForce] = useState(false);
+  const ahead = branch.ahead ?? 0;
+  const primary: SyncAction = ahead > 0 ? "push" : "fetch";
+  const running =
+    busy !== null && busy in RUNNING ? (busy as SyncAction) : null;
+  const noRemote = remotes.length === 0;
+  const disabled = busy !== null || noRemote;
+  // No upstream means nothing to pull from; a push then publishes the branch.
+  const canPull = branch.ahead !== null;
+  const canPush = branch.name !== null;
+
+  return (
+    <div
+      className="ml-auto flex shrink-0 items-center"
+      title={noRemote ? "This repository has no remote." : undefined}
+    >
+      <Button
+        variant="outline"
+        size="sm"
+        className="rounded-r-none"
+        disabled={disabled}
+        onClick={() => void sync(primary)}
+      >
+        {running ? (
+          RUNNING[running]
+        ) : primary === "push" ? (
+          <>
+            <span className="tabular-nums">↑{ahead}</span>
+            Push
+          </>
+        ) : (
+          <>
+            <HugeiconsIcon
+              icon={CloudDownloadIcon}
+              strokeWidth={1.8}
+              data-icon="inline-start"
+              aria-hidden="true"
+            />
+            Fetch
+          </>
+        )}
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          disabled={disabled}
+          render={
+            <Button
+              variant="outline"
+              size="icon-sm"
+              // Overlap the shared edge so the two halves draw one border.
+              className="-ml-px rounded-l-none"
+              aria-label="More sync actions"
+            />
+          }
+        >
+          <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem onClick={() => void sync("fetch")}>
+            Fetch
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Fetch From</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {remotes.map((remote) => (
+                <DropdownMenuItem
+                  key={remote}
+                  onClick={() => void sync("fetch", remote)}
+                >
+                  {remote}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuItem
+            disabled={!canPull}
+            onClick={() => void sync("pull")}
+          >
+            Pull
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!canPull}
+            onClick={() => void sync("pull-rebase")}
+          >
+            Pull (Rebase)
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={!canPush}
+            onClick={() => void sync("push")}
+          >
+            Push
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger disabled={!canPush}>
+              Push To
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {remotes.map((remote) => (
+                <DropdownMenuItem
+                  key={remote}
+                  onClick={() => void sync("push", remote)}
+                >
+                  {remote}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={!canPull}
+            onClick={() => setConfirmForce(true)}
+          >
+            Force Push
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <AlertDialog open={confirmForce} onOpenChange={setConfirmForce}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Force push {branch.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This replaces the branch on the remote with your local one.
+              Commits on the remote that are not in your branch are removed. The
+              push is refused if the remote changed since your last fetch.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              className="border-0"
+              onClick={() => {
+                setConfirmForce(false);
+                void sync("force-push");
+              }}
+            >
+              Force Push
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
 export function CommitBox({
   files,
   branch,
   head,
+  remotes,
 }: {
   files: WorktreeFile[];
   branch: BranchState;
   head: CommitSummary | null;
+  remotes: string[];
 }) {
   const message = useWorktree((state) => state.message);
   const setMessage = useWorktree((state) => state.setMessage);
   const commitChanges = useWorktree((state) => state.commitChanges);
-  const fetchRemote = useWorktree((state) => state.fetchRemote);
   const busy = useWorktree((state) => state.busy);
   const actionError = useWorktree((state) => state.actionError);
   const clearActionError = useWorktree((state) => state.clearActionError);
@@ -77,14 +272,6 @@ export function CommitBox({
         <span className="min-w-0 truncate font-medium">
           {branch.name ?? "Detached HEAD"}
         </span>
-        {(branch.ahead ?? 0) > 0 && (
-          <span
-            className="text-muted-foreground shrink-0 tabular-nums"
-            title={`${branch.ahead} commits to push`}
-          >
-            ↑{branch.ahead}
-          </span>
-        )}
         {(branch.behind ?? 0) > 0 && (
           <span
             className="text-muted-foreground shrink-0 tabular-nums"
@@ -93,21 +280,7 @@ export function CommitBox({
             ↓{branch.behind}
           </span>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="ml-auto"
-          disabled={busy !== null}
-          onClick={() => void fetchRemote()}
-        >
-          <HugeiconsIcon
-            icon={CloudDownloadIcon}
-            strokeWidth={1.8}
-            data-icon="inline-start"
-            aria-hidden="true"
-          />
-          {busy === "fetch" ? "Fetching…" : "Fetch"}
-        </Button>
+        <SyncButton branch={branch} remotes={remotes} />
       </div>
 
       <div className="flex flex-col gap-2 px-3 pb-2">

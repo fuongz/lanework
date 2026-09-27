@@ -67,7 +67,8 @@ const worktree: DesktopWorktreeApi = {
     ipcRenderer.invoke(worktreeChannels.restore, slug, paths),
   commit: (slug, message, mode) =>
     ipcRenderer.invoke(worktreeChannels.commit, slug, message, mode),
-  fetch: (slug) => ipcRenderer.invoke(worktreeChannels.fetch, slug),
+  sync: (slug, action, remote) =>
+    ipcRenderer.invoke(worktreeChannels.sync, slug, action, remote),
   log: (slug, skip) => ipcRenderer.invoke(worktreeChannels.log, slug, skip),
   show: (slug, sha) => ipcRenderer.invoke(worktreeChannels.show, slug, sha),
   branches: (slug) => ipcRenderer.invoke(worktreeChannels.branches, slug),

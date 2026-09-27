@@ -5,6 +5,7 @@ import type {
   CommitChange,
   CommitMode,
   CommitSummary,
+  SyncAction,
   WorktreePatch,
   WorktreeState,
 } from "../../shared/worktree";
@@ -102,7 +103,8 @@ interface WorktreeStore {
   unstage: (paths: string[]) => Promise<void>;
   restore: (paths: string[]) => Promise<void>;
   commitChanges: (mode: CommitMode, fallback: string) => Promise<boolean>;
-  fetchRemote: () => Promise<void>;
+  /** Fetch, pull or push; `remote` for Fetch From and Push To. The action's name is `busy`. */
+  sync: (action: SyncAction, remote?: string) => Promise<void>;
   openHistory: (slug: string) => Promise<void>;
   moreHistory: () => Promise<void>;
   openCommit: (slug: string, sha: string) => Promise<void>;
@@ -276,8 +278,16 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       return done;
     },
 
-    fetchRemote: async () => {
-      await act("fetch", (slug) => api().fetch(slug));
+    sync: async (action, remote) => {
+      const done = await act(action, (slug) =>
+        api().sync(slug, action, remote ?? null),
+      );
+      // A pull brings commits in; History's first page is read again on its
+      // next visit rather than shown without them.
+      if (done && (action === "pull" || action === "pull-rebase")) {
+        ticket.history++;
+        set({ history: [], historyMore: false });
+      }
     },
 
     openHistory: async (slug) => {

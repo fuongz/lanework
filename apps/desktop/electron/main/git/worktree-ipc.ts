@@ -4,6 +4,7 @@ import {
   type CommitHistory,
   type CommitMode,
   type FileSide,
+  type SyncAction,
   type WorktreePatch,
   type WorktreeState,
   worktreeChannels,
@@ -14,7 +15,6 @@ import { readFolders } from "../workspaces/store";
 import {
   branches,
   commit,
-  fetchRemote,
   fileText,
   locate,
   log,
@@ -24,6 +24,7 @@ import {
   stage,
   status,
   switchBranch,
+  sync,
   unstage,
 } from "./worktree";
 
@@ -40,6 +41,14 @@ function slugOf(value: unknown): string {
     throw new Error("A project is required.");
   return value;
 }
+
+const SYNC_ACTIONS: SyncAction[] = [
+  "fetch",
+  "pull",
+  "pull-rebase",
+  "push",
+  "force-push",
+];
 
 /** At most this many paths in one call — a "Stage All" on a big refactor, not more. */
 const MAX_PATHS = 5_000;
@@ -160,11 +169,20 @@ export function registerWorktree(devUrl?: string): void {
   );
 
   handle(
-    worktreeChannels.fetch,
+    worktreeChannels.sync,
     devUrl,
     async (args): Promise<WorktreeState> => {
       const slug = slugOf(args[0]);
-      await fetchRemote(await top(slug));
+      const action = args[1] as SyncAction;
+      if (!SYNC_ACTIONS.includes(action))
+        throw new Error("That is not a way to sync.");
+      const remote = args[2];
+      if (
+        remote !== null &&
+        (typeof remote !== "string" || !remote || remote.length > 255)
+      )
+        throw new Error("Choose a remote.");
+      await sync(await top(slug), action, remote);
       return current(slug);
     },
   );

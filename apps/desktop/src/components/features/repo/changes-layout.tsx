@@ -87,6 +87,7 @@ export function ChangesLayout() {
             files={state.files}
             branch={state.branch}
             head={state.head}
+            remotes={state.remotes}
           />
         </aside>
       </ResizablePanel>

@@ -3,7 +3,7 @@
  * (FE-22).
  *
  * ⚠️ Separate from `git.ts`, which is GitHub. Nothing here touches the network
- * except `fetch`, nothing here needs a token, and a project with no GitHub
+ * except `sync`, nothing here needs a token, and a project with no GitHub
  * connection at all still has a folder with changes in it.
  *
  * ⚠️ Every call names a PROJECT, never a folder. Main resolves the slug to the
@@ -81,6 +81,8 @@ export type WorktreeState =
       files: WorktreeFile[];
       /** The newest commit on HEAD, or null in a repository with none yet. */
       head: CommitSummary | null;
+      /** The repository's remotes by name, as `git remote` lists them. */
+      remotes: string[];
     };
 
 /**
@@ -141,6 +143,20 @@ export type FileSide = { kind: "worktree" } | { kind: "rev"; rev: string };
 /** How a commit is made: what is staged, or every tracked change. */
 export type CommitMode = "staged" | "tracked";
 
+/**
+ * One exchange with a remote, from the Changes screen's sync button.
+ *
+ * ⚠️ `force-push` is `--force-with-lease`, never a bare `--force`: it refuses
+ * when the remote moved since the last fetch, so it cannot erase a commit
+ * somebody else pushed that this machine has never seen.
+ */
+export type SyncAction =
+  | "fetch"
+  | "pull"
+  | "pull-rebase"
+  | "push"
+  | "force-push";
+
 export const worktreeChannels = {
   status: "worktree:status",
   patch: "worktree:patch",
@@ -149,7 +165,7 @@ export const worktreeChannels = {
   unstage: "worktree:unstage",
   restore: "worktree:restore",
   commit: "worktree:commit",
-  fetch: "worktree:fetch",
+  sync: "worktree:sync",
   log: "worktree:log",
   show: "worktree:show",
   branches: "worktree:branches",
@@ -182,7 +198,16 @@ export interface DesktopWorktreeApi {
     message: string,
     mode: CommitMode,
   ) => Promise<WorktreeState>;
-  fetch: (slug: string) => Promise<WorktreeState>;
+  /**
+   * Fetch, pull or push. `remote` names one of `remotes` for Fetch From and
+   * Push To; null means the branch's upstream (or, to push a branch that has
+   * none yet, `origin` — and the push then sets it).
+   */
+  sync: (
+    slug: string,
+    action: SyncAction,
+    remote: string | null,
+  ) => Promise<WorktreeState>;
   log: (slug: string, skip: number) => Promise<CommitHistory>;
   show: (slug: string, sha: string) => Promise<CommitChange>;
   /** Null when the project has no repository to have branches in. */

@@ -12,6 +12,7 @@ import {
   HISTORY_PAGE,
   patchStats,
   type StagedState,
+  type SyncAction,
   type WorktreeFile,
   type WorktreeFileStatus,
   type WorktreePatch,
@@ -343,7 +344,7 @@ async function headCommit(top: string, head: boolean) {
 
 export async function status(top: string): Promise<WorktreeState> {
   const { branch, entries, head } = await readEntries(top);
-  const [numstat, last] = await Promise.all([
+  const [numstat, last, names] = await Promise.all([
     entries.some((entry) => entry.status !== "untracked")
       ? out(top, [
           "diff",
@@ -355,6 +356,7 @@ export async function status(top: string): Promise<WorktreeState> {
         ]).then(parseNumstat)
       : Promise.resolve(new Map()),
     headCommit(top, head),
+    remotes(top),
   ]);
 
   let reads = 0;
@@ -376,7 +378,14 @@ export async function status(top: string): Promise<WorktreeState> {
     files.push({ ...entry, ...counts });
   }
   files.sort((a, b) => a.path.localeCompare(b.path));
-  return { kind: "ready", folder: top, branch, files, head: last };
+  return {
+    kind: "ready",
+    folder: top,
+    branch,
+    files,
+    head: last,
+    remotes: names,
+  };
 }
 
 /**
@@ -518,18 +527,98 @@ export async function commit(
   );
 }
 
-export async function fetchRemote(top: string): Promise<void> {
-  await run(top, ["fetch", "--prune"], {
-    timeout: 90_000,
-    // ⚠️ Never a prompt. There is no terminal behind this process, so a git
-    // that asked for a password — or ssh asking to trust a host — would wait
-    // for an answer until the timeout. Failing says what is wrong instead.
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: "0",
-      GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes",
+/**
+ * The environment every call that talks to a remote runs in.
+ *
+ * ⚠️ Never a prompt. There is no terminal behind this process, so a git that
+ * asked for a password — or ssh asking to trust a host — would wait for an
+ * answer until the timeout. Failing says what is wrong instead. `GIT_EDITOR`
+ * for the same reason: a pull that merges must not open an editor nobody sees.
+ */
+function networkEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_EDITOR: "true",
+    GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes",
+  };
+}
+
+export async function remotes(top: string): Promise<string[]> {
+  return (await out(top, ["remote"]))
+    .split("\n")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Fetch, pull or push (the Changes screen's sync button).
+ *
+ * ⚠️ A remote the renderer names is checked against a FRESH `git remote`, so it
+ * can only ever be one of this repository's remotes — never a URL, a path, or
+ * a string that starts with a dash.
+ *
+ * ⚠️ A branch with no upstream is pushed with `-u` to the named remote (or
+ * `origin`, or the only one there is), so its first push also sets where later
+ * pulls and pushes go. With an upstream, a plain push follows the user's own
+ * `push.default`. Pull says `--no-rebase` or `--rebase` out loud, because the
+ * menu names which one it is and `pull.rebase` must not make it the other.
+ */
+export async function sync(
+  top: string,
+  action: SyncAction,
+  remote: string | null,
+): Promise<void> {
+  const names = await remotes(top);
+  if (!names.length) throw new Error("This repository has no remote.");
+  if (remote !== null && !names.includes(remote))
+    throw new Error(`${remote} is not a remote of this repository.`);
+  const env = networkEnv();
+
+  if (action === "fetch") {
+    await run(top, ["fetch", "--prune", ...(remote ? [remote] : [])], {
+      timeout: 90_000,
+      env,
+    });
+    return;
+  }
+
+  // ⚠️ A long timeout for the rest: a pull runs merge hooks, a push runs the
+  // pre-push hook, and killing either halfway leaves the branch in between.
+  if (action === "pull" || action === "pull-rebase") {
+    await run(
+      top,
+      ["pull", action === "pull-rebase" ? "--rebase" : "--no-rebase"],
+      { timeout: 180_000, env },
+    );
+    return;
+  }
+
+  const branch = await run(
+    top,
+    ["symbolic-ref", "--quiet", "--short", "HEAD"],
+    {
+      ok: [1],
     },
-  });
+  );
+  if (branch.code !== 0) throw new Error("Check out a branch to push it.");
+  const upstream = await run(
+    top,
+    ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    { ok: [128] },
+  );
+  const force = action === "force-push" ? ["--force-with-lease"] : [];
+  const args =
+    upstream.code === 0 && remote === null
+      ? ["push", ...force]
+      : [
+          "push",
+          ...force,
+          ...(upstream.code === 0 ? [] : ["--set-upstream"]),
+          remote ?? (names.includes("origin") ? "origin" : names[0]),
+          "HEAD",
+        ];
+  await run(top, args, { timeout: 180_000, env });
 }
 
 export async function log(top: string, skip: number): Promise<CommitHistory> {
