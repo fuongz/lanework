@@ -47,6 +47,7 @@ import {
   logout,
   pluginConfigPath,
   status,
+  waitForDeviceLogin,
 } from "./cli";
 import {
   credentialLocation,
@@ -898,7 +899,10 @@ async function main(): Promise<void> {
         API,
         ARGS.flags.has("device"),
         ARGS.flags.has("force"),
+        STATE_DIR,
       );
+    if (mode === "login-wait" && arg)
+      return await waitForDeviceLogin(arg, STATE_DIR);
     if (mode === "logout") return await logout(API);
     if (mode === "status")
       return await status(API, STATE_DIR, desktopHookInstalled());

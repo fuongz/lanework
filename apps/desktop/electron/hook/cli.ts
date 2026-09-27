@@ -14,10 +14,12 @@
 // short code typed on another one (device).
 import { spawn } from "node:child_process";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -102,35 +104,127 @@ async function loginLoopback(
   return outcome;
 }
 
-async function loginDevice(
-  api: string,
-): Promise<{ machineId: string; secret: string }> {
+/** How long a device code lives on the server (`routes/cli.ts` TTL). */
+const DEVICE_TTL_MS = 10 * 60 * 1000;
+
+type PendingDevice = {
+  api: string;
+  deviceCode: string;
+  verifier: string;
+  interval: number;
+  deadline: number;
+};
+
+/** Say what the hook will ACTUALLY do with a credential just saved. */
+function outcome(): string {
+  // A `--force` beside the desktop app, or a credential file named only in
+  // this shell, change the answer from the plain case.
+  return desktopHookInstalled()
+    ? "The desktop app's hook is the one that runs on this machine, so this plugin's hook stays quiet and keeps not using this credential."
+    : process.env.LANEWORK_HOOK_SECRET_FILE
+      ? "The hook uses this credential only if LANEWORK_HOOK_SECRET_FILE is also set where Claude Code runs; otherwise it keeps using its usual one."
+      : "Claude Code will now leave a checkpoint on the card after every turn.";
+}
+
+function save(api: string, issued: { machineId: string; secret: string }) {
+  writeSecret(api, issued.secret);
+  if (readSecret(api) !== issued.secret)
+    throw new Error("Signed in, but the credential could not be read back.");
+  return `Signed in as machine ${issued.machineId}. Saved to ${credentialLocation()}.\n${outcome()}`;
+}
+
+/**
+ * Start a device sign-in, print the code, and RETURN (INF-03).
+ *
+ * ⚠️ The wait for approval runs in a detached process, not here. Claude Code
+ * shows a `!` command's output only once the command ends, so a login that
+ * sat polling for the user showed its code to nobody — and past 120s it was
+ * moved to the background, still waiting, code unseen. The poller carries the
+ * PKCE verifier in a 0600 file it deletes on start, and gives up when the code
+ * expires.
+ */
+async function startDeviceLogin(api: string, stateDir: string): Promise<void> {
   const { verifier, challenge } = pkcePair();
   const started = await startDevice(api, { challenge, facts: machineFacts() });
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const file = join(stateDir, `device-${process.pid}-${Date.now()}.json`);
+  const pending: PendingDevice = {
+    api,
+    deviceCode: started.deviceCode,
+    verifier,
+    interval: started.interval,
+    deadline: Date.now() + DEVICE_TTL_MS,
+  };
+  writeFileSync(file, JSON.stringify(pending), { mode: 0o600 });
+  // Same binary, same flags, same environment (a LANEWORK_HOOK_SECRET_FILE
+  // included), so the credential lands where this command would have put it.
+  spawn(
+    process.execPath,
+    [process.argv[1] ?? "", "--plugin", "login-wait", file],
+    { detached: true, stdio: "ignore" },
+  ).unref();
   console.log(
-    `On any device, open ${started.verificationUri} and enter the code:\n\n    ${started.userCode}\n`,
+    [
+      `On any device, open ${started.verificationUri} and enter the code:`,
+      "",
+      `    ${started.userCode}`,
+      "",
+      "Signing in finishes by itself once you approve (the code lasts 10 minutes).",
+      "Then check with: lanework status",
+    ].join("\n"),
   );
-  let interval = started.interval;
-  for (;;) {
-    await new Promise((resolve) => setTimeout(resolve, interval * 1000));
-    const outcome = await redeem(
-      api,
-      { deviceCode: started.deviceCode },
-      verifier,
-    );
-    if (outcome.state === "issued") return outcome;
-    if (outcome.state === "slow_down") interval += 5;
-    else if (outcome.state === "denied")
-      throw new Error("The sign-in was denied.");
-    else if (outcome.state === "expired")
-      throw new Error("The code expired. Run `lanework login` again.");
+}
+
+/** The detached half of a device sign-in: poll, save, and log the outcome. */
+export async function waitForDeviceLogin(
+  file: string,
+  stateDir: string,
+): Promise<void> {
+  const note = (line: string) => {
+    try {
+      mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+      appendFileSync(
+        join(stateDir, "hook.log"),
+        `${new Date().toISOString()} device sign-in: ${line}\n`,
+      );
+    } catch {
+      // Nowhere left to report to.
+    }
+  };
+  let pending: PendingDevice;
+  try {
+    pending = JSON.parse(readFileSync(file, "utf8")) as PendingDevice;
+  } finally {
+    rmSync(file, { force: true });
   }
+  let interval = pending.interval;
+  while (Date.now() < pending.deadline) {
+    await new Promise((resolve) => setTimeout(resolve, interval * 1000));
+    const result = await redeem(
+      pending.api,
+      { deviceCode: pending.deviceCode },
+      pending.verifier,
+    ).catch((error: unknown) => {
+      note(`failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    if (!result) return;
+    if (result.state === "issued") {
+      note(save(pending.api, result).split("\n")[0] ?? "signed in");
+      return;
+    }
+    if (result.state === "slow_down") interval += 5;
+    else if (result.state === "denied") return note("denied");
+    else if (result.state === "expired") return note("the code expired");
+  }
+  note("the code expired before it was approved");
 }
 
 export async function login(
   api: string,
   device: boolean,
-  force = false,
+  force: boolean,
+  stateDir: string,
 ): Promise<void> {
   // ⚠️ The desktop app keeps ITS credential in the same Keychain item. Signing
   // in here would overwrite it with a second machine's, the app would write
@@ -142,14 +236,8 @@ export async function login(
     );
     return;
   }
-  const issued =
-    device || headless() ? await loginDevice(api) : await loginLoopback(api);
-  writeSecret(api, issued.secret);
-  if (readSecret(api) !== issued.secret)
-    throw new Error("Signed in, but the credential could not be read back.");
-  console.log(
-    `Signed in as machine ${issued.machineId}. Saved to ${credentialLocation()}.\nClaude Code will now leave a checkpoint on the card after every turn.`,
-  );
+  if (device || headless()) return startDeviceLogin(api, stateDir);
+  console.log(save(api, await loginLoopback(api)));
 }
 
 export async function logout(api: string): Promise<void> {
