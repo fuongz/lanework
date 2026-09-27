@@ -70,6 +70,34 @@ Use `update_review` for metadata, `toggle_item` for checklist boxes and notes,
 and `set_status` for lifecycle changes. Metadata changes do not approve
 checklist items or change the card's status.
 
+## Checkpoints and resuming a card (BE-17)
+
+Any agent may have to hand a card to another one mid-task — Claude out of
+quota, work moving from a laptop to the cloud. The baton lives on the card, in
+the cloud, never in a local file.
+
+- **Leave a checkpoint.** While working a card, call the MCP tool `checkpoint`
+  after each checklist item you finish and before you stop mid-task: what is
+  done, what is verified and how, the next step, the files you changed. Never
+  paste transcripts, secrets, tokens or `.env` values. A card keeps its last 5
+  checkpoints; moving it to done or archiving it clears them.
+- **Claude Code does this by itself** after every turn, through the Stop hook
+  `.claude/hooks/lanework-checkpoint.ts`. It costs no model quota, redacts
+  secrets on the machine, and force-pushes the uncommitted working tree
+  (tracked changes plus untracked, non-ignored files) to
+  `refs/lanework/wip/<task-id>` — a ref on no branch; your branch, index and
+  history are never touched. Enrol a machine once:
+  `bun .claude/hooks/lanework-checkpoint.ts setup <lw_reg_…>` with a token from
+  `https://api.lanework.dev/setup`; the credential goes to the macOS Keychain
+  and is revoked on that same page. Failures go to
+  `~/.cache/lanework/checkpoint/hook.log`, never to the session.
+- **Resume ("resume BE-17").** `get_review` the card and read `checkpoint`.
+  If `checkpoint.git.wipRef` is set, start from `checkpoint.git.head`, then
+  `git fetch origin <wipRef> && git cherry-pick --no-commit FETCH_HEAD && git reset`.
+  Re-run every check the checkpoint claims passed before trusting it, then
+  continue from `nextStep` (or the summary). Tick checklist boxes only for what
+  YOU verified.
+
 ## Where artifacts go
 
 Agent working files (test results, scratch output) live under `.agents/`. Use
