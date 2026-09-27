@@ -138,6 +138,42 @@ export async function fetchWorkspaces(
   return parseWorkspaces(await body(response));
 }
 
+/**
+ * The boards a git remote is linked to (FE-30), from `GET /v1/boards?repo=` —
+ * the same lookup the checkpoint hook and the MCP `list_boards` make.
+ *
+ * ⚠️ The remote goes to the service AS IS, like the hook sends it: the
+ * service normalizes it, and a second normalizer here could disagree.
+ */
+export async function fetchBoardsForRepo(
+  record: MachineRecord,
+  remote: string,
+): Promise<{ workspaceId: string; name: string }[]> {
+  const response = await call(
+    record,
+    `/v1/boards?repo=${encodeURIComponent(remote)}`,
+  );
+  // Not a remote the service can read (a non-GitHub host, say): linked to nothing.
+  if (response.status === 400) return [];
+  if (!response.ok)
+    throw new Error(
+      `Could not look up this repo's board (HTTP ${response.status}).`,
+    );
+  const payload = (await body(response)) as { boards?: unknown };
+  const rows = Array.isArray(payload.boards) ? payload.boards : [];
+  return rows.flatMap((row: unknown) => {
+    const r = (row ?? {}) as Record<string, unknown>;
+    return text(r.workspaceId)
+      ? [
+          {
+            workspaceId: r.workspaceId,
+            name: text(r.name) ? r.name : r.workspaceId,
+          },
+        ]
+      : [];
+  });
+}
+
 const priority = (value: unknown): BoardCard["priority"] =>
   value === "low" || value === "medium" || value === "high" ? value : null;
 

@@ -157,6 +157,21 @@ const sessionKey = (record: MachineRecord) =>
  * same either-or `load(id)` accepts — while the folder link is keyed by slug.
  */
 export async function terminalFolder(key: string): Promise<string | null> {
+  const { record, workspace } = await knownWorkspace(key);
+  const [primary] = (await readFolders(record))[workspace.slug] ?? [];
+  return primary && (await folderExists(primary)) ? primary : null;
+}
+
+/**
+ * The workspace `key` (id or slug) names on this account, from the list this
+ * process last read — or a fresh one — and the credential that read it.
+ *
+ * ⚠️ Exported for `../readiness` (FE-30), which resolves a slug the same way
+ * the terminal does rather than trusting anything the renderer says about it.
+ */
+export async function knownWorkspace(
+  key: string,
+): Promise<{ record: MachineRecord; workspace: Workspace }> {
   const record = await authorizedRecord();
   const known =
     lastList?.session === sessionKey(record)
@@ -166,8 +181,7 @@ export async function terminalFolder(key: string): Promise<string | null> {
     (entry) => entry.id === key || entry.slug === key,
   );
   if (!workspace) throw new Error("That project is not on this account.");
-  const [primary] = (await readFolders(record))[workspace.slug] ?? [];
-  return primary && (await folderExists(primary)) ? primary : null;
+  return { record, workspace };
 }
 
 async function load(id?: string): Promise<WorkspaceSnapshot> {

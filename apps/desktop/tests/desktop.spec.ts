@@ -104,6 +104,8 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       "terminal",
       // FE-28: Settings → Agents, the checkpoint hook on and off.
       "handoff",
+      // FE-30: whether a project's folder is ready for an agent.
+      "readiness",
     ]);
     expect(
       await page.evaluate(

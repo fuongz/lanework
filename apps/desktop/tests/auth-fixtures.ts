@@ -297,6 +297,11 @@ export async function startStubPlane(
   setChecklistConflict: (value: boolean) => void;
   /** Fail every board read, so the app has to fall back to its saved copy. */
   setBoardOffline: (value: boolean) => void;
+  /**
+   * What `GET /v1/boards?repo=` answers (FE-30): the boards linked to any
+   * repo, by workspace id. Empty — linked to nothing — until set.
+   */
+  setRepoBoards: (value: { workspaceId: string; name: string }[]) => void;
   /** Answer `POST /purge` with 404, the way a service older than FE-14 does. */
   setPurgeMissing: (value: boolean) => void;
   /** Answer `GET /stats` with 404, the way a service older than FE-17 does. */
@@ -349,6 +354,7 @@ export async function startStubPlane(
   const VIEWER = "u-viewer";
   let checklistConflict = false;
   let boardOffline = false;
+  let repoBoards: { workspaceId: string; name: string }[] = [];
   let purgeMissing = false;
   let statsMissing = false;
   const presence = new Map<string, StubPresence[]>();
@@ -517,6 +523,14 @@ export async function startStubPlane(
         workspaces = [...workspaces, created];
         return json(201, { workspace: created });
       });
+      return;
+    }
+
+    // `GET /v1/boards?repo=` — which boards a git remote is linked to (FE-30).
+    if (/^\/v1\/boards\/?\?/.test(req.url ?? "") && !revoked) {
+      res
+        .writeHead(200, { "Content-Type": "application/json" })
+        .end(JSON.stringify({ repo: null, boards: repoBoards }));
       return;
     }
 
@@ -1284,6 +1298,9 @@ export async function startStubPlane(
     },
     setBoardOffline: (value) => {
       boardOffline = value;
+    },
+    setRepoBoards: (value) => {
+      repoBoards = value;
     },
     setSearchFailing: (value) => {
       searchFailing = value;

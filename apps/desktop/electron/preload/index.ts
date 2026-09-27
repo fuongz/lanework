@@ -4,6 +4,10 @@ import { channels, type DesktopApi } from "../../shared/desktop";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
 import { type DesktopHandoffApi, handoffChannels } from "../../shared/handoff";
 import {
+  type DesktopReadinessApi,
+  readinessChannels,
+} from "../../shared/readiness";
+import {
   type DesktopTerminalApi,
   type TerminalClientMessage,
   type TerminalCommand,
@@ -85,6 +89,15 @@ const handoff: DesktopHandoffApi = {
   enable: (agent) => ipcRenderer.invoke(handoffChannels.enable, agent),
   disable: (agent) => ipcRenderer.invoke(handoffChannels.disable, agent),
   setPushWip: (on) => ipcRenderer.invoke(handoffChannels.setPushWip, on),
+};
+
+/** Whether a project's folder is ready for an agent (FE-30). A slug, never a path. */
+const readiness: DesktopReadinessApi = {
+  check: (slug) => ipcRenderer.invoke(readinessChannels.check, slug),
+  preview: (slug, fix) =>
+    ipcRenderer.invoke(readinessChannels.preview, slug, fix),
+  apply: (slug, fix, before) =>
+    ipcRenderer.invoke(readinessChannels.apply, slug, fix, before),
 };
 
 const git: DesktopGitApi = {
@@ -443,5 +456,6 @@ const desktop: DesktopApi = {
   worktree,
   terminal: createTerminal(),
   handoff,
+  readiness,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

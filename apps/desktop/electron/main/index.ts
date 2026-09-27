@@ -7,6 +7,7 @@ import { registerHandoff } from "./handoff";
 import { broadcast, handle } from "./ipc";
 import { installMenu } from "./menu";
 import { registerAppProtocol } from "./protocol";
+import { registerReadiness } from "./readiness";
 import { appOrigin, isTrustedUrl } from "./security";
 import { registerTerminal } from "./terminal";
 import { registerWorkspaces } from "./workspaces";
@@ -138,6 +139,7 @@ app
     registerGit(devUrl);
     registerTerminal(devUrl);
     registerHandoff(devUrl);
+    registerReadiness(devUrl);
     installMenu();
     createWindow();
     app.on("activate", () => {

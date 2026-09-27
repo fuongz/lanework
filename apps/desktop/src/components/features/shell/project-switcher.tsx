@@ -112,7 +112,7 @@ export function ProjectSwitcher() {
               // screen-reader user what they are looking at and nothing about
               // what pressing it would do.
               aria-label={`Switch project — currently ${active?.name ?? "none"}`}
-              className="hover:bg-foreground/[0.05] mt-2 flex h-8 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors duration-150"
+              className="hover:bg-foreground/[0.05] flex h-8 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors duration-150"
             >
               <Tile workspace={active} className="size-6 text-[11px]" />
               <span className="truncate text-[13px] font-medium">

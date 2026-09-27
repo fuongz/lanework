@@ -22,6 +22,17 @@ const run = promisify(execFile);
 export async function suggestRepo(
   folder: string | null,
 ): Promise<RepoRef | null> {
+  const url = await originUrl(folder);
+  return url === null ? null : parseRepoRef(url);
+}
+
+/**
+ * `git remote get-url origin` in `folder`, as git prints it, or null.
+ *
+ * Any host, not only GitHub: the readiness check (FE-30) hands it to the
+ * service, which decides what it can link.
+ */
+export async function originUrl(folder: string | null): Promise<string | null> {
   if (!folder) return null;
   try {
     const { stdout } = await run("git", ["remote", "get-url", "origin"], {
@@ -31,7 +42,7 @@ export async function suggestRepo(
       // A remote URL is one line. Anything beyond this is not one.
       maxBuffer: 64 * 1024,
     });
-    return parseRepoRef(stdout.trim());
+    return stdout.trim() || null;
   } catch {
     // Not a git repo, no `origin`, no `git` on PATH, or the folder is gone.
     // None of those is an error worth a dialog: the user types the repo instead.

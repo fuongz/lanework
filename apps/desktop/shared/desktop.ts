@@ -1,6 +1,7 @@
 import type { DesktopAuthApi } from "./auth";
 import type { DesktopGitApi } from "./git";
 import type { DesktopHandoffApi } from "./handoff";
+import type { DesktopReadinessApi } from "./readiness";
 import type { DesktopTerminalApi } from "./terminal";
 import type { DesktopWorkspacesApi } from "./workspaces";
 import type { DesktopWorktreeApi } from "./worktree";
@@ -68,4 +69,6 @@ export interface DesktopApi {
   terminal: DesktopTerminalApi;
   /** Settings → Agents: the checkpoint hook for Claude Code (FE-28). */
   handoff: DesktopHandoffApi;
+  /** Whether a project's folder is ready for an agent to work its board (FE-30). */
+  readiness: DesktopReadinessApi;
 }

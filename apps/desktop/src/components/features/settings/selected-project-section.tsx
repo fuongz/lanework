@@ -1,7 +1,10 @@
 import { Folder01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import type { ReadinessFix } from "#/../shared/readiness";
 import type { Workspace } from "#/../shared/workspaces";
+import { ReadinessFixDialog } from "#/components/shared/readiness/readiness-fix-dialog";
+import { ReadinessList } from "#/components/shared/readiness/readiness-list";
 import { SettingsCard } from "#/components/shared/settings/settings-page";
 import {
   AlertDialog,
@@ -22,6 +25,7 @@ import {
 } from "#/components/ui/empty";
 import { Input } from "#/components/ui/input";
 import { useBoard } from "#/stores/board";
+import { useReadiness } from "#/stores/readiness";
 
 /** One row of the section's card: what it is on the left, the action on the right. */
 function Row({
@@ -42,6 +46,57 @@ function Row({
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-1">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Every readiness check for one project (FE-30), passed ones included — the
+ * full list behind the indicator beside the switcher, for ANY project here,
+ * not only the open one.
+ */
+function ReadinessSection({
+  slug,
+  folders,
+}: {
+  slug: string;
+  folders: string[];
+}) {
+  const report = useReadiness((state) => state.reports[slug]);
+  const error = useReadiness((state) => state.errors[slug]);
+  const check = useReadiness((state) => state.check);
+  const [fix, setFix] = useState<ReadinessFix | null>(null);
+  // Asked again when the folders change: linking one is the fix for the
+  // first check, and its result should not wait for the next focus.
+  const key = folders.join("\n");
+  useEffect(() => {
+    void key;
+    void check(slug);
+  }, [check, slug, key]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+        Ready for agents
+      </h3>
+      <SettingsCard className="px-4 py-1">
+        {report ? (
+          <ReadinessList
+            report={report}
+            onFix={setFix}
+            className="divide-border divide-y"
+          />
+        ) : (
+          <p className="text-muted-foreground py-3 text-[13px]">
+            {error ?? "Checking this project’s folder…"}
+          </p>
+        )}
+      </SettingsCard>
+      <ReadinessFixDialog
+        slug={slug}
+        fix={fix}
+        onOpenChange={(open) => !open && setFix(null)}
+      />
     </div>
   );
 }
@@ -168,6 +223,8 @@ export function SelectedProjectSection({
           </Button>
         </Row>
       </SettingsCard>
+
+      <ReadinessSection slug={workspace.slug} folders={folders} />
 
       <div className="flex flex-col gap-2">
         <h3 className="text-destructive text-xs font-medium tracking-wide uppercase">
