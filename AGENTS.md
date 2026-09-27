@@ -92,11 +92,16 @@ the cloud, never in a local file.
   and is revoked on that same page. Failures go to
   `~/.cache/lanework/checkpoint/hook.log`, never to the session.
 - **Resume ("resume BE-17").** `get_review` the card and read `checkpoint`.
-  If `checkpoint.git.wipRef` is set, start from `checkpoint.git.head`, then
+  If `checkpoint.git.wipRef` is set and you are NOT in the checkout it came
+  from (`checkpoint.host` is another machine, a fresh clone, a cloud sandbox),
+  start from `checkpoint.git.head`, then
   `git fetch origin <wipRef> && git cherry-pick --no-commit FETCH_HEAD && git reset`.
-  Re-run every check the checkpoint claims passed before trusting it, then
-  continue from `nextStep` (or the summary). Tick checklist boxes only for what
-  YOU verified.
+  In the same checkout the work is already on disk — skip that step, or it
+  conflicts with itself. `nextStep` may come from an older checkpoint than the
+  newest (`nextStepFrom` says which): the Stop hook writes after every turn
+  but never states a next step. Re-run every check the checkpoint claims
+  passed before trusting it, then continue from `nextStep` (or the summary).
+  Tick checklist boxes only for what YOU verified.
 
 ## Where artifacts go
 

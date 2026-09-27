@@ -159,6 +159,8 @@ export type Digest = {
   taskId: string | null;
   request: string | null;
   lastReply: string | null;
+  /** `lastReply` is the previous turn's: this one had not replied yet. */
+  replyIsPrevious: boolean;
   files: string[];
   commands: { command: string; ok: boolean | null }[];
 };
@@ -220,6 +222,7 @@ export function digest(transcript: string, root: string): Digest {
   let typedTaskId: string | null = null;
   let request: string | null = null;
   let replies: string[] = [];
+  let previousReplies: string[] = [];
   const uses = new Map<
     string,
     { name: string; input: Record<string, unknown> }
@@ -235,6 +238,10 @@ export function digest(transcript: string, root: string): Digest {
       const typed = humanText(content);
       if (typed) {
         request = typed;
+        // ⚠️ The previous turn's reply is kept until this turn writes one:
+        // a worker that runs mid-turn (or a turn that ends in tool calls)
+        // would otherwise report "no reply" and lose where the work stood.
+        if (replies.length) previousReplies = replies;
         replies = [];
         for (const m of typed.match(TASK_ID) ?? []) {
           if (!NOT_TASK_ID.test(m)) typedTaskId = m;
@@ -295,7 +302,9 @@ export function digest(transcript: string, root: string): Digest {
   return {
     taskId: mcpTaskId ?? typedTaskId,
     request,
-    lastReply: replies.length ? replies.join("\n\n") : null,
+    lastReply:
+      (replies.length ? replies : previousReplies).join("\n\n") || null,
+    replyIsPrevious: !replies.length && previousReplies.length > 0,
     files: files.slice(-100),
     commands,
   };
@@ -435,9 +444,12 @@ export function buildBody(
     git: Record<string, string | null>;
   },
 ) {
+  const heading = d.replyIsPrevious
+    ? "Claude Code's last message, from the turn BEFORE the request below (it stopped before replying to that one):"
+    : "Claude Code's last message before it stopped:";
   const summary = d.lastReply
-    ? `Claude Code's last message before it stopped:\n\n${clip(redact(d.lastReply), 5000)}`
-    : "Claude Code stopped before writing a reply this turn.";
+    ? `${heading}\n\n${clip(redact(d.lastReply), 5000)}`
+    : "Claude Code stopped before writing any reply in this session.";
   return {
     summary,
     request: d.request ? clip(redact(d.request), 2000) : null,
