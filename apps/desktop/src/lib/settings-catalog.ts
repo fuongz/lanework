@@ -2,6 +2,7 @@ import {
   FolderLibraryIcon,
   GithubIcon,
   InformationCircleIcon,
+  RoboticIcon,
   Sun01Icon,
   UserAccountIcon,
 } from "@hugeicons/core-free-icons";
@@ -54,6 +55,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         label: "Account",
         icon: UserAccountIcon,
         keywords: "sign out signed in user machine revoke credential",
+      },
+      {
+        to: "/settings/agents",
+        label: "Agents",
+        icon: RoboticIcon,
+        keywords:
+          "agent agents claude codex handoff checkpoint resume quota usage hook push wip",
       },
     ],
   },

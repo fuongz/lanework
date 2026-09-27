@@ -387,3 +387,70 @@ test("following, starring, assigning and labelling all reach the board", async (
     await removeProfile(profile);
   }
 });
+
+// FE-28/V3: where the last agent stopped, and the command that hands the card
+// to the next one — and nothing at all on a card nobody handed over.
+test("a checkpoint shows where the agent stopped and copies the resume command", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-cloud-project", board);
+  plane.setCheckpoint("c-parent", {
+    id: "cp-2",
+    agent: "claude-code",
+    host: "fuongz-m1.local",
+    createdAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+    request: "keep going",
+    summary: "Claude Code's last message before it stopped:\n\nStep 3 done.",
+    nextStep: "Wire the settings switch",
+    nextStepFrom: {
+      id: "cp-1",
+      agent: "claude-code-lanework",
+      createdAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+    },
+    files: ["apps/desktop/src/x.tsx"],
+    commands: [],
+    git: { branch: "main", head: "abc", wipRef: "refs/lanework/wip/FE-11" },
+  });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-issue-checkpoint-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+  });
+  try {
+    const page = await app.firstWindow();
+    const errors = await openIssue(page);
+    const block = page.getByRole("region", {
+      name: "Where the last agent stopped",
+    });
+    await expect(block).toBeVisible();
+    await expect(block.getByText("Claude Code stopped here")).toBeVisible();
+    await expect(
+      block.getByText("fuongz-m1.local", { exact: false }),
+    ).toBeVisible();
+    await expect(block.getByText("Wire the settings switch")).toBeVisible();
+    await expect(block.getByText(/from Claude Code/)).toBeVisible();
+    await expect(block.getByText("refs/lanework/wip/FE-11")).toBeVisible();
+
+    await block.getByRole("button", { name: "Copy resume for Codex" }).click();
+    await expect(block.getByRole("button", { name: "Copied" })).toBeVisible();
+    // Read back through main: the renderer may not read the clipboard.
+    expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(
+      'codex "resume FE-11"',
+    );
+
+    // A card with no checkpoint draws nothing.
+    await page.goto("app://lanework/w/cloud-project/issues/FE-12");
+    await expect(page.getByLabel("Card title")).toHaveValue(
+      "Example sub-issue",
+    );
+    await expect(
+      page.getByRole("region", { name: "Where the last agent stopped" }),
+    ).toHaveCount(0);
+    expect(errors).toEqual([]);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});

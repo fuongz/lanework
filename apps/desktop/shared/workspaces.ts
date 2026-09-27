@@ -84,6 +84,31 @@ export interface BoardMember {
 }
 
 /**
+ * Where an agent stopped on a card (BE-17) — the `latest` of
+ * `GET /v1/boards/:id/items/:card/checkpoints`, as the issue detail shows it
+ * (FE-28).
+ *
+ * ⚠️ `nextStep` may be an OLDER checkpoint's: the Stop hook writes after every
+ * turn but never states one, so the server carries the last stated step
+ * forward and `nextStepFrom` says whose it was.
+ */
+export interface CardCheckpoint {
+  agent: string;
+  host: string | null;
+  createdAt: string;
+  request: string | null;
+  summary: string;
+  nextStep: string | null;
+  nextStepFrom: { agent: string; createdAt: string } | null;
+  files: string[];
+  git: {
+    branch: string | null;
+    head: string | null;
+    wipRef: string | null;
+  } | null;
+}
+
+/**
  * An agent that called the Lanework MCP server about a card in the last few
  * minutes (BE-16) — `GET /v1/boards/:id/presence`.
  *
@@ -721,6 +746,7 @@ export const workspaceChannels = {
   more: "workspaces:board:more",
   stats: "workspaces:board:stats",
   presence: "workspaces:board:presence",
+  checkpoint: "workspaces:board:checkpoint",
   move: "workspaces:board:move",
   toggle: "workspaces:board:toggle",
   setChecklist: "workspaces:board:checklist",
@@ -778,6 +804,14 @@ export interface DesktopBoardApi {
    * Empty from a service older than `/presence`.
    */
   presence: (workspaceId: string) => Promise<BoardPresence[]>;
+  /**
+   * Where the last agent on this card stopped (FE-28), or null — none left,
+   * or a service older than BE-17.
+   */
+  checkpoint: (
+    workspaceId: string,
+    cardId: string,
+  ) => Promise<CardCheckpoint | null>;
   /**
    * One card WITH its checklist and assignees, by id.
    *

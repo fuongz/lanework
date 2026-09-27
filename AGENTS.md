@@ -82,15 +82,20 @@ the cloud, never in a local file.
   paste transcripts, secrets, tokens or `.env` values. A card keeps its last 5
   checkpoints; moving it to done or archiving it clears them.
 - **Claude Code does this by itself** after every turn, through the Stop hook
-  `.claude/hooks/lanework-checkpoint.ts`. It costs no model quota, redacts
-  secrets on the machine, and force-pushes the uncommitted working tree
-  (tracked changes plus untracked, non-ignored files) to
-  `refs/lanework/wip/<task-id>` — a ref on no branch; your branch, index and
-  history are never touched. Enrol a machine once:
-  `bun .claude/hooks/lanework-checkpoint.ts setup <lw_reg_…>` with a token from
-  `https://api.lanework.dev/setup`; the credential goes to the macOS Keychain
-  and is revoked on that same page. Failures go to
-  `~/.cache/lanework/checkpoint/hook.log`, never to the session.
+  the desktop app installs: **Settings → Agents → Save progress for the next
+  agent** (FE-28). It goes into `~/.claude/settings.json`, so every repo gets
+  it, and runs under the app's own Node — no bun needed. It costs no model
+  quota, redacts secrets on the machine, and uses the app's machine credential
+  from the Keychain (revoking the machine revokes the hook). A second switch,
+  off by default, also force-pushes the uncommitted working tree (tracked
+  changes plus untracked, non-ignored files) to `refs/lanework/wip/<task-id>`
+  — a ref on no branch; your branch, index and history are never touched.
+  Failures go to `~/.cache/lanework/checkpoint/hook.log`, never to the session.
+  The source is `apps/desktop/electron/hook/lanework-checkpoint.ts`; without
+  the app, enrol by hand with
+  `bun apps/desktop/electron/hook/lanework-checkpoint.ts setup <lw_reg_…>` and
+  add it to your Claude settings yourself. This repo no longer carries its own
+  copy of the hook — two installs would checkpoint every turn twice.
 - **Resume ("resume BE-17").** `get_review` the card and read `checkpoint`.
   If `checkpoint.git.wipRef` is set and you are NOT in the checkout it came
   from (`checkpoint.host` is another machine, a fresh clone, a cloud sandbox),

@@ -102,6 +102,8 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       "git",
       "worktree",
       "terminal",
+      // FE-28: Settings → Agents, the checkpoint hook on and off.
+      "handoff",
     ]);
     expect(
       await page.evaluate(

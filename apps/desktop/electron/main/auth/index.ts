@@ -9,6 +9,7 @@ import {
   type Verdict,
 } from "../../../shared/auth";
 import { can } from "../../../shared/policy";
+import { forgetHookCredential, syncHandoff } from "../handoff";
 import { broadcast, handle } from "../ipc";
 import * as api from "./client";
 import { listenForCallback } from "./loopback";
@@ -188,6 +189,8 @@ async function accept(
     // Both arrive on the first probe; `accept` publishes, which triggers one.
     owner: null,
   });
+  // FE-28: a hook that was left on through a sign-out gets the new credential.
+  void syncHandoff().catch(() => undefined);
   return publish();
 }
 
@@ -320,6 +323,8 @@ export async function signOut(): Promise<RedactedSession> {
     await api.revokeSelf(record);
 
   await clearRecord();
+  // FE-28: the Stop hook's copy of the credential goes with it.
+  if (record) await forgetHookCredential(record.apiUrl);
   api.resetVerdict();
   return publish();
 }

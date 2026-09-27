@@ -21,6 +21,7 @@ import {
   type BoardQuery,
   type BoardStats,
   type BoardWrite,
+  type CardCheckpoint,
   matchesSearch,
   normalizeTag,
   type Workspace,
@@ -579,6 +580,70 @@ export async function fetchStats(
     byColumn: parseCounts(stats.byColumn),
     byCategory: parseCounts(stats.byCategory),
     byPriority: parseCounts(stats.byPriority),
+  };
+}
+
+const str = (value: unknown): string | null =>
+  typeof value === "string" && value ? value : null;
+
+/**
+ * Where the last agent on a card stopped (FE-28), or null.
+ *
+ * ⚠️ Null, not an error, for a 404: a service older than BE-17 has no route,
+ * and a card nobody checkpointed simply has nothing to show. Like presence it
+ * is a hint beside the card, never a reason for the card to fail to open.
+ */
+export async function fetchCheckpoint(
+  record: MachineRecord,
+  workspaceId: string,
+  cardId: string,
+): Promise<CardCheckpoint | null> {
+  const response = await call(
+    record,
+    `/v1/boards/${workspaceId}/items/${encodeURIComponent(cardId)}/checkpoints`,
+  );
+  if (response.status === 404) return null;
+  if (!response.ok)
+    throw new Error(
+      `Could not load where the last agent stopped (HTTP ${response.status}).`,
+    );
+  const payload = (await body(response)) as { latest?: unknown };
+  const r = payload.latest;
+  if (!r || typeof r !== "object") return null;
+  const row = r as Record<string, unknown>;
+  const agent = str(row.agent);
+  const createdAt = str(row.createdAt);
+  const summary = str(row.summary);
+  if (!agent || !createdAt || !summary) return null;
+  const from =
+    row.nextStepFrom && typeof row.nextStepFrom === "object"
+      ? (row.nextStepFrom as Record<string, unknown>)
+      : null;
+  const git =
+    row.git && typeof row.git === "object"
+      ? (row.git as Record<string, unknown>)
+      : null;
+  return {
+    agent,
+    host: str(row.host),
+    createdAt,
+    request: str(row.request),
+    summary,
+    nextStep: str(row.nextStep),
+    nextStepFrom:
+      from && str(from.agent) && str(from.createdAt)
+        ? { agent: from.agent as string, createdAt: from.createdAt as string }
+        : null,
+    files: Array.isArray(row.files)
+      ? row.files.filter((f): f is string => typeof f === "string")
+      : [],
+    git: git
+      ? {
+          branch: str(git.branch),
+          head: str(git.head),
+          wipRef: str(git.wipRef),
+        }
+      : null,
   };
 }
 

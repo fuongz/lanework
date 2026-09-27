@@ -11,17 +11,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "command -v bun >/dev/null && bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/lanework-checkpoint.ts\" || true",
-            "timeout": 10
-          }
-        ]
-      }
     ]
   }
 }

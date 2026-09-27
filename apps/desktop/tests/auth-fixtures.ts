@@ -61,6 +61,11 @@ export function launchEnv(options: {
     LANEWORK_TEST_USER_DATA: options.profile,
     LANEWORK_HOME: options.home,
     LANEWORK_API_URL: options.apiUrl ?? DEAD_API,
+    // FE-28: Settings → Agents writes Claude Code's settings and the hook's
+    // credential. Both land inside the profile, never in the developer's real
+    // `~/.claude` or Keychain — and startup sync reads them there too.
+    CLAUDE_CONFIG_DIR: join(options.profile, "claude"),
+    LANEWORK_HOOK_SECRET_FILE: join(options.profile, "hook-secret"),
   };
   if (options.heartbeatMs)
     env.LANEWORK_HEARTBEAT_MS = String(options.heartbeatMs);
@@ -284,6 +289,11 @@ export async function startStubPlane(
   setStatsMissing: (value: boolean) => void;
   /** The agents `GET /presence` reports on one board (BE-16). */
   setPresence: (workspaceId: string, rows: StubPresence[]) => void;
+  /**
+   * The `latest` of `GET /items/:card/checkpoints` (BE-17, FE-28), keyed by
+   * the card's id or task id. Null clears it.
+   */
+  setCheckpoint: (card: string, latest: Record<string, unknown> | null) => void;
   /** Fail every `GET /items?q=` with 500, so search has to fall back. */
   setSearchFailing: (value: boolean) => void;
   /** `If-Match` headers the board saw, so a test can prove the precondition. */
@@ -328,6 +338,7 @@ export async function startStubPlane(
   let purgeMissing = false;
   let statsMissing = false;
   const presence = new Map<string, StubPresence[]>();
+  const checkpoints = new Map<string, Record<string, unknown>>();
   let searchFailing = false;
   // Board-level events (`purged`) per board, the way the service keeps them:
   // audit rows with no card, reported by the feed above the client's cursor.
@@ -607,6 +618,16 @@ export async function startStubPlane(
             machineId: null,
             ...row,
           })),
+        });
+        return;
+      }
+      // BE-17's checkpoints, as `latest` — the only part the app reads.
+      const checkpointOf = /^\/items\/([^/]+)\/checkpoints$/.exec(rest ?? "");
+      if (req.method === "GET" && checkpointOf?.[1]) {
+        const latest = checkpoints.get(decodeURIComponent(checkpointOf[1]));
+        json(200, {
+          checkpoints: latest ? [latest] : [],
+          latest: latest ?? null,
         });
         return;
       }
@@ -1258,6 +1279,10 @@ export async function startStubPlane(
     },
     setPresence: (workspaceId, rows) => {
       presence.set(workspaceId, rows);
+    },
+    setCheckpoint: (card, latest) => {
+      if (latest) checkpoints.set(card, latest);
+      else checkpoints.delete(card);
     },
     setPurgeMissing: (value) => {
       purgeMissing = value;

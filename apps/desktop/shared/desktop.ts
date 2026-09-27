@@ -1,5 +1,6 @@
 import type { DesktopAuthApi } from "./auth";
 import type { DesktopGitApi } from "./git";
+import type { DesktopHandoffApi } from "./handoff";
 import type { DesktopTerminalApi } from "./terminal";
 import type { DesktopWorkspacesApi } from "./workspaces";
 import type { DesktopWorktreeApi } from "./worktree";
@@ -65,4 +66,6 @@ export interface DesktopApi {
   /** The project's local repository — changes, commits, history (FE-22). */
   worktree: DesktopWorktreeApi;
   terminal: DesktopTerminalApi;
+  /** Settings → Agents: the checkpoint hook for Claude Code (FE-28). */
+  handoff: DesktopHandoffApi;
 }

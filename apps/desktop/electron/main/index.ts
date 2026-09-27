@@ -3,6 +3,7 @@ import { app, BrowserWindow, nativeTheme, protocol, session } from "electron";
 import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
 import { registerAuth } from "./auth";
 import { registerGit } from "./git";
+import { registerHandoff } from "./handoff";
 import { broadcast, handle } from "./ipc";
 import { installMenu } from "./menu";
 import { registerAppProtocol } from "./protocol";
@@ -136,6 +137,7 @@ app
     registerWorkspaces(devUrl);
     registerGit(devUrl);
     registerTerminal(devUrl);
+    registerHandoff(devUrl);
     installMenu();
     createWindow();
     app.on("activate", () => {

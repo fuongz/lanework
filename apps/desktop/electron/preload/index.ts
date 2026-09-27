@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 import { authChannels, type DesktopAuthApi } from "../../shared/auth";
 import { channels, type DesktopApi } from "../../shared/desktop";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
+import { type DesktopHandoffApi, handoffChannels } from "../../shared/handoff";
 import {
   type DesktopTerminalApi,
   type TerminalClientMessage,
@@ -78,6 +79,14 @@ const worktree: DesktopWorktreeApi = {
  * wrote down itself. `linkRepo` is the single exception and it takes the raw
  * string a human typed, which main parses before it becomes part of any URL.
  */
+/** Settings → Agents (FE-28): the checkpoint hook, on and off. */
+const handoff: DesktopHandoffApi = {
+  status: () => ipcRenderer.invoke(handoffChannels.status),
+  enable: () => ipcRenderer.invoke(handoffChannels.enable),
+  disable: () => ipcRenderer.invoke(handoffChannels.disable),
+  setPushWip: (on) => ipcRenderer.invoke(handoffChannels.setPushWip, on),
+};
+
 const git: DesktopGitApi = {
   account: () => ipcRenderer.invoke(gitChannels.account),
   connect: () => ipcRenderer.invoke(gitChannels.connect),
@@ -298,6 +307,8 @@ const desktop: DesktopApi = {
         ipcRenderer.invoke(workspaceChannels.stats, workspaceId, query),
       presence: (workspaceId) =>
         ipcRenderer.invoke(workspaceChannels.presence, workspaceId),
+      checkpoint: (workspaceId, cardId) =>
+        ipcRenderer.invoke(workspaceChannels.checkpoint, workspaceId, cardId),
       card: (workspaceId, cardId) =>
         ipcRenderer.invoke(workspaceChannels.card, workspaceId, cardId),
       lookup: (workspaceId, taskId) =>
@@ -431,5 +442,6 @@ const desktop: DesktopApi = {
   git,
   worktree,
   terminal: createTerminal(),
+  handoff,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

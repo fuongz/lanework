@@ -44,6 +44,7 @@ import {
   fetchCard,
   fetchCards,
   fetchChanges,
+  fetchCheckpoint,
   fetchGroup,
   fetchPresence,
   fetchStats,
@@ -1005,6 +1006,10 @@ export function registerWorkspaces(devUrl?: string): void {
   handle(workspaceChannels.presence, devUrl, async (args) => {
     const [workspaceId] = requireId(args, 1);
     return fetchPresence(await authorizedRecord(), workspaceId);
+  });
+  handle(workspaceChannels.checkpoint, devUrl, async (args) => {
+    const [workspaceId, cardId] = requireId(args, 2);
+    return fetchCheckpoint(await authorizedRecord(), workspaceId, cardId);
   });
   handle(workspaceChannels.card, devUrl, async (args): Promise<BoardCard> => {
     const [workspaceId, cardId] = requireId(args, 2);

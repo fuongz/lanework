@@ -11,6 +11,9 @@ export const electronBuildOptions = {
     // FE-19: the utility process every terminal lives in.
     "main/pty-host": "electron/main/terminal/host.ts",
     "preload/index": "electron/preload/index.ts",
+    // FE-28: the Claude Code Stop hook, run by Electron's own Node
+    // (`ELECTRON_RUN_AS_NODE=1`) from the command Settings → Agents installs.
+    "hook/lanework-checkpoint": "electron/hook/lanework-checkpoint.ts",
   },
   bundle: true,
   platform: "node",

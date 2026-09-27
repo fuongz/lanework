@@ -12,6 +12,9 @@ files:
 # dist/electron/node_modules by `scripts/electron-bundle.mjs`.
 asarUnpack:
   - "**/node_modules/@lydell/**"
+  # FE-28: the Stop hook is run by path from ~/.claude/settings.json under
+  # ELECTRON_RUN_AS_NODE, a plain Node that is not asar-aware.
+  - "dist/electron/hook/**"
 # The pty binary is a prebuilt N-API module: it runs under Electron's Node as
 # is, and there is nothing here for electron-rebuild to compile.
 npmRebuild: false

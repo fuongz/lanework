@@ -1,10 +1,19 @@
-#!/usr/bin/env bun
 // Claude Code Stop hook: leave a checkpoint on the lanework card this session
 // is working, so another agent (Codex, or Claude in the cloud) can resume it
 // once this one runs out of quota (BE-17).
 //
-//   bun .claude/hooks/lanework-checkpoint.ts setup <lw_reg_…>   # once per machine
-//   (then it runs by itself after every turn — see .claude/settings.json)
+// ⚠️ Installed by the DESKTOP APP (Settings → Agents, FE-28), which bundles
+// this file to `dist/electron/hook/lanework-checkpoint.cjs`, writes it into
+// `~/.claude/settings.json` and runs it under Electron's own Node
+// (`ELECTRON_RUN_AS_NODE=1`) — the people using it have no bun. So: Node APIs
+// only, no top-level await, no `import.meta`. It still runs under bun for
+// development, and without the app:
+//
+//   bun apps/desktop/electron/hook/lanework-checkpoint.ts setup <lw_reg_…>
+//
+// Flags, set by whoever installs it: `--api <url>` (default
+// https://api.lanework.dev) and `--push-wip`, the opt-in (FE-28/D3) to push the
+// uncommitted tree to `refs/lanework/wip/<task-id>`.
 //
 // ⚠️ Costs no model quota: it reads the transcript file Claude Code already
 // wrote, and nothing here calls a model. That is the point — when the quota runs
@@ -29,11 +38,35 @@ import {
   writeFileSync,
 } from "node:fs";
 import { arch, homedir, hostname, platform, tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 
+/** `--flag value` / `--flag` anywhere; everything else is positional. */
+function parseArgs(argv: string[]) {
+  const flags = new Map<string, string | true>();
+  const positional: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] ?? "";
+    if (!arg.startsWith("--")) {
+      positional.push(arg);
+    } else if (arg === "--api") {
+      flags.set("api", argv[++i] ?? "");
+    } else {
+      flags.set(arg.slice(2), true);
+    }
+  }
+  return { flags, positional };
+}
+
+const ARGS = parseArgs(process.argv.slice(2));
 const API = (
-  process.env.LANEWORK_API_URL ?? "https://api.lanework.dev"
+  (typeof ARGS.flags.get("api") === "string"
+    ? (ARGS.flags.get("api") as string)
+    : "") ||
+  process.env.LANEWORK_API_URL ||
+  "https://api.lanework.dev"
 ).replace(/\/$/, "");
+/** FE-28/D3: pushing unfinished code to the remote is opt-in. */
+const PUSH_WIP = ARGS.flags.has("push-wip");
 const AGENT = "claude-code";
 /** Keychain item holding this machine's credential (BE-17/D6). */
 const KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
@@ -313,6 +346,16 @@ export function digest(transcript: string, root: string): Digest {
 // ── Credential and board ────────────────────────────────────────────────────
 
 function readSecret(): string | null {
+  // A file instead of the Keychain, for tests and for machines without one.
+  // The desktop app honours the same variable when it writes the credential.
+  const file = process.env.LANEWORK_HOOK_SECRET_FILE;
+  if (file) {
+    try {
+      return readFileSync(file, "utf8").trim() || null;
+    } catch {
+      return null;
+    }
+  }
   try {
     return execFileSync(
       "security",
@@ -434,6 +477,8 @@ type SessionState = {
   /** The tree the remote WIP ref holds (or a clean tree), null if a push failed. */
   pushedCode: string | null;
   wip: Wip;
+  /** The card it went to — what Settings → Agents shows as "last checkpoint". */
+  taskId: string;
 };
 
 export function buildBody(
@@ -480,7 +525,7 @@ async function work(inputFile: string): Promise<void> {
   const secret = readSecret();
   if (!secret) {
     log(
-      "no credential in the Keychain; run: bun .claude/hooks/lanework-checkpoint.ts setup <lw_reg_…>",
+      "no credential; turn the hook on in the Lanework app (Settings → Agents)",
     );
     return;
   }
@@ -501,10 +546,12 @@ async function work(inputFile: string): Promise<void> {
   const boardId = await boardFor(remote, secret);
   if (!boardId) return;
 
-  // Push only when the tree moved since the last push that landed; otherwise
-  // the ref on the remote already holds this exact snapshot.
+  // Push only when opted in (FE-28/D3), and only when the tree moved since
+  // the last push that landed; otherwise the remote ref already holds it.
   const pushed = last?.pushedCode === code ? last.wip : null;
-  const wip = pushed ?? snapshot(root, d.taskId);
+  const wip: Wip = PUSH_WIP
+    ? (pushed ?? snapshot(root, d.taskId))
+    : { wipRef: null, wipSha: null };
   const body = buildBody(d, {
     host: hostname(),
     session: input.session_id ?? null,
@@ -533,6 +580,7 @@ async function work(inputFile: string): Promise<void> {
     code,
     pushedCode: wip.wipRef || !wip.wipSha ? code : null,
     wip,
+    taskId: d.taskId,
   };
   writeJson(stateFile, state);
 }
@@ -548,7 +596,7 @@ async function work(inputFile: string): Promise<void> {
 async function setup(token: string | undefined): Promise<void> {
   if (!token?.startsWith("lw_reg_")) {
     console.error(
-      `usage: bun .claude/hooks/lanework-checkpoint.ts setup <lw_reg_…>\n` +
+      `usage: bun apps/desktop/electron/hook/lanework-checkpoint.ts setup <lw_reg_…>\n` +
         `Mint the token at ${API}/setup ("Create registration token").`,
     );
     process.exit(1);
@@ -587,8 +635,11 @@ async function setup(token: string | undefined): Promise<void> {
 
 // ── Entry ───────────────────────────────────────────────────────────────────
 
+/** This file, however it was started: bun on the source, Node on the bundle. */
+const SELF = process.argv[1] ?? "";
+
 async function main(): Promise<void> {
-  const [mode, arg] = process.argv.slice(2);
+  const [mode, arg] = ARGS.positional;
   if (mode === "setup") return setup(arg);
   if (mode === "worker" && arg) {
     try {
@@ -605,7 +656,12 @@ async function main(): Promise<void> {
     mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
     const file = join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
     writeFileSync(file, stdin, { mode: 0o600 });
-    spawn(process.execPath, [import.meta.path, "worker", file], {
+    // ⚠️ The same flags travel to the worker, and so does the environment —
+    // `ELECTRON_RUN_AS_NODE` included, or the worker would start as an app.
+    const flags = process.argv
+      .slice(2)
+      .filter((a) => !ARGS.positional.includes(a));
+    spawn(process.execPath, [SELF, ...flags, "worker", file], {
       detached: true,
       stdio: "ignore",
     }).unref();
@@ -614,4 +670,5 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.main) await main();
+// Imported (by a test) rather than run: do nothing.
+if (basename(SELF).startsWith("lanework-checkpoint")) void main();

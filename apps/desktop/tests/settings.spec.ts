@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,16 +16,27 @@ import {
 } from "./auth-fixtures";
 
 /** An enrolled install talking to a stub, so every test starts past the gate. */
-async function open(options: { owner?: boolean } = {}): Promise<{
+async function open(
+  options: { owner?: boolean; claudeSettings?: unknown } = {},
+): Promise<{
   app: ElectronApplication;
   page: Page;
   plane: Awaited<ReturnType<typeof startStubPlane>>;
+  profile: string;
   cleanup: () => Promise<void>;
 }> {
   const plane = await startStubPlane(options);
   const profile = await mkdtemp(join(tmpdir(), "lanework-settings-"));
   const home = join(profile, "home");
   await seedCredential(home, plane.origin);
+  // `launchEnv` points CLAUDE_CONFIG_DIR here (FE-28).
+  if (options.claudeSettings !== undefined) {
+    await mkdir(join(profile, "claude"), { recursive: true });
+    await writeFile(
+      join(profile, "claude", "settings.json"),
+      JSON.stringify(options.claudeSettings),
+    );
+  }
   const app = await electron.launch({
     args: [process.cwd()],
     env: launchEnv({ profile, home, apiUrl: plane.origin }),
@@ -46,6 +57,7 @@ async function open(options: { owner?: boolean } = {}): Promise<{
     app,
     page,
     plane,
+    profile,
     cleanup: async () => {
       await app.close();
       await plane.close();
@@ -350,6 +362,68 @@ test("settings looks the way it was reviewed", async () => {
     await page.screenshot({
       path: "../../.agents/artifacts/settings-appearance-dark.png",
     });
+  } finally {
+    await cleanup();
+  }
+});
+
+// FE-28/V2: Settings → Agents installs the Claude Code hook and hands it the
+// credential, and removes exactly what it added. Both files live in the
+// profile (`launchEnv`), never in the real ~/.claude or Keychain.
+test("Agents: the switch installs the hook and its credential, and removes only those", async () => {
+  const theirs = {
+    model: "opus",
+    hooks: { Stop: [{ hooks: [{ type: "command", command: "notify.sh" }] }] },
+  };
+  const { page, profile, cleanup } = await open({ claudeSettings: theirs });
+  const settingsFile = join(profile, "claude", "settings.json");
+  const secretFile = join(profile, "hook-secret");
+  const read = async () => JSON.parse(await readFile(settingsFile, "utf8"));
+  try {
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("link", { name: "Agents" }).click();
+    await expect(page.getByRole("heading", { name: "Agents" })).toBeVisible();
+
+    const main = page.getByRole("switch", {
+      name: "Save progress for the next agent",
+    });
+    const push = page.getByRole("switch", {
+      name: "Also push unfinished code to GitHub",
+    });
+    await expect(main).not.toBeChecked();
+    await expect(push).toBeDisabled();
+
+    await main.click();
+    await expect(main).toBeChecked();
+    await expect(
+      page.getByText("In the Keychain", { exact: true }),
+    ).toBeVisible();
+    const on = await read();
+    expect(on.model).toBe("opus");
+    const commands = on.hooks.Stop.flatMap(
+      (group: { hooks: { command: string }[] }) =>
+        group.hooks.map((hook) => hook.command),
+    );
+    expect(commands).toContain("notify.sh");
+    const ours = commands.find((c: string) =>
+      c.includes("lanework-checkpoint"),
+    );
+    expect(ours).toContain("ELECTRON_RUN_AS_NODE=1");
+    // D3: pushing code is off until chosen.
+    expect(ours).not.toContain("--push-wip");
+    expect((await readFile(secretFile, "utf8")).trim()).toBe(
+      "lw_mch_test-secret",
+    );
+
+    await expect(push).toBeEnabled();
+    await push.click();
+    await expect(push).toBeChecked();
+    expect(JSON.stringify(await read())).toContain("--push-wip");
+
+    await main.click();
+    await expect(main).not.toBeChecked();
+    expect(await read()).toEqual(theirs);
+    await expect(readFile(secretFile, "utf8")).rejects.toThrow();
   } finally {
     await cleanup();
   }
