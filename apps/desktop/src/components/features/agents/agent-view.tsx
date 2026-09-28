@@ -167,10 +167,10 @@ export function AgentView() {
       <header className="border-sidebar-border flex h-11 shrink-0 items-center gap-2.5 border-b ps-[max(0.75rem,var(--titlebar-clear,0px))] pe-3">
         {working ? (
           <span role="img" aria-label="Working" className="flex shrink-0">
-            <OrbitSpinner className="text-foreground" />
+            <OrbitSpinner className="text-foreground size-[13px]" />
           </span>
         ) : (
-          <TerminalKindIcon kind={agent} className="size-4 shrink-0" />
+          <TerminalKindIcon kind={agent} className="size-[13px] shrink-0" />
         )}
         <h1
           className={`min-w-0 truncate text-[13px] font-medium ${working ? "text-shimmer" : ""}`}
@@ -178,15 +178,6 @@ export function AgentView() {
         >
           {title}
         </h1>
-        <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
-          <HugeiconsIcon
-            icon={Folder01Icon}
-            className="size-3"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-          {folderOf(session.cwd)}
-        </span>
         {session.exit && (
           <Badge variant="secondary" className="h-5 shrink-0 px-1.5">
             exited
@@ -198,6 +189,15 @@ export function AgentView() {
             {error}
           </span>
         )}
+        <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
+          <HugeiconsIcon
+            icon={Folder01Icon}
+            className="size-3"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+          {folderOf(session.cwd)}
+        </span>
         {session.exit ? (
           <Button size="sm" variant="outline" onClick={() => void again(agent)}>
             <HugeiconsIcon
@@ -211,7 +211,7 @@ export function AgentView() {
         ) : (
           <Button
             size="sm"
-            variant="outline"
+            variant="destructive"
             onClick={() => (working ? setConfirming(true) : void end())}
           >
             <HugeiconsIcon
