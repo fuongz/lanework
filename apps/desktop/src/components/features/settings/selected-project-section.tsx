@@ -75,10 +75,8 @@ function ReadinessSection({
   }, [check, slug, key]);
 
   return (
-    <div className="flex flex-col gap-2">
-      <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-        Ready for agents
-      </h3>
+    <div className="mt-9 flex flex-col gap-3">
+      <h3 className="text-[15px] font-medium">Ready for agents</h3>
       <SettingsCard className="px-4 py-1">
         {report ? (
           <ReadinessList
@@ -163,8 +161,11 @@ export function SelectedProjectSection({
       : null;
   const working = busy === `purge:${workspace.slug}`;
 
+  // ⚠️ The same rhythm as `SettingsPage` — `gap-2.5`, then `mt-9` and `gap-3`
+  // per heading — so "Ready for agents" and "Danger zone" read as sections of
+  // the page, spaced exactly like "On this account" below them.
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-2.5">
       <SettingsCard>
         <Row
           label={workspace.name}
@@ -226,8 +227,8 @@ export function SelectedProjectSection({
 
       <ReadinessSection slug={workspace.slug} folders={folders} />
 
-      <div className="flex flex-col gap-2">
-        <h3 className="text-destructive text-xs font-medium tracking-wide uppercase">
+      <div className="mt-9 flex flex-col gap-3">
+        <h3 className="text-destructive text-[15px] font-medium">
           Danger zone
         </h3>
         <SettingsCard>
