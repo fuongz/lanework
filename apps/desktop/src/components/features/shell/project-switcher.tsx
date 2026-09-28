@@ -87,7 +87,7 @@ function RunningAgents({ agents }: { agents: TerminalSession[] }) {
     .map((agent) => TERMINAL_KIND_LABELS[agent.kind])
     .join(", ");
   return (
-    <span className="ml-auto flex shrink-0 items-center pl-2" title={names}>
+    <span className="ml-auto flex shrink-0 items-center pr-1 pl-2" title={names}>
       {shown.map((agent) => (
         <span
           key={agent.id}
