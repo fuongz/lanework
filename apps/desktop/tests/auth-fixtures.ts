@@ -439,6 +439,35 @@ export async function startStubPlane(
       return;
     }
 
+    // The owner's project order (FE-32): the list is REWRITTEN in the order
+    // given, as the real service's `position` sort answers it. All or nothing,
+    // like the service: an id that is not a listed project refuses the body.
+    if (req.method === "PUT" && req.url === "/v1/sync/state/workspace-order") {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += chunk;
+      });
+      req.on("end", () => {
+        const json = (status: number, body: unknown) =>
+          res
+            .writeHead(status, { "Content-Type": "application/json" })
+            .end(JSON.stringify(body));
+        if (revoked) return json(401, { error: "revoked" });
+        const { ids } = JSON.parse(raw || "{}") as { ids?: string[] };
+        const placed = (ids ?? []).map((id) =>
+          workspaces.find((entry) => entry.id === id),
+        );
+        if (!ids?.length || placed.some((entry) => !entry))
+          return json(400, { error: "not every id is one of your projects" });
+        const rest = workspaces.filter(
+          (entry) => !ids.includes(entry.id ?? ""),
+        );
+        workspaces = [...(placed as Workspace[]), ...rest];
+        json(200, { ids });
+      });
+      return;
+    }
+
     // ⚠️ The machine surface's RENAME, keyed by ID as the DELETE above now is
     // too. The stub refuses the other keyspace on both for the same reason: a
     // uuid matches the real service's slug shape, so a stub that accepted either

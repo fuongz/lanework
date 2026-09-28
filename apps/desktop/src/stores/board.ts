@@ -153,6 +153,14 @@ interface BoardState {
    */
   renameProject: (id: string, name: string) => Promise<{ error?: string }>;
   /**
+   * Put the account's projects in this order, by slug, first to last (FE-32).
+   *
+   * ⚠️ Optimistic: the list moves at once and the write follows. A failure
+   * puts back the order from before and answers with why — the caller is the
+   * list that just moved.
+   */
+  reorderProjects: (slugs: string[]) => Promise<{ error?: string }>;
+  /**
    * Delete a project from the account.
    *
    * ⚠️ Answers with the failure rather than parking it in `error`, for the same
@@ -300,6 +308,9 @@ const laneOrder = (cards: BoardCard[], columnKey: string): string[] =>
 const sameOrder = (before: string[], after: string[]): boolean =>
   before.length === after.length &&
   before.every((id, index) => id === after[index]);
+
+/** Bumped by every reorder, so only the newest one's answer is applied. */
+let reorders = 0;
 
 export const useBoard = create<BoardState>()((set, get) => ({
   ready: false,
@@ -602,6 +613,42 @@ export const useBoard = create<BoardState>()((set, get) => ({
       set({ busy: null });
       return {
         error: ipcMessage(error, "Could not rename that project. Try again."),
+      };
+    }
+  },
+
+  reorderProjects: async (slugs) => {
+    const before = get().workspaces;
+    const bySlug = new Map(before.map((entry) => [entry.slug, entry]));
+    const next = slugs.flatMap((slug) => {
+      const found = bySlug.get(slug);
+      return found ? [found] : [];
+    });
+    // Only a permutation of what is on screen; anything else is a stale caller.
+    if (next.length !== before.length) return {};
+    const ids = next.map((entry) => entry.id);
+    if (ids.some((id) => id === null))
+      return {
+        error:
+          "A project here has no cloud id yet, so the order cannot be saved.",
+      };
+    const mine = ++reorders;
+    set({ workspaces: next });
+    try {
+      const snapshot = await api().reorder(ids as string[]);
+      // ⚠️ Only the LATEST move's answer lands. Two quick moves are two
+      // writes, and the first one's reply arriving last would put the list
+      // back one step.
+      if (mine === reorders)
+        set({ workspaces: snapshot.workspaces, active: snapshot.active });
+      return {};
+    } catch (error) {
+      if (mine === reorders) set({ workspaces: before });
+      return {
+        error: ipcMessage(
+          error,
+          "Could not save the project order. Try again.",
+        ),
       };
     }
   },

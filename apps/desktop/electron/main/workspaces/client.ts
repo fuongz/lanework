@@ -1495,6 +1495,32 @@ export async function renameWorkspace(
 }
 
 /**
+ * Put the account's projects in this order, first to last (FE-32).
+ *
+ * ⚠️ `PUT /v1/sync/state/workspace-order`, by CLOUD ID like `renameWorkspace`.
+ * The service refuses the whole order with a 400 if any id is not one of this
+ * account's live projects — most likely one deleted from another machine since
+ * this list was read — so that is reported as a stale list, not a bad request.
+ */
+export async function reorderWorkspaces(
+  record: MachineRecord,
+  ids: string[],
+): Promise<void> {
+  const response = await call(record, "/v1/sync/state/workspace-order", {
+    method: "PUT",
+    body: JSON.stringify({ ids }),
+  });
+  if (response.status === 400)
+    throw new Error(
+      "The project list changed somewhere else. Refresh and try again.",
+    );
+  if (!response.ok)
+    throw new Error(
+      `Could not save the project order (HTTP ${response.status}). Try again.`,
+    );
+}
+
+/**
  * Delete one project from the account, by CLOUD WORKSPACE ID.
  *
  * ⚠️ `DELETE /v1/sync/state/workspace/:id`, the machine surface, and a real

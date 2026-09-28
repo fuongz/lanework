@@ -1,7 +1,15 @@
+import {
+  DndContext,
+  type DragEndEvent,
+  type Modifier,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Workspace } from "#/../shared/workspaces";
 import { ImportLocalDialog } from "#/components/features/workspaces/import-local-dialog";
 import { RenameProjectDialog } from "#/components/features/workspaces/rename-project-dialog";
@@ -23,8 +31,8 @@ import {
   AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
-import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
+import { moveSlug, ProjectRow } from "./project-row";
 import { SelectedProjectSection } from "./selected-project-section";
 
 /**
@@ -93,6 +101,7 @@ export function WorkspacesSection() {
   const ready = useBoard((state) => state.ready);
   const hydrate = useBoard((state) => state.hydrate);
   const deleteProject = useBoard((state) => state.deleteProject);
+  const reorderProjects = useBoard((state) => state.reorderProjects);
 
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Workspace | null>(null);
@@ -107,6 +116,38 @@ export function WorkspacesSection() {
   >(null);
   const [failed, setFailed] = useState<string | null>(null);
   const { paths, refresh } = useFolderPaths(workspaces);
+
+  // FE-32: the order the switcher and ⌘1…⌘9 follow. Saved by cloud id, so a
+  // project the service sent no id for holds every row still.
+  const canMove =
+    workspaces.length > 1 && workspaces.every((entry) => entry.id !== null);
+  const reorder = (slugs: string[]) => {
+    setFailed(null);
+    void reorderProjects(slugs).then(
+      (result) => result.error && setFailed(result.error),
+    );
+  };
+  const slugs = workspaces.map((entry) => entry.slug);
+  // A small threshold, so a plain click on the grip does nothing.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
+  const onDragEnd = (event: DragEndEvent) => {
+    const over = event.over?.id;
+    if (over && over !== event.active.id)
+      reorder(moveSlug(slugs, String(event.active.id), String(over)));
+  };
+  const listRef = useRef<HTMLDivElement>(null);
+  // Up and down inside the card: a row cannot be lifted out of the list.
+  const alongList: Modifier = useCallback(({ transform, draggingNodeRect }) => {
+    const bounds = listRef.current?.getBoundingClientRect();
+    if (!bounds || !draggingNodeRect) return { ...transform, x: 0 };
+    const y = Math.min(
+      bounds.bottom - draggingNodeRect.bottom,
+      Math.max(bounds.top - draggingNodeRect.top, transform.y),
+    );
+    return { ...transform, x: 0, y };
+  }, []);
   // ⚠️ The project this page is MANAGING, which starts as the one that is open
   // and follows a click on a row below (FE-14). Page-local on purpose: picking
   // a project to look after is not the same as switching to it.
@@ -160,79 +201,92 @@ export function WorkspacesSection() {
                   </Alert>
                 )}
 
-                <SettingsCard>
-                  {!ready ? (
-                    <p className="text-muted-foreground px-4 py-3.5 text-sm">
-                      Reading your projects…
-                    </p>
-                  ) : workspaces.length === 0 ? (
-                    <p className="text-muted-foreground px-4 py-3.5 text-sm">
-                      No projects on this account yet.
-                    </p>
-                  ) : (
-                    workspaces.map((workspace) => {
-                      const linked = paths[workspace.slug] ?? [];
-                      const isSelected = workspace.slug === selected?.slug;
-                      return (
-                        <div
-                          key={workspace.slug}
-                          className={cn(
-                            "flex items-center justify-between gap-6 px-4 py-3.5 transition-colors",
-                            isSelected && "bg-foreground/[0.03]",
-                          )}
-                        >
-                          {/* ⚠️ The whole left side is the SELECT control, so
+                <DndContext
+                  sensors={sensors}
+                  onDragEnd={onDragEnd}
+                  modifiers={[alongList]}
+                >
+                  <SettingsCard>
+                    <div ref={listRef} className="divide-border divide-y">
+                      {!ready ? (
+                        <p className="text-muted-foreground px-4 py-3.5 text-sm">
+                          Reading your projects…
+                        </p>
+                      ) : workspaces.length === 0 ? (
+                        <p className="text-muted-foreground px-4 py-3.5 text-sm">
+                          No projects on this account yet.
+                        </p>
+                      ) : (
+                        workspaces.map((workspace, index) => {
+                          const linked = paths[workspace.slug] ?? [];
+                          const isSelected = workspace.slug === selected?.slug;
+                          return (
+                            <ProjectRow
+                              key={workspace.slug}
+                              workspace={workspace}
+                              index={index}
+                              selected={isSelected}
+                              canMove={canMove}
+                              onMove={(delta) => {
+                                const to = slugs[index + delta];
+                                if (to)
+                                  reorder(moveSlug(slugs, workspace.slug, to));
+                              }}
+                            >
+                              {/* ⚠️ The whole left side is the SELECT control, so
                               a row is picked the way a list item is — but it
                               is a real button, reachable by keyboard and named
                               for what it does. */}
-                          <button
-                            type="button"
-                            aria-label={`Select ${workspace.name}`}
-                            aria-pressed={isSelected}
-                            onClick={() => setPicked(workspace.slug)}
-                            className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1 text-left outline-none focus-visible:underline"
-                          >
-                            <span className="truncate text-sm font-medium">
-                              {workspace.name}
-                              {workspace.slug === active?.slug && (
-                                <span className="text-muted-foreground ml-2 text-xs font-normal">
-                                  open
+                              <button
+                                type="button"
+                                aria-label={`Select ${workspace.name}`}
+                                aria-pressed={isSelected}
+                                onClick={() => setPicked(workspace.slug)}
+                                className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1 text-left outline-none focus-visible:underline"
+                              >
+                                <span className="truncate text-sm font-medium">
+                                  {workspace.name}
+                                  {workspace.slug === active?.slug && (
+                                    <span className="text-muted-foreground ml-2 text-xs font-normal">
+                                      open
+                                    </span>
+                                  )}
                                 </span>
+                                <span className="text-muted-foreground truncate font-mono text-xs">
+                                  {workspace.slug}
+                                </span>
+                                <span
+                                  className="text-muted-foreground truncate text-[13px] leading-relaxed"
+                                  title={linked.join("\n")}
+                                >
+                                  {linked.length === 0
+                                    ? "No folder on this machine"
+                                    : linked.length === 1
+                                      ? linked[0]
+                                      : `${linked[0]} + ${linked.length - 1} more`}
+                                </span>
+                              </button>
+                              {workspace.slug !== active?.slug && (
+                                <Button
+                                  variant="ghost"
+                                  aria-label={`Open ${workspace.name}`}
+                                  render={
+                                    <Link
+                                      to="/w/$slug/issues"
+                                      params={{ slug: workspace.slug }}
+                                    />
+                                  }
+                                >
+                                  Open
+                                </Button>
                               )}
-                            </span>
-                            <span className="text-muted-foreground truncate font-mono text-xs">
-                              {workspace.slug}
-                            </span>
-                            <span
-                              className="text-muted-foreground truncate text-[13px] leading-relaxed"
-                              title={linked.join("\n")}
-                            >
-                              {linked.length === 0
-                                ? "No folder on this machine"
-                                : linked.length === 1
-                                  ? linked[0]
-                                  : `${linked[0]} + ${linked.length - 1} more`}
-                            </span>
-                          </button>
-                          {workspace.slug !== active?.slug && (
-                            <Button
-                              variant="ghost"
-                              aria-label={`Open ${workspace.name}`}
-                              render={
-                                <Link
-                                  to="/w/$slug/issues"
-                                  params={{ slug: workspace.slug }}
-                                />
-                              }
-                            >
-                              Open
-                            </Button>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </SettingsCard>
+                            </ProjectRow>
+                          );
+                        })
+                      )}
+                    </div>
+                  </SettingsCard>
+                </DndContext>
 
                 <div className="flex items-center gap-2">
                   <Button onClick={() => setCreating(true)}>

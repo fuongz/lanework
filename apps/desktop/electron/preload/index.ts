@@ -301,6 +301,8 @@ const desktop: DesktopApi = {
     // is caught by the service rather than by anything here.
     rename: (id, name) =>
       ipcRenderer.invoke(workspaceChannels.renameWorkspace, id, name),
+    reorder: (ids) =>
+      ipcRenderer.invoke(workspaceChannels.reorderWorkspaces, ids),
     // ⚠️ By ID for the service and by SLUG for this machine, and both have to
     // travel: the machine surface deletes by cloud id — it refuses a slug with a
     // 400 — while the folder link main has to drop afterwards is keyed by slug.

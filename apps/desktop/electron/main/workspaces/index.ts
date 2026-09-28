@@ -57,6 +57,7 @@ import {
   purgeIssues,
   putBoardConfig,
   renameWorkspace,
+  reorderWorkspaces,
   replaceChecklist,
   sealBoardMigration,
   searchCards,
@@ -942,6 +943,26 @@ export function registerWorkspaces(devUrl?: string): void {
       // local needs rewriting either, unlike the delete below: the service will
       // not change a slug, so the folder link and the saved selection still
       // name this project.
+      return load();
+    },
+  );
+  handle(
+    workspaceChannels.reorderWorkspaces,
+    devUrl,
+    async (args): Promise<WorkspaceSnapshot> => {
+      const [ids] = args;
+      if (
+        args.length !== 1 ||
+        !Array.isArray(ids) ||
+        ids.length === 0 ||
+        ids.length > 500 ||
+        !ids.every((id) => typeof id === "string" && id && id.length <= 64)
+      )
+        throw new Error("A list of project ids is required");
+      const record = await authorizedRecord();
+      await reorderWorkspaces(record, ids as string[]);
+      // `load()`, not `load(id)`: a fresh read, in the order the service now
+      // answers with, and no change to which project is open.
       return load();
     },
   );

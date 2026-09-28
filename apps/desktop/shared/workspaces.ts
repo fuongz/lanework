@@ -771,6 +771,7 @@ export const workspaceChannels = {
   changes: "workspaces:board:changes",
   createWorkspace: "workspaces:new",
   renameWorkspace: "workspaces:rename",
+  reorderWorkspaces: "workspaces:reorder",
   deleteWorkspace: "workspaces:delete",
   folderState: "workspaces:folder:state",
   folderPick: "workspaces:folder:pick",
@@ -1091,6 +1092,12 @@ export interface DesktopWorkspacesApi {
    * therefore un-renameable, and the screen says which rather than calling.
    */
   rename: (id: string, name: string) => Promise<WorkspaceSnapshot>;
+  /**
+   * Put the account's projects in this order, first to last, by CLOUD ID
+   * (FE-32), and answer with the list as the service now orders it. The
+   * switcher and ⌘1…⌘9 follow that order.
+   */
+  reorder: (ids: string[]) => Promise<WorkspaceSnapshot>;
   /**
    * Delete a project from the ACCOUNT, by slug, and answer with what is left.
    *
