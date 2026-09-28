@@ -222,12 +222,24 @@ const workspaces: Workspace[] = [
   },
 ];
 
-async function open(folder: string) {
-  const plane = await startStubPlane({ workspaces });
-  plane.setBoard("ws-alpha", {
-    columns: [{ key: "todo", name: "To-Do", role: "start" }],
-    cards: [],
+const beta: Workspace = {
+  id: "ws-beta",
+  slug: "beta",
+  name: "Beta",
+  path: null,
+  baseBranch: null,
+};
+
+/** Boot on Alpha at `folder`; `betaFolder` also links a second project. */
+async function open(folder: string, betaFolder?: string) {
+  const plane = await startStubPlane({
+    workspaces: betaFolder ? [...workspaces, beta] : workspaces,
   });
+  for (const id of betaFolder ? ["ws-alpha", "ws-beta"] : ["ws-alpha"])
+    plane.setBoard(id, {
+      columns: [{ key: "todo", name: "To-Do", role: "start" }],
+      cards: [],
+    });
   const profile = await mkdtemp(join(tmpdir(), "lanew-repo-ui-"));
   const home = join(profile, "home");
   await mkdir(home, { recursive: true });
@@ -246,6 +258,19 @@ async function open(folder: string) {
     "alpha",
     [folder],
   );
+  if (betaFolder)
+    await writeFolders(
+      {
+        machineId: "test-machine",
+        userId: "test-user",
+        apiUrl: plane.origin,
+        name: "test-machine",
+        secret: "lw_mch_test-secret",
+        owner: null,
+      } satisfies MachineRecord,
+      "beta",
+      [betaFolder],
+    );
   if (previous === undefined) delete process.env.LANEWORK_HOME;
   else process.env.LANEWORK_HOME = previous;
 
@@ -321,6 +346,97 @@ test("Changes stages and commits, and History shows the commit", async () => {
   } finally {
     await cleanup();
     await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("switching projects never shows the last one's history, and a return is instant", async () => {
+  const alpha = await makeRepo();
+  const other = await makeRepo();
+  git(alpha, "commit", "-qam", "feat: only in alpha");
+  git(other, "commit", "-qam", "feat: only in beta");
+  const { page, cleanup } = await open(alpha, other);
+  const switchTo = async (name: string) => {
+    await page.getByRole("button", { name: /^Switch project/ }).click();
+    await page.getByRole("option", { name }).first().click();
+    await expect(
+      page.getByRole("button", { name: `Switch project — currently ${name}` }),
+    ).toBeVisible();
+  };
+  try {
+    await page.goto("app://lanework/w/alpha/history");
+    await expect(
+      page.getByRole("link", { name: /feat: only in alpha/ }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    // Every change to the page: which project the rail names, and what the
+    // repository screen showed — each frame, not only where it settled.
+    // ⚠️ The rail's project, not the URL: the location moves a tick before
+    // the old screen unmounts, and that tick is the old project's own screen.
+    await page.evaluate(() => {
+      const seen: { project: string; text: string }[] = [];
+      (window as unknown as { seen: typeof seen }).seen = seen;
+      new MutationObserver(() =>
+        seen.push({
+          project:
+            document
+              .querySelector('[aria-label^="Switch project"]')
+              ?.getAttribute("aria-label") ?? "",
+          text:
+            location.pathname.includes("/history") ||
+            location.pathname.includes("/changes")
+              ? (document.querySelector("main")?.textContent ??
+                document.body.textContent ??
+                "")
+              : "",
+        }),
+      ).observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    });
+
+    await switchTo("Beta");
+    await page.getByRole("link", { name: "History" }).click();
+    await expect(
+      page.getByRole("link", { name: /feat: only in beta/ }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    const mark = await page.evaluate(
+      () => (window as unknown as { seen: unknown[] }).seen.length,
+    );
+    await switchTo("Alpha");
+    await expect.poll(() => page.url()).toContain("/w/alpha/history");
+    await expect(
+      page.getByRole("link", { name: /feat: only in alpha/ }),
+    ).toBeVisible();
+
+    const seen = await page.evaluate(
+      () =>
+        (window as unknown as { seen: { project: string; text: string }[] })
+          .seen,
+    );
+    expect(
+      seen.filter(
+        (frame) =>
+          frame.project.endsWith("Beta") &&
+          frame.text.includes("only in alpha"),
+      ),
+    ).toEqual([]);
+    // Back on Alpha, its history was on screen from the first frame.
+    expect(
+      seen
+        .slice(mark)
+        .filter(
+          (frame) =>
+            frame.project.endsWith("Alpha") &&
+            /Reading the (history|repository)/.test(frame.text),
+        ),
+    ).toEqual([]);
+  } finally {
+    await cleanup();
+    await rm(alpha, { recursive: true, force: true });
+    await rm(other, { recursive: true, force: true });
   }
 });
 

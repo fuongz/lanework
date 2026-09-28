@@ -52,6 +52,26 @@ function readStyle(): DiffStyle {
  */
 const ticket = { status: 0, patch: 0, history: 0, commit: 0, branches: 0 };
 
+/** What a project's screens held when another project was opened. */
+type Snapshot = Pick<
+  WorktreeStore,
+  "state" | "patch" | "message" | "history" | "historyMore" | "commit"
+>;
+
+/**
+ * The screens of the projects left most recently, so coming back to one
+ * shows it at once and reads it again underneath (stale-while-revalidate).
+ *
+ * ⚠️ Swapped whole on a project change, never merged: a project with no
+ * snapshot starts EMPTY, not with the last project's history under its name.
+ * Capped, because a patch can be large.
+ */
+const snapshots = new Map<string, Snapshot>();
+const SNAPSHOT_LIMIT = 8;
+
+/** The branch list each project last answered, for the rail's first paint. */
+const branchCache = new Map<string, BranchList | null>();
+
 interface WorktreeStore {
   slug: string | null;
   state: WorktreeState | null;
@@ -113,6 +133,56 @@ interface WorktreeStore {
 }
 
 export const useWorktree = create<WorktreeStore>((set, get) => {
+  /**
+   * Make `slug` the project the screens show: keep what the one being left
+   * holds, and put back what this one held last time (or nothing).
+   *
+   * ⚠️ Every ticket moves, so an answer still out for the project being left
+   * lands nowhere — not on this one, and not in its snapshot either.
+   */
+  function enter(slug: string) {
+    const current = get();
+    if (current.slug === slug) return;
+    if (current.slug) {
+      snapshots.delete(current.slug);
+      snapshots.set(current.slug, {
+        state: current.state,
+        patch: current.patch,
+        message: current.message,
+        history: current.history,
+        historyMore: current.historyMore,
+        commit: current.commit,
+      });
+      while (snapshots.size > SNAPSHOT_LIMIT)
+        snapshots.delete(snapshots.keys().next().value as string);
+    }
+    ticket.status++;
+    ticket.patch++;
+    ticket.history++;
+    ticket.commit++;
+    const kept = snapshots.get(slug);
+    set({
+      slug,
+      state: kept?.state ?? null,
+      patch: kept?.patch ?? null,
+      message: kept?.message ?? "",
+      history: kept?.history ?? [],
+      historyMore: kept?.historyMore ?? false,
+      commit: kept?.commit ?? null,
+      loading: false,
+      historyLoading: false,
+      // An action out for the project being left answers into nothing (its
+      // slug check drops it), so its `busy` would never clear here.
+      busy: null,
+      focus: null,
+      error: null,
+      patchError: null,
+      historyError: null,
+      commitError: null,
+      actionError: null,
+    });
+  }
+
   async function loadPatch() {
     const { slug, state } = get();
     if (!slug || state?.kind !== "ready") {
@@ -181,16 +251,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     switchError: null,
 
     open: async (slug) => {
-      if (get().slug !== slug)
-        set({
-          slug,
-          state: null,
-          patch: null,
-          focus: null,
-          message: "",
-          error: null,
-          actionError: null,
-        });
+      enter(slug);
       await get().refresh();
     },
 
@@ -214,16 +275,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     },
 
     peek: async (slug) => {
-      if (get().slug !== slug)
-        set({
-          slug,
-          state: null,
-          patch: null,
-          focus: null,
-          message: "",
-          error: null,
-          actionError: null,
-        });
+      enter(slug);
       if (get().loading) return;
       const seen = ticket.status;
       try {
@@ -292,17 +344,32 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     },
 
     openHistory: async (slug) => {
+      enter(slug);
       const mine = ++ticket.history;
-      if (get().slug !== slug) set({ slug, state: null, patch: null });
       set({ historyLoading: true, historyError: null });
       try {
         const page = await api().log(slug, 0);
         if (mine !== ticket.history) return;
-        set({
-          history: page.commits,
-          historyMore: page.more,
-          historyLoading: false,
-        });
+        // ⚠️ A kept list that still starts with this page keeps the pages
+        // scrolled in after it — re-reading the first hundred must not cut a
+        // list somebody was deep into back to a hundred. Anything else (a new
+        // commit, a rewrite) is read from the top again.
+        const kept = get().history;
+        const same =
+          kept.length > page.commits.length &&
+          page.commits.every((commit, at) => kept[at]?.sha === commit.sha);
+        set(
+          same
+            ? {
+                history: [...page.commits, ...kept.slice(page.commits.length)],
+                historyLoading: false,
+              }
+            : {
+                history: page.commits,
+                historyMore: page.more,
+                historyLoading: false,
+              },
+        );
       } catch (error) {
         if (mine !== ticket.history) return;
         set({
@@ -352,12 +419,16 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
 
     loadBranches: async (slug) => {
       const mine = ++ticket.branches;
+      if (get().branches?.slug !== slug && branchCache.has(slug))
+        set({ branches: { slug, list: branchCache.get(slug) ?? null } });
       try {
         const list = await api().branches(slug);
+        branchCache.set(slug, list);
         if (mine !== ticket.branches) return;
         set({ branches: { slug, list } });
       } catch {
         // No branch to show is the honest answer; the rail keeps its label.
+        branchCache.set(slug, null);
         if (mine !== ticket.branches) return;
         set({ branches: { slug, list: null } });
       }
@@ -373,6 +444,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
         // ⚠️ Another branch is another working tree and another history. What
         // the screens hold for this project is dropped and read again, not
         // patched — a diff from the old branch under the new name would lie.
+        snapshots.delete(slug);
         if (get().slug === slug) {
           ticket.status++;
           ticket.history++;
