@@ -3,7 +3,12 @@ import {
   WifiDisconnected01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Outlet, useNavigate, useParams } from "@tanstack/react-router";
+import {
+  Outlet,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "@tanstack/react-router";
 import { useEffect } from "react";
 import { ErrorState } from "#/components/shared/common/error-state";
 import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
@@ -16,6 +21,7 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { useBoard } from "#/stores/board";
+import { useLastRoute } from "#/stores/last-route";
 import { useReadinessWatch } from "#/stores/readiness";
 
 /**
@@ -45,6 +51,16 @@ export function WorkspaceLayout() {
   useEffect(() => {
     void open(slug);
   }, [open, slug]);
+
+  // Where this project was left, so switching away and back returns here.
+  // ⚠️ Only an href UNDER this slug: mid-switch the location already names the
+  // next project while the params still name this one, and filing the next
+  // project's href under this slug made switching back a no-op.
+  const href = useLocation({ select: (location) => location.href });
+  const remember = useLastRoute((state) => state.remember);
+  useEffect(() => {
+    if (href.startsWith(`/w/${slug}/`)) remember(slug, href);
+  }, [remember, slug, href]);
 
   // FE-30: whether this project's folder is ready for an agent. In the
   // background — the board never waits for it — and shown beside the switcher.

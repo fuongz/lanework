@@ -49,8 +49,7 @@ const workspaces: Workspace[] = [
 /** Open a project the way a person does: through the rail's switcher. */
 async function switchTo(page: Page, name: string): Promise<void> {
   await page.getByRole("button", { name: /^Switch project/ }).click();
-  // ⚠️ Not `exact`: a project row now carries its ⌘N shortcut, so its
-  // accessible name is "Lanework ⌘1" rather than "Lanework".
+  // Not `exact`: "Lanework" would otherwise have to match the whole row.
   await page.getByRole("option", { name }).first().click();
   await expect(
     page.getByRole("button", { name: `Switch project — currently ${name}` }),
@@ -1108,6 +1107,222 @@ test("a selection is honoured whether the service sends ids or not", async () =>
       }),
     ).toBeVisible();
     await expect(page.getByText("Board not available yet")).toBeVisible();
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("switching projects and back returns to where the project was left", async () => {
+  const plane = await startStubPlane({ workspaces });
+  for (const id of ["ws-lanework", "ws-cloud-project"])
+    plane.setBoard(id, {
+      columns: [{ key: "todo", name: "To-Do", role: "start" }],
+      cards: [
+        {
+          id: `${id}-card`,
+          revision: 1,
+          title: `Card of ${id}`,
+          body: "",
+          columnKey: "todo",
+          categoryKey: null,
+          taskId: "FE-01",
+          priority: null,
+          tags: [],
+          rank: "V",
+          createdAt: null,
+          updatedAt: null,
+          checklist: [],
+        },
+      ],
+    });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-last-route-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const env = launchEnv({ profile, home, apiUrl: plane.origin });
+  const app = await electron.launch({ args: [process.cwd()], env });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Lanework");
+    await page.getByText("Card of ws-lanework").click();
+    await expect.poll(() => page.url()).toContain("/w/lanework/issues/FE-01");
+
+    // A project never opened yet starts at its issues…
+    await switchTo(page, "Cloud project");
+    await expect.poll(() => page.url()).toMatch(/\/w\/cloud-project\/issues$/);
+
+    // …and one already open comes back on the screen it was left on. (Not
+    // `switchTo`: it waits for the list's refresh button, and this lands on
+    // the issue instead.)
+    await page.getByRole("button", { name: /^Switch project/ }).click();
+    await page.getByRole("option", { name: "Lanework" }).first().click();
+    await expect.poll(() => page.url()).toContain("/w/lanework/issues/FE-01");
+    await expect(page.getByRole("textbox", { name: "Card title" })).toHaveValue(
+      "Card of ws-lanework",
+    );
+
+    // The menu's gear, beside New project, opens Settings → Projects.
+    await page.getByRole("button", { name: /^Switch project/ }).click();
+    await page.getByRole("button", { name: "Project settings" }).click();
+    await expect.poll(() => page.url()).toContain("/settings/workspaces");
+    await expect(page.getByRole("option")).toHaveCount(0);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("the project menu shows the agents running in each project", async () => {
+  test.skip(process.platform === "win32", "The stand-in CLI is a POSIX shell.");
+  const plane = await startStubPlane({ workspaces });
+  for (const id of ["ws-lanework", "ws-cloud-project"])
+    plane.setBoard(id, {
+      columns: [{ key: "todo", name: "To-Do", role: "start" }],
+      cards: [],
+    });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-menu-agents-"));
+  const home = join(profile, "home");
+  const repo = join(profile, "repo");
+  await seedRepo(repo);
+  await seedCredential(home, plane.origin);
+  const previous = process.env.LANEWORK_HOME;
+  process.env.LANEWORK_HOME = home;
+  await writeFolders(
+    {
+      machineId: "test-machine",
+      userId: "test-user",
+      apiUrl: plane.origin,
+      name: "test-machine",
+      secret: "lw_mch_test-secret",
+      owner: null,
+    } satisfies MachineRecord,
+    "lanework",
+    [repo],
+  );
+  if (previous === undefined) delete process.env.LANEWORK_HOME;
+  else process.env.LANEWORK_HOME = previous;
+  // A stand-in Claude that stays running until `/exit`, as the real one does.
+  const claude = join(profile, "claude-stand-in.sh");
+  await writeFile(
+    claude,
+    `#!/bin/sh\nprintf 'claude-started\\n'\nwhile IFS= read -r line; do [ "$line" = "/exit" ] && exit 0; done\n`,
+    { mode: 0o755 },
+  );
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: {
+      ...launchEnv({ profile, home, apiUrl: plane.origin }),
+      LANEWORK_TERMINAL_SHELL: "/bin/sh",
+      LANEWORK_TERMINAL_AGENTS: "claude",
+      LANEWORK_CLAUDE_BIN: claude,
+    },
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Lanework");
+    const group = page.getByRole("navigation", { name: "Agents" });
+    await group.getByRole("button", { name: "New agent" }).click();
+    await page.getByRole("menuitem", { name: "New Claude" }).click();
+    await expect(
+      page
+        .getByRole("region", { name: "Claude — New Claude session" })
+        .locator(".xterm-rows"),
+    ).toContainText("claude-started");
+
+    // From ANOTHER project, the menu still says what Lanework has running —
+    // and says nothing about a project with no agent.
+    await switchTo(page, "Cloud project");
+    await page.getByRole("button", { name: /^Switch project/ }).click();
+    await expect(
+      page.getByRole("option", { name: /^Lanework/ }),
+    ).toHaveAccessibleName(/1 agent running: Claude$/);
+    await expect(
+      page.getByRole("option", { name: /^Cloud project/ }),
+    ).not.toHaveAccessibleName(/running/);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("projects are put in order from Settings, and the switcher and ⌘1 follow it (FE-32)", async () => {
+  const plane = await startStubPlane({ workspaces });
+  for (const id of ["ws-lanework", "ws-cloud-project"])
+    plane.setBoard(id, {
+      columns: [{ key: "todo", name: "To-Do", role: "start" }],
+      cards: [],
+    });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-order-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const env = launchEnv({ profile, home, apiUrl: plane.origin });
+  let app = await electron.launch({ args: [process.cwd()], env });
+  const rows = (page: Page) =>
+    page
+      .locator("[data-project-row]")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-project-row")),
+      );
+  const menuOrder = async (page: Page) => {
+    await page.getByRole("button", { name: /^Switch project/ }).click();
+    const names = await page.getByRole("option").allInnerTexts();
+    await page.keyboard.press("Escape");
+    // The tile's initial is a line of its own; the name is the last one.
+    return names.map((name) => name.trim().split("\n").at(-1)?.trim());
+  };
+  try {
+    let page = await app.firstWindow();
+    await switchTo(page, "Lanework");
+    await page.goto("app://lanework/settings/workspaces");
+    await expect.poll(() => rows(page)).toEqual(["lanework", "cloud-project"]);
+
+    // Dragged by its grip onto the first row: it takes that place.
+    const grip = page.getByRole("button", { name: /^Move Cloud project/ });
+    const target = page.locator('[data-project-row="lanework"]');
+    // "On this account" sits below the fold, under the selected project.
+    await target.scrollIntoViewIfNeeded();
+    const from = await grip.boundingBox();
+    const to = await target.boundingBox();
+    if (!from || !to) throw new Error("no rows to drag");
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    // Past the 4px that tell a drag from a click, then the rest of the way.
+    await page.mouse.move(from.x + from.width / 2, from.y - 8, { steps: 3 });
+    await page.mouse.move(from.x + from.width / 2, to.y + 4, { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(() => rows(page)).toEqual(["cloud-project", "lanework"]);
+    expect(plane.calls).toContain("PUT /v1/sync/state/workspace-order");
+
+    // Alt+↓ on the focused grip moves it back down one place.
+    await page.getByRole("button", { name: /^Move Cloud project/ }).focus();
+    await page.keyboard.press("Alt+ArrowDown");
+    await expect.poll(() => rows(page)).toEqual(["lanework", "cloud-project"]);
+    await page.getByRole("button", { name: /^Move Cloud project/ }).focus();
+    await page.keyboard.press("Alt+ArrowUp");
+    await expect.poll(() => rows(page)).toEqual(["cloud-project", "lanework"]);
+
+    // The switcher lists them in that order, and ⌘1 is the new first one.
+    await page.goto("app://lanework/w/lanework/issues");
+    await expect(
+      page.getByRole("button", { name: "Switch project — currently Lanework" }),
+    ).toBeVisible();
+    expect(await menuOrder(page)).toEqual(["Cloud project", "Lanework"]);
+    await page.keyboard.press("Meta+1");
+    await expect(
+      page.getByRole("button", {
+        name: "Switch project — currently Cloud project",
+      }),
+    ).toBeVisible();
+
+    // And it is the ACCOUNT's order: a relaunch reads it back from the service.
+    await app.close();
+    app = await electron.launch({ args: [process.cwd()], env });
+    page = await app.firstWindow();
+    await page.getByRole("button", { name: /^Switch project/ }).waitFor();
+    expect(await menuOrder(page)).toEqual(["Cloud project", "Lanework"]);
   } finally {
     await app.close();
     await plane.close();

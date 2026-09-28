@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
 import { columnOf } from "#/lib/board-view";
 import { useBoard } from "#/stores/board";
 import { useCommandPalette } from "#/stores/command-palette";
+import { useOpenProject } from "#/stores/last-route";
 import { usePreferences } from "#/stores/preferences";
 
 interface Command {
@@ -50,6 +51,7 @@ export function CommandPalette() {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const navigate = useNavigate();
+  const openProject = useOpenProject();
   const [query, setQuery] = useState("");
   const [at, setAt] = useState(0);
   const workspaceId = useBoard((state) => state.active?.id ?? null);
@@ -145,12 +147,7 @@ export function CommandPalette() {
         label: `Open ${workspace.name}`,
         hint: "Project",
         icon: Grid2X2Icon,
-        run: () =>
-          void navigate({
-            to: "/w/$slug/issues",
-            params: { slug: workspace.slug },
-            search: {},
-          }),
+        run: () => openProject(workspace.slug),
       });
     out.push(
       {
@@ -167,7 +164,7 @@ export function CommandPalette() {
       },
     );
     return out;
-  }, [navigate, setTheme, slug, theme, workspaces]);
+  }, [navigate, openProject, setTheme, slug, theme, workspaces]);
 
   const answered = remote?.query === trimmed ? remote : null;
   const cardCommands = useMemo<Command[]>(() => {
