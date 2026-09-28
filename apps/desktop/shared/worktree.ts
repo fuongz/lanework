@@ -88,6 +88,11 @@ export type WorktreeState =
       head: CommitSummary | null;
       /** The repository's remotes by name, as `git remote` lists them. */
       remotes: string[];
+      /**
+       * Commits on HEAD no remote branch has — History's ↑ rows, counted.
+       * 0 with no remote: with nowhere to push, nothing is "not pushed".
+       */
+      unpushed: number;
     };
 
 /**

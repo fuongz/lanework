@@ -358,6 +358,7 @@ export async function status(top: string): Promise<WorktreeState> {
     headCommit(top, head),
     remotes(top),
   ]);
+  const ahead = head ? await unpushedCount(top, names) : 0;
 
   let reads = 0;
   const files: WorktreeFile[] = [];
@@ -385,6 +386,7 @@ export async function status(top: string): Promise<WorktreeState> {
     files,
     head: last,
     remotes: names,
+    unpushed: ahead,
   };
 }
 
@@ -645,6 +647,22 @@ async function unpushed(top: string): Promise<Set<string>> {
     "--remotes",
   ]);
   return new Set(raw.split("\n").filter(Boolean));
+}
+
+/**
+ * How many commits `unpushed` would mark, for the rail's History badge — the
+ * same rule, so the badge and the ↑ marks never disagree.
+ */
+async function unpushedCount(top: string, names: string[]): Promise<number> {
+  if (!names.length) return 0;
+  const raw = await out(top, [
+    "rev-list",
+    "--count",
+    "HEAD",
+    "--not",
+    "--remotes",
+  ]);
+  return Number.parseInt(raw.trim(), 10) || 0;
 }
 
 export async function log(top: string, skip: number): Promise<CommitHistory> {

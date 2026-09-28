@@ -6,6 +6,7 @@ import {
   PencilEdit02Icon,
   Search01Icon,
   Settings01Icon,
+  SquareArrowUp02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
@@ -87,6 +88,16 @@ export function AppSidebar() {
       ? state.state.files.reduce((sum, file) => sum + file.deletions, 0)
       : 0,
   );
+  // History's ↑ rows, counted — what the next push sends.
+  const unpushed = useWorktree((state) =>
+    state.slug === slug && state.state?.kind === "ready"
+      ? state.state.unpushed
+      : 0,
+  );
+  const unpushedLabel =
+    unpushed === 1
+      ? "1 commit not pushed yet"
+      : `${unpushed} commits not pushed yet`;
   // The terminal's key for this project — the cloud id, or the slug — which
   // the Agents group resumes into.
   const workspaceKey = useWorkspaceKey(slug);
@@ -285,6 +296,22 @@ export function AppSidebar() {
                 aria-hidden="true"
               />
               <span className="min-w-0 truncate">History</span>
+              {unpushed > 0 && (
+                <span
+                  role="img"
+                  aria-label={unpushedLabel}
+                  title={unpushedLabel}
+                  className="ml-auto flex shrink-0 items-center gap-1 text-xs text-blue-600 tabular-nums dark:text-blue-400"
+                >
+                  <HugeiconsIcon
+                    icon={SquareArrowUp02Icon}
+                    className="size-3.5"
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                  {unpushed > 1 && <span aria-hidden="true">{unpushed}</span>}
+                </span>
+              )}
             </Link>
             <Link
               to="/w/$slug/pulls"

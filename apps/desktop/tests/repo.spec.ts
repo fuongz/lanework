@@ -442,16 +442,24 @@ test("switching projects never shows the last one's history, and a return is ins
 
 test("the sync button pushes local commits, then offers Fetch", async () => {
   const { repo, origin } = await makeTrackedRepo();
+  git(repo, "commit", "-qm", "chore: first unpushed", "--allow-empty");
   git(repo, "commit", "-qam", "feat: unpushed");
   const { page, cleanup } = await open(repo);
   try {
     await page.goto("app://lanework/w/alpha/changes");
-    const push = page.getByRole("button", { name: "↑1 Push" });
-    await expect(push).toBeVisible({ timeout: 15_000 });
+    // The rail's History row counts what the push will send.
+    const badge = page.getByRole("img", { name: "2 commits not pushed yet" });
+    await expect(badge).toBeVisible({ timeout: 15_000 });
+    await expect(badge).toHaveText("2");
+    const push = page.getByRole("button", { name: "↑2 Push" });
+    await expect(push).toBeVisible();
     await push.click();
     await expect(page.getByRole("button", { name: "Fetch" })).toBeVisible({
       timeout: 15_000,
     });
+    await expect(page.getByRole("img", { name: /not pushed yet/ })).toHaveCount(
+      0,
+    );
     expect(git(origin, "log", "-1", "--format=%s", "main").trim()).toBe(
       "feat: unpushed",
     );
