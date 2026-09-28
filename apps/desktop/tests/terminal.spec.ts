@@ -549,6 +549,193 @@ test("the Agents + offers only the CLIs this machine has, and a new agent opens 
   }
 });
 
+/**
+ * A stand-in Codex that behaves as the real one does about its rollout
+ * (FE-31): stamped with the moment it started, but written only once
+ * somebody types, its turn opened before its prompt is — and, like Codex,
+ * taking no conversation id from us.
+ */
+async function codexStandIn(dir: string, agentHome: string, id: string) {
+  const day = join(agentHome, ".codex", "sessions", "2026", "09", "28");
+  const file = join(dir, "codex-rollout-stand-in.sh");
+  await writeFile(
+    file,
+    `#!/bin/sh
+started=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+echo codex-started
+rollout='${day}/rollout-2026-09-28T09-46-37-${id}.jsonl'
+while IFS= read -r line; do
+  [ "$line" = "/exit" ] && exit 0
+  if [ ! -f "$rollout" ]; then
+    mkdir -p '${day}'
+    # Held OPEN and appended to, as Codex does — which a recursive watch on
+    # macOS reports only when the file is made, not as it is written.
+    exec 3>>"$rollout"
+    printf '{"type":"session_meta","payload":{"id":"${id}","cwd":"%s","timestamp":"%s"}}\n{"type":"event_msg","payload":{"type":"task_started"}}\n' "$PWD" "$started" >&3
+    # The prompt that titles it lands a moment later, in the same turn —
+    # no news to anything watching the turn's state.
+    sleep 1
+  fi
+  printf '{"type":"event_msg","payload":{"type":"user_message","message":"%s"}}\n' "$line" >&3
+  echo "codex-heard-$line"
+done
+`,
+    { mode: 0o755 },
+  );
+  return file;
+}
+
+/**
+ * A stand-in Claude that keeps `~/.claude/sessions/<pid>.json` as the real
+ * one does (FE-31): `/clear` moves it to a new, empty conversation, and
+ * `/resume` takes it back to the first — writing nothing to its transcript.
+ */
+async function claudeStandIn(
+  dir: string,
+  agentHome: string,
+  repo: string,
+  cleared: string,
+) {
+  const projects = join(
+    agentHome,
+    ".claude",
+    "projects",
+    claudeProjectDir(repo),
+  );
+  const sessions = join(agentHome, ".claude", "sessions");
+  const file = join(dir, "claude-pid-stand-in.sh");
+  await writeFile(
+    file,
+    `#!/bin/sh
+first="$2"
+current="$first"
+startedAt=$(($(date +%s) * 1000))
+mkdir -p '${projects}' '${sessions}'
+at() {
+  printf '{"pid":%s,"sessionId":"%s","startedAt":%s}' $$ "$current" "$startedAt" > '${sessions}/'$$.json
+}
+at
+echo claude-started
+while IFS= read -r line; do
+  case "$line" in
+    /exit) exit 0 ;;
+    /clear) current='${cleared}'; printf '{"type":"mode"}\n' >> '${projects}/'"$current".jsonl; at ;;
+    /resume) current="$first"; at ;;
+    *)
+      printf '{"type":"user","cwd":"%s","message":{"role":"user","content":"%s"}}\n{"type":"system","subtype":"turn_duration"}\n' "$PWD" "$line" >> '${projects}/'"$current".jsonl ;;
+  esac
+  echo "claude-heard-$line"
+done
+`,
+    { mode: 0o755 },
+  );
+  return file;
+}
+
+test("a running agent keeps ONE row as its CLI moves between conversations (FE-31)", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  // As on a machine that has run both here before: their folders exist,
+  // today's Codex day does not yet.
+  await mkdir(join(agentHome, ".codex", "sessions", "2026", "09", "27"), {
+    recursive: true,
+  });
+  await mkdir(join(agentHome, ".claude", "sessions"), { recursive: true });
+  await mkdir(join(agentHome, ".claude", "projects", claudeProjectDir(repo)), {
+    recursive: true,
+  });
+  const codexId = "01a0e5e8-3b95-7df3-a823-000000000abc";
+  const cleared = "77777777-2222-4333-8444-555555555555";
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+    LANEWORK_CODEX_BIN: await codexStandIn(profile, agentHome, codexId),
+    LANEWORK_CLAUDE_BIN: await claudeStandIn(profile, agentHome, repo, cleared),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const group = page.getByRole("navigation", { name: "Agents" });
+    const running = page.getByRole("navigation", { name: "Running" });
+    const type = async (region: string, line: string) => {
+      await page
+        .getByRole("region", { name: region })
+        .locator(".xterm")
+        .click();
+      await page.keyboard.type(line);
+      await page.keyboard.press("Enter");
+    };
+
+    // A new Codex: no id until its first prompt writes a rollout — then
+    // its row IS that conversation, in Running, and nowhere else.
+    await group.getByRole("button", { name: "New agent" }).click();
+    await page.getByRole("menuitem", { name: "New Codex" }).click();
+    await expect(
+      page
+        .getByRole("region", { name: "Codex — New Codex session" })
+        .locator(".xterm-rows"),
+    ).toContainText("codex-started");
+    await type("Codex — New Codex session", "Respond to hello");
+    await expect(
+      page
+        .getByRole("region", { name: "Codex — New Codex session" })
+        .locator(".xterm-rows"),
+    ).toContainText("codex-heard-Respond to hello");
+    await expect(
+      running.getByRole("button", {
+        name: "Resume “Respond to hello” in Codex",
+      }),
+    ).toBeVisible();
+    await expect(
+      running.getByRole("button", { name: "Open new Codex session" }),
+    ).toHaveCount(0);
+    await expect(group.getByRole("button", { name: /in Codex$/ })).toHaveCount(
+      0,
+    );
+
+    // A new Claude, asked something: one row, in Running.
+    await group.getByRole("button", { name: "New agent" }).click();
+    await page.getByRole("menuitem", { name: "New Claude" }).click();
+    await expect(
+      page
+        .getByRole("region", { name: "Claude — New Claude session" })
+        .locator(".xterm-rows"),
+    ).toContainText("claude-started");
+    await type("Claude — New Claude session", "Read readme");
+    await expect(
+      page
+        .getByRole("region", { name: "Claude — New Claude session" })
+        .locator(".xterm-rows"),
+    ).toContainText("claude-heard-Read readme");
+    const readme = "Resume “Read readme” in Claude";
+    await expect(running.getByRole("button", { name: readme })).toBeVisible();
+
+    // `/clear`: the agent is on an empty conversation now, and the one it
+    // left is a transcript — in Agents.
+    await type("Claude — Read readme", "/clear");
+    await expect(
+      running.getByRole("button", { name: "Open new Claude session" }),
+    ).toBeVisible();
+    await expect(group.getByRole("button", { name: readme })).toBeVisible();
+
+    // `/resume` back to it: ONE row again, in Running — though nothing was
+    // written to its transcript.
+    await type("Claude — New Claude session", "/resume");
+    await expect(running.getByRole("button", { name: readme })).toBeVisible();
+    await expect(
+      running.getByRole("button", { name: "Open new Claude session" }),
+    ).toHaveCount(0);
+    await expect(group.getByRole("button", { name: readme })).toHaveCount(0);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
 test("an agent whose CLI cannot start stays on screen to say why — only a clean exit closes it", async () => {
   const plane = await startStubPlane({ workspaces });
   plane.setBoard("ws-alpha", board);

@@ -48,9 +48,10 @@ export interface TerminalSession {
   /** Set once the shell has exited; the tab stays until it is closed. */
   exit: { code: number; signal: number | null } | null;
   /**
-   * The agent conversation this tab resumed (FE-23) — or, for a new Claude
-   * tab, the id it was started under, so its transcript is known from the
-   * moment one is written. Null otherwise.
+   * The agent conversation this tab is on NOW (FE-31): the one it resumed
+   * (FE-23), or a new Claude tab's `--session-id` — then kept up to date by
+   * main as the CLI moves (`/clear`, `/resume`, a new Codex's first rollout).
+   * Null for a shell, or a new Codex tab nobody has typed into yet.
    */
   resume: string | null;
 }

@@ -607,6 +607,46 @@ export async function listAgentSessions(
 }
 
 /**
+ * `folder`'s newest Codex conversations and when each one's CLI STARTED
+ * (FE-31), among the newest `scan` rollouts on the machine written since
+ * `since`.
+ *
+ * ⚠️ The start is `session_meta`'s own `timestamp`, not the file's: Codex
+ * writes a rollout only once somebody types, but stamps it with the moment
+ * the thread began — which is what ties it to the tab that launched it.
+ */
+export async function codexStarts(
+  home: string,
+  folder: string,
+  since = 0,
+  scan = 40,
+): Promise<{ id: string; startedAt: number }[]> {
+  const files = (await codexRollouts(join(home, ".codex", "sessions"))).slice(
+    0,
+    scan,
+  );
+  const out: { id: string; startedAt: number }[] = [];
+  for (const file of files) {
+    try {
+      // ⚠️ Not written since `since`: no tab asking could be its — and not
+      // worth opening, as this runs on every write of a turn.
+      if ((await stat(file)).mtimeMs < since) continue;
+      const head = lines(await readRange(file, 0, META_CHUNK), { head: true });
+      const meta = head.find((line) => line.type === "session_meta")?.payload as
+        | { id?: unknown; cwd?: unknown; timestamp?: unknown }
+        | undefined;
+      if (meta?.cwd !== folder || !isAgentSessionId(meta.id)) continue;
+      const startedAt =
+        typeof meta.timestamp === "string" ? Date.parse(meta.timestamp) : NaN;
+      if (Number.isFinite(startedAt)) out.push({ id: meta.id, startedAt });
+    } catch {
+      // A rollout being written, or gone.
+    }
+  }
+  return out;
+}
+
+/**
  * Which conversation a Codex rollout is, if it is `folder`'s — read from its
  * `session_meta`, once, by the activity watcher (FE-25).
  *

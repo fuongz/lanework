@@ -1,5 +1,6 @@
 // The main process's side of the terminal (FE-19): starting the pty host,
 // answering the panel's requests, and handing windows a port to it.
+import { type FSWatcher, watch } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -26,6 +27,7 @@ import { assertTrustedSender, broadcast, handle } from "../ipc";
 import { appHomeDir } from "../paths";
 import { terminalFolder } from "../workspaces";
 import { watchAgentActivity } from "./agent-activity";
+import { agentBindings } from "./agent-binding";
 import {
   applyAgentMarks,
   cleanAgentName,
@@ -85,6 +87,7 @@ function ensureHost(): UtilityProcess {
     broadcast(terminalChannels.hostExited, null);
   });
   host = child;
+  watchMoves();
   return child;
 }
 
@@ -166,6 +169,10 @@ function watchWorkspace(workspace: string, folder: string): void {
         card,
         at: Date.now(),
       }),
+    // ⚠️ EVERY write, not only a turn that changed state: a new Codex's
+    // first rollout can be caught before its `session_meta` is whole, and
+    // the next writes of that turn are no news (FE-31/D5).
+    (agent, id) => rebind(workspace, agentKey({ agent, id })),
   );
   watching.set(workspace, { folder, stop });
 }
@@ -180,7 +187,106 @@ async function agentSessionsOf(workspace: string): Promise<AgentSession[]> {
   watchWorkspace(workspace, folder);
   const marks = await readAgentMarks(agentMarksFile());
   const listed = await listAgentSessions(agentHome(), folder, keptKeys(marks));
+  listedKeys.set(workspace, new Set(listed.map(agentKey)));
   return applyAgentMarks(listed, marks);
+}
+
+/**
+ * Re-check which conversation `workspace`'s agent tabs are on (FE-31/D5);
+ * the host tells every window if one moved.
+ *
+ * ⚠️ One at a time per workspace, and at most one more queued behind it: a
+ * turn writes its transcript many times a second.
+ */
+const rebinding = new Map<string, Set<string>>();
+function rebind(workspace: string, written?: string): void {
+  if (!host) return;
+  const queued = rebinding.get(workspace);
+  if (queued) {
+    // "" is a run asked for with no write behind it (a Claude move).
+    queued.add(written ?? "");
+    return;
+  }
+  const writes = new Set(written ? [written] : []);
+  // The next run's writes collect here while this one is in flight.
+  rebinding.set(workspace, new Set());
+  void agentTerminals(workspace)
+    .then((terminals) => {
+      // ⚠️ A tab on a conversation the rail has not been shown, whose
+      // transcript was just written: list again. A new Codex's first write
+      // is its `session_meta`, before the prompt that titles it — and the
+      // rest of that turn is no news to the activity watcher, so without
+      // this its row stayed "New Codex session" until something else moved.
+      const shown = listedKeys.get(workspace);
+      const untitled = terminals.some((entry) => {
+        if (entry.kind === "shell" || entry.exit || entry.resume === null)
+          return false;
+        const key = agentKey({ agent: entry.kind, id: entry.resume });
+        return writes.has(key) && !shown?.has(key);
+      });
+      if (untitled) return request({ t: "touch", workspace });
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      const next = rebinding.get(workspace);
+      rebinding.delete(workspace);
+      // One run for all that queued: the first starts it, the rest join.
+      for (const key of next ?? []) rebind(workspace, key || undefined);
+    });
+}
+
+/** The conversations each workspace's listing last answered (FE-31). */
+const listedKeys = new Map<string, Set<string>>();
+
+/**
+ * Claude's own record of which conversation each of its processes is on
+ * (FE-31): `/resume` moves a tab by changing only that, writing nothing to
+ * any transcript. Watched once the host runs, for every listed workspace.
+ */
+let movesWatch: FSWatcher | null = null;
+let movesTimer: NodeJS.Timeout | null = null;
+function watchMoves(): void {
+  if (movesWatch) return;
+  try {
+    movesWatch = watch(join(agentHome(), ".claude", "sessions"), () => {
+      if (movesTimer) return;
+      movesTimer = setTimeout(() => {
+        movesTimer = null;
+        for (const workspace of watching.keys()) rebind(workspace);
+      }, 300);
+    });
+    movesWatch.on("error", () => {
+      movesWatch?.close();
+      movesWatch = null;
+    });
+  } catch {
+    // No Claude on this machine, or it has never run: nothing to follow.
+  }
+}
+
+/**
+ * `workspace`'s tabs, each agent one on the conversation it is on NOW
+ * (FE-31): a tab that moved is moved in the host too, which tells every
+ * window — so the rail regroups without polling (FE-31/D5).
+ *
+ * ⚠️ Best effort: a folder that cannot be read keeps what the host had.
+ */
+async function agentTerminals(workspace: string): Promise<TerminalSession[]> {
+  const listed = await request<TerminalSession[]>({ t: "list", workspace });
+  if (!listed.some((entry) => entry.kind !== "shell" && !entry.exit))
+    return listed;
+  const folder = await terminalFolder(workspace);
+  if (!folder) return listed;
+  const bindings = await agentBindings(agentHome(), folder, listed).catch(
+    () => [],
+  );
+  if (bindings.length === 0) return listed;
+  await request({ t: "bind", workspace, bindings });
+  const moved = new Map(bindings.map((entry) => [entry.id, entry.resume]));
+  return listed.map((entry) => ({
+    ...entry,
+    resume: moved.get(entry.id) ?? entry.resume,
+  }));
 }
 
 /**
@@ -260,7 +366,7 @@ export function registerTerminal(devUrl?: string): void {
       const workspace = key(args[0], "workspace");
       // Nothing was ever started: no reason to start a process to say so.
       if (!host) return [];
-      return request<TerminalSession[]>({ t: "list", workspace });
+      return agentTerminals(workspace);
     },
   );
   handle(

@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { watchAgentActivity } from "../electron/main/terminal/agent-activity";
+import { agentBindings } from "../electron/main/terminal/agent-binding";
 import {
   applyAgentMarks,
   cleanAgentName,
@@ -29,7 +30,11 @@ import {
   listAgentSessions,
 } from "../electron/main/terminal/agent-sessions";
 import { createSessions } from "../electron/main/terminal/sessions";
-import { isAgentSessionId, type TerminalHostMessage } from "../shared/terminal";
+import {
+  isAgentSessionId,
+  type TerminalHostMessage,
+  type TerminalSession,
+} from "../shared/terminal";
 import { CLAUDE_ID, CODEX_ID, seedAgentHome } from "./agent-fixtures";
 
 async function tempDir(prefix: string): Promise<string> {
@@ -510,5 +515,162 @@ test("a listing and the watcher both say which card a working agent is on — an
     ).toBeNull();
   } finally {
     stop();
+  }
+});
+
+/** A running agent tab as the host lists it, for `agentBindings` (FE-31). */
+function tab(
+  fields: Partial<TerminalSession> & Pick<TerminalSession, "id" | "kind">,
+): TerminalSession {
+  return {
+    workspace: "ws",
+    shell: "zsh",
+    cwd: null,
+    pid: 4242,
+    createdAt: Date.parse("2026-09-27T10:00:00Z"),
+    exit: null,
+    resume: null,
+    ...fields,
+  };
+}
+
+test("a Claude tab follows its CLI to the conversation it moved to — and keeps its own when it cannot tell", async () => {
+  const home = await tempDir("lanew-bind-home-");
+  const dir = join(home, ".claude", "sessions");
+  await mkdir(dir, { recursive: true });
+  const moved = "99999999-2222-4333-8444-555555555555";
+  const running = tab({ id: "t1", kind: "claude", resume: CLAUDE_ID });
+  const pidFile = (value: unknown) =>
+    writeFile(join(dir, "4242.json"), JSON.stringify(value));
+
+  // No pid file: nothing to go on, so nothing moves.
+  expect(await agentBindings(home, "/repo", [running])).toEqual([]);
+
+  // `/clear` or `/resume` inside the CLI: its pid file names the new one.
+  await pidFile({
+    pid: 4242,
+    sessionId: moved,
+    startedAt: running.createdAt + 3_000,
+  });
+  expect(await agentBindings(home, "/repo", [running])).toEqual([
+    { id: "t1", resume: moved },
+  ]);
+  // Already on it: no news.
+  expect(
+    await agentBindings(home, "/repo", [{ ...running, resume: moved }]),
+  ).toEqual([]);
+
+  // Not a UUID, another pid's, or left by the pid's EARLIER owner: kept.
+  for (const stale of [
+    { pid: 4242, sessionId: "x; rm -rf ~", startedAt: running.createdAt },
+    { pid: 1, sessionId: moved, startedAt: running.createdAt },
+    { pid: 4242, sessionId: moved, startedAt: running.createdAt - 60_000 },
+  ]) {
+    await pidFile(stale);
+    expect(await agentBindings(home, "/repo", [running])).toEqual([]);
+  }
+  await writeFile(join(dir, "4242.json"), "{ not json");
+  expect(await agentBindings(home, "/repo", [running])).toEqual([]);
+  // An exited tab is a transcript, not an agent.
+  await pidFile({ pid: 4242, sessionId: moved, startedAt: running.createdAt });
+  expect(
+    await agentBindings(home, "/repo", [
+      { ...running, exit: { code: 1, signal: null } },
+    ]),
+  ).toEqual([]);
+});
+
+test("two new Codex tabs each take their own rollout, never one another's", async () => {
+  const home = await tempDir("lanew-bind-home-");
+  const folder = "/repo";
+  const day = join(home, ".codex", "sessions", "2026", "09", "27");
+  await mkdir(day, { recursive: true });
+  const at = (iso: string) => Date.parse(iso);
+  const rollout = (id: string, cwd: string, timestamp: string) =>
+    writeFile(
+      join(day, `rollout-2026-09-27T17-00-00-${id}.jsonl`),
+      `${JSON.stringify({ type: "session_meta", payload: { id, cwd, timestamp } })}\n`,
+    );
+  const first = "01a0e24c-c571-79b0-8805-000000000001";
+  const second = "01a0e24c-c571-79b0-8805-000000000002";
+  const older = "01a0e24c-c571-79b0-8805-000000000003";
+  const elsewhere = "01a0e24c-c571-79b0-8805-000000000004";
+  const resumed = "01a0e24c-c571-79b0-8805-000000000005";
+  // Each CLI starts a few seconds after its tab; the rollout is written later.
+  await rollout(first, folder, "2026-09-27T10:00:03Z");
+  await rollout(second, folder, "2026-09-27T10:05:04Z");
+  // Before either tab: some earlier Codex, not theirs.
+  await rollout(older, folder, "2026-09-27T09:00:00Z");
+  // Another folder's, however close in time.
+  await rollout(elsewhere, "/other", "2026-09-27T10:00:01Z");
+  // Already another tab's.
+  await rollout(resumed, folder, "2026-09-27T10:05:01Z");
+
+  const tabs = [
+    tab({ id: "a", kind: "codex", createdAt: at("2026-09-27T10:00:00Z") }),
+    tab({ id: "b", kind: "codex", createdAt: at("2026-09-27T10:05:00Z") }),
+    tab({ id: "c", kind: "codex", resume: resumed, pid: 7 }),
+  ];
+  expect(
+    (await agentBindings(home, folder, tabs)).sort((x, y) =>
+      x.id.localeCompare(y.id),
+    ),
+  ).toEqual([
+    { id: "a", resume: first },
+    { id: "b", resume: second },
+  ]);
+  // Nobody has typed into a third yet: it waits, rather than taking a
+  // rollout another tab is on.
+  const bound = [
+    { ...tabs[0], resume: first },
+    { ...tabs[1], resume: second },
+    tabs[2],
+    tab({ id: "d", kind: "codex", createdAt: at("2026-09-27T10:06:00Z") }),
+  ] as TerminalSession[];
+  expect(await agentBindings(home, folder, bound)).toEqual([]);
+});
+
+test("the host moves a live agent tab onto its conversation, and tells its watchers once", async () => {
+  const sessions = createSessions({
+    shell: { file: "/bin/sh", args: [] },
+    agentCommand: () => "true",
+  });
+  const changes: string[] = [];
+  const off = sessions.onChanged((workspace) => changes.push(workspace));
+  try {
+    const cwd = await tempDir("lanew-term-");
+    const agent = sessions.spawn({
+      workspace: "ws",
+      cwd,
+      cols: 80,
+      rows: 24,
+      kind: "codex",
+    });
+    const shell = sessions.spawn({ workspace: "ws", cwd, cols: 80, rows: 24 });
+    changes.length = 0;
+    expect(
+      sessions.bind("ws", [
+        { id: agent.id, resume: CODEX_ID },
+        // A shell resumes nothing; a bad id is never taken.
+        { id: shell.id, resume: CODEX_ID },
+        { id: agent.id, resume: "not; an id" },
+      ]),
+    ).toBe(true);
+    expect(sessions.list("ws").map((entry) => entry.resume)).toEqual([
+      CODEX_ID,
+      null,
+    ]);
+    // Another workspace's tab is not this one's to move.
+    expect(sessions.bind("other", [{ id: agent.id, resume: CLAUDE_ID }])).toBe(
+      false,
+    );
+    // The same answer again is no change.
+    expect(sessions.bind("ws", [{ id: agent.id, resume: CODEX_ID }])).toBe(
+      false,
+    );
+    expect(changes).toEqual(["ws"]);
+  } finally {
+    off();
+    sessions.killAll();
   }
 });

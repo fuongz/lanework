@@ -7,7 +7,7 @@
 //
 // Two kinds of traffic:
 // - main → here, over `process.parentPort`: requests with a `reqId` (list,
-//   spawn, kill, reorder, agents, count, killAll), and `connect`, which
+//   spawn, kill, reorder, bind, touch, agents, count, killAll), and `connect`, which
 //   carries a MessagePort.
 // - a renderer ↔ here, over that port: attach/detach/input/resize, and the
 //   output coming back. Main made the port and handed it only to a window it
@@ -26,6 +26,8 @@ type Request = { reqId: number } & (
   | ({ t: "spawn" } & SpawnRequest)
   | { t: "kill"; id: string }
   | { t: "reorder"; workspace: string; ids: unknown }
+  | { t: "bind"; workspace: string; bindings: unknown }
+  | { t: "touch"; workspace: string }
   | { t: "agents" }
   | { t: "killAll" }
   | { t: "count" }
@@ -70,6 +72,10 @@ function run(request: Request): unknown {
       return sessions.kill(request.id);
     case "reorder":
       return sessions.reorder(request.workspace, request.ids);
+    case "bind":
+      return sessions.bind(request.workspace, request.bindings);
+    case "touch":
+      return sessions.touch(request.workspace);
     case "agents":
       return agents();
     case "killAll":

@@ -88,9 +88,17 @@ export function workingOn(
  */
 const latest = new Map<string, number>();
 
-/** Unknown ids re-list at most this often: a new conversation, just begun. */
-const RELIST_MS = 5_000;
+/**
+ * Unknown ids re-list at most this often: a new conversation, just begun.
+ *
+ * ⚠️ One inside the window is put off to its end, never dropped (FE-31): a
+ * second agent started within it — or a first whose transcript had no title
+ * yet at the first read — was otherwise never listed until the window lost
+ * and regained focus.
+ */
+const RELIST_MS = 2_000;
 const relisted = new Map<string, number>();
+const relistLater = new Map<string, ReturnType<typeof setTimeout>>();
 
 export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   byWorkspace: {},
@@ -145,10 +153,16 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       // started: list again — but not on every write of it.
       const known = get().byWorkspace[activity.workspace] ?? [];
       if (known.some((entry) => agentKey(entry) === key)) return;
-      const now = Date.now();
-      if (now - (relisted.get(activity.workspace) ?? 0) < RELIST_MS) return;
-      relisted.set(activity.workspace, now);
-      void get().load(activity.workspace);
+      const workspace = activity.workspace;
+      const relist = () => {
+        relistLater.delete(workspace);
+        relisted.set(workspace, Date.now());
+        void get().load(workspace);
+      };
+      const wait = RELIST_MS - (Date.now() - (relisted.get(workspace) ?? 0));
+      if (wait <= 0) relist();
+      else if (!relistLater.has(workspace))
+        relistLater.set(workspace, setTimeout(relist, wait));
     });
   },
 

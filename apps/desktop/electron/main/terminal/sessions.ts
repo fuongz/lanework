@@ -596,6 +596,41 @@ export function createSessions(options: SessionsOptions = {}) {
       .map(copy);
   }
 
+  /**
+   * Move agent tabs onto the conversation they are really on (FE-31), as
+   * main worked out from the CLIs' own files. True when any moved.
+   *
+   * ⚠️ Checked here as well: only a live agent tab of `workspace`, and only
+   * an id shaped like one — it is what a later resume is matched against.
+   */
+  function bind(workspace: string, bindings: unknown): boolean {
+    if (!Array.isArray(bindings)) return false;
+    let moved = false;
+    for (const binding of bindings as { id?: unknown; resume?: unknown }[]) {
+      const session =
+        typeof binding?.id === "string" ? sessions.get(binding.id) : undefined;
+      if (
+        !session ||
+        session.info.workspace !== workspace ||
+        session.info.kind === "shell" ||
+        session.info.exit ||
+        !isAgentSessionId(binding.resume) ||
+        session.info.resume === binding.resume
+      )
+        continue;
+      session.info.resume = binding.resume;
+      moved = true;
+    }
+    if (moved) changed(workspace);
+    return moved;
+  }
+
+  /** Tell `workspace`'s watchers to list again (FE-31): nothing moved here. */
+  function touch(workspace: string): true {
+    changed(workspace);
+    return true;
+  }
+
   /** Shells still running — what quitting the app would stop. */
   function liveCount(): number {
     return [...sessions.values()].filter((session) => !session.info.exit)
@@ -616,6 +651,8 @@ export function createSessions(options: SessionsOptions = {}) {
     input,
     resize,
     reorder,
+    bind,
+    touch,
     kill,
     killAll,
     liveCount,

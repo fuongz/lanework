@@ -27,6 +27,9 @@ import {
  */
 const SETTLE_MS = 400;
 
+/** Codex rollouts of one folder watched file by file, at most. */
+const FOLLOW_LIMIT = 16;
+
 const TRAILING_ID =
   /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 
@@ -51,6 +54,12 @@ export function watchAgentActivity(
     working: boolean,
     card: AgentCard | null,
   ) => void,
+  /**
+   * Every settled write, news or not (FE-31): a tab may have moved to the
+   * conversation being written even when its turn's state did not change —
+   * or that conversation may only now have the prompt that titles it.
+   */
+  onWrite?: (agent: TerminalAgent, id: string) => void,
 ): () => void {
   const watchers: FSWatcher[] = [];
   const pending = new Map<string, NodeJS.Timeout>();
@@ -81,6 +90,7 @@ export function watchAgentActivity(
       key,
       setTimeout(() => {
         pending.delete(key);
+        if (!stopped) onWrite?.(agent, id);
         void (async () => {
           const working = await transcriptWorking(
             file,
@@ -116,24 +126,63 @@ export function watchAgentActivity(
 
   const codexRoot = join(home, ".codex", "sessions");
   const whose = new Map<string, Promise<string | false | null>>();
+  /**
+   * This folder's rollouts, each watched on its own (FE-31).
+   *
+   * ⚠️ The recursive watch alone is not enough on macOS: it reports a
+   * rollout when it is created and when Codex closes it, and NOTHING of the
+   * writes in between — Codex keeps it open and appends. A turn would then
+   * spin until the end, and a new Codex's prompt, written just after its
+   * `session_meta`, would never be read. A watch on the file itself sees
+   * every write. Capped: the oldest followed is let go first.
+   */
+  const followed = new Map<string, FSWatcher>();
+  const unfollow = (file: string) => {
+    followed.get(file)?.close();
+    followed.delete(file);
+  };
+  const follow = (file: string) => {
+    if (stopped || followed.has(file)) return;
+    if (followed.size >= FOLLOW_LIMIT) {
+      const [oldest] = followed.keys();
+      if (oldest !== undefined) unfollow(oldest);
+    }
+    try {
+      const watcher = watch(file, () => seen(file));
+      watcher.on("error", () => unfollow(file));
+      followed.set(file, watcher);
+    } catch {
+      // Gone already.
+    }
+  };
+  const seen = (file: string) => {
+    let known = whose.get(file);
+    if (!known) {
+      known = codexRolloutOf(file, folder);
+      whose.set(file, known);
+    }
+    void known.then((id) => {
+      if (id) {
+        follow(file);
+        report("codex", id, file);
+      } else if (id === null) {
+        // Not readable yet: asked again on its next write — which only
+        // its own watch is sure to see.
+        whose.delete(file);
+        follow(file);
+      } else {
+        // Another folder's: cached, never opened again.
+        unfollow(file);
+      }
+    });
+  };
   try {
     watchers.push(
       watch(codexRoot, { recursive: true }, (_event, name) => {
         const match = name ? TRAILING_ID.exec(String(name)) : null;
         if (!match?.[1] || !basename(String(name)).startsWith("rollout-"))
           return;
-        const file = join(codexRoot, String(name));
-        let known = whose.get(file);
-        if (!known) {
-          known = codexRolloutOf(file, folder);
-          whose.set(file, known);
-        }
-        void known.then((id) => {
-          if (id) report("codex", id, file);
-          // Not readable yet: asked again on its next write. Another
-          // folder's (`false`) stays cached and is never opened again.
-          else if (id === null) whose.delete(file);
-        });
+        seen(join(codexRoot, String(name)));
       }),
     );
   } catch {
@@ -145,5 +194,6 @@ export function watchAgentActivity(
     stopped = true;
     for (const timer of pending.values()) clearTimeout(timer);
     for (const watcher of watchers) watcher.close();
+    for (const file of [...followed.keys()]) unfollow(file);
   };
 }
