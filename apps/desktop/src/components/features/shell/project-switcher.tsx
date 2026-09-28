@@ -22,6 +22,7 @@ import { cn } from "#/lib/utils";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
 import { useOpenProject } from "#/stores/last-route";
+import { useWorkspaceIcon } from "./use-workspace-icon";
 
 /**
  * A project's colour, derived from its slug.
@@ -47,6 +48,10 @@ function tile(slug: string): string {
   return TILES[hash % TILES.length];
 }
 
+/**
+ * A project's mark: its GitHub repo owner's avatar (BE-18), or its initial
+ * on a colour picked by its slug when there is none.
+ */
 function Tile({
   workspace,
   className,
@@ -54,6 +59,21 @@ function Tile({
   workspace: Workspace | null;
   className?: string;
 }) {
+  const icon = useWorkspaceIcon(workspace);
+  if (icon)
+    return (
+      <img
+        src={icon}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+        data-project-icon=""
+        className={cn(
+          "bg-muted shrink-0 rounded-md object-cover outline -outline-offset-1 outline-black/10 dark:outline-white/10",
+          className,
+        )}
+      />
+    );
   return (
     <span
       aria-hidden="true"
@@ -87,7 +107,10 @@ function RunningAgents({ agents }: { agents: TerminalSession[] }) {
     .map((agent) => TERMINAL_KIND_LABELS[agent.kind])
     .join(", ");
   return (
-    <span className="ml-auto flex shrink-0 items-center pr-1 pl-2" title={names}>
+    <span
+      className="ml-auto flex shrink-0 items-center pr-1 pl-2"
+      title={names}
+    >
       {shown.map((agent) => (
         <span
           key={agent.id}

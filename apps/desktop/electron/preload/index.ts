@@ -287,6 +287,8 @@ const desktop: DesktopApi = {
     // ⚠️ The cloud workspace id, not the slug: every board call is addressed by
     // it.
     select: (id) => ipcRenderer.invoke(workspaceChannels.select, id),
+    icon: (workspaceId, iconKey) =>
+      ipcRenderer.invoke(workspaceChannels.icon, workspaceId, iconKey),
     // The NAME a human typed; main derives the slug the service demands. The
     // folders are pick IDS, primary first — main resolves them to paths it
     // handed out itself, so no path ever travels this way.

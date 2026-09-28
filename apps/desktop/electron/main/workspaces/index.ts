@@ -73,6 +73,7 @@ import {
   registerFolder,
   revealFolder,
 } from "./folder-chooser";
+import { workspaceIcon } from "./icon";
 import { folderExists, readLocalFolder } from "./local-folder";
 import { IMPORT_BATCH, planMigration } from "./review-import";
 import { slugify } from "./slug";
@@ -881,6 +882,16 @@ export function registerWorkspaces(devUrl?: string): void {
   handle(workspaceChannels.select, devUrl, (args) => {
     const [id] = requireId(args, 1);
     return load(id);
+  });
+  handle(workspaceChannels.icon, devUrl, async (args) => {
+    const [workspaceId] = requireId(args.slice(0, 1), 1);
+    const key = args[1];
+    if (
+      args.length !== 2 ||
+      !(key === null || (typeof key === "string" && key.length <= 300))
+    )
+      throw new Error("A valid workspace is required");
+    return workspaceIcon(await authorizedRecord(), workspaceId, key);
   });
   handle(
     workspaceChannels.createWorkspace,

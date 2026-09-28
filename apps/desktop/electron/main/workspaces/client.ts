@@ -69,6 +69,9 @@ export function parseWorkspaces(value: unknown): Workspace[] {
       name: row.name,
       path: row.path,
       baseBranch: row.baseBranch,
+      // Absent before BE-18, and then left absent; anything but a string is
+      // no icon, never a refusal.
+      ...(text(row.iconKey) ? { iconKey: row.iconKey } : {}),
     };
   });
 }
@@ -1689,4 +1692,50 @@ export async function sealBoardMigration(
     };
   }
   return { migratedAt: payload.migratedAt ?? null };
+}
+
+/** What `GET /icon` answered (BE-18). */
+export type IconAnswer =
+  | { kind: "same" }
+  | { kind: "new"; key: string; type: string; bytes: Buffer }
+  | { kind: "none" };
+
+/**
+ * The project's icon — its GitHub repo owner's avatar, which the SERVICE read
+ * and keeps (BE-18). `held` is the key already on disk: a match is a 304 and
+ * no bytes.
+ *
+ * ⚠️ From the control plane, never from GitHub: asking GitHub from here would
+ * tell it which projects this person has open. 404 is "no icon" (no GitHub
+ * repo, or a service older than the route), and the tile keeps its letter.
+ */
+export async function fetchIcon(
+  record: MachineRecord,
+  workspaceId: string,
+  held: string | null,
+): Promise<IconAnswer> {
+  const response = await call(record, `/v1/boards/${workspaceId}/icon`, {
+    headers: held ? { "if-none-match": `"${held}"` } : {},
+  });
+  if (response.status === 304) return { kind: "same" };
+  // ⚠️ Only a 404 is "no icon". A 5xx is the service having a bad minute, and
+  // reading it as "none" would drop an icon that is still right.
+  if (!response.ok && response.status !== 404) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(
+      `Could not load the project icon (HTTP ${response.status}).`,
+    );
+  }
+  const key = response.headers.get("x-icon-key");
+  const type = response.headers.get("content-type") ?? "";
+  if (!response.ok || !key || !type.startsWith("image/")) {
+    await response.body?.cancel().catch(() => {});
+    return { kind: "none" };
+  }
+  return {
+    kind: "new",
+    key,
+    type,
+    bytes: Buffer.from(await response.arrayBuffer()),
+  };
 }

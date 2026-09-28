@@ -25,6 +25,16 @@ export interface Workspace {
    */
   path: string | null;
   baseBranch: string | null;
+  /**
+   * The project icon's key on the control plane (BE-18) — its GitHub repo
+   * owner's avatar — or null until the service first reads one.
+   *
+   * ⚠️ The key names the bytes, so it is the cache key: a new value is a new
+   * icon, and the same value is the file already on disk. Optional because
+   * absent from a service older than BE-18, and from test fixtures that
+   * predate it.
+   */
+  iconKey?: string | null;
 }
 
 export interface WorkspaceSnapshot {
@@ -742,6 +752,7 @@ export interface PickedFolder {
 export const workspaceChannels = {
   load: "workspaces:load",
   select: "workspaces:select",
+  icon: "workspaces:icon",
   board: "workspaces:board",
   more: "workspaces:board:more",
   stats: "workspaces:board:stats",
@@ -1063,6 +1074,11 @@ export interface DesktopFolderApi {
 export interface DesktopWorkspacesApi {
   load: () => Promise<WorkspaceSnapshot>;
   select: (id: string) => Promise<WorkspaceSnapshot>;
+  /**
+   * A project's icon as a `data:` URL (BE-18), or null for the letter tile.
+   * Pass the `iconKey` the list gave; main draws from its disk cache first.
+   */
+  icon: (workspaceId: string, iconKey: string | null) => Promise<string | null>;
   /**
    * Create a project on the account and open it.
    *

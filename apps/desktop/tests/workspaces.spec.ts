@@ -259,6 +259,70 @@ test("the rail remembers a project across relaunch, and never falls back silentl
   }
 });
 
+test("the switcher draws a project's GitHub icon, keeps it on disk, and letters the rest", async () => {
+  // An 8×8 blue PNG, standing in for an owner's avatar.
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGOQq7iDFTEMLQkA9VVcgUEvJ4sAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const key = `owner-avatars/fuongz/${"a".repeat(64)}.png`;
+  const withIcon: Workspace[] = [
+    { ...workspaces[0], iconKey: key },
+    workspaces[1],
+  ];
+  const plane = await startStubPlane({ workspaces: withIcon });
+  for (const id of ["ws-lanework", "ws-cloud-project"])
+    plane.setBoard(id, {
+      columns: [{ key: "todo", name: "To-Do", role: "start" }],
+      cards: [],
+    });
+  plane.setIcon("ws-lanework", { key, bytes: png });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-icons-"));
+  const home = join(profile, "home");
+  await seedCredential(home, plane.origin);
+  const env = launchEnv({ profile, home, apiUrl: plane.origin });
+  let app = await electron.launch({ args: [process.cwd()], env });
+  try {
+    let page = await app.firstWindow();
+    await page.getByRole("link", { name: /Lanework/ }).click();
+    const trigger = page.getByRole("button", {
+      name: "Switch project — currently Lanework",
+    });
+    await expect(trigger.locator("img[data-project-icon]")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await trigger.click();
+    const lanework = page.getByRole("option", { name: /Lanework/ }).first();
+    const cloud = page.getByRole("option", { name: /Cloud project/ }).first();
+    await expect(lanework.locator("img[data-project-icon]")).toBeVisible();
+    // No GitHub repo: the letter on its colour, as before.
+    await expect(cloud.locator("img[data-project-icon]")).toHaveCount(0);
+    await expect(cloud.getByText("C", { exact: true })).toBeVisible();
+    // Every tile of one project shares ONE ask of the service.
+    expect(
+      plane.calls.filter((call) => call === "GET /v1/boards/ws-lanework/icon"),
+    ).toHaveLength(1);
+    await page.keyboard.press("Escape");
+    await app.close();
+
+    // Relaunched with the service failing: the icon on disk is still drawn.
+    plane.setIcon("ws-lanework", null);
+    plane.setBoardOffline(true);
+    app = await electron.launch({ args: [process.cwd()], env });
+    page = await app.firstWindow();
+    await expect(
+      page
+        .getByRole("button", { name: "Switch project — currently Lanework" })
+        .locator("img[data-project-icon]"),
+    ).toBeVisible({ timeout: 15_000 });
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
 test("a service error is told apart from an empty account, and a bad selection keeps the old one", async () => {
   const plane = await startStubPlane({ workspaces });
   plane.setWorkspaceResponse(503);

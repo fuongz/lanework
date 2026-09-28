@@ -312,6 +312,11 @@ export async function startStubPlane(
   setStatsMissing: (value: boolean) => void;
   /** The agents `GET /presence` reports on one board (BE-16). */
   setPresence: (workspaceId: string, rows: StubPresence[]) => void;
+  /** What `GET /icon` serves for one board (BE-18); null is no icon. */
+  setIcon: (
+    workspaceId: string,
+    icon: { key: string; bytes: Buffer } | null,
+  ) => void;
   /**
    * The `latest` of `GET /items/:card/checkpoints` (BE-17, FE-28), keyed by
    * the card's id or task id. Null clears it.
@@ -362,6 +367,8 @@ export async function startStubPlane(
   let repoBoardsDelay = 0;
   let purgeMissing = false;
   let statsMissing = false;
+  // BE-18's icons, by workspace id: the key the service names it by and its bytes.
+  const icons = new Map<string, { key: string; bytes: Buffer }>();
   const presence = new Map<string, StubPresence[]>();
   const checkpoints = new Map<string, Record<string, unknown>>();
   let searchFailing = false;
@@ -677,6 +684,20 @@ export async function startStubPlane(
       // FE-17's counts. Absent (404) while `statsMissing` is set, the way a
       // service older than the route answers — the app then reads the whole
       // board, as it used to.
+      // BE-18's icon: 404 for none, 304 for the key the app already holds.
+      if (req.method === "GET" && rest === "/icon") {
+        const icon = icons.get(board[1]);
+        if (!icon) return json(404, { error: "no icon" });
+        const headers = {
+          "content-type": "image/png",
+          etag: `"${icon.key}"`,
+          "x-icon-key": icon.key,
+        };
+        if (req.headers["if-none-match"] === `"${icon.key}"`)
+          res.writeHead(304, headers).end();
+        else res.writeHead(200, headers).end(icon.bytes);
+        return;
+      }
       // BE-16's presence: whatever the test seeded, already inside the TTL —
       // the real route filters expired rows before answering.
       if (req.method === "GET" && rest === "/presence") {
@@ -1350,6 +1371,10 @@ export async function startStubPlane(
     },
     setPresence: (workspaceId, rows) => {
       presence.set(workspaceId, rows);
+    },
+    setIcon: (workspaceId, icon) => {
+      if (icon) icons.set(workspaceId, icon);
+      else icons.delete(workspaceId);
     },
     setCheckpoint: (card, latest) => {
       if (latest) checkpoints.set(card, latest);
