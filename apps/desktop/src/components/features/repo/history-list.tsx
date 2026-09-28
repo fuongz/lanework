@@ -1,3 +1,5 @@
+import { SquareArrowUp02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
@@ -11,6 +13,9 @@ import { useWorktree } from "#/stores/worktree";
  * ⚠️ A page of 100, and the next page when the last row scrolls into view —
  * not a "load more" button. History is read by scrolling, and a button every
  * hundred commits interrupts exactly the motion it exists to serve.
+ *
+ * The ↑ at a subject's end marks a commit no remote branch has yet — what
+ * the next push sends.
  *
  * ⚠️ The mark beside an author is an ORB seeded by their email, not a
  * Gravatar. It is drawn from nothing but the commit, so opening History sends
@@ -66,7 +71,26 @@ export function HistoryList() {
           params={{ slug, sha: commit.sha }}
           className="hover:bg-foreground/[0.04] aria-[current]:bg-foreground/[0.06] focus-visible:ring-accent-brand flex min-w-0 flex-col gap-1 rounded-md px-2.5 py-2 outline-none focus-visible:ring-2"
         >
-          <span className="min-w-0 truncate text-[13px]">{commit.subject}</span>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-[13px]">
+              {commit.subject}
+            </span>
+            {commit.unpushed && (
+              <span
+                role="img"
+                aria-label="Not pushed yet"
+                title="Not pushed yet"
+                className="text-muted-foreground flex shrink-0"
+              >
+                <HugeiconsIcon
+                  icon={SquareArrowUp02Icon}
+                  className="size-3.5"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+              </span>
+            )}
+          </span>
           <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
             <AccountOrb seed={commit.authorEmail} className="size-4" />
             <span className="min-w-0 truncate">{commit.authorName}</span>

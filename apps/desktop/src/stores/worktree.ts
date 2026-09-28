@@ -282,9 +282,10 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       const done = await act(action, (slug) =>
         api().sync(slug, action, remote ?? null),
       );
-      // A pull brings commits in; History's first page is read again on its
-      // next visit rather than shown without them.
-      if (done && (action === "pull" || action === "pull-rebase")) {
+      // A pull brings commits in, and every sync moves the remote refs that
+      // say which commits are unpushed; History's first page is read again on
+      // its next visit rather than shown stale.
+      if (done) {
         ticket.history++;
         set({ history: [], historyMore: false });
       }

@@ -51,6 +51,11 @@ export interface CommitSummary {
   authorEmail: string;
   /** ISO 8601, as git wrote it. */
   authoredAt: string;
+  /**
+   * True when no remote branch has this commit yet — it goes out on the next
+   * push. Only History (`log`) sets it; absent everywhere else.
+   */
+  unpushed?: boolean;
 }
 
 export interface BranchState {

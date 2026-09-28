@@ -621,18 +621,50 @@ export async function sync(
   await run(top, args, { timeout: 180_000, env });
 }
 
+/** The most unpushed commits `log` looks for; past it, rows go unmarked. */
+const MAX_UNPUSHED = 5_000;
+
+/**
+ * Commits on HEAD that no remote-tracking branch has.
+ *
+ * ⚠️ `--not --remotes`, not `@{u}..HEAD`: a branch pushed without `-u` has no
+ * upstream, and every one of its commits would then read as unpushed. And not
+ * the branch's `ahead` count either — with a merge in the way, the unpushed
+ * commits are not the first N rows of the log.
+ *
+ * ⚠️ Empty when the repository has no remote: with nowhere to push, "not
+ * pushed" would mark every commit and say nothing.
+ */
+async function unpushed(top: string): Promise<Set<string>> {
+  if (!(await remotes(top)).length) return new Set();
+  const raw = await out(top, [
+    "rev-list",
+    `--max-count=${MAX_UNPUSHED}`,
+    "HEAD",
+    "--not",
+    "--remotes",
+  ]);
+  return new Set(raw.split("\n").filter(Boolean));
+}
+
 export async function log(top: string, skip: number): Promise<CommitHistory> {
   if (!(await hasHead(top))) return { commits: [], more: false };
-  const raw = await out(top, [
-    "log",
-    `--max-count=${HISTORY_PAGE + 1}`,
-    `--skip=${skip}`,
-    LOG_FORMAT,
+  const [raw, ahead] = await Promise.all([
+    out(top, [
+      "log",
+      `--max-count=${HISTORY_PAGE + 1}`,
+      `--skip=${skip}`,
+      LOG_FORMAT,
+    ]),
+    unpushed(top),
   ]);
   const commits = raw
     .split("\x1e")
     .map((record) => toCommit(record.replace(/^\n/, "")))
-    .filter((entry): entry is CommitSummary => entry !== null);
+    .filter((entry): entry is CommitSummary => entry !== null)
+    .map((commit) =>
+      ahead.has(commit.sha) ? { ...commit, unpushed: true } : commit,
+    );
   return {
     commits: commits.slice(0, HISTORY_PAGE),
     more: commits.length > HISTORY_PAGE,
