@@ -1,6 +1,6 @@
 // Agent conversations on disk (FE-23): a fake home folder holding what Claude
 // and Codex would have written for a project's folder.
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
 
@@ -108,6 +108,152 @@ export async function seedAgentHome(home: string, folder: string) {
     jsonl([
       { id: CODEX_ID, thread_name: "Old name" },
       { id: CODEX_ID, thread_name: "Settings page cleanup" },
+    ]),
+  );
+}
+
+export const CODEX_SPAWNED_ID = "01a0db07-52f1-7020-abe9-222222222222";
+export const CODEX_GUARDIAN_ID = "01a0db07-52f1-7020-abe9-333333333333";
+
+/**
+ * What `seedAgentHome`'s conversations spawned (FE-33): three Claude
+ * sub-agents — one done, one still going with no meta, one that handed its
+ * report back — a thread the Codex one spawned, and the approval `guardian`
+ * Codex ran for itself, which must be listed nowhere.
+ *
+ * ⚠️ Each Claude sub-agent is stamped a minute apart, so newest-first is
+ * fixed: `going`, then `handback`, then `done`.
+ */
+export async function seedSubagents(home: string, folder: string) {
+  const subagents = join(
+    home,
+    ".claude",
+    "projects",
+    claudeProjectDir(folder),
+    CLAUDE_ID,
+    "subagents",
+  );
+  await mkdir(subagents, { recursive: true });
+  const sub = (name: string) => join(subagents, `agent-${name}.jsonl`);
+  const meta = (name: string) => join(subagents, `agent-${name}.meta.json`);
+  const sidechain = { isSidechain: true, cwd: folder };
+  await writeFile(
+    sub("done"),
+    jsonl([
+      { ...sidechain, type: "user", message: { content: "Map the rail" } },
+      {
+        ...sidechain,
+        type: "assistant",
+        message: { stop_reason: "end_turn", content: [] },
+      },
+    ]),
+  );
+  await writeFile(
+    meta("done"),
+    JSON.stringify({ agentType: "Explore", description: "Map the rail code" }),
+  );
+  await writeFile(
+    sub("handback"),
+    jsonl([
+      { ...sidechain, type: "user", message: { content: "Find the specs" } },
+      {
+        ...sidechain,
+        type: "assistant",
+        message: {
+          stop_reason: null,
+          content: [{ type: "tool_use", name: "SubagentHandback" }],
+        },
+      },
+      {
+        ...sidechain,
+        type: "user",
+        toolEndsTurn: true,
+        message: { content: [{ type: "tool_result" }] },
+      },
+    ]),
+  );
+  await writeFile(
+    meta("handback"),
+    JSON.stringify({ agentType: "general-purpose", description: "Find specs" }),
+  );
+  // No meta: called by what it was asked; mid-tool, so still going.
+  await writeFile(
+    sub("going"),
+    jsonl([
+      { ...sidechain, type: "user", message: { content: "Count the tests" } },
+      {
+        ...sidechain,
+        type: "assistant",
+        message: {
+          stop_reason: "tool_use",
+          content: [{ type: "tool_use", name: "Bash" }],
+        },
+      },
+    ]),
+  );
+  // Neither a sub-agent nor a transcript.
+  await writeFile(join(subagents, "agent-done.forked-skill.json"), "{}");
+  const now = Date.now() / 1000;
+  await utimes(sub("done"), now - 180, now - 180);
+  await utimes(sub("handback"), now - 120, now - 120);
+  await utimes(sub("going"), now - 60, now - 60);
+
+  const day = join(home, ".codex", "sessions", "2026", "09", "26");
+  await writeFile(
+    join(day, `rollout-2026-09-26T07-10-00-${CODEX_SPAWNED_ID}.jsonl`),
+    jsonl([
+      {
+        type: "session_meta",
+        payload: {
+          id: CODEX_SPAWNED_ID,
+          session_id: CODEX_ID,
+          parent_thread_id: CODEX_ID,
+          cwd: folder,
+          timestamp: new Date().toISOString(),
+          source: {
+            subagent: {
+              thread_spawn: {
+                parent_thread_id: CODEX_ID,
+                depth: 1,
+                agent_path: "/root/social_card",
+                agent_nickname: "Gibbs",
+                agent_role: null,
+              },
+            },
+          },
+        },
+      },
+      { type: "event_msg", payload: { type: "task_started" } },
+    ]),
+  );
+  await writeFile(
+    join(day, `rollout-2026-09-26T07-20-00-${CODEX_GUARDIAN_ID}.jsonl`),
+    jsonl([
+      {
+        type: "session_meta",
+        payload: {
+          id: CODEX_GUARDIAN_ID,
+          session_id: CODEX_ID,
+          parent_thread_id: CODEX_ID,
+          cwd: folder,
+          timestamp: new Date().toISOString(),
+          source: { subagent: { other: "guardian" } },
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "The following is the Codex agent history whose request action you are assessing.",
+            },
+          ],
+        },
+      },
+      { type: "event_msg", payload: { type: "task_started" } },
     ]),
   );
 }

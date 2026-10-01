@@ -12,6 +12,7 @@ import {
   type TerminalAgent,
 } from "../../../shared/terminal";
 import {
+  CLAUDE_SUBAGENT_FILE,
   claudeProjectDir,
   codexRolloutOf,
   lastCardIn,
@@ -33,6 +34,9 @@ const FOLLOW_LIMIT = 16;
 const TRAILING_ID =
   /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 
+/** `<conversation>/subagents/agent-<id>.jsonl`, under Claude's folder (FE-33). */
+const CLAUDE_SUBAGENT_PATH = /^([^/\\]+)[/\\]subagents[/\\]([^/\\]+)$/;
+
 /**
  * Watch `folder`'s Claude and Codex transcripts under `home`, and call
  * `onActivity` when one is written. Returns the stop.
@@ -53,6 +57,8 @@ export function watchAgentActivity(
     id: string,
     working: boolean,
     card: AgentCard | null,
+    /** One of `id`'s sub-agents was written, not `id` (FE-33). */
+    subagent: string | null,
   ) => void,
   /**
    * Every settled write, news or not (FE-31): a tab may have moved to the
@@ -83,29 +89,41 @@ export function watchAgentActivity(
     return next.card;
   };
   let stopped = false;
-  const report = (agent: TerminalAgent, id: string, file: string) => {
-    const key = `${agent}:${id}`;
+  /**
+   * `subagent` set: it is that sub-agent of `id` that was written (FE-33) —
+   * its own state, no card, and no `onWrite`: a sub-agent is never the
+   * conversation a tab is on.
+   */
+  const report = (
+    agent: TerminalAgent,
+    id: string,
+    file: string,
+    subagent: string | null = null,
+  ) => {
+    const key = subagent ? `${agent}:${id}/${subagent}` : `${agent}:${id}`;
     if (pending.has(key)) return;
     pending.set(
       key,
       setTimeout(() => {
         pending.delete(key);
-        if (!stopped) onWrite?.(agent, id);
+        if (!stopped && !subagent) onWrite?.(agent, id);
         void (async () => {
           const working = await transcriptWorking(
             file,
             agent as "claude" | "codex",
+            subagent !== null,
           );
           // Looked for only while working: an idle agent is on no card.
-          const card = working
-            ? await cardOf(key, file).catch(() => null)
-            : null;
+          const card =
+            working && !subagent
+              ? await cardOf(key, file).catch(() => null)
+              : null;
           // Only a CHANGE is news: a row already spinning is not told again
           // on every write of the turn it is spinning for.
           const news = `${working}:${card?.boardId}:${card?.card}`;
           if (stopped || said.get(key) === news) return;
           said.set(key, news);
-          onActivity(agent, id, working, card);
+          onActivity(agent, id, working, card, subagent);
         })();
       }, SETTLE_MS),
     );
@@ -123,9 +141,29 @@ export function watchAgentActivity(
   } catch {
     // No Claude conversations for this folder yet.
   }
+  // ⚠️ A sub-agent writes its OWN transcript, one folder down, while its
+  // conversation's may sit still — a background agent's does (FE-33). Its
+  // own watch, recursive, so the conversations' one above is left as it was.
+  try {
+    watchers.push(
+      watch(claudeDir, { recursive: true }, (_event, name) => {
+        const match = name ? CLAUDE_SUBAGENT_PATH.exec(String(name)) : null;
+        const sub = match?.[2]
+          ? CLAUDE_SUBAGENT_FILE.exec(match[2])?.[1]
+          : null;
+        if (match?.[1] && sub && isAgentSessionId(match[1]))
+          report("claude", match[1], join(claudeDir, String(name)), sub);
+      }),
+    );
+  } catch {
+    // No Claude conversations for this folder yet.
+  }
 
   const codexRoot = join(home, ".codex", "sessions");
-  const whose = new Map<string, Promise<string | false | null>>();
+  const whose = new Map<
+    string,
+    Promise<{ id: string; parent: string | null } | false | null>
+  >();
   /**
    * This folder's rollouts, each watched on its own (FE-31).
    *
@@ -161,11 +199,13 @@ export function watchAgentActivity(
       known = codexRolloutOf(file, folder);
       whose.set(file, known);
     }
-    void known.then((id) => {
-      if (id) {
+    void known.then((rollout) => {
+      if (rollout) {
         follow(file);
-        report("codex", id, file);
-      } else if (id === null) {
+        // A thread a conversation spawned: news of that conversation's row.
+        if (rollout.parent) report("codex", rollout.parent, file, rollout.id);
+        else report("codex", rollout.id, file);
+      } else if (rollout === null) {
         // Not readable yet: asked again on its next write — which only
         // its own watch is sure to see.
         whose.delete(file);

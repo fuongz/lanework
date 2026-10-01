@@ -22,7 +22,9 @@ import {
 } from "../electron/main/terminal/agent-marks";
 import {
   claudeProjectDir,
+  claudeSubagentWorking,
   claudeWorking,
+  codexStarts,
   codexWorking,
   laneworkCard,
   lastActivity,
@@ -35,7 +37,14 @@ import {
   type TerminalHostMessage,
   type TerminalSession,
 } from "../shared/terminal";
-import { CLAUDE_ID, CODEX_ID, seedAgentHome } from "./agent-fixtures";
+import {
+  CLAUDE_ID,
+  CODEX_GUARDIAN_ID,
+  CODEX_ID,
+  CODEX_SPAWNED_ID,
+  seedAgentHome,
+  seedSubagents,
+} from "./agent-fixtures";
 
 async function tempDir(prefix: string): Promise<string> {
   return realpath(await mkdtemp(join(tmpdir(), prefix)));
@@ -340,6 +349,154 @@ test("the watcher reports a turn opening and closing — this folder's only", as
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(seen.length).toBe(before);
     expect(seen.some((key) => key.includes("111111111111"))).toBe(false);
+  } finally {
+    stop();
+  }
+});
+
+test("a conversation lists the agents it spawned under it — and Codex's own helpers nowhere (FE-33)", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  await seedAgentHome(home, folder);
+  await seedSubagents(home, folder);
+
+  const listed = await listAgentSessions(home, folder);
+  // The guardian is no conversation, and no spawned one is a row of its own.
+  expect(listed.map(({ agent, id }) => `${agent}:${id}`).sort()).toEqual([
+    `claude:${CLAUDE_ID}`,
+    `codex:${CODEX_ID}`,
+  ]);
+  const claude = listed.find((entry) => entry.agent === "claude");
+  expect(
+    claude?.subagents.map(({ id, title, type, working }) => ({
+      id,
+      title,
+      type,
+      working,
+    })),
+  ).toEqual([
+    { id: "going", title: "Count the tests", type: null, working: true },
+    {
+      id: "handback",
+      title: "Find specs",
+      type: "general-purpose",
+      working: false,
+    },
+    { id: "done", title: "Map the rail code", type: "Explore", working: false },
+  ]);
+  const codex = listed.find((entry) => entry.agent === "codex");
+  expect(
+    codex?.subagents.map(({ id, title, type, working }) => ({
+      id,
+      title,
+      type,
+      working,
+    })),
+  ).toEqual([
+    {
+      id: CODEX_SPAWNED_ID,
+      title: "Gibbs: social card",
+      type: null,
+      working: true,
+    },
+  ]);
+  // A thread Codex started is no new tab's conversation either.
+  expect(
+    (await codexStarts(home, folder)).map((start) => start.id),
+  ).not.toContain(CODEX_SPAWNED_ID);
+  expect(
+    (await codexStarts(home, folder)).map((start) => start.id),
+  ).not.toContain(CODEX_GUARDIAN_ID);
+
+  expect(
+    claudeSubagentWorking([
+      { type: "user", isSidechain: true, message: { content: "Go" } },
+      { type: "attachment" },
+    ]),
+  ).toBe(true);
+  expect(
+    claudeSubagentWorking([
+      { type: "user", isSidechain: true, message: { content: "Go" } },
+      { type: "user", message: { content: "[Request interrupted by user]" } },
+    ]),
+  ).toBe(false);
+});
+
+test("the watcher reports a sub-agent's writes as its conversation's sub-agent — never a guardian's (FE-33)", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  await seedAgentHome(home, folder);
+  await seedSubagents(home, folder);
+  const seen: string[] = [];
+  const stop = watchAgentActivity(
+    home,
+    folder,
+    (agent, id, working, _card, subagent) =>
+      seen.push(`${agent}:${id}:${subagent}:${working}`),
+  );
+  const claude = join(
+    home,
+    ".claude",
+    "projects",
+    claudeProjectDir(folder),
+    CLAUDE_ID,
+    "subagents",
+    "agent-done.jsonl",
+  );
+  const day = join(home, ".codex", "sessions", "2026", "09", "26");
+  const spawned = join(
+    day,
+    `rollout-2026-09-26T07-10-00-${CODEX_SPAWNED_ID}.jsonl`,
+  );
+  const guardian = join(
+    day,
+    `rollout-2026-09-26T07-20-00-${CODEX_GUARDIAN_ID}.jsonl`,
+  );
+  const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+  try {
+    // ⚠️ Written AGAIN until it is seen, as the watcher spec above does.
+    await expect(async () => {
+      await appendFile(
+        claude,
+        line({ type: "user", isSidechain: true, message: { content: "More" } }),
+      );
+      await appendFile(
+        spawned,
+        line({ type: "event_msg", payload: { type: "task_started" } }),
+      );
+      await appendFile(
+        guardian,
+        line({ type: "event_msg", payload: { type: "task_started" } }),
+      );
+      await expect
+        .poll(() => [...new Set(seen)].sort(), { timeout: 1_500 })
+        .toEqual([
+          `claude:${CLAUDE_ID}:done:true`,
+          `codex:${CODEX_ID}:${CODEX_SPAWNED_ID}:true`,
+        ]);
+    }).toPass({ timeout: 15_000 });
+
+    await appendFile(
+      claude,
+      line({
+        type: "assistant",
+        isSidechain: true,
+        message: { stop_reason: "end_turn", content: [] },
+      }),
+    );
+    await appendFile(
+      spawned,
+      line({ type: "event_msg", payload: { type: "task_complete" } }),
+    );
+    await expect
+      .poll(() => seen.slice(-2).sort())
+      .toEqual([
+        `claude:${CLAUDE_ID}:done:false`,
+        `codex:${CODEX_ID}:${CODEX_SPAWNED_ID}:false`,
+      ]);
+    expect(seen.some((key) => key.includes(CODEX_GUARDIAN_ID))).toBe(false);
+    // The conversations themselves were not written: no news of them.
+    expect(seen.some((key) => key.includes(":null:"))).toBe(false);
   } finally {
     stop();
   }

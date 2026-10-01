@@ -86,6 +86,30 @@ export interface AgentSession {
    * working, null otherwise or when it never named one (FE-27).
    */
   card: AgentCard | null;
+  /** The agents it spawned, newest first (FE-33); none for most. */
+  subagents: AgentSubagent[];
+}
+
+/**
+ * An agent a conversation spawned (FE-33): a Claude sub-agent, or a thread a
+ * Codex conversation spawned. Shown under its conversation's row.
+ *
+ * ⚠️ Never resumed on its own — a Claude sub-agent is a sidechain of its
+ * conversation — so its id is a key for the rail and never reaches a command
+ * line. Nested ones are flattened under the conversation at the root
+ * (FE-33/D6).
+ */
+export interface AgentSubagent {
+  /** Unique within its conversation: Claude's `agent-<id>`, a Codex thread id. */
+  id: string;
+  /** What it was asked to do, as its spawner described it. */
+  title: string;
+  /** Its kind as the CLI names it — `Explore`, `general-purpose` — or null. */
+  type: string | null;
+  /** When it was last written to, ISO. */
+  updatedAt: string;
+  /** Whether it is still going: its last word is not a finished answer. */
+  working: boolean;
 }
 
 /**
@@ -115,6 +139,11 @@ export interface AgentActivity {
   working: boolean;
   /** The card it is on, as `AgentSession.card` (FE-27). */
   card: AgentCard | null;
+  /**
+   * Set when it is one of `id`'s sub-agents that was written, not `id`
+   * itself (FE-33): `working` is then that sub-agent's, and `card` null.
+   */
+  subagent: string | null;
   /** Epoch ms. */
   at: number;
 }

@@ -23,7 +23,12 @@ import type { MachineRecord } from "../electron/main/auth/store";
 import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
 import { writeFolders } from "../electron/main/workspaces/store";
 import type { Workspace } from "../shared/workspaces";
-import { CLAUDE_ID, CODEX_ID, seedAgentHome } from "./agent-fixtures";
+import {
+  CLAUDE_ID,
+  CODEX_ID,
+  seedAgentHome,
+  seedSubagents,
+} from "./agent-fixtures";
 import {
   launchEnv,
   removeProfile,
@@ -1026,6 +1031,135 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
     await expect(group().getByRole("button", { name: /^Resume/ })).toHaveCount(
       2,
     );
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("a conversation's sub-agents sit under its row — folded until one works, and a click resumes the conversation (FE-33)", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  await seedSubagents(agentHome, repo);
+  const claudeDir = join(
+    agentHome,
+    ".claude",
+    "projects",
+    claudeProjectDir(repo),
+  );
+  const subagents = join(claudeDir, CLAUDE_ID, "subagents");
+  // An hour old, all of Claude's: nothing of it is going at first.
+  const old = Date.now() / 1000 - 3_600;
+  await utimes(join(claudeDir, `${CLAUDE_ID}.jsonl`), old, old);
+  for (const [name, age] of [
+    ["done", 180],
+    ["handback", 120],
+    ["going", 60],
+  ] as const)
+    await utimes(join(subagents, `agent-${name}.jsonl`), old - age, old - age);
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+    LANEWORK_CLAUDE_BIN: await standIn(profile, "claude", "ran-%s-%s-%s"),
+    LANEWORK_CODEX_BIN: await standIn(profile, "codex", "ran-%s-%s-%s"),
+  });
+  const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const group = page.getByRole("navigation", { name: "Agents" });
+    const claudeRow = page.getByRole("button", {
+      name: "Resume “Flaky login test” in Claude",
+    });
+    const subRows = (parent: string) =>
+      page.getByRole("button", { name: `a sub-agent of “${parent}”` });
+    // Codex's guardian is a row nowhere, and its spawned thread no row of
+    // its own (FE-33/D1).
+    await expect(group.getByRole("button", { name: /^Resume/ })).toHaveCount(2);
+    // The spawned thread is going: its conversation shows it unasked (D2).
+    const gibbs = subRows("Settings page cleanup");
+    await expect(gibbs).toHaveAccessibleName(/^Gibbs: social card,/);
+    await expect(gibbs).toHaveAttribute("aria-busy", "true");
+
+    // Claude's are all done: folded, and counted beside the age (D7).
+    await expect(subRows("Flaky login test")).toHaveCount(0);
+    await expect(claudeRow.getByTestId("subagent-count")).toHaveText("3");
+    await claudeRow.hover();
+    await page.getByRole("button", { name: "Show 3 sub-agents" }).click();
+    await expect(
+      page.getByRole("button", { name: "Hide 3 sub-agents" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    // Newest first, each by what it was asked to do (D3, D4).
+    await expect(subRows("Flaky login test")).toHaveText([
+      /Count the tests/,
+      /Find specs/,
+      /Map the rail code/,
+    ]);
+
+    // One goes again: it spins, and comes to the top.
+    const mapped = subRows("Flaky login test").filter({
+      hasText: "Map the rail code",
+    });
+    // ⚠️ Written AGAIN until it is seen: the watcher takes a moment to start.
+    await expect(async () => {
+      await appendFile(
+        join(subagents, "agent-done.jsonl"),
+        line({ type: "user", isSidechain: true, message: { content: "More" } }),
+      );
+      await expect(mapped).toHaveAttribute("aria-busy", "true", {
+        timeout: 1_500,
+      });
+    }).toPass({ timeout: 15_000 });
+    await expect(subRows("Flaky login test").first()).toContainText(
+      "Map the rail code",
+    );
+    await expect(claudeRow.getByTestId("subagent-count")).toHaveText("1");
+    await appendFile(
+      join(subagents, "agent-done.jsonl"),
+      line({
+        type: "assistant",
+        isSidechain: true,
+        message: { stop_reason: "end_turn", content: [] },
+      }),
+    );
+    await expect(mapped).not.toHaveAttribute("aria-busy", "true");
+    await expect(claudeRow.getByTestId("subagent-count")).toHaveText("3");
+
+    // One just spawned: listed once it writes, going — and a fourth folds
+    // the oldest away (D4).
+    await writeFile(
+      join(subagents, "agent-fresh.meta.json"),
+      JSON.stringify({ agentType: "Explore", description: "Fresh probe" }),
+    );
+    await appendFile(
+      join(subagents, "agent-fresh.jsonl"),
+      line({ type: "user", isSidechain: true, message: { content: "Look" } }),
+    );
+    await expect(subRows("Flaky login test").first()).toContainText(
+      "Fresh probe",
+    );
+    await expect(subRows("Flaky login test").first()).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    await expect(subRows("Flaky login test")).toHaveCount(3);
+    await page.getByRole("button", { name: "Show 1 more" }).click();
+    await expect(subRows("Flaky login test")).toHaveCount(4);
+
+    // A sub-agent has nothing to resume of its own: it opens its
+    // conversation (D5).
+    await mapped.click();
+    await expect(
+      page
+        .getByRole("region", { name: "Claude — Flaky login test" })
+        .locator(".xterm-rows"),
+    ).toContainText(`ran-claude---resume-${CLAUDE_ID}`);
+    await expect(claudeRow).toHaveAttribute("aria-current", "page");
   } finally {
     await app.close();
     await plane.close();

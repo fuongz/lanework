@@ -3,6 +3,7 @@ import type {
   AgentActivity,
   AgentCard,
   AgentSession,
+  AgentSubagent,
   TerminalAgent,
 } from "../../shared/terminal";
 
@@ -15,9 +16,17 @@ interface AgentSessionsState {
   /**
    * Whether each conversation's agent is working, by `agent:id`, as the
    * watcher last reported it (FE-25) — newer than the listing's own
-   * `working` until the next listing, which clears it.
+   * `working` until the next listing, which clears it. A sub-agent's is
+   * under `subagentKey` (FE-33).
    */
   live: Record<string, boolean>;
+  /**
+   * Whether each conversation's sub-agents are shown, by `agent:id`, as
+   * somebody last chose (FE-33/D2). Unset follows them: open while one is
+   * working. Kept for the app's run, never on disk.
+   */
+  open: Record<string, boolean>;
+  setOpen: (session: AgentSession, open: boolean) => void;
   /** The card each is on, by `agent:id`, as `live` is to `working` (FE-27). */
   cards: Record<string, AgentCard | null>;
   load: (workspace: string) => Promise<void>;
@@ -42,6 +51,27 @@ export function agentKey(session: {
   id: string;
 }): string {
   return `${session.agent}:${session.id}`;
+}
+
+/** A sub-agent's key: its conversation's, then its own id (FE-33). */
+export function subagentKey(
+  session: { agent: TerminalAgent; id: string },
+  subagent: { id: string },
+): string {
+  return `${agentKey(session)}/${subagent.id}`;
+}
+
+function sameSubagents(a: AgentSubagent[], b: AgentSubagent[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (entry, index) =>
+        entry.id === b[index]?.id &&
+        entry.title === b[index]?.title &&
+        entry.updatedAt === b[index]?.updatedAt &&
+        entry.working === b[index]?.working,
+    )
+  );
 }
 
 function sameCard(
@@ -104,6 +134,10 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   byWorkspace: {},
   live: {},
   cards: {},
+  open: {},
+
+  setOpen: (session, open) =>
+    set((state) => ({ open: { ...state.open, [agentKey(session)]: open } })),
 
   rename: async (workspace, session, name) => {
     const surface = window.desktop?.terminal;
@@ -138,7 +172,36 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   watchActivity: () => {
     const surface = window.desktop?.terminal;
     if (!surface) return () => {};
+    /** List `workspace` again — but not on every write that asks (FE-31). */
+    const relistSoon = (workspace: string) => {
+      const relist = () => {
+        relistLater.delete(workspace);
+        relisted.set(workspace, Date.now());
+        void get().load(workspace);
+      };
+      const wait = RELIST_MS - (Date.now() - (relisted.get(workspace) ?? 0));
+      if (wait <= 0) relist();
+      else if (!relistLater.has(workspace))
+        relistLater.set(workspace, setTimeout(relist, wait));
+    };
     return surface.onAgentActivity((activity: AgentActivity) => {
+      const known = get().byWorkspace[activity.workspace] ?? [];
+      const parent = known.find(
+        (entry) => agentKey(entry) === agentKey(activity),
+      );
+      if (activity.subagent) {
+        const key = subagentKey(activity, { id: activity.subagent });
+        set((state) =>
+          state.live[key] === activity.working
+            ? state
+            : { live: { ...state.live, [key]: activity.working } },
+        );
+        // ⚠️ A sub-agent the rail has not listed is one just spawned (FE-33):
+        // list again, the way a new conversation is.
+        if (!parent?.subagents.some((entry) => entry.id === activity.subagent))
+          relistSoon(activity.workspace);
+        return;
+      }
       const key = agentKey(activity);
       set((state) =>
         state.live[key] === activity.working &&
@@ -151,18 +214,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       );
       // ⚠️ A conversation the rail has not listed yet is one that just
       // started: list again — but not on every write of it.
-      const known = get().byWorkspace[activity.workspace] ?? [];
-      if (known.some((entry) => agentKey(entry) === key)) return;
-      const workspace = activity.workspace;
-      const relist = () => {
-        relistLater.delete(workspace);
-        relisted.set(workspace, Date.now());
-        void get().load(workspace);
-      };
-      const wait = RELIST_MS - (Date.now() - (relisted.get(workspace) ?? 0));
-      if (wait <= 0) relist();
-      else if (!relistLater.has(workspace))
-        relistLater.set(workspace, setTimeout(relist, wait));
+      if (!parent) relistSoon(activity.workspace);
     });
   },
 
@@ -186,7 +238,8 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
             entry.updatedAt === listed[index]?.updatedAt &&
             entry.pinnedAt === listed[index]?.pinnedAt &&
             entry.working === listed[index]?.working &&
-            sameCard(entry.card, listed[index]?.card),
+            sameCard(entry.card, listed[index]?.card) &&
+            sameSubagents(entry.subagents, listed[index]?.subagents ?? []),
         )
       )
         return;
@@ -198,6 +251,8 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
         for (const entry of listed) {
           delete live[agentKey(entry)];
           delete cards[agentKey(entry)];
+          for (const sub of entry.subagents)
+            delete live[subagentKey(entry, sub)];
         }
         return {
           byWorkspace: { ...state.byWorkspace, [workspace]: listed },

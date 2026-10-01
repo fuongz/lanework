@@ -160,13 +160,14 @@ function watchWorkspace(workspace: string, folder: string): void {
   const stop = watchAgentActivity(
     agentHome(),
     folder,
-    (agent, id, working, card) =>
+    (agent, id, working, card, subagent) =>
       broadcast(terminalChannels.agentActivity, {
         workspace,
         agent,
         id,
         working,
         card,
+        subagent,
         at: Date.now(),
       }),
     // ⚠️ EVERY write, not only a turn that changed state: a new Codex's

@@ -4,11 +4,12 @@
 // ⚠️ Read-only, and nothing here imports Electron: main calls it, and a spec
 // can drive it under plain Node against a fake home folder.
 import { open, readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   AGENT_SESSION_LIMIT,
   type AgentCard,
   type AgentSession,
+  type AgentSubagent,
   isAgentSessionId,
 } from "../../../shared/terminal";
 
@@ -19,6 +20,10 @@ const META_CHUNK = 256 * 1024;
 /** Codex keeps every folder's rollouts in one tree; stop looking after this. */
 const CODEX_SCAN = 400;
 const TITLE_MAX = 120;
+/** A conversation's newest sub-agents read, at most (FE-33/D4). */
+const SUBAGENT_LIMIT = 20;
+/** Claude's name for a sub-agent's transcript, beside its `.meta.json`. */
+export const CLAUDE_SUBAGENT_FILE = /^agent-([A-Za-z0-9_-]{1,64})\.jsonl$/;
 
 type Line = Record<string, unknown>;
 
@@ -153,6 +158,36 @@ export function claudeWorking(tail: Line[]): boolean {
   return false;
 }
 
+/**
+ * Whether a Claude sub-agent is still going (FE-33): its newest word is not
+ * a finished answer.
+ *
+ * ⚠️ Not `claudeWorking`: every line of a sub-agent is a sidechain, and its
+ * run ends AT the answer — no closing `system` line follows it. Two ends:
+ * an `end_turn` answer, or (newer CLIs) the result of the tool it hands its
+ * report back with, which says `toolEndsTurn`.
+ */
+export function claudeSubagentWorking(tail: Line[]): boolean {
+  for (let at = tail.length - 1; at >= 0; at--) {
+    const line = tail[at] as Line;
+    if (line.type === "assistant") {
+      const stop = (line.message as { stop_reason?: unknown } | undefined)
+        ?.stop_reason;
+      return stop === "tool_use" || stop === null || stop === undefined;
+    }
+    if (line.type === "user" && !line.isMeta) {
+      if (line.toolEndsTurn === true) return false;
+      const content = (line.message as { content?: unknown } | undefined)
+        ?.content;
+      return !(
+        typeof content === "string" &&
+        content.startsWith("[Request interrupted")
+      );
+    }
+  }
+  return false;
+}
+
 /** Whether a Codex task is open: `task_started` with no end after it. */
 export function codexWorking(tail: Line[]): boolean {
   for (let at = tail.length - 1; at >= 0; at--) {
@@ -223,10 +258,14 @@ export function lastActivity(
  */
 const STALE_MS = 10 * 60_000;
 
-/** Whether the agent behind `file` is working now, from its transcript's end. */
+/**
+ * Whether the agent behind `file` is working now, from its transcript's end
+ * — a conversation's, or one of its sub-agents' (FE-33).
+ */
 export async function transcriptWorking(
   file: string,
   agent: "claude" | "codex",
+  subagent = false,
 ): Promise<boolean> {
   try {
     const info = await stat(file);
@@ -235,7 +274,8 @@ export async function transcriptWorking(
     const tail = lines(await readRange(file, start, CHUNK), {
       head: start === 0,
     });
-    return agent === "claude" ? claudeWorking(tail) : codexWorking(tail);
+    if (agent === "codex") return codexWorking(tail);
+    return subagent ? claudeSubagentWorking(tail) : claudeWorking(tail);
   } catch {
     return false;
   }
@@ -372,6 +412,79 @@ async function transcriptCard(
   );
 }
 
+/**
+ * The sub-agents Claude conversation `id` spawned (FE-33), newest first:
+ * `<id>/subagents/agent-<sub>.jsonl` beside its transcript, each with a
+ * `.meta.json` saying what it was asked to do.
+ *
+ * ⚠️ Only a recent one's end is read, for whether it is still going; the
+ * rest are done. Nested sub-agents are written to the same folder, so they
+ * come out flat (FE-33/D6).
+ */
+async function claudeSubagents(
+  dir: string,
+  id: string,
+): Promise<AgentSubagent[]> {
+  const folder = join(dir, id, "subagents");
+  const names = await readdir(folder).catch(() => [] as string[]);
+  const files = await Promise.all(
+    names.map(async (name) => {
+      const sub = CLAUDE_SUBAGENT_FILE.exec(name)?.[1];
+      if (!sub) return null;
+      const file = join(folder, name);
+      const info = await stat(file).catch(() => null);
+      return info?.isFile() ? { sub, file, info } : null;
+    }),
+  );
+  const newest = files
+    .filter((entry) => entry !== null)
+    .sort((a, b) => b.info.mtimeMs - a.info.mtimeMs)
+    .slice(0, SUBAGENT_LIMIT);
+  return Promise.all(
+    newest.map(async ({ sub, file, info }) => {
+      const meta = (await readFile(
+        join(folder, `agent-${sub}.meta.json`),
+        "utf8",
+      )
+        .then((text) => JSON.parse(text) as unknown)
+        .catch(() => null)) as {
+        description?: unknown;
+        agentType?: unknown;
+      } | null;
+      const described =
+        typeof meta?.description === "string" && meta.description.trim()
+          ? tidy(meta.description)
+          : null;
+      // No meta: what it was asked, its first line.
+      const title =
+        described ??
+        lines(await readRange(file, 0, CHUNK).catch(() => ""), { head: true })
+          .filter((line) => line.type === "user")
+          .map((line) =>
+            typed((line.message as { content?: unknown })?.content),
+          )
+          .find(Boolean) ??
+        "Sub-agent";
+      const recent = Date.now() - info.mtimeMs <= STALE_MS;
+      const tail = recent
+        ? lines(await readRange(file, Math.max(0, info.size - CHUNK), CHUNK), {
+            head: info.size <= CHUNK,
+          })
+        : [];
+      return {
+        id: sub,
+        title,
+        type:
+          typeof meta?.agentType === "string" && meta.agentType
+            ? meta.agentType
+            : null,
+        updatedAt: info.mtime.toISOString(),
+        working: recent && claudeSubagentWorking(tail),
+      };
+    }),
+  );
+}
+
 async function claudeSession(
   file: string,
   id: string,
@@ -413,6 +526,7 @@ async function claudeSession(
     working,
     // Read only for a working one: an idle agent is on no card (FE-27/D1).
     card: working ? await transcriptCard(file, info.size) : null,
+    subagents: await claudeSubagents(dirname(file), id),
   };
 }
 
@@ -518,6 +632,55 @@ function codexPrompt(line: Line): string | null {
   return null;
 }
 
+/** What a Codex rollout is, by its `session_meta` (FE-33). */
+type CodexRole =
+  | { kind: "conversation" }
+  | {
+      kind: "spawned";
+      root: string;
+      nickname: string | null;
+      task: string | null;
+      role: string | null;
+    }
+  | { kind: "helper" };
+
+const text = (value: unknown): string | null =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
+
+/**
+ * Somebody's conversation; a thread a conversation spawned, and the
+ * conversation at its root; or Codex's own helper — the `guardian` that
+ * assesses approvals, a review — which is neither and is never listed
+ * (FE-33/D1).
+ *
+ * ⚠️ All three have the folder's `cwd`. Without this, every approval Codex
+ * had assessed was a row of its own on the rail.
+ *
+ * ⚠️ The root is `session_id` — a spawned thread's own spawns name the same
+ * one — so nesting flattens to the conversation (FE-33/D6).
+ */
+function codexRole(meta: Record<string, unknown>): CodexRole {
+  const source = meta.source;
+  if (!source || typeof source !== "object" || !("subagent" in source))
+    return { kind: "conversation" };
+  const spawn = (source.subagent as { thread_spawn?: unknown } | null)
+    ?.thread_spawn as Record<string, unknown> | undefined;
+  if (!spawn) return { kind: "helper" };
+  const root = [meta.session_id, spawn.parent_thread_id, meta.parent_thread_id]
+    .filter(isAgentSessionId)
+    .find((id) => id !== meta.id);
+  if (!root) return { kind: "helper" };
+  // `/root/social_card` → `social card`: the task it was spawned for.
+  const path = text(spawn.agent_path ?? meta.agent_path);
+  return {
+    kind: "spawned",
+    root,
+    nickname: text(spawn.agent_nickname ?? meta.agent_nickname),
+    task: path ? (path.split("/").pop()?.replace(/_/g, " ") ?? null) : null,
+    role: text(spawn.agent_role),
+  };
+}
+
 async function codexSessions(
   home: string,
   folder: string,
@@ -526,6 +689,11 @@ async function codexSessions(
   const files = await codexRollouts(join(home, ".codex", "sessions"));
   const names = await codexNames(home);
   const out: AgentSession[] = [];
+  /**
+   * The threads each conversation spawned, by its id (FE-33). A spawned
+   * thread starts after its conversation, so newest-first meets it first.
+   */
+  const spawned = new Map<string, AgentSubagent[]>();
   // ⚠️ Only Codex's own kept ids: waiting on a Claude one here would read
   // every rollout on the machine looking for it.
   const wanted = [...keep].filter((key) => key.startsWith("codex:"));
@@ -543,6 +711,33 @@ async function codexSessions(
         | { id?: unknown; cwd?: unknown }
         | undefined;
       if (meta?.cwd !== folder || !isAgentSessionId(meta.id)) continue;
+      const role = codexRole(meta);
+      if (role.kind === "helper") continue;
+      if (role.kind === "spawned") {
+        const siblings = spawned.get(role.root) ?? [];
+        if (siblings.length >= SUBAGENT_LIMIT) continue;
+        spawned.set(role.root, siblings);
+        const info = await stat(file);
+        const recent = Date.now() - info.mtimeMs <= STALE_MS;
+        const start = Math.max(0, info.size - CHUNK);
+        const tail = !recent
+          ? []
+          : start === 0
+            ? head
+            : lines(await readRange(file, start, CHUNK), { head: false });
+        // ⚠️ What it was told is sealed in its spawner's call; the task
+        // name it was spawned under is what is left to call it by.
+        const task = role.task ?? head.map(codexPrompt).find(Boolean) ?? null;
+        siblings.push({
+          id: meta.id,
+          title:
+            [role.nickname, task].filter(Boolean).join(": ") || "Sub-agent",
+          type: role.role,
+          updatedAt: lastActivity(tail, "codex") ?? info.mtime.toISOString(),
+          working: recent && codexWorking(tail),
+        });
+        continue;
+      }
       if (out.length >= AGENT_SESSION_LIMIT && !keep.has(`codex:${meta.id}`))
         continue;
       const named = names.get(meta.id);
@@ -569,6 +764,7 @@ async function codexSessions(
         pinnedAt: null,
         working,
         card: working ? await transcriptCard(file, info.size) : null,
+        subagents: spawned.get(meta.id) ?? [],
       });
     } catch {
       // A rollout being written, or gone: the next one.
@@ -636,6 +832,9 @@ export async function codexStarts(
         | { id?: unknown; cwd?: unknown; timestamp?: unknown }
         | undefined;
       if (meta?.cwd !== folder || !isAgentSessionId(meta.id)) continue;
+      // ⚠️ A thread Codex started for itself starts after the tab too, and
+      // is never the conversation a tab is on (FE-33).
+      if (codexRole(meta).kind !== "conversation") continue;
       const startedAt =
         typeof meta.timestamp === "string" ? Date.parse(meta.timestamp) : NaN;
       if (Number.isFinite(startedAt)) out.push({ id: meta.id, startedAt });
@@ -650,21 +849,26 @@ export async function codexStarts(
  * Which conversation a Codex rollout is, if it is `folder`'s — read from its
  * `session_meta`, once, by the activity watcher (FE-25).
  *
- * Answers the id; `false` for a rollout that belongs elsewhere (an answer to
- * keep); `null` when it cannot be told yet — no `session_meta` written, or
- * the file mid-creation — which is worth asking again.
+ * Answers its id, and for a thread a conversation spawned that
+ * conversation's as `parent` (FE-33); `false` for a rollout that belongs
+ * elsewhere or is Codex's own helper (an answer to keep); `null` when it
+ * cannot be told yet — no `session_meta` written, or the file mid-creation —
+ * which is worth asking again.
  */
 export async function codexRolloutOf(
   file: string,
   folder: string,
-): Promise<string | false | null> {
+): Promise<{ id: string; parent: string | null } | false | null> {
   try {
     const head = lines(await readRange(file, 0, META_CHUNK), { head: true });
     const meta = head.find((line) => line.type === "session_meta")?.payload as
       | { id?: unknown; cwd?: unknown }
       | undefined;
     if (!meta) return null;
-    return meta.cwd === folder && isAgentSessionId(meta.id) ? meta.id : false;
+    if (meta.cwd !== folder || !isAgentSessionId(meta.id)) return false;
+    const role = codexRole(meta);
+    if (role.kind === "helper") return false;
+    return { id: meta.id, parent: role.kind === "spawned" ? role.root : null };
   } catch {
     return null;
   }
