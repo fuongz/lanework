@@ -177,7 +177,7 @@ export function TerminalPanel({ workspace }: { workspace: string }) {
           className="size-6"
           aria-label="Hide terminal"
           title="Hide terminal (⌘`)"
-          onClick={() => setOpen(false)}
+          onClick={() => setOpen(workspace, false)}
         >
           <HugeiconsIcon
             icon={ArrowDown01Icon}

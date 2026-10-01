@@ -54,7 +54,7 @@ export function terminalShown(
   state: Pick<TerminalState, "open" | "sessions" | "spawning">,
   workspace: string | null,
 ): boolean {
-  if (!state.open || !workspace) return false;
+  if (!workspace || !state.open[workspace]) return false;
   // ⚠️ No empty panel: a project with no terminal shows the bar, and the
   // panel comes up with the first one — which opening it starts.
   return (state.sessions[workspace]?.length ?? 0) > 0 || state.spawning;
@@ -62,10 +62,13 @@ export function terminalShown(
 
 interface TerminalState {
   /**
-   * Whether the panel was asked for. Hiding it stops nothing; on screen it is
-   * `terminalShown()`, which also needs a terminal to show.
+   * Whether each workspace's panel was asked for. Hiding it stops nothing; on
+   * screen it is `terminalShown()`, which also needs a terminal to show.
+   *
+   * ⚠️ Per workspace, not one flag: a panel opened in one project must not
+   * come up in the next one you switch to, where nobody opened it.
    */
-  open: boolean;
+  open: Record<string, boolean | undefined>;
   /** The height the panel opens at, in percent of the content column. */
   height: number;
   setHeight: (height: number) => void;
@@ -79,7 +82,7 @@ interface TerminalState {
   /** The agent CLIs this machine has, as last asked: what + offers. */
   agents: TerminalAgent[];
   loadAgents: () => Promise<void>;
-  setOpen: (open: boolean) => void;
+  setOpen: (workspace: string, open: boolean) => void;
   refresh: (workspace: string) => Promise<void>;
   spawn: (
     workspace: string,
@@ -109,7 +112,9 @@ interface TerminalState {
  */
 function settle(workspace: string) {
   if (!(useTerminal.getState().sessions[workspace]?.length ?? 0))
-    useTerminal.setState({ open: false });
+    useTerminal.setState((state) => ({
+      open: { ...state.open, [workspace]: false },
+    }));
 }
 
 /**
@@ -145,7 +150,7 @@ function applyOrder(workspace: string, ids: string[]) {
 }
 
 export const useTerminal = create<TerminalState>()((set, get) => ({
-  open: false,
+  open: {},
   height: readHeight(),
   sessions: {},
   active: {},
@@ -162,7 +167,11 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     }
   },
 
-  setOpen: (open) => set({ open, error: open ? get().error : null }),
+  setOpen: (workspace, open) =>
+    set((state) => ({
+      open: { ...state.open, [workspace]: open },
+      error: open ? state.error : null,
+    })),
 
   setHeight: (height) => {
     if (!Number.isFinite(height) || height < 1 || height > 85) return;
@@ -251,7 +260,10 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
         sessions: { ...state.sessions, [workspace]: rest },
         active: { ...state.active, [workspace]: active },
         // The last one closed: back to the bar, not an empty panel.
-        open: rest.length > 0 && state.open,
+        open: {
+          ...state.open,
+          [workspace]: rest.length > 0 && !!state.open[workspace],
+        },
       };
     });
     try {
@@ -303,20 +315,23 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
   toggle: async (workspace) => {
     // ⚠️ What is on SCREEN decides, not the flag: a panel asked for whose
     // project has no terminal shows as the bar, and the key has to open it.
+    if (!workspace) return;
     if (terminalShown(get(), workspace)) {
-      set({ open: false, error: null });
+      get().setOpen(workspace, false);
       return;
     }
-    set({ open: true, error: null });
-    if (!workspace) return;
+    set((state) => ({
+      open: { ...state.open, [workspace]: true },
+      error: null,
+    }));
     await get().refresh(workspace);
     if (!(get().sessions[workspace]?.length ?? 0)) await get().spawn(workspace);
     settle(workspace);
   },
 
   newTerminal: async (workspace) => {
-    set({ open: true });
     if (!workspace) return;
+    set((state) => ({ open: { ...state.open, [workspace]: true } }));
     await get().spawn(workspace);
     settle(workspace);
   },

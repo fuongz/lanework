@@ -327,8 +327,9 @@ export function AppShell() {
                   const height = layout.terminal ?? 0;
                   // Dragged shut past its minimum: that is a hide, and the
                   // bar takes over. Any other drag is the height to keep.
-                  if (height < 1) setTerminalOpen(false);
-                  else setTerminalHeight(height);
+                  if (height < 1) {
+                    if (workspaceKey) setTerminalOpen(workspaceKey, false);
+                  } else setTerminalHeight(height);
                 }}
               >
                 <ResizablePanel id="content" minSize="20%">
