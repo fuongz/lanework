@@ -1,4 +1,8 @@
-import { GithubIcon } from "@hugeicons/core-free-icons";
+import {
+  Copy01Icon,
+  GithubIcon,
+  Unlink02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import {
@@ -15,14 +19,21 @@ import { formatRepoRef, type RepoRef } from "../../../../shared/git";
 /**
  * The GitHub connection, and which repository each project reads.
  *
- * ⚠️ Connecting happens on the pull-request screen, not here. This page is
- * where a connection is REVIEWED and undone — the place people look when they
- * want to know what this app can reach and how to stop it — and a second
- * device-flow entry point would be two half-explained ways to do one thing.
+ * Connecting starts here as well as on the pull-request screen — the place
+ * people look first for "connect GitHub" is Settings. Both run the ONE device
+ * flow in the pulls store (`connect`, `progress`, `cancelConnect`), so a code
+ * started on either screen is the same pending connection on the other.
  */
 export function GitSection() {
   const account = usePulls((state) => state.account);
   const disconnect = usePulls((state) => state.disconnect);
+  const progress = usePulls((state) => state.progress);
+  const watch = usePulls((state) => state.watch);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  // The device code arrives as an event; without this, Settings would start a
+  // connection and never show the code to type in.
+  useEffect(() => watch(), [watch]);
   const workspaces = useBoard((state) => state.workspaces);
   const hydrate = useBoard((state) => state.hydrate);
   const [links, setLinks] = useState<
@@ -83,39 +94,43 @@ export function GitSection() {
                   : account.kind === "expired"
                     ? "Connection expired"
                     : "Not connected",
-              description:
-                account.kind === "connected"
-                  ? "Pull requests are read with this account. Nothing is written to your repositories unless you submit a review."
-                  : account.kind === "expired"
-                    ? "GitHub stopped accepting this connection. Reconnect from a project's Pull requests screen."
-                    : "Connect from a project's Pull requests screen.",
+              description: connectError
+                ? connectError
+                : progress
+                  ? "Enter this code on GitHub to finish connecting."
+                  : account.kind === "connected"
+                    ? "Pull requests are read with this account. Nothing is written to your repositories unless you submit a review."
+                    : account.kind === "expired"
+                      ? "GitHub stopped accepting this connection. Reconnect to keep reading pull requests."
+                      : "Pull requests are read with your own GitHub account. Nothing is written to your repositories.",
               keywords: "github connect disconnect account token oauth device",
               control:
-                account.kind === "none" ? (
-                  <span className="text-muted-foreground flex items-center gap-1.5 text-[13px]">
-                    <HugeiconsIcon
-                      icon={GithubIcon}
-                      className="size-4"
-                      strokeWidth={1.5}
-                      aria-hidden="true"
-                    />
-                    GitHub
-                  </span>
+                account.kind !== "connected" ? (
+                  <ConnectControl
+                    label={
+                      account.kind === "expired"
+                        ? "Reconnect GitHub"
+                        : "Connect GitHub"
+                    }
+                    onError={setConnectError}
+                  />
                 ) : (
                   <Button
-                    variant="outline"
-                    size="sm"
+                    variant="destructive"
+                    size="lg"
+                    // The tinted pill of Account → Sign out, `border-0` and all
+                    // (see `account-section.tsx`).
+                    className="h-8 gap-1.5 rounded-lg border-0 pr-3 pl-2.5 text-sm"
                     onClick={() => void disconnect()}
                   >
+                    <HugeiconsIcon
+                      icon={Unlink02Icon}
+                      className="size-4"
+                      strokeWidth={2}
+                    />
                     Disconnect
                   </Button>
                 ),
-            },
-            {
-              label: "Signing out of GitHub here is local",
-              description:
-                "This forgets the token on this machine. To revoke the app's access entirely, remove it in your GitHub account settings.",
-              keywords: "revoke access authorised applications security",
             },
           ],
         },
@@ -140,10 +155,16 @@ export function GitSection() {
                       <SettingsValue>{formatRepoRef(link.repo)}</SettingsValue>
                     </div>
                     <Button
-                      variant="ghost"
-                      size="sm"
+                      variant="destructive"
+                      size="lg"
+                      className="h-8 gap-1.5 rounded-lg border-0 pr-3 pl-2.5 text-sm"
                       onClick={() => void unlink(link.slug)}
                     >
+                      <HugeiconsIcon
+                        icon={Unlink02Icon}
+                        className="size-4"
+                        strokeWidth={2}
+                      />
                       Disconnect
                     </Button>
                   </div>
@@ -159,5 +180,75 @@ export function GitSection() {
         },
       ]}
     />
+  );
+}
+
+/**
+ * Connect GitHub from Settings: the button, then — while the device flow waits
+ * — the code to type, a way to copy it, the page to type it on, and a way out.
+ */
+function ConnectControl({
+  label,
+  onError,
+}: {
+  label: string;
+  onError: (error: string | null) => void;
+}) {
+  const connecting = usePulls((state) => state.connecting);
+  const progress = usePulls((state) => state.progress);
+  const connect = usePulls((state) => state.connect);
+  const cancelConnect = usePulls((state) => state.cancelConnect);
+  const [copied, setCopied] = useState(false);
+
+  if (!progress)
+    return (
+      <Button
+        size="lg"
+        className="h-8 gap-1.5 rounded-lg pr-3 pl-2.5 text-sm"
+        disabled={connecting}
+        onClick={() => {
+          onError(null);
+          void connect().then((result) => onError(result.error ?? null));
+        }}
+      >
+        <HugeiconsIcon icon={GithubIcon} className="size-4" strokeWidth={2} />
+        {connecting ? "Connecting…" : label}
+      </Button>
+    );
+
+  return (
+    <div className="flex items-center gap-2">
+      <code className="bg-foreground/[0.05] rounded-md px-2 py-1 font-mono text-sm tracking-[0.2em]">
+        {progress.userCode}
+      </code>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          void navigator.clipboard
+            .writeText(progress.userCode)
+            .then(() => setCopied(true))
+            .catch(() => {});
+        }}
+      >
+        <HugeiconsIcon icon={Copy01Icon} aria-hidden="true" />
+        {copied ? "Copied" : "Copy"}
+      </Button>
+      {/* ⚠️ A real link, as on the pull-request screen: the window's navigation
+          guard sends external origins to the OS browser, where a GitHub
+          sign-in belongs. */}
+      <Button
+        variant="outline"
+        size="sm"
+        render={
+          <a href={progress.verificationUri} target="_blank" rel="noreferrer" />
+        }
+      >
+        Open GitHub
+      </Button>
+      <Button variant="ghost" size="sm" onClick={() => void cancelConnect()}>
+        Cancel
+      </Button>
+    </div>
   );
 }
