@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import type { TerminalSession } from "#/../shared/terminal";
 import type { Workspace } from "#/../shared/workspaces";
 import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
+import { ProjectTile } from "#/components/shared/common/project-tile";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
@@ -18,75 +19,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "#/components/ui/popover";
-import { cn } from "#/lib/utils";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
 import { useOpenProject } from "#/stores/last-route";
-import { useWorkspaceIcon } from "./use-workspace-icon";
-
-/**
- * A project's colour, derived from its slug.
- *
- * ⚠️ Derived, not stored and not by list position. A colour that came from the
- * index would change the moment somebody creates a project earlier in the
- * alphabet — and the whole point of giving each one a colour is that it is the
- * same tile every time you open the menu.
- */
-const TILES = [
-  "bg-tone-violet",
-  "bg-tone-sky",
-  "bg-tone-emerald",
-  "bg-tone-amber",
-  "bg-tone-teal",
-  "bg-tone-rose",
-  "bg-tone-blue",
-] as const;
-
-function tile(slug: string): string {
-  let hash = 0;
-  for (const char of slug) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return TILES[hash % TILES.length];
-}
-
-/**
- * A project's mark: its GitHub repo owner's avatar (BE-18), or its initial
- * on a colour picked by its slug when there is none.
- */
-function Tile({
-  workspace,
-  className,
-}: {
-  workspace: Workspace | null;
-  className?: string;
-}) {
-  const icon = useWorkspaceIcon(workspace);
-  if (icon)
-    return (
-      <img
-        src={icon}
-        alt=""
-        aria-hidden="true"
-        draggable={false}
-        data-project-icon=""
-        className={cn(
-          "bg-muted shrink-0 rounded-md object-cover outline -outline-offset-1 outline-black/10 dark:outline-white/10",
-          className,
-        )}
-      />
-    );
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "grid shrink-0 place-items-center rounded-md font-semibold text-white",
-        workspace ? tile(workspace.slug) : "bg-muted-foreground",
-        className,
-      )}
-    >
-      {(workspace?.name ?? "?").slice(0, 1).toUpperCase()}
-    </span>
-  );
-}
 
 /** The terminal key a project's agents are filed under (FE-19, FE-26). */
 const keyOf = (workspace: Workspace) => workspace.id ?? workspace.slug;
@@ -197,7 +132,7 @@ export function ProjectSwitcher() {
               aria-label={`Switch project — currently ${active?.name ?? "none"}`}
               className="hover:bg-foreground/[0.05] flex h-8 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors duration-150"
             >
-              <Tile workspace={active} className="size-6 text-[11px]" />
+              <ProjectTile workspace={active} className="size-6 text-[11px]" />
               <span className="truncate text-[13px] font-medium">
                 {active?.name ?? "Choose a project"}
               </span>
@@ -230,7 +165,7 @@ export function ProjectSwitcher() {
                 onClick={() => go(workspace.slug)}
                 className="hover:bg-foreground/[0.05] aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-8 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none"
               >
-                <Tile
+                <ProjectTile
                   workspace={workspace}
                   className="size-5 rounded-[5px] text-[10px]"
                 />

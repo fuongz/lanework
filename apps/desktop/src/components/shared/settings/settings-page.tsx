@@ -24,6 +24,12 @@ export interface SettingsSectionSpec {
   content?: ReactNode;
   /** Searchable words for a `content` section, which has no rows to match on. */
   keywords?: string;
+  /**
+   * Keep `title` for search and screen readers but draw no heading — for a
+   * section whose first row already says what it is (Projects → the selected
+   * project's own name and avatar).
+   */
+  hideTitle?: boolean;
 }
 
 /**
@@ -74,7 +80,14 @@ export function SettingsPage({
       ) : (
         visible.map((section) => (
           <section key={section.title} className="mt-9 flex flex-col gap-3">
-            <h2 className="text-[15px] font-medium">{section.title}</h2>
+            <h2
+              className={cn(
+                "text-[15px] font-medium",
+                section.hideTitle && "sr-only",
+              )}
+            >
+              {section.title}
+            </h2>
             {section.content ?? (
               <SettingsCard>
                 {section.rows.map((row) => (

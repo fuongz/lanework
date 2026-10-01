@@ -1,6 +1,8 @@
 import {
   DndContext,
   type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
   type Modifier,
   PointerSensor,
   useSensor,
@@ -31,8 +33,9 @@ import {
   AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
+import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
-import { moveSlug, ProjectRow } from "./project-row";
+import { moveSlug, ProjectRow, shiftFor } from "./project-row";
 import { SelectedProjectSection } from "./selected-project-section";
 
 /**
@@ -87,9 +90,10 @@ function useFolderPaths(workspaces: Workspace[]) {
  * credential by design, so none of these three may be pointed at it.
  *
  * ⚠️ Rename moves the NAME only. No route on the service can change a slug, so
- * the mono line under each name is fixed for the life of the project — which is
- * what makes the folder link and the saved selection, both keyed by slug, safe
- * from a rename. The page states that rather than leaving it to be discovered.
+ * the key under Selected project's name is fixed for the life of the project —
+ * which is what makes the folder link and the saved selection, both keyed by
+ * slug, safe from a rename. The rename dialog says so, where the question
+ * comes up (`rename-project-dialog.tsx`).
  *
  * ⚠️ Delete on this surface is not the archive the web app does. The service
  * removes the row and cascades every machine's recorded path for it, so the
@@ -132,10 +136,35 @@ export function WorkspacesSection() {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
+  // Where the lifted row would land, so the rows it passes make room for it
+  // while it is still in the air. The order itself changes only at the drop.
+  const [dragging, setDragging] = useState<{
+    from: number;
+    to: number;
+    height: number;
+  } | null>(null);
+  const onDragStart = (event: DragStartEvent) => {
+    const from = slugs.indexOf(String(event.active.id));
+    setDragging({ from, to: from, height: 0 });
+  };
+  const onDragOver = (event: DragOverEvent) => {
+    const over = event.over ? slugs.indexOf(String(event.over.id)) : -1;
+    // ⚠️ The height from here, not from `onDragStart`: dnd-kit measures the
+    // lifted row only after that fires, so `rect.initial` is null there and
+    // every row would step aside by 0px.
+    const height = event.active.rect.current.initial?.height ?? 0;
+    setDragging(
+      (now) => now && { ...now, height, to: over < 0 ? now.from : over },
+    );
+  };
   const onDragEnd = (event: DragEndEvent) => {
     const over = event.over?.id;
+    // ⚠️ The reorder and the reset in ONE render: the rows that made room are
+    // already where the new order puts them, so their `y` returning to 0 and
+    // their layout move cancel out instead of bouncing.
     if (over && over !== event.active.id)
       reorder(moveSlug(slugs, String(event.active.id), String(over)));
+    setDragging(null);
   };
   const listRef = useRef<HTMLDivElement>(null);
   // Up and down inside the card: a row cannot be lifted out of the list.
@@ -171,6 +200,7 @@ export function WorkspacesSection() {
         sections={[
           {
             title: "Selected project",
+            hideTitle: true,
             keywords:
               "selected project rename folders import danger remove all issues purge delete clear reset",
             content: (
@@ -203,7 +233,10 @@ export function WorkspacesSection() {
 
                 <DndContext
                   sensors={sensors}
+                  onDragStart={onDragStart}
+                  onDragOver={onDragOver}
                   onDragEnd={onDragEnd}
+                  onDragCancel={() => setDragging(null)}
                   modifiers={[alongList]}
                 >
                   <SettingsCard>
@@ -226,6 +259,7 @@ export function WorkspacesSection() {
                               workspace={workspace}
                               index={index}
                               selected={isSelected}
+                              shift={shiftFor(index, dragging)}
                               canMove={canMove}
                               onMove={(delta) => {
                                 const to = slugs[index + delta];
@@ -252,11 +286,17 @@ export function WorkspacesSection() {
                                     </span>
                                   )}
                                 </span>
-                                <span className="text-muted-foreground truncate font-mono text-xs">
-                                  {workspace.slug}
-                                </span>
+                                {/* The slug is not repeated here: it is under
+                                Selected project, and a third line made every
+                                row read as two keys and a path. */}
                                 <span
-                                  className="text-muted-foreground truncate text-[13px] leading-relaxed"
+                                  className={cn(
+                                    "text-muted-foreground truncate leading-relaxed",
+                                    // Mono only for a real path, not the sentence.
+                                    linked.length === 0
+                                      ? "text-[13px]"
+                                      : "font-mono text-xs",
+                                  )}
                                   title={linked.join("\n")}
                                 >
                                   {linked.length === 0
@@ -302,22 +342,6 @@ export function WorkspacesSection() {
                   </Button>
                 </div>
               </div>
-            ),
-          },
-          {
-            title: "Renaming",
-            keywords: "rename name edit title change key slug",
-            content: (
-              // ⚠️ Here because the question a rename raises is not "how" — the
-              // button is right there — but "what did I just change". The key
-              // is what a folder link, a saved selection and a URL all point
-              // at, and it does NOT follow the name.
-              <p className="text-muted-foreground text-[13px] leading-relaxed">
-                Renaming changes the name on your account, so every machine
-                signed in sees it. The key underneath — the mono line above —
-                never changes, which is what keeps each project's folders and
-                the project you had open pointing at the right place.
-              </p>
             ),
           },
         ]}

@@ -2577,10 +2577,10 @@ test("a project is renamed from settings, and its key does not move", async () =
       "PATCH /v1/sync/state/workspace/ws-cloud-project",
     );
     // ⚠️ The KEY is untouched, which is what the folder link and the saved
-    // selection are both keyed by. (Twice: the selected-project section and
-    // the project's own row.)
+    // selection are both keyed by. (Once: under the selected project's name.
+    // The list rows no longer repeat it.)
     await expect(page.getByText("cloud-project", { exact: true })).toHaveCount(
-      2,
+      1,
     );
 
     // A name that is only whitespace never reaches the service: there is

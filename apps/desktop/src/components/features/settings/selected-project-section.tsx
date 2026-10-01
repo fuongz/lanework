@@ -1,8 +1,13 @@
-import { Folder01Icon } from "@hugeicons/core-free-icons";
+import {
+  Delete02Icon,
+  Folder01Icon,
+  TaskRemove01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useId, useState } from "react";
 import type { ReadinessFix } from "#/../shared/readiness";
 import type { Workspace } from "#/../shared/workspaces";
+import { ProjectTile } from "#/components/shared/common/project-tile";
 import { ReadinessFixDialog } from "#/components/shared/readiness/readiness-fix-dialog";
 import { ReadinessList } from "#/components/shared/readiness/readiness-list";
 import { SettingsCard } from "#/components/shared/settings/settings-page";
@@ -29,21 +34,27 @@ import { useReadiness } from "#/stores/readiness";
 
 /** One row of the section's card: what it is on the left, the action on the right. */
 function Row({
+  leading,
   label,
   description,
   children,
 }: {
+  /** Drawn before the label — the project's avatar on its own row. */
+  leading?: React.ReactNode;
   label: React.ReactNode;
   description: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between gap-6 px-4 py-3.5">
-      <div className="flex min-w-0 flex-col gap-1">
-        <span className="truncate text-sm font-medium">{label}</span>
-        <span className="text-muted-foreground text-[13px] leading-relaxed">
-          {description}
-        </span>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        {leading}
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="truncate text-sm font-medium">{label}</span>
+          <span className="text-muted-foreground text-[13px] leading-relaxed">
+            {description}
+          </span>
+        </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">{children}</div>
     </div>
@@ -168,13 +179,16 @@ export function SelectedProjectSection({
     <div className="flex flex-col gap-2.5">
       <SettingsCard>
         <Row
+          leading={
+            <ProjectTile workspace={workspace} className="size-9 text-sm" />
+          }
           label={workspace.name}
           description={
             <span className="font-mono text-xs">{workspace.slug}</span>
           }
         >
           <Button
-            variant="ghost"
+            variant="outline"
             aria-label={`Rename ${workspace.name}`}
             disabled={!id || busy === `rename:${id}`}
             title={id ? undefined : noId}
@@ -216,7 +230,7 @@ export function SelectedProjectSection({
               panel still reads the folder and says what is in it, which is the
               one place that answers "where did my cards go?". */}
           <Button
-            variant="ghost"
+            variant="outline"
             aria-label={`Import from local into ${workspace.name}`}
             onClick={() => onImport(workspace)}
           >
@@ -241,8 +255,11 @@ export function SelectedProjectSection({
             }
           >
             <Button
-              variant="ghost"
-              className="text-destructive hover:text-destructive"
+              variant="destructive"
+              size="lg"
+              // The same tinted pill as Account → Sign out, and its
+              // `border-0` for the same reason (see `account-section.tsx`).
+              className="h-8 gap-1.5 rounded-lg border-0 pr-3 pl-2.5 text-sm"
               aria-label={`Remove all issues in ${workspace.name}`}
               disabled={!id || working}
               title={id ? undefined : noId}
@@ -251,6 +268,11 @@ export function SelectedProjectSection({
                 setPurging(true);
               }}
             >
+              <HugeiconsIcon
+                icon={TaskRemove01Icon}
+                className="size-4"
+                strokeWidth={2}
+              />
               {working ? "Removing…" : "Remove all issues"}
             </Button>
           </Row>
@@ -259,13 +281,19 @@ export function SelectedProjectSection({
             description="Remove the project and its cloud board from your account."
           >
             <Button
-              variant="ghost"
-              className="text-destructive hover:text-destructive"
+              variant="destructive"
+              size="lg"
+              className="h-8 gap-1.5 rounded-lg border-0 pr-3 pl-2.5 text-sm"
               aria-label={`Delete ${workspace.name}`}
               disabled={!id || busy === `delete:${workspace.slug}`}
               title={id ? undefined : noId}
               onClick={() => id && onDelete({ ...workspace, id })}
             >
+              <HugeiconsIcon
+                icon={Delete02Icon}
+                className="size-4"
+                strokeWidth={2}
+              />
               {busy === `delete:${workspace.slug}` ? "Deleting…" : "Delete"}
             </Button>
           </Row>

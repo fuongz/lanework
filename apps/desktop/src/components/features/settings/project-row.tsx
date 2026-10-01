@@ -22,13 +22,32 @@ export function moveSlug(
 }
 
 /**
+ * How far row `index` steps aside while the row at `from` hovers over `to`:
+ * one lifted row's height, toward the gap it leaves (FE-32).
+ */
+export function shiftFor(
+  index: number,
+  drag: { from: number; to: number; height: number } | null,
+): number {
+  if (!drag || index === drag.from) return 0;
+  if (drag.from < drag.to && index > drag.from && index <= drag.to)
+    return -drag.height;
+  if (drag.to < drag.from && index >= drag.to && index < drag.from)
+    return drag.height;
+  return 0;
+}
+
+const glide = { duration: 0.2, ease: [0.22, 1, 0.36, 1] } as const;
+
+/**
  * One project in Settings → Projects, with the grip that puts it in order
  * (FE-32). Its number is its place, and its ⌘ shortcut in the switcher.
  *
  * ⚠️ The same drag as the terminal's tab strip (`terminal-tab.tsx`):
  * `useDraggable` + `useDroppable` per row rather than `@dnd-kit/sortable`, a
  * y-only transform, Motion `layout` off mid-drag and on at the drop. The order
- * changes only at the drop.
+ * changes only at the drop; until then the rows the lifted one passes slide
+ * out of its way by `shift`, so the list shows where it will land.
  *
  * ⚠️ Only the GRIP drags (D5). The rest of the row is already a button — the
  * one that picks which project this page manages — and a row that dragged from
@@ -38,6 +57,7 @@ export function ProjectRow({
   workspace,
   index,
   selected,
+  shift,
   canMove,
   onMove,
   children,
@@ -45,6 +65,8 @@ export function ProjectRow({
   workspace: Workspace;
   index: number;
   selected: boolean;
+  /** Px this row steps aside for the one being dragged (`shiftFor`). */
+  shift: number;
   /** False while the order cannot be saved (a project with no cloud id). */
   canMove: boolean;
   /** Alt+↑ / Alt+↓ on the focused grip: the keyboard path for the same move. */
@@ -66,14 +88,24 @@ export function ProjectRow({
     <motion.div
       ref={setRefs}
       layout={!drag.isDragging}
-      style={{ y: drag.transform?.y ?? 0 }}
-      transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+      initial={false}
+      // One `y` for both roles: under the pointer while lifted (no easing, or
+      // it lags the cursor), and a glide otherwise — out of the way mid-drag,
+      // and from where it was dropped into its slot, the layout move and the
+      // `y` returning to 0 running on the same curve.
+      animate={{ y: drag.isDragging ? (drag.transform?.y ?? 0) : shift }}
+      transition={drag.isDragging ? { duration: 0 } : glide}
       data-project-row={workspace.slug}
       className={cn(
-        "flex items-center gap-3 py-3.5 pr-4 pl-2 transition-colors first:rounded-t-xl last:rounded-b-xl",
+        "flex items-center gap-3 py-3.5 pr-4 pl-2 transition-colors",
+        // Lifted, every row is the same small card, all four corners round —
+        // the first row's `rounded-t` alone read as a different kind of row.
         drag.isDragging
-          ? "bg-card relative z-10 shadow-card"
-          : selected && "bg-foreground/[0.03]",
+          ? "bg-card relative z-10 rounded-xl shadow-card"
+          : cn(
+              "first:rounded-t-xl last:rounded-b-xl",
+              selected && "bg-foreground/[0.03]",
+            ),
       )}
     >
       <button

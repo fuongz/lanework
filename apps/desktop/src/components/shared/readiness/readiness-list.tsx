@@ -32,6 +32,13 @@ function StatusIcon({ check }: { check: ReadinessCheck }) {
   );
 }
 
+/** The file each fix writes — the button says which, not just "Fix…". */
+const FIX_FILE: Record<ReadinessFix, string> = {
+  "agents-md": "AGENTS.md",
+  "claude-md": "CLAUDE.md",
+  "mcp-json": ".mcp.json",
+};
+
 /** Failed blockers first, then warnings, then notes, then what passed. */
 const ORDER = { blocker: 0, warning: 1, info: 2 } as const;
 const rank = (check: ReadinessCheck) => (check.ok ? 3 : ORDER[check.level]);
@@ -93,13 +100,13 @@ export function ReadinessList({
               aria-label={`Fix ${check.title}`}
               onClick={() => check.fix && onFix(check.fix)}
             >
-              Fix…
+              Fix {FIX_FILE[check.fix]}
             </Button>
           )}
           {!check.ok && !check.fix && check.action && (
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               onClick={() => check.action && go(check.action)}
             >
               Open settings
