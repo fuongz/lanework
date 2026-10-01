@@ -16,7 +16,7 @@ import {
 /** How much of a transcript's start and end is read; never the whole file. */
 const CHUNK = 64 * 1024;
 /** A Codex `session_meta` line carries the whole system prompt. */
-const META_CHUNK = 256 * 1024;
+export const META_CHUNK = 256 * 1024;
 /** Codex keeps every folder's rollouts in one tree; stop looking after this. */
 const CODEX_SCAN = 400;
 const TITLE_MAX = 120;
@@ -25,9 +25,9 @@ const SUBAGENT_LIMIT = 20;
 /** Claude's name for a sub-agent's transcript, beside its `.meta.json`. */
 export const CLAUDE_SUBAGENT_FILE = /^agent-([A-Za-z0-9_-]{1,64})\.jsonl$/;
 
-type Line = Record<string, unknown>;
+export type Line = Record<string, unknown>;
 
-async function readRange(
+export async function readRange(
   file: string,
   start: number,
   length: number,
@@ -47,7 +47,7 @@ async function readRange(
  * the first one of a tail, the last one of a head — and a line that is not
  * JSON is skipped, never thrown on.
  */
-function lines(text: string, { head }: { head: boolean }): Line[] {
+export function lines(text: string, { head }: { head: boolean }): Line[] {
   const parts = text.split("\n");
   if (head) parts.pop();
   else parts.shift();
@@ -65,7 +65,7 @@ function lines(text: string, { head }: { head: boolean }): Line[] {
 }
 
 /** One line, whitespace collapsed, short enough for a rail row. */
-function tidy(text: string): string {
+export function tidy(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > TITLE_MAX ? `${flat.slice(0, TITLE_MAX - 1)}…` : flat;
 }
@@ -256,7 +256,7 @@ export function lastActivity(
  * A turn left open this long is not being worked on — a CLI killed mid-task
  * never writes its end. Long enough for a slow tool run or a long think.
  */
-const STALE_MS = 10 * 60_000;
+export const STALE_MS = 10 * 60_000;
 
 /**
  * Whether the agent behind `file` is working now, from its transcript's end
@@ -585,7 +585,7 @@ async function codexNames(home: string): Promise<Map<string, string>> {
 }
 
 /** Newest first: `sessions/YYYY/MM/DD/rollout-….jsonl`, each level sorted. */
-async function codexRollouts(root: string): Promise<string[]> {
+export async function codexRollouts(root: string): Promise<string[]> {
   const out: string[] = [];
   const down = async (dir: string, depth: number): Promise<void> => {
     const names = (await readdir(dir).catch(() => [] as string[]))
@@ -633,7 +633,7 @@ function codexPrompt(line: Line): string | null {
 }
 
 /** What a Codex rollout is, by its `session_meta` (FE-33). */
-type CodexRole =
+export type CodexRole =
   | { kind: "conversation" }
   | {
       kind: "spawned";
@@ -659,7 +659,7 @@ const text = (value: unknown): string | null =>
  * ⚠️ The root is `session_id` — a spawned thread's own spawns name the same
  * one — so nesting flattens to the conversation (FE-33/D6).
  */
-function codexRole(meta: Record<string, unknown>): CodexRole {
+export function codexRole(meta: Record<string, unknown>): CodexRole {
   const source = meta.source;
   if (!source || typeof source !== "object" || !("subagent" in source))
     return { kind: "conversation" };

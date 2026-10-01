@@ -169,6 +169,65 @@ export interface AgentSubagent {
   working: boolean;
 }
 
+const CLAUDE_SUBAGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * Whether `value` can name a Claude sub-agent's transcript: the `<id>` of
+ * `agent-<id>.jsonl`, the same shape the listing reads off the file's name
+ * (FE-35/D10).
+ *
+ * ⚠️ Letters, digits, `_` and `-` only: never a `.` or a separator, so it is
+ * one file name and can climb out of no folder.
+ */
+export function isClaudeSubagentId(value: unknown): value is string {
+  return typeof value === "string" && CLAUDE_SUBAGENT_ID.test(value);
+}
+
+/**
+ * One tool call a sub-agent made (FE-35/D3): its name, a line saying what it
+ * was called on, and its input as JSON for a closer look. The result is
+ * never carried over — only whether it was an error.
+ */
+export interface SubagentStep {
+  tool: string;
+  /** The input it was called on, in brief: a path, a pattern, a command's first line. */
+  summary: string;
+  /** Its input, as pretty JSON — cut at `SUBAGENT_INPUT_MAX`. */
+  input: string;
+  /** Its result said it failed. */
+  error: boolean;
+}
+
+/** The most of one step's input JSON a viewer is sent, in characters. */
+export const SUBAGENT_INPUT_MAX = 8 * 1024;
+
+/**
+ * A sub-agent's transcript, read for the viewer (FE-35): what it was asked,
+ * the tools it called, and what it reported back.
+ */
+export interface SubagentTranscript {
+  /** What it was asked to do, as its spawner described it. */
+  title: string;
+  /** Its kind as the CLI names it — `Explore`, `fork` — or null. */
+  type: string | null;
+  /** The model its CLI ran it on, as the CLI names it, or null. */
+  model: string | null;
+  /** Its first and latest line, ISO; null when it has none. */
+  startedAt: string | null;
+  endedAt: string | null;
+  working: boolean;
+  /** What it was told; null when the CLI keeps that sealed (a Codex thread). */
+  prompt: string | null;
+  steps: SubagentStep[];
+  /** What it handed back; null while it works, or when it ended without one. */
+  report: string | null;
+  /**
+   * The transcript was longer than one read takes (FE-35/D10): its start and
+   * its end were read, and the steps in between are missing.
+   */
+  truncated: boolean;
+}
+
 /**
  * A card an agent is on, as its latest Lanework MCP call named it (FE-27/D1).
  *
@@ -251,6 +310,8 @@ export const terminalChannels = {
   agentSessionRename: "terminal:agent-sessions:rename",
   /** Pin a conversation to the top of the group, or unpin it (FE-25). */
   agentSessionPin: "terminal:agent-sessions:pin",
+  /** One sub-agent's transcript, for the viewer (FE-35). */
+  agentSubagent: "terminal:agent-subagent",
   /** Main → renderer: a transcript was written (FE-25). */
   agentActivity: "terminal:agent-activity",
   /** Main → renderer: a View-menu command. */
@@ -327,6 +388,17 @@ export interface DesktopTerminalApi {
     id: string,
     pinned: boolean,
   ) => Promise<AgentSession[]>;
+  /**
+   * One of a conversation's sub-agents, read for the viewer (FE-35). By ids
+   * only: main builds the path inside the CLI's own folder for `workspace`,
+   * and refuses an id of any other shape.
+   */
+  agentSubagent: (
+    workspace: string,
+    agent: TerminalAgent,
+    conversation: string,
+    sub: string,
+  ) => Promise<SubagentTranscript>;
   onAgentActivity: (listener: (activity: AgentActivity) => void) => () => void;
   /**
    * The agent CLIs this machine has, asked of the user's own shell: what the

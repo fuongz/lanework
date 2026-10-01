@@ -1039,7 +1039,7 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
   }
 });
 
-test("a conversation's sub-agents sit under its row — folded until one works, and a click resumes the conversation (FE-33)", async () => {
+test("a conversation's sub-agents sit under its row — folded until one works (FE-33)", async () => {
   const plane = await startStubPlane({ workspaces });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
@@ -1151,16 +1151,193 @@ test("a conversation's sub-agents sit under its row — folded until one works, 
     await expect(subRows("Flaky login test")).toHaveCount(3);
     await page.getByRole("button", { name: "Show 1 more" }).click();
     await expect(subRows("Flaky login test")).toHaveCount(4);
+    // A click opens its transcript now, not its conversation (FE-35/D9):
+    // see the FE-35 case below.
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
 
-    // A sub-agent has nothing to resume of its own: it opens its
-    // conversation (D5).
+test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool calls, report — starts no agent, follows it live, and links back to its conversation", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  await seedSubagents(agentHome, repo);
+  const going = join(
+    agentHome,
+    ".claude",
+    "projects",
+    claudeProjectDir(repo),
+    CLAUDE_ID,
+    "subagents",
+    "agent-going.jsonl",
+  );
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+    LANEWORK_CLAUDE_BIN: await standIn(profile, "claude", "ran-%s-%s-%s"),
+    LANEWORK_CODEX_BIN: await standIn(profile, "codex", "ran-%s-%s-%s"),
+  });
+  const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const subRows = page.getByRole("button", {
+      name: "a sub-agent of “Flaky login test”",
+    });
+    // `going` is going, so Claude's sub-agents show unasked (FE-33/D2).
+    const mapped = subRows.filter({ hasText: "Map the rail code" });
+    await expect(mapped).toHaveAccessibleName(/Open its transcript$/);
     await mapped.click();
+
+    const viewer = page.getByRole("region", {
+      name: "Sub-agent — Map the rail code",
+    });
+    await expect(
+      viewer.getByRole("heading", { name: "Map the rail code" }),
+    ).toBeVisible();
+    // The header's second row: each fact by its icon, read with what it is.
+    const facts = viewer.getByTestId("subagent-meta");
+    await expect(facts.getByRole("term")).toHaveText([
+      "Agent type",
+      "Model",
+      "Ran for",
+      "Tool calls",
+      "Status",
+    ]);
+    await expect(facts.getByRole("definition")).toHaveText([
+      "Explore",
+      "Haiku 4.5",
+      "1m 8s",
+      "2 tools",
+      "done",
+    ]);
+    // One row a call; a failed one says so (FE-35/D3).
+    const calls = viewer
+      .getByRole("region", { name: "Tool calls" })
+      .getByRole("listitem");
+    await expect(calls).toHaveText([
+      /^Grep"subagents" src$/,
+      /^Readsrc\/nav\.tsx:410-470error$/,
+    ]);
+    // Opened, a call shows its input — and never its result.
+    await calls.nth(1).getByRole("button").click();
+    await expect(calls.nth(1).locator("pre")).toContainText('"offset": 410');
+    await expect(viewer).not.toContainText("File does not exist");
+    // The prompt is folded until asked; the report is open.
+    const prompt = viewer.getByRole("region", { name: "Prompt" });
+    await expect(prompt).not.toContainText("Map the rail");
+    await viewer.getByRole("button", { name: "Prompt" }).click();
+    await expect(prompt).toContainText("Map the rail");
+    await expect(viewer.getByRole("region", { name: "Report" })).toContainText(
+      "The rail is mapped.",
+    );
+
+    // The row it opened from is marked; nothing was started (FE-35/V4).
+    await expect(mapped).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("navigation", { name: "Running" })).toHaveCount(
+      0,
+    );
+    expect(
+      await page.evaluate(() =>
+        (
+          window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+        ).desktop.terminal.list("ws-alpha"),
+      ),
+    ).toEqual([]);
+
+    // One still going: working, and read again as it writes — no polling,
+    // its own writes (FE-35/D11).
+    const counting = subRows.filter({ hasText: "Count the tests" });
+    await counting.click();
+    const live = page.getByRole("region", {
+      name: "Sub-agent — Count the tests",
+    });
+    await expect(live.getByRole("img", { name: "Working" })).toBeVisible();
+    // Its own folds, not the last one's: the prompt opened there is shut.
+    await expect(live.getByRole("button", { name: "Prompt" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await expect(counting).toHaveAttribute("aria-current", "page");
+    await expect(mapped).not.toHaveAttribute("aria-current", "page");
+    const liveCalls = live
+      .getByRole("region", { name: "Tool calls" })
+      .getByRole("listitem");
+    await expect(liveCalls).toHaveCount(1);
+    // ⚠️ Written AGAIN until it is seen: the watcher takes a moment to start.
+    await expect(async () => {
+      await appendFile(
+        going,
+        line({
+          type: "assistant",
+          isSidechain: true,
+          message: {
+            stop_reason: "tool_use",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_count",
+                name: "Bash",
+                input: { command: "bun test --list | wc -l" },
+              },
+            ],
+          },
+        }),
+      );
+      await expect(liveCalls.nth(1)).toHaveText(/^Bashbun test --list/, {
+        timeout: 1_500,
+      });
+    }).toPass({ timeout: 15_000 });
+    await appendFile(
+      going,
+      line({
+        type: "user",
+        isSidechain: true,
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "toolu_count" }],
+        },
+      }),
+    );
+    await appendFile(
+      going,
+      line({
+        type: "assistant",
+        isSidechain: true,
+        message: {
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "There are 42 tests." }],
+        },
+      }),
+    );
+    await expect(live.getByRole("region", { name: "Report" })).toContainText(
+      "There are 42 tests.",
+    );
+    await expect(live.getByRole("img", { name: "Working" })).toHaveCount(0);
+
+    // Back is the router's: the transcript before it.
+    await page.goBack();
+    await expect(viewer).toBeVisible();
+
+    // Its conversation is a link away, resumed as its row resumes it (D9).
+    await viewer
+      .getByRole("button", {
+        name: "Open its conversation, “Flaky login test”, in Claude",
+      })
+      .click();
     await expect(
       page
         .getByRole("region", { name: "Claude — Flaky login test" })
         .locator(".xterm-rows"),
     ).toContainText(`ran-claude---resume-${CLAUDE_ID}`);
-    await expect(claudeRow).toHaveAttribute("aria-current", "page");
+    await expect(
+      page.getByRole("button", { name: "Resume “Flaky login test” in Claude" }),
+    ).toHaveAttribute("aria-current", "page");
   } finally {
     await app.close();
     await plane.close();

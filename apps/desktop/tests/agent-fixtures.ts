@@ -121,6 +121,10 @@ export const CODEX_GUARDIAN_ID = "01a0db07-52f1-7020-abe9-333333333333";
  * report back — a thread the Codex one spawned, and the approval `guardian`
  * Codex ran for itself, which must be listed nowhere.
  *
+ * Each one calls tools the viewer lists (FE-35): `done` a Grep and a Read
+ * that failed, then answers; `handback` a Glob, then hands its report back;
+ * the Codex thread a function call and an `exec` script that failed.
+ *
  * ⚠️ Each Claude sub-agent is stamped a minute apart, so newest-first is
  * fixed: `going`, then `handback`, then `done`.
  */
@@ -140,11 +144,65 @@ export async function seedSubagents(home: string, folder: string) {
   await writeFile(
     sub("done"),
     jsonl([
-      { ...sidechain, type: "user", message: { content: "Map the rail" } },
+      {
+        ...sidechain,
+        type: "user",
+        timestamp: "2026-09-26T07:00:00.000Z",
+        message: { content: "Map the rail" },
+      },
       {
         ...sidechain,
         type: "assistant",
-        message: { stop_reason: "end_turn", content: [] },
+        timestamp: "2026-09-26T07:00:05.000Z",
+        message: {
+          model: "claude-haiku-4-5-20251001",
+          stop_reason: "tool_use",
+          content: [
+            { type: "text", text: "Looking." },
+            {
+              type: "tool_use",
+              id: "toolu_grep",
+              name: "Grep",
+              input: { pattern: "subagents", path: join(folder, "src") },
+            },
+            {
+              type: "tool_use",
+              id: "toolu_read",
+              name: "Read",
+              input: {
+                file_path: join(folder, "src", "nav.tsx"),
+                offset: 410,
+                limit: 61,
+              },
+            },
+          ],
+        },
+      },
+      {
+        ...sidechain,
+        type: "user",
+        timestamp: "2026-09-26T07:00:06.000Z",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_grep", content: "x" },
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_read",
+              is_error: true,
+              content: "File does not exist.",
+            },
+          ],
+        },
+      },
+      {
+        ...sidechain,
+        type: "assistant",
+        timestamp: "2026-09-26T07:01:08.000Z",
+        message: {
+          model: "claude-haiku-4-5-20251001",
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "The rail is **mapped**." }],
+        },
       },
     ]),
   );
@@ -156,12 +214,56 @@ export async function seedSubagents(home: string, folder: string) {
     sub("handback"),
     jsonl([
       { ...sidechain, type: "user", message: { content: "Find the specs" } },
+      // What the CLI reminds it of is no prompt and no step.
+      {
+        ...sidechain,
+        type: "user",
+        isMeta: true,
+        message: { content: "<system-reminder>Hand back.</system-reminder>" },
+      },
       {
         ...sidechain,
         type: "assistant",
         message: {
           stop_reason: null,
-          content: [{ type: "tool_use", name: "SubagentHandback" }],
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_glob",
+              name: "Glob",
+              input: { pattern: "tests/*.spec.ts" },
+            },
+          ],
+        },
+      },
+      {
+        ...sidechain,
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "toolu_glob" }],
+        },
+      },
+      {
+        ...sidechain,
+        type: "assistant",
+        message: {
+          stop_reason: null,
+          content: [{ type: "text", text: "Found them, handing back." }],
+        },
+      },
+      {
+        ...sidechain,
+        type: "assistant",
+        message: {
+          stop_reason: null,
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_back",
+              name: "SubagentHandback",
+              input: { message: "Two specs: `terminal` and `agents`." },
+            },
+          ],
         },
       },
       {
@@ -224,6 +326,64 @@ export async function seedSubagents(home: string, folder: string) {
         },
       },
       { type: "event_msg", payload: { type: "task_started" } },
+      {
+        type: "turn_context",
+        payload: { model: "gpt-5.6-sol", cwd: folder },
+      },
+      {
+        type: "response_item",
+        payload: {
+          type: "agent_message",
+          author: "/root",
+          recipient: "/root/social_card",
+          content: [
+            {
+              type: "input_text",
+              text: "Message Type: NEW_TASK\nTask name: /root/social_card\nSender: /root\nPayload:\nDraw the social card",
+            },
+          ],
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          arguments: JSON.stringify({ cmd: "ls public\nls src" }),
+          call_id: "call_ls",
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          call_id: "call_ls",
+          output: "card.png",
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input:
+            'const r = await tools.exec_command({"cmd":"sips -g pixelWidth card.png"});',
+          call_id: "call_sips",
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call_sips",
+          output: [
+            {
+              type: "input_text",
+              text: "Script failed\nWall time 0.0 seconds",
+            },
+          ],
+        },
+      },
     ]),
   );
   await writeFile(
@@ -255,5 +415,93 @@ export async function seedSubagents(home: string, folder: string) {
       },
       { type: "event_msg", payload: { type: "task_started" } },
     ]),
+  );
+}
+
+/**
+ * A FORK Claude sub-agent of `seedAgentHome`'s conversation (FE-35), as the
+ * CLI writes one: a `fork-context-ref` instead of the parent's history, the
+ * parent's own call that spawned it, then its directive — wrapped in the
+ * rules Claude gives a fork — and its answer.
+ *
+ * ⚠️ Its own seeder, not part of `seedSubagents`: the FE-33 specs count
+ * those three.
+ */
+export async function seedForkSubagent(home: string, folder: string) {
+  const subagents = join(
+    home,
+    ".claude",
+    "projects",
+    claudeProjectDir(folder),
+    CLAUDE_ID,
+    "subagents",
+  );
+  await mkdir(subagents, { recursive: true });
+  const sidechain = { isSidechain: true, cwd: folder };
+  await writeFile(
+    join(subagents, "agent-fork.jsonl"),
+    jsonl([
+      {
+        type: "fork-context-ref",
+        agentId: "fork",
+        parentSessionId: CLAUDE_ID,
+        parentLastUuid: "3e2c5bac-1169-4653-99cd-84e85e520c2b",
+      },
+      // The parent's call, not the fork's: never one of its steps.
+      {
+        ...sidechain,
+        type: "assistant",
+        timestamp: "2026-09-26T07:30:00.000Z",
+        message: {
+          model: "claude-opus-5-5",
+          stop_reason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_spawn",
+              name: "Agent",
+              input: { description: "Fork: test", subagent_type: "fork" },
+            },
+          ],
+        },
+      },
+      {
+        ...sidechain,
+        type: "user",
+        timestamp: "2026-09-26T07:30:01.000Z",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_spawn",
+              content: [{ type: "text", text: "Fork started" }],
+            },
+            {
+              type: "text",
+              text: "<fork-boilerplate>\nYou are a worker fork. The transcript above is the parent's history.\n</fork-boilerplate>\n\nYour directive: Say which model you are",
+            },
+          ],
+        },
+      },
+      {
+        ...sidechain,
+        type: "assistant",
+        timestamp: "2026-09-26T07:30:09.000Z",
+        message: {
+          model: "claude-opus-5-5",
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "Opus 5.5." }],
+        },
+      },
+    ]),
+  );
+  await writeFile(
+    join(subagents, "agent-fork.meta.json"),
+    JSON.stringify({
+      agentType: "fork",
+      isFork: true,
+      description: "Fork: which model",
+      model: "inherit",
+    }),
   );
 }

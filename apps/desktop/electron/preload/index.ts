@@ -237,6 +237,14 @@ function createTerminal(): DesktopTerminalApi {
         id,
         pinned,
       ),
+    agentSubagent: (workspace, agent, conversation, sub) =>
+      ipcRenderer.invoke(
+        terminalChannels.agentSubagent,
+        workspace,
+        agent,
+        conversation,
+        sub,
+      ),
     onAgentActivity: (listener) =>
       subscribe(terminalChannels.agentActivity, listener),
     agents: () => ipcRenderer.invoke(terminalChannels.agents),

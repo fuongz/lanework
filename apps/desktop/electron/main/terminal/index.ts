@@ -20,6 +20,7 @@ import {
   isBoardId,
   isCardBrief,
   isTerminalKind,
+  type SubagentTranscript,
   TERMINAL_LIMITS,
   type TerminalAgent,
   type TerminalCommand,
@@ -39,6 +40,7 @@ import {
   updateAgentMark,
 } from "./agent-marks";
 import { agentKey, listAgentSessions } from "./agent-sessions";
+import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
 
 let host: UtilityProcess | null = null;
 let nextRequest = 1;
@@ -481,6 +483,19 @@ export function registerTerminal(devUrl?: string): void {
         pinnedAt: pinned ? (current.pinnedAt ?? Date.now()) : undefined,
       }));
       return agentSessionsOf(workspace);
+    },
+  );
+  // ⚠️ By ids alone (FE-35/D10): `subagentRequest` refuses any of another
+  // shape, and the path is built from them inside the CLI's folder for this
+  // workspace's own folder — a page cannot name a file to read.
+  handle(
+    terminalChannels.agentSubagent,
+    devUrl,
+    async (args): Promise<SubagentTranscript> => {
+      const { workspace, ...which } = subagentRequest(args);
+      const folder = await terminalFolder(workspace);
+      if (!folder) throw new Error("This project has no folder here.");
+      return readSubagentTranscript(agentHome(), folder, which);
     },
   );
   handle(terminalChannels.reorder, devUrl, async (args): Promise<void> => {

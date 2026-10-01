@@ -33,6 +33,10 @@ import {
 } from "../electron/main/terminal/agent-sessions";
 import { cardPrompt, createSessions } from "../electron/main/terminal/sessions";
 import {
+  readSubagentTranscript,
+  subagentRequest,
+} from "../electron/main/terminal/subagent-transcript";
+import {
   isAgentSessionId,
   isCardRef,
   type TerminalHostMessage,
@@ -44,6 +48,7 @@ import {
   CODEX_ID,
   CODEX_SPAWNED_ID,
   seedAgentHome,
+  seedForkSubagent,
   seedSubagents,
 } from "./agent-fixtures";
 
@@ -578,6 +583,26 @@ test("the watcher reports a sub-agent's writes as its conversation's sub-agent �
     `rollout-2026-09-26T07-20-00-${CODEX_GUARDIAN_ID}.jsonl`,
   );
   const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+  /**
+   * The two written here, each by its latest word.
+   *
+   * ⚠️ Only theirs: the seeding just before the watch started may be
+   * reported late (macOS replays recent writes), which is true of the other
+   * sub-agents and no failure. And the LATEST: a sub-agent's every settled
+   * write is news (FE-35/D11), so the last two said need not be one of each.
+   */
+  const written = [
+    `claude:${CLAUDE_ID}:done`,
+    `codex:${CODEX_ID}:${CODEX_SPAWNED_ID}`,
+  ];
+  const latest = () =>
+    [
+      ...new Map(
+        seen
+          .map((key) => [key.slice(0, key.lastIndexOf(":")), key] as const)
+          .filter(([who]) => written.includes(who)),
+      ).values(),
+    ].sort();
   try {
     // ⚠️ Written AGAIN until it is seen, as the watcher spec above does.
     await expect(async () => {
@@ -594,7 +619,7 @@ test("the watcher reports a sub-agent's writes as its conversation's sub-agent �
         line({ type: "event_msg", payload: { type: "task_started" } }),
       );
       await expect
-        .poll(() => [...new Set(seen)].sort(), { timeout: 1_500 })
+        .poll(latest, { timeout: 1_500 })
         .toEqual([
           `claude:${CLAUDE_ID}:done:true`,
           `codex:${CODEX_ID}:${CODEX_SPAWNED_ID}:true`,
@@ -614,7 +639,7 @@ test("the watcher reports a sub-agent's writes as its conversation's sub-agent �
       line({ type: "event_msg", payload: { type: "task_complete" } }),
     );
     await expect
-      .poll(() => seen.slice(-2).sort())
+      .poll(latest)
       .toEqual([
         `claude:${CLAUDE_ID}:done:false`,
         `codex:${CODEX_ID}:${CODEX_SPAWNED_ID}:false`,
@@ -625,6 +650,205 @@ test("the watcher reports a sub-agent's writes as its conversation's sub-agent �
   } finally {
     stop();
   }
+});
+
+test("FE-35: a sub-agent reads as its prompt, its tool calls and its report — a fork's own directive, a handback's report, a Codex thread's calls", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  await seedAgentHome(home, folder);
+  await seedSubagents(home, folder);
+  await seedForkSubagent(home, folder);
+  const claude = (sub: string) =>
+    readSubagentTranscript(home, folder, {
+      agent: "claude",
+      conversation: CLAUDE_ID,
+      sub,
+    });
+  const brief = (steps: { tool: string; summary: string; error: boolean }[]) =>
+    steps.map(({ tool, summary, error }) => ({ tool, summary, error }));
+
+  // Answered with `end_turn`: its last words are the report; a failed call
+  // is flagged, and its result is never carried over (FE-35/D3).
+  const done = await claude("done");
+  expect(done).toMatchObject({
+    title: "Map the rail code",
+    type: "Explore",
+    model: "claude-haiku-4-5-20251001",
+    startedAt: "2026-09-26T07:00:00.000Z",
+    endedAt: "2026-09-26T07:01:08.000Z",
+    working: false,
+    prompt: "Map the rail",
+    report: "The rail is **mapped**.",
+    truncated: false,
+  });
+  expect(brief(done.steps)).toEqual([
+    { tool: "Grep", summary: '"subagents" src', error: false },
+    { tool: "Read", summary: "src/nav.tsx:410-470", error: true },
+  ]);
+  expect(JSON.parse(done.steps[1]?.input ?? "")).toMatchObject({
+    offset: 410,
+    limit: 61,
+  });
+  expect(JSON.stringify(done)).not.toContain("File does not exist");
+
+  // Handed back: the handback is the report, never a step; what the CLI
+  // reminded it of is no prompt.
+  const handback = await claude("handback");
+  expect(handback).toMatchObject({
+    title: "Find specs",
+    type: "general-purpose",
+    working: false,
+    prompt: "Find the specs",
+    report: "Two specs: `terminal` and `agents`.",
+  });
+  expect(brief(handback.steps)).toEqual([
+    { tool: "Glob", summary: '"tests/*.spec.ts"', error: false },
+  ]);
+
+  // Still going: no report yet, and no meta to name it by but its prompt.
+  const going = await claude("going");
+  expect(going).toMatchObject({
+    title: "Count the tests",
+    type: null,
+    working: true,
+    report: null,
+  });
+  expect(going.steps.map((step) => step.tool)).toEqual(["Bash"]);
+
+  // A fork: its prompt is its OWN directive — not the parent's history it
+  // was handed, nor the rules wrapped around it — and the parent's call
+  // that spawned it is none of its steps.
+  const fork = await claude("fork");
+  expect(fork).toMatchObject({
+    title: "Fork: which model",
+    type: "fork",
+    model: "claude-opus-5-5",
+    startedAt: "2026-09-26T07:30:01.000Z",
+    working: false,
+    prompt: "Say which model you are",
+    steps: [],
+    report: "Opus 5.5.",
+  });
+
+  // A Codex thread: its function and `exec` calls, the one whose script
+  // failed flagged; its task as its spawner sent it.
+  const codex = () =>
+    readSubagentTranscript(home, folder, {
+      agent: "codex",
+      conversation: CODEX_ID,
+      sub: CODEX_SPAWNED_ID,
+    });
+  const thread = await codex();
+  expect(thread).toMatchObject({
+    title: "Gibbs: social card",
+    model: "gpt-5.6-sol",
+    working: true,
+    prompt: "Draw the social card",
+    report: null,
+  });
+  expect(brief(thread.steps)).toEqual([
+    { tool: "exec_command", summary: "ls public", error: false },
+    { tool: "exec", summary: "sips -g pixelWidth card.png", error: true },
+  ]);
+  await appendFile(
+    join(
+      home,
+      ".codex",
+      "sessions",
+      "2026",
+      "09",
+      "26",
+      `rollout-2026-09-26T07-10-00-${CODEX_SPAWNED_ID}.jsonl`,
+    ),
+    `${JSON.stringify({
+      type: "event_msg",
+      payload: { type: "task_complete", last_agent_message: "Card drawn." },
+    })}\n`,
+  );
+  expect(await codex()).toMatchObject({
+    working: false,
+    report: "Card drawn.",
+  });
+});
+
+test("FE-35: a sub-agent is read by ids alone — a path, `..` or any other shape is refused, and nothing outside the CLI's folder is read", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  await seedAgentHome(home, folder);
+  await seedSubagents(home, folder);
+  // A transcript-shaped file OUTSIDE the agent home, worth stealing.
+  const outside = await tempDir("lanew-outside-");
+  const secret = join(outside, "agent-secret.jsonl");
+  await writeFile(
+    secret,
+    `${JSON.stringify({ type: "user", message: { content: "TOP SECRET" } })}\n`,
+  );
+
+  expect(subagentRequest(["ws-alpha", "claude", CLAUDE_ID, "done"])).toEqual({
+    workspace: "ws-alpha",
+    agent: "claude",
+    conversation: CLAUDE_ID,
+    sub: "done",
+  });
+  expect(
+    subagentRequest(["ws-alpha", "codex", CODEX_ID, CODEX_SPAWNED_ID]).sub,
+  ).toBe(CODEX_SPAWNED_ID);
+  const refused: unknown[][] = [
+    ["ws-alpha", "claude", CLAUDE_ID, "../../../../outside/agent-secret"],
+    ["ws-alpha", "claude", CLAUDE_ID, secret],
+    ["ws-alpha", "claude", CLAUDE_ID, "done.jsonl"],
+    ["ws-alpha", "claude", CLAUDE_ID, ".."],
+    ["ws-alpha", "claude", CLAUDE_ID, "a/b"],
+    ["ws-alpha", "claude", CLAUDE_ID, "a\\b"],
+    ["ws-alpha", "claude", CLAUDE_ID, ""],
+    ["ws-alpha", "claude", CLAUDE_ID, 7],
+    ["ws-alpha", "claude", `${CLAUDE_ID}/..`, "done"],
+    ["ws-alpha", "claude", "../projects", "done"],
+    ["ws-alpha", "claude", outside, "done"],
+    // A Codex thread is a UUID, never a Claude-shaped name.
+    ["ws-alpha", "codex", CODEX_ID, "done"],
+    ["ws-alpha", "shell", CLAUDE_ID, "done"],
+    ["", "claude", CLAUDE_ID, "done"],
+    ["ws-alpha", "claude", CLAUDE_ID],
+    ["ws-alpha", "claude", CLAUDE_ID, "done", "extra"],
+  ];
+  for (const args of refused)
+    expect(() => subagentRequest(args), JSON.stringify(args)).toThrow(
+      /required/,
+    );
+  // The reader checks them again, whoever calls it.
+  for (const sub of ["../../../../outside/agent-secret", secret, "a/b"])
+    await expect(
+      readSubagentTranscript(home, folder, {
+        agent: "claude",
+        conversation: CLAUDE_ID,
+        sub,
+      }),
+    ).rejects.toThrow(/valid sub-agent/);
+
+  // Well shaped, but not this conversation's in this folder: refused too —
+  // no such Claude file; Codex's other folder's rollout, its guardian, and
+  // a thread named under the wrong conversation.
+  const notOurs = /not one of this conversation's/;
+  await expect(
+    readSubagentTranscript(home, folder, {
+      agent: "claude",
+      conversation: CLAUDE_ID,
+      sub: "secret",
+    }),
+  ).rejects.toThrow(notOurs);
+  for (const [conversation, sub] of [
+    [CODEX_ID, "01a0db07-52f1-7020-abe9-000000000000"],
+    [CODEX_ID, CODEX_GUARDIAN_ID],
+    [CLAUDE_ID, CODEX_SPAWNED_ID],
+  ] as const)
+    await expect(
+      readSubagentTranscript(home, folder, {
+        agent: "codex",
+        conversation,
+        sub,
+      }),
+    ).rejects.toThrow(notOurs);
 });
 
 test("the card an agent is on is its latest Lanework call that names one — this board's, from either CLI (FE-27)", async () => {

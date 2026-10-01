@@ -120,8 +120,13 @@ export function watchAgentActivity(
               : null;
           // Only a CHANGE is news: a row already spinning is not told again
           // on every write of the turn it is spinning for.
+          // ⚠️ Except a sub-agent's: every settled write of it is, at most
+          // one per `SETTLE_MS` — a viewer open on it reads it again on each
+          // (FE-35/D11), and its working state alone stays `true` from its
+          // first tool call to its report.
           const news = `${working}:${card?.boardId}:${card?.card}`;
-          if (stopped || said.get(key) === news) return;
+          if (stopped) return;
+          if (!subagent && said.get(key) === news) return;
           said.set(key, news);
           onActivity(agent, id, working, card, subagent);
         })();

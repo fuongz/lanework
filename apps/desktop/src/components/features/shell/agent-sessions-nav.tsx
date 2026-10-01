@@ -7,18 +7,18 @@ import {
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type {
   AgentSession,
   AgentSubagent,
   TerminalSession,
 } from "#/../shared/terminal";
-import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
+import { WorkingMark } from "#/components/shared/terminal/working-mark";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,26 +70,6 @@ const SUBAGENTS_FOLDED = 3;
  * sits under its conversation's title (`px-2` + the 12px icon + `gap-2.5`).
  */
 const SUB_ROW = "h-[26px] w-full ps-[30px] text-left text-xs";
-
-/**
- * Working: a spinner where the agent's icon was (FE-25/D5) — no extra
- * column, so a row that spins is still the only row that moved. Reduced
- * motion gets a still dot in the same place.
- */
-function WorkingMark() {
-  return (
-    <span
-      className="relative grid size-3 shrink-0 place-items-center"
-      data-working=""
-    >
-      <OrbitSpinner className="text-foreground size-3 gap-px motion-reduce:hidden" />
-      <span
-        aria-hidden="true"
-        className="bg-tone-emerald hidden size-1.5 rounded-full motion-reduce:block"
-      />
-    </span>
-  );
-}
 
 /**
  * A row's quick actions, shown on hover or keyboard focus in place of its age
@@ -220,8 +200,20 @@ export function AgentSessionsNav({
   const start = useAgentTerminals((state) => state.start);
   const stop = useAgentTerminals((state) => state.stop);
   const navigate = useNavigate();
-  const { terminalId } = useParams({ strict: false }) as {
+  const {
+    terminalId,
+    conversation: viewing,
+    sub: viewingSub,
+  } = useParams({
+    strict: false,
+  }) as {
     terminalId?: string;
+    conversation?: string;
+    sub?: string;
+  };
+  // The sub-agent viewer's (FE-35): which CLI's conversation `viewing` is.
+  const { agent: viewingAgent } = useSearch({ strict: false }) as {
+    agent?: string;
   };
   const onScreen = running.find((entry) => entry.id === terminalId);
   const live = useAgentSessions((state) => state.live);
@@ -362,6 +354,17 @@ export function AgentSessionsNav({
             : void stop(workspace, terminal.id)
       : undefined;
     const onResume = () => void resume(workspace, session).then(go);
+    /** A sub-agent opens read-only, in the main view (FE-35/D9). */
+    const view = (sub: AgentSubagent) =>
+      void navigate({
+        to: "/w/$slug/agents/sub/$conversation/$sub",
+        params: { slug, conversation: session.id, sub: sub.id },
+        search: { agent: session.agent },
+      });
+    const viewed = (sub: AgentSubagent) =>
+      viewing === session.id &&
+      viewingSub === sub.id &&
+      (viewingAgent ?? "claude") === session.agent;
     return (
       <Fragment key={key}>
         <div className="group/row relative">
@@ -476,16 +479,19 @@ export function AgentSessionsNav({
         </div>
         {open &&
           shownSubagents.map(({ sub, working: busy }) => (
-            // ⚠️ Opens its CONVERSATION (FE-33/D5): a Claude sub-agent is a
-            // sidechain of it, with nothing of its own to resume.
+            // ⚠️ Opens its transcript, read-only (FE-35/D9) — not its
+            // conversation, which was usually the one on screen already, so
+            // a click looked like it did nothing. A sub-agent has nothing of
+            // its own to resume; its conversation's row still resumes.
             <button
               key={sub.id}
               type="button"
-              onClick={onResume}
+              onClick={() => view(sub)}
+              aria-current={viewed(sub) ? "page" : undefined}
               aria-busy={busy || undefined}
-              aria-label={`${sub.title}, a sub-agent of “${session.title}”. Resume it in ${agent}`}
+              aria-label={`${sub.title}, a sub-agent of “${session.title}”. Open its transcript`}
               title={`${sub.title}\n${sub.type ?? "Sub-agent"} · ${busy ? "working" : relativeTime(sub.updatedAt, now)}`}
-              className={cn(row, SUB_ROW)}
+              className={cn(row, SUB_ROW, viewed(sub) && activeClass)}
             >
               {busy ? (
                 <WorkingMark />
@@ -496,7 +502,7 @@ export function AgentSessionsNav({
                 />
               )}
               <span
-                className={`min-w-0 flex-1 truncate ${busy ? "text-shimmer" : "text-muted-foreground"}`}
+                className={`min-w-0 flex-1 truncate ${busy ? "text-shimmer" : viewed(sub) ? "" : "text-muted-foreground"}`}
               >
                 {sub.title}
               </span>
