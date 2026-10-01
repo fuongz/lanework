@@ -11,8 +11,11 @@ import { type IPty, spawn as spawnPty } from "@lydell/node-pty";
 import * as serializeModule from "@xterm/addon-serialize";
 import * as headlessModule from "@xterm/headless";
 import {
+  type CardBriefMode,
   clampGeometry,
   isAgentSessionId,
+  isBoardId,
+  isCardBrief,
   isTerminalKind,
   TERMINAL_LIMITS,
   type TerminalAgent,
@@ -203,6 +206,51 @@ export interface SpawnRequest {
   kind?: unknown;
   /** An agent conversation to continue (FE-23); ignored unless a UUID. */
   resume?: unknown;
+  /**
+   * The card a NEW agent tab is for (FE-34): `{ boardId, card, mode }`, the
+   * board resolved by main. Ignored unless every part is shaped right, and
+   * for a shell or a resume.
+   */
+  card?: unknown;
+}
+
+/**
+ * An agent's first prompt for a card it was handed (FE-34/D3).
+ *
+ * ⚠️ FIXED words around two ids, and the only prompt this app ever types.
+ * The renderer chooses the mode and names the card; it never supplies a word
+ * of this. Kept free of quotes and `!`, so it reads the same to every shell
+ * even before `shellQuote` wraps it.
+ */
+export function cardPrompt(
+  mode: CardBriefMode,
+  boardId: string,
+  card: string,
+): string {
+  const work =
+    "set_status processing, implement every ticked decision, prove each verify item before ticking it, and call checkpoint after each item you finish. Follow the AGENTS.md and CLAUDE.md of this repo.";
+  return mode === "review"
+    ? `Review lanework card ${card} on board ${boardId} with me first: get_review it, ask me about every open decision, and record my answers with review_card. Once it answers ready, work the card end to end: ${work}`
+    : `Work lanework card ${card} on board ${boardId} end to end. get_review it first. If a decision is still open, stop and review it with me before writing any code. Otherwise ${work}`;
+}
+
+/** One shell word, whatever it holds: single-quoted, `'` written as `'\''`. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * The card brief a spawn carries, or null — checked HERE as well as in main:
+ * it becomes words on a command line.
+ */
+function cardOf(
+  value: unknown,
+): { boardId: string; card: string; mode: CardBriefMode } | null {
+  if (!isCardBrief(value)) return null;
+  const { boardId } = value as { boardId?: unknown };
+  return isBoardId(boardId)
+    ? { boardId, card: value.card, mode: value.mode }
+    : null;
 }
 
 /** What follows the CLI's name to continue a conversation (FE-23). */
@@ -344,11 +392,17 @@ export function createSessions(options: SessionsOptions = {}) {
         : null;
     const named = kind !== "shell" && !resumed ? NEW_ARGS[kind] : undefined;
     const resume = resumed ?? (named ? randomUUID() : null);
+    // A card is for a NEW conversation only: a resumed one has its own
+    // history, and a prompt typed over it would be a second request.
+    const card = kind !== "shell" && !resumed ? cardOf(request.card) : null;
+    const prompt = card
+      ? ` ${shellQuote(cardPrompt(card.mode, card.boardId, card.card))}`
+      : "";
     const args = resumed
       ? ` ${RESUME_ARGS[kind as TerminalAgent](resumed)}`
       : named && resume
-        ? ` ${named(resume)}`
-        : "";
+        ? ` ${named(resume)}${prompt}`
+        : prompt;
     const session: Session = {
       info: {
         id: randomUUID(),
@@ -360,6 +414,7 @@ export function createSessions(options: SessionsOptions = {}) {
         createdAt: Date.now(),
         exit: null,
         resume,
+        card: card?.card ?? null,
       },
       seq: seq++,
       pty,

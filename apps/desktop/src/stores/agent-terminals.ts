@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
 import type {
   AgentSession,
+  CardBrief,
   TerminalAgent,
   TerminalSession,
 } from "../../shared/terminal";
@@ -53,10 +54,14 @@ interface AgentTerminalsState {
     workspace: string,
     conversation: AgentSession,
   ) => Promise<TerminalSession | null>;
-  /** A new conversation with `agent` (FE-26/D3). */
+  /**
+   * A new conversation with `agent` (FE-26/D3) — briefed on `card` when one
+   * is given (FE-34), its first prompt written by the host.
+   */
   start: (
     workspace: string,
     agent: TerminalAgent,
+    card?: CardBrief,
   ) => Promise<TerminalSession | null>;
   stop: (workspace: string, id: string) => Promise<void>;
   markExited: (workspace: string, id: string, code: number) => void;
@@ -68,12 +73,20 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
     workspace: string,
     agent: TerminalAgent,
     resume?: string,
+    card?: CardBrief,
   ): Promise<TerminalSession | null> {
     if (get().starting) return null;
     set({ starting: true, error: null });
     try {
       // A first guess at the size; the view's attach sets the real one.
-      const session = await api().spawn(workspace, 120, 36, agent, resume);
+      const session = await api().spawn(
+        workspace,
+        120,
+        36,
+        agent,
+        resume,
+        card,
+      );
       bump(workspace);
       set((state) => ({
         sessions: {
@@ -135,7 +148,7 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
       return live ?? spawn(workspace, conversation.agent, conversation.id);
     },
 
-    start: (workspace, agent) => spawn(workspace, agent),
+    start: (workspace, agent, card) => spawn(workspace, agent, undefined, card),
 
     stop: async (workspace, id) => {
       bump(workspace);

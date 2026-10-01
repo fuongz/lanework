@@ -54,6 +54,63 @@ export interface TerminalSession {
    * Null for a shell, or a new Codex tab nobody has typed into yet.
    */
   resume: string | null;
+  /**
+   * The card this tab was started to work (FE-34): its task id, or its uuid
+   * when it has none. Null for every other tab. Set once, at spawn; which card
+   * the agent is on LATER is `AgentSession.card`, read from its transcript.
+   */
+  card: string | null;
+}
+
+/**
+ * How an agent is briefed on the card it was handed (FE-34): `work` it end to
+ * end — its decisions are settled — or `review` the open ones with the person
+ * first (FE-34/D6, the BE-14 flow), then work it.
+ */
+export const CARD_BRIEFS = ["work", "review"] as const;
+export type CardBriefMode = (typeof CARD_BRIEFS)[number];
+
+/**
+ * What the renderer may say about the card a new agent tab is for (FE-34/D3).
+ *
+ * ⚠️ A card's NAME and a mode, never words for the prompt. The host writes
+ * the prompt from a fixed template, and the board comes from main's own
+ * knowledge of the workspace — nothing typed into the CLI crosses from the
+ * page except an id `isCardRef` accepts.
+ */
+export interface CardBrief {
+  /** The card's task id (`FE-34`), or its uuid when it has none. */
+  card: string;
+  mode: CardBriefMode;
+}
+
+const TASK_ID = /^[A-Z]{1,6}-\d{1,5}$/;
+
+/**
+ * Whether `value` can be put in an agent's first prompt as a card: a task id
+ * or a uuid.
+ *
+ * ⚠️ The only two shapes, for the reason `isAgentSessionId` has one: the
+ * prompt is TYPED into a shell, and letters, digits and dashes are nothing a
+ * shell reads as syntax.
+ */
+export function isCardRef(value: unknown): value is string {
+  return typeof value === "string" && (TASK_ID.test(value) || UUID.test(value));
+}
+
+/** A board's id — the cloud workspace's — as the host puts it in a prompt. */
+export function isBoardId(value: unknown): value is string {
+  return typeof value === "string" && UUID.test(value);
+}
+
+export function isCardBrief(value: unknown): value is CardBrief {
+  if (!value || typeof value !== "object") return false;
+  const { card, mode } = value as Record<string, unknown>;
+  return (
+    isCardRef(card) &&
+    typeof mode === "string" &&
+    (CARD_BRIEFS as readonly string[]).includes(mode)
+  );
 }
 
 /**
@@ -235,6 +292,9 @@ export interface DesktopTerminalApi {
    *
    * `resume` names one of `agentSessions(workspace)` to continue (FE-23); main
    * refuses an id that listing does not have.
+   *
+   * `card` starts a NEW agent on a card of this workspace's board (FE-34),
+   * its first prompt written by the host; never together with `resume`.
    */
   spawn: (
     workspace: string,
@@ -242,6 +302,7 @@ export interface DesktopTerminalApi {
     rows: number,
     kind?: TerminalKind,
     resume?: string,
+    card?: CardBrief,
   ) => Promise<TerminalSession>;
   /**
    * The Claude and Codex conversations kept for `workspace`'s folder, newest

@@ -211,23 +211,14 @@ function createTerminal(): DesktopTerminalApi {
 
   return {
     list: (workspace) => ipcRenderer.invoke(terminalChannels.list, workspace),
-    spawn: (workspace, cols, rows, kind = "shell", resume) =>
-      resume === undefined
-        ? ipcRenderer.invoke(
-            terminalChannels.spawn,
-            workspace,
-            cols,
-            rows,
-            kind,
-          )
-        : ipcRenderer.invoke(
-            terminalChannels.spawn,
-            workspace,
-            cols,
-            rows,
-            kind,
-            resume,
-          ),
+    spawn: (workspace, cols, rows, kind = "shell", resume, card) => {
+      const args: unknown[] = [workspace, cols, rows, kind];
+      // ⚠️ A card goes sixth, behind an explicit `null` resume: main counts
+      // its arguments, and a hole would read as a resume of `undefined`.
+      if (card !== undefined) args.push(resume ?? null, card);
+      else if (resume !== undefined) args.push(resume);
+      return ipcRenderer.invoke(terminalChannels.spawn, ...args);
+    },
     agentSessions: (workspace) =>
       ipcRenderer.invoke(terminalChannels.agentSessions, workspace),
     renameAgentSession: (workspace, agent, id, name) =>

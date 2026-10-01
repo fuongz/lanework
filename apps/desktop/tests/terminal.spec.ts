@@ -22,6 +22,7 @@ import type { MenuItem } from "electron";
 import type { MachineRecord } from "../electron/main/auth/store";
 import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
 import { writeFolders } from "../electron/main/workspaces/store";
+import type { DesktopTerminalApi } from "../shared/terminal";
 import type { Workspace } from "../shared/workspaces";
 import {
   CLAUDE_ID,
@@ -1471,6 +1472,273 @@ test("an agent on another machine marks its card too, and this machine's own is 
     await expect(
       page.getByRole("button", { name: /^Open Claude/ }),
     ).toHaveCount(0);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+// ── FE-34: hand a card to an agent ─────────────────────────────────────────
+
+/**
+ * A board whose id is a UUID, as every cloud workspace's is: the host puts
+ * the board's id in the agent's prompt, and takes nothing else.
+ */
+const handBoardId = "6a1c0d3e-5b7f-4c2a-9d1e-0f3b2a4c5d6e";
+const handWorkspaces: Workspace[] = [
+  {
+    id: handBoardId,
+    slug: "alpha",
+    name: "Alpha",
+    path: null,
+    baseBranch: null,
+  },
+  workspaces[1],
+];
+
+type Box = NonNullable<StubCard["checklist"]>[number];
+const box = (key: string, text: string, fields: Partial<Box> = {}): Box => ({
+  key,
+  section: "decisions",
+  text,
+  checked: false,
+  checkedAt: null,
+  note: null,
+  group: null,
+  ...fields,
+});
+const ticked = { checked: true, checkedAt: "2026-09-30T08:00:00.000Z" };
+
+function handCard(
+  id: string,
+  taskId: string,
+  rank: string,
+  checklist: Box[],
+  fields: Partial<StubCard> = {},
+): StubCard {
+  return {
+    id,
+    revision: 1,
+    title: `Work for ${taskId}`,
+    body: "",
+    columnKey: "todo",
+    categoryKey: "frontend",
+    taskId,
+    priority: "medium",
+    tags: [],
+    rank,
+    createdAt: null,
+    updatedAt: null,
+    checklist,
+    assignees: { users: [], agents: [] },
+    ...fields,
+  };
+}
+
+async function bootHanding(cards: StubCard[]) {
+  const plane = await startStubPlane({ workspaces: handWorkspaces });
+  plane.setBoard(handBoardId, {
+    columns: [
+      { key: "todo", name: "To-Do", role: "start" },
+      { key: "done", name: "Done", role: "done" },
+    ],
+    cards,
+  });
+  plane.setBoard("ws-beta", board);
+  const { profile, home } = await seedProfile(plane.origin);
+  // Each CLI prints every argument it was given on a line of its own: a
+  // prompt the shell split into words would show up as several.
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+    LANEWORK_CLAUDE_BIN: await standIn(profile, "claude", "arg[%s]"),
+    LANEWORK_CODEX_BIN: await standIn(profile, "codex", "arg[%s]"),
+  });
+  const page = await app.firstWindow();
+  await switchTo(page, "Alpha");
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  return { plane, profile, app, page };
+}
+
+const lane = (page: Page) =>
+  page.getByLabel("To-Do column").getByRole("listitem");
+const agentView = (page: Page, agent: "Claude" | "Codex") =>
+  page.getByRole("region", { name: new RegExp(`^${agent} — `) });
+const toBoard = (page: Page) =>
+  page
+    .getByRole("navigation", { name: "Project" })
+    .getByRole("link", { name: /^Issues/ })
+    .click();
+const checklistWrites = (calls: string[], card: string) =>
+  calls.filter(
+    (call) => call === `PUT /v1/boards/${handBoardId}/items/${card}/checklist`,
+  );
+
+test("FE-34: a settled card starts its agent at once; an open one is approved as recommended only on confirm — and a card being worked opens its session", async () => {
+  const { plane, profile, app, page } = await bootHanding([
+    handCard("card-41", "FE-41", "V", [
+      box("D1", "Settled already", ticked),
+      box("V1", "typecheck", { section: "verify" }),
+    ]),
+    handCard("card-42", "FE-42", "W", [
+      box("D1a", "(Recommended) The header", { group: "entry" }),
+      box("D1b", "The assignee field", { group: "entry" }),
+      box("D2", "Write the agent on the card"),
+      box("V1", "typecheck", { section: "verify" }),
+    ]),
+    handCard("card-49", "FE-49", "X", [], { columnKey: "done" }),
+  ]);
+  try {
+    // Finished work is handed to nobody: no Assign in its menu.
+    await page
+      .getByLabel("Done column")
+      .getByRole("listitem")
+      .click({ button: "right" });
+    await expect(page.getByRole("menuitem", { name: "Delete…" })).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: /^Assign to/ }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    // Settled: the header's menu starts Claude straight away, no question.
+    await expect(lane(page)).toHaveCount(2);
+    await lane(page).nth(0).getByRole("link").click();
+    await page.getByRole("button", { name: "Assign to agent" }).click();
+    // (Codex's two theme marks carry their own `<title>` text.)
+    await expect(page.getByRole("menuitem")).toHaveText([/Claude$/, /Codex$/]);
+    await page.getByRole("menuitem", { name: "Claude" }).click();
+    const claude = agentView(page, "Claude").locator(".xterm-rows");
+    await expect(claude).toContainText("arg[claude]");
+    await expect(claude).toContainText("arg[--session-id]");
+    await expect(claude).toContainText(`arg[Work lanework card FE-41 on board`);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    expect(checklistWrites(plane.calls, "card-41")).toEqual([]);
+    // D2: the agent is on the card now.
+    await expect
+      .poll(() => plane.readCard(handBoardId, "card-41")?.assignees)
+      .toEqual({ users: [], agents: ["claude"] });
+
+    // Open: the right-click menu asks first, and Cancel sends nothing.
+    await toBoard(page);
+    await lane(page).nth(1).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Assign to Claude" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText("Hand FE-42 to Claude?");
+    await expect(dialog.locator("[data-pick]")).toHaveText([
+      /^D1a.*The header/,
+      /^D2.*Write the agent on the card/,
+    ]);
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(checklistWrites(plane.calls, "card-42")).toEqual([]);
+    expect(plane.readCard(handBoardId, "card-42")?.assignees?.agents).toEqual(
+      [],
+    );
+
+    // Confirmed: ONE write ticks exactly the listed boxes, with a note — and
+    // only then does Codex start, briefed to work the card.
+    await lane(page).nth(1).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Assign to Codex" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Approve and start" })
+      .click();
+    const codex = agentView(page, "Codex").locator(".xterm-rows");
+    await expect(codex).toContainText("arg[codex]");
+    await expect(codex).toContainText(`arg[Work lanework card FE-42 on board`);
+    expect(checklistWrites(plane.calls, "card-42")).toHaveLength(1);
+    const approved = plane.readCard(handBoardId, "card-42");
+    expect(
+      approved?.checklist?.map(({ key, checked }) => [key, checked]),
+    ).toEqual([
+      ["D1a", true],
+      ["D1b", false],
+      ["D2", true],
+      ["V1", false],
+    ]);
+    expect(approved?.checklist?.find((row) => row.key === "D2")?.note).toMatch(
+      /^Approved as recommended from the desktop app on \d{4}-\d{2}-\d{2}$/,
+    );
+    expect(approved?.checklist?.find((row) => row.key === "D1b")?.note).toBe(
+      null,
+    );
+    expect(approved?.assignees?.agents).toEqual(["codex"]);
+
+    // D8: a card whose agent is still running is opened, not handed out again.
+    await toBoard(page);
+    await lane(page).nth(0).click({ button: "right" });
+    await expect(
+      page.getByRole("menuitem", { name: /^Assign to/ }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await lane(page).nth(0).getByRole("link").click();
+    await page.getByRole("button", { name: "Open session" }).click();
+    await expect(
+      agentView(page, "Claude").locator(".xterm-rows"),
+    ).toContainText("card FE-41");
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("FE-34: a group with no recommendation can only be reviewed in session — and main refuses a card it cannot vouch for", async () => {
+  const { plane, profile, app, page } = await bootHanding([
+    handCard("card-43", "FE-43", "V", [
+      box("D1a", "One way", { group: "entry" }),
+      box("D1b", "Another", { group: "entry" }),
+    ]),
+  ]);
+  try {
+    await lane(page).nth(0).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Assign to Claude" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText("entry has no recommended option");
+    await expect(
+      dialog.getByRole("button", { name: "Approve and start" }),
+    ).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Review in session" }).click();
+    await expect(
+      agentView(page, "Claude").locator(".xterm-rows"),
+    ).toContainText("arg[Review lanework card FE-43 on board");
+    // Nothing was approved for the person.
+    expect(checklistWrites(plane.calls, "card-43")).toEqual([]);
+
+    // Main's own checks, past any button: a card shaped wrong, a mode it
+    // does not know, a card on a shell — each refused before the host is
+    // asked.
+    const spawn = (kind: string, resume: unknown, card: unknown) =>
+      page.evaluate(
+        ([ws, kind, resume, card]) =>
+          (
+            window as unknown as {
+              desktop: { terminal: DesktopTerminalApi };
+            }
+          ).desktop.terminal
+            .spawn(
+              ws as string,
+              80,
+              24,
+              kind as "claude",
+              resume as string,
+              card as never,
+            )
+            .then(
+              () => "started",
+              (error: Error) => error.message,
+            ),
+        [handBoardId, kind, resume, card] as const,
+      );
+    expect(
+      await spawn("claude", null, { card: "FE-1; id", mode: "work" }),
+    ).toMatch(/Unknown card/);
+    expect(await spawn("claude", null, { card: "FE-43", mode: "go" })).toMatch(
+      /Unknown card/,
+    );
+    expect(await spawn("shell", null, { card: "FE-43", mode: "work" })).toMatch(
+      /A card starts a new agent/,
+    );
   } finally {
     await app.close();
     await plane.close();

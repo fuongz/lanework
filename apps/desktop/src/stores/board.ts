@@ -219,6 +219,22 @@ interface BoardState {
     revision: number,
   ) => Promise<void>;
   /**
+   * Tick `keys` on `card` in ONE write, each with `note` under it (FE-34/D4a):
+   * the recommendations a person just approved in the hand-to-agent dialog.
+   * Answers the card as the service now has it, or null when it was refused —
+   * the reason is in `error` or `conflict`, as for any other write.
+   */
+  approve: (
+    card: BoardCard,
+    keys: string[],
+    note: string,
+  ) => Promise<BoardCard | null>;
+  /**
+   * A card with its checklist, read by id — for a lane card, whose list read
+   * carries none. Null when it cannot be read.
+   */
+  readCard: (cardId: string) => Promise<BoardCard | null>;
+  /**
    * Checklist ticks made on the open card and not saved yet (FE-13/D7).
    *
    * ⚠️ The DESIRED state per key, compared against the card when it is read —
@@ -908,6 +924,61 @@ export const useBoard = create<BoardState>()((set, get) => ({
       });
     } finally {
       set({ busy: null });
+    }
+  },
+
+  approve: async (card, keys, note) => {
+    const workspace = get().active;
+    if (!workspace?.id || !card.checklist) return null;
+    // ⚠️ The same shape `saveDraft` sends: every row back, `checked` and
+    // `note` ONLY on the boxes being approved, so every other box keeps its
+    // tick, its timestamp and a note the MCP may have written a second ago.
+    const wanted = new Set(keys);
+    const payload: BoardChecklistDraft[] = card.checklist.map((item) => ({
+      key: item.key,
+      section: item.section === "verify" ? "verify" : "decisions",
+      text: item.text,
+      group: item.group,
+      ...(wanted.has(item.key) ? { checked: true, note } : {}),
+    }));
+    set({ busy: `${card.id}:checklist`, error: null, conflict: null });
+    try {
+      const result = await api().board.setChecklist(
+        workspace.id,
+        card.id,
+        payload,
+        card.revision,
+      );
+      if (result.kind === "ok") {
+        set((state) => ({
+          detail: state.detail?.id === card.id ? result.card : state.detail,
+        }));
+        // The lane's progress count is a list read's; it moves with a poll.
+        void get().poll();
+        return result.card;
+      }
+      if (result.kind === "conflict") set({ conflict: result });
+      else set({ error: result.message });
+      await get().refreshDetail(card.id);
+      return null;
+    } catch (error) {
+      set({
+        error: ipcMessage(error, "Those approvals did not save. Try again."),
+      });
+      return null;
+    } finally {
+      set({ busy: null });
+    }
+  },
+
+  readCard: async (cardId) => {
+    const workspace = get().active;
+    if (!workspace?.id) return null;
+    try {
+      return await api().board.card(workspace.id, cardId);
+    } catch (error) {
+      set({ error: ipcMessage(error, "Could not read that card.") });
+      return null;
     }
   },
 

@@ -21,6 +21,7 @@ import {
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
 import { useBoard } from "#/stores/board";
+import { AssignAgentMenuItems, useAssignAgent } from "./assign-agent";
 
 /**
  * What a right click on a card offers — on a lane card and on a list row alike.
@@ -47,15 +48,21 @@ export function IssueMenu({
   const stale = useBoard((state) => state.view?.stale ?? false);
   const busy = useBoard((state) => state.busy);
   const [confirming, setConfirming] = useState(false);
+  const assign = useAssignAgent(card);
   const name = card.taskId ?? card.title;
 
   return (
     <>
-      <ContextMenu>
+      <ContextMenu
+        onOpenChange={(open) => {
+          if (open) assign.load();
+        }}
+      >
         <ContextMenuTrigger render={render}>{children}</ContextMenuTrigger>
         <ContextMenuContent>
           <ContextMenuGroup>
             <ContextMenuLabel>{name}</ContextMenuLabel>
+            <AssignAgentMenuItems assign={assign} />
             <ContextMenuItem
               variant="destructive"
               // ⚠️ Off while the board is a saved copy, like every other write.
@@ -76,6 +83,7 @@ export function IssueMenu({
         open={confirming}
         onOpenChange={setConfirming}
       />
+      {assign.dialog}
     </>
   );
 }

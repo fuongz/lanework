@@ -17,6 +17,7 @@ import type {
   BoardChecklistItem,
   BoardMember,
 } from "#/../shared/workspaces";
+import { AssignAgentButton } from "#/components/shared/board/assign-agent";
 import { CardAgentsLine } from "#/components/shared/board/card-agents";
 import {
   CategoryDot,
@@ -44,6 +45,10 @@ import {
   MarkdownBody,
 } from "#/components/shared/common/markdown-body";
 import { useCopy } from "#/components/shared/common/use-copy";
+import {
+  TERMINAL_KIND_LABELS,
+  TerminalKindIcon,
+} from "#/components/shared/terminal/terminal-kind-icon";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -80,6 +85,7 @@ import {
 } from "#/lib/board-view";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
+import { presenceKind } from "#/stores/board-presence";
 import { IssueActivity } from "./issue-activity";
 import { IssueCheckpoint } from "./issue-checkpoint";
 
@@ -284,6 +290,7 @@ function HeaderActions({ card }: { card: BoardCard }) {
           that is always there, greyed out, reads as "this page has unsaved
           state somewhere" — the one thing it must never say when it is false. */}
       <div className="ml-auto flex items-center gap-1">
+        <AssignAgentButton card={card} unsaved={changes > 0} />
         {changes > 0 && (
           <>
             <Button
@@ -708,12 +715,27 @@ function AssigneeRow({
   const users = card.assignees?.users ?? [];
   const on = new Set(users);
   const first = memberOf(members, users[0]);
+  // ⚠️ Shown, never edited here (FE-34/D2): an agent is put on a card by
+  // handing it the card, which starts it. A menu entry that only relabelled
+  // the card would claim work nobody is doing.
+  const agents = (card.assignees?.agents ?? []).map((agent) => ({
+    agent,
+    kind: presenceKind(agent),
+  }));
+  const agentNames = agents
+    .map(({ agent, kind }) => (kind ? TERMINAL_KIND_LABELS[kind] : agent))
+    .join(", ");
   const label =
     users.length === 0
-      ? "Unassigned"
+      ? agentNames || "Unassigned"
       : users.length === 1
         ? (first?.name ?? users[0])
         : `${first?.name ?? users[0]} +${users.length - 1}`;
+  const agentIcons = agents.map(({ agent, kind }) =>
+    kind ? (
+      <TerminalKindIcon key={agent} kind={kind} className="size-4 shrink-0" />
+    ) : null,
+  );
 
   return (
     <DropdownMenu>
@@ -721,8 +743,21 @@ function AssigneeRow({
         disabled={disabled}
         className="hover:bg-foreground/[0.06] focus-visible:ring-accent-brand flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-[13px] transition-colors focus-visible:ring-2 disabled:opacity-50"
       >
-        <Avatar member={first} size="sm" />
+        {users.length === 0 && agents.length > 0 ? (
+          agentIcons
+        ) : (
+          <Avatar member={first} size="sm" />
+        )}
         <span className="truncate">{label}</span>
+        {users.length > 0 && agents.length > 0 && (
+          <span
+            className="ml-auto flex shrink-0 items-center gap-1"
+            title={agentNames}
+          >
+            {agentIcons}
+            <span className="sr-only">and {agentNames}</span>
+          </span>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-56">
         <DropdownMenuItem closeOnClick={false} onClick={() => onChange([])}>

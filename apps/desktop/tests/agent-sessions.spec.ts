@@ -31,9 +31,10 @@ import {
   lastCardIn,
   listAgentSessions,
 } from "../electron/main/terminal/agent-sessions";
-import { createSessions } from "../electron/main/terminal/sessions";
+import { cardPrompt, createSessions } from "../electron/main/terminal/sessions";
 import {
   isAgentSessionId,
+  isCardRef,
   type TerminalHostMessage,
   type TerminalSession,
 } from "../shared/terminal";
@@ -123,6 +124,130 @@ test("an agent tab resumes a conversation by its id — and never types anything
   } finally {
     sessions.killAll();
   }
+});
+
+test("FE-34: an agent handed a card is briefed by the host's own prompt, as one word — and only for a card shaped right", async () => {
+  // Every argument the CLI receives on its own line, so a prompt the shell
+  // split into words — or ran a piece of — shows up as more than one.
+  const sessions = createSessions({
+    shell: { file: "/bin/sh", args: [] },
+    agentCommand: (agent) => `printf 'arg[%s]\\n' ${agent}`,
+    // An exited tab still holds its place, and this test opens eleven.
+    limit: 20,
+  });
+  const board = "604f96ba-e76f-4503-b183-9aeff29f1004";
+  const run = async (
+    kind: "claude" | "codex",
+    card: unknown,
+    resume?: unknown,
+  ) => {
+    const session = sessions.spawn({
+      workspace: "ws",
+      cwd: await tempDir("lanew-term-"),
+      // Wide, so a long prompt is never wrapped into the screen's next row.
+      cols: 1000,
+      rows: 24,
+      kind,
+      resume,
+      card,
+    });
+    const messages: TerminalHostMessage[] = [];
+    sessions.attach(
+      { send: (message) => messages.push(message) },
+      session.id,
+      1000,
+      24,
+    );
+    const text = () =>
+      messages
+        .map((m) => (m.t === "snapshot" || m.t === "data" ? m.data : ""))
+        .join("");
+    await expect.poll(text).toMatch(/\[Process exited/);
+    const args = [...text().matchAll(/arg\[([^\]]*)\]/g)].map((m) => m[1]);
+    return { session, args };
+  };
+  try {
+    const claude = await run("claude", {
+      boardId: board,
+      card: "FE-34",
+      mode: "work",
+    });
+    expect(claude.session.card).toBe("FE-34");
+    expect(claude.args).toEqual([
+      "claude",
+      "--session-id",
+      claude.session.resume,
+      cardPrompt("work", board, "FE-34"),
+    ]);
+    expect(claude.args[3]).toContain(`card FE-34 on board ${board}`);
+
+    // Codex takes the prompt alone; a uuid names a card with no task id.
+    const uuidCard = "0bbfb085-821a-4233-8faf-fef325e501bb";
+    const codex = await run("codex", {
+      boardId: board,
+      card: uuidCard,
+      mode: "review",
+    });
+    expect(codex.session.card).toBe(uuidCard);
+    expect(codex.args).toEqual([
+      "codex",
+      cardPrompt("review", board, uuidCard),
+    ]);
+    expect(codex.args[1]).toMatch(/^Review lanework card .* with me first/);
+
+    // Anything else is no card at all: a plain new conversation, nothing
+    // typed after the CLI's own arguments.
+    for (const hostile of [
+      { boardId: board, card: "FE-1; rm -rf ~", mode: "work" },
+      { boardId: board, card: "$(id)", mode: "work" },
+      { boardId: board, card: "FE-1\nid", mode: "work" },
+      { boardId: board, card: "fe-34", mode: "work" },
+      { boardId: "x'; id; '", card: "FE-34", mode: "work" },
+      { boardId: board, card: "FE-34", mode: "anything" },
+      { card: "FE-34", mode: "work" },
+      "FE-34",
+    ]) {
+      const refused = await run("claude", hostile);
+      expect(refused.session.card).toBeNull();
+      expect(refused.args).toEqual([
+        "claude",
+        "--session-id",
+        refused.session.resume,
+      ]);
+    }
+
+    // A resumed conversation has its own history: the card is ignored.
+    const resumed = await run(
+      "claude",
+      { boardId: board, card: "FE-34", mode: "work" },
+      CLAUDE_ID,
+    );
+    expect(resumed.session.card).toBeNull();
+    expect(resumed.args).toEqual(["claude", "--resume", CLAUDE_ID]);
+  } finally {
+    sessions.killAll();
+  }
+});
+
+test("FE-34: a card ref is a task id or a uuid, and nothing a shell reads as syntax", () => {
+  for (const good of ["FE-34", "INF-1", "PD-02", "ABCDEF-12345"])
+    expect(isCardRef(good), good).toBe(true);
+  expect(isCardRef("0bbfb085-821a-4233-8faf-fef325e501bb")).toBe(true);
+  for (const bad of [
+    "fe-34",
+    "FE-34 ",
+    "FE-34\n",
+    "FE-1; id",
+    "$(id)",
+    "`id`",
+    "FE-34'",
+    "ABCDEFG-1",
+    "FE-123456",
+    "",
+    42,
+    null,
+  ])
+    expect(isCardRef(bad), String(bad)).toBe(false);
 });
 
 test("a name and a pin are Lanework's own, and a pinned conversation outlives the listing's limit", async () => {
@@ -687,6 +812,7 @@ function tab(
     createdAt: Date.parse("2026-09-27T10:00:00Z"),
     exit: null,
     resume: null,
+    card: null,
     ...fields,
   };
 }

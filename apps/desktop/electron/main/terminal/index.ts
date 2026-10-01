@@ -14,8 +14,11 @@ import {
 } from "electron";
 import {
   type AgentSession,
+  type CardBrief,
   clampGeometry,
   isAgentSessionId,
+  isBoardId,
+  isCardBrief,
   isTerminalKind,
   TERMINAL_LIMITS,
   type TerminalAgent,
@@ -25,7 +28,7 @@ import {
 } from "../../../shared/terminal";
 import { assertTrustedSender, broadcast, handle } from "../ipc";
 import { appHomeDir } from "../paths";
-import { terminalFolder } from "../workspaces";
+import { knownWorkspace, terminalFolder } from "../workspaces";
 import { watchAgentActivity } from "./agent-activity";
 import { agentBindings } from "./agent-binding";
 import {
@@ -116,6 +119,24 @@ function key(value: unknown, what: string): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
     throw new Error(`A valid ${what} is required`);
   return value;
+}
+
+/**
+ * The card a new agent tab is for, with the board it is on (FE-34/D3).
+ *
+ * ⚠️ The board is the WORKSPACE's own id, looked up here — never one the
+ * renderer names. A page can only start an agent on the board of the project
+ * it is already allowed to open a terminal for.
+ */
+async function cardFor(
+  workspace: string,
+  value: unknown,
+): Promise<CardBrief & { boardId: string }> {
+  if (!isCardBrief(value)) throw new Error("Unknown card");
+  const { workspace: known } = await knownWorkspace(workspace);
+  if (!isBoardId(known.id))
+    throw new Error("This project has no board to take a card from.");
+  return { boardId: known.id, card: value.card, mode: value.mode };
 }
 
 /**
@@ -374,7 +395,7 @@ export function registerTerminal(devUrl?: string): void {
     terminalChannels.spawn,
     devUrl,
     async (args): Promise<TerminalSession> => {
-      if (args.length < 3 || args.length > 5)
+      if (args.length < 3 || args.length > 6)
         throw new Error("A workspace and a size are required");
       const workspace = key(args[0], "workspace");
       const cols = clampGeometry(args[1], 80);
@@ -385,7 +406,8 @@ export function registerTerminal(devUrl?: string): void {
       if (!isTerminalKind(kind)) throw new Error("Unknown kind of terminal");
       // ⚠️ A resume id is one this folder's listing has, for that agent —
       // not merely one shaped right (FE-23). The host checks the shape again.
-      const resume = args[4];
+      // `null` is "none", sent only to put a card behind it (FE-34).
+      const resume = args[4] ?? undefined;
       if (resume !== undefined) {
         if (kind === "shell" || !isAgentSessionId(resume))
           throw new Error("Unknown conversation");
@@ -393,6 +415,9 @@ export function registerTerminal(devUrl?: string): void {
         if (!known.some((entry) => entry.id === resume && entry.agent === kind))
           throw new Error("That conversation is not in this project.");
       }
+      const card = args.length === 6 ? await cardFor(workspace, args[5]) : null;
+      if (card && (kind === "shell" || resume !== undefined))
+        throw new Error("A card starts a new agent.");
       const cwd = await terminalFolder(workspace);
       return request<TerminalSession>({
         t: "spawn",
@@ -402,6 +427,7 @@ export function registerTerminal(devUrl?: string): void {
         rows,
         kind,
         resume,
+        card,
       });
     },
   );
