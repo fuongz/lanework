@@ -6,14 +6,14 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
-import { Button } from "#/components/ui/button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "#/components/ui/select";
+} from "#/components/shared/navigation/select";
+import { Button } from "#/components/ui/button";
 import {
   Tooltip,
   TooltipContent,

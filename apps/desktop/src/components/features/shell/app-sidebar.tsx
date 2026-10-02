@@ -12,6 +12,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
+import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { Kbd } from "#/components/ui/kbd";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { cn } from "#/lib/utils";
@@ -24,7 +25,6 @@ import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
 import { BranchSwitcher } from "./branch-switcher";
 import { ProjectSwitcher } from "./project-switcher";
-import { RAIL_ROW, RailHover } from "./rail-hover";
 import { ReadinessIndicator } from "./readiness-indicator";
 
 /**

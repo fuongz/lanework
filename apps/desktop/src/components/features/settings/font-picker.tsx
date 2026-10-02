@@ -2,6 +2,13 @@ import { UnfoldMoreIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#/components/shared/navigation/select";
+import {
   Command,
   CommandEmpty,
   CommandGroup,
@@ -15,13 +22,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "#/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "#/components/ui/select";
 import { type FontCatalog, type FontStyle, loadFontCatalog } from "#/lib/fonts";
 import { type FontRole, usePreferences } from "#/stores/preferences";
 

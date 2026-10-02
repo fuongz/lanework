@@ -12,6 +12,7 @@ import {
   PriorityIcon,
   StatusIcon,
 } from "#/components/shared/board/glyphs";
+import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { Button } from "#/components/ui/button";
 import {
   Command,
@@ -137,6 +138,7 @@ function ValuePicker({
         <div className="flex items-start gap-1">
           <div className="min-w-0 flex-1">
             <CommandInput
+              className="text-[13px]"
               placeholder={field.label}
               value={query}
               onValueChange={setQuery}
@@ -153,37 +155,43 @@ function ValuePicker({
         </div>
       ) : (
         <CommandInput
+          className="text-[13px]"
           placeholder={field.label}
           value={query}
           onValueChange={setQuery}
         />
       )}
       <CommandList>
-        <CommandEmpty>No matches.</CommandEmpty>
-        {shown.map((option) => (
-          <CommandItem
-            key={option.value}
-            value={option.value}
-            // ⚠️ `data-checked` rather than a tick of our own. `CommandItem`
-            // already renders the registry's indicator — the same `Tick02Icon`
-            // a `DropdownMenuCheckboxItem` uses — and it only needs to be told
-            // the row is on. A hand-rolled badge here was a second way to draw
-            // the same state, and it did not match the menus beside it.
-            data-checked={selected === option.value ? "true" : undefined}
-            onSelect={() => onPick(option.value)}
-            className="gap-2.5"
-          >
-            <OptionGlyph field={field} option={option} />
-            <span className="truncate">{option.label}</span>
-          </CommandItem>
-        ))}
-        {matched.length > shown.length && (
-          // ⚠️ Said out loud. A list that silently stops at 50 makes the search
-          // box look broken to anybody whose value is the 51st.
-          <p className="text-muted-foreground px-2.5 py-1.5 text-xs">
-            {matched.length - shown.length} more — keep typing.
-          </p>
-        )}
+        <RailHover
+          key={query}
+          className="[&[data-hovering=true]_[data-slot=command-item]]:bg-transparent"
+        >
+          <CommandEmpty>No matches.</CommandEmpty>
+          {shown.map((option) => (
+            <CommandItem
+              key={option.value}
+              value={option.value}
+              // ⚠️ `data-checked` rather than a tick of our own. `CommandItem`
+              // already renders the registry's indicator — the same `Tick02Icon`
+              // a `DropdownMenuCheckboxItem` uses — and it only needs to be told
+              // the row is on. A hand-rolled badge here was a second way to draw
+              // the same state, and it did not match the menus beside it.
+              data-checked={selected === option.value ? "true" : undefined}
+              onSelect={() => onPick(option.value)}
+              className={`${RAIL_ROW} min-h-8 gap-2.5 text-[13px]`}
+            >
+              <OptionGlyph field={field} option={option} />
+              <span className="truncate">{option.label}</span>
+            </CommandItem>
+          ))}
+          {matched.length > shown.length && (
+            // ⚠️ Said out loud. A list that silently stops at 50 makes the search
+            // box look broken to anybody whose value is the 51st.
+            <p className="text-muted-foreground px-2.5 py-1.5 text-xs">
+              {matched.length - shown.length} more — keep typing.
+            </p>
+          )}
+        </RailHover>
       </CommandList>
     </Command>
   );
@@ -261,71 +269,73 @@ function FilterMenu({
             panel for the values hid the other fields behind a back button and
             cost a click to compare two of them — the whole point of a submenu
             is that you can still see what you are choosing between. */}
-        <div role="menu" aria-label="Filter by" className="flex flex-col">
-          {fields.map((entry) => (
-            <Popover
-              key={entry.key}
-              open={openField === entry.key}
-              // ⚠️ A press on the row never CLOSES the submenu. Hover already
-              // opened it, and a trigger that toggles would make the click a
-              // person makes to confirm what they are hovering shut the very
-              // panel they were reading. Every other close — outside press,
-              // Escape, picking a value — still lands here.
-              onOpenChange={(next, details) => {
-                if (!next && details?.reason === "trigger-press") return;
-                setOpenField(next ? entry.key : null);
-              }}
-            >
-              <PopoverTrigger
-                render={
-                  <button
-                    type="button"
-                    role="menuitem"
-                    aria-haspopup="menu"
-                    onMouseEnter={() => hover(entry.key)}
-                    onMouseLeave={cancelHover}
-                    // ⚠️ NOT `onFocus`. Base UI focuses the first row when the
-                    // menu opens, so opening on focus meant one click on
-                    // "Filter" produced two panels — the field list and
-                    // whichever submenu happened to be first. Hover opens it;
-                    // pressing the row (Enter, Space, click) opens it too.
-                    className="hover:bg-foreground/[0.05] aria-expanded:bg-foreground/[0.05] flex h-8 items-center gap-2.5 rounded-md px-2 text-left text-[13px]"
-                  >
-                    <HugeiconsIcon
-                      icon={entry.icon}
-                      className="text-muted-foreground size-4 shrink-0"
-                      strokeWidth={1.5}
-                      aria-hidden="true"
-                    />
-                    {entry.label}
-                    <HugeiconsIcon
-                      icon={ArrowRight01Icon}
-                      className="text-muted-foreground ml-auto size-3.5 shrink-0"
-                      strokeWidth={1.8}
-                      aria-hidden="true"
-                    />
-                  </button>
-                }
-              />
-              <PopoverContent
-                side="right"
-                align="start"
-                sideOffset={6}
-                className="w-56 p-0"
+        <RailHover>
+          <div role="menu" aria-label="Filter by" className="flex flex-col">
+            {fields.map((entry) => (
+              <Popover
+                key={entry.key}
+                open={openField === entry.key}
+                // ⚠️ A press on the row never CLOSES the submenu. Hover already
+                // opened it, and a trigger that toggles would make the click a
+                // person makes to confirm what they are hovering shut the very
+                // panel they were reading. Every other close — outside press,
+                // Escape, picking a value — still lands here.
+                onOpenChange={(next, details) => {
+                  if (!next && details?.reason === "trigger-press") return;
+                  setOpenField(next ? entry.key : null);
+                }}
               >
-                <ValuePicker
-                  field={entry}
-                  selected={search[entry.key]}
-                  onPick={(value) => {
-                    setOpenField(null);
-                    setOpen(false);
-                    onPick(entry.key, value);
-                  }}
+                <PopoverTrigger
+                  render={
+                    <button
+                      type="button"
+                      role="menuitem"
+                      aria-haspopup="menu"
+                      onMouseEnter={() => hover(entry.key)}
+                      onMouseLeave={cancelHover}
+                      // ⚠️ NOT `onFocus`. Base UI focuses the first row when the
+                      // menu opens, so opening on focus meant one click on
+                      // "Filter" produced two panels — the field list and
+                      // whichever submenu happened to be first. Hover opens it;
+                      // pressing the row (Enter, Space, click) opens it too.
+                      className={`${RAIL_ROW} relative aria-expanded:bg-foreground/[0.05] flex h-8 items-center gap-2.5 rounded-md px-2 text-left text-[13px]`}
+                    >
+                      <HugeiconsIcon
+                        icon={entry.icon}
+                        className="text-muted-foreground size-4 shrink-0"
+                        strokeWidth={1.5}
+                        aria-hidden="true"
+                      />
+                      {entry.label}
+                      <HugeiconsIcon
+                        icon={ArrowRight01Icon}
+                        className="text-muted-foreground ml-auto size-3.5 shrink-0"
+                        strokeWidth={1.8}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  }
                 />
-              </PopoverContent>
-            </Popover>
-          ))}
-        </div>
+                <PopoverContent
+                  side="right"
+                  align="start"
+                  sideOffset={6}
+                  className="w-56 p-0"
+                >
+                  <ValuePicker
+                    field={entry}
+                    selected={search[entry.key]}
+                    onPick={(value) => {
+                      setOpenField(null);
+                      setOpen(false);
+                      onPick(entry.key, value);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
+            ))}
+          </div>
+        </RailHover>
       </PopoverContent>
     </Popover>
   );

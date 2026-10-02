@@ -10,6 +10,7 @@ import type { TerminalSession } from "#/../shared/terminal";
 import type { Workspace } from "#/../shared/workspaces";
 import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
 import { ProjectTile } from "#/components/shared/common/project-tile";
+import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
@@ -146,40 +147,41 @@ export function ProjectSwitcher() {
           }
         />
         <PopoverContent align="start" className="w-60 gap-0 p-1">
-          <div
-            role="listbox"
-            aria-label="Projects"
-            className="flex max-h-80 flex-col gap-0.5 overflow-y-auto"
-          >
-            {workspaces.length === 0 && (
-              <p className="text-muted-foreground px-2 py-3 text-[13px]">
-                No projects on this account yet.
-              </p>
-            )}
-            {workspaces.map((workspace) => (
-              <button
-                key={workspace.slug}
-                type="button"
-                role="option"
-                aria-selected={workspace.slug === active?.slug}
-                onClick={() => go(workspace.slug)}
-                className="hover:bg-foreground/[0.05] aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-8 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none"
-              >
-                <ProjectTile
-                  workspace={workspace}
-                  className="size-5 rounded-[5px] text-[10px]"
-                />
-                <span className="truncate">{workspace.name}</span>
-                <RunningAgents
-                  agents={(agentsByKey[keyOf(workspace)] ?? NO_AGENTS).filter(
-                    (agent) => !agent.exit,
-                  )}
-                />
-              </button>
-            ))}
-          </div>
-
-          <div className="border-border mt-1 flex gap-0.5 border-t pt-1">
+          <RailHover className="max-h-80 overflow-y-auto">
+            <div
+              role="listbox"
+              aria-label="Projects"
+              className="flex flex-col gap-0.5"
+            >
+              {workspaces.length === 0 && (
+                <p className="text-muted-foreground px-2 py-3 text-[13px]">
+                  No projects on this account yet.
+                </p>
+              )}
+              {workspaces.map((workspace) => (
+                <button
+                  key={workspace.slug}
+                  type="button"
+                  role="option"
+                  aria-selected={workspace.slug === active?.slug}
+                  onClick={() => go(workspace.slug)}
+                  className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-8 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
+                >
+                  <ProjectTile
+                    workspace={workspace}
+                    className="size-5 rounded-[5px] text-[10px]"
+                  />
+                  <span className="truncate">{workspace.name}</span>
+                  <RunningAgents
+                    agents={(agentsByKey[keyOf(workspace)] ?? NO_AGENTS).filter(
+                      (agent) => !agent.exit,
+                    )}
+                  />
+                </button>
+              ))}
+            </div>
+          </RailHover>
+          <RailHover className="border-border mt-1 flex gap-0.5 border-t pt-1">
             {/* ⚠️ A row that opens a DIALOG, and the menu closes behind it. A
               project is named and pointed at its folders in one go now, and
               that does not fit — nor belong — inside a menu people open to
@@ -190,7 +192,7 @@ export function ProjectSwitcher() {
                 setOpen(false);
                 setCreating(true);
               }}
-              className="hover:bg-foreground/[0.05] focus-visible:bg-foreground/[0.08] flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none"
+              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
             >
               <HugeiconsIcon
                 icon={Add01Icon}
@@ -209,7 +211,7 @@ export function ProjectSwitcher() {
                 setOpen(false);
                 void navigate({ to: "/settings/workspaces" });
               }}
-              className="hover:bg-foreground/[0.05] focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-8 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none"
+              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-8 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
             >
               <HugeiconsIcon
                 icon={Settings01Icon}
@@ -218,7 +220,7 @@ export function ProjectSwitcher() {
                 aria-hidden="true"
               />
             </button>
-          </div>
+          </RailHover>
         </PopoverContent>
       </Popover>
       {/* Outside the popover on purpose: rendered inside it, closing the menu

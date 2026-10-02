@@ -44,13 +44,13 @@ import {
 import { IssueMenu } from "#/components/shared/board/issue-menu";
 import { LoadMore } from "#/components/shared/board/load-more";
 import { BoardLanesSkeleton } from "#/components/shared/board/skeletons";
-import { Empty, EmptyDescription, EmptyHeader } from "#/components/ui/empty";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-} from "#/components/ui/select";
+} from "#/components/shared/navigation/select";
+import { Empty, EmptyDescription, EmptyHeader } from "#/components/ui/empty";
 import {
   byRank,
   categoryOf,

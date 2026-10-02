@@ -6,6 +6,13 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useState } from "react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#/components/shared/navigation/select";
 import { Button } from "#/components/ui/button";
 import {
   Empty,
@@ -16,13 +23,6 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { Input } from "#/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "#/components/ui/select";
 import { shortAge } from "#/lib/board-view";
 import { cn } from "#/lib/utils";
 import { usePulls } from "#/stores/pulls";

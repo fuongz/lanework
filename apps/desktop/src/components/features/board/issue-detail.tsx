@@ -46,6 +46,13 @@ import {
 } from "#/components/shared/common/markdown-body";
 import { useCopy } from "#/components/shared/common/use-copy";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#/components/shared/navigation/select";
+import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
@@ -69,13 +76,6 @@ import {
 } from "#/components/ui/dropdown-menu";
 import { Input } from "#/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "#/components/ui/select";
 import { Separator } from "#/components/ui/separator";
 import {
   categoryOf,

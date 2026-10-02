@@ -15,15 +15,15 @@ import {
   Row,
 } from "#/components/shared/board/properties";
 import { MarkdownEditor } from "#/components/shared/common/markdown-editor";
-import { Button } from "#/components/ui/button";
-import { Input } from "#/components/ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "#/components/ui/select";
+} from "#/components/shared/navigation/select";
+import { Button } from "#/components/ui/button";
+import { Input } from "#/components/ui/input";
 import { categoryOf, columnOf } from "#/lib/board-view";
 import { useBoard } from "#/stores/board";
 

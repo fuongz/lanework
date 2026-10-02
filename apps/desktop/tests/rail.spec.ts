@@ -7,6 +7,7 @@ import {
   type ElectronApplication,
   _electron as electron,
   expect,
+  type Locator,
   type Page,
   test,
 } from "@playwright/test";
@@ -53,8 +54,8 @@ const board = {
   })),
 };
 
-async function seed() {
-  const plane = await startStubPlane({ workspaces });
+async function seed(projects = workspaces) {
+  const plane = await startStubPlane({ workspaces: projects });
   plane.setBoard("ws-alpha", board);
   const profile = await mkdtemp(join(tmpdir(), "lanew-rail-"));
   const home = join(profile, "home");
@@ -322,7 +323,7 @@ test("one hover background slides from row to row, and fades once the pointer le
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    const hover = page.getByTestId("rail-hover");
+    const hover = page.locator(".app-sidebar").getByTestId("rail-hover");
     const rail = page.getByRole("navigation", { name: "Repository" });
     const top = async (locator: ReturnType<Page["locator"]>) =>
       Math.round((await locator.boundingBox())?.y ?? -1);
@@ -343,6 +344,118 @@ test("one hover background slides from row to row, and fades once the pointer le
     // Out of the rail: gone, not stuck on the last row.
     await page.mouse.move(900, 400);
     await expect.poll(opacity).toBe(0);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("shared hover follows project, settings, select, filter and issue rows", async () => {
+  const { plane, profile, boot } = await seed([
+    ...workspaces,
+    { ...workspaces[0], id: "ws-beta", slug: "beta", name: "Beta" },
+  ]);
+  const app = await boot();
+  try {
+    const page = await app.firstWindow();
+    const follow = async (row: Locator) => {
+      await row.hover();
+      const area = row.locator(
+        'xpath=ancestor::div[@data-slot="rail-hover-area"][1]',
+      );
+      const background = area.getByTestId("rail-hover");
+      await expect(background).toHaveCount(1);
+      await expect
+        .poll(async () => {
+          const target = await row.boundingBox();
+          const box = await background.boundingBox();
+          if (!target || !box) return false;
+          return ["x", "y", "width", "height"].every(
+            (key) =>
+              Math.abs(
+                target[key as keyof typeof target] -
+                  box[key as keyof typeof box],
+              ) < 1,
+          );
+        })
+        .toBe(true);
+      await expect
+        .poll(async () => {
+          await row.hover();
+          return background.evaluate((node) =>
+            Number(getComputedStyle(node).opacity),
+          );
+        })
+        .toBe(1);
+      return background;
+    };
+
+    await page.getByRole("button", { name: /^Switch project/ }).click();
+    await follow(page.getByRole("option", { name: "Alpha", exact: true }));
+    await follow(page.getByRole("option", { name: "Beta", exact: true }));
+    await follow(
+      page.getByRole("button", { name: "New project", exact: true }),
+    );
+    await follow(
+      page.getByRole("button", { name: "Project settings", exact: true }),
+    );
+    await page.getByRole("option", { name: "Alpha", exact: true }).click();
+    await expect(
+      page.getByRole("option", { name: "Alpha", exact: true }),
+    ).toBeHidden();
+
+    await follow(page.getByRole("link", { name: /FE-01 Card number 1/ }));
+    await follow(page.getByRole("link", { name: /FE-02 Card number 2/ }));
+
+    await page.getByRole("combobox", { name: "Group by" }).click();
+    await follow(page.getByRole("option", { name: "Status", exact: true }));
+    const selectHover = await follow(
+      page.getByRole("option", { name: "Priority", exact: true }),
+    );
+    await page.keyboard.press("ArrowDown");
+    await expect
+      .poll(() =>
+        selectHover.evaluate((node) => Number(getComputedStyle(node).opacity)),
+      )
+      .toBe(0);
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: "Filter", exact: true }).click();
+    await follow(page.getByRole("menuitem", { name: "Status", exact: true }));
+    await follow(page.getByRole("option", { name: "To-Do", exact: true }));
+    for (const row of [
+      page.getByRole("menuitem", { name: "Status", exact: true }),
+      page.getByRole("option", { name: "To-Do", exact: true }),
+      page.getByPlaceholder("Status", { exact: true }),
+    ]) {
+      expect(
+        await row.evaluate((node) => getComputedStyle(node).fontSize),
+      ).toBe("13px");
+    }
+    const filterHover = await follow(
+      page.getByRole("option", { name: "In Progress", exact: true }),
+    );
+    await page.getByPlaceholder("Status", { exact: true }).press("ArrowDown");
+    await expect
+      .poll(() =>
+        filterHover.evaluate((node) => Number(getComputedStyle(node).opacity)),
+      )
+      .toBe(0);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await follow(page.getByRole("link", { name: "Account", exact: true }));
+    await follow(page.getByRole("link", { name: "Appearance", exact: true }));
+    await page.mouse.move(900, 400);
+    await expect
+      .poll(() =>
+        page
+          .getByTestId("rail-hover")
+          .evaluate((node) => Number(getComputedStyle(node).opacity)),
+      )
+      .toBe(0);
   } finally {
     await app.close();
     await plane.close();
