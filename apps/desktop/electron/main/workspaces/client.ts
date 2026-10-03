@@ -24,6 +24,9 @@ import {
   type CardCheckpoint,
   matchesSearch,
   normalizeTag,
+  parseDispatch,
+  parseItemStream,
+  parseStreams,
   type Workspace,
 } from "../../../shared/workspaces";
 import { resolveApi } from "../auth/client";
@@ -200,6 +203,8 @@ function parseChecklist(value: unknown): BoardChecklistItem[] {
         checkedAt: text(row.checkedAt) ? row.checkedAt : null,
         note: text(row.note) ? row.note : null,
         group: text(row.group) ? row.group : null,
+        // The stream this verify item proves (BE-19); null for the lead's.
+        stream: parseItemStream(row.stream),
       },
     ];
   });
@@ -258,6 +263,9 @@ export function parseCard(value: unknown): BoardCard | null {
     // reading that as `[]` is what made every card on the board render as
     // having no decisions. Absent means "not asked"; `[]` means "asked, none".
     checklist: "checklist" in row ? parseChecklist(row.checklist) : null,
+    // How the card splits for sub-agents (BE-19), read-only here.
+    streams: parseStreams(row.streams),
+    dispatch: parseDispatch(row.dispatch),
     // ⚠️ A SEPARATE key, and it must stay separate. The check above keys on
     // `checklist` being present to tell a list read from a card read; folding
     // the count in under that name would make every card on a board look like

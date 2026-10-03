@@ -23,4 +23,13 @@ Cards for this repo live on Lanework, through the \`lanework\` MCP server.
 - Every \`create_review\` sets \`category\`, \`tags\` and \`priority\`.
 - Put decisions in the card's checklist, and start the work only after I
   have ticked them.
-- Move cards with \`set_status\`; tick verify steps with \`toggle_item\`.`;
+- Move cards with \`set_status\`; tick verify steps with \`toggle_item\`.
+- A card that touches two or more separate areas gets \`streams\`: one
+  sub-agent each, with exact \`owns\` paths and a verify step tagged with
+  its key. Shared types go in a \`W0\` the others depend on; at most 4
+  streams per wave.
+- Handed a card with \`streams\`, you are the lead: run \`dispatch\` wave
+  by wave, one sub-agent per stream in its own worktree, each given its
+  brief as is. Sub-agents write only in \`owns\`, never commit and never
+  call Lanework. After each wave, merge, re-run each stream's checks, tick
+  its verify steps and \`checkpoint\` once.`;

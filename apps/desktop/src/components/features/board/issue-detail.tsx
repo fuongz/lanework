@@ -88,6 +88,7 @@ import { useBoard } from "#/stores/board";
 import { presenceKind } from "#/stores/board-presence";
 import { IssueActivity } from "./issue-activity";
 import { IssueCheckpoint } from "./issue-checkpoint";
+import { IssueStreams, StreamKey } from "./issue-streams";
 
 export function IssueDetail() {
   const { slug, taskId } = useParams({ from: "/_app/w/$slug/issues/$taskId" });
@@ -492,11 +493,18 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
       <MarkdownBody source={card.body} />
       <Attachments card={card} />
       <Checklist card={card} />
+      <WorkBreakdown card={card} />
       <SubIssues card={card} slug={slug} />
       <IssueCheckpoint card={card} />
       <IssueActivity card={card} />
     </article>
   );
+}
+
+/** The streams, counted against the checklist exactly as the page shows it. */
+function WorkBreakdown({ card }: { card: BoardCard }) {
+  const { items } = useChecklistDraft(card);
+  return <IssueStreams card={card} items={items} />;
 }
 
 /** `5.11 MB` — a file size as a person reads one. */
@@ -1094,6 +1102,12 @@ function RowLabel({
       <span className="text-muted-foreground mr-1.5 font-mono text-xs">
         {item.key}
       </span>
+      {/* The stream this row proves (BE-19); untagged rows are the lead's. */}
+      {item.section === "verify" && item.stream && (
+        <span className="mr-1.5 inline-flex align-[1px]">
+          <StreamKey value={item.stream} />
+        </span>
+      )}
       {/* ⚠️ Rendered, not printed: cards are written in markdown, and a
           decision that reads `**Tool \`create_board\`**` as literal asterisks
           and backticks is noise around the one sentence being approved. */}

@@ -228,7 +228,7 @@ export function cardPrompt(
   card: string,
 ): string {
   const work =
-    "set_status processing, implement every ticked decision, prove each verify item before ticking it, and call checkpoint after each item you finish. Follow the AGENTS.md and CLAUDE.md of this repo.";
+    "set_status processing, implement every ticked decision, prove each verify item before ticking it, and call checkpoint after each item you finish. If the card has streams, you are the lead: run its dispatch wave by wave, one sub-agent per stream in its own worktree given its brief as is, then merge each wave, re-run and tick that stream's verify items, checkpoint once per wave, and run the untagged verify items last. Follow the AGENTS.md and CLAUDE.md of this repo.";
   return mode === "review"
     ? `Review lanework card ${card} on board ${boardId} with me first: get_review it, ask me about every open decision, and record my answers with review_card. Once it answers ready, work the card end to end: ${work}`
     : `Work lanework card ${card} on board ${boardId} end to end. get_review it first. If a decision is still open, stop and review it with me before writing any code. Otherwise ${work}`;

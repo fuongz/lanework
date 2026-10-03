@@ -939,6 +939,8 @@ export const useBoard = create<BoardState>()((set, get) => ({
       section: item.section === "verify" ? "verify" : "decisions",
       text: item.text,
       group: item.group,
+      // Sent as it is, so saving a tick never strips a stream tag (BE-19).
+      stream: item.stream ?? null,
       ...(wanted.has(item.key) ? { checked: true, note } : {}),
     }));
     set({ busy: `${card.id}:checklist`, error: null, conflict: null });
@@ -1034,6 +1036,8 @@ export const useBoard = create<BoardState>()((set, get) => ({
       section: item.section === "verify" ? "verify" : "decisions",
       text: item.text,
       group: item.group,
+      // Sent as it is, so saving a tick never strips a stream tag (BE-19).
+      stream: item.stream ?? null,
       ...(wanted.has(item.key) ? { checked: draft.checked[item.key] } : {}),
     }));
 

@@ -209,6 +209,14 @@ export interface BoardChecklistItem {
    * renders every box as an independent checkbox misreads its own board.
    */
   group: string | null;
+  /**
+   * The stream (`W1`, …) a verify row proves, or null for the lead's own (BE-19).
+   *
+   * ⚠️ Optional because a service older than BE-19 never sends it; absent and
+   * null both mean "the lead's". A rewrite must send it back, or the row loses
+   * its stream.
+   */
+  stream?: string | null;
 }
 
 /**
@@ -225,6 +233,8 @@ export interface BoardChecklistDraft {
   checked?: boolean;
   note?: string | null;
   group?: string | null;
+  /** See `BoardChecklistItem.stream`. */
+  stream?: string | null;
 }
 
 /** The board's limits on a checklist, so a caller can refuse before the API does. */
@@ -329,6 +339,150 @@ export interface BoardCard {
    * machine's job, not a download.
    */
   attachments: BoardAttachment[] | null;
+  /**
+   * The card split into sub-agents' jobs (BE-19), `[]` when it has none.
+   *
+   * ⚠️ Optional: absent from a service older than BE-19. Read it as `[]`.
+   */
+  streams?: BoardStream[];
+  /**
+   * Who runs when, and what each is told — single-card reads only, and null
+   * for a card without streams. When absent, `streamWaves` computes the waves.
+   */
+  dispatch?: BoardDispatch | null;
+}
+
+export const STREAM_ROLES = ["research", "implement", "test"] as const;
+export type StreamRole = (typeof STREAM_ROLES)[number];
+
+/**
+ * One sub-agent's job on a card — `Stream` in `packages/db/src/board/streams.ts`,
+ * restated because this app never imports the db package.
+ */
+export interface BoardStream {
+  key: string;
+  title: string;
+  goal: string;
+  role: StreamRole;
+  /** Repo-relative paths; a trailing `/` is a directory. */
+  owns: string[];
+  reads: string[];
+  /** Stream keys this one waits for. */
+  dependsOn: string[];
+  isolation: "worktree" | "shared";
+  position: number;
+}
+
+export interface BoardDispatch {
+  waves: string[][];
+  briefs: Record<string, string>;
+}
+
+const nonEmpty = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
+const stringList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter(nonEmpty) : [];
+
+/**
+ * A card's `streams` as the API sent them, or `[]`.
+ *
+ * ⚠️ Defensive like every other card parser: a row without a key is dropped
+ * (a key is what checklist rows and waves point at), anything else unknown is
+ * defaulted rather than refused, and the result is in `position` order.
+ */
+export function parseStreams(value: unknown): BoardStream[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .flatMap((entry, index): BoardStream[] => {
+      if (!entry || typeof entry !== "object") return [];
+      const row = entry as Record<string, unknown>;
+      if (!nonEmpty(row.key)) return [];
+      return [
+        {
+          key: row.key,
+          title: nonEmpty(row.title) ? row.title : row.key,
+          goal: typeof row.goal === "string" ? row.goal : "",
+          role: STREAM_ROLES.includes(row.role as StreamRole)
+            ? (row.role as StreamRole)
+            : "implement",
+          owns: stringList(row.owns),
+          reads: stringList(row.reads),
+          dependsOn: stringList(row.dependsOn),
+          isolation: row.isolation === "shared" ? "shared" : "worktree",
+          position:
+            typeof row.position === "number" && Number.isFinite(row.position)
+              ? row.position
+              : index,
+        },
+      ];
+    })
+    .sort((a, b) => a.position - b.position);
+}
+
+/** A single-card read's `dispatch`, or null when absent or malformed. */
+export function parseDispatch(value: unknown): BoardDispatch | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (!Array.isArray(row.waves)) return null;
+  const waves = row.waves
+    .map((wave) => stringList(wave))
+    .filter((wave) => wave.length > 0);
+  const briefs: Record<string, string> = {};
+  if (row.briefs && typeof row.briefs === "object")
+    for (const [key, brief] of Object.entries(row.briefs))
+      if (typeof brief === "string") briefs[key] = brief;
+  return { waves, briefs };
+}
+
+/** A checklist row's `stream`: a non-empty key, or null. */
+export function parseItemStream(value: unknown): string | null {
+  return nonEmpty(value) ? value : null;
+}
+
+/**
+ * The streams in waves: wave 0 depends on nothing, each later wave only on
+ * earlier ones. The server's `dispatch.waves` wins when it is there.
+ *
+ * ⚠️ A dependency on a key the card does not have is ignored, and a cycle (the
+ * API refuses one, an old row might not) lands in one last wave rather than
+ * looping or vanishing — every stream is always drawn exactly once.
+ */
+export function streamWaves(
+  streams: BoardStream[],
+  dispatch?: BoardDispatch | null,
+): BoardStream[][] {
+  const byKey = new Map(streams.map((stream) => [stream.key, stream]));
+  if (dispatch?.waves.length) {
+    const placed = new Set<string>();
+    const waves = dispatch.waves
+      .map((wave) =>
+        wave.flatMap((key) => {
+          const stream = byKey.get(key);
+          if (!stream || placed.has(key)) return [];
+          placed.add(key);
+          return [stream];
+        }),
+      )
+      .filter((wave) => wave.length > 0);
+    const rest = streams.filter((stream) => !placed.has(stream.key));
+    return rest.length ? [...waves, rest] : waves;
+  }
+  const waves: BoardStream[][] = [];
+  const done = new Set<string>();
+  let left = streams;
+  while (left.length) {
+    const ready = left.filter((stream) =>
+      stream.dependsOn.every((key) => done.has(key) || !byKey.has(key)),
+    );
+    if (!ready.length) {
+      waves.push(left);
+      break;
+    }
+    waves.push(ready);
+    for (const stream of ready) done.add(stream.key);
+    left = left.filter((stream) => !done.has(stream.key));
+  }
+  return waves;
 }
 
 /** A file reference on its way to a card. */

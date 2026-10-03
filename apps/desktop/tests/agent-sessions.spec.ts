@@ -233,6 +233,12 @@ test("FE-34: an agent handed a card is briefed by the host's own prompt, as one 
       cardPrompt("work", board, "FE-34"),
     ]);
     expect(claude.args[3]).toContain(`card FE-34 on board ${board}`);
+    // A card with streams makes the agent the lead (BE-19): it runs the
+    // card's dispatch, one sub-agent per stream, and checkpoints per wave.
+    expect(claude.args[3]).toMatch(
+      /If the card has streams, you are the lead: run its dispatch wave by wave, one sub-agent per stream in its own worktree/,
+    );
+    expect(claude.args[3]).toContain("checkpoint once per wave");
 
     // Codex takes the prompt alone; a uuid names a card with no task id.
     const uuidCard = "0bbfb085-821a-4233-8faf-fef325e501bb";
@@ -247,6 +253,9 @@ test("FE-34: an agent handed a card is briefed by the host's own prompt, as one 
       cardPrompt("review", board, uuidCard),
     ]);
     expect(codex.args[1]).toMatch(/^Review lanework card .* with me first/);
+    expect(codex.args[1]).toContain(
+      "If the card has streams, you are the lead",
+    );
 
     // Anything else is no card at all: a plain new conversation, nothing
     // typed after the CLI's own arguments.

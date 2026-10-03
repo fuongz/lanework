@@ -693,7 +693,17 @@ function parseChecklistDraft(value: unknown): BoardChecklistDraft[] {
       throw new Error(`${at} is not an item`);
     const row = entry as Record<string, unknown>;
     for (const key of Object.keys(row))
-      if (!["key", "section", "text", "checked", "note", "group"].includes(key))
+      if (
+        ![
+          "key",
+          "section",
+          "text",
+          "checked",
+          "note",
+          "group",
+          "stream",
+        ].includes(key)
+      )
         throw new Error(`${at} cannot carry "${key}"`);
 
     if (typeof row.text !== "string" || !row.text.trim())
@@ -749,6 +759,16 @@ function parseChecklistDraft(value: unknown): BoardChecklistDraft[] {
       )
         throw new Error(`${at} has an invalid group`);
       draft.group = row.group;
+    }
+    // The stream a verify item proves (BE-19), passed through so a save keeps
+    // the tag; the API checks it against the card's streams.
+    if (row.stream !== undefined) {
+      if (
+        row.stream !== null &&
+        (typeof row.stream !== "string" || !/^W\d{1,3}$/.test(row.stream))
+      )
+        throw new Error(`${at} has an invalid stream`);
+      draft.stream = row.stream;
     }
     return draft;
   });

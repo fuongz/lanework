@@ -162,6 +162,54 @@ What does **not** need a review: read-only requests, single-file obvious fixes,
 or tasks where the user specified the exact shape. Those only need a
 plan.
 
+## Streams: one card, several sub-agents (BE-19)
+
+A card may carry **streams** (`W0`, `W1`, …) — each one sub-agent's job, so
+Claude Code or Codex can run independent parts of a card in parallel.
+
+**When writing a card**, split it into streams when it touches **two or more
+independent write areas** (e.g. db + mcp + desktop). Small cards (1–2 files)
+have none. Each stream needs:
+
+- `key`, `title`, `goal`, `role` (`research`, `implement` or `test`);
+- `owns` — exact paths, or directories ending in `/`; no globs. Two streams
+  never own the same path;
+- `reads`, `depends_on` (stream keys), `isolation` — `worktree` (the default)
+  or `shared` for read-only research;
+- at least one `verify` item tagged `stream: "<key>"`. Untagged verify items
+  belong to the lead: gate, build, e2e, real-app checks.
+
+Shared files (types, schema, contracts) go in a **`W0`** stream the others
+depend on. **At most 4 streams per wave.** Keep the human **files touched**
+table; `owns` is its machine-readable per-stream form.
+
+| Stream | Role | Owns | Depends on |
+| --- | --- | --- | --- |
+| `W0` Contract | implement | `packages/db/src/schema.ts` | — |
+| `W1` MCP tools | implement | `apps/mcp/src/mcp/tools/` | `W0` |
+| `W2` Desktop panel | implement | `apps/desktop/src/components/features/board/` | `W0` |
+
+**Running a card with streams.** `get_review` returns `streams` and
+`dispatch: { waves, briefs }`; the agent that got the card is the **lead**:
+
+1. For each wave, spawn every stream of the wave in **one** turn (Claude Code:
+   several `Agent` calls in one message; Codex: its sub-agents), each in its own
+   git worktree from the current HEAD unless the stream is `shared`. Hand each
+   sub-agent `dispatch.briefs[key]` verbatim. No sub-agents? Run the streams
+   one by one in wave order.
+2. Sub-agents write only inside `owns`, may build and test in their own
+   worktree, and report the files they changed and the checks they ran. They
+   **never** call the Lanework MCP and never commit.
+3. After the wave, the lead merges each worktree into the main checkout (3-way
+   per file against the base), reverts anything outside `owns`, re-runs the
+   stream's checks, ticks that stream's verify items, and calls `checkpoint`
+   **once** for the wave.
+4. After the last wave, the lead runs the untagged verify items.
+
+Only the lead writes to the card. On **resume** (BE-17), re-dispatch only the
+streams whose verify items are not all ticked. A card without streams works
+as before: one agent, end to end.
+
 ## Reusable scripts
 
 Before writing a one-off script for a mechanical task (CSV/JSON conversion,
