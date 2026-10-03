@@ -87,8 +87,9 @@ the cloud, never in a local file.
   `~/.codex/hooks.json`, so every repo gets it, and both run one script the
   app rewrites on each launch, `~/.lanew/hooks/lanework-checkpoint`, under the
   app's own Node — no bun needed. Codex runs a new hook only after you approve
-  it in Codex, once; the app never approves it for you, and needs
-  `[features] hooks = true` in `~/.codex/config.toml`. It costs no model
+  it in Codex, once (`/hooks`); the app never approves it for you. Hooks are
+  on by default in current Codex — only `[features] hooks = false` in
+  `~/.codex/config.toml` turns them off. It costs no model
   quota, redacts secrets on the machine, and uses the app's machine credential
   from the Keychain (revoking the machine revokes the hook). A second switch,
   off by default, also force-pushes the uncommitted working tree (tracked
