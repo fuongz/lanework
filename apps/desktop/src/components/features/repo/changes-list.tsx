@@ -25,12 +25,13 @@ import type {
 } from "../../../../shared/worktree";
 
 /**
- * The working tree's changes, one row per file, grouped by folder.
+ * The working tree's changes, one row per file, nested by folder.
  *
- * ⚠️ Grouped by DIRECTORY, not drawn as a tree. A change list is short and
- * wide-pathed; one row per folder that holds changes reads like the list in any
- * git client, where a nested tree would spend three rows of indentation to say
- * `apps/desktop/src`.
+ * ⚠️ A TREE with single-child chains compacted, the way an editor's source
+ * control view draws it. One row per changed directory listed
+ * `crates/olm`, `crates/olm/src` and `crates/olm/tests` as unrelated siblings;
+ * a plain tree spends three rows of indentation to say `apps/desktop/src`.
+ * Folding the chains keeps the nesting and drops the empty steps.
  *
  * ⚠️ Plain React, not `@pierre/trees`. The pull request's tree is a web
  * component with its own shadow root, and every row here carries a checkbox and
@@ -46,6 +47,102 @@ const MARK: Record<WorktreeFileStatus, { letter: string; tone: string }> = {
   renamed: { letter: "R", tone: "text-violet-600 dark:text-violet-400" },
   conflicted: { letter: "!", tone: "text-rose-600 dark:text-rose-400" },
 };
+
+/** A directory holding changes. `files` is every change beneath it, at any depth. */
+interface Folder {
+  kind: "folder";
+  /** The full path, which is also its key and its accessible name. */
+  path: string;
+  /** What the row shows: one segment, or a compacted chain like `apps/desktop`. */
+  name: string;
+  children: Node[];
+  files: WorktreeFile[];
+}
+
+type Node = Folder | { kind: "file"; file: WorktreeFile };
+
+/** Folders first, then files, each alphabetical — the order a file tree uses. */
+function byKind(a: Node, b: Node): number {
+  if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+  const left = a.kind === "folder" ? a.name : splitPath(a.file.path).name;
+  const right = b.kind === "folder" ? b.name : splitPath(b.file.path).name;
+  return left.localeCompare(right);
+}
+
+/** Folds a folder whose only child is another folder into one row. */
+function compact(node: Node): Node {
+  if (node.kind === "file") return node;
+  let folder = node;
+  while (folder.children.length === 1 && folder.children[0].kind === "folder") {
+    const only: Folder = folder.children[0];
+    folder = { ...only, name: `${folder.name}/${only.name}` };
+  }
+  return { ...folder, children: folder.children.map(compact).sort(byKind) };
+}
+
+function buildTree(files: WorktreeFile[]): Node[] {
+  const root: Folder = {
+    kind: "folder",
+    path: "",
+    name: "",
+    children: [],
+    files: [],
+  };
+  const folders = new Map<string, Folder>();
+  for (const file of files) {
+    const segments = file.path.split("/");
+    let parent = root;
+    for (let depth = 1; depth < segments.length; depth++) {
+      const path = segments.slice(0, depth).join("/");
+      let folder = folders.get(path);
+      if (!folder) {
+        folder = {
+          kind: "folder",
+          path,
+          name: segments[depth - 1],
+          children: [],
+          files: [],
+        };
+        folders.set(path, folder);
+        parent.children.push(folder);
+      }
+      folder.files.push(file);
+      parent = folder;
+    }
+    parent.children.push({ kind: "file", file });
+  }
+  // ⚠️ The root's children are compacted one by one, never the root itself: a
+  // repo whose every change sits under `apps/` would otherwise fold the whole
+  // list into a single unnamed row.
+  return root.children.map(compact).sort(byKind);
+}
+
+type Row =
+  | { kind: "folder"; folder: Folder; depth: number }
+  | { kind: "file"; file: WorktreeFile; depth: number };
+
+/** The rows a reader can see: a shut folder hides everything beneath it. */
+function visibleRows(
+  nodes: Node[],
+  shut: Set<string>,
+  depth = 0,
+  rows: Row[] = [],
+): Row[] {
+  for (const node of nodes) {
+    if (node.kind === "file") {
+      rows.push({ kind: "file", file: node.file, depth });
+      continue;
+    }
+    rows.push({ kind: "folder", folder: node, depth });
+    if (!shut.has(node.path)) visibleRows(node.children, shut, depth + 1, rows);
+  }
+  return rows;
+}
+
+/** Pixels of indentation per level of nesting. */
+const INDENT = 12;
+/** A folder's chevron and the gap after it — what a file leaves blank instead. */
+const TWISTIE = 18;
 
 function Counts({
   additions,
@@ -71,11 +168,12 @@ function Counts({
 
 function FileRow({
   file,
-  indent,
+  pad,
   onRestore,
 }: {
   file: WorktreeFile;
-  indent: boolean;
+  /** Left padding in pixels, which is where the file sits in the tree. */
+  pad: number;
   onRestore: (file: WorktreeFile) => void;
 }) {
   const focus = useWorktree((state) => state.focus);
@@ -96,7 +194,8 @@ function FileRow({
         type="button"
         title={file.path}
         onClick={() => focusFile(file.path)}
-        className={`focus-visible:ring-accent-brand flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-[13px] outline-none focus-visible:ring-2 ${indent ? "pl-7" : "pl-2"}`}
+        style={{ paddingLeft: pad }}
+        className="focus-visible:ring-accent-brand flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-[13px] outline-none focus-visible:ring-2"
       >
         <FileTypeIcon path={file.path} className="size-4 shrink-0" />
         <span
@@ -147,6 +246,59 @@ function FileRow({
   );
 }
 
+function FolderRow({
+  folder,
+  pad,
+  shut,
+  onToggle,
+}: {
+  folder: Folder;
+  /** Left padding in pixels, which is where the folder sits in the tree. */
+  pad: number;
+  shut: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="hover:bg-foreground/[0.04] flex h-7 min-w-0 items-center gap-2 rounded-md pr-2">
+      <button
+        type="button"
+        aria-expanded={!shut}
+        aria-label={`${shut ? "Expand" : "Collapse"} ${folder.path}`}
+        onClick={onToggle}
+        style={{ paddingLeft: pad }}
+        className="focus-visible:ring-accent-brand flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md text-left outline-none focus-visible:ring-2"
+      >
+        <HugeiconsIcon
+          icon={shut ? ArrowRight01Icon : ArrowDown01Icon}
+          className="text-muted-foreground size-3 shrink-0"
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+        <HugeiconsIcon
+          icon={shut ? Folder01Icon : FolderOpenIcon}
+          className="text-muted-foreground size-4 shrink-0"
+          strokeWidth={1.5}
+          aria-hidden="true"
+        />
+        {/* ⚠️ Truncated from the START, like the diff header: the end of a
+            compacted chain is the part that says where you are. */}
+        <span
+          className="text-muted-foreground min-w-0 flex-1 truncate text-left text-[13px] [direction:rtl]"
+          title={folder.path}
+        >
+          <bdi>{folder.name}</bdi>
+        </span>
+        {shut && (
+          <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+            {folder.files.length}
+          </span>
+        )}
+      </button>
+      <StageBox files={folder.files} label={folder.path} />
+    </div>
+  );
+}
+
 function Section({
   title,
   files,
@@ -166,15 +318,11 @@ function Section({
       else next.add(dir);
       return next;
     });
-  const groups = useMemo(() => {
-    const map = new Map<string, WorktreeFile[]>();
-    for (const file of files) {
-      const { dir } = splitPath(file.path);
-      const key = dir.replace(/\/$/, "");
-      map.set(key, [...(map.get(key) ?? []), file]);
-    }
-    return [...map].sort(([a], [b]) => a.localeCompare(b));
-  }, [files]);
+  const tree = useMemo(() => buildTree(files), [files]);
+  const rows = useMemo(() => visibleRows(tree, shut), [tree, shut]);
+  // A list of files at the repo's root has no chevrons to line up with, so it
+  // keeps its plain left edge instead of a blank twistie on every row.
+  const flat = tree.every((node) => node.kind === "file");
 
   if (!files.length) return null;
   return (
@@ -198,57 +346,24 @@ function Section({
         <StageBox files={files} label={`all ${title.toLowerCase()} files`} />
       </div>
       {open &&
-        groups.map(([dir, members]) => (
-          <div key={dir} className="flex flex-col">
-            {dir && (
-              <div className="hover:bg-foreground/[0.04] flex h-7 min-w-0 items-center gap-2 rounded-md pr-2">
-                <button
-                  type="button"
-                  aria-expanded={!shut.has(dir)}
-                  aria-label={`${shut.has(dir) ? "Expand" : "Collapse"} ${dir}`}
-                  onClick={() => toggle(dir)}
-                  className="focus-visible:ring-accent-brand flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1 text-left outline-none focus-visible:ring-2"
-                >
-                  <HugeiconsIcon
-                    icon={shut.has(dir) ? ArrowRight01Icon : ArrowDown01Icon}
-                    className="text-muted-foreground size-3 shrink-0"
-                    strokeWidth={1.8}
-                    aria-hidden="true"
-                  />
-                  <HugeiconsIcon
-                    icon={shut.has(dir) ? Folder01Icon : FolderOpenIcon}
-                    className="text-muted-foreground size-4 shrink-0"
-                    strokeWidth={1.5}
-                    aria-hidden="true"
-                  />
-                  {/* ⚠️ Truncated from the START, like the diff header: the end
-                      of a directory is the part that says where you are. */}
-                  <span
-                    className="text-muted-foreground min-w-0 flex-1 truncate text-left text-[13px] [direction:rtl]"
-                    title={dir}
-                  >
-                    <bdi>{dir}</bdi>
-                  </span>
-                  {shut.has(dir) && (
-                    <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
-                      {members.length}
-                    </span>
-                  )}
-                </button>
-                <StageBox files={members} label={dir} />
-              </div>
-            )}
-            {!shut.has(dir) &&
-              members.map((file) => (
-                <FileRow
-                  key={file.path}
-                  file={file}
-                  indent={dir !== ""}
-                  onRestore={onRestore}
-                />
-              ))}
-          </div>
-        ))}
+        rows.map((row) =>
+          row.kind === "folder" ? (
+            <FolderRow
+              key={`folder:${row.folder.path}`}
+              folder={row.folder}
+              pad={4 + row.depth * INDENT}
+              shut={shut.has(row.folder.path)}
+              onToggle={() => toggle(row.folder.path)}
+            />
+          ) : (
+            <FileRow
+              key={row.file.path}
+              file={row.file}
+              pad={flat ? 8 : 4 + row.depth * INDENT + TWISTIE}
+              onRestore={onRestore}
+            />
+          ),
+        )}
     </section>
   );
 }
