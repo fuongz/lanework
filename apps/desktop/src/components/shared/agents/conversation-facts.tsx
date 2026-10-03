@@ -133,13 +133,15 @@ export function ConversationRecap({
   return (
     <section
       aria-label="Recap"
+      // ⚠️ One line height for the three parts — the label, the text and its
+      // time — so they sit level shut, and the first line stays level open.
       className="border-sidebar-border flex shrink-0 items-start gap-2 border-b px-3 py-2 text-xs"
     >
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="text-foreground flex shrink-0 items-center gap-1 font-medium"
+        className="text-foreground flex h-5 shrink-0 items-center gap-1 leading-5 font-medium"
       >
         <HugeiconsIcon
           icon={ArrowRight01Icon}
@@ -154,7 +156,7 @@ export function ConversationRecap({
       </button>
       <p
         className={cn(
-          "text-muted-foreground min-w-0 flex-1 leading-relaxed",
+          "text-muted-foreground min-w-0 flex-1 leading-5",
           open ? "max-h-40 overflow-y-auto whitespace-pre-line" : "truncate",
         )}
       >
@@ -164,7 +166,7 @@ export function ConversationRecap({
         <time
           dateTime={recap.at}
           title={new Date(recap.at).toLocaleString()}
-          className="text-muted-foreground shrink-0 tabular-nums"
+          className="text-muted-foreground shrink-0 leading-5 tabular-nums"
         >
           {relativeTime(recap.at, Date.now())}
         </time>

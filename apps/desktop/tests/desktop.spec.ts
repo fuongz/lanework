@@ -108,6 +108,8 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       "readiness",
       // FE-36: what Claude Code remembers about a project, read-only.
       "memory",
+      "instructions",
+      "agentSetup",
     ]);
     expect(
       await page.evaluate(
