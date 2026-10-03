@@ -1,17 +1,30 @@
-import { Fragment } from "react";
+import { createContext, Fragment, type ReactNode, useContext } from "react";
 import { Empty, EmptyDescription, EmptyHeader } from "#/components/ui/empty";
 import {
   type Block,
   type Inline,
   inlines,
+  type LinkSpan,
   parseMarkdown,
 } from "#/lib/markdown";
 
+/** What a link is drawn as, by the one reader that follows links (FE-36). */
+export type LinkRenderer = (span: LinkSpan) => ReactNode;
+
+/**
+ * The body's link renderer. None — every card body — and links are not even
+ * parsed: they stay the text they were written as.
+ */
+const LinkContext = createContext<LinkRenderer | null>(null);
+
 function Spans({ spans }: { spans: Inline[] }) {
+  const link = useContext(LinkContext);
   return (
     <>
       {spans.map((span, index) => {
         const key = `${span.kind}-${index}`;
+        if (span.kind === "link")
+          return <Fragment key={key}>{link ? link(span) : span.raw}</Fragment>;
         if (span.kind === "code")
           return (
             <code
@@ -46,27 +59,45 @@ export function InlineMarkdown({ source }: { source: string }) {
   return <Spans spans={inlines(source)} />;
 }
 
-/** A card's body, built as elements — never as HTML. See `lib/markdown`. */
-export function MarkdownBody({ source }: { source: string }) {
+/**
+ * A card's body, built as elements — never as HTML. See `lib/markdown`.
+ *
+ * `link` reads `[text](href)` and `[[name]]` as links and draws each one
+ * (FE-36); without it they are left as written.
+ */
+export function MarkdownBody({
+  source,
+  link,
+  empty = "No description.",
+}: {
+  source: string;
+  link?: LinkRenderer;
+  empty?: string;
+}) {
   if (!source.trim())
     return (
       <Empty className="items-start py-6 text-left">
         <EmptyHeader className="items-start">
-          <EmptyDescription>No description.</EmptyDescription>
+          <EmptyDescription>{empty}</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
   return (
-    <div className="font-content flex flex-col gap-3 text-[13px] leading-relaxed [font-weight:var(--content-font-weight)]">
-      {parseMarkdown(source).map((block, index) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: a parsed document is positional and never reorders — the index is the block's identity.
-        <BlockView key={`${block.kind}-${index}`} block={block} />
-      ))}
-    </div>
+    <LinkContext.Provider value={link ?? null}>
+      <div className="font-content flex flex-col gap-3 text-[13px] leading-relaxed [font-weight:var(--content-font-weight)]">
+        {parseMarkdown(source, { links: link !== undefined }).map(
+          (block, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a parsed document is positional and never reorders — the index is the block's identity.
+            <BlockView key={`${block.kind}-${index}`} block={block} />
+          ),
+        )}
+      </div>
+    </LinkContext.Provider>
   );
 }
 
 function BlockView({ block }: { block: Block }) {
+  const links = useContext(LinkContext) !== null;
   if (block.kind === "heading") {
     const size =
       block.level <= 2
@@ -117,7 +148,7 @@ function BlockView({ block }: { block: Block }) {
               {block.header.map((cell, index) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: a parsed document is positional and never reorders — the index is the row's identity.
                 <th key={index} className="py-1.5 pr-3 font-medium">
-                  <Spans spans={inlines(cell)} />
+                  <Spans spans={inlines(cell, { links })} />
                 </th>
               ))}
             </tr>
@@ -133,7 +164,7 @@ function BlockView({ block }: { block: Block }) {
                         "files touched" ones, and every path in them is written
                         in backticks. Rendering the cell raw printed the
                         backticks and lost the code styling. */}
-                    <Spans spans={inlines(cell)} />
+                    <Spans spans={inlines(cell, { links })} />
                   </td>
                 ))}
               </tr>

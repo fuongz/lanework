@@ -4,6 +4,11 @@ import { channels, type DesktopApi } from "../../shared/desktop";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
 import { type DesktopHandoffApi, handoffChannels } from "../../shared/handoff";
 import {
+  type DesktopMemoryApi,
+  type MemoryChange,
+  memoryChannels,
+} from "../../shared/memory";
+import {
   type DesktopReadinessApi,
   readinessChannels,
 } from "../../shared/readiness";
@@ -99,6 +104,16 @@ const readiness: DesktopReadinessApi = {
     ipcRenderer.invoke(readinessChannels.preview, slug, fix),
   apply: (slug, fix, before) =>
     ipcRenderer.invoke(readinessChannels.apply, slug, fix, before),
+};
+
+/** What Claude remembers about a project (FE-36): read-only, by file NAME. */
+const memory: DesktopMemoryApi = {
+  list: (workspace) => ipcRenderer.invoke(memoryChannels.list, workspace),
+  read: (workspace, file) =>
+    ipcRenderer.invoke(memoryChannels.read, workspace, file),
+  reveal: (workspace) => ipcRenderer.invoke(memoryChannels.reveal, workspace),
+  onChange: (listener) =>
+    subscribe<MemoryChange>(memoryChannels.changed, listener),
 };
 
 const git: DesktopGitApi = {
@@ -461,5 +476,6 @@ const desktop: DesktopApi = {
   terminal: createTerminal(),
   handoff,
   readiness,
+  memory,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

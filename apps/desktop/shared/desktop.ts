@@ -1,6 +1,7 @@
 import type { DesktopAuthApi } from "./auth";
 import type { DesktopGitApi } from "./git";
 import type { DesktopHandoffApi } from "./handoff";
+import type { DesktopMemoryApi } from "./memory";
 import type { DesktopReadinessApi } from "./readiness";
 import type { DesktopTerminalApi } from "./terminal";
 import type { DesktopWorkspacesApi } from "./workspaces";
@@ -71,4 +72,6 @@ export interface DesktopApi {
   handoff: DesktopHandoffApi;
   /** Whether a project's folder is ready for an agent to work its board (FE-30). */
   readiness: DesktopReadinessApi;
+  /** What Claude Code remembers about a project, read-only (FE-36). */
+  memory: DesktopMemoryApi;
 }

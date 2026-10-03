@@ -5,6 +5,7 @@ import { registerAuth } from "./auth";
 import { registerGit } from "./git";
 import { registerHandoff } from "./handoff";
 import { broadcast, handle } from "./ipc";
+import { registerMemory } from "./memory";
 import { installMenu } from "./menu";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
@@ -140,6 +141,7 @@ app
     registerTerminal(devUrl);
     registerHandoff(devUrl);
     registerReadiness(devUrl);
+    registerMemory(devUrl);
     installMenu();
     createWindow();
     app.on("activate", () => {

@@ -15,7 +15,28 @@ export type Inline =
   | { kind: "text"; text: string }
   | { kind: "code"; text: string }
   | { kind: "strong"; text: string }
-  | { kind: "em"; text: string };
+  | { kind: "em"; text: string }
+  | LinkSpan;
+
+/**
+ * `[text](href)`, or `[[name]]` (`wiki`) — only when asked for (FE-36).
+ * `raw` is the link as written, for a reader that does not follow it.
+ */
+export interface LinkSpan {
+  kind: "link";
+  text: string;
+  href: string;
+  wiki: boolean;
+  raw: string;
+}
+
+export interface MarkdownOptions {
+  /**
+   * Read `[text](href)` and `[[name]]` as links (FE-36). Off by default: a
+   * card body keeps every link exactly as written.
+   */
+  links?: boolean;
+}
 
 export type Block =
   | { kind: "heading"; level: number; spans: Inline[] }
@@ -26,16 +47,38 @@ export type Block =
   | { kind: "table"; header: string[]; rows: string[][] };
 
 const INLINE = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*)/g;
+/** The same, with links. Code comes first: a link inside it stays code. */
+const INLINE_LINKS =
+  /(`[^`]+`|\[\[[^\]\n]+\]\]|\[[^\]\n]+\]\([^)\s]+\)|\*\*[^*]+\*\*|\*[^*\n]+\*)/g;
+const LINK = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/;
 
 /** Split one line into spans. Unmatched text stays exactly as written. */
-export function inlines(line: string): Inline[] {
+export function inlines(line: string, options: MarkdownOptions = {}): Inline[] {
   const spans: Inline[] = [];
   let at = 0;
-  for (const match of line.matchAll(INLINE)) {
+  for (const match of line.matchAll(options.links ? INLINE_LINKS : INLINE)) {
     const start = match.index ?? 0;
     if (start > at) spans.push({ kind: "text", text: line.slice(at, start) });
     const token = match[0];
-    if (token.startsWith("`"))
+    const link = LINK.exec(token);
+    if (token.startsWith("[[")) {
+      const name = token.slice(2, -2).trim();
+      spans.push({
+        kind: "link",
+        text: name,
+        href: name,
+        wiki: true,
+        raw: token,
+      });
+    } else if (link)
+      spans.push({
+        kind: "link",
+        text: link[1] ?? "",
+        href: link[2] ?? "",
+        wiki: false,
+        raw: token,
+      });
+    else if (token.startsWith("`"))
       spans.push({ kind: "code", text: token.slice(1, -1) });
     else if (token.startsWith("**"))
       spans.push({ kind: "strong", text: token.slice(2, -2) });
@@ -52,14 +95,18 @@ const cells = (row: string): string[] =>
     .split("|")
     .map((cell) => cell.trim());
 
-export function parseMarkdown(source: string): Block[] {
+export function parseMarkdown(
+  source: string,
+  options: MarkdownOptions = {},
+): Block[] {
+  const read = (line: string) => inlines(line, options);
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   const blocks: Block[] = [];
   let paragraph: string[] = [];
 
   const flush = () => {
     if (!paragraph.length) return;
-    blocks.push({ kind: "paragraph", spans: inlines(paragraph.join(" ")) });
+    blocks.push({ kind: "paragraph", spans: read(paragraph.join(" ")) });
     paragraph = [];
   };
 
@@ -83,7 +130,7 @@ export function parseMarkdown(source: string): Block[] {
       blocks.push({
         kind: "heading",
         level: heading[1].length,
-        spans: inlines(heading[2]),
+        spans: read(heading[2]),
       });
       continue;
     }
@@ -109,11 +156,11 @@ export function parseMarkdown(source: string): Block[] {
     if (bullet) {
       flush();
       const ordered = /^\s*\d+\./.test(line);
-      const items: Inline[][] = [inlines(bullet[1])];
+      const items: Inline[][] = [read(bullet[1])];
       while (i + 1 < lines.length) {
         const next = /^\s*(?:[-*+]|\d+\.)\s+(.*)$/.exec(lines[i + 1]);
         if (!next) break;
-        items.push(inlines(next[1]));
+        items.push(read(next[1]));
         i++;
       }
       blocks.push({ kind: "list", ordered, items });
@@ -122,7 +169,7 @@ export function parseMarkdown(source: string): Block[] {
 
     if (line.startsWith(">")) {
       flush();
-      blocks.push({ kind: "quote", spans: inlines(line.replace(/^>\s?/, "")) });
+      blocks.push({ kind: "quote", spans: read(line.replace(/^>\s?/, "")) });
       continue;
     }
 

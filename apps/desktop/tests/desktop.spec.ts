@@ -106,6 +106,8 @@ test("production SPA supports native IPC, navigation and persisted preferences",
       "handoff",
       // FE-30: whether a project's folder is ready for an agent.
       "readiness",
+      // FE-36: what Claude Code remembers about a project, read-only.
+      "memory",
     ]);
     expect(
       await page.evaluate(

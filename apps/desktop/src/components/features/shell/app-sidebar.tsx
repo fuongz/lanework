@@ -1,4 +1,5 @@
 import {
+  Brain02Icon,
   Clock01Icon,
   GitCompareIcon,
   GitPullRequestIcon,
@@ -19,6 +20,7 @@ import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { useCommandPalette } from "#/stores/command-palette";
 import { useIssueView } from "#/stores/issue-view";
+import { memoryCount, useMemory, useMemoryWatch } from "#/stores/memory";
 import { usePulls } from "#/stores/pulls";
 import { useSession } from "#/stores/session";
 import { useWorktree } from "#/stores/worktree";
@@ -110,6 +112,12 @@ export function AppSidebar() {
   );
   const navigate = useNavigate();
   const peek = useWorktree((state) => state.peek);
+  // Listed with the rail, not when Memory is opened: the count is the reason
+  // to open it, and main's watch keeps it current (FE-36/D11).
+  useMemoryWatch(slug);
+  const memories = useMemory((state) =>
+    state.slug === slug ? memoryCount(state.list) : 0,
+  );
 
   // ⚠️ Read with the board, not when Changes is opened: the badge is the reason
   // to open Changes, so it cannot wait for it. `git status` only — the patch
@@ -237,6 +245,26 @@ export function AppSidebar() {
               {view && (
                 <span className="text-muted-foreground ml-auto shrink-0 text-xs tabular-nums">
                   {view.total ?? view.cards.length}
+                </span>
+              )}
+            </Link>
+            {/* What Claude Code remembers about this project (FE-36/D3). */}
+            <Link
+              to="/w/$slug/memory"
+              params={{ slug }}
+              className={ROW}
+              activeProps={ACTIVE}
+            >
+              <HugeiconsIcon
+                icon={Brain02Icon}
+                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 truncate">Memory</span>
+              {memories > 0 && (
+                <span className="text-muted-foreground ml-auto shrink-0 text-xs tabular-nums">
+                  {memories}
                 </span>
               )}
             </Link>
