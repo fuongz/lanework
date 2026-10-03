@@ -4,24 +4,25 @@
 // ⚠️ `config.toml` is READ here and never written (FE-29/D5, D7). Two things
 // in it matter and both are the user's to change, not ours:
 //
-//   • `[features] hooks = true` — without it Codex runs no hook at all. The
-//     app shows the line to add rather than editing a TOML file it does not
-//     own.
+//   • `[features] hooks` — ON unless the user wrote `false` (Codex made it a
+//     stable feature, on by default; `codex_hooks` is its old name). Turned
+//     off, Codex runs no hook at all, and the app shows the line that turns
+//     it back on rather than editing a TOML file it does not own.
 //   • `[hooks.state."<file>:stop:<group>:<index>"] trusted_hash = …` — Codex's
 //     own record that the user reviewed a hook. Writing it ourselves would
 //     switch off the one safety check Codex puts in front of running code.
 //
 // The TOML reader is deliberately tiny: table headers and `key = value` lines,
 // which is all these two questions need. Anything it cannot read counts as
-// "not set", which only ever makes the app show an instruction it did not
-// need to — never claim an approval that is not there.
+// "not set": hooks on, as Codex itself defaults, and no approval — never
+// claim an approval that is not there.
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 /** Codex's home — `$CODEX_HOME`, as Codex itself reads it, or `~/.codex`. */
-export function codexHome(): string {
-  return process.env.CODEX_HOME || join(homedir(), ".codex");
+export function codexHome(home = homedir()): string {
+  return process.env.CODEX_HOME || join(home, ".codex");
 }
 
 export const codexHooksPath = () => join(codexHome(), "hooks.json");
@@ -31,7 +32,8 @@ export const codexConfigPath = () => join(codexHome(), "config.toml");
 export const HOOKS_FEATURE_LINE = "[features]\nhooks = true";
 
 export type CodexConfig = {
-  /** `[features] hooks = true` (or `features.hooks = true`). */
+  /** False only for `[features] hooks = false` (or `features.hooks`, or the
+   * old `codex_hooks`): Codex runs hooks by default. */
   hooksEnabled: boolean;
   /** Every `hooks.state` key Codex holds a `trusted_hash` for. */
   trusted: Set<string>;
@@ -47,7 +49,7 @@ function unquoteKey(key: string): string {
 
 export function parseCodexConfig(text: string): CodexConfig {
   let table = "";
-  let hooksEnabled = false;
+  let hooksEnabled = true;
   const trusted = new Set<string>();
   for (const raw of text.split("\n")) {
     const line = raw.replace(/\s+#.*$/, "").trim();
@@ -62,10 +64,11 @@ export function parseCodexConfig(text: string): CodexConfig {
     const key = pair[1].trim();
     const value = pair[2].trim();
     if (
-      (table === "features" && key === "hooks") ||
-      (table === "" && key === "features.hooks")
+      (table === "features" && (key === "hooks" || key === "codex_hooks")) ||
+      (table === "" &&
+        (key === "features.hooks" || key === "features.codex_hooks"))
     )
-      hooksEnabled = value === "true";
+      hooksEnabled = value !== "false";
     const state = /^hooks\.state\.(.+)$/.exec(table);
     if (state?.[1] && key === "trusted_hash" && value.length > 2)
       trusted.add(unquoteKey(state[1]));

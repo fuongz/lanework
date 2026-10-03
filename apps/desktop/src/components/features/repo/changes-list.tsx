@@ -10,6 +10,14 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMemo, useState } from "react";
 import { splitPath } from "#/components/shared/diff/diff-file-header";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
+import {
+  buildTree,
+  type Folder,
+  INDENT,
+  MARK,
+  TWISTIE,
+  visibleRows,
+} from "#/components/shared/repo/file-tree";
 import { RestoreDialog } from "#/components/shared/repo/restore-dialog";
 import { StageBox } from "#/components/shared/repo/stage-box";
 import { Button } from "#/components/ui/button";
@@ -19,10 +27,8 @@ import {
   TooltipTrigger,
 } from "#/components/ui/tooltip";
 import { stagedTally, useWorktree } from "#/stores/worktree";
-import type {
-  WorktreeFile,
-  WorktreeFileStatus,
-} from "../../../../shared/worktree";
+import type { WorktreeFile } from "../../../../shared/worktree";
+import { ChangeAgents } from "./change-agents";
 
 /**
  * The working tree's changes, one row per file, nested by folder.
@@ -37,112 +43,6 @@ import type {
  * component with its own shadow root, and every row here carries a checkbox and
  * a restore button that have to be real, focusable controls in this document.
  */
-
-/** One letter per status, the way `git status -s` spells them. */
-const MARK: Record<WorktreeFileStatus, { letter: string; tone: string }> = {
-  added: { letter: "A", tone: "text-emerald-600 dark:text-emerald-400" },
-  untracked: { letter: "U", tone: "text-emerald-600 dark:text-emerald-400" },
-  modified: { letter: "M", tone: "text-amber-600 dark:text-amber-400" },
-  deleted: { letter: "D", tone: "text-rose-600 dark:text-rose-400" },
-  renamed: { letter: "R", tone: "text-violet-600 dark:text-violet-400" },
-  conflicted: { letter: "!", tone: "text-rose-600 dark:text-rose-400" },
-};
-
-/** A directory holding changes. `files` is every change beneath it, at any depth. */
-interface Folder {
-  kind: "folder";
-  /** The full path, which is also its key and its accessible name. */
-  path: string;
-  /** What the row shows: one segment, or a compacted chain like `apps/desktop`. */
-  name: string;
-  children: Node[];
-  files: WorktreeFile[];
-}
-
-type Node = Folder | { kind: "file"; file: WorktreeFile };
-
-/** Folders first, then files, each alphabetical — the order a file tree uses. */
-function byKind(a: Node, b: Node): number {
-  if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
-  const left = a.kind === "folder" ? a.name : splitPath(a.file.path).name;
-  const right = b.kind === "folder" ? b.name : splitPath(b.file.path).name;
-  return left.localeCompare(right);
-}
-
-/** Folds a folder whose only child is another folder into one row. */
-function compact(node: Node): Node {
-  if (node.kind === "file") return node;
-  let folder = node;
-  while (folder.children.length === 1 && folder.children[0].kind === "folder") {
-    const only: Folder = folder.children[0];
-    folder = { ...only, name: `${folder.name}/${only.name}` };
-  }
-  return { ...folder, children: folder.children.map(compact).sort(byKind) };
-}
-
-function buildTree(files: WorktreeFile[]): Node[] {
-  const root: Folder = {
-    kind: "folder",
-    path: "",
-    name: "",
-    children: [],
-    files: [],
-  };
-  const folders = new Map<string, Folder>();
-  for (const file of files) {
-    const segments = file.path.split("/");
-    let parent = root;
-    for (let depth = 1; depth < segments.length; depth++) {
-      const path = segments.slice(0, depth).join("/");
-      let folder = folders.get(path);
-      if (!folder) {
-        folder = {
-          kind: "folder",
-          path,
-          name: segments[depth - 1],
-          children: [],
-          files: [],
-        };
-        folders.set(path, folder);
-        parent.children.push(folder);
-      }
-      folder.files.push(file);
-      parent = folder;
-    }
-    parent.children.push({ kind: "file", file });
-  }
-  // ⚠️ The root's children are compacted one by one, never the root itself: a
-  // repo whose every change sits under `apps/` would otherwise fold the whole
-  // list into a single unnamed row.
-  return root.children.map(compact).sort(byKind);
-}
-
-type Row =
-  | { kind: "folder"; folder: Folder; depth: number }
-  | { kind: "file"; file: WorktreeFile; depth: number };
-
-/** The rows a reader can see: a shut folder hides everything beneath it. */
-function visibleRows(
-  nodes: Node[],
-  shut: Set<string>,
-  depth = 0,
-  rows: Row[] = [],
-): Row[] {
-  for (const node of nodes) {
-    if (node.kind === "file") {
-      rows.push({ kind: "file", file: node.file, depth });
-      continue;
-    }
-    rows.push({ kind: "folder", folder: node, depth });
-    if (!shut.has(node.path)) visibleRows(node.children, shut, depth + 1, rows);
-  }
-  return rows;
-}
-
-/** Pixels of indentation per level of nesting. */
-const INDENT = 12;
-/** A folder's chevron and the gap after it — what a file leaves blank instead. */
-const TWISTIE = 18;
 
 function Counts({
   additions,
@@ -218,6 +118,8 @@ function FileRow({
           <Counts additions={file.additions} deletions={file.deletions} />
         )}
       </button>
+      {/* Beside the row's button, not in it: each mark is a button (FE-39/D2). */}
+      <ChangeAgents path={file.path} />
       {/* ⚠️ A real tooltip, not `title`: the native one waits a second and a
           half, which on an icon-only destructive button is too long to learn
           what it does before clicking it. */}

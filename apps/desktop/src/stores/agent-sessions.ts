@@ -4,6 +4,8 @@ import type {
   AgentCard,
   AgentSession,
   AgentSubagent,
+  CodexGoal,
+  CodexQuota,
   TerminalAgent,
 } from "../../shared/terminal";
 
@@ -43,6 +45,16 @@ interface AgentSessionsState {
   ) => Promise<void>;
   /** Start listening for transcript writes; returns the stop. */
   watchActivity: () => () => void;
+  /**
+   * The Codex account's usage as its newest turn on this machine reported
+   * it (FE-41/D1): the account's, so one for every project. Null until read,
+   * or when no turn ever reported one.
+   */
+  codexQuota: CodexQuota | null;
+  /** Each workspace's Codex conversations' goals, by thread id (FE-41/D4). */
+  codexGoals: Record<string, Record<string, CodexGoal>>;
+  /** Read both again, for `workspace`'s listed conversations (FE-41). */
+  loadCodexUsage: (workspace: string) => Promise<void>;
 }
 
 /** A conversation's key across both CLIs: ids are only unique per agent. */
@@ -130,11 +142,28 @@ const RELIST_MS = 2_000;
 const relisted = new Map<string, number>();
 const relistLater = new Map<string, ReturnType<typeof setTimeout>>();
 
+/**
+ * Codex's usage is read again after its turns write at most this often
+ * (FE-41): a turn opens and closes once, but a spawned thread reports every
+ * settled write. One inside the window is put off to its end, as a relist is.
+ */
+const USAGE_MS = 2_000;
+const usageRead = new Map<string, number>();
+const usageLater = new Map<string, ReturnType<typeof setTimeout>>();
+/** As `latest`, for the usage reads (FE-41). */
+const usageLatest = new Map<string, number>();
+
+/** Whether two serializable answers say the same, so the rail need not redraw. */
+const sameJson = (a: unknown, b: unknown) =>
+  JSON.stringify(a) === JSON.stringify(b);
+
 export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   byWorkspace: {},
   live: {},
   cards: {},
   open: {},
+  codexQuota: null,
+  codexGoals: {},
 
   setOpen: (session, open) =>
     set((state) => ({ open: { ...state.open, [agentKey(session)]: open } })),
@@ -184,7 +213,22 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       else if (!relistLater.has(workspace))
         relistLater.set(workspace, setTimeout(relist, wait));
     };
+    /** Read Codex's usage again — but not on every write that asks (FE-41). */
+    const usageSoon = (workspace: string) => {
+      const read = () => {
+        usageLater.delete(workspace);
+        usageRead.set(workspace, Date.now());
+        void get().loadCodexUsage(workspace);
+      };
+      const wait = USAGE_MS - (Date.now() - (usageRead.get(workspace) ?? 0));
+      if (wait <= 0) read();
+      else if (!usageLater.has(workspace))
+        usageLater.set(workspace, setTimeout(read, wait));
+    };
     return surface.onAgentActivity((activity: AgentActivity) => {
+      // ⚠️ A Codex rollout settled a write: its turn may have reported new
+      // usage, or moved its goal on (FE-41).
+      if (activity.agent === "codex") usageSoon(activity.workspace);
       const known = get().byWorkspace[activity.workspace] ?? [];
       const parent = known.find(
         (entry) => agentKey(entry) === agentKey(activity),
@@ -226,6 +270,8 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     try {
       const listed = await surface.agentSessions(workspace);
       if (latest.get(workspace) !== mine) return;
+      // With every listing, changed or not: the goals are its threads' (FE-41).
+      void get().loadCodexUsage(workspace);
       const previous = get().byWorkspace[workspace];
       // Unchanged: keep the old array, so the rail does not redraw.
       if (
@@ -263,6 +309,32 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     } catch {
       // No folder, not signed in, a file mid-write: the group keeps what it
       // showed, or stays hidden (FE-23/D9).
+    }
+  },
+
+  loadCodexUsage: async (workspace) => {
+    const surface = window.desktop?.terminal;
+    if (!surface) return;
+    const mine = (usageLatest.get(workspace) ?? 0) + 1;
+    usageLatest.set(workspace, mine);
+    try {
+      const usage = await surface.codexUsage(workspace);
+      if (usageLatest.get(workspace) !== mine) return;
+      // Unchanged: keep the old objects, so nothing redraws.
+      set((state) => {
+        const quota = sameJson(state.codexQuota, usage.quota)
+          ? state.codexQuota
+          : usage.quota;
+        const goals = sameJson(state.codexGoals[workspace], usage.goals)
+          ? state.codexGoals
+          : { ...state.codexGoals, [workspace]: usage.goals };
+        return quota === state.codexQuota && goals === state.codexGoals
+          ? state
+          : { codexQuota: quota, codexGoals: goals };
+      });
+    } catch {
+      // Main answers empty rather than failing; a refused call keeps what
+      // the rail showed.
     }
   },
 }));

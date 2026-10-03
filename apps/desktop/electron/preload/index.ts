@@ -1,8 +1,17 @@
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
+import {
+  agentSetupChannels,
+  type DesktopAgentSetupApi,
+} from "../../shared/agent-setup";
 import { authChannels, type DesktopAuthApi } from "../../shared/auth";
 import { channels, type DesktopApi } from "../../shared/desktop";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
 import { type DesktopHandoffApi, handoffChannels } from "../../shared/handoff";
+import {
+  type DesktopInstructionsApi,
+  type InstructionChange,
+  instructionChannels,
+} from "../../shared/instructions";
 import {
   type DesktopMemoryApi,
   type MemoryChange,
@@ -114,6 +123,26 @@ const memory: DesktopMemoryApi = {
   reveal: (workspace) => ipcRenderer.invoke(memoryChannels.reveal, workspace),
   onChange: (listener) =>
     subscribe<MemoryChange>(memoryChannels.changed, listener),
+};
+
+/** What a project's agents are told (FE-37): read-only, by an id main minted. */
+const instructions: DesktopInstructionsApi = {
+  list: (workspace) => ipcRenderer.invoke(instructionChannels.list, workspace),
+  read: (workspace, id) =>
+    ipcRenderer.invoke(instructionChannels.read, workspace, id),
+  effective: (workspace, agent) =>
+    ipcRenderer.invoke(instructionChannels.effective, workspace, agent),
+  reveal: (workspace, id) =>
+    ipcRenderer.invoke(instructionChannels.reveal, workspace, id),
+  onChange: (listener) =>
+    subscribe<InstructionChange>(instructionChannels.changed, listener),
+};
+
+/** A project's agent setup (FE-40): read-only, a slug and an id, never a path. */
+const agentSetup: DesktopAgentSetupApi = {
+  read: (slug) => ipcRenderer.invoke(agentSetupChannels.read, slug),
+  open: (slug, id) => ipcRenderer.invoke(agentSetupChannels.open, slug, id),
+  reveal: (slug, id) => ipcRenderer.invoke(agentSetupChannels.reveal, slug, id),
 };
 
 const git: DesktopGitApi = {
@@ -260,8 +289,20 @@ function createTerminal(): DesktopTerminalApi {
         conversation,
         sub,
       ),
+    agentFiles: (workspace, agent, id) =>
+      ipcRenderer.invoke(terminalChannels.agentFiles, workspace, agent, id),
+    agentFilesForWorktree: (workspace) =>
+      ipcRenderer.invoke(terminalChannels.agentFilesForWorktree, workspace),
     onAgentActivity: (listener) =>
       subscribe(terminalChannels.agentActivity, listener),
+    codexUsage: (workspace) =>
+      ipcRenderer.invoke(terminalChannels.codexUsage, workspace),
+    agentFacts: (workspace, agent, id) =>
+      ipcRenderer.invoke(terminalChannels.agentFacts, workspace, agent, id),
+    agentUsage: (workspace) =>
+      ipcRenderer.invoke(terminalChannels.agentUsage, workspace),
+    onAgentWritten: (listener) =>
+      subscribe(terminalChannels.agentWritten, listener),
     agents: () => ipcRenderer.invoke(terminalChannels.agents),
     kill: (id) => ipcRenderer.invoke(terminalChannels.kill, id),
     reorder: (workspace, ids) =>
@@ -477,5 +518,7 @@ const desktop: DesktopApi = {
   handoff,
   readiness,
   memory,
+  instructions,
+  agentSetup,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

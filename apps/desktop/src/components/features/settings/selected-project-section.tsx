@@ -31,6 +31,8 @@ import {
 import { Input } from "#/components/ui/input";
 import { useBoard } from "#/stores/board";
 import { useReadiness } from "#/stores/readiness";
+import { AgentSetupSection } from "./agent-setup-section";
+import { AgentUsageRow } from "./agent-usage-row";
 
 /** One row of the section's card: what it is on the left, the action on the right. */
 function Row({
@@ -237,9 +239,24 @@ export function SelectedProjectSection({
             Import from local
           </Button>
         </Row>
+        {/* Counted again when the folder changes: it is that folder's
+            conversations (FE-38/D6). */}
+        <AgentUsageRow
+          key={folders[0] ?? ""}
+          workspace={workspace.id ?? workspace.slug}
+        >
+          {({ description, control }) => (
+            <Row label="Agent usage" description={description}>
+              {control}
+            </Row>
+          )}
+        </AgentUsageRow>
       </SettingsCard>
 
       <ReadinessSection slug={workspace.slug} folders={folders} />
+
+      {/* FE-40/D1: right under the readiness list it explains. */}
+      <AgentSetupSection slug={workspace.slug} folders={folders} />
 
       <div className="mt-9 flex flex-col gap-3">
         <h3 className="text-destructive text-[15px] font-medium">

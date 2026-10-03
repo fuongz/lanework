@@ -27,6 +27,7 @@ import type { Workspace } from "../shared/workspaces";
 import {
   CLAUDE_ID,
   CODEX_ID,
+  seedAgentFacts,
   seedAgentHome,
   seedSubagents,
 } from "./agent-fixtures";
@@ -1338,6 +1339,178 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
     await expect(
       page.getByRole("button", { name: "Resume “Flaky login test” in Claude" }),
     ).toHaveAttribute("aria-current", "page");
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("FE-38: an agent's view shows its conversation's numbers and Claude's recap, and follows its writes — a row's tooltip and Settings read them too", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  await seedAgentFacts(agentHome, repo);
+  const transcript = join(
+    agentHome,
+    ".claude",
+    "projects",
+    claudeProjectDir(repo),
+    `${CLAUDE_ID}.jsonl`,
+  );
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+    LANEWORK_CLAUDE_BIN: await standIn(profile, "claude", "ran-%s-%s-%s"),
+    LANEWORK_CODEX_BIN: await standIn(profile, "codex", "ran-%s-%s-%s"),
+  });
+  const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+
+    // A row's tooltip has its cost and context once it is hovered — read
+    // then, and not before (FE-38/D5).
+    const codexRow = page.getByRole("button", {
+      name: "Resume “Settings page cleanup” in Codex",
+    });
+    await expect(codexRow).toHaveAttribute("title", /Codex · /);
+    await expect(codexRow).not.toHaveAttribute("title", /context/);
+    await codexRow.hover();
+    await expect(codexRow).toHaveAttribute("title", /\ncontext 88k \(34%\)$/);
+
+    await page
+      .getByRole("button", { name: "Resume “Flaky login test” in Claude" })
+      .click();
+    const claude = page.getByRole("region", {
+      name: "Claude — Flaky login test",
+    });
+    // In the header: each fact by its icon, read with what it is (D1).
+    const facts = claude.getByTestId("agent-facts");
+    await expect(facts.getByRole("term")).toHaveText([
+      "Model",
+      "Cost",
+      "Tokens in and out",
+      "Context",
+      "Lines added and removed",
+      "Run time",
+    ]);
+    const values = facts.getByRole("definition");
+    await expect(values).toHaveText([
+      "Opus 5.5",
+      "≈ $0.73",
+      "141k in, 4k out",
+      "142k",
+      "+120 −8",
+      "4m 12s",
+    ]);
+    // The cost says what it is: an estimate, sub-agents in it (V5).
+    await expect(
+      facts.locator('[title^="An estimate at API prices"]'),
+    ).toContainText("≈ $0.73");
+    // Claude's newer recap, one line until opened (D4).
+    const recap = claude.getByRole("region", { name: "Recap" });
+    await expect(recap).toContainText(
+      "Fixed the flaky login test; the retry is next.",
+    );
+    const opener = recap.getByRole("button", { name: "Recap" });
+    await expect(opener).toHaveAttribute("aria-expanded", "false");
+    await opener.click();
+    await expect(opener).toHaveAttribute("aria-expanded", "true");
+
+    // A turn written after Claude last saved: the context and tokens follow
+    // it, no polling; the saved cost is marked as lagging.
+    await appendFile(
+      transcript,
+      line({ type: "user", message: { content: "And the retry?" } }),
+    );
+    const turn = line({
+      type: "assistant",
+      message: {
+        id: "msg_fourth",
+        model: "claude-opus-5-5",
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 1,
+          cache_read_input_tokens: 152_000,
+          cache_creation_input_tokens: 0,
+          output_tokens: 300,
+        },
+        content: [{ type: "text", text: "On it." }],
+      },
+    });
+    // ⚠️ Written AGAIN until it is seen: the watcher takes a moment to
+    // start. One answer however often: its id is counted once.
+    await expect(async () => {
+      await appendFile(transcript, turn);
+      await expect(values.nth(3)).toHaveText("152k", { timeout: 1_500 });
+    }).toPass({ timeout: 15_000 });
+    await expect(values.nth(1)).toHaveText("≈ $0.73+");
+    await expect(values.nth(2)).toHaveText("293k in, 4.3k out");
+    // Saved again: the new totals, current.
+    await appendFile(
+      transcript,
+      line({ type: "system", subtype: "turn_duration" }) +
+        line({
+          type: "cost-state",
+          totalCostUSD: 0.91,
+          totalLinesAdded: 130,
+          totalLinesRemoved: 9,
+          totalDuration: 300_000,
+          modelUsage: {
+            "claude-opus-5-5": {
+              inputTokens: 200,
+              outputTokens: 5000,
+              cacheReadInputTokens: 150_000,
+              cacheCreationInputTokens: 2000,
+            },
+          },
+        }),
+    );
+    await expect(values).toHaveText([
+      "Opus 5.5",
+      "≈ $0.91",
+      "152k in, 5k out",
+      "152k",
+      "+130 −9",
+      "5m 0s",
+    ]);
+
+    // Codex: no cost, lines, run time or recap — its context a share of the
+    // window it records (D2).
+    await page
+      .getByRole("button", { name: "Resume “Settings page cleanup” in Codex" })
+      .click();
+    const codex = page.getByRole("region", {
+      name: "Codex — Settings page cleanup",
+    });
+    const codexFacts = codex.getByTestId("agent-facts");
+    await expect(codexFacts.getByRole("term")).toHaveText([
+      "Model",
+      "Tokens in and out",
+      "Context",
+    ]);
+    await expect(codexFacts.getByRole("definition")).toHaveText([
+      "gpt-6.1-sol (low)",
+      "1.8M in, 17.3k out",
+      "88k (34%)",
+    ]);
+    await expect(codex.getByRole("region", { name: "Recap" })).toHaveCount(0);
+
+    // Settings → Projects totals the folder's conversations (D6).
+    await page.goto("app://lanework/settings/workspaces");
+    const usage = page.getByTestId("agent-usage");
+    await expect(usage).toContainText("Last 7 days");
+    await expect(usage).toContainText("Last 30 days");
+    await expect(usage).toContainText(
+      "Claude ≈ $0.91, 152k in, 5k out, 1 conversation",
+    );
+    await expect(usage).toContainText(
+      "Codex 1.8M in, 17.3k out, 1 conversation",
+    );
   } finally {
     await app.close();
     await plane.close();

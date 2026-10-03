@@ -10,7 +10,7 @@ import {
   Timer02Icon,
   Wrench01Icon,
 } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import type {
@@ -18,6 +18,12 @@ import type {
   SubagentTranscript,
   TerminalAgent,
 } from "#/../shared/terminal";
+import {
+  durationText,
+  type Fact,
+  Facts,
+  modelLabel,
+} from "#/components/shared/agents/facts";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import {
   TERMINAL_KIND_LABELS,
@@ -46,74 +52,7 @@ const STEPS_FOLDED = 5;
 /** How long it ran, as a person reads it: `68s`, `4m 12s`, `1h 3m`. */
 function elapsed(from: string | null, to: string | null): string | null {
   if (!from || !to) return null;
-  const ms = Date.parse(to) - Date.parse(from);
-  if (!Number.isFinite(ms) || ms < 0) return null;
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
-/** `claude-haiku-4-5-20251001` → `Haiku 4.5`; any other model as named. */
-function modelLabel(model: string): string {
-  const claude = /^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$/.exec(model);
-  if (!claude?.[1]) return model;
-  return `${claude[1][0]?.toUpperCase()}${claude[1].slice(1)} ${claude[2]}.${claude[3]}`;
-}
-
-/** One fact in the header's second row: what it is, said by its icon. */
-interface Fact {
-  key: string;
-  /** What it is, for a screen reader and the tooltip. */
-  label: string;
-  icon?: IconSvgElement;
-  /** A mark of its own in the icon's place: the working dot. */
-  mark?: ReactNode;
-  text: string;
-  /** The tooltip, when it says more than the label (the model's own id). */
-  title?: string;
-  className?: string;
-}
-
-/**
- * The header's second row: its kind, model, how long it ran, how many tools
- * it called, and where it is — each by its own icon, no separators.
- *
- * ⚠️ ABOVE the scroller, not sticky inside it, for the issue page's reason:
- * a sticky row is laid out in the scroller's content box, which stops at
- * the scrollbar gutter — its `border-b` ended short of the pane's edge. Out
- * here it is always in view and its line runs the full width. A `<dl>`, so
- * each fact is read with what it is.
- */
-function Facts({ facts }: { facts: Fact[] }) {
-  return (
-    <dl
-      data-testid="subagent-meta"
-      className="border-sidebar-border text-muted-foreground flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b px-6 py-2 text-xs"
-    >
-      {facts.map((fact) => (
-        <div
-          key={fact.key}
-          title={fact.title ?? fact.label}
-          className={cn("flex min-w-0 items-center gap-1.5", fact.className)}
-        >
-          <dt className="sr-only">{fact.label}</dt>
-          {fact.icon ? (
-            <HugeiconsIcon
-              icon={fact.icon}
-              className="size-3.5 shrink-0"
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-          ) : (
-            fact.mark
-          )}
-          <dd className="truncate">{fact.text}</dd>
-        </div>
-      ))}
-    </dl>
-  );
+  return durationText(Date.parse(to) - Date.parse(from));
 }
 
 /** A section that folds behind its label: the prompt, the report. */
@@ -420,7 +359,7 @@ function SubagentPage({
           {title}
         </h1>
       </header>
-      {transcript && <Facts facts={facts} />}
+      {transcript && <Facts facts={facts} data-testid="subagent-meta" />}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!transcript ? (

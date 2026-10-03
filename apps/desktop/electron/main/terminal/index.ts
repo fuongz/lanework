@@ -13,8 +13,14 @@ import {
   utilityProcess,
 } from "electron";
 import {
+  type AgentFacts,
+  type AgentFileMarks,
+  type AgentFiles,
   type AgentSession,
+  type AgentUsage,
+  type AgentWrite,
   type CardBrief,
+  type CodexUsage,
   clampGeometry,
   isAgentSessionId,
   isBoardId,
@@ -27,11 +33,18 @@ import {
   type TerminalSession,
   terminalChannels,
 } from "../../../shared/terminal";
+import { codexHome } from "../handoff/codex";
 import { assertTrustedSender, broadcast, handle } from "../ipc";
 import { appHomeDir } from "../paths";
 import { knownWorkspace, terminalFolder } from "../workspaces";
 import { watchAgentActivity } from "./agent-activity";
 import { agentBindings } from "./agent-binding";
+import { factsRequest, readAgentFacts, readAgentUsage } from "./agent-facts";
+import {
+  agentFileMarks,
+  agentFilesRequest,
+  readAgentFiles,
+} from "./agent-files";
 import {
   applyAgentMarks,
   cleanAgentName,
@@ -40,6 +53,7 @@ import {
   updateAgentMark,
 } from "./agent-marks";
 import { agentKey, listAgentSessions } from "./agent-sessions";
+import { type CodexDirs, readCodexUsage } from "./codex-usage";
 import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
 
 let host: UtilityProcess | null = null;
@@ -151,6 +165,25 @@ function agentHome(): string {
   return (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
 }
 
+/**
+ * Where Codex keeps its rollouts and its databases (FE-41): `$CODEX_HOME`,
+ * and `$CODEX_SQLITE_HOME` before it for the databases — the order Codex
+ * itself reads them in.
+ *
+ * ⚠️ Both inside the test home when `agentHome()`'s seam is set: a spec's
+ * fake goals sit beside its fake rollouts, and every launch points
+ * `CODEX_HOME` at a profile folder for the hook (FE-29).
+ */
+function codexDirs(): CodexDirs {
+  const test = !app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME;
+  if (test) {
+    const dir = join(test, ".codex");
+    return { home: dir, sqlite: dir };
+  }
+  const home = codexHome();
+  return { home, sqlite: process.env.CODEX_SQLITE_HOME || home };
+}
+
 /** Lanework's names and pins for agent conversations (FE-24, FE-25). */
 function agentMarksFile(): string {
   return join(appHomeDir(), "agent-sessions.json");
@@ -196,7 +229,17 @@ function watchWorkspace(workspace: string, folder: string): void {
     // ⚠️ EVERY write, not only a turn that changed state: a new Codex's
     // first rollout can be caught before its `session_meta` is whole, and
     // the next writes of that turn are no news (FE-31/D5).
-    (agent, id) => rebind(workspace, agentKey({ agent, id })),
+    (agent, id) => {
+      rebind(workspace, agentKey({ agent, id }));
+      // And for a view showing its numbers, which move on every write of a
+      // turn — most of which change no state (FE-38).
+      broadcast(terminalChannels.agentWritten, {
+        workspace,
+        agent,
+        id,
+        at: Date.now(),
+      } satisfies AgentWrite);
+    },
   );
   watching.set(workspace, { folder, stop });
 }
@@ -496,6 +539,79 @@ export function registerTerminal(devUrl?: string): void {
       const folder = await terminalFolder(workspace);
       if (!folder) throw new Error("This project has no folder here.");
       return readSubagentTranscript(agentHome(), folder, which);
+    },
+  );
+  // ⚠️ By workspace alone (FE-41): the goals are those of the Codex
+  // conversations its own listing last answered, and the quota is the
+  // account's — a page names no file and no thread.
+  handle(
+    terminalChannels.codexUsage,
+    devUrl,
+    async (args): Promise<CodexUsage> => {
+      if (args.length !== 1) throw new Error("A workspace is required");
+      const workspace = key(args[0], "workspace");
+      const listed =
+        listedKeys.get(workspace) ??
+        new Set((await agentSessionsOf(workspace)).map(agentKey));
+      const ids = [...listed]
+        .filter((entry) => entry.startsWith("codex:"))
+        .map((entry) => entry.slice("codex:".length));
+      return readCodexUsage(codexDirs(), ids);
+    },
+  );
+  // ⚠️ By ids alone, as a sub-agent is read (FE-38): `factsRequest` refuses
+  // any other shape, and the path is built inside the CLI's folder for this
+  // workspace's own folder. Never part of the listing: the rail would pay
+  // for every row's numbers to show none of them.
+  handle(
+    terminalChannels.agentFacts,
+    devUrl,
+    async (args): Promise<AgentFacts> => {
+      const { workspace, agent, id } = factsRequest(args);
+      const folder = await terminalFolder(workspace);
+      if (!folder) throw new Error("This project has no folder here.");
+      return readAgentFacts(agentHome(), folder, agent, id);
+    },
+  );
+  // Asked by Settings when it shows the project, and only then (FE-38/D6):
+  // it reads the end of every transcript the folder had this month.
+  handle(
+    terminalChannels.agentUsage,
+    devUrl,
+    async (args): Promise<AgentUsage | null> => {
+      if (args.length !== 1) throw new Error("A workspace is required");
+      const folder = await terminalFolder(key(args[0], "workspace"));
+      if (!folder) return null;
+      return readAgentUsage(agentHome(), folder);
+    },
+  );
+  // ⚠️ By ids alone, as a sub-agent is (FE-39): `agentFilesRequest` refuses
+  // any other shape, and every transcript's path is built inside the CLI's
+  // folder for this workspace's own folder.
+  handle(
+    terminalChannels.agentFiles,
+    devUrl,
+    async (args): Promise<AgentFiles> => {
+      const { workspace, ...which } = agentFilesRequest(args);
+      const folder = await terminalFolder(workspace);
+      if (!folder) throw new Error("This project has no folder here.");
+      return readAgentFiles(agentHome(), folder, which);
+    },
+  );
+  // Only the conversations this workspace's own listing has (FE-39/D2).
+  handle(
+    terminalChannels.agentFilesForWorktree,
+    devUrl,
+    async (args): Promise<AgentFileMarks> => {
+      if (args.length !== 1) throw new Error("A workspace is required");
+      const workspace = key(args[0], "workspace");
+      const folder = await terminalFolder(workspace);
+      if (!folder) return { files: {}, partial: false };
+      return agentFileMarks(
+        agentHome(),
+        folder,
+        await agentSessionsOf(workspace),
+      );
     },
   );
   handle(terminalChannels.reorder, devUrl, async (args): Promise<void> => {

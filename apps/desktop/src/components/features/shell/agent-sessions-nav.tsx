@@ -8,12 +8,14 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type {
   AgentSession,
   AgentSubagent,
   TerminalSession,
 } from "#/../shared/terminal";
+import { factsSummary } from "#/components/shared/agents/conversation-facts";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
@@ -49,6 +51,7 @@ import {
 } from "#/components/ui/tooltip";
 import { relativeTime, shortAge } from "#/lib/board-view";
 import { cn } from "#/lib/utils";
+import { useAgentFacts } from "#/stores/agent-facts";
 import {
   agentKey,
   subagentKey,
@@ -56,6 +59,7 @@ import {
 } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useTerminal } from "#/stores/terminal";
+import { CodexGoalBadge, CodexQuotaBar } from "./codex-usage";
 import { RenameAgentDialog } from "./rename-agent-dialog";
 
 /** Stable empty lists: a selector that allocated one would re-render forever. */
@@ -70,6 +74,10 @@ const SUBAGENTS_FOLDED = 3;
  * sits under its conversation's title (`px-2` + the 12px icon + `gap-2.5`).
  */
 const SUB_ROW = "h-[26px] w-full ps-[30px] text-left text-xs";
+/** A pointer resting this long on a row means it: its numbers are read (FE-38/D5). */
+const PEEK_MS = 150;
+/** A row's numbers read this recently are shown again, not read again. */
+const FACTS_FRESH_MS = 15_000;
 
 /**
  * A row's quick actions, shown on hover or keyboard focus in place of its age
@@ -227,6 +235,38 @@ export function AgentSessionsNav({
     new Set(),
   );
   const [renaming, setRenaming] = useState<AgentSession | null>(null);
+  // ⚠️ The tooltip lines, not the facts: a view open on an agent reads its
+  // facts on every write, and the rail redraws only when a line changes.
+  const summaries = useAgentFacts(
+    useShallow((state) =>
+      Object.fromEntries(
+        Object.entries(state.byKey).map(([key, entry]) => [
+          key,
+          factsSummary(entry.facts),
+        ]),
+      ),
+    ),
+  );
+  const readFacts = useAgentFacts((state) => state.read);
+  const peeking = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * A row's cost and context, for its tooltip (FE-38/D5).
+   *
+   * ⚠️ Read only once a pointer rests on that row — never for the whole
+   * list, and not for one it merely passes over on its way down the rail.
+   */
+  const peek = (session: AgentSession) => {
+    if (peeking.current) clearTimeout(peeking.current);
+    peeking.current = setTimeout(() => {
+      const known = useAgentFacts.getState().byKey[agentKey(session)];
+      if (!known || Date.now() - known.at > FACTS_FRESH_MS)
+        readFacts(workspace, session);
+    }, PEEK_MS);
+  };
+  const unpeek = () => {
+    if (peeking.current) clearTimeout(peeking.current);
+    peeking.current = null;
+  };
   /** The working agent whose Stop asked first (FE-26/D5), as the view does. */
   const [confirming, setConfirming] = useState<{
     terminal: TerminalSession;
@@ -365,6 +405,8 @@ export function AgentSessionsNav({
       viewing === session.id &&
       viewingSub === sub.id &&
       (viewingAgent ?? "claude") === session.agent;
+    // Known once its row was hovered, or its agent viewed (FE-38/D5).
+    const summary = summaries[key] ?? null;
     return (
       <Fragment key={key}>
         <div className="group/row relative">
@@ -377,7 +419,11 @@ export function AgentSessionsNav({
                   aria-current={current ? "page" : undefined}
                   aria-label={`Resume “${session.title}” in ${agent}`}
                   aria-busy={working || undefined}
-                  title={`${session.title}\n${agent} · ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}`}
+                  title={`${session.title}\n${agent} · ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}${summary ? `\n${summary}` : ""}`}
+                  onPointerEnter={() => peek(session)}
+                  onPointerLeave={unpeek}
+                  onFocus={() => peek(session)}
+                  onBlur={unpeek}
                   className={`${row} w-full text-left ${current ? activeClass : ""} ${terminal ? "group-hover/row:pe-12 group-focus-within/row:pe-12" : "group-hover/row:pe-7 group-focus-within/row:pe-7"}`}
                 />
               }
@@ -424,6 +470,12 @@ export function AgentSessionsNav({
                   {going > 0 ? going : subagents.length}
                 </span>
               )}
+              {/* A Codex goal that stopped short says so (FE-41/D4). */}
+              <CodexGoalBadge
+                workspace={workspace}
+                session={session}
+                className={MAKES_ROOM}
+              />
               <span
                 className={`text-muted-foreground shrink-0 text-xs tabular-nums ${MAKES_ROOM}`}
               >
@@ -600,6 +652,8 @@ export function AgentSessionsNav({
             <span className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
               Agents
             </span>
+            {/* The Codex account's usage windows (FE-41/D1). */}
+            <CodexQuotaBar />
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="New agent"

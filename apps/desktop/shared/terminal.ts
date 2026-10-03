@@ -228,6 +228,159 @@ export interface SubagentTranscript {
   truncated: boolean;
 }
 
+/** What a conversation's edits did to a file, all told (FE-39). */
+export type AgentFileOp = "added" | "modified" | "deleted" | "renamed";
+
+/**
+ * One file a conversation edited (FE-39): what the agent view's Files list
+ * shows a row for.
+ *
+ * ⚠️ Only what the CLI's own FILE TOOLS did — Claude's `Edit`, `Write`,
+ * `MultiEdit` and `NotebookEdit`, Codex's `apply_patch`. A file changed
+ * through the shell (`sed`, a script, a formatter, codegen) is in no
+ * transcript, so its absence here says nothing about whether the agent
+ * touched it.
+ */
+export interface AgentFileTouch {
+  /** From the repository's top level, `/`-separated — as Changes names it. */
+  path: string;
+  op: AgentFileOp;
+  /** How many times it was edited, its sub-agents' edits included. */
+  edits: number;
+  /** When it was last edited, ISO. */
+  lastAt: string;
+  /**
+   * The sub-agent that edited it, when the conversation itself never did
+   * (FE-39/D5): its id, and its kind as the CLI names it — `Explore`,
+   * `general-purpose`, a Codex thread's role — or null.
+   */
+  via: { id: string; type: string | null } | null;
+}
+
+/** A conversation's edited files, newest edit first (FE-39). */
+export interface AgentFiles {
+  files: AgentFileTouch[];
+  /**
+   * A transcript was longer than one scan reads: its newest part was read,
+   * and edits before that may be missing.
+   */
+  partial: boolean;
+}
+
+/** A conversation that edited a file since HEAD's commit (FE-39/D2). */
+export interface AgentFileMark {
+  agent: TerminalAgent;
+  id: string;
+  /** What the rail calls it: its Lanework name, else the CLI's title. */
+  title: string;
+  /** Its newest edit of the file, ISO. */
+  lastAt: string;
+  via: AgentFileTouch["via"];
+}
+
+/**
+ * Which conversations edited each file since HEAD's commit (FE-39/D2, D3) —
+ * the marks on Changes. Keyed by `AgentFileTouch.path`, newest edit first.
+ */
+export interface AgentFileMarks {
+  files: Record<string, AgentFileMark[]>;
+  partial: boolean;
+}
+
+/**
+ * One conversation's numbers, read from the end of its transcript for the
+ * agent view (FE-38). Each is null when the CLI wrote none — never a 0
+ * standing in for "not known" (FE-38/D1).
+ */
+export interface AgentFacts {
+  agent: TerminalAgent;
+  /** The model its newest answer came from, as the CLI names it. */
+  model: string | null;
+  /** Codex only: the reasoning effort its newest turn ran at. */
+  effort: string | null;
+  /**
+   * Claude only: what the conversation would have cost at API prices — an
+   * estimate, NOT what a subscription is billed — as Claude last saved it
+   * (`cost-state`). Its sub-agents' spend is in it (FE-38/V5).
+   */
+  costUSD: number | null;
+  /**
+   * Claude answered again after it last saved its totals: `costUSD`,
+   * `lines` and `duration` are as of then. Claude saves them when it is
+   * left or quit, not after every turn.
+   */
+  stale: boolean;
+  /**
+   * Tokens in and out over the whole conversation; `cached` is the part of
+   * `input` read from the cache.
+   */
+  tokens: { input: number; output: number; cached: number } | null;
+  /**
+   * What its newest turn sent the model, in tokens — and the model's window,
+   * only when the CLI records it: Codex does, Claude does not (FE-38/D2).
+   */
+  context: { tokens: number; window: number | null } | null;
+  /** Claude only: lines its edits added and removed. */
+  lines: { added: number; removed: number } | null;
+  /**
+   * Claude only, in ms: how long its CLI ran (`wall`), and of that how long
+   * it waited on the model and ran tools.
+   */
+  duration: { wall: number; api: number; tools: number } | null;
+  /**
+   * Claude's own newest recap of it (`away_summary`) and when it wrote it;
+   * none for Codex, or with recap off in Claude's `/config` (FE-38/D4).
+   */
+  recap: { text: string; at: string | null } | null;
+  /**
+   * The read stopped at `AGENT_FACTS_READ_MAX` before the transcript's
+   * start: what it did not reach is null (FE-38/V2).
+   */
+  partial: boolean;
+}
+
+/** The most of one transcript a facts read takes, from its end (FE-38). */
+export const AGENT_FACTS_READ_MAX = 4 * 1024 * 1024;
+
+/** One agent's totals over a window of days (FE-38/D6). */
+export interface AgentUsageTotals {
+  /** Conversations written to in the window; a Codex thread's spawns are not counted. */
+  conversations: number;
+  /** Claude only: the sum of each conversation's `AgentFacts.costUSD`. */
+  costUSD: number | null;
+  input: number;
+  output: number;
+}
+
+/**
+ * A project's agent usage over the last 7 and 30 days (FE-38/D6): each
+ * conversation written to in the window counts whole.
+ */
+export interface AgentUsage {
+  windows: {
+    days: number;
+    claude: AgentUsageTotals;
+    codex: AgentUsageTotals;
+  }[];
+  /** Transcripts too long to total in one read, left out of the sums. */
+  skipped: number;
+}
+
+export const AGENT_USAGE_DAYS = [7, 30] as const;
+
+/**
+ * A conversation's transcript settled a write (FE-38): pushed for EVERY
+ * settled write, unlike `AgentActivity`, so a view showing its numbers
+ * reads them again. At most one per conversation per settle window.
+ */
+export interface AgentWrite {
+  workspace: string;
+  agent: TerminalAgent;
+  id: string;
+  /** Epoch ms. */
+  at: number;
+}
+
 /**
  * A card an agent is on, as its latest Lanework MCP call named it (FE-27/D1).
  *
@@ -263,6 +416,73 @@ export interface AgentActivity {
   /** Epoch ms. */
   at: number;
 }
+
+/** One of the Codex account's usage windows, as a rollout reported it (FE-41). */
+export interface CodexQuotaWindow {
+  /** How much of it is used, 0–100. */
+  usedPercent: number;
+  /** How long it runs: 300 is the 5-hour one, 10080 the week. */
+  windowMinutes: number;
+  /** When it starts over, epoch ms. */
+  resetsAt: number;
+}
+
+/**
+ * The Codex account's usage, as the newest Codex turn on this machine
+ * reported it (FE-41/D1).
+ *
+ * ⚠️ The ACCOUNT's, not a project's, and only as fresh as that turn: read
+ * from a rollout's last `token_count`, never asked of OpenAI. A window past
+ * its `resetsAt` says nothing any more (FE-41/D3).
+ */
+export interface CodexQuota {
+  /** The short window — 5 hours today. */
+  primary: CodexQuotaWindow | null;
+  /** The long one — a week today. */
+  secondary: CodexQuotaWindow | null;
+  /** The plan as Codex names it — `plus`, `pro` — or null. */
+  plan: string | null;
+  /** When the turn that reported it was, ISO. */
+  at: string;
+}
+
+/** A goal's state, as Codex's own `thread_goals` table allows (FE-41). */
+export const CODEX_GOAL_STATUSES = [
+  "active",
+  "paused",
+  "blocked",
+  "usage_limited",
+  "budget_limited",
+  "complete",
+] as const;
+export type CodexGoalStatus = (typeof CODEX_GOAL_STATUSES)[number];
+
+export function isCodexGoalStatus(value: unknown): value is CodexGoalStatus {
+  return (
+    typeof value === "string" &&
+    (CODEX_GOAL_STATUSES as readonly string[]).includes(value)
+  );
+}
+
+/** The goal a Codex conversation was given (`/goal`), as Codex keeps it (FE-41/D4). */
+export interface CodexGoal {
+  objective: string;
+  status: CodexGoalStatus;
+  /** Tokens it may spend; null when it has no budget. */
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  /** When Codex last changed it, epoch ms. */
+  updatedAt: number;
+}
+
+/** What `codexUsage` answers for a workspace (FE-41). */
+export interface CodexUsage {
+  quota: CodexQuota | null;
+  /** By thread id — only the workspace's listed Codex conversations'. */
+  goals: Record<string, CodexGoal>;
+}
+
 /** The longest name a session may be given in Lanework. */
 export const AGENT_NAME_MAX = 120;
 
@@ -312,8 +532,20 @@ export const terminalChannels = {
   agentSessionPin: "terminal:agent-sessions:pin",
   /** One sub-agent's transcript, for the viewer (FE-35). */
   agentSubagent: "terminal:agent-subagent",
+  /** One conversation's numbers, for the agent view and the rail (FE-38). */
+  agentFacts: "terminal:agent-facts",
+  /** A project's agent usage over 7 and 30 days, for Settings (FE-38/D6). */
+  agentUsage: "terminal:agent-usage",
+  /** Main → renderer: a conversation's transcript settled a write (FE-38). */
+  agentWritten: "terminal:agent-written",
+  /** The files one conversation edited (FE-39/D1). */
+  agentFiles: "terminal:agent-files",
+  /** Which conversations edited each changed file, for Changes (FE-39/D2). */
+  agentFilesForWorktree: "terminal:agent-files-for-worktree",
   /** Main → renderer: a transcript was written (FE-25). */
   agentActivity: "terminal:agent-activity",
+  /** The Codex account's usage, and its conversations' goals (FE-41). */
+  codexUsage: "terminal:codex-usage",
   /** Main → renderer: a View-menu command. */
   command: "terminal:command",
 } as const;
@@ -399,7 +631,43 @@ export interface DesktopTerminalApi {
     conversation: string,
     sub: string,
   ) => Promise<SubagentTranscript>;
+  /**
+   * The files conversation `id` edited with its file tools, its sub-agents'
+   * folded in (FE-39). By ids only, as `agentSubagent`: main builds every
+   * path inside the CLI's own folder for `workspace`.
+   */
+  agentFiles: (
+    workspace: string,
+    agent: TerminalAgent,
+    id: string,
+  ) => Promise<AgentFiles>;
+  /**
+   * Which of `workspace`'s conversations edited each file since HEAD's
+   * commit (FE-39/D2, D3); empty without a repository.
+   */
+  agentFilesForWorktree: (workspace: string) => Promise<AgentFileMarks>;
   onAgentActivity: (listener: (activity: AgentActivity) => void) => () => void;
+  /**
+   * The Codex account's usage as its newest turn reported it, and the goals
+   * of `workspace`'s listed Codex conversations (FE-41). By workspace only:
+   * main picks the files and the threads; a page names neither.
+   */
+  codexUsage: (workspace: string) => Promise<CodexUsage>;
+  /**
+   * One conversation's numbers (FE-38). By ids only, as `agentSubagent`:
+   * main builds the path inside the CLI's own folder for `workspace`.
+   */
+  agentFacts: (
+    workspace: string,
+    agent: TerminalAgent,
+    id: string,
+  ) => Promise<AgentFacts>;
+  /**
+   * `workspace`'s agent usage over 7 and 30 days (FE-38/D6); null when the
+   * project has no folder here. Reads the end of every recent transcript.
+   */
+  agentUsage: (workspace: string) => Promise<AgentUsage | null>;
+  onAgentWritten: (listener: (write: AgentWrite) => void) => () => void;
   /**
    * The agent CLIs this machine has, asked of the user's own shell: what the
    * + menu offers beside a plain terminal. Cached for a little while.

@@ -23,6 +23,11 @@ import * as worktree from "../electron/main/git/worktree";
 import { writeFolders } from "../electron/main/workspaces/store";
 import type { Workspace } from "../shared/workspaces";
 import {
+  agentStandIn,
+  CLAUDE_EDITS_ID,
+  seedClaudeEdits,
+} from "./agent-fixtures";
+import {
   launchEnv,
   removeProfile,
   seedCredential,
@@ -230,8 +235,15 @@ const beta: Workspace = {
   baseBranch: null,
 };
 
-/** Boot on Alpha at `folder`; `betaFolder` also links a second project. */
-async function open(folder: string, betaFolder?: string) {
+/**
+ * Boot on Alpha at `folder`; `betaFolder` also links a second project, and
+ * `env` adds to the app's environment.
+ */
+async function open(
+  folder: string,
+  betaFolder?: string,
+  env: Record<string, string> = {},
+) {
   const plane = await startStubPlane({
     workspaces: betaFolder ? [...workspaces, beta] : workspaces,
   });
@@ -276,7 +288,7 @@ async function open(folder: string, betaFolder?: string) {
 
   const app = await electron.launch({
     args: [process.cwd()],
-    env: launchEnv({ profile, home, apiUrl: plane.origin }),
+    env: { ...launchEnv({ profile, home, apiUrl: plane.origin }), ...env },
   });
   const page: Page = await app.firstWindow();
   await page
@@ -588,5 +600,92 @@ test("a project whose folder is not a repository gets an empty state", async () 
   } finally {
     await cleanup();
     await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("FE-39: Changes marks the one file a conversation edited since HEAD, and its Files list opens that diff", async () => {
+  const repo = await realpath(await mkdtemp(join(tmpdir(), "lanew-git-")));
+  // HEAD is committed at tick 4: after the conversation created `src/new.ts`
+  // (tick 3), before its sub-agent edited `src/router.tsx` (tick 6).
+  const committed = {
+    ...process.env,
+    GIT_AUTHOR_DATE: "2026-09-27T01:00:04Z",
+    GIT_COMMITTER_DATE: "2026-09-27T01:00:04Z",
+  };
+  const at = (...args: string[]) =>
+    execFileSync("git", ["-c", "commit.gpgsign=false", ...args], {
+      cwd: repo,
+      env: committed,
+      encoding: "utf8",
+    });
+  at("init", "-q", "-b", "main");
+  at("config", "user.email", "tester@example.com");
+  at("config", "user.name", "Tester");
+  await mkdir(join(repo, "src"));
+  await writeFile(join(repo, "src", "router.tsx"), "a\n");
+  await writeFile(join(repo, "src", "new.ts"), "new\n");
+  await writeFile(join(repo, "notes.md"), "keep\n");
+  at("add", "-A");
+  at("commit", "-qm", "init");
+  // Two changed files; only the router is a conversation's.
+  await writeFile(join(repo, "src", "router.tsx"), "a\nB\n");
+  await writeFile(join(repo, "notes.md"), "keep\nmore\n");
+  const scratch = await mkdtemp(join(tmpdir(), "lanew-agents-"));
+  const agentHome = join(scratch, "home");
+  await seedClaudeEdits(agentHome, repo);
+  const { page, cleanup } = await open(repo, undefined, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_SHELL: "/bin/sh",
+    LANEWORK_TERMINAL_AGENTS: "claude",
+    LANEWORK_CLAUDE_BIN: await agentStandIn(scratch, "claude"),
+  });
+  try {
+    await page.goto("app://lanework/w/alpha/changes");
+    const list = page.getByRole("complementary", { name: "Changed files" });
+    await expect(list.getByText("notes.md")).toBeVisible({ timeout: 15_000 });
+    const mark = list.getByRole("button", {
+      name: "Edited by “Wire the router” in Claude",
+    });
+    await expect(mark).toBeVisible({ timeout: 15_000 });
+    await expect(mark.locator("xpath=..")).toContainText("router.tsx");
+    await expect(list.getByRole("button", { name: /^Edited by/ })).toHaveCount(
+      1,
+    );
+
+    // Hover names the conversation. ⚠️ Retried as a pair, as the Changes
+    // list's other tooltips are: a pointer landing mid-render can miss it.
+    const tip = page.locator('[data-slot="tooltip-content"]');
+    await expect(async () => {
+      await list.getByText("notes.md").hover();
+      await mark.hover();
+      await expect(tip).toHaveText("Wire the router", { timeout: 1_500 });
+    }).toPass({ timeout: 10_000 });
+
+    // A click opens it, the way its row on the rail does.
+    await mark.click();
+    const agent = page.getByRole("region", {
+      name: "Claude — Wire the router",
+    });
+    await expect(agent.locator(".xterm-rows")).toContainText(
+      `ran-claude---resume-${CLAUDE_EDITS_ID}`,
+    );
+
+    // Its Files: the router opens its diff; `src/new.ts` (committed since)
+    // and `src/helper.ts` (never on disk here) have nothing to show.
+    await agent.getByRole("button", { name: "Files (3)" }).click();
+    const files = page.locator('[data-slot="popover-content"]');
+    await expect(files.getByText("via general-purpose")).toBeVisible();
+    await expect(files.getByText("3 edits")).toBeVisible();
+    await expect(files.locator('[aria-disabled="true"]')).toHaveCount(2);
+    await expect(files).toContainText("through the shell");
+    await files
+      .getByRole("button", { name: "Open the diff of src/router.tsx" })
+      .click();
+    await expect(page).toHaveURL(/\/w\/alpha\/changes$/);
+    await expect(list.locator("[data-active]")).toContainText("router.tsx");
+  } finally {
+    await cleanup();
+    await rm(repo, { recursive: true, force: true });
+    await rm(scratch, { recursive: true, force: true });
   }
 });

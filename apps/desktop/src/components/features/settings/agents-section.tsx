@@ -172,7 +172,7 @@ export function AgentsSection() {
       ? [
           {
             label: "Hooks are off in Codex",
-            description: `Codex runs no hooks until this is in ${codex.configPath}. Lanework does not edit that file.`,
+            description: `${codex.configPath} turns hooks off, so Codex runs no hook. Change that line to this one; Lanework does not edit that file.`,
             control: (
               <Button
                 variant="outline"

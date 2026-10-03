@@ -3,6 +3,7 @@ import {
   Clock01Icon,
   GitCompareIcon,
   GitPullRequestIcon,
+  LegalDocument01Icon,
   ListViewIcon,
   PencilEdit02Icon,
   Search01Icon,
@@ -267,6 +268,21 @@ export function AppSidebar() {
                   {memories}
                 </span>
               )}
+            </Link>
+            {/* What its agents are told: CLAUDE.md and AGENTS.md (FE-37/D1). */}
+            <Link
+              to="/w/$slug/instructions"
+              params={{ slug }}
+              className={ROW}
+              activeProps={ACTIVE}
+            >
+              <HugeiconsIcon
+                icon={LegalDocument01Icon}
+                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 truncate">Instructions</span>
             </Link>
           </nav>
         )}

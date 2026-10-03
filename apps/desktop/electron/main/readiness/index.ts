@@ -16,15 +16,7 @@
 // appended block or one added key. Nothing is committed, and nothing outside
 // the folder — `~/.claude.json`, `config.toml` — is ever written.
 import { randomUUID } from "node:crypto";
-import {
-  readdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
-import { homedir } from "node:os";
+import { readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   isReadinessFix,
@@ -33,6 +25,7 @@ import {
   type ReadinessReport,
   readinessChannels,
 } from "../../../shared/readiness";
+import { claudeDir, claudeJsonPath, readText } from "../agent-home";
 import { originUrl } from "../git/remote";
 import {
   claudeSettingsPath,
@@ -56,37 +49,11 @@ import {
   type ReadinessFacts,
 } from "./checks";
 
-/** Notes and configs are small; anything bigger is not one. */
-const MAX_BYTES = 512 * 1024;
-
-async function readText(path: string): Promise<string | null> {
-  try {
-    const info = await stat(path);
-    if (!info.isFile() || info.size > MAX_BYTES) return null;
-    return await readFile(path, "utf8");
-  } catch {
-    return null;
-  }
-}
-
 const exists = (path: string) =>
   stat(path).then(
     () => true,
     () => false,
   );
-
-/** Claude Code's own home: `$CLAUDE_CONFIG_DIR`, as it reads it, or `~/.claude`. */
-const claudeDir = () =>
-  process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
-
-/**
- * `~/.claude.json`, where `claude mcp add` files the user and local scopes —
- * inside `$CLAUDE_CONFIG_DIR` when that is set.
- */
-const claudeJsonPath = () =>
-  process.env.CLAUDE_CONFIG_DIR
-    ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json")
-    : join(homedir(), ".claude.json");
 
 async function hookInstalled(path: string): Promise<boolean> {
   const read = await readSettings(path);

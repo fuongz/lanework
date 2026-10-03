@@ -1,6 +1,8 @@
+import type { DesktopAgentSetupApi } from "./agent-setup";
 import type { DesktopAuthApi } from "./auth";
 import type { DesktopGitApi } from "./git";
 import type { DesktopHandoffApi } from "./handoff";
+import type { DesktopInstructionsApi } from "./instructions";
 import type { DesktopMemoryApi } from "./memory";
 import type { DesktopReadinessApi } from "./readiness";
 import type { DesktopTerminalApi } from "./terminal";
@@ -74,4 +76,8 @@ export interface DesktopApi {
   readiness: DesktopReadinessApi;
   /** What Claude Code remembers about a project, read-only (FE-36). */
   memory: DesktopMemoryApi;
+  /** What a project's agents are told, read-only (FE-37). */
+  instructions: DesktopInstructionsApi;
+  /** What Claude Code and Codex load in a project's folder, read-only (FE-40). */
+  agentSetup: DesktopAgentSetupApi;
 }

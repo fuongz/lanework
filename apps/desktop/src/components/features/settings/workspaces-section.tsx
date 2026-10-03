@@ -202,7 +202,7 @@ export function WorkspacesSection() {
             title: "Selected project",
             hideTitle: true,
             keywords:
-              "selected project rename folders import danger remove all issues purge delete clear reset",
+              "selected project rename folders import danger remove all issues purge delete clear reset agent usage cost tokens",
             content: (
               <SelectedProjectSection
                 // A fresh section per project, so a "Removed 12 issues" line

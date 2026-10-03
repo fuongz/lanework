@@ -12,6 +12,11 @@ import type {
   TerminalAgent,
   TerminalSession,
 } from "#/../shared/terminal";
+import {
+  ConversationFacts,
+  ConversationRecap,
+} from "#/components/shared/agents/conversation-facts";
+import type { Fact } from "#/components/shared/agents/facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import {
   TERMINAL_KIND_LABELS,
@@ -40,10 +45,14 @@ import {
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
+import { AgentFilesButton } from "./agent-files";
+import { goalFacts } from "./codex-goal";
+import { useConversationFacts } from "./use-agent-facts";
 
 /** Stable empties: a selector that allocated one would re-render forever. */
 const NO_TERMINALS: TerminalSession[] = [];
 const NO_CONVERSATIONS: AgentSession[] = [];
+const NO_FACTS: Fact[] = [];
 
 /** The last segment of a path, for the header. */
 function folderOf(cwd: string | null): string {
@@ -111,6 +120,14 @@ export function AgentView() {
     !!conversation &&
     !session?.exit &&
     (live[agentKey(conversation)] ?? conversation.working);
+  // ⚠️ By the tab's own conversation, listed or not: a new one has numbers
+  // from its first answer, before the rail has its title (FE-38).
+  const goal = useAgentSessions((state) =>
+    workspace && conversation?.agent === "codex"
+      ? state.codexGoals[workspace]?.[conversation.id]
+      : undefined,
+  );
+  const facts = useConversationFacts(workspace, agent, session?.resume ?? null);
 
   const open = (next: TerminalSession | null) => {
     if (next)
@@ -183,11 +200,27 @@ export function AgentView() {
             exited
           </Badge>
         )}
+        {/* Its numbers in the header's own row (FE-38/D1), a Codex goal's
+            among them (FE-41/D4). */}
+        <ConversationFacts
+          facts={facts}
+          extra={goal ? goalFacts(goal) : NO_FACTS}
+        />
         <span className="ml-auto" />
         {error && (
           <span role="alert" className="text-destructive truncate text-xs">
             {error}
           </span>
+        )}
+        {/* What this conversation edited (FE-39/D1): only once there is one. */}
+        {conversation && workspace && (
+          <AgentFilesButton
+            slug={slug}
+            workspace={workspace}
+            agent={conversation.agent}
+            id={conversation.id}
+            working={working}
+          />
         )}
         <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
           <HugeiconsIcon
@@ -224,6 +257,7 @@ export function AgentView() {
           </Button>
         )}
       </header>
+      {facts?.recap && <ConversationRecap recap={facts.recap} />}
       <div className="bg-background relative min-h-0 flex-1 px-2 pt-1">
         <XtermPane
           key={session.id}

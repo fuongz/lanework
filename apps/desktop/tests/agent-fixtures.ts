@@ -1,6 +1,6 @@
 // Agent conversations on disk (FE-23): a fake home folder holding what Claude
 // and Codex would have written for a project's folder.
-import { mkdir, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
 
@@ -418,6 +418,367 @@ export async function seedSubagents(home: string, folder: string) {
   );
 }
 
+export const CLAUDE_EDITS_ID = "44444444-2222-4333-8444-555555555555";
+export const CLAUDE_TOOLS_ID = "55555555-2222-4333-8444-555555555555";
+export const CODEX_EDITS_ID = "01a0db07-52f1-7020-abe9-444444444444";
+export const CODEX_EDITS_SPAWNED_ID = "01a0db07-52f1-7020-abe9-555555555555";
+
+/** `2026-09-27T01:00:0<n>.000Z`: the FE-39 fixtures' clock, a second a tick. */
+export const tick = (n: number) => `2026-09-27T01:00:0${n}.000Z`;
+
+/** A Claude file-tool call, as the assistant line that makes it. */
+function claudeCall(
+  name: string,
+  id: string,
+  input: Record<string, unknown>,
+  at: string,
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    ...extra,
+    type: "assistant",
+    timestamp: at,
+    message: {
+      role: "assistant",
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id, name, input }],
+    },
+  };
+}
+
+/** Its result: an error, or what Claude records of a `Write` that created. */
+function claudeResult(
+  id: string,
+  at: string,
+  { error = false, created }: { error?: boolean; created?: string } = {},
+) {
+  return {
+    type: "user",
+    timestamp: at,
+    message: {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: id,
+          ...(error ? { is_error: true } : {}),
+          content: error ? "File has not been read yet." : "ok",
+        },
+      ],
+    },
+    ...(created
+      ? { toolUseResult: { type: "create", filePath: created, content: "" } }
+      : {}),
+  };
+}
+
+/** Claude's file history's record of a file's first edit in a session. */
+function claudeDelta(folder: string, path: string, at: string, fresh: boolean) {
+  return {
+    type: "file-history-delta",
+    messageId: "ac95fa64-9cce-4bf9-9a66-2d661047fa86",
+    trackingPath: path,
+    backup: {
+      backupFileName: fresh ? null : "ebdb35af1818c9c1@v1",
+      version: 1,
+      backupTime: at,
+      realParentDir: join(folder, path, ".."),
+    },
+    timestamp: at,
+  };
+}
+
+/**
+ * Two Claude conversations that edited files in `folder` (FE-39), as the CLI
+ * writes them:
+ *
+ * - `CLAUDE_EDITS_ID` ("Wire the router") with file history on: two `Edit`s
+ *   of `src/router.tsx` (one file-history delta), a `Write` that created
+ *   `src/new.ts`, a `Write` that FAILED, and an edit outside the folder. Its
+ *   sub-agent `helper` (general-purpose) edited `src/router.tsx` too, and
+ *   created `src/helper.ts`.
+ * - `CLAUDE_TOOLS_ID` ("Tidy the notebook") with file history off: a `Write`
+ *   that created `src/made.ts`, a `MultiEdit` of `src/router.tsx`, a
+ *   `NotebookEdit` of `nb/analysis.ipynb`.
+ *
+ * Stamped `tick(1)` … `tick(7)`.
+ */
+export async function seedClaudeEdits(home: string, folder: string) {
+  const dir = join(home, ".claude", "projects", claudeProjectDir(folder));
+  await mkdir(join(dir, CLAUDE_EDITS_ID, "subagents"), { recursive: true });
+  const at = (path: string) => join(folder, path);
+  await writeFile(
+    join(dir, `${CLAUDE_EDITS_ID}.jsonl`),
+    jsonl([
+      {
+        type: "user",
+        cwd: folder,
+        timestamp: tick(0),
+        message: { role: "user", content: "Wire the router" },
+      },
+      claudeCall(
+        "Edit",
+        "toolu_e1",
+        { file_path: at("src/router.tsx") },
+        tick(1),
+      ),
+      claudeDelta(folder, "src/router.tsx", tick(1), false),
+      claudeResult("toolu_e1", tick(1)),
+      claudeCall(
+        "Edit",
+        "toolu_e2",
+        { file_path: at("src/router.tsx") },
+        tick(2),
+      ),
+      claudeResult("toolu_e2", tick(2)),
+      claudeCall("Write", "toolu_w1", { file_path: at("src/new.ts") }, tick(3)),
+      claudeDelta(folder, "src/new.ts", tick(3), true),
+      claudeResult("toolu_w1", tick(3), { created: at("src/new.ts") }),
+      // Failed: it edited nothing.
+      claudeCall(
+        "Write",
+        "toolu_w2",
+        { file_path: at("src/broken.ts") },
+        tick(4),
+      ),
+      claudeResult("toolu_w2", tick(4), { error: true }),
+      // Not in the repository.
+      claudeCall(
+        "Edit",
+        "toolu_e3",
+        { file_path: "/elsewhere/notes.md" },
+        tick(5),
+      ),
+      claudeResult("toolu_e3", tick(5)),
+      {
+        type: "assistant",
+        timestamp: tick(5),
+        message: { role: "assistant", stop_reason: "end_turn", content: [] },
+      },
+      { type: "system", subtype: "turn_duration", timestamp: tick(5) },
+    ]),
+  );
+  const sidechain = { isSidechain: true, cwd: folder };
+  await writeFile(
+    join(dir, CLAUDE_EDITS_ID, "subagents", "agent-helper.jsonl"),
+    jsonl([
+      {
+        ...sidechain,
+        type: "user",
+        timestamp: tick(5),
+        message: { content: "Add the helper" },
+      },
+      claudeCall(
+        "Edit",
+        "toolu_s1",
+        { file_path: at("src/router.tsx") },
+        tick(6),
+        sidechain,
+      ),
+      claudeCall(
+        "Write",
+        "toolu_s2",
+        { file_path: at("src/helper.ts") },
+        tick(7),
+        sidechain,
+      ),
+      {
+        ...claudeResult("toolu_s2", tick(7), { created: at("src/helper.ts") }),
+        ...sidechain,
+      },
+    ]),
+  );
+  await writeFile(
+    join(dir, CLAUDE_EDITS_ID, "subagents", "agent-helper.meta.json"),
+    JSON.stringify({ agentType: "general-purpose", description: "Add helper" }),
+  );
+  await writeFile(
+    join(dir, `${CLAUDE_TOOLS_ID}.jsonl`),
+    jsonl([
+      {
+        type: "user",
+        cwd: folder,
+        timestamp: tick(0),
+        message: { role: "user", content: "Tidy the notebook" },
+      },
+      claudeCall(
+        "Write",
+        "toolu_m1",
+        { file_path: at("src/made.ts") },
+        tick(1),
+      ),
+      claudeResult("toolu_m1", tick(1), { created: at("src/made.ts") }),
+      claudeCall(
+        "MultiEdit",
+        "toolu_m2",
+        { file_path: at("src/router.tsx"), edits: [] },
+        tick(2),
+      ),
+      claudeCall(
+        "NotebookEdit",
+        "toolu_m3",
+        { notebook_path: at("nb/analysis.ipynb") },
+        tick(3),
+      ),
+    ]),
+  );
+}
+
+/**
+ * A Codex conversation that edited files in `folder` (FE-39), and a thread
+ * it spawned:
+ *
+ * - An `apply_patch` that adds `docs/added.md`, updates `src/router.tsx`,
+ *   deletes `old.txt` and moves `src/name.ts` to `src/renamed.ts` — with the
+ *   `FileChange` item a newer CLI writes for the same patch, which must not
+ *   count it twice.
+ * - A `FileChange` alone (a patch sent from an `exec` script) for
+ *   `src/script.ts`; one that FAILED for `src/failed.ts`; an older CLI's
+ *   `function_call` patch of `src/router.tsx`.
+ * - Its thread "Gibbs" (a `worker`) created `src/spawned.ts`.
+ */
+export async function seedCodexEdits(home: string, folder: string) {
+  const day = join(home, ".codex", "sessions", "2026", "09", "27");
+  await mkdir(day, { recursive: true });
+  const at = (path: string) => join(folder, path);
+  const patch = [
+    "*** Begin Patch",
+    "*** Add File: docs/added.md",
+    "+hello",
+    "*** Update File: src/router.tsx",
+    "@@",
+    "-a",
+    "+b",
+    "*** Delete File: old.txt",
+    "*** Update File: src/name.ts",
+    "*** Move to: src/renamed.ts",
+    "@@",
+    "-x",
+    "+y",
+    "*** End Patch",
+    "",
+  ].join("\n");
+  const fileChange = (
+    changes: Record<string, unknown>,
+    stamp: string,
+    status = "completed",
+  ) => ({
+    type: "event_msg",
+    timestamp: stamp,
+    payload: {
+      type: "item_completed",
+      item: { type: "FileChange", id: "exec-1", changes, status },
+    },
+  });
+  await writeFile(
+    join(day, `rollout-2026-09-27T01-00-00-${CODEX_EDITS_ID}.jsonl`),
+    jsonl([
+      {
+        type: "session_meta",
+        timestamp: tick(0),
+        payload: { id: CODEX_EDITS_ID, cwd: folder, timestamp: tick(0) },
+      },
+      {
+        type: "event_msg",
+        timestamp: tick(0),
+        payload: { type: "user_message", message: "Reshape the docs" },
+      },
+      {
+        type: "response_item",
+        timestamp: tick(1),
+        payload: {
+          type: "custom_tool_call",
+          name: "apply_patch",
+          call_id: "call_patch",
+          input: patch,
+        },
+      },
+      fileChange(
+        {
+          [at("docs/added.md")]: { type: "add", content: "hello\n" },
+          [at("src/router.tsx")]: {
+            type: "update",
+            unified_diff: "",
+            move_path: null,
+          },
+          [at("old.txt")]: { type: "delete", content: "" },
+          [at("src/name.ts")]: {
+            type: "update",
+            unified_diff: "",
+            move_path: at("src/renamed.ts"),
+          },
+        },
+        tick(1),
+      ),
+      fileChange(
+        {
+          [at("src/script.ts")]: {
+            type: "update",
+            unified_diff: "",
+            move_path: null,
+          },
+        },
+        tick(2),
+      ),
+      fileChange({ [at("src/failed.ts")]: { type: "add" } }, tick(2), "failed"),
+      {
+        type: "response_item",
+        timestamp: tick(3),
+        payload: {
+          type: "function_call",
+          name: "apply_patch",
+          call_id: "call_old",
+          arguments: JSON.stringify({
+            input:
+              "*** Begin Patch\n*** Update File: src/router.tsx\n@@\n-b\n+c\n*** End Patch\n",
+          }),
+        },
+      },
+    ]),
+  );
+  await writeFile(
+    join(day, `rollout-2026-09-27T01-00-04-${CODEX_EDITS_SPAWNED_ID}.jsonl`),
+    jsonl([
+      {
+        type: "session_meta",
+        timestamp: tick(4),
+        payload: {
+          id: CODEX_EDITS_SPAWNED_ID,
+          session_id: CODEX_EDITS_ID,
+          cwd: folder,
+          timestamp: tick(4),
+          source: {
+            subagent: {
+              thread_spawn: {
+                parent_thread_id: CODEX_EDITS_ID,
+                depth: 1,
+                agent_path: "/root/spawned",
+                agent_nickname: "Gibbs",
+                agent_role: "worker",
+              },
+            },
+          },
+        },
+      },
+      fileChange({ [at("src/spawned.ts")]: { type: "add" } }, tick(4)),
+    ]),
+  );
+}
+
+/**
+ * A stand-in for an agent's CLI: prints `<name> <args>` and waits, ending on
+ * `/exit` — so a spec can resume a conversation without launching one.
+ */
+export async function agentStandIn(dir: string, name: string) {
+  const file = join(dir, `${name}-stand-in.sh`);
+  await writeFile(
+    file,
+    `#!/bin/sh\nprintf 'ran-%s-%s-%s\\n' ${name} "$@"\nwhile IFS= read -r line; do [ "$line" = "/exit" ] && exit 0; done\n`,
+    { mode: 0o755 },
+  );
+  return file;
+}
+
 /**
  * A FORK Claude sub-agent of `seedAgentHome`'s conversation (FE-35), as the
  * CLI writes one: a `fork-context-ref` instead of the parent's history, the
@@ -503,5 +864,269 @@ export async function seedForkSubagent(home: string, folder: string) {
       description: "Fork: which model",
       model: "inherit",
     }),
+  );
+}
+
+/**
+ * The `rate_limits` a Codex `token_count` carries (FE-41): the 5-hour and the
+ * week window, each used `used`% and reset at `resetsAt` (epoch ms) — or null.
+ */
+export function codexRateLimits(
+  primary: { used: number; resetsAt: number } | null,
+  secondary: { used: number; resetsAt: number } | null,
+) {
+  const window = (
+    entry: { used: number; resetsAt: number } | null,
+    minutes: number,
+  ) =>
+    entry && {
+      used_percent: entry.used,
+      window_minutes: minutes,
+      // ⚠️ Unix SECONDS, as Codex writes it.
+      resets_at: Math.floor(entry.resetsAt / 1000),
+    };
+  return {
+    limit_id: "codex",
+    limit_name: null,
+    primary: window(primary, 300),
+    secondary: window(secondary, 10_080),
+    credits: null,
+    individual_limit: null,
+    spend_control_reached: null,
+    plan_type: "plus",
+    rate_limit_reached_type: null,
+  };
+}
+
+/** A Codex `token_count` event, as one rollout line (FE-41). */
+export function codexTokenCount(timestamp: string, rateLimits: unknown) {
+  return {
+    timestamp,
+    type: "event_msg",
+    payload: { type: "token_count", info: null, rate_limits: rateLimits },
+  };
+}
+
+/** One row of Codex's `thread_goals` (FE-41). */
+export interface GoalRow {
+  threadId: string;
+  objective: string;
+  status: string;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+}
+
+/**
+ * Codex's goals database, made with `node:sqlite` as `dir/<name>`, with the
+ * schema Codex itself creates (FE-41). Answers the file.
+ *
+ * ⚠️ `node:sqlite` loaded only here: the specs that never make one are spared
+ * its experimental warning.
+ */
+export async function seedCodexGoals(
+  dir: string,
+  goals: GoalRow[],
+  name = "goals_1.sqlite",
+): Promise<string> {
+  const { DatabaseSync } = await import("node:sqlite");
+  await mkdir(dir, { recursive: true });
+  const file = join(dir, name);
+  const db = new DatabaseSync(file);
+  try {
+    db.exec(`CREATE TABLE thread_goals (
+      thread_id TEXT PRIMARY KEY NOT NULL,
+      goal_id TEXT NOT NULL,
+      objective TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN (
+        'active', 'paused', 'blocked', 'usage_limited', 'budget_limited',
+        'complete'
+      )),
+      token_budget INTEGER,
+      tokens_used INTEGER NOT NULL DEFAULT 0,
+      time_used_seconds INTEGER NOT NULL DEFAULT 0,
+      created_at_ms INTEGER NOT NULL,
+      updated_at_ms INTEGER NOT NULL
+    )`);
+    const insert = db.prepare(
+      "INSERT INTO thread_goals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    for (const goal of goals)
+      insert.run(
+        goal.threadId,
+        `goal-${goal.threadId}`,
+        goal.objective,
+        goal.status,
+        goal.tokenBudget,
+        goal.tokensUsed,
+        goal.timeUsedSeconds,
+        1_790_647_016_392,
+        1_790_649_031_534,
+      );
+  } finally {
+    db.close();
+  }
+  return file;
+}
+
+/**
+ * The numbers `seedAgentHome`'s two conversations end on (FE-38), appended
+ * to their transcripts as the CLIs write them: Claude's answers with their
+ * usage, two `cost-state`s and two recaps — the newer of each wins — a
+ * sub-agent's line and a cut one, neither counted; Codex's `turn_context`
+ * and `token_count`s, the newest of which says nothing.
+ *
+ * Claude: Opus 5.5, ≈ $0.73, 141k in · 4k out, context 142,320, +120 −8,
+ * 4m 12s, the newer recap. Codex: gpt-6.1-sol at low effort, 1.8M in ·
+ * 17.3k out, context 88,039 of 258,400 (34%).
+ *
+ * ⚠️ Its own seeder, not part of `seedAgentHome`: a turn's answers and
+ * stamps would move what the FE-23/FE-25 specs read off those transcripts.
+ */
+export async function seedAgentFacts(home: string, folder: string) {
+  const claude = join(
+    home,
+    ".claude",
+    "projects",
+    claudeProjectDir(folder),
+    `${CLAUDE_ID}.jsonl`,
+  );
+  await appendFile(
+    claude,
+    jsonl([
+      {
+        type: "assistant",
+        message: {
+          id: "msg_first",
+          model: "claude-opus-5-5",
+          stop_reason: "end_turn",
+          usage: {
+            input_tokens: 5,
+            cache_read_input_tokens: 1000,
+            cache_creation_input_tokens: 200,
+            output_tokens: 50,
+          },
+          content: [],
+        },
+      },
+      {
+        type: "cost-state",
+        totalCostUSD: 0.25,
+        totalLinesAdded: 10,
+        totalLinesRemoved: 1,
+        totalDuration: 60_000,
+        modelUsage: {
+          "claude-opus-5-5": { inputTokens: 5, outputTokens: 50 },
+        },
+      },
+      {
+        type: "system",
+        subtype: "away_summary",
+        content: "An older recap.",
+        timestamp: "2026-09-26T07:00:00.000Z",
+      },
+      // The answer the newest totals were saved after — twice, as Claude
+      // writes one answer: a line per part, the same id and usage.
+      ...[1, 2].map(() => ({
+        type: "assistant",
+        message: {
+          id: "msg_second",
+          model: "claude-opus-5-5",
+          stop_reason: "end_turn",
+          usage: {
+            input_tokens: 2,
+            cache_read_input_tokens: 140_000,
+            cache_creation_input_tokens: 2318,
+            output_tokens: 400,
+          },
+          content: [],
+        },
+      })),
+      // A sub-agent's answer, in an older CLI's transcript: not this one's.
+      {
+        type: "assistant",
+        isSidechain: true,
+        message: {
+          model: "claude-haiku-4-5-20251001",
+          usage: { input_tokens: 999_999, output_tokens: 999 },
+        },
+      },
+      {
+        type: "cost-state",
+        totalCostUSD: 0.7312,
+        totalLinesAdded: 120,
+        totalLinesRemoved: 8,
+        totalDuration: 252_000,
+        totalAPIDuration: 90_000,
+        totalToolDuration: 30_000,
+        modelUsage: {
+          "claude-opus-5-5": {
+            inputTokens: 100,
+            outputTokens: 4000,
+            cacheReadInputTokens: 130_000,
+            cacheCreationInputTokens: 9900,
+            costUSD: 0.73,
+          },
+          "claude-haiku-4-5-20251001": {
+            inputTokens: 1000,
+            outputTokens: 20,
+            costUSD: 0.0012,
+          },
+        },
+      },
+      {
+        type: "system",
+        subtype: "away_summary",
+        content: "Fixed the flaky login test; the retry is next.",
+        timestamp: "2026-09-26T08:00:00.000Z",
+      },
+    ]).replace(/\n$/, '\n{"type":"cost-state","totalCostUSD":99\n'),
+  );
+
+  const codex = join(
+    home,
+    ".codex",
+    "sessions",
+    "2026",
+    "09",
+    "26",
+    `rollout-2026-09-26T07-04-45-${CODEX_ID}.jsonl`,
+  );
+  await appendFile(
+    codex,
+    jsonl([
+      {
+        type: "turn_context",
+        payload: { model: "gpt-6.1-sol", effort: "low", cwd: folder },
+      },
+      {
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            total_token_usage: {
+              input_tokens: 1_753_176,
+              cached_input_tokens: 1_665_152,
+              cache_write_input_tokens: 0,
+              output_tokens: 17_326,
+              reasoning_output_tokens: 348,
+              total_tokens: 1_770_502,
+            },
+            last_token_usage: {
+              input_tokens: 88_039,
+              cached_input_tokens: 87_040,
+              output_tokens: 110,
+              total_tokens: 88_149,
+            },
+            model_context_window: 258_400,
+          },
+        },
+      },
+      // Rate limits only: no usage in it.
+      {
+        type: "event_msg",
+        payload: { type: "token_count", info: null, rate_limits: {} },
+      },
+    ]),
   );
 }

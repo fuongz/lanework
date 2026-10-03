@@ -1,18 +1,42 @@
 // The agent conversations the rail's Agents group lists, and the resume line a
 // tab types for one (FE-23) — driven directly under Node against a fake home.
+import { execFileSync } from "node:child_process";
 import {
   appendFile,
+  chmod,
   mkdir,
   mkdtemp,
+  readdir,
+  readFile,
   realpath,
+  stat,
   utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import {
+  _electron as electron,
+  expect,
+  type Page,
+  test,
+} from "@playwright/test";
+import type { MachineRecord } from "../electron/main/auth/store";
 import { watchAgentActivity } from "../electron/main/terminal/agent-activity";
 import { agentBindings } from "../electron/main/terminal/agent-binding";
+import {
+  factsRequest,
+  readAgentFacts,
+  readAgentUsage,
+} from "../electron/main/terminal/agent-facts";
+import {
+  AGENT_FILES_READ_MAX,
+  agentFileMarks,
+  agentFilesRequest,
+  patchedFiles,
+  readAgentFiles,
+  scanTranscript,
+} from "../electron/main/terminal/agent-files";
 import {
   applyAgentMarks,
   cleanAgentName,
@@ -31,26 +55,50 @@ import {
   lastCardIn,
   listAgentSessions,
 } from "../electron/main/terminal/agent-sessions";
+import {
+  readCodexGoals,
+  readCodexQuota,
+  readCodexUsage,
+} from "../electron/main/terminal/codex-usage";
 import { cardPrompt, createSessions } from "../electron/main/terminal/sessions";
 import {
   readSubagentTranscript,
   subagentRequest,
 } from "../electron/main/terminal/subagent-transcript";
+import { writeFolders } from "../electron/main/workspaces/store";
 import {
+  AGENT_FACTS_READ_MAX,
   isAgentSessionId,
   isCardRef,
   type TerminalHostMessage,
   type TerminalSession,
 } from "../shared/terminal";
 import {
+  CLAUDE_EDITS_ID,
   CLAUDE_ID,
+  CLAUDE_TOOLS_ID,
+  CODEX_EDITS_ID,
+  CODEX_EDITS_SPAWNED_ID,
   CODEX_GUARDIAN_ID,
   CODEX_ID,
   CODEX_SPAWNED_ID,
+  codexRateLimits,
+  codexTokenCount,
+  seedAgentFacts,
   seedAgentHome,
+  seedClaudeEdits,
+  seedCodexEdits,
+  seedCodexGoals,
   seedForkSubagent,
   seedSubagents,
+  tick,
 } from "./agent-fixtures";
+import {
+  launchEnv,
+  removeProfile,
+  seedCredential,
+  startStubPlane,
+} from "./auth-fixtures";
 
 async function tempDir(prefix: string): Promise<string> {
   return realpath(await mkdtemp(join(tmpdir(), prefix)));
@@ -851,6 +899,347 @@ test("FE-35: a sub-agent is read by ids alone — a path, `..` or any other shap
     ).rejects.toThrow(notOurs);
 });
 
+const factsLine = (value: unknown) => `${JSON.stringify(value)}\n`;
+
+/** A Claude answer with its usage, as the CLI writes one line of it. */
+function answer(id: string, cacheRead: number, output = 100) {
+  return {
+    type: "assistant",
+    message: {
+      id,
+      model: "claude-opus-5-5",
+      stop_reason: "end_turn",
+      usage: {
+        input_tokens: 1,
+        cache_read_input_tokens: cacheRead,
+        cache_creation_input_tokens: 0,
+        output_tokens: output,
+      },
+      content: [],
+    },
+  };
+}
+
+test("FE-38: a Claude conversation's numbers are its newest cost-state's — and the answers since are added, once each", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  await seedAgentHome(home, folder);
+  await seedAgentFacts(home, folder);
+  const file = join(
+    home,
+    ".claude",
+    "projects",
+    claudeProjectDir(folder),
+    `${CLAUDE_ID}.jsonl`,
+  );
+
+  // The newer of two `cost-state`s and two recaps; the cut `cost-state`
+  // after them, and the sub-agent's answer, count for nothing.
+  expect(await readAgentFacts(home, folder, "claude", CLAUDE_ID)).toEqual({
+    agent: "claude",
+    model: "claude-opus-5-5",
+    effort: null,
+    costUSD: 0.7312,
+    stale: false,
+    tokens: { input: 141_000, output: 4020, cached: 130_000 },
+    context: { tokens: 142_320, window: null },
+    lines: { added: 120, removed: 8 },
+    duration: { wall: 252_000, api: 90_000, tools: 30_000 },
+    recap: {
+      text: "Fixed the flaky login test; the retry is next.",
+      at: "2026-09-26T08:00:00.000Z",
+    },
+    partial: false,
+  });
+
+  // A turn after Claude last saved: its answer — two lines, one id — joins
+  // the tokens once, is the context now, and the saved totals are stale.
+  await appendFile(
+    file,
+    factsLine({ type: "user", message: { content: "And the retry?" } }) +
+      factsLine(answer("msg_third", 150_000, 300)) +
+      factsLine(answer("msg_third", 150_000, 300)),
+  );
+  const after = await readAgentFacts(home, folder, "claude", CLAUDE_ID);
+  expect(after.stale).toBe(true);
+  expect(after.costUSD).toBe(0.7312);
+  expect(after.tokens).toEqual({
+    input: 141_000 + 150_001,
+    output: 4020 + 300,
+    cached: 130_000 + 150_000,
+  });
+  expect(after.context).toEqual({ tokens: 150_001, window: null });
+
+  // Saved again: the new totals, nothing added on top.
+  await appendFile(
+    file,
+    factsLine({
+      type: "cost-state",
+      totalCostUSD: 0.91,
+      modelUsage: { "claude-opus-5-5": { inputTokens: 300_000 } },
+    }),
+  );
+  const saved = await readAgentFacts(home, folder, "claude", CLAUDE_ID);
+  expect(saved.stale).toBe(false);
+  expect(saved.costUSD).toBe(0.91);
+  expect(saved.tokens).toEqual({ input: 300_000, output: 0, cached: 0 });
+  // Nothing saved for these: not known, never a 0.
+  expect(saved.lines).toBeNull();
+  expect(saved.duration).toBeNull();
+
+  // Recap off, never saved — a conversation running now: what its answers
+  // say, read to its start; no cost, no recap.
+  const fresh = "44444444-2222-4333-8444-555555555555";
+  await writeFile(
+    join(
+      home,
+      ".claude",
+      "projects",
+      claudeProjectDir(folder),
+      `${fresh}.jsonl`,
+    ),
+    factsLine({ type: "user", cwd: folder, message: { content: "Go" } }) +
+      factsLine(answer("msg_a", 1000, 10)) +
+      factsLine(answer("msg_b", 2000, 20)),
+  );
+  expect(await readAgentFacts(home, folder, "claude", fresh)).toMatchObject({
+    costUSD: null,
+    stale: false,
+    tokens: { input: 3002, output: 30, cached: 3000 },
+    context: { tokens: 2001, window: null },
+    recap: null,
+    partial: false,
+  });
+});
+
+test("FE-38: a cost-state is found behind the last 64 KB — and past 4 MB the read stops, with what it found", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  const dir = join(home, ".claude", "projects", claudeProjectDir(folder));
+  await mkdir(dir, { recursive: true });
+  const head =
+    factsLine({ type: "user", cwd: folder, message: { content: "Go" } }) +
+    factsLine({ type: "cost-state", totalCostUSD: 1.5 });
+  // Bookkeeping Claude writes between turns, ~1 KB a line.
+  const filler = (bytes: number) =>
+    factsLine({
+      type: "attachment",
+      attachment: { text: "x".repeat(1000) },
+    }).repeat(Math.ceil(bytes / 1040));
+
+  const near = "55555555-2222-4333-8444-555555555555";
+  await writeFile(
+    join(dir, `${near}.jsonl`),
+    head + filler(300 * 1024) + factsLine(answer("msg_end", 9000)),
+  );
+  const found = await readAgentFacts(home, folder, "claude", near);
+  expect(found.costUSD).toBe(1.5);
+  expect(found.context?.tokens).toBe(9001);
+  expect(found.partial).toBe(false);
+
+  // Past the cap the `cost-state` at its start is never reached: partial,
+  // with the newest answer's context — and no cost or tokens it cannot
+  // vouch for, rather than the whole file read.
+  const far = "66666666-2222-4333-8444-555555555555";
+  await writeFile(
+    join(dir, `${far}.jsonl`),
+    head +
+      filler(AGENT_FACTS_READ_MAX + 512 * 1024) +
+      factsLine(answer("msg_end", 9000)),
+  );
+  const capped = await readAgentFacts(home, folder, "claude", far);
+  expect(capped).toMatchObject({
+    model: "claude-opus-5-5",
+    costUSD: null,
+    tokens: null,
+    context: { tokens: 9001, window: null },
+    partial: true,
+  });
+});
+
+test("FE-38: a Codex conversation's numbers are its newest token_count's — its context a share of the window only when Codex records one", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  await seedAgentHome(home, folder);
+  await seedAgentFacts(home, folder);
+
+  // The newest `token_count` says nothing (`info: null`): the one before.
+  expect(await readAgentFacts(home, folder, "codex", CODEX_ID)).toEqual({
+    agent: "codex",
+    model: "gpt-6.1-sol",
+    effort: "low",
+    costUSD: null,
+    stale: false,
+    tokens: { input: 1_753_176, output: 17_326, cached: 1_665_152 },
+    context: { tokens: 88_039, window: 258_400 },
+    lines: null,
+    duration: null,
+    recap: null,
+    partial: false,
+  });
+
+  // No window recorded: a count, no share (FE-38/D2).
+  await appendFile(
+    join(
+      home,
+      ".codex",
+      "sessions",
+      "2026",
+      "09",
+      "26",
+      `rollout-2026-09-26T07-04-45-${CODEX_ID}.jsonl`,
+    ),
+    factsLine({
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: { input_tokens: 1_900_000, output_tokens: 20_000 },
+          last_token_usage: { input_tokens: 95_000 },
+        },
+      },
+    }),
+  );
+  expect(
+    (await readAgentFacts(home, folder, "codex", CODEX_ID)).context,
+  ).toEqual({ tokens: 95_000, window: null });
+});
+
+test("FE-38: a conversation's numbers are read by ids alone — another shape, another folder's conversation or a sub-agent are refused", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  await seedAgentHome(home, folder);
+  await seedSubagents(home, folder);
+  const outside = await tempDir("lanew-outside-");
+
+  expect(factsRequest(["ws-alpha", "claude", CLAUDE_ID])).toEqual({
+    workspace: "ws-alpha",
+    agent: "claude",
+    id: CLAUDE_ID,
+  });
+  const refused: unknown[][] = [
+    ["ws-alpha", "claude", "../../../../outside/secret"],
+    ["ws-alpha", "claude", join(outside, "secret")],
+    ["ws-alpha", "claude", `${CLAUDE_ID}.jsonl`],
+    ["ws-alpha", "claude", `${CLAUDE_ID}/..`],
+    ["ws-alpha", "claude", ""],
+    ["ws-alpha", "claude", 7],
+    ["ws-alpha", "shell", CLAUDE_ID],
+    ["", "claude", CLAUDE_ID],
+    ["ws-alpha", "claude"],
+    ["ws-alpha", "claude", CLAUDE_ID, "extra"],
+  ];
+  for (const args of refused)
+    expect(() => factsRequest(args), JSON.stringify(args)).toThrow(/required/);
+  // The reader checks the id again, whoever calls it.
+  await expect(
+    readAgentFacts(home, folder, "claude", "../../../../outside/secret"),
+  ).rejects.toThrow(/valid conversation/);
+
+  // Well shaped, but not this folder's conversation: Claude's under a name
+  // two folders share, Codex's other folder's rollout, its guardian, and a
+  // thread a conversation spawned.
+  const notOurs = /not one of this project's/;
+  await expect(
+    readAgentFacts(
+      home,
+      folder,
+      "claude",
+      "33333333-2222-4333-8444-555555555555",
+    ),
+  ).rejects.toThrow(notOurs);
+  await expect(
+    readAgentFacts(
+      home,
+      folder,
+      "claude",
+      "77777777-2222-4333-8444-555555555555",
+    ),
+  ).rejects.toThrow(notOurs);
+  for (const id of [
+    "01a0db07-52f1-7020-abe9-000000000000",
+    CODEX_GUARDIAN_ID,
+    CODEX_SPAWNED_ID,
+  ])
+    await expect(readAgentFacts(home, folder, "codex", id)).rejects.toThrow(
+      notOurs,
+    );
+});
+
+test("FE-38/D6: a project's usage totals each conversation written in the last 7 and 30 days — a Codex thread's spawns for their tokens only", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  await seedAgentHome(home, folder);
+  await seedAgentFacts(home, folder);
+  await seedSubagents(home, folder);
+  const dir = join(home, ".claude", "projects", claudeProjectDir(folder));
+  const day = 24 * 60 * 60;
+  const now = Date.now() / 1000;
+  // Written ten days ago: the 30 days' only. Forty: neither.
+  for (const [id, age, cost] of [
+    ["88888888-2222-4333-8444-555555555555", 10, 1.5],
+    ["99999999-2222-4333-8444-555555555555", 40, 7],
+  ] as const) {
+    const file = join(dir, `${id}.jsonl`);
+    await writeFile(
+      file,
+      factsLine({ type: "user", cwd: folder, message: { content: "Go" } }) +
+        factsLine({
+          type: "cost-state",
+          totalCostUSD: cost,
+          modelUsage: { m: { inputTokens: 1000, outputTokens: 10 } },
+        }),
+    );
+    await utimes(file, now - age * day, now - age * day);
+  }
+  // The thread the Codex conversation spawned spent tokens of its own.
+  await appendFile(
+    join(
+      home,
+      ".codex",
+      "sessions",
+      "2026",
+      "09",
+      "26",
+      `rollout-2026-09-26T07-10-00-${CODEX_SPAWNED_ID}.jsonl`,
+    ),
+    factsLine({
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: { input_tokens: 5000, output_tokens: 50 },
+        },
+      },
+    }),
+  );
+
+  const usage = await readAgentUsage(home, folder);
+  expect(usage.skipped).toBe(0);
+  expect(usage.windows.map((window) => window.days)).toEqual([7, 30]);
+  const [week, month] = usage.windows;
+  // The seeded conversation; the empty one, the other folder's and the
+  // badly named one count for nothing.
+  expect(week?.claude).toEqual({
+    conversations: 1,
+    costUSD: 0.7312,
+    input: 141_000,
+    output: 4020,
+  });
+  expect(month?.claude.conversations).toBe(2);
+  expect(month?.claude.costUSD).toBeCloseTo(2.2312, 6);
+  expect(month?.claude.input).toBe(142_000);
+  // Codex: one conversation; its spawned thread's tokens, never its
+  // guardian's or another folder's.
+  expect(week?.codex).toEqual({
+    conversations: 1,
+    costUSD: null,
+    input: 1_753_176 + 5000,
+    output: 17_326 + 50,
+  });
+  expect(month?.codex).toEqual(week?.codex);
+});
+
 test("the card an agent is on is its latest Lanework call that names one — this board's, from either CLI (FE-27)", async () => {
   const claudeCall = (name: string, input: unknown) => ({
     type: "assistant",
@@ -1180,4 +1569,671 @@ test("the host moves a live agent tab onto its conversation, and tells its watch
     off();
     sessions.killAll();
   }
+});
+
+const HOUR = 3_600_000;
+const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+
+test("FE-41: Codex's usage is the last `token_count` that reported it, in the rollout written last", async () => {
+  const codex = join(await tempDir("lanew-codex-"), ".codex");
+  const day = join(codex, "sessions", "2026", "10", "03");
+  await mkdir(day, { recursive: true });
+  const soon = Date.now() + 2 * HOUR;
+  const later = Date.now() + 100 * HOUR;
+  const rollout = (time: string, id: string) =>
+    join(day, `rollout-2026-10-03T${time}-01a0db07-52f1-7020-abe9-${id}.jsonl`);
+  // Written last of those that reported: several reports, and after the one
+  // to take, a `premium` one with no window, a null one — and a tool output
+  // longer than the first read of its end.
+  const reported = rollout("08-00-00", "000000000001");
+  await writeFile(
+    reported,
+    line({ type: "session_meta", payload: { id: "x", cwd: "/tmp" } }) +
+      line(
+        codexTokenCount(
+          "2026-10-03T08:01:00.000Z",
+          codexRateLimits(
+            { used: 3, resetsAt: soon },
+            { used: 1, resetsAt: later },
+          ),
+        ),
+      ) +
+      line(
+        codexTokenCount(
+          "2026-10-03T08:02:00.000Z",
+          codexRateLimits(
+            { used: 6, resetsAt: soon },
+            { used: 2, resetsAt: later },
+          ),
+        ),
+      ) +
+      line(
+        codexTokenCount("2026-10-03T08:03:00.000Z", {
+          limit_id: "premium",
+          primary: null,
+          secondary: null,
+        }),
+      ) +
+      line(codexTokenCount("2026-10-03T08:04:00.000Z", null)) +
+      line({ type: "event_msg", payload: { type: "task_complete" } }) +
+      line({
+        type: "response_item",
+        payload: { type: "function_call_output", output: "x".repeat(100_000) },
+      }),
+  );
+  // Started later, but last written before it: older numbers.
+  const older = rollout("09-00-00", "000000000002");
+  await writeFile(
+    older,
+    line(
+      codexTokenCount(
+        "2026-10-03T07:00:00.000Z",
+        codexRateLimits(
+          { used: 50, resetsAt: soon },
+          { used: 40, resetsAt: later },
+        ),
+      ),
+    ),
+  );
+  // Written just now, with no report yet: passed over.
+  const fresh = rollout("10-00-00", "000000000003");
+  await writeFile(
+    fresh,
+    line({ type: "session_meta", payload: { id: "y", cwd: "/tmp" } }),
+  );
+  const now = Date.now() / 1000;
+  await utimes(older, now - 3600, now - 3600);
+  await utimes(reported, now - 60, now - 60);
+
+  const expected = {
+    primary: {
+      usedPercent: 6,
+      windowMinutes: 300,
+      resetsAt: Math.floor(soon / 1000) * 1000,
+    },
+    secondary: {
+      usedPercent: 2,
+      windowMinutes: 10_080,
+      resetsAt: Math.floor(later / 1000) * 1000,
+    },
+    plan: "plus",
+    at: "2026-10-03T08:02:00.000Z",
+  };
+  expect(await readCodexQuota(codex)).toEqual(expected);
+  // With the goals, side by side; no history at all is none, not an error.
+  expect(
+    await readCodexUsage({ home: codex, sqlite: codex }, [CODEX_ID]),
+  ).toEqual({ quota: expected, goals: {} });
+  expect(await readCodexQuota(await tempDir("lanew-codex-empty-"))).toBeNull();
+});
+
+test("FE-41: a goal is read for its own thread from Codex's newest goals database — one that cannot be read is no goals, and none is ever written", async () => {
+  const sqlite = await tempDir("lanew-codex-sqlite-");
+  // None yet.
+  expect(await readCodexGoals(sqlite, [CODEX_ID])).toEqual({});
+
+  const other = "01a0db07-52f1-7020-abe9-444444444444";
+  const goal = {
+    threadId: CODEX_ID,
+    objective: "Ship the quota bar\n  on the rail",
+    status: "usage_limited",
+    tokenBudget: 500_000,
+    tokensUsed: 363_078,
+    timeUsedSeconds: 2_015,
+  };
+  // An older schema's file: `goals_2` sorts after `goals_10` as text, never
+  // as a number.
+  await seedCodexGoals(
+    sqlite,
+    [{ ...goal, status: "active" }],
+    "goals_2.sqlite",
+  );
+  const file = await seedCodexGoals(
+    sqlite,
+    [goal, { ...goal, threadId: other, objective: "Not asked for" }],
+    "goals_10.sqlite",
+  );
+  // ⚠️ Read-only for real: a file nobody may write still reads.
+  await chmod(file, 0o444);
+  const before = {
+    bytes: await readFile(file),
+    mtime: (await stat(file)).mtimeMs,
+    names: (await readdir(sqlite)).sort(),
+  };
+  const read = await readCodexGoals(sqlite, [
+    CODEX_ID,
+    "x') OR 1=1 --",
+    CODEX_ID,
+  ]);
+  expect(read).toEqual({
+    [CODEX_ID]: {
+      objective: "Ship the quota bar\n  on the rail",
+      status: "usage_limited",
+      tokenBudget: 500_000,
+      tokensUsed: 363_078,
+      timeUsedSeconds: 2_015,
+      updatedAt: 1_790_649_031_534,
+    },
+  });
+  // No thread asked for: the file is not even opened.
+  expect(await readCodexGoals(sqlite, [])).toEqual({});
+  // Never written: not a byte, not its time, no journal beside it.
+  expect(await readFile(file)).toEqual(before.bytes);
+  expect((await stat(file)).mtimeMs).toBe(before.mtime);
+  expect((await readdir(sqlite)).sort()).toEqual(before.names);
+
+  // Locked by a writer: no goals, no error — and back once it lets go.
+  await chmod(file, 0o644);
+  const { DatabaseSync } = await import("node:sqlite");
+  const writer = new DatabaseSync(file);
+  writer.exec("BEGIN EXCLUSIVE");
+  try {
+    expect(await readCodexGoals(sqlite, [CODEX_ID])).toEqual({});
+  } finally {
+    writer.exec("ROLLBACK");
+    writer.close();
+  }
+  expect(Object.keys(await readCodexGoals(sqlite, [CODEX_ID]))).toEqual([
+    CODEX_ID,
+  ]);
+
+  // A newer schema this does not know: no goals.
+  const changed = new DatabaseSync(join(sqlite, "goals_11.sqlite"));
+  changed.exec(
+    "CREATE TABLE thread_goals (thread_id TEXT PRIMARY KEY, goal TEXT)",
+  );
+  changed.prepare("INSERT INTO thread_goals VALUES (?, ?)").run(CODEX_ID, "x");
+  changed.close();
+  expect(await readCodexGoals(sqlite, [CODEX_ID])).toEqual({});
+  // Not a database at all: no goals.
+  await writeFile(join(sqlite, "goals_12.sqlite"), "not a database");
+  expect(await readCodexGoals(sqlite, [CODEX_ID])).toEqual({});
+});
+
+const FE41_WORKSPACES = [
+  {
+    id: "ws-alpha",
+    slug: "alpha",
+    name: "Alpha",
+    path: null,
+    baseBranch: null,
+  },
+  { id: "ws-beta", slug: "beta", name: "Beta", path: null, baseBranch: null },
+];
+
+/**
+ * An app booted on a profile whose Alpha project is linked to a folder, its
+ * agents' conversations read from a fake home `seed` fills (FE-41).
+ */
+async function bootOnAgentHome(
+  origin: string,
+  seed: (agentHome: string, repo: string) => Promise<void>,
+) {
+  const profile = await mkdtemp(join(tmpdir(), "lanew-codex-usage-"));
+  const home = join(profile, "home");
+  const repo = await realpath(await mkdtemp(join(tmpdir(), "lanew-repo-")));
+  await mkdir(home, { recursive: true });
+  await seedCredential(home, origin);
+  const previous = process.env.LANEWORK_HOME;
+  process.env.LANEWORK_HOME = home;
+  await writeFolders(
+    {
+      machineId: "test-machine",
+      userId: "test-user",
+      apiUrl: origin,
+      name: "test-machine",
+      secret: "lw_mch_test-secret",
+      owner: null,
+    } satisfies MachineRecord,
+    "alpha",
+    [repo],
+  );
+  if (previous === undefined) delete process.env.LANEWORK_HOME;
+  else process.env.LANEWORK_HOME = previous;
+  const agentHome = join(profile, "agent-home");
+  await seed(agentHome, repo);
+  // A stand-in Codex: says it ran, then waits like a real CLI.
+  const codexBin = join(profile, "codex-stand-in.sh");
+  await writeFile(
+    codexBin,
+    `#!/bin/sh\nprintf 'ran-codex-%s\\n' "$@"\nwhile IFS= read -r line; do [ "$line" = "/exit" ] && exit 0; done\n`,
+    { mode: 0o755 },
+  );
+  const app = await electron.launch({
+    args: [process.cwd()],
+    env: {
+      ...launchEnv({ profile, home, apiUrl: origin }),
+      LANEWORK_TERMINAL_SHELL: "/bin/sh",
+      LANEWORK_TEST_AGENT_HOME: agentHome,
+      LANEWORK_TERMINAL_AGENTS: "claude,codex",
+      LANEWORK_CODEX_BIN: codexBin,
+    },
+  });
+  return { app, profile };
+}
+
+async function openProject(page: Page, name: string) {
+  await page.getByRole("button", { name: /^Switch project/ }).click();
+  await page.getByRole("option", { name }).first().click();
+  await expect(
+    page.getByRole("button", { name: `Switch project — currently ${name}` }),
+  ).toBeVisible();
+}
+
+test("FE-41: the rail shows Codex's usage until each window resets, and a goal's status on its conversation", async () => {
+  test.skip(process.platform === "win32", "This drives a POSIX shell.");
+  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  const board = {
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    cards: [],
+  };
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  let rollout = "";
+  const { app, profile } = await bootOnAgentHome(
+    plane.origin,
+    async (agentHome, repo) => {
+      await seedAgentHome(agentHome, repo);
+      const codex = join(agentHome, ".codex");
+      rollout = join(
+        codex,
+        "sessions",
+        "2026",
+        "09",
+        "26",
+        `rollout-2026-09-26T07-04-45-${CODEX_ID}.jsonl`,
+      );
+      await appendFile(
+        rollout,
+        line(
+          codexTokenCount(
+            new Date().toISOString(),
+            codexRateLimits(
+              { used: 6, resetsAt: Date.now() + 2 * HOUR },
+              { used: 1, resetsAt: Date.now() + 100 * HOUR },
+            ),
+          ),
+        ),
+      );
+      await seedCodexGoals(codex, [
+        {
+          threadId: CODEX_ID,
+          objective: "Ship the quota bar",
+          status: "usage_limited",
+          tokenBudget: 500_000,
+          tokensUsed: 363_078,
+          timeUsedSeconds: 2_015,
+        },
+      ]);
+    },
+  );
+  try {
+    const page = await app.firstWindow();
+    await openProject(page, "Alpha");
+    const group = page.getByRole("navigation", { name: "Agents" });
+    const quota = group.getByTestId("codex-quota");
+    // Read from the fake home with the listing; the details are in it for
+    // anybody who cannot hover.
+    await expect(quota).toContainText("Codex 5h 6%, week 1%");
+    await expect(quota).toContainText("week resets");
+    await expect(quota).toContainText("As of");
+    // The goal that ran out of usage says so on its own row, and only there.
+    const codexRow = page.getByRole("button", {
+      name: "Resume “Settings page cleanup” in Codex",
+    });
+    await expect(codexRow.getByTestId("codex-goal-badge")).toHaveAttribute(
+      "aria-label",
+      "Goal usage limit",
+    );
+    await expect(
+      page
+        .getByRole("button", { name: "Resume “Flaky login test” in Claude" })
+        .getByTestId("codex-goal-badge"),
+    ).toHaveCount(0);
+
+    // A turn reports again — its 5-hour window already past: that number
+    // goes, the week's stays (FE-41/D3). Read as the watcher settles it.
+    // ⚠️ Written AGAIN until it is seen: the OS watcher takes a moment.
+    await expect(async () => {
+      await appendFile(
+        rollout,
+        line({ type: "event_msg", payload: { type: "task_started" } }) +
+          line(
+            codexTokenCount(
+              new Date().toISOString(),
+              codexRateLimits(
+                { used: 99, resetsAt: Date.now() - 60_000 },
+                { used: 2, resetsAt: Date.now() + 100 * HOUR },
+              ),
+            ),
+          ),
+      );
+      await expect(quota).toContainText("Codex week 2%", { timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
+    await expect(quota).not.toContainText("5h");
+
+    // Both past: the bar goes.
+    await appendFile(
+      rollout,
+      line(
+        codexTokenCount(
+          new Date().toISOString(),
+          codexRateLimits(
+            { used: 99, resetsAt: Date.now() - 60_000 },
+            { used: 2, resetsAt: Date.now() - 60_000 },
+          ),
+        ),
+      ) + line({ type: "event_msg", payload: { type: "task_complete" } }),
+    );
+    await expect(quota).toHaveCount(0, { timeout: 10_000 });
+
+    // Its agent view says what the goal is, where it stands, and its tokens
+    // against its budget (FE-41/D4).
+    await codexRow.click();
+    const view = page.getByRole("region", {
+      name: "Codex — Settings page cleanup",
+    });
+    const goal = view.getByTestId("agent-facts");
+    await expect(goal).toContainText("Ship the quota bar");
+    await expect(goal).toContainText("usage limit");
+    await expect(goal).toContainText("363.1K / 500K tokens");
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+/** A real repository at `folder`, its one commit stamped `committedAt`. */
+function gitRepo(folder: string, committedAt: string) {
+  // Whole seconds: git's own resolution.
+  const date = committedAt.replace(/\.\d+Z$/, "Z");
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_DATE: date,
+    GIT_COMMITTER_DATE: date,
+  };
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "commit.gpgsign=false", ...args], {
+      cwd: folder,
+      env,
+      encoding: "utf8",
+    });
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "tester@example.com");
+  git("config", "user.name", "Tester");
+  git("commit", "-q", "--allow-empty", "-m", "init");
+  return git;
+}
+
+test("FE-39: a Claude conversation's files — file history or its tools alone, sub-agents folded in, nothing outside the repo", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = await tempDir("lanew-files-");
+  const git = gitRepo(folder, tick(0));
+  // A sub-agent's isolated checkout lives inside the folder: its edits are
+  // that worktree's, never this one's.
+  git(
+    "worktree",
+    "add",
+    "-q",
+    join(".claude", "worktrees", "iso"),
+    "-b",
+    "iso",
+  );
+  await seedClaudeEdits(home, folder);
+  const subagents = join(
+    home,
+    ".claude",
+    "projects",
+    claudeProjectDir(folder),
+    CLAUDE_EDITS_ID,
+    "subagents",
+  );
+  await writeFile(
+    join(subagents, "agent-iso.jsonl"),
+    `${JSON.stringify({
+      type: "assistant",
+      isSidechain: true,
+      timestamp: tick(8),
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_iso",
+            name: "Edit",
+            input: {
+              file_path: join(folder, ".claude", "worktrees", "iso", "a.ts"),
+            },
+          },
+        ],
+      },
+    })}\n`,
+  );
+
+  // File history on: two edits, one delta — counted as two, not three. The
+  // failed `Write` and the edit outside the folder are not files.
+  expect(
+    await readAgentFiles(home, folder, {
+      agent: "claude",
+      id: CLAUDE_EDITS_ID,
+    }),
+  ).toEqual({
+    partial: false,
+    files: [
+      {
+        path: "src/helper.ts",
+        op: "added",
+        edits: 1,
+        lastAt: tick(7),
+        via: { id: "helper", type: "general-purpose" },
+      },
+      // Its sub-agent edited it too: folded in, and not "via" — the
+      // conversation edited it itself.
+      {
+        path: "src/router.tsx",
+        op: "modified",
+        edits: 3,
+        lastAt: tick(6),
+        via: null,
+      },
+      { path: "src/new.ts", op: "added", edits: 1, lastAt: tick(3), via: null },
+    ],
+  });
+  // File history off: the tools alone, `Write`'s result saying "created".
+  expect(
+    await readAgentFiles(home, folder, {
+      agent: "claude",
+      id: CLAUDE_TOOLS_ID,
+    }),
+  ).toEqual({
+    partial: false,
+    files: [
+      {
+        path: "nb/analysis.ipynb",
+        op: "modified",
+        edits: 1,
+        lastAt: tick(3),
+        via: null,
+      },
+      {
+        path: "src/router.tsx",
+        op: "modified",
+        edits: 1,
+        lastAt: tick(2),
+        via: null,
+      },
+      {
+        path: "src/made.ts",
+        op: "added",
+        edits: 1,
+        lastAt: tick(1),
+        via: null,
+      },
+    ],
+  });
+});
+
+test("FE-39: a Codex conversation's patches — add, update, delete and move — counted once, its thread folded in", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = await tempDir("lanew-files-");
+  await seedCodexEdits(home, folder);
+  expect(
+    await readAgentFiles(home, folder, { agent: "codex", id: CODEX_EDITS_ID }),
+  ).toEqual({
+    partial: false,
+    files: [
+      {
+        path: "src/spawned.ts",
+        op: "added",
+        edits: 1,
+        lastAt: tick(4),
+        via: { id: CODEX_EDITS_SPAWNED_ID, type: "worker" },
+      },
+      // The patch and its `FileChange` are one edit; the older CLI's call a
+      // second.
+      {
+        path: "src/router.tsx",
+        op: "modified",
+        edits: 2,
+        lastAt: tick(3),
+        via: null,
+      },
+      {
+        path: "src/script.ts",
+        op: "modified",
+        edits: 1,
+        lastAt: tick(2),
+        via: null,
+      },
+      {
+        path: "docs/added.md",
+        op: "added",
+        edits: 1,
+        lastAt: tick(1),
+        via: null,
+      },
+      { path: "old.txt", op: "deleted", edits: 1, lastAt: tick(1), via: null },
+      {
+        path: "src/renamed.ts",
+        op: "renamed",
+        edits: 1,
+        lastAt: tick(1),
+        via: null,
+      },
+    ],
+  });
+  expect(
+    patchedFiles(
+      "*** Begin Patch\n*** Update File: a.ts\n*** Move to: b.ts\n*** Delete File: c.ts\n*** Add File: d.ts\n+x\n*** End Patch",
+    ),
+  ).toEqual([
+    { path: "b.ts", op: "renamed" },
+    { path: "c.ts", op: "deleted" },
+    { path: "d.ts", op: "added" },
+  ]);
+});
+
+test("FE-39: a re-read parses only what was appended, and a transcript past 32 MB is read from its end", async () => {
+  const folder = await tempDir("lanew-files-");
+  const file = join(await tempDir("lanew-scan-"), "t.jsonl");
+  const edit = (name: string, at: string) =>
+    `${JSON.stringify({
+      type: "assistant",
+      timestamp: at,
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: `toolu_${name}`,
+            name: "Edit",
+            input: { file_path: join(folder, `${name}.ts`) },
+          },
+        ],
+      },
+    })}\n`;
+  await writeFile(file, edit("one", tick(1)));
+  const paths = async () =>
+    [...(await scanTranscript(file, "claude", folder)).files.keys()].map(
+      (path) => path.slice(folder.length + 1),
+    );
+  expect(await paths()).toEqual(["one.ts"]);
+
+  // The first line rewritten in place, the same length, and a line appended:
+  // only the appended line is read — `uno` is never seen.
+  const first = edit("one", tick(1));
+  await writeFile(
+    file,
+    first.replace("one.ts", "uno.ts") + edit("two", tick(2)),
+  );
+  expect((await paths()).sort()).toEqual(["one.ts", "two.ts"]);
+  // A line still being written is left for the next read.
+  await appendFile(file, edit("six", tick(6)).slice(0, 40));
+  expect((await paths()).sort()).toEqual(["one.ts", "two.ts"]);
+
+  // Past 32 MB: its newest 32 MB, and it says so.
+  const big = join(await tempDir("lanew-scan-"), "big.jsonl");
+  const filler = `${JSON.stringify({
+    type: "assistant",
+    message: { content: [{ type: "text", text: "x".repeat(1024 * 1024) }] },
+  })}\n`;
+  await writeFile(big, edit("early", tick(1)));
+  for (let mb = 0; mb <= AGENT_FILES_READ_MAX / (1024 * 1024); mb++)
+    await appendFile(big, filler);
+  await appendFile(big, edit("late", tick(2)));
+  const scanned = await scanTranscript(big, "claude", folder);
+  expect(scanned.partial).toBe(true);
+  expect([...scanned.files.keys()]).toEqual([join(folder, "late.ts")]);
+});
+
+test("FE-39: Changes marks only what a conversation edited since HEAD's commit — and files are asked for by ids alone", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = await tempDir("lanew-files-");
+  // Committed after `src/new.ts` (tick 3), before the sub-agent's edits.
+  gitRepo(folder, tick(4));
+  await seedClaudeEdits(home, folder);
+  expect(
+    await agentFileMarks(home, folder, await listAgentSessions(home, folder)),
+  ).toEqual({
+    partial: false,
+    files: {
+      "src/helper.ts": [
+        {
+          agent: "claude",
+          id: CLAUDE_EDITS_ID,
+          title: "Wire the router",
+          lastAt: tick(7),
+          via: { id: "helper", type: "general-purpose" },
+        },
+      ],
+      "src/router.tsx": [
+        {
+          agent: "claude",
+          id: CLAUDE_EDITS_ID,
+          title: "Wire the router",
+          lastAt: tick(6),
+          via: null,
+        },
+      ],
+    },
+  });
+
+  for (const args of [
+    ["ws", "claude"],
+    ["ws", "claude", "../../etc/passwd"],
+    ["ws", "bash", CLAUDE_EDITS_ID],
+    ["", "claude", CLAUDE_EDITS_ID],
+  ])
+    expect(() => agentFilesRequest(args)).toThrow();
+  expect(agentFilesRequest(["ws", "codex", CODEX_EDITS_ID])).toEqual({
+    workspace: "ws",
+    agent: "codex",
+    id: CODEX_EDITS_ID,
+  });
+  // Another folder's conversation is not this one's to read.
+  await expect(
+    readAgentFiles(home, await tempDir("lanew-other-"), {
+      agent: "claude",
+      id: CLAUDE_EDITS_ID,
+    }),
+  ).rejects.toThrow(/not one of this project's/);
 });

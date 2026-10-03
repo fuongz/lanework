@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
+import type { AgentFileMarks } from "../../shared/terminal";
 import type {
   BranchList,
   CommitChange,
@@ -51,6 +52,8 @@ function readStyle(): DiffStyle {
  * throw away the patch that was asked for after it.
  */
 const ticket = { status: 0, patch: 0, history: 0, commit: 0, branches: 0 };
+/** The agent marks' own (FE-39/D2): a slow scan must not land on a later one. */
+let marksTicket = 0;
 
 /** What a project's screens held when another project was opened. */
 type Snapshot = Pick<
@@ -105,6 +108,15 @@ interface WorktreeStore {
   branches: { slug: string; list: BranchList | null } | null;
   switching: string | null;
   switchError: string | null;
+  /**
+   * Which agent conversations edited each changed file since HEAD's commit
+   * (FE-39/D2, D3), by path; null until read.
+   *
+   * ⚠️ Read after every status, never awaited by it: scanning transcripts is
+   * slower than `git status`, and the list does not wait for its marks.
+   */
+  agentMarks: AgentFileMarks | null;
+  loadAgentMarks: () => Promise<void>;
 
   open: (slug: string) => Promise<void>;
   refresh: () => Promise<void>;
@@ -160,6 +172,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     ticket.patch++;
     ticket.history++;
     ticket.commit++;
+    marksTicket++;
     const kept = snapshots.get(slug);
     set({
       slug,
@@ -180,6 +193,8 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       historyError: null,
       commitError: null,
       actionError: null,
+      // Another project's conversations: never shown under this one's files.
+      agentMarks: null,
     });
   }
 
@@ -213,6 +228,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       if (get().slug !== slug) return false;
       ticket.status++;
       set({ state, busy: null, error: null });
+      void get().loadAgentMarks();
       await loadPatch();
       return true;
     } catch (error) {
@@ -249,6 +265,23 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     branches: null,
     switching: null,
     switchError: null,
+    agentMarks: null,
+
+    loadAgentMarks: async () => {
+      const { slug, state } = get();
+      const surface = window.desktop?.terminal;
+      if (!slug || state?.kind !== "ready" || !surface) return;
+      const mine = ++marksTicket;
+      try {
+        // ⚠️ The slug is a workspace key main accepts, as the cloud id is.
+        const agentMarks = await surface.agentFilesForWorktree(slug);
+        if (mine !== marksTicket) return;
+        set({ agentMarks });
+      } catch {
+        // No marks is the honest answer: the files are still listed.
+        if (mine === marksTicket) set({ agentMarks: null });
+      }
+    },
 
     open: async (slug) => {
       enter(slug);
@@ -264,6 +297,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
         const state = await api().status(slug);
         if (mine !== ticket.status) return;
         set({ state, loading: false, error: null });
+        void get().loadAgentMarks();
         await loadPatch();
       } catch (error) {
         if (mine !== ticket.status) return;
@@ -455,6 +489,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
             historyMore: false,
             commit: null,
           });
+          void get().loadAgentMarks();
           await loadPatch();
           void get()
             .openHistory(slug)

@@ -221,9 +221,16 @@ test("Codex: config.toml says whether hooks are on and what is approved", () => 
     false,
   );
   expect(parseCodexConfig("features.hooks = true").hooksEnabled).toBe(true);
-  // Nothing readable is "not set" — never a false "approved".
+  expect(parseCodexConfig("[features]\ncodex_hooks = false").hooksEnabled).toBe(
+    false,
+  );
+  // Nothing readable is "not set": hooks on, as Codex defaults them — and
+  // never a false "approved".
   const empty = parseCodexConfig("");
-  expect(empty.hooksEnabled).toBe(false);
+  expect(empty.hooksEnabled).toBe(true);
+  expect(parseCodexConfig("[features]\njs_repl = false").hooksEnabled).toBe(
+    true,
+  );
   expect(empty.trusted.size).toBe(0);
 });
 

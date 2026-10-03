@@ -799,3 +799,29 @@ export async function switchBranch(top: string, name: string): Promise<void> {
   }
   throw new Error(`${name} is not a branch in this repository.`);
 }
+
+/**
+ * When HEAD was committed, epoch ms (null with no commit yet), and the
+ * repository's other worktrees — what the agent marks on Changes are
+ * reckoned against (FE-39/D3).
+ *
+ * ⚠️ The COMMITTER's time, not the author's: an amend or a rebase rewrites
+ * HEAD now, and what it took in is committed now.
+ */
+export async function repoFacts(
+  top: string,
+): Promise<{ headAt: number | null; worktrees: string[] }> {
+  const [head, list] = await Promise.all([
+    run(top, ["log", "-1", "--format=%ct", "HEAD"], { ok: [128] }),
+    run(top, ["worktree", "list", "--porcelain", "-z"], { ok: [128, 129] }),
+  ]);
+  const seconds = Number(head.code === 0 ? head.stdout.trim() : NaN);
+  return {
+    headAt: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null,
+    worktrees: list.stdout
+      .split("\0")
+      .filter((field) => field.startsWith("worktree "))
+      .map((field) => field.slice(9))
+      .filter((path) => path && path !== top),
+  };
+}
