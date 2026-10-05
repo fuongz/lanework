@@ -15,7 +15,12 @@ import type {
   AgentSubagent,
   TerminalSession,
 } from "#/../shared/terminal";
+import {
+  backgroundCue,
+  TASK_KIND_ICONS,
+} from "#/components/shared/agents/background-tasks";
 import { factsSummary } from "#/components/shared/agents/conversation-facts";
+import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
@@ -145,6 +150,82 @@ function QuickAction({
   );
 }
 
+/**
+ * A conversation's background shells and monitors still running (FE-42/D1),
+ * as rows under it beside its sub-agents' — its background agents already
+ * are sub-agent rows. A row opens the task's own page.
+ *
+ * ⚠️ Mounted only for a conversation whose listing counts one running, so
+ * the rail reads no task list for the rest.
+ */
+function BackgroundShellRows({
+  workspace,
+  slug,
+  session,
+  row,
+  active,
+  viewingTask,
+  now,
+}: {
+  workspace: string;
+  slug: string;
+  session: AgentSession;
+  row: string;
+  active: string;
+  /** The task whose page is on screen, if one is. */
+  viewingTask: string | undefined;
+  now: number;
+}) {
+  const navigate = useNavigate();
+  const { tasks } = useBackgroundTasks(
+    workspace,
+    session.id,
+    backgroundCue(session),
+  );
+  const shells = (tasks ?? []).filter(
+    (task) => task.status === "running" && task.kind !== "agent",
+  );
+  return shells.map((task) => {
+    const viewed = viewingTask === task.id;
+    const name = task.description || task.command || task.id;
+    return (
+      <button
+        key={task.id}
+        type="button"
+        onClick={() =>
+          void navigate({
+            to: "/w/$slug/agents/task/$conversation/$task",
+            params: { slug, conversation: session.id, task: task.id },
+          })
+        }
+        aria-current={viewed ? "page" : undefined}
+        aria-label={`${name}, a background ${task.kind} of “${session.title}”. Open its output`}
+        title={`${task.command ?? name}\nBackground ${task.kind} · running since ${relativeTime(task.startedAt, now)}`}
+        className={cn(row, SUB_ROW, viewed && active)}
+      >
+        <HugeiconsIcon
+          icon={TASK_KIND_ICONS[task.kind]}
+          className="size-3 shrink-0 opacity-60"
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+        <span
+          className={`min-w-0 flex-1 truncate ${viewed ? "" : "text-muted-foreground"}`}
+        >
+          {name}
+        </span>
+        <span
+          aria-hidden="true"
+          className="bg-tone-emerald size-1.5 shrink-0 rounded-full"
+        />
+        <span className="text-muted-foreground shrink-0 tabular-nums">
+          {shortAge(task.startedAt, now)}
+        </span>
+      </button>
+    );
+  });
+}
+
 /** What hover hides to make room for the quick actions. */
 const MAKES_ROOM = "group-hover/row:invisible group-focus-within/row:invisible";
 
@@ -212,12 +293,14 @@ export function AgentSessionsNav({
     terminalId,
     conversation: viewing,
     sub: viewingSub,
+    task: viewingTask,
   } = useParams({
     strict: false,
   }) as {
     terminalId?: string;
     conversation?: string;
     sub?: string;
+    task?: string;
   };
   // The sub-agent viewer's (FE-35): which CLI's conversation `viewing` is.
   const { agent: viewingAgent } = useSearch({ strict: false }) as {
@@ -379,8 +462,13 @@ export function AgentSessionsNav({
           b.sub.updatedAt.localeCompare(a.sub.updatedAt),
       );
     const going = ordered.filter((entry) => entry.working).length;
+    // Its background tasks still running (FE-42/D1): Claude counts them.
+    const background =
+      session.agent === "claude" ? session.background.running : 0;
+    const nested = subagents.length > 0 || background > 0;
     // Unset follows them: open while one is going (FE-33/D2).
-    const open = subagents.length > 0 && (openSubagents[key] ?? going > 0);
+    const open =
+      nested && (openSubagents[key] ?? (going > 0 || background > 0));
     const all = allSubagents.has(key);
     const shownSubagents = all ? ordered : ordered.slice(0, SUBAGENTS_FOLDED);
     const isPinned = session.pinnedAt !== null;
@@ -429,9 +517,7 @@ export function AgentSessionsNav({
               }
             >
               {/* With sub-agents, hover trades the icon for their chevron. */}
-              <span
-                className={`flex shrink-0 ${subagents.length > 0 ? MAKES_ROOM : ""}`}
-              >
+              <span className={`flex shrink-0 ${nested ? MAKES_ROOM : ""}`}>
                 {working ? (
                   <WorkingMark />
                 ) : (
@@ -505,12 +591,16 @@ export function AgentSessionsNav({
           </ContextMenu>
           {/* ⚠️ A sibling laid over the icon, like the quick actions: the
             row is a button, and a button cannot hold another. */}
-          {subagents.length > 0 && (
+          {nested && (
             <button
               type="button"
               aria-expanded={open}
-              aria-label={`${open ? "Hide" : "Show"} ${subagents.length} sub-agent${subagents.length === 1 ? "" : "s"}`}
-              title={`${subagents.length} sub-agent${subagents.length === 1 ? "" : "s"}${going > 0 ? `, ${going} working` : ""}`}
+              aria-label={`${open ? "Hide" : "Show"} ${
+                subagents.length > 0
+                  ? `${subagents.length} sub-agent${subagents.length === 1 ? "" : "s"}`
+                  : `${background} background task${background === 1 ? "" : "s"}`
+              }`}
+              title={`${subagents.length} sub-agent${subagents.length === 1 ? "" : "s"}${going > 0 ? `, ${going} working` : ""}${background > 0 ? `\n${background} running in the background` : ""}`}
               onClick={() => setOpenSubagents(session, !open)}
               className="text-muted-foreground hover:text-foreground pointer-events-none absolute inset-y-0 left-0 flex w-7 items-center justify-center opacity-0 transition-opacity group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100"
             >
@@ -529,6 +619,17 @@ export function AgentSessionsNav({
             }}
           />
         </div>
+        {open && background > 0 && (
+          <BackgroundShellRows
+            workspace={workspace}
+            slug={slug}
+            session={session}
+            row={row}
+            active={activeClass}
+            viewingTask={viewing === session.id ? viewingTask : undefined}
+            now={now}
+          />
+        )}
         {open &&
           shownSubagents.map(({ sub, working: busy }) => (
             // ⚠️ Opens its transcript, read-only (FE-35/D9) — not its

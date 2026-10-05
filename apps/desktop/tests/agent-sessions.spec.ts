@@ -9,7 +9,9 @@ import {
   readdir,
   readFile,
   realpath,
+  rm,
   stat,
+  symlink,
   utimes,
   writeFile,
 } from "node:fs/promises";
@@ -56,6 +58,12 @@ import {
   listAgentSessions,
 } from "../electron/main/terminal/agent-sessions";
 import {
+  backgroundRequest,
+  readBackgroundTasks,
+  readTaskOutput,
+  taskOutputRequest,
+} from "../electron/main/terminal/background-tasks";
+import {
   readCodexGoals,
   readCodexQuota,
   readCodexUsage,
@@ -68,12 +76,15 @@ import {
 import { writeFolders } from "../electron/main/workspaces/store";
 import {
   AGENT_FACTS_READ_MAX,
+  BACKGROUND_OUTPUT_MAX,
   isAgentSessionId,
   isCardRef,
   type TerminalHostMessage,
   type TerminalSession,
 } from "../shared/terminal";
 import {
+  CLAUDE_BG_ID,
+  CLAUDE_BG_OLD_ID,
   CLAUDE_EDITS_ID,
   CLAUDE_ID,
   CLAUDE_TOOLS_ID,
@@ -86,6 +97,7 @@ import {
   codexTokenCount,
   seedAgentFacts,
   seedAgentHome,
+  seedBackgroundTasks,
   seedClaudeEdits,
   seedCodexEdits,
   seedCodexGoals,
@@ -2245,4 +2257,236 @@ test("FE-39: Changes marks only what a conversation edited since HEAD's commit �
       id: CLAUDE_EDITS_ID,
     }),
   ).rejects.toThrow(/not one of this project's/);
+});
+
+test("FE-42: a conversation's background tasks are read from its transcript — status from the notification, lost when it went quiet", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  const tmp = await tempDir("lanew-tmp-");
+  await seedBackgroundTasks(home, folder, tmp);
+
+  // Running first, then newest first. The foreground `Bash` and the
+  // sidechain's call are no tasks; the duplicated notice is read once; the
+  // Monitor's status-less event ends nothing.
+  const tasks = await readBackgroundTasks(home, folder, CLAUDE_BG_ID);
+  expect(
+    tasks.map(({ id, kind, status, exitCode, subagentId }) => ({
+      id,
+      kind,
+      status,
+      exitCode,
+      subagentId,
+    })),
+  ).toEqual([
+    {
+      id: "bgmon01",
+      kind: "monitor",
+      status: "running",
+      exitCode: null,
+      subagentId: null,
+    },
+    {
+      id: "bgrun01",
+      kind: "shell",
+      status: "running",
+      exitCode: null,
+      subagentId: null,
+    },
+    {
+      id: "agbg01",
+      kind: "agent",
+      status: "completed",
+      exitCode: null,
+      subagentId: "agbg01",
+    },
+    {
+      id: "bgfail1",
+      kind: "shell",
+      status: "failed",
+      exitCode: 1,
+      subagentId: null,
+    },
+  ]);
+  const failed = tasks.find((task) => task.id === "bgfail1");
+  expect(failed).toMatchObject({
+    toolUseId: "toolu_fail",
+    description: "Run the tests",
+    command: "bun test\nbun run lint",
+    summary: 'Background command "Run the tests" failed with exit code 1',
+    startedAt: "2026-10-03T04:00:02.000Z",
+    endedAt: "2026-10-03T04:00:07.000Z",
+  });
+  expect(tasks.find((task) => task.id === "bgmon01")).toMatchObject({
+    command: null,
+    description: "Watch the log",
+    summary: 'Monitor event: "Watch the log"',
+    endedAt: null,
+  });
+  expect(tasks.find((task) => task.id === "agbg01")).toMatchObject({
+    description: "Explore the views",
+    command: null,
+    endedAt: "2026-10-03T04:00:08.000Z",
+  });
+
+  // An hour quiet: the one that never reported is lost, and so is the one
+  // Claude marked `stopped`.
+  const old = await readBackgroundTasks(home, folder, CLAUDE_BG_OLD_ID);
+  expect(
+    old.map(({ id, status, endedAt }) => ({ id, status, endedAt })),
+  ).toEqual([
+    { id: "bgstop1", status: "lost", endedAt: null },
+    { id: "bglost1", status: "lost", endedAt: null },
+  ]);
+
+  // The rail's counts ride on the listing.
+  const listed = await listAgentSessions(home, folder);
+  expect(
+    Object.fromEntries(
+      listed.map((session) => [session.id, session.background]),
+    ),
+  ).toEqual({
+    [CLAUDE_BG_ID]: { running: 2, total: 4 },
+    [CLAUDE_BG_OLD_ID]: { running: 0, total: 2 },
+  });
+
+  // Read on from where it stopped: the notice appended now ends the shell.
+  const file = join(
+    home,
+    ".claude",
+    "projects",
+    claudeProjectDir(folder),
+    `${CLAUDE_BG_ID}.jsonl`,
+  );
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      type: "user",
+      timestamp: "2026-10-03T04:01:00.000Z",
+      message: {
+        role: "user",
+        content:
+          "<task-notification>\n<task-id>bgrun01</task-id>\n<status>completed</status>\n<summary>Background command &quot;Run the gate&quot; completed (exit code 0)</summary>\n</task-notification>",
+      },
+    })}\n`,
+  );
+  expect(
+    (await readBackgroundTasks(home, folder, CLAUDE_BG_ID)).find(
+      (task) => task.id === "bgrun01",
+    ),
+  ).toMatchObject({
+    status: "completed",
+    exitCode: 0,
+    summary: 'Background command "Run the gate" completed (exit code 0)',
+    endedAt: "2026-10-03T04:01:00.000Z",
+  });
+
+  for (const args of [["ws"], ["ws", "../../etc/passwd"], ["", CLAUDE_BG_ID]])
+    expect(() => backgroundRequest(args)).toThrow();
+  expect(backgroundRequest(["ws", CLAUDE_BG_ID])).toEqual({
+    workspace: "ws",
+    conversation: CLAUDE_BG_ID,
+  });
+});
+
+test("FE-42: a task's output is read only from its CLI task folder — its last 64 KB, escapes stripped", async () => {
+  const home = await tempDir("lanew-agent-home-");
+  const folder = join(await tempDir("lanew-agent-"), "my_repo");
+  const tmp = await tempDir("lanew-tmp-");
+  const { tasks, decoy } = await seedBackgroundTasks(home, folder, tmp);
+  const read = (task: string, roots = [tmp]) =>
+    readTaskOutput(home, folder, CLAUDE_BG_ID, task, roots);
+
+  expect(await read("bgrun01")).toEqual({
+    text: "✓ typecheck\nrunning e2e…\n",
+    size: (await stat(join(tasks, "bgrun01.output"))).size,
+    truncated: false,
+    missing: false,
+  });
+
+  // A task this conversation never started, one with no output of its own,
+  // and an id that is no id.
+  await expect(read("nosuch1")).rejects.toThrow(/no such task/);
+  await expect(read("agbg01")).rejects.toThrow(/no output/);
+  await expect(read("../secret")).rejects.toThrow(/valid task/);
+  for (const args of [
+    ["ws", CLAUDE_BG_ID],
+    ["ws", CLAUDE_BG_ID, "../x"],
+    ["ws", "nope", "bgrun01"],
+  ])
+    expect(() => taskOutputRequest(args)).toThrow();
+
+  // The same file, but not under a temp dir it may read.
+  await expect(
+    read("bgrun01", [await tempDir("lanew-other-")]),
+  ).rejects.toThrow(/outside/);
+  // Its file swapped for a symlink out of the folder.
+  await rm(join(tasks, "bgfail1.output"));
+  await symlink(decoy, join(tasks, "bgfail1.output"));
+  await expect(read("bgfail1")).rejects.toThrow(/outside/);
+
+  // A path the transcript recorded outside any CLI task folder.
+  const elsewhere = join(tmp, "bgout9.output");
+  await writeFile(elsewhere, "not a task's\n");
+  await appendFile(
+    join(
+      home,
+      ".claude",
+      "projects",
+      claudeProjectDir(folder),
+      `${CLAUDE_BG_ID}.jsonl`,
+    ),
+    [
+      {
+        type: "assistant",
+        timestamp: "2026-10-03T04:02:00.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_out",
+              name: "Bash",
+              input: { command: "true", run_in_background: true },
+            },
+          ],
+        },
+      },
+      {
+        type: "user",
+        timestamp: "2026-10-03T04:02:00.000Z",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_out",
+              content: `Command running in background with ID: bgout9. Output is being written to: ${elsewhere}.`,
+            },
+          ],
+        },
+        toolUseResult: { backgroundTaskId: "bgout9" },
+      },
+    ]
+      .map((line) => `${JSON.stringify(line)}\n`)
+      .join(""),
+  );
+  await expect(read("bgout9")).rejects.toThrow(/outside/);
+
+  // Never written, or gone: missing, not an error.
+  expect(
+    await readTaskOutput(home, folder, CLAUDE_BG_OLD_ID, "bglost1", [tmp]),
+  ).toEqual({ text: "", size: 0, truncated: false, missing: true });
+
+  // Longer than the cap: only its end.
+  const long = `${"é".repeat(BACKGROUND_OUTPUT_MAX)}\u001b[1mEND\u001b[0m\n`;
+  await writeFile(join(tasks, "bgrun01.output"), long);
+  const tail = await read("bgrun01");
+  expect(tail.truncated).toBe(true);
+  expect(tail.size).toBe(Buffer.byteLength(long));
+  expect(Buffer.byteLength(tail.text)).toBeLessThanOrEqual(
+    BACKGROUND_OUTPUT_MAX,
+  );
+  expect(tail.text.endsWith("éEND\n")).toBe(true);
+  expect(tail.text).not.toContain("\u001b");
+  expect(tail.text.startsWith("é")).toBe(true);
 });

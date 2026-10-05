@@ -12,6 +12,7 @@ import {
   type AgentSubagent,
   isAgentSessionId,
 } from "../../../shared/terminal";
+import { backgroundCount, readTranscriptTasks } from "./background-tasks";
 
 /** How much of a transcript's start and end is read; never the whole file. */
 const CHUNK = 64 * 1024;
@@ -527,6 +528,10 @@ async function claudeSession(
     // Read only for a working one: an idle agent is on no card (FE-27/D1).
     card: working ? await transcriptCard(file, info.size) : null,
     subagents: await claudeSubagents(dirname(file), id),
+    // Read on from where the last listing stopped (FE-42): cheap after once.
+    background: backgroundCount(
+      await readTranscriptTasks(file).catch(() => []),
+    ),
   };
 }
 
@@ -765,6 +770,8 @@ async function codexSessions(
         working,
         card: working ? await transcriptCard(file, info.size) : null,
         subagents: spawned.get(meta.id) ?? [],
+        // Codex keeps no background tasks in its rollout (FE-42/D4).
+        background: { running: 0, total: 0 },
       });
     } catch {
       // A rollout being written, or gone: the next one.

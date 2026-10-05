@@ -145,6 +145,86 @@ export interface AgentSession {
   card: AgentCard | null;
   /** The agents it spawned, newest first (FE-33); none for most. */
   subagents: AgentSubagent[];
+  /** How many tasks it started in the background (FE-42); Claude only. */
+  background: BackgroundCount;
+}
+
+/** A conversation's background tasks, counted for the rail (FE-42). */
+export interface BackgroundCount {
+  running: number;
+  total: number;
+}
+
+/**
+ * What a background task is (FE-42): a shell `Bash` left running, an agent
+ * that runs on its own, or a `Monitor` watching a stream.
+ */
+export type BackgroundTaskKind = "shell" | "agent" | "monitor";
+
+/**
+ * Where a background task stands (FE-42). `lost`: its conversation stopped
+ * long ago and no notification ever came — the CLI that owned it is gone.
+ */
+export type BackgroundTaskStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | "killed"
+  | "lost";
+
+/**
+ * A task a Claude conversation started in the background (FE-42), read from
+ * its transcript: the call, the id its result named, and the
+ * `<task-notification>` that closed it, if one came.
+ */
+export interface BackgroundTask {
+  /** The CLI's task id — `backgroundTaskId`, or an async agent's `agentId`. */
+  id: string;
+  /** The `tool_use` that started it. */
+  toolUseId: string;
+  kind: BackgroundTaskKind;
+  /** What it was started for, as its caller described it. */
+  description: string;
+  /** A shell's command, cut at `BACKGROUND_COMMAND_MAX`; null for the rest. */
+  command: string | null;
+  /** An agent's sub-agent id (`agent-<id>.jsonl`), for its viewer; else null. */
+  subagentId: string | null;
+  status: BackgroundTaskStatus;
+  /** A shell's exit code as its notification said it, else null. */
+  exitCode: number | null;
+  /** The notification's one-line summary, or null before one came. */
+  summary: string | null;
+  /** When it was started, ISO. */
+  startedAt: string;
+  /** When its notification came, ISO; null while running or lost. */
+  endedAt: string | null;
+}
+
+/** The most of a shell's command a task carries, in characters. */
+export const BACKGROUND_COMMAND_MAX = 4 * 1024;
+
+/** The most of a task's output one read sends, in bytes — its end. */
+export const BACKGROUND_OUTPUT_MAX = 64 * 1024;
+
+/**
+ * The end of a background shell's output (FE-42/D5), escape codes stripped.
+ * `missing`: the CLI's file is gone, or never was where it said.
+ */
+export interface BackgroundTaskOutput {
+  text: string;
+  /** The whole file's size, in bytes. */
+  size: number;
+  /** `text` is only the file's last `BACKGROUND_OUTPUT_MAX` bytes. */
+  truncated: boolean;
+  missing: boolean;
+}
+
+/**
+ * Whether `value` can name a background task: the CLI's ids are short
+ * letters and digits. Same rule as a sub-agent id — one file name, no `.`.
+ */
+export function isBackgroundTaskId(value: unknown): value is string {
+  return typeof value === "string" && CLAUDE_SUBAGENT_ID.test(value);
 }
 
 /**
@@ -532,6 +612,10 @@ export const terminalChannels = {
   agentSessionPin: "terminal:agent-sessions:pin",
   /** One sub-agent's transcript, for the viewer (FE-35). */
   agentSubagent: "terminal:agent-subagent",
+  /** A Claude conversation's background tasks (FE-42). */
+  agentBackgroundTasks: "terminal:agent-background-tasks",
+  /** The end of one background shell's output (FE-42/D5). */
+  agentTaskOutput: "terminal:agent-task-output",
   /** One conversation's numbers, for the agent view and the rail (FE-38). */
   agentFacts: "terminal:agent-facts",
   /** A project's agent usage over 7 and 30 days, for Settings (FE-38/D6). */
@@ -631,6 +715,24 @@ export interface DesktopTerminalApi {
     conversation: string,
     sub: string,
   ) => Promise<SubagentTranscript>;
+  /**
+   * The tasks Claude conversation `conversation` started in the background,
+   * running first then newest first (FE-42). By ids only, as `agentSubagent`.
+   */
+  agentBackgroundTasks: (
+    workspace: string,
+    conversation: string,
+  ) => Promise<BackgroundTask[]>;
+  /**
+   * The end of one background shell's output (FE-42/D5). By ids only: main
+   * takes the path from the conversation's own transcript, and reads it only
+   * inside the CLI's task folder under the temp dir. Poll it while running.
+   */
+  agentTaskOutput: (
+    workspace: string,
+    conversation: string,
+    task: string,
+  ) => Promise<BackgroundTaskOutput>;
   /**
    * The files conversation `id` edited with its file tools, its sub-agents'
    * folded in (FE-39). By ids only, as `agentSubagent`: main builds every

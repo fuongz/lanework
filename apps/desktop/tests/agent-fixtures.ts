@@ -1130,3 +1130,347 @@ export async function seedAgentFacts(home: string, folder: string) {
     ]),
   );
 }
+
+export const CLAUDE_BG_ID = "66666666-2222-4333-8444-555555555555";
+export const CLAUDE_BG_OLD_ID = "77777777-2222-4333-8444-555555555555";
+
+/**
+ * Where Claude writes `conversation`'s background output under `tmp` — the
+ * shape it really uses: `<tmp>/claude-<uid>/<project>/<session>/tasks/`.
+ */
+export function claudeTasksDir(
+  tmp: string,
+  folder: string,
+  conversation: string,
+) {
+  return join(
+    tmp,
+    "claude-501",
+    claudeProjectDir(folder),
+    conversation,
+    "tasks",
+  );
+}
+
+/** What Claude answers a call it put in the background, for `task`. */
+function backgroundStarted(
+  toolUseId: string,
+  at: string,
+  toolUseResult: Record<string, unknown>,
+  text: string,
+) {
+  return {
+    type: "user",
+    isSidechain: false,
+    timestamp: at,
+    message: {
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: toolUseId, content: text }],
+    },
+    toolUseResult,
+  };
+}
+
+/** A `<task-notification>` as Claude writes it, mid-turn or as a new turn. */
+function taskNotification(
+  at: string,
+  fields: {
+    task: string;
+    toolUseId?: string;
+    status?: string;
+    summary: string;
+  },
+  queued = false,
+) {
+  const content = [
+    "<task-notification>",
+    `<task-id>${fields.task}</task-id>`,
+    ...(fields.toolUseId
+      ? [`<tool-use-id>${fields.toolUseId}</tool-use-id>`]
+      : []),
+    ...(fields.status ? [`<status>${fields.status}</status>`] : []),
+    `<summary>${fields.summary}</summary>`,
+    "</task-notification>",
+  ].join("\n");
+  const origin = { kind: "task-notification", producer: "session-task" };
+  // Arriving mid-turn, Claude files it as a queued command, not a user line.
+  return queued
+    ? {
+        type: "attachment",
+        isSidechain: false,
+        timestamp: at,
+        attachment: {
+          type: "queued_command",
+          prompt: content,
+          commandMode: "task-notification",
+          origin,
+        },
+      }
+    : {
+        type: "user",
+        isSidechain: false,
+        timestamp: at,
+        origin,
+        message: { role: "user", content },
+      };
+}
+
+/**
+ * Two Claude conversations with background tasks (FE-42), and their output
+ * files under `tmp`:
+ *
+ * - `CLAUDE_BG_ID`, written just now: a shell still running (`bgrun01`, with
+ *   output), a shell that failed with exit 1 (`bgfail1`), an async agent that
+ *   finished (`agbg01`, with its sub-agent file), a Monitor still watching
+ *   (`bgmon01`), and a foreground `Bash` that is no task.
+ * - `CLAUDE_BG_OLD_ID`, untouched for an hour: a shell that never reported
+ *   (`bglost1`) and one Claude marked `stopped` (`bgstop1`) — both lost.
+ *
+ * A sidechain's background call, and a decoy output file outside the tasks
+ * folder, must never be listed or read.
+ */
+export async function seedBackgroundTasks(
+  home: string,
+  folder: string,
+  tmp: string,
+) {
+  const claude = join(home, ".claude", "projects", claudeProjectDir(folder));
+  await mkdir(claude, { recursive: true });
+  const tasks = claudeTasksDir(tmp, folder, CLAUDE_BG_ID);
+  await mkdir(tasks, { recursive: true });
+  const out = (task: string) => join(tasks, `${task}.output`);
+  const said = (task: string) =>
+    `Command running in background with ID: ${task}. Output is being written to: ${out(task)}. You will be notified when it completes.`;
+  const at = (n: number) => `2026-10-03T04:00:0${n}.000Z`;
+  await writeFile(
+    join(claude, `${CLAUDE_BG_ID}.jsonl`),
+    jsonl([
+      {
+        type: "user",
+        cwd: folder,
+        timestamp: at(0),
+        message: { role: "user", content: "Run the gate" },
+      },
+      claudeCall(
+        "Bash",
+        "toolu_run",
+        {
+          command: "bun run gate",
+          description: "Run the gate",
+          run_in_background: true,
+        },
+        at(1),
+      ),
+      backgroundStarted(
+        "toolu_run",
+        at(1),
+        {
+          stdout: "",
+          stderr: "",
+          interrupted: false,
+          backgroundTaskId: "bgrun01",
+        },
+        said("bgrun01"),
+      ),
+      claudeCall(
+        "Bash",
+        "toolu_fail",
+        {
+          command: "bun test\nbun run lint",
+          description: "Run the tests",
+          run_in_background: true,
+        },
+        at(2),
+      ),
+      backgroundStarted(
+        "toolu_fail",
+        at(2),
+        {
+          stdout: "",
+          stderr: "",
+          interrupted: false,
+          backgroundTaskId: "bgfail1",
+        },
+        said("bgfail1"),
+      ),
+      claudeCall(
+        "Agent",
+        "toolu_agent",
+        {
+          description: "Explore the views",
+          subagent_type: "Explore",
+          prompt: "Look around",
+        },
+        at(3),
+      ),
+      backgroundStarted(
+        "toolu_agent",
+        at(3),
+        {
+          isAsync: true,
+          status: "async_launched",
+          agentId: "agbg01",
+          description: "Explore the views",
+        },
+        "Async agent launched successfully.\nagentId: agbg01",
+      ),
+      claudeCall(
+        "Monitor",
+        "toolu_mon",
+        {
+          command: "tail -f log",
+          description: "Watch the log",
+          timeout_ms: 600000,
+        },
+        at(4),
+      ),
+      backgroundStarted(
+        "toolu_mon",
+        at(4),
+        { taskId: "bgmon01", timeoutMs: 600000, persistent: false },
+        "Monitor started (task bgmon01, expires in 10m).",
+      ),
+      // In the foreground: no task.
+      claudeCall(
+        "Bash",
+        "toolu_fg",
+        { command: "ls", description: "List" },
+        at(5),
+      ),
+      claudeResult("toolu_fg", at(5)),
+      // A sub-agent's own background call: never the conversation's.
+      {
+        ...claudeCall(
+          "Bash",
+          "toolu_side",
+          { command: "sleep 9", run_in_background: true },
+          at(5),
+        ),
+        isSidechain: true,
+      },
+      // A Monitor event carries no status: still watching.
+      taskNotification(
+        at(6),
+        { task: "bgmon01", summary: 'Monitor event: "Watch the log"' },
+        true,
+      ),
+      // The same notice, queued mid-turn and again as a turn: read once.
+      taskNotification(
+        at(7),
+        {
+          task: "bgfail1",
+          toolUseId: "toolu_fail",
+          status: "failed",
+          summary: 'Background command "Run the tests" failed with exit code 1',
+        },
+        true,
+      ),
+      taskNotification(at(7), {
+        task: "bgfail1",
+        toolUseId: "toolu_fail",
+        status: "failed",
+        summary: 'Background command "Run the tests" failed with exit code 1',
+      }),
+      taskNotification(at(8), {
+        task: "agbg01",
+        toolUseId: "toolu_agent",
+        status: "completed",
+        summary: 'Agent "Explore the views" finished',
+      }),
+      {
+        type: "assistant",
+        timestamp: at(9),
+        message: { role: "assistant", stop_reason: "end_turn", content: [] },
+      },
+    ]),
+  );
+  await writeFile(
+    out("bgrun01"),
+    "\u001b[32m✓\u001b[0m typecheck\nrunning e2e…\n",
+  );
+  await writeFile(out("bgfail1"), "1 failed\n");
+  const subagents = join(claude, CLAUDE_BG_ID, "subagents");
+  await mkdir(subagents, { recursive: true });
+  await writeFile(
+    join(subagents, "agent-agbg01.jsonl"),
+    jsonl([
+      {
+        type: "user",
+        isSidechain: true,
+        cwd: folder,
+        timestamp: at(3),
+        message: { role: "user", content: "Look around" },
+      },
+    ]),
+  );
+  await writeFile(
+    join(subagents, "agent-agbg01.meta.json"),
+    JSON.stringify({ agentType: "Explore", description: "Explore the views" }),
+  );
+  // Outside the tasks folder: never read, whatever a transcript says.
+  await writeFile(join(tmp, "secret.output"), "not yours\n");
+
+  const oldTasks = claudeTasksDir(tmp, folder, CLAUDE_BG_OLD_ID);
+  await mkdir(oldTasks, { recursive: true });
+  const oldSaid = (task: string) =>
+    `Command running in background with ID: ${task}. Output is being written to: ${join(oldTasks, `${task}.output`)}.`;
+  const old = join(claude, `${CLAUDE_BG_OLD_ID}.jsonl`);
+  await writeFile(
+    old,
+    jsonl([
+      {
+        type: "user",
+        cwd: folder,
+        timestamp: tick(0),
+        message: { role: "user", content: "Start the server" },
+      },
+      claudeCall(
+        "Bash",
+        "toolu_lost",
+        {
+          command: "bun dev",
+          description: "Start the server",
+          run_in_background: true,
+        },
+        tick(1),
+      ),
+      backgroundStarted(
+        "toolu_lost",
+        tick(1),
+        { backgroundTaskId: "bglost1" },
+        oldSaid("bglost1"),
+      ),
+      claudeCall(
+        "Bash",
+        "toolu_stop",
+        {
+          command: "bun run watch",
+          description: "Watch",
+          run_in_background: true,
+        },
+        tick(2),
+      ),
+      backgroundStarted(
+        "toolu_stop",
+        tick(2),
+        { backgroundTaskId: "bgstop1" },
+        oldSaid("bgstop1"),
+      ),
+      taskNotification(tick(3), {
+        task: "bgstop1",
+        toolUseId: "toolu_stop",
+        status: "stopped",
+        summary:
+          "Background shell command didn't finish before the previous session ended",
+      }),
+      {
+        type: "assistant",
+        timestamp: tick(4),
+        message: { role: "assistant", stop_reason: "end_turn", content: [] },
+      },
+    ]),
+  );
+  const hourAgo = Date.now() / 1000 - 3600;
+  await utimes(old, hourAgo, hourAgo);
+  return { tasks, oldTasks, decoy: join(tmp, "secret.output") };
+}

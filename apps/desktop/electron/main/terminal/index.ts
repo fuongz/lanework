@@ -19,6 +19,8 @@ import {
   type AgentSession,
   type AgentUsage,
   type AgentWrite,
+  type BackgroundTask,
+  type BackgroundTaskOutput,
   type CardBrief,
   type CodexUsage,
   clampGeometry,
@@ -53,6 +55,12 @@ import {
   updateAgentMark,
 } from "./agent-marks";
 import { agentKey, listAgentSessions } from "./agent-sessions";
+import {
+  backgroundRequest,
+  readBackgroundTasks,
+  readTaskOutput,
+  taskOutputRequest,
+} from "./background-tasks";
 import { type CodexDirs, readCodexUsage } from "./codex-usage";
 import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
 
@@ -539,6 +547,29 @@ export function registerTerminal(devUrl?: string): void {
       const folder = await terminalFolder(workspace);
       if (!folder) throw new Error("This project has no folder here.");
       return readSubagentTranscript(agentHome(), folder, which);
+    },
+  );
+  // ⚠️ By ids alone, as a sub-agent is (FE-42): the transcript's path is
+  // built inside Claude's folder, and an output's path is the one that
+  // transcript recorded — read only inside the CLI's task folder.
+  handle(
+    terminalChannels.agentBackgroundTasks,
+    devUrl,
+    async (args): Promise<BackgroundTask[]> => {
+      const { workspace, conversation } = backgroundRequest(args);
+      const folder = await terminalFolder(workspace);
+      if (!folder) throw new Error("This project has no folder here.");
+      return readBackgroundTasks(agentHome(), folder, conversation);
+    },
+  );
+  handle(
+    terminalChannels.agentTaskOutput,
+    devUrl,
+    async (args): Promise<BackgroundTaskOutput> => {
+      const { workspace, conversation, task } = taskOutputRequest(args);
+      const folder = await terminalFolder(workspace);
+      if (!folder) throw new Error("This project has no folder here.");
+      return readTaskOutput(agentHome(), folder, conversation, task);
     },
   );
   // ⚠️ By workspace alone (FE-41): the goals are those of the Codex

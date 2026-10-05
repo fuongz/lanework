@@ -12,6 +12,7 @@ import type {
   TerminalAgent,
   TerminalSession,
 } from "#/../shared/terminal";
+import { BackgroundTasksButton } from "#/components/shared/agents/background-tasks";
 import {
   ConversationFacts,
   ConversationRecap,
@@ -211,6 +212,15 @@ export function AgentView() {
           <span role="alert" className="text-destructive truncate text-xs">
             {error}
           </span>
+        )}
+        {/* What it left running in the background (FE-42/D1): only when it
+            started anything there. */}
+        {conversation && workspace && (
+          <BackgroundTasksButton
+            slug={slug}
+            workspace={workspace}
+            session={conversation}
+          />
         )}
         {/* What this conversation edited (FE-39/D1): only once there is one. */}
         {conversation && workspace && (

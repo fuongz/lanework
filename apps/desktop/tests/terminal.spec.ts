@@ -6,6 +6,7 @@ import {
   mkdir,
   mkdtemp,
   realpath,
+  rm,
   utimes,
   writeFile,
 } from "node:fs/promises";
@@ -29,6 +30,7 @@ import {
   CODEX_ID,
   seedAgentFacts,
   seedAgentHome,
+  seedBackgroundTasks,
   seedSubagents,
 } from "./agent-fixtures";
 import {
@@ -1515,6 +1517,104 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
     await app.close();
     await plane.close();
     await removeProfile(profile);
+  }
+});
+
+test("FE-42: an agent's header counts its background tasks; a shell opens its command and output, an agent its transcript — and the rail lists the shells still running", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  // ⚠️ Under the real temp dir, in a `claude-*` folder: main reads a task's
+  // output only at `<temp>/claude-*/…/tasks/` (FE-42/D5).
+  const tmp = await realpath(await mkdtemp(join(tmpdir(), "claude-lanew-")));
+  await seedBackgroundTasks(agentHome, repo, tmp);
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+    LANEWORK_CLAUDE_BIN: await standIn(profile, "claude", "ran-%s-%s-%s"),
+    LANEWORK_CODEX_BIN: await standIn(profile, "codex", "ran-%s-%s-%s"),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+
+    // The rail: its running shell and monitor under it, unasked — never the
+    // failed shell, and never the agent, which is a sub-agent row (D1).
+    const shellRow = page.getByRole("button", {
+      name: "Run the gate, a background shell of “Run the gate”. Open its output",
+    });
+    await expect(shellRow).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "Watch the log, a background monitor of “Run the gate”. Open its output",
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /^Run the tests, a background/ }),
+    ).toHaveCount(0);
+
+    await page
+      .getByRole("button", { name: "Resume “Run the gate” in Claude" })
+      .click();
+    const claude = page.getByRole("region", { name: "Claude — Run the gate" });
+    // The header's chip counts the running ones, by kind (D1).
+    const chip = claude.getByTestId("background-tasks");
+    await expect(chip).toHaveText("1 shell · 1 monitor");
+
+    // Running first; the finished folded, with how they ended (D2).
+    await chip.click();
+    await expect(
+      page.getByRole("button", { name: "Run the gate, shell, running" }),
+    ).toBeVisible();
+    const finished = page.getByRole("button", { name: "Finished (2)" });
+    await expect(finished).toHaveAttribute("aria-expanded", "false");
+    await expect(
+      page.getByRole("button", { name: /^Run the tests, shell, / }),
+    ).toHaveCount(0);
+    await finished.click();
+    await expect(
+      page.getByRole("button", { name: /^Run the tests, shell, / }),
+    ).toContainText("failed, exit 1");
+
+    // A shell opens its own page: the command, then its output (D3).
+    await page
+      .getByRole("button", { name: "Run the gate, shell, running" })
+      .click();
+    const task = page.getByRole("region", {
+      name: "Background task — Run the gate",
+    });
+    await expect(
+      task.getByRole("heading", { name: "Run the gate" }),
+    ).toBeVisible();
+    await expect(task.getByRole("region", { name: "Command" })).toContainText(
+      "bun run gate",
+    );
+    const output = task.getByTestId("task-output");
+    await expect(output).toContainText("running e2e…");
+    // Escape codes stripped: the text, not the colours.
+    await expect(output).not.toContainText("[32m");
+    await expect(task.getByTestId("task-meta")).toContainText("running");
+    await expect(shellRow).toHaveAttribute("aria-current", "page");
+
+    // An agent opens its transcript in the sub-agent viewer.
+    await page.goBack();
+    await expect(chip).toBeVisible();
+    await chip.click();
+    await page.getByRole("button", { name: "Finished (2)" }).click();
+    await page
+      .getByRole("button", { name: "Explore the views, agent, completed" })
+      .click();
+    await expect(
+      page.getByRole("region", { name: "Sub-agent — Explore the views" }),
+    ).toBeVisible();
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+    await rm(tmp, { recursive: true, force: true });
   }
 });
 

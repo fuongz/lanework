@@ -285,7 +285,9 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
             entry.pinnedAt === listed[index]?.pinnedAt &&
             entry.working === listed[index]?.working &&
             sameCard(entry.card, listed[index]?.card) &&
-            sameSubagents(entry.subagents, listed[index]?.subagents ?? []),
+            sameSubagents(entry.subagents, listed[index]?.subagents ?? []) &&
+            entry.background.running === listed[index]?.background.running &&
+            entry.background.total === listed[index]?.background.total,
         )
       )
         return;
