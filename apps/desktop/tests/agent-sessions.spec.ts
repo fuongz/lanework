@@ -2380,6 +2380,55 @@ test("FE-42: a conversation's background tasks are read from its transcript — 
     endedAt: "2026-10-03T04:01:00.000Z",
   });
 
+  // `TaskStop` sends no notification: its own answer ends the task.
+  const stop = {
+    message: "Successfully stopped task: bgmon01 (tail -f log)",
+    task_id: "bgmon01",
+    task_type: "local_bash",
+    command: "tail -f log",
+  };
+  await appendFile(
+    file,
+    `${JSON.stringify({
+      type: "assistant",
+      timestamp: "2026-10-03T04:02:00.000Z",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_stopmon",
+            name: "TaskStop",
+            input: { task_id: "bgmon01" },
+          },
+        ],
+      },
+    })}\n${JSON.stringify({
+      type: "user",
+      timestamp: "2026-10-03T04:02:01.000Z",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_stopmon",
+            content: JSON.stringify(stop),
+          },
+        ],
+      },
+      toolUseResult: stop,
+    })}\n`,
+  );
+  expect(
+    (await readBackgroundTasks(home, folder, CLAUDE_BG_ID)).find(
+      (task) => task.id === "bgmon01",
+    ),
+  ).toMatchObject({
+    status: "killed",
+    exitCode: null,
+    endedAt: "2026-10-03T04:02:01.000Z",
+  });
+
   for (const args of [["ws"], ["ws", "../../etc/passwd"], ["", CLAUDE_BG_ID]])
     expect(() => backgroundRequest(args)).toThrow();
   expect(backgroundRequest(["ws", CLAUDE_BG_ID])).toEqual({

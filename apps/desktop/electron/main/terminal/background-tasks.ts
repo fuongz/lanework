@@ -39,6 +39,8 @@ const MARKERS = [
   '"name":"Agent"',
   '"name":"Task"',
   '"name":"Monitor"',
+  "Successfully stopped task",
+  "Successfully killed shell",
 ];
 const NOTIFICATION = /<task-notification>([\s\S]*?)<\/task-notification>/g;
 const OUTPUT_PATH = /Output is being written to: (\S+\.output)/;
@@ -210,6 +212,19 @@ function notify(parsed: Parsed, text: string, at: string | null) {
   }
 }
 
+/**
+ * The task a `TaskStop` (or the older `KillShell`) answer says it stopped. The
+ * CLI sends no notification for a task stopped this way: this answer is the
+ * only word of its end.
+ */
+function stoppedBy(result: Record<string, unknown>): string | null {
+  const message = str(result.message);
+  if (!message || !/^Successfully (stopped task|killed shell)/.test(message))
+    return null;
+  const id = result.task_id ?? result.shell_id;
+  return typeof id === "string" && isBackgroundTaskId(id) ? id : null;
+}
+
 function kindOf(
   name: string | undefined,
   result: Record<string, unknown>,
@@ -285,6 +300,18 @@ function visit(parsed: Parsed, line: Line) {
       const call = parsed.calls.get(toolUseId);
       // Answered: started in the background or not, the call is done with.
       parsed.calls.delete(toolUseId);
+      const stopped = stoppedBy(result);
+      if (stopped) {
+        // A task that already reported keeps how it ended.
+        if (!parsed.notices.get(stopped)?.status)
+          parsed.notices.set(stopped, {
+            status: "killed",
+            exitCode: null,
+            summary: parsed.notices.get(stopped)?.summary ?? null,
+            at,
+          });
+        return;
+      }
       const which = kindOf(call?.name, result);
       if (which) {
         const command =
