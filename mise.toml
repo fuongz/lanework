@@ -60,8 +60,27 @@ description = "Everything that must pass before a commit: builds, lint, typechec
 run = "bun run gate"
 
 [tasks.test]
-description = "Desktop Playwright suite (production build)"
+description = "Build, then the desktop Playwright suite (production build)"
+# The specs boot dist/: without a build they test the last bundle.
+depends = ["build"]
 run = "bun run test"
+
+[tasks."test:agents"]
+description = "Build, then the agent view's cases: header facts, Changes, background tasks, agent marks"
+dir = "apps/desktop"
+run = [
+  "bun run build",
+  "bunx playwright test tests/terminal.spec.ts tests/repo.spec.ts tests/agent-sessions.spec.ts --project=production -g \"FE-38: an agent's view|FE-39: Changes marks the one file|FE-41|FE-42|carries its spinner|on another machine marks\"",
+]
+
+[tasks."test:grep"]
+description = "Build, then only the cases whose name matches: mise run test:grep \"FE-42\""
+dir = "apps/desktop"
+usage = 'arg "<pattern>" help="Part of a test name, or a regex"'
+run = [
+  "bun run build",
+  "bunx playwright test --project=production -g \"${usage_pattern?}\"",
+]
 
 [tasks."test:packaged"]
 description = "Playwright against the packaged app"
