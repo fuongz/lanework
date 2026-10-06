@@ -1,9 +1,4 @@
-import {
-  Folder01Icon,
-  Loading03Icon,
-  PlayIcon,
-  StopIcon,
-} from "@hugeicons/core-free-icons";
+import { Loading03Icon, PlayIcon, StopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -16,6 +11,7 @@ import { BackgroundTasksButton } from "#/components/shared/agents/background-tas
 import {
   ConversationFacts,
   ConversationRecap,
+  ModelButton,
 } from "#/components/shared/agents/conversation-facts";
 import type { Fact } from "#/components/shared/agents/facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
@@ -54,12 +50,6 @@ import { useConversationFacts } from "./use-agent-facts";
 const NO_TERMINALS: TerminalSession[] = [];
 const NO_CONVERSATIONS: AgentSession[] = [];
 const NO_FACTS: Fact[] = [];
-
-/** The last segment of a path, for the header. */
-function folderOf(cwd: string | null): string {
-  if (!cwd) return "~";
-  return cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd;
-}
 
 /**
  * One agent, full size in the main view (FE-26).
@@ -201,8 +191,8 @@ export function AgentView() {
             exited
           </Badge>
         )}
-        {/* Its numbers in the header's own row (FE-38/D1), a Codex goal's
-            among them (FE-41/D4). */}
+        {/* How long it ran, in the header's own row (FE-38/D1), a Codex
+            goal's beside it (FE-41/D4); the rest is the model's popover. */}
         <ConversationFacts
           facts={facts}
           extra={goal ? goalFacts(goal) : NO_FACTS}
@@ -213,6 +203,8 @@ export function AgentView() {
             {error}
           </span>
         )}
+        {/* Its model, the ring how full its context is; its usage inside. */}
+        <ModelButton facts={facts} />
         {/* What it left running in the background (FE-42/D1): only when it
             started anything there. */}
         {conversation && workspace && (
@@ -230,17 +222,9 @@ export function AgentView() {
             agent={conversation.agent}
             id={conversation.id}
             working={working}
+            facts={facts}
           />
         )}
-        <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
-          <HugeiconsIcon
-            icon={Folder01Icon}
-            className="size-3"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-          {folderOf(session.cwd)}
-        </span>
         {session.exit ? (
           <Button size="sm" variant="outline" onClick={() => void again(agent)}>
             <HugeiconsIcon

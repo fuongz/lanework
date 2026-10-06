@@ -1,18 +1,23 @@
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
+  Clock01Icon,
   File01Icon,
   Folder01Icon,
   FolderOpenIcon,
+  GitCompareIcon,
+  PencilEdit02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AgentFacts,
   AgentFiles,
   AgentFileTouch,
   TerminalAgent,
 } from "#/../shared/terminal";
+import { linesFact } from "#/components/shared/agents/conversation-facts";
 import { splitPath } from "#/components/shared/diff/diff-file-header";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import {
@@ -142,11 +147,27 @@ function FileRow({
       )}
       <span className="ml-auto" />
       <span
-        className="text-muted-foreground shrink-0 text-[11px] tabular-nums"
-        title={`Last edited ${relativeTime(touch.lastAt, now)}`}
+        className="text-muted-foreground flex shrink-0 items-center gap-2 text-[11px] tabular-nums"
+        title={`${touch.edits === 1 ? "1 edit" : `${touch.edits} edits`}, the last ${relativeTime(touch.lastAt, now)}`}
       >
-        {touch.edits === 1 ? "1 edit" : `${touch.edits} edits`} ·{" "}
-        {shortAge(touch.lastAt, now)}
+        <span className="flex items-center gap-0.5">
+          <HugeiconsIcon
+            icon={PencilEdit02Icon}
+            className="size-3"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+          {touch.edits}
+        </span>
+        <span className="flex items-center gap-0.5">
+          <HugeiconsIcon
+            icon={Clock01Icon}
+            className="size-3"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+          {shortAge(touch.lastAt, now)}
+        </span>
       </span>
     </>
   );
@@ -177,8 +198,29 @@ function FileRow({
   );
 }
 
+/** `+81 −20`, coloured as the rail's Changes is; nothing for no change. */
+export function LineCounts({
+  added,
+  removed,
+}: {
+  added: number;
+  removed: number;
+}) {
+  if (added === 0 && removed === 0) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1 tabular-nums">
+      {added > 0 && (
+        <span className="text-emerald-600 dark:text-emerald-400">+{added}</span>
+      )}
+      {removed > 0 && (
+        <span className="text-rose-600 dark:text-rose-400">−{removed}</span>
+      )}
+    </span>
+  );
+}
+
 /**
- * The agent view's "Files (n)" (FE-39/D1): the files this conversation edited
+ * The agent view's "Changes" (FE-39/D1): the files this conversation edited
  * — its sub-agents' with them, "via" their kind (D5) — nested by folder the
  * way Changes is.
  *
@@ -192,12 +234,15 @@ export function AgentFilesButton({
   agent,
   id,
   working,
+  facts,
 }: {
   slug: string;
   workspace: string;
   agent: TerminalAgent;
   id: string;
   working: boolean;
+  /** Its numbers: Claude's own count of the lines it wrote, shown inside. */
+  facts?: AgentFacts | null;
 }) {
   const navigate = useNavigate();
   const peek = useWorktree((state) => state.peek);
@@ -246,6 +291,12 @@ export function AgentFilesButton({
     void load();
   }, [load, working]);
 
+  // The count on the button is git's: the working tree's status, read once
+  // here — Changes keeps it current after that.
+  useEffect(() => {
+    void peek(slug);
+  }, [peek, slug]);
+
   const byPath = useMemo(() => {
     const map = new Map<string, WorktreeFile>();
     for (const file of changes ?? []) {
@@ -256,6 +307,18 @@ export function AgentFilesButton({
     return map;
   }, [changes]);
   const files = found?.files ?? NO_FILES;
+  /** What git still sees changed in the files it edited. */
+  let added = 0;
+  let removed = 0;
+  const counted = new Set<WorktreeFile>();
+  for (const touch of files) {
+    const file = byPath.get(touch.path);
+    if (!file || counted.has(file)) continue;
+    counted.add(file);
+    added += file.additions;
+    removed += file.deletions;
+  }
+  const lines = facts ? linesFact(facts) : null;
   const tree = useMemo(() => buildTree(files), [files]);
   const rows = useMemo(() => visibleRows(tree, shut), [tree, shut]);
   const flat = tree.every((node) => node.kind === "file");
@@ -291,29 +354,43 @@ export function AgentFilesButton({
         render={
           <Button
             size="sm"
-            variant="ghost"
-            aria-label={`Files (${files.length})`}
+            variant="secondary"
+            data-testid="agent-changes"
+            aria-label={`Changes: ${files.length} ${files.length === 1 ? "file" : "files"} edited${added || removed ? `, +${added} −${removed} in git` : ""}`}
             disabled={found === null && error === null}
           />
         }
       >
         <HugeiconsIcon
-          icon={File01Icon}
+          icon={GitCompareIcon}
           strokeWidth={1.8}
           data-icon="inline-start"
           aria-hidden="true"
         />
-        Files
-        <span className="text-muted-foreground tabular-nums">
-          {files.length}
-        </span>
+        Changes
+        <LineCounts added={added} removed={removed} />
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[26rem] gap-2 p-1.5">
-        <div className="flex items-baseline gap-2 px-1.5 pt-1">
+        <div className="flex items-center gap-2 px-1.5 pt-1">
           <span className="text-[13px] font-medium">Files it edited</span>
           <span className="text-muted-foreground tabular-nums">
             {files.length}
           </span>
+          {lines && (
+            <span
+              title={lines.title}
+              className="text-muted-foreground ms-auto flex items-center gap-1 text-xs tabular-nums"
+            >
+              <HugeiconsIcon
+                icon={PencilEdit02Icon}
+                className="size-3"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+              <span className="sr-only">{lines.label}: </span>
+              {lines.text}
+            </span>
+          )}
         </div>
         {error ? (
           <p role="alert" className="text-destructive px-1.5 text-xs">

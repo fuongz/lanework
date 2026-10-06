@@ -3,19 +3,27 @@ import {
   ArrowDataTransferVerticalIcon,
   ArrowRight01Icon,
   Coins01Icon,
-  DashboardSpeed01Icon,
   GitCompareIcon,
   Timer02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { AgentFacts } from "#/../shared/terminal";
+import { Button } from "#/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "#/components/ui/popover";
 import { relativeTime } from "#/lib/board-view";
 import { cn } from "#/lib/utils";
 import {
+  ContextRing,
+  claudeWindow,
   costText,
   durationText,
   type Fact,
+  FactList,
   Facts,
   modelLabel,
   tokenText,
@@ -35,21 +43,37 @@ export const COST_NOTE =
 const STALE_NOTE =
   "As Claude last saved it: it saves when it is left or quit, so the turns since are not counted yet.";
 
-/** The context, short: `142k`, and its share of the window when known. */
-function contextText(context: NonNullable<AgentFacts["context"]>): string {
-  const share = context.window
-    ? ` (${Math.round((context.tokens / context.window) * 100)}%)`
-    : "";
-  return `${tokenText(context.tokens)}${share}`;
+/** The context's window and how full it is: Claude's guessed from its model. */
+export function contextUse(
+  facts: AgentFacts,
+): { window: number | null; share: number | null; guessed: boolean } | null {
+  if (!facts.context) return null;
+  const known = facts.context.window;
+  const window = known ?? claudeWindow(facts.model, facts.context.tokens);
+  return {
+    window,
+    share: window ? facts.context.tokens / window : null,
+    guessed: !known && window !== null,
+  };
 }
 
+/** The context, short: `142k`, and its share of the window when known. */
+function contextText(facts: AgentFacts): string {
+  if (!facts.context) return "";
+  const share = contextUse(facts)?.share;
+  return `${tokenText(facts.context.tokens)}${share != null ? ` (${Math.round(share * 100)}%)` : ""}`;
+}
+
+/** Why a Claude window is a guess (FE-38/D2): the CLI writes none down. */
+const WINDOW_NOTE =
+  "Claude does not record its window: it is taken from the model, 1M unless it is Haiku.";
+
 /**
- * A conversation's facts row (FE-38/D1): model · cost ≈ · tokens in and out
- * · context · lines · run time — each only when the CLI wrote it, so a
- * number never reads 0 for "not known". Cost, lines and run time are
- * Claude's alone; Codex writes none of them.
+ * The model's popover (FE-38/D1): which model, what it cost ≈, its tokens in
+ * and out, and its context — each only when the CLI wrote it, so a number
+ * never reads 0 for "not known". Cost is Claude's alone.
  */
-export function conversationFacts(facts: AgentFacts): Fact[] {
+export function modelFacts(facts: AgentFacts): Fact[] {
   const out: Fact[] = [];
   const stale = facts.stale ? `\n${STALE_NOTE}` : "";
   if (facts.model)
@@ -76,34 +100,47 @@ export function conversationFacts(facts: AgentFacts): Fact[] {
       text: `${tokenText(facts.tokens.input)} in, ${tokenText(facts.tokens.output)} out`,
       title: `Tokens: ${exact(facts.tokens.input)} in (${exact(facts.tokens.cached)} from cache), ${exact(facts.tokens.output)} out`,
     });
-  if (facts.context)
+  const use = contextUse(facts);
+  if (facts.context && use)
     out.push({
       key: "context",
       label: "Context",
-      icon: DashboardSpeed01Icon,
-      text: contextText(facts.context),
-      title: facts.context.window
-        ? `Context: ${exact(facts.context.tokens)} of ${exact(facts.context.window)} tokens`
-        : `Context: ${exact(facts.context.tokens)} tokens. ${facts.agent === "claude" ? "Claude" : "Codex"} does not record its window, so no share is shown.`,
+      mark: <ContextRing share={use.share} />,
+      text: contextText(facts),
+      title: use.window
+        ? `Context: ${exact(facts.context.tokens)} of ${exact(use.window)} tokens${use.guessed ? `\n${WINDOW_NOTE}` : ""}`
+        : `Context: ${exact(facts.context.tokens)} tokens. Codex did not record its window, so no share is shown.`,
     });
-  if (facts.lines)
-    out.push({
-      key: "lines",
-      label: "Lines added and removed",
-      icon: GitCompareIcon,
-      text: `+${exact(facts.lines.added)} −${exact(facts.lines.removed)}`,
-      title: `${exact(facts.lines.added)} lines added, ${exact(facts.lines.removed)} removed${stale}`,
-    });
+  return out;
+}
+
+/** What it wrote, by Claude's own count; null when the CLI wrote none. */
+export function linesFact(facts: AgentFacts): Fact | null {
+  if (!facts.lines) return null;
+  const stale = facts.stale ? `\n${STALE_NOTE}` : "";
+  return {
+    key: "lines",
+    label: "Lines added and removed",
+    icon: GitCompareIcon,
+    text: `+${exact(facts.lines.added)} −${exact(facts.lines.removed)}`,
+    title: `${exact(facts.lines.added)} lines added, ${exact(facts.lines.removed)} removed by Claude's own count, all along — committed ones too${stale}`,
+  };
+}
+
+/** The header's own row: how long it ran. Claude's alone. */
+function runFacts(facts: AgentFacts): Fact[] {
+  const stale = facts.stale ? `\n${STALE_NOTE}` : "";
   const ran = facts.duration ? durationText(facts.duration.wall) : null;
-  if (facts.duration && ran)
-    out.push({
+  if (!facts.duration || !ran) return [];
+  return [
+    {
       key: "ran",
       label: "Run time",
       icon: Timer02Icon,
       text: ran,
       title: `Ran ${ran}: the model ${durationText(facts.duration.api)}, tools ${durationText(facts.duration.tools)}${stale}`,
-    });
-  return out;
+    },
+  ];
 }
 
 /**
@@ -115,7 +152,7 @@ export function factsSummary(facts: AgentFacts): string | null {
     facts.costUSD !== null
       ? `${costText(facts.costUSD)}${facts.stale ? "+" : ""} (API price)`
       : null,
-    facts.context ? `context ${contextText(facts.context)}` : null,
+    facts.context ? `context ${contextText(facts)}` : null,
   ].filter(Boolean);
   return parts.length > 0 ? parts.join("\n") : null;
 }
@@ -176,11 +213,11 @@ export function ConversationRecap({
 }
 
 /**
- * A conversation's numbers, in the agent view's header itself (FE-38):
- * nothing at all when the CLI wrote none. Claude's recap is its own row,
- * `ConversationRecap`, under the header.
+ * A conversation's run time, in the agent view's header itself (FE-38):
+ * nothing at all when the CLI wrote none. Its model and usage are the
+ * `ModelButton`'s; Claude's recap is its own row, `ConversationRecap`.
  *
- * `extra` joins the same facts — a Codex goal's (FE-41/D4) — and shows
+ * `extra` joins the same row — a Codex goal's (FE-41/D4) — and shows
  * even before the transcript's own numbers are read.
  */
 export function ConversationFacts({
@@ -190,9 +227,53 @@ export function ConversationFacts({
   facts: AgentFacts | null | undefined;
   extra?: Fact[];
 }) {
-  const list = [...(facts ? conversationFacts(facts) : []), ...extra];
+  const list = [...(facts ? runFacts(facts) : []), ...extra];
   if (list.length === 0) return null;
   return (
     <Facts facts={list} inline data-testid="agent-facts" className="ms-1" />
+  );
+}
+
+/**
+ * The model, by name, with how full its context is as the ring before it —
+ * opening its usage: cost ≈, tokens, context. Nothing until the CLI names
+ * a model.
+ */
+export function ModelButton({
+  facts,
+}: {
+  facts: AgentFacts | null | undefined;
+}) {
+  if (!facts?.model) return null;
+  const use = contextUse(facts);
+  const list = modelFacts(facts);
+  const share = use?.share ?? null;
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="agent-model"
+            aria-label={`${modelLabel(facts.model)}${share !== null ? `, context ${Math.round(share * 100)}% full` : ""}. Show its usage`}
+          />
+        }
+      >
+        <ContextRing
+          share={share}
+          className={cn(
+            "size-3.5",
+            share !== null && share >= 0.8
+              ? "text-tone-amber"
+              : "text-muted-foreground",
+          )}
+        />
+        {modelLabel(facts.model)}
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 gap-1 p-1.5">
+        <FactList facts={list} data-testid="model-facts" />
+      </PopoverContent>
+    </Popover>
   );
 }

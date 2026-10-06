@@ -1,4 +1,8 @@
-import { SquareArrowUp02Icon } from "@hugeicons/core-free-icons";
+import {
+  Clock01Icon,
+  GitCommitIcon,
+  SquareArrowUp02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
@@ -94,12 +98,27 @@ export function HistoryList() {
           <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
             <AccountOrb seed={commit.authorEmail} className="size-4" />
             <span className="min-w-0 truncate">{commit.authorName}</span>
-            <span aria-hidden="true">·</span>
-            <time dateTime={commit.authoredAt} className="shrink-0">
+            <time
+              dateTime={commit.authoredAt}
+              className="flex shrink-0 items-center gap-1"
+            >
+              <HugeiconsIcon
+                icon={Clock01Icon}
+                className="size-3"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
               {relativeTime(commit.authoredAt, now)}
             </time>
-            <span aria-hidden="true">·</span>
-            <span className="shrink-0 font-mono">{commit.shortSha}</span>
+            <span className="flex shrink-0 items-center gap-1 font-mono">
+              <HugeiconsIcon
+                icon={GitCommitIcon}
+                className="size-3"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+              {commit.shortSha}
+            </span>
           </span>
         </Link>
       ))}

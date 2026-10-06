@@ -1379,7 +1379,7 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
     const codexRow = page.getByRole("button", {
       name: "Resume “Settings page cleanup” in Codex",
     });
-    await expect(codexRow).toHaveAttribute("title", /Codex · /);
+    await expect(codexRow).toHaveAttribute("title", /\nCodex, /);
     await expect(codexRow).not.toHaveAttribute("title", /context/);
     await codexRow.hover();
     await expect(codexRow).toHaveAttribute("title", /\ncontext 88k \(34%\)$/);
@@ -1390,29 +1390,43 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
     const claude = page.getByRole("region", {
       name: "Claude — Flaky login test",
     });
-    // In the header: each fact by its icon, read with what it is (D1).
+    // In the header's row: how long it ran, by its icon (D1).
     const facts = claude.getByTestId("agent-facts");
-    await expect(facts.getByRole("term")).toHaveText([
+    await expect(facts.getByRole("term")).toHaveText(["Run time"]);
+    await expect(facts.getByRole("definition")).toHaveText(["4m 12s"]);
+    // Claude's own count of its lines is inside Changes.
+    await claude.getByTestId("agent-changes").click();
+    await expect(page.locator('[data-slot="popover-content"]')).toContainText(
+      "+120 −8",
+    );
+    await page.keyboard.press("Escape");
+    // The model names it, its ring how full the context is: Claude's window
+    // taken from the model, 1M (D2).
+    const model = claude.getByTestId("agent-model");
+    await expect(model).toHaveText("Opus 5.5");
+    await expect(model).toHaveAccessibleName(
+      "Opus 5.5, context 14% full. Show its usage",
+    );
+    await model.click();
+    const claudeUsage = page.getByTestId("model-facts");
+    await expect(claudeUsage.getByRole("term")).toHaveText([
       "Model",
       "Cost",
       "Tokens in and out",
       "Context",
-      "Lines added and removed",
-      "Run time",
     ]);
-    const values = facts.getByRole("definition");
+    const values = claudeUsage.getByRole("definition");
     await expect(values).toHaveText([
       "Opus 5.5",
       "≈ $0.73",
       "141k in, 4k out",
-      "142k",
-      "+120 −8",
-      "4m 12s",
+      "142k (14%)",
     ]);
     // The cost says what it is: an estimate, sub-agents in it (V5).
     await expect(
-      facts.locator('[title^="An estimate at API prices"]'),
+      claudeUsage.locator('[title^="An estimate at API prices"]'),
     ).toContainText("≈ $0.73");
+    await page.keyboard.press("Escape");
     // Claude's newer recap, one line until opened (D4).
     const recap = claude.getByRole("region", { name: "Recap" });
     await expect(recap).toContainText(
@@ -1425,6 +1439,7 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
 
     // A turn written after Claude last saved: the context and tokens follow
     // it, no polling; the saved cost is marked as lagging.
+    await model.click();
     await appendFile(
       transcript,
       line({ type: "user", message: { content: "And the retry?" } }),
@@ -1448,7 +1463,9 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
     // start. One answer however often: its id is counted once.
     await expect(async () => {
       await appendFile(transcript, turn);
-      await expect(values.nth(3)).toHaveText("152k", { timeout: 1_500 });
+      await expect(values.nth(3)).toHaveText("152k (15%)", {
+        timeout: 1_500,
+      });
     }).toPass({ timeout: 15_000 });
     await expect(values.nth(1)).toHaveText("≈ $0.73+");
     await expect(values.nth(2)).toHaveText("293k in, 4.3k out");
@@ -1476,10 +1493,10 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
       "Opus 5.5",
       "≈ $0.91",
       "152k in, 5k out",
-      "152k",
-      "+130 −9",
-      "5m 0s",
+      "152k (15%)",
     ]);
+    await expect(facts.getByRole("definition")).toHaveText(["5m 0s"]);
+    await page.keyboard.press("Escape");
 
     // Codex: no cost, lines, run time or recap — its context a share of the
     // window it records (D2).
@@ -1489,7 +1506,9 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
     const codex = page.getByRole("region", {
       name: "Codex — Settings page cleanup",
     });
-    const codexFacts = codex.getByTestId("agent-facts");
+    await expect(codex.getByTestId("agent-facts")).toHaveCount(0);
+    await codex.getByTestId("agent-model").click();
+    const codexFacts = page.getByTestId("model-facts");
     await expect(codexFacts.getByRole("term")).toHaveText([
       "Model",
       "Tokens in and out",
@@ -1500,6 +1519,7 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
       "1.8M in, 17.3k out",
       "88k (34%)",
     ]);
+    await page.keyboard.press("Escape");
     await expect(codex.getByRole("region", { name: "Recap" })).toHaveCount(0);
 
     // Settings → Projects totals the folder's conversations (D6).
@@ -1562,7 +1582,7 @@ test("FE-42: an agent's header counts its background tasks; a shell opens its co
     const claude = page.getByRole("region", { name: "Claude — Run the gate" });
     // The header's chip counts the running ones, by kind (D1).
     const chip = claude.getByTestId("background-tasks");
-    await expect(chip).toHaveText("1 shell · 1 monitor");
+    await expect(chip).toHaveText("1 shell, 1 monitor");
 
     // Running first; the finished folded, with how they ended (D2).
     await chip.click();
@@ -1786,13 +1806,13 @@ test("a card an agent is working on carries its spinner, on the board and in the
     // In the status icon's place, and said in the lane Select's name.
     await expect(
       lane.nth(0).getByRole("combobox", { name: /^Move Show who is working/ }),
-    ).toHaveAccessibleName(/Claude · working: Flaky login test/);
+    ).toHaveAccessibleName(/Claude working: Flaky login test/);
 
     // The issue says who, and a click opens that agent.
     await lane.nth(0).getByRole("link").click();
     await expect(
       page.getByRole("button", {
-        name: "Open Claude · working: Flaky login test",
+        name: "Open Claude working: Flaky login test",
       }),
     ).toBeVisible();
 
@@ -1802,7 +1822,7 @@ test("a card an agent is working on carries its spinner, on the board and in the
       line({ type: "system", subtype: "turn_duration" }),
     );
     await expect(
-      page.getByRole("button", { name: /^Open Claude · working/ }),
+      page.getByRole("button", { name: /^Open Claude working/ }),
     ).toHaveCount(0);
   } finally {
     await app.close();
@@ -1906,7 +1926,7 @@ test("an agent on another machine marks its card too, and this machine's own is 
     await expect(lane.nth(1).locator('[data-card-agents="1"]')).toHaveCount(1);
     await expect(
       lane.nth(1).getByRole("combobox", { name: /^Move Decio is on this one/ }),
-    ).toHaveAccessibleName(/Claude · Decio · (just now|now)/);
+    ).toHaveAccessibleName(/Claude on Decio, (just now|now)/);
 
     // FE-01: the local session, once — not again as the service's copy.
     await expect(lane.nth(0).locator('[data-card-agents="1"]')).toHaveCount(1);

@@ -324,7 +324,7 @@ export function AgentsSection() {
           control: (
             <span className="text-muted-foreground text-[13px]">
               {status.last
-                ? `${status.last.taskId} · ${relativeTime(status.last.at, now)}`
+                ? `${status.last.taskId}, ${relativeTime(status.last.at, now)}`
                 : "None yet"}
             </span>
           ),

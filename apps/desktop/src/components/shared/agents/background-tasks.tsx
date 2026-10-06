@@ -7,6 +7,7 @@ import {
   HelpCircleIcon,
   Radar01Icon,
   Robot02Icon,
+  TaskDaily01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
@@ -47,7 +48,7 @@ const KIND_NOUNS: Record<BackgroundTaskKind, [string, string]> = {
   monitor: ["monitor", "monitors"],
 };
 
-/** `1 shell · 5 agents`: the running ones, by kind, in that order. */
+/** `1 shell, 5 agents`: the running ones, by kind, in that order. */
 function runningText(tasks: BackgroundTask[]): string {
   return (["shell", "agent", "monitor"] as const)
     .map((kind) => {
@@ -58,7 +59,7 @@ function runningText(tasks: BackgroundTask[]): string {
       return count === 0 ? null : `${count} ${count === 1 ? one : many}`;
     })
     .filter(Boolean)
-    .join(" · ");
+    .join(", ");
 }
 
 /** How a finished task ended, as a mark and a colour. */
@@ -71,7 +72,7 @@ const STATUS_LOOK: Partial<
   lost: { icon: HelpCircleIcon, tone: "text-muted-foreground" },
 };
 
-/** Where a finished task ended, as a person reads it: `failed · exit 1`. */
+/** Where a finished task ended, as a person reads it: `failed, exit 1`. */
 export function taskStatusText(task: BackgroundTask): string {
   if (task.status === "lost") return "lost";
   return task.exitCode !== null && task.status !== "running"
@@ -108,7 +109,7 @@ function TaskRow({
       disabled={!opens}
       onClick={() => onOpen(task)}
       aria-label={`${task.description || task.command || task.id}, ${task.kind}, ${status}`}
-      title={`${task.command ?? task.description}\n${status} · started ${relativeTime(task.startedAt, now)}${task.summary ? `\n${task.summary}` : ""}`}
+      title={`${task.command ?? task.description}\n${status}, started ${relativeTime(task.startedAt, now)}${task.summary ? `\n${task.summary}` : ""}`}
       className={cn(
         "hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-7 w-full min-w-0 shrink-0 items-center gap-2 rounded-md px-1.5 text-left text-[13px] outline-none focus-visible:ring-2 disabled:pointer-events-none",
         task.status === "lost" && "opacity-50",
@@ -159,7 +160,7 @@ function TaskRow({
 
 /**
  * The agent view's background tasks (FE-42/D1): a chip counting the running
- * ones by kind — `1 shell · 5 agents`, or `3 tasks` muted once none runs —
+ * ones by kind — `1 shell, 5 agents`, or `3 tasks` muted once none runs —
  * and a popover listing them, running first, the finished folded (D2).
  *
  * ⚠️ Hidden while the conversation has none: most never start one. Claude
@@ -220,20 +221,31 @@ export function BackgroundTasksButton({
         render={
           <Button
             size="sm"
-            variant="ghost"
+            variant="secondary"
             data-testid="background-tasks"
             aria-label={`Background tasks: ${label}`}
-            className={cn(running.length === 0 && "text-muted-foreground")}
           />
         }
       >
-        {running.length > 0 && (
-          <span
+        {/* Running: the spinner every running thing has, in the icon's place. */}
+        {running.length > 0 ? (
+          <WorkingMark />
+        ) : (
+          <HugeiconsIcon
+            icon={TaskDaily01Icon}
+            strokeWidth={1.8}
+            data-icon="inline-start"
             aria-hidden="true"
-            className="bg-tone-emerald size-1.5 shrink-0 rounded-full"
           />
         )}
-        <span className="tabular-nums">{label}</span>
+        <span
+          className={cn(
+            "tabular-nums",
+            running.length === 0 && "text-muted-foreground",
+          )}
+        >
+          {label}
+        </span>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[26rem] gap-2 p-1.5">
         <div className="flex items-baseline gap-2 px-1.5 pt-1">

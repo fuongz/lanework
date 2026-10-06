@@ -670,12 +670,18 @@ test("FE-39: Changes marks the one file a conversation edited since HEAD, and it
       `ran-claude---resume-${CLAUDE_EDITS_ID}`,
     );
 
-    // Its Files: the router opens its diff; `src/new.ts` (committed since)
-    // and `src/helper.ts` (never on disk here) have nothing to show.
-    await agent.getByRole("button", { name: "Files (3)" }).click();
+    // Its Changes: git's count of what it edited — the router's one line,
+    // not notes.md's. The router opens its diff; `src/new.ts` (committed
+    // since) and `src/helper.ts` (never on disk here) have nothing to show.
+    const changes = agent.getByTestId("agent-changes");
+    await expect(changes).toHaveAccessibleName(
+      "Changes: 3 files edited, +1 −0 in git",
+    );
+    await expect(changes).toContainText("+1");
+    await changes.click();
     const files = page.locator('[data-slot="popover-content"]');
     await expect(files.getByText("via general-purpose")).toBeVisible();
-    await expect(files.getByText("3 edits")).toBeVisible();
+    await expect(files.locator('[title^="3 edits, the last"]')).toBeVisible();
     await expect(files.locator('[aria-disabled="true"]')).toHaveCount(2);
     await expect(files).toContainText("through the shell");
     await files

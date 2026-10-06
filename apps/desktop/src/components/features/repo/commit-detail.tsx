@@ -1,4 +1,8 @@
-import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  Clock01Icon,
+  Copy01Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -68,10 +72,20 @@ function CommitHeader({ commit }: { commit: CommitSummary }) {
             <span className="truncate text-[13px] font-medium">
               {commit.authorName}
             </span>
-            <span className="text-muted-foreground truncate text-xs">
-              <time dateTime={commit.authoredAt}>{day(commit.authoredAt)}</time>
-              {" · "}
-              {commit.authorEmail}
+            <span className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs">
+              <span className="truncate">{commit.authorEmail}</span>
+              <time
+                dateTime={commit.authoredAt}
+                className="flex shrink-0 items-center gap-1"
+              >
+                <HugeiconsIcon
+                  icon={Clock01Icon}
+                  className="size-3"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+                {day(commit.authoredAt)}
+              </time>
             </span>
           </div>
           <CopySha sha={commit.sha} />

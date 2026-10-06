@@ -1,4 +1,5 @@
 import {
+  Clock01Icon,
   Copy01Icon,
   RoboticIcon,
   Tick02Icon,
@@ -102,10 +103,20 @@ export function IssueCheckpoint({ card }: { card: BoardCard }) {
           aria-hidden="true"
         />
         <span className="font-medium">{who} stopped here</span>
-        <span className="text-muted-foreground truncate">
-          {[checkpoint.host, relativeTime(checkpoint.createdAt, now)]
-            .filter(Boolean)
-            .join(" · ")}
+        {/* The age behind a clock rather than a "·", as Summary has it. */}
+        <span className="text-muted-foreground flex min-w-0 items-center gap-2">
+          {checkpoint.host && (
+            <span className="truncate">{checkpoint.host}</span>
+          )}
+          <span className="flex shrink-0 items-center gap-1">
+            <HugeiconsIcon
+              icon={Clock01Icon}
+              className="size-3.5"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            {relativeTime(checkpoint.createdAt, now)}
+          </span>
         </span>
       </div>
 
@@ -114,7 +125,7 @@ export function IssueCheckpoint({ card }: { card: BoardCard }) {
           <span className="text-muted-foreground text-xs font-medium">
             Next step
             {checkpoint.nextStepFrom &&
-              ` · from ${agentName(checkpoint.nextStepFrom.agent)}, ${relativeTime(checkpoint.nextStepFrom.createdAt, now)}`}
+              ` (from ${agentName(checkpoint.nextStepFrom.agent)}, ${relativeTime(checkpoint.nextStepFrom.createdAt, now)})`}
           </span>
           <p className="text-sm leading-relaxed whitespace-pre-wrap">
             {checkpoint.nextStep}

@@ -340,7 +340,7 @@ export function CommitBox({
       {head && (
         <div
           className="border-sidebar-border text-muted-foreground flex h-8 items-center gap-2 border-t px-3 text-xs"
-          title={`${head.shortSha} · ${head.subject}`}
+          title={`${head.shortSha}: ${head.subject}`}
         >
           <HugeiconsIcon
             icon={GitCommitIcon}

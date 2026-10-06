@@ -1,3 +1,5 @@
+import { Clock01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -99,8 +101,8 @@ function agentLabel(agent: string): string {
  */
 function describe(agent: CardAgent, now: number): string {
   if (agent.from === "local")
-    return `${TERMINAL_KIND_LABELS[agent.session.agent]} · working: ${agent.session.title}`;
-  return `${agentLabel(agent.row.agent)} · ${agent.name} · ${relativeTime(agent.row.lastSeenAt, now)}`;
+    return `${TERMINAL_KIND_LABELS[agent.session.agent]} working: ${agent.session.title}`;
+  return `${agentLabel(agent.row.agent)} on ${agent.name}, ${relativeTime(agent.row.lastSeenAt, now)}`;
 }
 
 /** Every agent on the card, one after another, for an `aria-label`. */
@@ -214,7 +216,16 @@ export function CardAgentsLine({ card }: { card: CardRef }) {
                 {agentLabel(agent.row.agent)}
               </span>
               <span className="text-muted-foreground min-w-0 truncate">
-                · {agent.name} · {relativeTime(agent.row.lastSeenAt, now)}
+                on {agent.name}
+              </span>
+              <span className="text-muted-foreground flex shrink-0 items-center gap-1">
+                <HugeiconsIcon
+                  icon={Clock01Icon}
+                  className="size-3"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+                {relativeTime(agent.row.lastSeenAt, now)}
               </span>
             </div>
           );
@@ -238,7 +249,7 @@ export function CardAgentsLine({ card }: { card: CardRef }) {
             <span className="shrink-0 font-medium">
               {TERMINAL_KIND_LABELS[session.agent]}
             </span>
-            <span className="text-muted-foreground shrink-0">· working</span>
+            <span className="text-muted-foreground shrink-0">working on</span>
             <span className="text-shimmer min-w-0 truncate">
               {session.title}
             </span>

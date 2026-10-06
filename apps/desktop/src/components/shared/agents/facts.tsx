@@ -80,6 +80,113 @@ export function Facts({
   );
 }
 
+/**
+ * Facts one under the other, in a popover: each by its icon and its name,
+ * its value at the end of the row.
+ */
+export function FactList({
+  facts,
+  "data-testid": testId,
+}: {
+  facts: Fact[];
+  "data-testid"?: string;
+}) {
+  return (
+    <dl data-testid={testId} className="flex flex-col text-[13px]">
+      {facts.map((fact) => (
+        <div
+          key={fact.key}
+          title={fact.title ?? fact.label}
+          className="flex h-7 min-w-0 items-center gap-2 px-1.5"
+        >
+          <span className="text-muted-foreground grid size-3.5 shrink-0 place-items-center">
+            {fact.icon ? (
+              <HugeiconsIcon
+                icon={fact.icon}
+                className="size-3.5"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+            ) : (
+              fact.mark
+            )}
+          </span>
+          <dt className="text-muted-foreground shrink-0">{fact.label}</dt>
+          <dd
+            className={cn(
+              "ms-auto min-w-0 truncate tabular-nums",
+              fact.className,
+            )}
+          >
+            {fact.text}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * A Claude model's context window, guessed: Claude Code writes none down
+ * (FE-38/D2). Haiku's is 200k; any other model's is taken to be 1M — and a
+ * context already past 200k can only be in a 1M window. Null for a model
+ * that is not Claude's.
+ */
+export function claudeWindow(
+  model: string | null,
+  tokens: number,
+): number | null {
+  if (!model?.startsWith("claude-")) return null;
+  if (tokens > 200_000) return 1_000_000;
+  return /^claude-haiku-/.test(model) ? 200_000 : 1_000_000;
+}
+
+/**
+ * How full the context is, as a ring filling clockwise from the top; an
+ * empty ring when its window is not known.
+ */
+export function ContextRing({
+  share,
+  className,
+}: {
+  /** 0–1, or null when the window is not known. */
+  share: number | null;
+  className?: string;
+}) {
+  const r = 5.5;
+  const length = 2 * Math.PI * r;
+  const filled = share === null ? 0 : Math.min(Math.max(share, 0), 1);
+  return (
+    <svg
+      viewBox="0 0 14 14"
+      aria-hidden="true"
+      className={cn("size-3.5 shrink-0 -rotate-90", className)}
+    >
+      <circle
+        cx="7"
+        cy="7"
+        r={r}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        className="opacity-25"
+      />
+      {filled > 0 && (
+        <circle
+          cx="7"
+          cy="7"
+          r={r}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={`${filled * length} ${length}`}
+        />
+      )}
+    </svg>
+  );
+}
+
 /** `claude-haiku-4-5-20251001` → `Haiku 4.5`; any other model as named. */
 export function modelLabel(model: string): string {
   const claude = /^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$/.exec(model);

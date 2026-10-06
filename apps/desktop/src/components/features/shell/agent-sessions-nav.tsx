@@ -15,10 +15,7 @@ import type {
   AgentSubagent,
   TerminalSession,
 } from "#/../shared/terminal";
-import {
-  backgroundCue,
-  TASK_KIND_ICONS,
-} from "#/components/shared/agents/background-tasks";
+import { backgroundCue } from "#/components/shared/agents/background-tasks";
 import { factsSummary } from "#/components/shared/agents/conversation-facts";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
 import {
@@ -200,24 +197,17 @@ function BackgroundShellRows({
         }
         aria-current={viewed ? "page" : undefined}
         aria-label={`${name}, a background ${task.kind} of “${session.title}”. Open its output`}
-        title={`${task.command ?? name}\nBackground ${task.kind} · running since ${relativeTime(task.startedAt, now)}`}
+        title={`${task.command ?? name}\nBackground ${task.kind}, running since ${relativeTime(task.startedAt, now)}`}
         className={cn(row, SUB_ROW, viewed && active)}
       >
-        <HugeiconsIcon
-          icon={TASK_KIND_ICONS[task.kind]}
-          className="size-3 shrink-0 opacity-60"
-          strokeWidth={1.8}
-          aria-hidden="true"
-        />
+        {/* Running: the spinner where its kind's icon was, as a working
+            agent's row has it. */}
+        <WorkingMark />
         <span
           className={`min-w-0 flex-1 truncate ${viewed ? "" : "text-muted-foreground"}`}
         >
           {name}
         </span>
-        <span
-          aria-hidden="true"
-          className="bg-tone-emerald size-1.5 shrink-0 rounded-full"
-        />
         <span className="text-muted-foreground shrink-0 tabular-nums">
           {shortAge(task.startedAt, now)}
         </span>
@@ -507,7 +497,7 @@ export function AgentSessionsNav({
                   aria-current={current ? "page" : undefined}
                   aria-label={`Resume “${session.title}” in ${agent}`}
                   aria-busy={working || undefined}
-                  title={`${session.title}\n${agent} · ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}${summary ? `\n${summary}` : ""}`}
+                  title={`${session.title}\n${agent}, ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}${summary ? `\n${summary}` : ""}`}
                   onPointerEnter={() => peek(session)}
                   onPointerLeave={unpeek}
                   onFocus={() => peek(session)}
@@ -643,7 +633,7 @@ export function AgentSessionsNav({
               aria-current={viewed(sub) ? "page" : undefined}
               aria-busy={busy || undefined}
               aria-label={`${sub.title}, a sub-agent of “${session.title}”. Open its transcript`}
-              title={`${sub.title}\n${sub.type ?? "Sub-agent"} · ${busy ? "working" : relativeTime(sub.updatedAt, now)}`}
+              title={`${sub.title}\n${sub.type ?? "Sub-agent"}, ${busy ? "working" : relativeTime(sub.updatedAt, now)}`}
               className={cn(row, SUB_ROW, viewed(sub) && activeClass)}
             >
               {busy ? (

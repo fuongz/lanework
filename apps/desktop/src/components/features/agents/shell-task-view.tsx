@@ -171,12 +171,7 @@ function ShellTaskPage({
         : {
             key: "status",
             label: "Status",
-            mark: (
-              <span
-                aria-hidden="true"
-                className="bg-tone-emerald mx-1 size-1.5 shrink-0 rounded-full"
-              />
-            ),
+            mark: <WorkingMark />,
             text: "running",
             className: "text-foreground",
           },
