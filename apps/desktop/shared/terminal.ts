@@ -556,11 +556,44 @@ export interface CodexGoal {
   updatedAt: number;
 }
 
-/** What `codexUsage` answers for a workspace (FE-41). */
+/** A Claude account limit window, without any authentication material (FE-46). */
+export interface ClaudeQuotaWindow {
+  /** How much of it is used, 0–100. */
+  usedPercent: number;
+  /** 300 for the 5-hour window; 10080 for the 7-day window. */
+  windowMinutes: number;
+  /** When it starts over, epoch ms; null when the source does not say. */
+  resetsAt: number | null;
+}
+
+/**
+ * Safe, serialized Claude account usage for the footer (FE-46).
+ * Only account metadata and usage cross to the renderer: never credentials,
+ * raw auth responses, email addresses, or tokens. Missing windows do not
+ * imply zero usage; an auth-only result can still identify the plan.
+ */
+export interface ClaudeUsage {
+  /** The 5-hour window, when available. */
+  primary: ClaudeQuotaWindow | null;
+  /** The 7-day window, when available. */
+  secondary: ClaudeQuotaWindow | null;
+  /** The subscription name reported by Claude, or null when unknown. */
+  plan: string | null;
+  /** The authentication mode reported by Claude, or null when unknown. */
+  authMode: string | null;
+  /** When usage was successfully fetched, ISO; null for auth-only results. */
+  at: string | null;
+  /** The cache is older than the freshness threshold; values are last known. */
+  stale: boolean;
+}
+
+/** What `codexUsage` answers for a workspace (FE-41, FE-46). */
 export interface CodexUsage {
   quota: CodexQuota | null;
   /** By thread id — only the workspace's listed Codex conversations'. */
   goals: Record<string, CodexGoal>;
+  /** Claude account metadata and limits, when available (FE-46). */
+  claude?: ClaudeUsage | null;
 }
 
 /** The longest name a session may be given in Lanework. */

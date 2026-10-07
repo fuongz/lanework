@@ -1,6 +1,7 @@
 // Which agent CLIs this machine has (FE-19): what the terminal's + menu offers
 // beside a plain shell. Runs in the pty host, next to the shells it predicts.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { TERMINAL_AGENTS, type TerminalAgent } from "../../../shared/terminal";
 import { defaultShell, type ShellChoice, shellEnv } from "./sessions";
@@ -83,6 +84,130 @@ export function createAgentProbe(options: AgentProbeOptions = {}) {
       .then((agents) => {
         cached = { at: Date.now(), agents };
         return agents;
+      })
+      .finally(() => {
+        running = null;
+      });
+    return running;
+  };
+}
+
+export interface ClaudeAuth {
+  plan: string | null;
+  authMode: string | null;
+  loggedIn: boolean;
+  identity: string | null;
+}
+/** Only these public account labels escape the CLI JSON. */
+export function claudeAuthOf(value: unknown): ClaudeAuth {
+  const empty = { plan: null, authMode: null, loggedIn: false, identity: null };
+  if (!value || typeof value !== "object") return empty;
+  const v = value as Record<string, unknown>;
+  const plans = ["pro", "max", "team", "enterprise", "free"];
+  const modes = [
+    "claude.ai",
+    "api_key",
+    "api",
+    "api_key_helper",
+    "third_party",
+    "none",
+    "bedrock",
+    "vertex",
+    "foundry",
+    "oauth_token",
+  ];
+  const plan =
+    typeof v.subscriptionType === "string" &&
+    plans.includes(v.subscriptionType.toLowerCase())
+      ? v.subscriptionType.toLowerCase()
+      : null;
+  const authMode =
+    typeof v.authMethod === "string" && modes.includes(v.authMethod)
+      ? v.authMethod
+      : null;
+  // An in-memory fingerprint detects same-plan account switches; never sent
+  // over IPC or stored. Credential fields are deliberately never inspected.
+  const identifiers = [v.accountUuid, v.orgUuid, v.email].filter(
+    (value) => typeof value === "string",
+  );
+  const identity = identifiers.length
+    ? createHash("sha256").update(JSON.stringify(identifiers)).digest("hex")
+    : null;
+  return { plan, authMode, loggedIn: v.loggedIn === true, identity };
+}
+
+export function createClaudeAuthProbe(options: AgentProbeOptions = {}) {
+  let cached: { at: number; auth: ClaudeAuth } | null = null;
+  let running: Promise<ClaudeAuth> | null = null;
+  return (): Promise<ClaudeAuth> => {
+    if (cached && Date.now() - cached.at < (options.ttlMs ?? 60_000))
+      return Promise.resolve(cached.auth);
+    running ??= new Promise<ClaudeAuth>((resolve) => {
+      const env = options.env ?? process.env;
+      const shell = options.shell ?? defaultShell(env);
+      let out = "";
+      let settled = false;
+      const marker = "__lanework_claude_auth__";
+      const child = spawn(
+        shell.file,
+        [
+          ...shell.args,
+          "-i",
+          "-c",
+          `printf '%s\\n' '${marker}'; claude auth status --json`,
+        ],
+        {
+          cwd: homedir(),
+          env: shellEnv(env),
+          stdio: ["ignore", "pipe", "ignore"],
+          detached: process.platform !== "win32",
+        },
+      );
+      const kill = () => {
+        try {
+          if (process.platform !== "win32" && child.pid)
+            process.kill(-child.pid, "SIGKILL");
+          else child.kill("SIGKILL");
+        } catch {
+          /* Already exited. */
+        }
+      };
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try {
+          resolve(
+            claudeAuthOf(
+              JSON.parse(
+                out.slice(out.lastIndexOf(marker) + marker.length).trim(),
+              ),
+            ),
+          );
+        } catch {
+          resolve(claudeAuthOf(null));
+        }
+        out = "";
+      };
+      const timer = setTimeout(() => {
+        kill();
+        settle();
+      }, options.timeoutMs ?? 5000);
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        out += chunk;
+        if (out.length > 64 * 1024) {
+          out = "";
+          kill();
+          settle();
+        }
+      });
+      child.once("error", settle);
+      child.once("close", settle);
+    })
+      .then((auth) => {
+        cached = { at: Date.now(), auth };
+        return auth;
       })
       .finally(() => {
         running = null;

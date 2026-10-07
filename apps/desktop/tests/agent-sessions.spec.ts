@@ -1789,6 +1789,12 @@ const FE41_WORKSPACES = [
 async function bootOnAgentHome(
   origin: string,
   seed: (agentHome: string, repo: string) => Promise<void>,
+  claudeAuth?: {
+    subscriptionType?: string;
+    authMethod: string;
+    loggedIn: boolean;
+  },
+  launchClaudeStatusLine = false,
 ) {
   const profile = await mkdtemp(join(tmpdir(), "lanew-codex-usage-"));
   const home = join(profile, "home");
@@ -1820,6 +1826,33 @@ async function bootOnAgentHome(
     `#!/bin/sh\nprintf 'ran-codex-%s\\n' "$@"\nwhile IFS= read -r line; do [ "$line" = "/exit" ] && exit 0; done\n`,
     { mode: 0o755 },
   );
+  const claudeBin = join(profile, "claude-stand-in.sh");
+  const claudeConfig = join(profile, "claude-config");
+  if (launchClaudeStatusLine) {
+    await mkdir(claudeConfig, { recursive: true });
+    const script = join(profile, "claude-stand-in.cjs");
+    await writeFile(
+      script,
+      `const fs = require("node:fs");
+const { execFileSync } = require("node:child_process");
+const args = process.argv.slice(2);
+const index = args.indexOf("--settings");
+if (index < 0) throw new Error("Missing default statusLine injection");
+const settings = JSON.parse(args[index + 1]);
+const resumed = args.includes("--resume");
+const used = resumed ? 31 : 19;
+execFileSync("/bin/sh", ["-c", settings.statusLine.command], { input: JSON.stringify({rate_limits:{five_hour:{used_percentage:used,resets_at:Date.now()/1000+7200},seven_day:{used_percentage:23,resets_at:Date.now()/1000+360000}}}), env: process.env });
+fs.appendFileSync(${JSON.stringify(join(profile, "claude-launches.jsonl"))}, JSON.stringify({args, settings, used}) + "\\n");
+console.log("ran-claude-statusline-" + used);
+process.stdin.resume();
+`,
+    );
+    await writeFile(
+      claudeBin,
+      `#!/bin/sh\nexec '${process.execPath.replace(/'/g, "'\\''")}' '${script.replace(/'/g, "'\\''")}' "$@"\n`,
+      { mode: 0o755 },
+    );
+  }
   const app = await electron.launch({
     args: [process.cwd()],
     env: {
@@ -1828,6 +1861,12 @@ async function bootOnAgentHome(
       LANEWORK_TEST_AGENT_HOME: agentHome,
       LANEWORK_TERMINAL_AGENTS: "claude,codex",
       LANEWORK_CODEX_BIN: codexBin,
+      ...(launchClaudeStatusLine
+        ? { LANEWORK_CLAUDE_BIN: claudeBin, CLAUDE_CONFIG_DIR: claudeConfig }
+        : {}),
+      ...(claudeAuth
+        ? { LANEWORK_TEST_CLAUDE_AUTH: JSON.stringify(claudeAuth) }
+        : {}),
     },
   });
   return { app, profile };
@@ -2576,4 +2615,206 @@ test("FE-42: a task's output is read only from its CLI task folder — its last 
   expect(tail.text.endsWith("éEND\n")).toBe(true);
   expect(tail.text).not.toContain("\u001b");
   expect(tail.text.startsWith("é")).toBe(true);
+});
+
+/** Exercise the bundled statusLine process, not a renderer-injected quota. */
+function writeClaudeStatusLine(file: string, used: number, resetsAt: number) {
+  execFileSync(
+    process.execPath,
+    [
+      join(process.cwd(), "dist/electron/statusline/claude-usage.cjs"),
+      file,
+      "",
+    ],
+    {
+      input: JSON.stringify({
+        rate_limits: {
+          five_hour: { used_percentage: used, resets_at: resetsAt / 1000 },
+          seven_day: {
+            used_percentage: 23,
+            resets_at: (Date.now() + 100 * HOUR) / 1000,
+          },
+        },
+      }),
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    },
+  );
+}
+
+test("FE-46: Claude ghost footer shows live limits, hover and focus details, and expires without changing Codex", async () => {
+  test.skip(process.platform === "win32", "This drives a POSIX shell.");
+  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  plane.setBoard("ws-alpha", {
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    cards: [],
+  });
+  const { app, profile } = await bootOnAgentHome(
+    plane.origin,
+    async (agentHome, repo) => {
+      await seedAgentHome(agentHome, repo);
+      writeClaudeStatusLine(
+        join(agentHome, "..", "home", "claude-usage.json"),
+        11,
+        Date.now() + 60_000,
+      );
+      const rollout = join(
+        agentHome,
+        ".codex",
+        "sessions",
+        "2026",
+        "09",
+        "26",
+        `rollout-2026-09-26T07-04-45-${CODEX_ID}.jsonl`,
+      );
+      await appendFile(
+        rollout,
+        line(
+          codexTokenCount(
+            new Date().toISOString(),
+            codexRateLimits(
+              { used: 6, resetsAt: Date.now() + 2 * HOUR },
+              { used: 1, resetsAt: Date.now() + 100 * HOUR },
+            ),
+          ),
+        ),
+      );
+    },
+    { subscriptionType: "max", authMethod: "claude.ai", loggedIn: true },
+  );
+  try {
+    const page = await app.firstWindow();
+    await openProject(page, "Alpha");
+    const badge = page.getByTestId("claude-quota");
+    const codex = page.getByTestId("codex-quota");
+    await expect(badge).toHaveAccessibleName("Claude Max, 5h usage 11%");
+    await expect(badge).toContainText("11%Max");
+    await expect(badge.locator('circle[pathLength="100"]')).toHaveAttribute(
+      "stroke-dasharray",
+      "11 100",
+    );
+    const bounds = await badge.boundingBox();
+    const codexBounds = await codex.boundingBox();
+    expect(bounds?.width).toBe(codexBounds?.width);
+    expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(
+      codexBounds?.y ?? 0,
+    );
+    await badge.hover();
+    const details = page.getByTestId("claude-quota-details");
+    await expect(details).toBeVisible();
+    await expect(details).toContainText("5-hour usage11% used");
+    await expect(details).toContainText("7-day usage23% used");
+    await expect(details).toContainText("As of");
+    await page.getByRole("link", { name: "Settings", exact: true }).hover();
+    await expect(details).not.toBeVisible();
+    await badge.focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+    await expect(details).toBeVisible();
+    // A statusLine cache rename after the app starts refreshes the account
+    // without a transcript event, then the UI expires it on its own timer.
+    writeClaudeStatusLine(
+      join(profile, "home", "claude-usage.json"),
+      17,
+      Date.now() + 8_000,
+    );
+    await expect(badge).toHaveAccessibleName("Claude Max, 5h usage 17%");
+    await expect(details).toContainText("5-hour usage17% used");
+    await expect(badge).toHaveAccessibleName(
+      "Claude Max, 5h usage unavailable",
+      { timeout: 20_000 },
+    );
+    await expect(badge).toHaveText("Max");
+    await expect(details).toContainText("5-hour usage—");
+    await expect(codex).toHaveAccessibleName("Codex Plus, 5h usage 6%");
+  } finally {
+    await app.close();
+    await plane.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test("FE-46: Claude API authentication keeps missing quota unknown and explains it on focus", async () => {
+  test.skip(process.platform === "win32", "This drives a POSIX shell.");
+  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  plane.setBoard("ws-alpha", {
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    cards: [],
+  });
+  const { app, profile } = await bootOnAgentHome(plane.origin, seedAgentHome, {
+    authMethod: "api_key",
+    loggedIn: true,
+  });
+  try {
+    const page = await app.firstWindow();
+    await openProject(page, "Alpha");
+    const badge = page.getByTestId("claude-quota");
+    await expect(badge).toHaveText("Claude");
+    await expect(badge.locator('circle[pathLength="100"]')).toHaveAttribute(
+      "stroke-dasharray",
+      "0 100",
+    );
+    await badge.focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+    const details = page.getByTestId("claude-quota-details");
+    await expect(details).toBeVisible();
+    await expect(details).toContainText(
+      "API authentication: subscription usage is unavailable.",
+    );
+    await expect(details).toContainText("5-hour usage—");
+    await expect(details).toContainText("7-day usage—");
+  } finally {
+    await app.close();
+    await plane.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test("FE-46: new and resumed Claude launches install the default statusLine bridge and update the footer", async () => {
+  test.skip(process.platform === "win32", "This drives a POSIX shell.");
+  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  plane.setBoard("ws-alpha", {
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    cards: [],
+  });
+  const { app, profile } = await bootOnAgentHome(
+    plane.origin,
+    seedAgentHome,
+    { loggedIn: true, subscriptionType: "pro", authMethod: "claude.ai" },
+    true,
+  );
+  try {
+    const page = await app.firstWindow();
+    await openProject(page, "Alpha");
+    const badge = page.getByTestId("claude-quota");
+    await expect(badge).toHaveText("Pro");
+    await page.getByRole("button", { name: "New agent", exact: true }).click();
+    await page
+      .getByRole("menuitem", { name: "New Claude", exact: true })
+      .click();
+    await expect(badge).toHaveAccessibleName("Claude Pro, 5h usage 19%");
+    await page
+      .getByRole("button", { name: "Resume “Flaky login test” in Claude" })
+      .click();
+    await expect(badge).toHaveAccessibleName("Claude Pro, 5h usage 31%");
+    const launches = (
+      await readFile(join(profile, "claude-launches.jsonl"), "utf8")
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(launches.map((launch) => launch.used)).toEqual([19, 31]);
+    expect(launches[0].settings.statusLine.command).toContain(
+      "claude-usage.cjs",
+    );
+    expect(launches[1].args).toContain("--resume");
+    await badge.hover();
+    await expect(page.getByTestId("claude-quota-details")).toContainText(
+      "5-hour usage31% used",
+    );
+  } finally {
+    await app.close();
+    await plane.close();
+    await rm(profile, { recursive: true, force: true });
+  }
 });

@@ -55,12 +55,14 @@ import {
   updateAgentMark,
 } from "./agent-marks";
 import { agentKey, listAgentSessions } from "./agent-sessions";
+import { claudeAuthOf, createClaudeAuthProbe } from "./agents";
 import {
   backgroundRequest,
   readBackgroundTasks,
   readTaskOutput,
   taskOutputRequest,
 } from "./background-tasks";
+import { CLAUDE_USAGE_FILE, readClaudeQuota } from "./claude-usage";
 import { type CodexDirs, readCodexUsage } from "./codex-usage";
 import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
 
@@ -312,6 +314,36 @@ function rebind(workspace: string, written?: string): void {
 
 /** The conversations each workspace's listing last answered (FE-31). */
 const listedKeys = new Map<string, Set<string>>();
+const claudeAuth = createClaudeAuthProbe();
+let lastClaudePlan: string | null | undefined;
+let lastClaudeIdentity: string | null | undefined;
+let lastClaudeMode: string | undefined;
+let claudeAccountChangedAt = 0;
+let quotaWatch: FSWatcher | null = null;
+function watchClaudeQuota(): void {
+  if (quotaWatch) return;
+  try {
+    quotaWatch = watch(appHomeDir(), (_event, file) => {
+      if (file?.toString() !== CLAUDE_USAGE_FILE) return;
+      for (const [workspace, keys] of listedKeys) {
+        const id = [...keys].find((key) => key.startsWith("claude:"))?.slice(7);
+        broadcast(terminalChannels.agentWritten, {
+          workspace,
+          agent: "claude",
+          id: id ?? "00000000-0000-4000-8000-000000000000",
+          at: Date.now(),
+        } satisfies AgentWrite);
+      }
+    });
+    quotaWatch.on("error", () => {
+      quotaWatch?.close();
+      quotaWatch = null;
+    });
+    quotaWatch.unref();
+  } catch {
+    /* A later read retries once the application home exists. */
+  }
+}
 
 /**
  * Claude's own record of which conversation each of its processes is on
@@ -587,7 +619,51 @@ export function registerTerminal(devUrl?: string): void {
       const ids = [...listed]
         .filter((entry) => entry.startsWith("codex:"))
         .map((entry) => entry.slice("codex:".length));
-      return readCodexUsage(codexDirs(), ids);
+      watchClaudeQuota();
+      const testAuth =
+        !app.isPackaged &&
+        process.env.LANEWORK_TEST_USER_DATA &&
+        process.env.LANEWORK_TEST_CLAUDE_AUTH;
+      const [usage, quota, auth] = await Promise.all([
+        readCodexUsage(codexDirs(), ids),
+        readClaudeQuota(join(appHomeDir(), CLAUDE_USAGE_FILE)),
+        testAuth
+          ? Promise.resolve().then(() => {
+              try {
+                return claudeAuthOf(JSON.parse(testAuth));
+              } catch {
+                return claudeAuthOf(null);
+              }
+            })
+          : claudeAuth(),
+      ]);
+      const mode = `${auth.loggedIn}:${auth.authMode}`;
+      if (
+        (lastClaudePlan !== undefined && lastClaudePlan !== auth.plan) ||
+        (lastClaudeIdentity !== undefined &&
+          lastClaudeIdentity !== auth.identity) ||
+        (lastClaudeMode !== undefined && lastClaudeMode !== mode)
+      )
+        claudeAccountChangedAt = Date.now();
+      lastClaudePlan = auth.plan;
+      lastClaudeIdentity = auth.identity;
+      lastClaudeMode = mode;
+      const subscription =
+        auth.loggedIn &&
+        (auth.authMode === "claude.ai" || auth.authMode === "oauth_token");
+      const compatible =
+        subscription &&
+        (!quota.at || Date.parse(quota.at) > claudeAccountChangedAt);
+      return {
+        ...usage,
+        claude: {
+          ...(compatible
+            ? quota
+            : { primary: null, secondary: null, at: null, stale: false }),
+          plan: auth.plan,
+          authMode: auth.authMode,
+        },
+      };
     },
   );
   // ⚠️ By ids alone, as a sub-agent is read (FE-38): `factsRequest` refuses

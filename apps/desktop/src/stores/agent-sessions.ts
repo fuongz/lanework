@@ -4,6 +4,7 @@ import type {
   AgentCard,
   AgentSession,
   AgentSubagent,
+  ClaudeUsage,
   CodexGoal,
   CodexQuota,
   TerminalAgent,
@@ -51,6 +52,7 @@ interface AgentSessionsState {
    * or when no turn ever reported one.
    */
   codexQuota: CodexQuota | null;
+  claudeUsage: ClaudeUsage | null;
   /** Each workspace's Codex conversations' goals, by thread id (FE-41/D4). */
   codexGoals: Record<string, Record<string, CodexGoal>>;
   /** Read both again, for `workspace`'s listed conversations (FE-41). */
@@ -163,6 +165,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   cards: {},
   open: {},
   codexQuota: null,
+  claudeUsage: null,
   codexGoals: {},
 
   setOpen: (session, open) =>
@@ -225,10 +228,14 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       else if (!usageLater.has(workspace))
         usageLater.set(workspace, setTimeout(read, wait));
     };
-    return surface.onAgentActivity((activity: AgentActivity) => {
+    const stopWritten = surface.onAgentWritten((write) => {
+      if (write.agent === "claude") usageSoon(write.workspace);
+    });
+    const stopActivity = surface.onAgentActivity((activity: AgentActivity) => {
       // ⚠️ A Codex rollout settled a write: its turn may have reported new
       // usage, or moved its goal on (FE-41).
-      if (activity.agent === "codex") usageSoon(activity.workspace);
+      if (activity.agent === "codex" || activity.agent === "claude")
+        usageSoon(activity.workspace);
       const known = get().byWorkspace[activity.workspace] ?? [];
       const parent = known.find(
         (entry) => agentKey(entry) === agentKey(activity),
@@ -260,6 +267,10 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       // started: list again — but not on every write of it.
       if (!parent) relistSoon(activity.workspace);
     });
+    return () => {
+      stopWritten();
+      stopActivity();
+    };
   },
 
   load: async (workspace) => {
@@ -327,12 +338,17 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
         const quota = sameJson(state.codexQuota, usage.quota)
           ? state.codexQuota
           : usage.quota;
+        const claude = sameJson(state.claudeUsage, usage.claude ?? null)
+          ? state.claudeUsage
+          : (usage.claude ?? null);
         const goals = sameJson(state.codexGoals[workspace], usage.goals)
           ? state.codexGoals
           : { ...state.codexGoals, [workspace]: usage.goals };
-        return quota === state.codexQuota && goals === state.codexGoals
+        return quota === state.codexQuota &&
+          claude === state.claudeUsage &&
+          goals === state.codexGoals
           ? state
-          : { codexQuota: quota, codexGoals: goals };
+          : { codexQuota: quota, claudeUsage: claude, codexGoals: goals };
       });
     } catch {
       // Main answers empty rather than failing; a refused call keeps what

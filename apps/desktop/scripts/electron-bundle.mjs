@@ -14,6 +14,8 @@ export const electronBuildOptions = {
     // FE-28: the Claude Code Stop hook, run by Electron's own Node
     // (`ELECTRON_RUN_AS_NODE=1`) from the command Settings → Agents installs.
     "hook/lanework-checkpoint": "electron/hook/lanework-checkpoint.ts",
+    // FE-46: process-scoped Claude statusLine wrapper, same Node as the hook.
+    "statusline/claude-usage": "electron/statusline/claude-usage.ts",
   },
   bundle: true,
   platform: "node",

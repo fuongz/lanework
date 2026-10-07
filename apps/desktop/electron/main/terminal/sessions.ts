@@ -22,6 +22,7 @@ import {
   type TerminalHostMessage,
   type TerminalSession,
 } from "../../../shared/terminal";
+import { claudeStatuslineArgs } from "./claude-statusline";
 
 /**
  * A CommonJS package's exports, however it was imported.
@@ -194,6 +195,8 @@ export interface SessionsOptions {
   scrollback?: number;
   /** What an agent tab types (tests); otherwise the CLI's own name. */
   agentCommand?: (agent: TerminalAgent) => string;
+  /** Pin the bridge settings builder in process-launch tests. */
+  claudeStatusline?: (cwd: string) => string;
 }
 
 export interface SpawnRequest {
@@ -398,11 +401,19 @@ export function createSessions(options: SessionsOptions = {}) {
     const prompt = card
       ? ` ${shellQuote(cardPrompt(card.mode, card.boardId, card.card))}`
       : "";
-    const args = resumed
-      ? ` ${RESUME_ARGS[kind as TerminalAgent](resumed)}`
-      : named && resume
-        ? ` ${named(resume)}${prompt}`
-        : prompt;
+    const bridgeArgs =
+      kind === "claude"
+        ? (options.claudeStatusline ?? claudeStatuslineArgs)(
+            request.cwd ?? homedir(),
+          )
+        : "";
+    const args =
+      bridgeArgs +
+      (resumed
+        ? ` ${RESUME_ARGS[kind as TerminalAgent](resumed)}`
+        : named && resume
+          ? ` ${named(resume)}${prompt}`
+          : prompt);
     const session: Session = {
       info: {
         id: randomUUID(),
