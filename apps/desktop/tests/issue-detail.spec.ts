@@ -345,6 +345,17 @@ test("following, starring, assigning and labelling all reach the board", async (
     const errors = await openIssue(page);
     const read = () => plane.readCard("ws-cloud-project", "c-parent");
 
+    // A saved move must update the open rail without navigating or reloading.
+    const status = page.getByRole("combobox", { name: "Status", exact: true });
+    await status.click();
+    await page.getByRole("option", { name: "In Progress", exact: true }).click();
+    await expect.poll(() => read()?.columnKey).toBe("processing");
+    await expect(status).toHaveText("In Progress");
+    await status.click();
+    await page.getByRole("option", { name: "Todo", exact: true }).click();
+    await expect.poll(() => read()?.columnKey).toBe("todo");
+    await expect(status).toHaveText("Todo");
+
     // ⚠️ "Unsubscribe" because the card already has a follower, which is what
     // the service's auto-subscribe produces. A page that read an absent field
     // as `false` would say "Subscribe" here and unfollow on the first click.

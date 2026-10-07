@@ -818,6 +818,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
         placement,
       );
       if (result.kind === "ok") {
+        // The properties rail reads detail, independently of the board list.
+        // Refresh it after a saved move so its status and revision stay current.
+        await get().refreshDetail(cardId);
         await get().poll();
         return;
       }
@@ -1070,8 +1073,15 @@ export const useBoard = create<BoardState>()((set, get) => ({
   refreshDetail: async (cardId) => {
     const workspace = get().active;
     if (!workspace?.id || get().detail?.id !== cardId) return;
+    const mine = ticket.detail;
     try {
-      set({ detail: await api().board.card(workspace.id, cardId) });
+      const card = await api().board.card(workspace.id, cardId);
+      if (
+        mine === ticket.detail &&
+        get().active?.id === workspace.id &&
+        get().detail?.id === cardId
+      )
+        set({ detail: card });
     } catch {
       // The card on screen is still the last thing the server said; a failed
       // re-read must not blank it.
