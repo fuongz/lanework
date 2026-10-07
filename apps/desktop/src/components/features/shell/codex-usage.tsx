@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useReducer } from "react";
 import type { AgentSession } from "#/../shared/terminal";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
-import { Badge } from "#/components/ui/badge";
+import { badgeVariants } from "#/components/ui/badge";
 import {
   HoverCard,
   HoverCardContent,
@@ -61,17 +61,15 @@ export function CodexQuotaBar() {
   const plan = quota.plan ? titleCase(quota.plan) : "Codex";
   const asOf = `As of ${clockTime(Date.parse(quota.at), now)}, the last Codex turn`;
   return (
-    <div className="flex h-[30px] items-center px-2">
+    <div className="flex h-[30px] items-center">
       <HoverCard>
         <HoverCardTrigger
           delay={150}
-          render={
-            <Badge
-              variant="ghost"
-              render={<button type="button" />}
-              className="h-6 w-full justify-start gap-1.5"
-            />
-          }
+          render={<button type="button" />}
+          className={cn(
+            badgeVariants({ variant: "ghost" }),
+            "h-6 w-full justify-start gap-1.5",
+          )}
           data-testid="codex-quota"
           aria-label={`Codex ${plan}, 5h usage ${used === null ? "unavailable" : `${Math.round(used)}%`}`}
         >
