@@ -5,7 +5,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useParams } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { RepoMessage } from "#/components/shared/repo/repo-empty";
 import { relativeTime } from "#/lib/board-view";
@@ -34,6 +34,11 @@ export function HistoryList() {
   const moreHistory = useWorktree((state) => state.moreHistory);
   const sentinel = useRef<HTMLDivElement>(null);
   const now = Date.now();
+  const dayFormatter = new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 
   useEffect(() => {
     const node = sentinel.current;
@@ -68,60 +73,74 @@ export function HistoryList() {
       aria-label="Commits"
       className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 py-1.5"
     >
-      {commits.map((commit) => (
-        <Link
-          key={commit.sha}
-          to="/w/$slug/history/$sha"
-          params={{ slug, sha: commit.sha }}
-          className="hover:bg-foreground/[0.04] aria-[current]:bg-foreground/[0.06] focus-visible:ring-accent-brand flex min-w-0 flex-col gap-1 rounded-md px-2.5 py-2 outline-none focus-visible:ring-2"
-        >
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-[13px]">
-              {commit.subject}
-            </span>
-            {commit.unpushed && (
-              <span
-                role="img"
-                aria-label="Not pushed yet"
-                title="Not pushed yet"
-                className="text-muted-foreground flex shrink-0"
-              >
-                <HugeiconsIcon
-                  icon={SquareArrowUp02Icon}
-                  className="size-3.5"
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                />
-              </span>
+      {commits.map((commit, index) => {
+        const date = new Date(commit.authoredAt);
+        const previous = commits[index - 1];
+        const startsDay =
+          !previous ||
+          date.toDateString() !== new Date(previous.authoredAt).toDateString();
+
+        return (
+          <Fragment key={commit.sha}>
+            {startsDay && (
+              <h2 className="text-muted-foreground px-2.5 pt-4 pb-2 text-xs font-medium first:pt-2">
+                {dayFormatter.format(date)}
+              </h2>
             )}
-          </span>
-          <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
-            <AccountOrb seed={commit.authorEmail} className="size-4" />
-            <span className="min-w-0 truncate">{commit.authorName}</span>
-            <time
-              dateTime={commit.authoredAt}
-              className="flex shrink-0 items-center gap-1"
+            <Link
+              to="/w/$slug/history/$sha"
+              params={{ slug, sha: commit.sha }}
+              className="hover:bg-foreground/[0.04] aria-[current]:bg-foreground/[0.06] focus-visible:ring-accent-brand flex min-w-0 flex-col gap-1 rounded-md px-2.5 py-2 outline-none focus-visible:ring-2"
             >
-              <HugeiconsIcon
-                icon={Clock01Icon}
-                className="size-3"
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
-              {relativeTime(commit.authoredAt, now)}
-            </time>
-            <span className="flex shrink-0 items-center gap-1 font-mono">
-              <HugeiconsIcon
-                icon={GitCommitIcon}
-                className="size-3"
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
-              {commit.shortSha}
-            </span>
-          </span>
-        </Link>
-      ))}
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-[13px]">
+                  {commit.subject}
+                </span>
+                {commit.unpushed && (
+                  <span
+                    role="img"
+                    aria-label="Not pushed yet"
+                    title="Not pushed yet"
+                    className="text-muted-foreground flex shrink-0"
+                  >
+                    <HugeiconsIcon
+                      icon={SquareArrowUp02Icon}
+                      className="size-3.5"
+                      strokeWidth={1.8}
+                      aria-hidden="true"
+                    />
+                  </span>
+                )}
+              </span>
+              <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
+                <AccountOrb seed={commit.authorEmail} className="size-4" />
+                <span className="min-w-0 truncate">{commit.authorName}</span>
+                <time
+                  dateTime={commit.authoredAt}
+                  className="flex shrink-0 items-center gap-1"
+                >
+                  <HugeiconsIcon
+                    icon={Clock01Icon}
+                    className="size-3"
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                  {relativeTime(commit.authoredAt, now)}
+                </time>
+                <span className="flex shrink-0 items-center gap-1 font-mono">
+                  <HugeiconsIcon
+                    icon={GitCommitIcon}
+                    className="size-3"
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                  {commit.shortSha}
+                </span>
+              </span>
+            </Link>
+          </Fragment>
+        );
+      })}
       <div ref={sentinel} className="h-px shrink-0" />
       {loading && (
         <p className="text-muted-foreground px-2.5 py-2 text-xs">Loading…</p>
