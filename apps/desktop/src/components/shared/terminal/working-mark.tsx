@@ -1,9 +1,10 @@
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 
 /**
- * Working: a spinner where the agent's icon was (FE-25/D5) — no extra
- * column, so a row that spins is still the only row that moved. Reduced
- * motion gets a still dot in the same place.
+ * Working: a spinner on the right of a row, beside its age — the icon on the
+ * left keeps saying what the row is (an agent, a shell, a monitor), so which
+ * of several running tasks is which still reads at a glance. Reduced motion
+ * gets a still dot in the same place.
  *
  * ⚠️ Shared by the rail's rows and the sub-agent viewer's header (FE-35/D11),
  * so "working" looks the same wherever an agent is.

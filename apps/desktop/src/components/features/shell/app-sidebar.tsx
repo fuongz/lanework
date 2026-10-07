@@ -13,6 +13,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { CodexQuotaBar } from "#/components/shared/agents/codex-usage";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { Kbd } from "#/components/ui/kbd";
@@ -28,7 +29,6 @@ import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
 import { BranchSwitcher } from "./branch-switcher";
 import { ClaudeQuotaBar } from "./claude-usage";
-import { CodexQuotaBar } from "./codex-usage";
 import { ProjectSwitcher } from "./project-switcher";
 import { ReadinessIndicator } from "./readiness-indicator";
 

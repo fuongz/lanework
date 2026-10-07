@@ -15,7 +15,11 @@ import type {
   AgentSubagent,
   TerminalSession,
 } from "#/../shared/terminal";
-import { backgroundCue } from "#/components/shared/agents/background-tasks";
+import {
+  backgroundCue,
+  TASK_KIND_ICONS,
+} from "#/components/shared/agents/background-tasks";
+import { CodexGoalBadge } from "#/components/shared/agents/codex-usage";
 import { factsSummary } from "#/components/shared/agents/conversation-facts";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
 import {
@@ -61,7 +65,6 @@ import {
 } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useTerminal } from "#/stores/terminal";
-import { CodexGoalBadge } from "./codex-usage";
 import { RenameAgentDialog } from "./rename-agent-dialog";
 
 /** Stable empty lists: a selector that allocated one would re-render forever. */
@@ -200,14 +203,20 @@ function BackgroundShellRows({
         title={`${task.command ?? name}\nBackground ${task.kind}, running since ${relativeTime(task.startedAt, now)}`}
         className={cn(row, SUB_ROW, viewed && active)}
       >
-        {/* Running: the spinner where its kind's icon was, as a working
-            agent's row has it. */}
-        <WorkingMark />
+        {/* Its kind on the left, so a row says what runs; the spinner on
+            the right, beside its age. */}
+        <HugeiconsIcon
+          icon={TASK_KIND_ICONS[task.kind]}
+          className="text-muted-foreground size-3 shrink-0"
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
         <span
           className={`min-w-0 flex-1 truncate ${viewed ? "" : "text-muted-foreground"}`}
         >
           {name}
         </span>
+        <WorkingMark />
         <span className="text-muted-foreground shrink-0 tabular-nums">
           {shortAge(task.startedAt, now)}
         </span>
@@ -508,14 +517,10 @@ export function AgentSessionsNav({
             >
               {/* With sub-agents, hover trades the icon for their chevron. */}
               <span className={`flex shrink-0 ${nested ? MAKES_ROOM : ""}`}>
-                {working ? (
-                  <WorkingMark />
-                ) : (
-                  <TerminalKindIcon
-                    kind={session.agent}
-                    className="size-3 shrink-0"
-                  />
-                )}
+                <TerminalKindIcon
+                  kind={session.agent}
+                  className="size-3 shrink-0"
+                />
               </span>
               <span
                 className={`min-w-0 flex-1 truncate ${working ? "text-shimmer" : ""}`}
@@ -552,6 +557,11 @@ export function AgentSessionsNav({
                 session={session}
                 className={MAKES_ROOM}
               />
+              {working && (
+                <span className={`flex shrink-0 ${MAKES_ROOM}`}>
+                  <WorkingMark />
+                </span>
+              )}
               <span
                 className={`text-muted-foreground shrink-0 text-xs tabular-nums ${MAKES_ROOM}`}
               >
@@ -636,19 +646,16 @@ export function AgentSessionsNav({
               title={`${sub.title}\n${sub.type ?? "Sub-agent"}, ${busy ? "working" : relativeTime(sub.updatedAt, now)}`}
               className={cn(row, SUB_ROW, viewed(sub) && activeClass)}
             >
-              {busy ? (
-                <WorkingMark />
-              ) : (
-                <TerminalKindIcon
-                  kind={session.agent}
-                  className="size-3 shrink-0 opacity-60"
-                />
-              )}
+              <TerminalKindIcon
+                kind={session.agent}
+                className="size-3 shrink-0 opacity-60"
+              />
               <span
                 className={`min-w-0 flex-1 truncate ${busy ? "text-shimmer" : viewed(sub) ? "" : "text-muted-foreground"}`}
               >
                 {sub.title}
               </span>
+              {busy && <WorkingMark />}
               <span className="text-muted-foreground shrink-0 tabular-nums">
                 {shortAge(sub.updatedAt, now)}
               </span>

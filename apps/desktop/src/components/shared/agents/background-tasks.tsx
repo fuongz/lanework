@@ -115,16 +115,13 @@ function TaskRow({
         task.status === "lost" && "opacity-50",
       )}
     >
-      {running ? (
-        <WorkingMark />
-      ) : (
-        <HugeiconsIcon
-          icon={TASK_KIND_ICONS[task.kind]}
-          className="text-muted-foreground size-3 shrink-0"
-          strokeWidth={1.8}
-          aria-hidden="true"
-        />
-      )}
+      {/* Its kind stays on the left; running spins on the right. */}
+      <HugeiconsIcon
+        icon={TASK_KIND_ICONS[task.kind]}
+        className="text-muted-foreground size-3 shrink-0"
+        strokeWidth={1.8}
+        aria-hidden="true"
+      />
       <span
         className={cn(
           "min-w-0 flex-1 truncate",
@@ -151,6 +148,7 @@ function TaskRow({
           {status}
         </span>
       )}
+      {running && <WorkingMark />}
       <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
         {shortAge(task.endedAt ?? task.startedAt, now)}
       </span>
