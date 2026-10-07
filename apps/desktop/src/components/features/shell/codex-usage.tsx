@@ -25,7 +25,7 @@ const NEARLY_SPENT = 90;
 const LONGEST_WAIT = 2 ** 31 - 1;
 
 /**
- * The Codex account's usage on the Agents group's header (FE-41/D1) — its
+ * The Codex account's usage above Settings in the fixed rail footer — its
  * mark, then `5h 6% · week 1%` — and, on hover, when each window resets and
  * which turn said so.
  *
@@ -65,9 +65,9 @@ export function CodexQuotaBar() {
       <TooltipTrigger
         render={<span />}
         data-testid="codex-quota"
-        className="text-muted-foreground ml-auto flex min-w-0 items-center gap-1 text-[11px] tabular-nums"
+        className="text-muted-foreground flex h-[30px] min-w-0 items-center gap-2.5 px-2 text-[11px] tabular-nums"
       >
-        <TerminalKindIcon kind="codex" className="size-3 shrink-0" />
+        <TerminalKindIcon kind="codex" className="size-4 shrink-0" />
         <span className="flex min-w-0 gap-1.5 truncate">
           <span className="sr-only">Codex </span>
           {windows.map((window, index) => (

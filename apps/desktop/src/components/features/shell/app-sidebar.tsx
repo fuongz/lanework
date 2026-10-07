@@ -27,6 +27,7 @@ import { useSession } from "#/stores/session";
 import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
 import { BranchSwitcher } from "./branch-switcher";
+import { CodexQuotaBar } from "./codex-usage";
 import { ProjectSwitcher } from "./project-switcher";
 import { ReadinessIndicator } from "./readiness-indicator";
 
@@ -393,6 +394,7 @@ export function AppSidebar() {
       </RailHover>
 
       <div className="mt-2 shrink-0 pt-2 pb-2.5">
+        <CodexQuotaBar />
         <Link to="/settings" className={LONE_ROW}>
           <HugeiconsIcon
             icon={Settings01Icon}

@@ -1892,7 +1892,26 @@ test("FE-41: the rail shows Codex's usage until each window resets, and a goal's
     const page = await app.firstWindow();
     await openProject(page, "Alpha");
     const group = page.getByRole("navigation", { name: "Agents" });
-    const quota = group.getByTestId("codex-quota");
+    const quota = page.getByTestId("codex-quota");
+    await expect(group.getByTestId("codex-quota")).toHaveCount(0);
+    await expect(quota).toBeVisible();
+    const settings = page.getByRole("link", { name: "Settings", exact: true });
+    const quotaBounds = await quota.boundingBox();
+    const settingsBounds = await settings.boundingBox();
+    expect(quotaBounds).not.toBeNull();
+    expect(settingsBounds).not.toBeNull();
+    expect(
+      (quotaBounds?.y ?? 0) + (quotaBounds?.height ?? 0),
+    ).toBeLessThanOrEqual(settingsBounds?.y ?? 0);
+    // The footer stays put while the rail's conversation list scrolls.
+    await page
+      .locator('.app-sidebar [data-slot="rail-hover-area"]')
+      .evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+      });
+    await expect
+      .poll(async () => (await quota.boundingBox())?.y)
+      .toBe(quotaBounds?.y);
     // Read from the fake home with the listing; the details are in it for
     // anybody who cannot hover.
     await expect(quota).toContainText("Codex 5h 6%, week 1%");

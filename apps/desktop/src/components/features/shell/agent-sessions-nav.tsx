@@ -61,7 +61,7 @@ import {
 } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useTerminal } from "#/stores/terminal";
-import { CodexGoalBadge, CodexQuotaBar } from "./codex-usage";
+import { CodexGoalBadge } from "./codex-usage";
 import { RenameAgentDialog } from "./rename-agent-dialog";
 
 /** Stable empty lists: a selector that allocated one would re-render forever. */
@@ -743,8 +743,6 @@ export function AgentSessionsNav({
             <span className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
               Agents
             </span>
-            {/* The Codex account's usage windows (FE-41/D1). */}
-            <CodexQuotaBar />
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="New agent"
