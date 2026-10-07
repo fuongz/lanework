@@ -1862,7 +1862,11 @@ process.stdin.resume();
       LANEWORK_TERMINAL_AGENTS: "claude,codex",
       LANEWORK_CODEX_BIN: codexBin,
       ...(launchClaudeStatusLine
-        ? { LANEWORK_CLAUDE_BIN: claudeBin, CLAUDE_CONFIG_DIR: claudeConfig }
+        ? {
+            LANEWORK_CLAUDE_BIN: claudeBin,
+            LANEWORK_TEST_CLAUDE_STATUSLINE: "1",
+            CLAUDE_CONFIG_DIR: claudeConfig,
+          }
         : {}),
       ...(claudeAuth
         ? { LANEWORK_TEST_CLAUDE_AUTH: JSON.stringify(claudeAuth) }

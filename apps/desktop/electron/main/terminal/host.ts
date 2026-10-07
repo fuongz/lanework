@@ -45,6 +45,12 @@ const binOverride = (agent: TerminalAgent) =>
 
 const sessions = createSessions({
   agentCommand: (agent) => binOverride(agent) || agent,
+  // Legacy CLI stand-ins do not implement Claude settings; bridge integration
+  // tests opt in explicitly. Production always uses the default bridge.
+  claudeStatusline:
+    binOverride("claude") && !process.env.LANEWORK_TEST_CLAUDE_STATUSLINE
+      ? () => ""
+      : undefined,
 });
 const probeAgents = createAgentProbe();
 const clients = new Set<Subscriber>();

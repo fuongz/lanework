@@ -19,6 +19,8 @@ export function claudeStatuslineArgs(
   } = {},
 ): string {
   if (process.platform === "win32") return "";
+  // Source-only Node consumers have no packaged statusLine entry.
+  if (!options.bridge && typeof __dirname === "undefined") return "";
   const home = options.home ?? homedir();
   const config =
     options.config ?? process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude");
