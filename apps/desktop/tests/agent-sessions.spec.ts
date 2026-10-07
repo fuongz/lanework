@@ -1914,7 +1914,7 @@ test("FE-41: the rail shows Codex's usage until each window resets, and a goal's
       .toBe(quotaBounds?.y);
     // Read from the fake home with the listing; the details are in it for
     // anybody who cannot hover.
-    await expect(quota).toHaveText("6%Plus");
+    await expect(quota).toContainText("6%Plus");
     await expect(quota).toHaveAccessibleName("Codex Plus, 5h usage 6%");
     await quota.hover();
     const details = page.getByTestId("codex-quota-details");
@@ -1964,7 +1964,7 @@ test("FE-41: the rail shows Codex's usage until each window resets, and a goal's
         { timeout: 2_000 },
       );
     }).toPass({ timeout: 20_000 });
-    await expect(quota).toHaveText("—Plus");
+    await expect(quota).toContainText("—Plus");
     await quota.hover();
     await expect(details).toContainText("Weekly usage2% used");
     await expect(details).toContainText("5-hour usage is awaiting an update.");

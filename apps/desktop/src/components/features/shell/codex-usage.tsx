@@ -2,6 +2,7 @@ import { Alert02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useReducer } from "react";
 import type { AgentSession } from "#/../shared/terminal";
+import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { Badge } from "#/components/ui/badge";
 import {
   HoverCard,
@@ -68,15 +69,20 @@ export function CodexQuotaBar() {
             <Badge
               variant="secondary"
               render={<button type="button" />}
-              className="h-6 gap-1.5"
+              className="h-6 w-full justify-start gap-1.5"
             />
           }
           data-testid="codex-quota"
           aria-label={`Codex ${plan}, 5h usage ${used === null ? "unavailable" : `${Math.round(used)}%`}`}
         >
+          <TerminalKindIcon kind="codex" className="size-3 shrink-0" />
+          <span className="tabular-nums">
+            {used === null ? "—" : `${Math.round(used)}%`}
+          </span>
+          <span>{plan}</span>
           <span
             className={cn(
-              "flex size-4 shrink-0",
+              "ml-auto flex size-4 shrink-0",
               used !== null && used >= NEARLY_SPENT
                 ? "text-tone-amber"
                 : "text-muted-foreground",
@@ -109,10 +115,6 @@ export function CodexQuotaBar() {
               />
             </svg>
           </span>
-          <span className="tabular-nums">
-            {used === null ? "—" : `${Math.round(used)}%`}
-          </span>
-          <span>{plan}</span>
         </HoverCardTrigger>
         <HoverCardContent
           side="top"
