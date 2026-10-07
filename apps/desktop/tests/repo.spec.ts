@@ -361,6 +361,103 @@ test("Changes stages and commits, and History shows the commit", async () => {
   }
 });
 
+test("History searches loaded commits by message, author and SHA, and loads more", async () => {
+  const repo = await makeRepo();
+  const other = await makeRepo();
+  git(repo, "commit", "--amend", "--no-edit", "--date=2024-01-01T12:00:00Z");
+  const firstSha = git(repo, "rev-parse", "HEAD").trim();
+  for (let index = 0; index < 101; index++)
+    git(
+      repo,
+      "commit",
+      "--allow-empty",
+      "-qm",
+      `chore: padding ${index}`,
+      "--date=2025-01-01T12:00:00Z",
+    );
+  git(
+    repo,
+    "-c",
+    "user.name=Alice",
+    "-c",
+    "user.email=alice@example.com",
+    "commit",
+    "--allow-empty",
+    "-qm",
+    "feat: unique history search",
+    "--date=2026-01-01T12:00:00Z",
+  );
+  const latestSha = git(repo, "rev-parse", "HEAD").trim();
+  const { page, cleanup } = await open(repo, other);
+  try {
+    await page.goto("app://lanework/w/alpha/history");
+    const search = page.getByRole("searchbox", { name: "Search commits" });
+    const list = page.getByRole("navigation", { name: "Commits" });
+    await expect(search).toBeVisible({ timeout: 15_000 });
+    await expect(list.getByRole("link")).toHaveCount(100);
+    await expect(page.getByText(/Searches \d+ loaded commits/)).toHaveCount(0);
+
+    for (const query of [
+      " UNIQUE HISTORY ",
+      "ALICE",
+      "ALICE@EXAMPLE.COM",
+      latestSha.slice(0, 12),
+    ]) {
+      await search.fill(query);
+      await expect(list.getByRole("link")).toHaveCount(1);
+      await expect(
+        list.getByRole("link", { name: /unique history search/ }),
+      ).toBeVisible();
+      await expect(list.getByRole("heading")).toHaveCount(1);
+    }
+    await list.getByRole("link").click();
+    await expect(
+      page.getByRole("button", { name: "Commit SHA" }),
+    ).toBeVisible();
+
+    await search.fill(firstSha);
+    await expect(list.getByRole("link")).toHaveCount(0);
+    await expect(list.getByRole("status")).toHaveText(
+      "No matching commits in the loaded history.",
+    );
+    await list.getByRole("button", { name: "Load more commits" }).click();
+    await expect(
+      list.getByRole("link", { name: /init: first commit/ }),
+    ).toBeVisible();
+    await expect(list.getByRole("link")).toHaveCount(1);
+    await expect(
+      list.getByRole("button", { name: "Load more commits" }),
+    ).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Clear", exact: true }).click();
+    await expect(search).toHaveValue("");
+    await expect(list.getByRole("link")).toHaveCount(103);
+    await expect(list.getByRole("heading")).toHaveCount(3);
+    await search.fill("no such commit");
+    await search.press("Escape");
+    await expect(list.getByRole("link")).toHaveCount(103);
+
+    await search.fill("unique history");
+    await page.goto("app://lanework/w/beta/history");
+    await expect(search).toHaveValue("");
+    await expect(
+      list.getByRole("link", { name: /init: first commit/ }),
+    ).toBeVisible();
+    await expect(
+      list.getByRole("link", { name: /unique history search/ }),
+    ).toHaveCount(0);
+    await page.goto("app://lanework/w/alpha/history");
+    await expect(search).toHaveValue("");
+    await expect(
+      list.getByRole("link", { name: /unique history search/ }),
+    ).toBeVisible();
+  } finally {
+    await cleanup();
+    await rm(repo, { recursive: true, force: true });
+    await rm(other, { recursive: true, force: true });
+  }
+});
+
 test("switching projects never shows the last one's history, and a return is instant", async () => {
   const alpha = await makeRepo();
   const other = await makeRepo();
