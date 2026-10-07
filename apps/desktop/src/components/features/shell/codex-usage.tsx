@@ -67,7 +67,7 @@ export function CodexQuotaBar() {
           delay={150}
           render={
             <Badge
-              variant="secondary"
+              variant="ghost"
               render={<button type="button" />}
               className="h-6 w-full justify-start gap-1.5"
             />
