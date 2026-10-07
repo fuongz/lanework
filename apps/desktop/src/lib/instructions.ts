@@ -93,3 +93,47 @@ export function importOf(
   const index = IMPORT_HREF.exec(href)?.[1];
   return index === undefined ? null : (imports[Number(index)] ?? null);
 }
+
+/** A folder of the subfolder group (FE-44/D3): its folders, then its files. */
+export interface NestedFolder {
+  /** What its row says: one segment, or a chain of them (`apps/desktop`). */
+  name: string;
+  /** From the project's folder; `""` for the root. */
+  path: string;
+  folders: NestedFolder[];
+  files: InstructionNode[];
+}
+
+/**
+ * The files in subfolders as a tree of folders (FE-44/D3), by each file's
+ * path from the project. A folder holding one folder and nothing else folds
+ * into it, so `apps/desktop` is one row rather than two.
+ */
+export function nestedFolders(list: InstructionList): NestedFolder {
+  const root: NestedFolder = { name: "", path: "", folders: [], files: [] };
+  for (const node of list.nested) {
+    const file = list.files[node.file];
+    if (!file) continue;
+    const segments = file.name.split("/").slice(0, -1);
+    let folder = root;
+    for (const segment of segments) {
+      const path = folder.path ? `${folder.path}/${segment}` : segment;
+      let next = folder.folders.find((child) => child.path === path);
+      if (!next) {
+        next = { name: segment, path, folders: [], files: [] };
+        folder.folders.push(next);
+      }
+      folder = next;
+    }
+    folder.files.push(node);
+  }
+  const fold = (folder: NestedFolder): NestedFolder => {
+    let current = folder;
+    while (current.files.length === 0 && current.folders.length === 1) {
+      const [only] = current.folders as [NestedFolder];
+      current = { ...only, name: `${current.name}/${only.name}` };
+    }
+    return { ...current, folders: current.folders.map(fold) };
+  };
+  return { ...root, folders: root.folders.map(fold) };
+}
