@@ -1914,9 +1914,20 @@ test("FE-41: the rail shows Codex's usage until each window resets, and a goal's
       .toBe(quotaBounds?.y);
     // Read from the fake home with the listing; the details are in it for
     // anybody who cannot hover.
-    await expect(quota).toContainText("Codex 5h 6%, week 1%");
-    await expect(quota).toContainText("week resets");
-    await expect(quota).toContainText("As of");
+    await expect(quota).toHaveText("6%Plus");
+    await expect(quota).toHaveAccessibleName("Codex Plus, 5h usage 6%");
+    await quota.hover();
+    const details = page.getByTestId("codex-quota-details");
+    await expect(details).toBeVisible();
+    await expect(details).toContainText("5-hour usage6% used");
+    await expect(details).toContainText("Weekly usage1% used");
+    await expect(details).toContainText("week resets");
+    await expect(details).toContainText("As of");
+    await page.screenshot({
+      path: "../../.agents/artifacts/2026-10-07-codex-usage-badge.png",
+    });
+    await settings.hover();
+    await expect(details).not.toBeVisible();
     // The goal that ran out of usage says so on its own row, and only there.
     const codexRow = page.getByRole("button", {
       name: "Resume “Settings page cleanup” in Codex",
@@ -1948,9 +1959,17 @@ test("FE-41: the rail shows Codex's usage until each window resets, and a goal's
             ),
           ),
       );
-      await expect(quota).toContainText("Codex week 2%", { timeout: 2_000 });
+      await expect(quota).toHaveAccessibleName(
+        "Codex Plus, 5h usage unavailable",
+        { timeout: 2_000 },
+      );
     }).toPass({ timeout: 20_000 });
-    await expect(quota).not.toContainText("5h");
+    await expect(quota).toHaveText("—Plus");
+    await quota.hover();
+    await expect(details).toContainText("Weekly usage2% used");
+    await expect(details).toContainText("5-hour usage is awaiting an update.");
+    await settings.hover();
+    await expect(details).not.toBeVisible();
 
     // Both past: the bar goes.
     await appendFile(

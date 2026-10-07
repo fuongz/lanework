@@ -2,12 +2,12 @@ import { Alert02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useReducer } from "react";
 import type { AgentSession } from "#/../shared/terminal";
-import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
+import { Badge } from "#/components/ui/badge";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "#/components/ui/tooltip";
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "#/components/ui/hover-card";
 import {
   clockTime,
   GOAL_STATUS_LABELS,
@@ -26,16 +26,15 @@ const LONGEST_WAIT = 2 ** 31 - 1;
 
 /**
  * The Codex account's usage above Settings in the fixed rail footer — its
- * mark, then `5h 6% · week 1%` — and, on hover, when each window resets and
- * which turn said so.
+ * a progress ring, the 5h percentage and plan; hover shows every live window
+ * and its reset time.
  *
  * ⚠️ Only as fresh as the newest Codex turn on this machine: nothing here
  * asks OpenAI. A window past its reset hides its number, which no longer
  * says anything — and with none left the bar goes (FE-41/D3). Re-drawn when
  * the next window resets, so a stale number goes on time with no new turn.
  *
- * ⚠️ Not a control, as the card's agents mark is not: its words are in the
- * sr-only text for anybody who cannot hover.
+ * The badge can also be focused to read the details without hovering.
  */
 export function CodexQuotaBar() {
   const quota = useAgentSessions((state) => state.codexQuota);
@@ -54,49 +53,110 @@ export function CodexQuotaBar() {
   }, [next]);
 
   if (!quota || windows.length === 0 || !agents.includes("codex")) return null;
-  const resets = windows.map(
-    (window) => `${window.label} resets ${clockTime(window.resetsAt, now)}`,
-  );
+  const shortWindow = windows.find((window) => window.label === "5h");
+  const used = shortWindow
+    ? Math.max(0, Math.min(100, shortWindow.usedPercent))
+    : null;
+  const plan = quota.plan ? titleCase(quota.plan) : "Codex";
   const asOf = `As of ${clockTime(Date.parse(quota.at), now)}, the last Codex turn`;
   return (
-    <Tooltip>
-      {/* ⚠️ Codex's mark, not its name: the rail is too narrow for the
-          word and both windows, and the week's number was the one cut. */}
-      <TooltipTrigger
-        render={<span />}
-        data-testid="codex-quota"
-        className="text-muted-foreground flex h-[30px] min-w-0 items-center gap-2.5 px-2 text-[11px] tabular-nums"
-      >
-        <TerminalKindIcon kind="codex" className="size-4 shrink-0" />
-        <span className="flex min-w-0 gap-1.5 truncate">
-          <span className="sr-only">Codex </span>
-          {windows.map((window, index) => (
-            <span
-              key={window.label}
-              className={cn(
-                window.usedPercent >= NEARLY_SPENT && "text-tone-amber",
-              )}
+    <div className="flex h-[30px] items-center px-2">
+      <HoverCard>
+        <HoverCardTrigger
+          delay={150}
+          render={
+            <Badge
+              variant="secondary"
+              render={<button type="button" />}
+              className="h-6 gap-1.5"
+            />
+          }
+          data-testid="codex-quota"
+          aria-label={`Codex ${plan}, 5h usage ${used === null ? "unavailable" : `${Math.round(used)}%`}`}
+        >
+          <span
+            className={cn(
+              "flex size-4 shrink-0",
+              used !== null && used >= NEARLY_SPENT
+                ? "text-tone-amber"
+                : "text-muted-foreground",
+            )}
+          >
+            <svg
+              viewBox="0 0 20 20"
+              className="size-4 -rotate-90"
+              aria-hidden="true"
             >
-              {/* A gap on screen, a pause for a screen reader. */}
-              {index > 0 && <span className="sr-only">, </span>}
-              {window.label} {Math.round(window.usedPercent)}%
-            </span>
-          ))}
-          <span className="sr-only">
-            . {resets.join(", ")}. {asOf}.
+              <circle
+                cx="10"
+                cy="10"
+                r="7.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                className="opacity-20"
+              />
+              <circle
+                cx="10"
+                cy="10"
+                r="7.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                pathLength="100"
+                strokeDasharray={`${used ?? 0} 100`}
+                strokeLinecap={used ? "round" : "butt"}
+              />
+            </svg>
           </span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent className="flex-col items-start gap-0.5">
-        {quota.plan && (
-          <span className="font-medium">Codex {titleCase(quota.plan)}</span>
-        )}
-        {resets.map((line) => (
-          <span key={line}>{line}</span>
-        ))}
-        <span className="opacity-70">{asOf}</span>
-      </TooltipContent>
-    </Tooltip>
+          <span className="tabular-nums">
+            {used === null ? "—" : `${Math.round(used)}%`}
+          </span>
+          <span>{plan}</span>
+        </HoverCardTrigger>
+        <HoverCardContent
+          side="top"
+          align="start"
+          className="flex flex-col gap-3"
+          aria-label="Codex usage details"
+          data-testid="codex-quota-details"
+        >
+          <span className="font-medium">
+            Codex {plan === "Codex" ? "usage" : plan}
+          </span>
+          {windows.map((window) => (
+            <div key={window.label} className="flex flex-col gap-1">
+              <div className="flex items-center justify-between gap-3">
+                <span>
+                  {window.label === "5h"
+                    ? "5-hour usage"
+                    : window.label === "week"
+                      ? "Weekly usage"
+                      : `${window.label} usage`}
+                </span>
+                <span
+                  className={cn(
+                    "tabular-nums",
+                    window.usedPercent >= NEARLY_SPENT && "text-tone-amber",
+                  )}
+                >
+                  {Math.round(window.usedPercent)}% used
+                </span>
+              </div>
+              <span className="text-muted-foreground">
+                {window.label} resets {clockTime(window.resetsAt, now)}
+              </span>
+            </div>
+          ))}
+          {!shortWindow && (
+            <span className="text-muted-foreground">
+              5-hour usage is awaiting an update.
+            </span>
+          )}
+          <span className="text-muted-foreground border-t pt-2">{asOf}</span>
+        </HoverCardContent>
+      </HoverCard>
+    </div>
   );
 }
 
