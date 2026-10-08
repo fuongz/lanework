@@ -416,6 +416,15 @@
   .app-header button {
     app-region: no-drag;
   }
+  html[data-vibrancy="true"] .agent-titlebar {
+    app-region: drag;
+    user-select: none;
+  }
+  .agent-titlebar a,
+  .agent-titlebar button,
+  .agent-titlebar [role="button"] {
+    app-region: no-drag;
+  }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;

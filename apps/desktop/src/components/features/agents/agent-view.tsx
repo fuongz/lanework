@@ -172,7 +172,7 @@ export function AgentView() {
       aria-label={`${label} — ${title}`}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      <header className="border-sidebar-border flex h-11 shrink-0 items-center gap-2.5 border-b ps-[max(0.75rem,var(--titlebar-clear,0px))] pe-3">
+      <header className="agent-titlebar border-sidebar-border flex h-11 shrink-0 items-center gap-2.5 border-b ps-[max(0.75rem,var(--titlebar-clear,0px))] pe-3">
         {working ? (
           <span role="img" aria-label="Working" className="flex shrink-0">
             <OrbitSpinner className="text-foreground size-[13px]" />
