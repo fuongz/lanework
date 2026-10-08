@@ -38,7 +38,12 @@ import {
 import { codexHome } from "../handoff/codex";
 import { assertTrustedSender, broadcast, handle } from "../ipc";
 import { appHomeDir } from "../paths";
-import { knownWorkspace, terminalFolder } from "../workspaces";
+import {
+  authorizedRecord,
+  knownWorkspace,
+  menuBarWorkspaces,
+  terminalFolder,
+} from "../workspaces";
 import { watchAgentActivity } from "./agent-activity";
 import { agentBindings } from "./agent-binding";
 import { factsRequest, readAgentFacts, readAgentUsage } from "./agent-facts";
@@ -69,6 +74,13 @@ import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
 
 let host: UtilityProcess | null = null;
 let nextRequest = 1;
+const runningListeners = new Set<() => void>();
+export function onRunningChanged(listener: () => void): () => void {
+  runningListeners.add(listener);
+  return () => {
+    runningListeners.delete(listener);
+  };
+}
 const waiting = new Map<
   number,
   {
@@ -98,6 +110,10 @@ function ensureHost(): UtilityProcess {
       value?: unknown;
       error?: string;
     } | null;
+    if (reply?.t === "changed") {
+      for (const listener of runningListeners) listener();
+      return;
+    }
     if (reply?.t !== "reply" || typeof reply.reqId !== "number") return;
     const entry = waiting.get(reply.reqId);
     if (!entry) return;
@@ -115,6 +131,7 @@ function ensureHost(): UtilityProcess {
     waiting.clear();
     // Every window's port died with it; they reconnect on the next use.
     broadcast(terminalChannels.hostExited, null);
+    for (const listener of runningListeners) listener();
   });
   host = child;
   watchMoves();
@@ -425,7 +442,139 @@ async function markable(args: unknown[]): Promise<{
 export function sendTerminalCommand(command: TerminalCommand): void {
   const window =
     BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-  window?.webContents.send(terminalChannels.command, command);
+  if (!window) return;
+  const send = () => window.webContents.send(terminalChannels.command, command);
+  if (window.webContents.isLoadingMainFrame())
+    window.webContents.once("did-finish-load", send);
+  else send();
+}
+
+export interface RunningProject {
+  name: string;
+  workspace: string;
+  slug: string;
+  items: { label: string; href: string; shellId?: string }[];
+}
+
+/** Native menu snapshot across every account project, without starting the pty host. */
+export async function runningProjects(): Promise<RunningProject[]> {
+  const account = await authorizedRecord();
+  const workspaces = await menuBarWorkspaces();
+  const terminals = host ? await request<TerminalSession[]>({ t: "list" }) : [];
+  const marks = await readAgentMarks(agentMarksFile());
+  const results: RunningProject[] = [];
+  // Sequential reads bound disk work, even with many linked projects.
+  for (const project of workspaces) {
+    const workspace = project.id ?? project.slug;
+    const prefix = `/w/${encodeURIComponent(project.slug)}`;
+    const live = terminals.filter(
+      (entry) => entry.workspace === workspace && !entry.exit,
+    );
+    const folder = await terminalFolder(workspace);
+    const conversations = folder
+      ? applyAgentMarks(
+          await listAgentSessions(
+            agentHome(),
+            folder,
+            keptKeys(marks),
+            Infinity,
+          ),
+          marks,
+        )
+      : [];
+    const items: RunningProject["items"] = live.map((entry) => {
+      const conversation = conversations.find(
+        (row) => row.agent === entry.kind && row.id === entry.resume,
+      );
+      const name =
+        entry.kind === "shell"
+          ? entry.shell
+          : (conversation?.title ?? entry.kind);
+      const status =
+        entry.kind === "shell"
+          ? "Running"
+          : conversation?.working
+            ? "Working"
+            : "Open";
+      return {
+        label: `${name} — ${status} · PID ${entry.pid}`,
+        href:
+          entry.kind === "shell"
+            ? `${prefix}/issues`
+            : `${prefix}/agents/${encodeURIComponent(entry.id)}`,
+        ...(entry.kind === "shell" ? { shellId: entry.id } : {}),
+      };
+    });
+    for (const conversation of conversations) {
+      // Include working conversations started outside the app, too.
+      if (
+        conversation.working &&
+        !live.some(
+          (entry) =>
+            entry.kind === conversation.agent &&
+            entry.resume === conversation.id,
+        )
+      ) {
+        items.push({
+          label: `${conversation.title} — Working (external)`,
+          href: `${prefix}/issues`,
+        });
+      }
+      for (const sub of conversation.subagents.filter(
+        (entry) => entry.working,
+      )) {
+        items.push({
+          label: `${sub.title || sub.id} — Working (sub-agent)`,
+          href: `${prefix}/agents/sub/${conversation.id}/${encodeURIComponent(sub.id)}?agent=${conversation.agent}`,
+        });
+      }
+      if (
+        folder &&
+        conversation.agent === "claude" &&
+        conversation.background.running > 0
+      ) {
+        const tasks = await readBackgroundTasks(
+          agentHome(),
+          folder,
+          conversation.id,
+        );
+        for (const task of tasks.filter(
+          (entry) => entry.status === "running",
+        )) {
+          if (
+            task.kind === "agent" &&
+            conversation.subagents.some(
+              (sub) => sub.id === task.subagentId && sub.working,
+            )
+          )
+            continue;
+          items.push({
+            label: `${task.description || task.kind} — Running (${task.kind})`,
+            href:
+              task.kind === "agent" && task.subagentId
+                ? `${prefix}/agents/sub/${conversation.id}/${encodeURIComponent(task.subagentId)}?agent=claude`
+                : `${prefix}/agents/task/${conversation.id}/${encodeURIComponent(task.id)}`,
+          });
+        }
+      }
+    }
+    if (items.length)
+      results.push({
+        name: project.name,
+        workspace,
+        slug: project.slug,
+        items,
+      });
+  }
+  const current = await authorizedRecord();
+  if (
+    current.machineId !== account.machineId ||
+    current.secret !== account.secret ||
+    current.apiUrl !== account.apiUrl ||
+    current.userId !== account.userId
+  )
+    throw new Error("Your session changed.");
+  return results;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { SidebarLeftIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Outlet, useParams } from "@tanstack/react-router";
+import { Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import {
   useCallback,
   useEffect,
@@ -85,6 +85,7 @@ function saveRailHidden(hidden: boolean) {
  * under Pull requests and is frozen under Issues reads as a bug, not a feature.
  */
 export function AppShell() {
+  const navigate = useNavigate();
   const { defaultLayout, onLayoutChanged } = usePersistedLayout(
     "lanework:shell",
     ["sidebar", "main"],
@@ -168,10 +169,16 @@ export function AppShell() {
     () =>
       window.desktop?.terminal.onCommand((command) => {
         const terminal = useTerminal.getState();
-        if (command === "toggle") void terminal.toggle(keyRef.current);
+        if (typeof command === "object" && command.type === "focus") {
+          if (command.shellId) {
+            terminal.select(command.workspace, command.shellId);
+            terminal.setOpen(command.workspace, true);
+          }
+          void navigate({ href: command.href });
+        } else if (command === "toggle") void terminal.toggle(keyRef.current);
         else void terminal.newTerminal(keyRef.current);
       }),
-    [],
+    [navigate],
   );
 
   // ⚠️ A LAYOUT effect: a panel opened or folded after paint shows one frame

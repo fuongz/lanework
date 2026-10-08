@@ -205,6 +205,14 @@ const git: DesktopGitApi = {
  * on `hostExited`, and the next call asks for a fresh port.
  */
 function createTerminal(): DesktopTerminalApi {
+  const commandListeners = new Set<(command: TerminalCommand) => void>();
+  let pendingFocus: Extract<TerminalCommand, { type: "focus" }> | null = null;
+  // A newly reopened window receives native navigation before React mounts.
+  subscribe<TerminalCommand>(terminalChannels.command, (command) => {
+    if (!commandListeners.size && typeof command === "object")
+      pendingFocus = command;
+    else for (const listener of commandListeners) listener(command);
+  });
   let port: MessagePort | null = null;
   let connecting: Promise<MessagePort> | null = null;
   const views = new Map<string, TerminalViewHandlers>();
@@ -357,8 +365,20 @@ function createTerminal(): DesktopTerminalApi {
         changeListeners.delete(listener);
       };
     },
-    onCommand: (listener) =>
-      subscribe<TerminalCommand>(terminalChannels.command, listener),
+    onCommand: (listener) => {
+      commandListeners.add(listener);
+      if (pendingFocus) {
+        const command = pendingFocus;
+        pendingFocus = null;
+        queueMicrotask(() => {
+          if (commandListeners.has(listener)) listener(command);
+          else pendingFocus = command;
+        });
+      }
+      return () => {
+        commandListeners.delete(listener);
+      };
+    },
   };
 }
 

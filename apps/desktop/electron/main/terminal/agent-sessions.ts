@@ -539,6 +539,7 @@ async function claudeSessions(
   home: string,
   folder: string,
   keep: ReadonlySet<string>,
+  limit: number,
 ): Promise<AgentSession[]> {
   const dir = join(home, ".claude", "projects", claudeProjectDir(folder));
   const names = await readdir(dir).catch(() => [] as string[]);
@@ -559,11 +560,11 @@ async function claudeSessions(
   // A few spare, for the ones that turn out empty or another folder's — and
   // every KEPT one wherever it falls: a pinned conversation stays on the rail
   // however old it gets (FE-25/D1).
-  const head = valid.slice(0, AGENT_SESSION_LIMIT * 2);
+  const head = valid.slice(0, limit * 2);
   const newest = [
     ...head,
     ...valid
-      .slice(AGENT_SESSION_LIMIT * 2)
+      .slice(limit * 2)
       .filter((entry) => entry && keep.has(`claude:${entry.id}`)),
   ];
   const read = await Promise.all(
@@ -690,6 +691,7 @@ async function codexSessions(
   home: string,
   folder: string,
   keep: ReadonlySet<string>,
+  limit: number,
 ): Promise<AgentSession[]> {
   const files = await codexRollouts(join(home, ".codex", "sessions"));
   const names = await codexNames(home);
@@ -705,11 +707,7 @@ async function codexSessions(
   const found = new Set<string>();
   for (const file of files) {
     // Enough of the newest, and every kept one found: stop reading.
-    if (
-      out.length >= AGENT_SESSION_LIMIT &&
-      wanted.every((key) => found.has(key))
-    )
-      break;
+    if (out.length >= limit && wanted.every((key) => found.has(key))) break;
     try {
       const head = lines(await readRange(file, 0, META_CHUNK), { head: true });
       const meta = head.find((line) => line.type === "session_meta")?.payload as
@@ -743,8 +741,7 @@ async function codexSessions(
         });
         continue;
       }
-      if (out.length >= AGENT_SESSION_LIMIT && !keep.has(`codex:${meta.id}`))
-        continue;
+      if (out.length >= limit && !keep.has(`codex:${meta.id}`)) continue;
       const named = names.get(meta.id);
       const title = named ? tidy(named) : head.map(codexPrompt).find(Boolean);
       if (!title) continue;
@@ -792,10 +789,11 @@ export async function listAgentSessions(
   home: string,
   folder: string,
   keep: ReadonlySet<string> = new Set(),
+  limit = AGENT_SESSION_LIMIT,
 ): Promise<AgentSession[]> {
   const [claude, codex] = await Promise.all([
-    claudeSessions(home, folder, keep).catch(() => []),
-    codexSessions(home, folder, keep).catch(() => []),
+    claudeSessions(home, folder, keep, limit).catch(() => []),
+    codexSessions(home, folder, keep, limit).catch(() => []),
   ]);
   const all = [...claude, ...codex].sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt),
@@ -803,7 +801,7 @@ export async function listAgentSessions(
   const kept = all.filter((entry) => keep.has(agentKey(entry)));
   const rest = all
     .filter((entry) => !keep.has(agentKey(entry)))
-    .slice(0, AGENT_SESSION_LIMIT);
+    .slice(0, limit);
   return [...kept, ...rest].sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt),
   );

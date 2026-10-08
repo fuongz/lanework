@@ -10,6 +10,7 @@ import { registerInstructions } from "./instructions";
 import { broadcast, handle } from "./ipc";
 import { registerMemory } from "./memory";
 import { installMenu } from "./menu";
+import { installMenuBar } from "./menu-bar";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { appOrigin, isTrustedUrl } from "./security";
@@ -150,6 +151,15 @@ app
     registerAgentConfig(devUrl);
     installMenu();
     createWindow();
+    installMenuBar(() => {
+      const window = BrowserWindow.getAllWindows()[0];
+      if (!window) createWindow();
+      else {
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+      }
+    });
     app.on("activate", () => {
       if (!BrowserWindow.getAllWindows().length) createWindow();
     });

@@ -186,6 +186,14 @@ export async function knownWorkspace(
   return { record, workspace };
 }
 
+/** Account-scoped projects for native surfaces; never reuse another account's list. */
+export async function menuBarWorkspaces(): Promise<Workspace[]> {
+  const record = await authorizedRecord();
+  return lastList?.session === sessionKey(record)
+    ? lastList.workspaces
+    : fetchWorkspaces(record);
+}
+
 async function load(id?: string): Promise<WorkspaceSnapshot> {
   const record = await authorizedRecord();
   const session = sessionKey(record);

@@ -22,7 +22,7 @@ import { createAgentProbe } from "./agents";
 import { createSessions, type SpawnRequest, type Subscriber } from "./sessions";
 
 type Request = { reqId: number } & (
-  | { t: "list"; workspace: string }
+  | { t: "list"; workspace?: string }
   | ({ t: "spawn" } & SpawnRequest)
   | { t: "kill"; id: string }
   | { t: "reorder"; workspace: string; ids: unknown }
@@ -65,6 +65,7 @@ function agents(): Promise<TerminalAgent[]> {
 }
 
 sessions.onChanged((workspace) => {
+  process.parentPort?.postMessage({ t: "changed" });
   for (const client of clients) client.send({ t: "changed", workspace });
 });
 

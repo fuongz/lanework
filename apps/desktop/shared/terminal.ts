@@ -670,7 +670,16 @@ export const terminalChannels = {
 } as const;
 
 /** What the View menu can ask the panel to do. */
-export type TerminalCommand = "toggle" | "new";
+export type TerminalCommand =
+  | "toggle"
+  | "new"
+  | {
+      type: "focus";
+      workspace: string;
+      slug: string;
+      href: string;
+      shellId?: string;
+    };
 
 /** Renderer → host, over the port. */
 export type TerminalClientMessage =
