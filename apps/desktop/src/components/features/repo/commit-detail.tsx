@@ -64,7 +64,7 @@ function CopySha({ sha }: { sha: string }) {
 
 function CommitHeader({ commit }: { commit: CommitSummary }) {
   return (
-    <header className="border-sidebar-border flex gap-3 border-b px-4 py-3">
+    <header className="window-drag-region border-sidebar-border flex gap-3 border-b px-4 py-3">
       <AccountOrb seed={commit.authorEmail} className="size-9" />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 items-start gap-2">

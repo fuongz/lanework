@@ -180,7 +180,7 @@ export function PullDetail() {
           +798 −425` sat among the controls and read as if it were one. */}
       <header
         className={cn(
-          "border-sidebar-border grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b pe-3",
+          "window-drag-region border-sidebar-border grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b pe-3",
           // Beside the rail only in focus mode, with the list shut; the
           // rest of the time the list is what keeps it clear of the window
           // controls.

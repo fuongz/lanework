@@ -286,7 +286,7 @@ export function ChangesList({ files }: { files: WorktreeFile[] }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-10 shrink-0 items-center gap-2 px-3">
+      <div className="window-drag-region flex h-10 shrink-0 items-center gap-2 px-3">
         <span className="text-[13px] font-medium">Changes</span>
         <Counts additions={additions} deletions={deletions} />
         <span className="ml-auto" />

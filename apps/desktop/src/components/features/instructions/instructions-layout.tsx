@@ -84,7 +84,7 @@ export function InstructionsLayout() {
           aria-label="Instructions"
           className="bg-sidebar flex h-full min-h-0 flex-col"
         >
-          <header className="border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-[max(0.875rem,var(--titlebar-clear,0px))] pe-2">
+          <header className="window-drag-region border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-[max(0.875rem,var(--titlebar-clear,0px))] pe-2">
             <h2 className="text-[13px] font-medium">Instructions</h2>
           </header>
           <InstructionsList slug={slug} list={list} />

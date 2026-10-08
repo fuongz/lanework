@@ -416,13 +416,20 @@
   .app-header button {
     app-region: no-drag;
   }
-  html[data-vibrancy="true"] .agent-titlebar {
+  html[data-vibrancy="true"] .agent-titlebar,
+  html[data-vibrancy="true"] .window-drag-region {
     app-region: drag;
     user-select: none;
   }
   .agent-titlebar a,
   .agent-titlebar button,
-  .agent-titlebar [role="button"] {
+  .agent-titlebar [role="button"],
+  .window-drag-region a,
+  .window-drag-region button,
+  .window-drag-region [role="button"],
+  .window-drag-region input,
+  .window-drag-region select,
+  .window-drag-region textarea {
     app-region: no-drag;
   }
   button:not(:disabled),

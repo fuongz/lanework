@@ -322,7 +322,7 @@ function SubagentPage({
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
       {/* Lined up with the body's `px-6`, as the issue page's header is. */}
-      <header className="border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-[max(1.5rem,var(--titlebar-clear,0px))] pe-6">
+      <header className="window-drag-region border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-[max(1.5rem,var(--titlebar-clear,0px))] pe-6">
         {working ? (
           <span role="img" aria-label="Working" className="flex shrink-0">
             <WorkingMark />

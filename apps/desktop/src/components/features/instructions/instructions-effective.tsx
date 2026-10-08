@@ -63,7 +63,7 @@ export function InstructionsEffective() {
       aria-label={`Instructions — Effective for ${name}`}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      <header className="border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-6 pe-4">
+      <header className="window-drag-region border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-6 pe-4">
         <h1 className="min-w-0 truncate text-[13px] font-medium">
           Effective — {name}
         </h1>

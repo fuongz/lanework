@@ -127,7 +127,7 @@ export function ViewToolbar({
   const reload = useBoard((state) => state.reload);
 
   return (
-    <div className="border-border flex shrink-0 flex-col gap-2 border-b pe-6 ps-[max(1.5rem,var(--titlebar-clear,0px))] pt-2 pb-3">
+    <div className="window-drag-region border-border flex shrink-0 flex-col gap-2 border-b pe-6 ps-[max(1.5rem,var(--titlebar-clear,0px))] pt-2 pb-3">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
         {/* ⚠️ Beside the title, not with the controls on the right. "Group"

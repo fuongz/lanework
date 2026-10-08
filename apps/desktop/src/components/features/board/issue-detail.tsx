@@ -130,7 +130,7 @@ export function IssueDetail() {
             divider and left a notch in the line between the two panes. Out here
             the bar owns the pane's full width, and the scroll region starts
             under it instead of running behind it. */}
-        <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b pe-6 ps-[max(1.5rem,var(--titlebar-clear,0px))]">
+        <header className="window-drag-region border-border flex h-11 shrink-0 items-center gap-1 border-b pe-6 ps-[max(1.5rem,var(--titlebar-clear,0px))]">
           <Link
             to="/w/$slug/issues"
             params={{ slug }}
@@ -195,7 +195,7 @@ export function IssueDetail() {
       >
         {/* The rail's own header band, the same height as the one beside it, so
             the divider between the panels has one unbroken line to draw. */}
-        <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b px-4">
+        <header className="window-drag-region border-border flex h-11 shrink-0 items-center gap-1 border-b px-4">
           <span className="text-muted-foreground font-mono text-xs">
             {card?.taskId ?? taskId}
           </span>

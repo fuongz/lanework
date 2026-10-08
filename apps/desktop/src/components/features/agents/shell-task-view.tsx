@@ -213,7 +213,7 @@ function ShellTaskPage({
     >
       {stopping.feedback}
       {/* Lined up with the body's `px-6`, as the sub-agent viewer's is. */}
-      <header className="border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-[max(1.5rem,var(--titlebar-clear,0px))] pe-6">
+      <header className="window-drag-region border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-[max(1.5rem,var(--titlebar-clear,0px))] pe-6">
         {running ? (
           <span role="img" aria-label="Running" className="flex shrink-0">
             <WorkingMark />
