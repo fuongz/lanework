@@ -1305,6 +1305,31 @@ test("the project menu shows the agents running in each project", async () => {
     await expect(
       page.getByRole("option", { name: /^Cloud project/ }),
     ).not.toHaveAccessibleName(/running/);
+
+    const order = () =>
+      page.getByRole("listbox", { name: "Projects" }).getByRole("option");
+    const sortBy = async (name: string) => {
+      await page.getByRole("button", { name: "Sort projects" }).click();
+      await page.getByRole("menuitemradio", { name, exact: true }).click();
+      await expect(
+        page.getByRole("listbox", { name: "Projects" }),
+      ).toBeVisible();
+    };
+    await sortBy("Name");
+    await expect(order().first()).toHaveAccessibleName(/^Cloud project/);
+    await expect(order().nth(1)).toHaveAccessibleName(/^Lanework/);
+    await sortBy("Activate");
+    await expect(order().first()).toHaveAccessibleName(/^Lanework/);
+    await sortBy("Default");
+    await expect(order().first()).toHaveAccessibleName(/^Lanework/);
+    await sortBy("Name");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+1" : "Control+1",
+    );
+    await expect(
+      page.getByRole("button", { name: /^Switch project/ }),
+    ).toHaveAccessibleName("Switch project — currently Cloud project");
   } finally {
     await app.close();
     await plane.close();

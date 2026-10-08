@@ -1,6 +1,7 @@
 import {
   Add01Icon,
   Settings01Icon,
+  Sorting05Icon,
   UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -16,6 +17,13 @@ import {
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "#/components/ui/dropdown-menu";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -28,6 +36,7 @@ import { useOpenProject } from "#/stores/last-route";
 const keyOf = (workspace: Workspace) => workspace.id ?? workspace.slug;
 
 const NO_AGENTS: TerminalSession[] = [];
+type ProjectSort = "default" | "name" | "activate";
 
 /**
  * The agents running in a project on this machine, as overlapping marks.
@@ -78,12 +87,26 @@ function RunningAgents({ agents }: { agents: TerminalSession[] }) {
 export function ProjectSwitcher() {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [sort, setSort] = useState<ProjectSort>("default");
   const workspaces = useBoard((state) => state.workspaces);
   const active = useBoard((state) => state.active);
   const openProject = useOpenProject();
   const navigate = useNavigate();
   const agentsByKey = useAgentTerminals((state) => state.sessions);
   const refreshAgents = useAgentTerminals((state) => state.refresh);
+  const hasAgents = (workspace: Workspace) =>
+    (agentsByKey[keyOf(workspace)] ?? NO_AGENTS).some(
+      (agent) =>
+        !agent.exit && (agent.kind === "claude" || agent.kind === "codex"),
+    );
+  const sortedWorkspaces =
+    sort === "default"
+      ? workspaces
+      : [...workspaces].sort((a, b) =>
+          sort === "name"
+            ? a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+            : Number(hasAgents(b)) - Number(hasAgents(a)),
+        );
 
   // ⚠️ Asked for EVERY project each time the menu opens. The rail only lists
   // the open project's agents, so without this the other rows would show
@@ -110,7 +133,7 @@ export function ProjectSwitcher() {
       if (!event.metaKey && !event.ctrlKey) return;
       const at = Number(event.key) - 1;
       if (!Number.isInteger(at) || at < 0 || at > 8) return;
-      const workspace = workspaces[at];
+      const workspace = sortedWorkspaces[at];
       if (!workspace) return;
       event.preventDefault();
       go(workspace.slug);
@@ -158,7 +181,7 @@ export function ProjectSwitcher() {
                   No projects on this account yet.
                 </p>
               )}
-              {workspaces.map((workspace) => (
+              {sortedWorkspaces.map((workspace) => (
                 <button
                   key={workspace.slug}
                   type="button"
@@ -220,6 +243,41 @@ export function ProjectSwitcher() {
                 aria-hidden="true"
               />
             </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="Sort projects"
+                    title="Sort projects"
+                    className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-8 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
+                  >
+                    <HugeiconsIcon
+                      icon={Sorting05Icon}
+                      className="size-4"
+                      strokeWidth={1.8}
+                      aria-hidden="true"
+                    />
+                  </button>
+                }
+              />
+              <DropdownMenuContent align="end">
+                <DropdownMenuRadioGroup
+                  value={sort}
+                  onValueChange={(value) => setSort(value as ProjectSort)}
+                >
+                  <DropdownMenuRadioItem value="default">
+                    Default
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="name">
+                    Name
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="activate">
+                    Activate
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </RailHover>
         </PopoverContent>
       </Popover>
