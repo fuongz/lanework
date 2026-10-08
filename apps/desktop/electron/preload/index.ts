@@ -302,6 +302,13 @@ function createTerminal(): DesktopTerminalApi {
         conversation,
         task,
       ),
+    agentStopTask: (workspace, conversation, task) =>
+      ipcRenderer.invoke(
+        terminalChannels.agentStopTask,
+        workspace,
+        conversation,
+        task,
+      ),
     agentFiles: (workspace, agent, id) =>
       ipcRenderer.invoke(terminalChannels.agentFiles, workspace, agent, id),
     agentFilesForWorktree: (workspace) =>

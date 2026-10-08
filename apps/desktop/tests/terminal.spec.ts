@@ -26,6 +26,7 @@ import { writeFolders } from "../electron/main/workspaces/store";
 import type { DesktopTerminalApi } from "../shared/terminal";
 import type { Workspace } from "../shared/workspaces";
 import {
+  CLAUDE_BG_ID,
   CLAUDE_ID,
   CODEX_ID,
   seedAgentFacts,
@@ -1177,6 +1178,7 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
     "projects",
     claudeProjectDir(repo),
     CLAUDE_ID,
+    CLAUDE_BG_ID,
     "subagents",
     "agent-going.jsonl",
   );
@@ -1630,6 +1632,121 @@ test("FE-42: an agent's header counts its background tasks; a shell opens its co
     await expect(
       page.getByRole("region", { name: "Sub-agent — Explore the views" }),
     ).toBeVisible();
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("FE-43: shell Stop confirms all entry points, cancels safely, reports races and errors, and re-reads killed state", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  const tmp = await realpath(await mkdtemp(join(tmpdir(), "claude-lanew-")));
+  await seedBackgroundTasks(agentHome, repo, tmp);
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+    LANEWORK_CLAUDE_BIN: await standIn(profile, "claude", "ran-%s-%s-%s"),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const seeded = await page.evaluate(
+      async (conversation) =>
+        (
+          window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+        ).desktop.terminal.agentBackgroundTasks("alpha", conversation),
+      CLAUDE_BG_ID,
+    );
+    await app.evaluate(({ ipcMain }, tasks) => {
+      const state = { calls: [] as string[][], mode: "zero", tasks };
+      (
+        globalThis as typeof globalThis & { stopFixture: typeof state }
+      ).stopFixture = state;
+      ipcMain.removeHandler("terminal:agent-background-tasks");
+      ipcMain.handle("terminal:agent-background-tasks", () => state.tasks);
+      ipcMain.removeHandler("terminal:agent-stop-task");
+      ipcMain.handle("terminal:agent-stop-task", (_event, ...ids: string[]) => {
+        state.calls.push(ids);
+        if (state.mode === "error")
+          throw new Error("Process inspection failed");
+        if (state.mode === "zero") return { stopped: 0 };
+        state.tasks = state.tasks.map((task) =>
+          task.id === ids[2]
+            ? { ...task, status: "killed", endedAt: new Date().toISOString() }
+            : task,
+        );
+        return { stopped: 1 };
+      });
+    }, seeded);
+    const calls = () =>
+      app.evaluate(
+        () =>
+          (
+            globalThis as typeof globalThis & {
+              stopFixture: { calls: string[][] };
+            }
+          ).stopFixture.calls,
+      );
+    const setMode = (mode: string) =>
+      app.evaluate((_electron, mode) => {
+        (
+          globalThis as typeof globalThis & { stopFixture: { mode: string } }
+        ).stopFixture.mode = mode;
+      }, mode);
+    const shellRow = page.getByRole("button", {
+      name: "Run the gate, a background shell of “Run the gate”. Open its output",
+    });
+    await shellRow.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Stop", exact: true }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText("bun run gate");
+    await dialog.getByRole("button", { name: "Keep it running" }).click();
+    expect(await calls()).toEqual([]);
+
+    await page
+      .getByRole("button", { name: "Resume “Run the gate” in Claude" })
+      .click();
+    const chip = page.getByTestId("background-tasks");
+    await chip.click();
+    await expect(
+      page.getByRole("button", { name: "Stop Watch the log", exact: true }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Stop Run the gate", exact: true })
+      .click();
+    await dialog.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect(
+      page.getByText("That task was no longer running", { exact: true }),
+    ).toBeVisible();
+    expect(await calls()).toEqual([["ws-alpha", CLAUDE_BG_ID, "bgrun01"]]);
+    await page.getByRole("button", { name: "Dismiss notification" }).click();
+
+    await shellRow.click();
+    const task = page.getByRole("region", {
+      name: "Background task — Run the gate",
+    });
+    await setMode("error");
+    await task.getByRole("button", { name: "Stop", exact: true }).click();
+    await dialog.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect(page.getByText(/Process inspection failed/)).toBeVisible();
+    await page.getByRole("button", { name: "Dismiss notification" }).click();
+    await setMode("success");
+    await task.getByRole("button", { name: "Stop", exact: true }).click();
+    await dialog.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect(task.getByTestId("task-meta")).toContainText("killed");
+    await expect(
+      task.getByRole("button", { name: "Stop", exact: true }),
+    ).toHaveCount(0);
+    expect(await calls()).toEqual(
+      Array.from({ length: 3 }, () => ["ws-alpha", CLAUDE_BG_ID, "bgrun01"]),
+    );
   } finally {
     await app.close();
     await plane.close();

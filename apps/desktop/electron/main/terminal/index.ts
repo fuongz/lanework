@@ -60,6 +60,7 @@ import {
   backgroundRequest,
   readBackgroundTasks,
   readTaskOutput,
+  stopBackgroundTask,
   taskOutputRequest,
 } from "./background-tasks";
 import { CLAUDE_USAGE_FILE, readClaudeQuota } from "./claude-usage";
@@ -602,6 +603,16 @@ export function registerTerminal(devUrl?: string): void {
       const folder = await terminalFolder(workspace);
       if (!folder) throw new Error("This project has no folder here.");
       return readTaskOutput(agentHome(), folder, conversation, task);
+    },
+  );
+  handle(
+    terminalChannels.agentStopTask,
+    devUrl,
+    async (args): Promise<{ stopped: number }> => {
+      const { workspace, conversation, task } = taskOutputRequest(args);
+      const folder = await terminalFolder(workspace);
+      if (!folder) throw new Error("This project has no folder here.");
+      return stopBackgroundTask(agentHome(), folder, conversation, task);
     },
   );
   // ⚠️ By workspace alone (FE-41): the goals are those of the Codex

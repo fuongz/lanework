@@ -348,7 +348,9 @@ test("following, starring, assigning and labelling all reach the board", async (
     // A saved move must update the open rail without navigating or reloading.
     const status = page.getByRole("combobox", { name: "Status", exact: true });
     await status.click();
-    await page.getByRole("option", { name: "In Progress", exact: true }).click();
+    await page
+      .getByRole("option", { name: "In Progress", exact: true })
+      .click();
     await expect.poll(() => read()?.columnKey).toBe("processing");
     await expect(status).toHaveText("In Progress");
     await status.click();

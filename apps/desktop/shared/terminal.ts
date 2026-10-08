@@ -649,6 +649,8 @@ export const terminalChannels = {
   agentBackgroundTasks: "terminal:agent-background-tasks",
   /** The end of one background shell's output (FE-42/D5). */
   agentTaskOutput: "terminal:agent-task-output",
+  /** Stop one running background shell (FE-43). */
+  agentStopTask: "terminal:agent-stop-task",
   /** One conversation's numbers, for the agent view and the rail (FE-38). */
   agentFacts: "terminal:agent-facts",
   /** A project's agent usage over 7 and 30 days, for Settings (FE-38/D6). */
@@ -766,6 +768,15 @@ export interface DesktopTerminalApi {
     conversation: string,
     task: string,
   ) => Promise<BackgroundTaskOutput>;
+  /**
+   * Stop one background shell by its conversation and task ids (FE-43).
+   * `stopped` counts processes signalled; zero means it was no longer running.
+   */
+  agentStopTask: (
+    workspace: string,
+    conversation: string,
+    task: string,
+  ) => Promise<{ stopped: number }>;
   /**
    * The files conversation `id` edited with its file tools, its sub-agents'
    * folded in (FE-39). By ids only, as `agentSubagent`: main builds every

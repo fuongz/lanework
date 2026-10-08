@@ -19,6 +19,7 @@ import {
 import {
   backgroundCue,
   TASK_KIND_ICONS,
+  useStopBackgroundTask,
 } from "#/components/shared/agents/background-tasks";
 import {
   durationText,
@@ -31,6 +32,7 @@ import {
 } from "#/components/shared/agents/use-background-tasks";
 import { WorkingMark } from "#/components/shared/terminal/working-mark";
 import { Badge } from "#/components/ui/badge";
+import { Button } from "#/components/ui/button";
 import {
   Empty,
   EmptyDescription,
@@ -78,8 +80,8 @@ function useNow(ticking: boolean): number {
  * size in the main view (FE-42/D3): what it runs, where it stands, and the
  * end of its output, followed live while it runs.
  *
- * ⚠️ Nothing here stops it — the CLI that started it owns it. The way back is
- * its conversation, which the header's link resumes as the rail's row does.
+ * Running shells can be stopped after confirmation (FE-43). The header link
+ * resumes its parent conversation.
  */
 export function ShellTaskView() {
   const { slug, conversation, task } = useParams({ from: ROUTE });
@@ -114,10 +116,11 @@ function ShellTaskPage({
       : undefined,
   );
   const resume = useAgentTerminals((state) => state.resume);
+  const stopping = useStopBackgroundTask(workspace, conversation);
   const { tasks, error } = useBackgroundTasks(
     workspace,
     conversation,
-    backgroundCue(parent),
+    `${backgroundCue(parent)}:${stopping.revision}`,
   );
   const task: BackgroundTask | undefined = tasks?.find(
     (entry) => entry.id === taskId,
@@ -208,6 +211,7 @@ function ShellTaskPage({
       aria-label={`Background task — ${title}`}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
+      {stopping.feedback}
       {/* Lined up with the body's `px-6`, as the sub-agent viewer's is. */}
       <header className="border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-[max(1.5rem,var(--titlebar-clear,0px))] pe-6">
         {running ? (
@@ -254,6 +258,17 @@ function ShellTaskPage({
           <Badge variant="secondary" className="h-5 shrink-0 px-1.5">
             {task.kind}
           </Badge>
+        )}
+        {running && task?.kind === "shell" && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ms-auto"
+            onClick={() => stopping.requestStop(task)}
+          >
+            <HugeiconsIcon icon={StopCircleIcon} strokeWidth={1.8} />
+            Stop
+          </Button>
         )}
       </header>
       {task && <Facts facts={facts} data-testid="task-meta" />}

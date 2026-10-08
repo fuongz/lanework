@@ -7,11 +7,12 @@ import {
   HelpCircleIcon,
   Radar01Icon,
   Robot02Icon,
+  StopIcon,
   TaskDaily01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   AgentSession,
   BackgroundTask,
@@ -19,6 +20,17 @@ import type {
 } from "#/../shared/terminal";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
 import { WorkingMark } from "#/components/shared/terminal/working-mark";
+import { Alert, AlertDescription } from "#/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
 import {
   Empty,
@@ -33,7 +45,123 @@ import {
   PopoverTrigger,
 } from "#/components/ui/popover";
 import { relativeTime, shortAge } from "#/lib/board-view";
+import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
+
+/** One confirmation flow shared by all three shell Stop entry points. */
+export function useStopBackgroundTask(
+  workspace: string | null,
+  conversation: string,
+) {
+  const [confirming, setConfirming] = useState<BackgroundTask | null>(null);
+  const [pending, setPending] = useState(false);
+  const pendingIdentity = useRef<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
+  const identity = `${workspace}:${conversation}`;
+  const currentIdentity = useRef(identity);
+  currentIdentity.current = identity;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new conversation resets its confirmation and feedback
+  useEffect(() => {
+    setConfirming(null);
+    setNotice(null);
+    setPending(false);
+    pendingIdentity.current = null;
+  }, [identity]);
+  const stop = async () => {
+    const startedFor = identity;
+    if (
+      !workspace ||
+      !confirming ||
+      !window.desktop ||
+      pendingIdentity.current === identity
+    )
+      return;
+    pendingIdentity.current = identity;
+    setPending(true);
+    try {
+      const result = await window.desktop.terminal.agentStopTask(
+        workspace,
+        conversation,
+        confirming.id,
+      );
+      if (currentIdentity.current !== startedFor) return;
+      if (result.stopped === 0) setNotice("That task was no longer running");
+    } catch (error) {
+      if (currentIdentity.current !== startedFor) return;
+      setNotice(ipcMessage(error, "Could not stop this task."));
+    } finally {
+      if (currentIdentity.current === startedFor) {
+        pendingIdentity.current = null;
+        setRevision((value) => value + 1);
+        setPending(false);
+        setConfirming(null);
+      }
+    }
+  };
+  return {
+    revision,
+    requestStop: (task: BackgroundTask) => {
+      if (!pending && task.kind === "shell" && task.status === "running") {
+        setNotice(null);
+        setConfirming(task);
+      }
+    },
+    feedback: (
+      <>
+        <AlertDialog
+          open={confirming !== null}
+          onOpenChange={(open) => {
+            if (!open && !pending) setConfirming(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Stop{" "}
+                {confirming?.description ||
+                  confirming?.command ||
+                  "this background shell"}
+                ?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Its running processes will be stopped.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <pre className="max-h-40 overflow-auto rounded-md bg-muted p-2 text-xs">
+              <code>{confirming?.command ?? confirming?.description}</code>
+            </pre>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={pending}>
+                Keep it running
+              </AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={pending}
+                onClick={() => void stop()}
+              >
+                Stop
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        {notice && (
+          <Alert className="mx-2 my-1 w-auto">
+            <AlertDescription>{notice}</AlertDescription>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setNotice(null)}
+              aria-label="Dismiss notification"
+            >
+              Dismiss
+            </Button>
+          </Alert>
+        )}
+      </>
+    ),
+  };
+}
 
 /** Each kind's icon, wherever a task is listed. */
 export const TASK_KIND_ICONS: Record<BackgroundTaskKind, IconSvgElement> = {
@@ -95,64 +223,79 @@ function TaskRow({
   task,
   now,
   onOpen,
+  onStop,
 }: {
   task: BackgroundTask;
   now: number;
   onOpen: (task: BackgroundTask) => void;
+  onStop?: (task: BackgroundTask) => void;
 }) {
   const running = task.status === "running";
   const opens = task.kind !== "agent" || task.subagentId !== null;
   const status = taskStatusText(task);
   return (
-    <button
-      type="button"
-      disabled={!opens}
-      onClick={() => onOpen(task)}
-      aria-label={`${task.description || task.command || task.id}, ${task.kind}, ${status}`}
-      title={`${task.command ?? task.description}\n${status}, started ${relativeTime(task.startedAt, now)}${task.summary ? `\n${task.summary}` : ""}`}
-      className={cn(
-        "hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-7 w-full min-w-0 shrink-0 items-center gap-2 rounded-md px-1.5 text-left text-[13px] outline-none focus-visible:ring-2 disabled:pointer-events-none",
-        task.status === "lost" && "opacity-50",
-      )}
-    >
-      {/* Its kind stays on the left; running spins on the right. */}
-      <HugeiconsIcon
-        icon={TASK_KIND_ICONS[task.kind]}
-        className="text-muted-foreground size-3 shrink-0"
-        strokeWidth={1.8}
-        aria-hidden="true"
-      />
-      <span
+    <div className="group/task flex min-w-0 items-center">
+      <button
+        type="button"
+        disabled={!opens}
+        onClick={() => onOpen(task)}
+        aria-label={`${task.description || task.command || task.id}, ${task.kind}, ${status}`}
+        title={`${task.command ?? task.description}\n${status}, started ${relativeTime(task.startedAt, now)}${task.summary ? `\n${task.summary}` : ""}`}
         className={cn(
-          "min-w-0 flex-1 truncate",
-          !running && "text-muted-foreground",
+          "hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-[13px] outline-none focus-visible:ring-2 disabled:pointer-events-none",
+          task.status === "lost" && "opacity-50",
         )}
       >
-        {task.description || task.command || task.id}
-      </span>
-      {!running && (
-        // A coloured mark beside the word, level with it: how it ended reads
-        // at a glance.
+        {/* Its kind stays on the left; running spins on the right. */}
+        <HugeiconsIcon
+          icon={TASK_KIND_ICONS[task.kind]}
+          className="text-muted-foreground size-3 shrink-0"
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
         <span
           className={cn(
-            "flex shrink-0 items-center gap-1 text-[11px] tabular-nums",
-            STATUS_LOOK[task.status]?.tone ?? "text-muted-foreground",
+            "min-w-0 flex-1 truncate",
+            !running && "text-muted-foreground",
           )}
         >
-          <HugeiconsIcon
-            icon={STATUS_LOOK[task.status]?.icon ?? HelpCircleIcon}
-            className="size-3 shrink-0"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-          {status}
+          {task.description || task.command || task.id}
         </span>
+        {!running && (
+          // A coloured mark beside the word, level with it: how it ended reads
+          // at a glance.
+          <span
+            className={cn(
+              "flex shrink-0 items-center gap-1 text-[11px] tabular-nums",
+              STATUS_LOOK[task.status]?.tone ?? "text-muted-foreground",
+            )}
+          >
+            <HugeiconsIcon
+              icon={STATUS_LOOK[task.status]?.icon ?? HelpCircleIcon}
+              className="size-3 shrink-0"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            {status}
+          </span>
+        )}
+        {running && <WorkingMark />}
+        <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+          {shortAge(task.endedAt ?? task.startedAt, now)}
+        </span>
+      </button>
+      {running && task.kind === "shell" && onStop && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Stop ${task.description || task.command || task.id}`}
+          className="shrink-0 opacity-0 group-hover/task:opacity-100 group-focus-within/task:opacity-100"
+          onClick={() => onStop(task)}
+        >
+          <HugeiconsIcon icon={StopIcon} strokeWidth={1.8} />
+        </Button>
       )}
-      {running && <WorkingMark />}
-      <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
-        {shortAge(task.endedAt ?? task.startedAt, now)}
-      </span>
-    </button>
+    </div>
   );
 }
 
@@ -177,11 +320,12 @@ export function BackgroundTasksButton({
   const [open, setOpen] = useState(false);
   /** The Finished group, folded (D2) — unless the user said, or nothing runs. */
   const [finishedChoice, setFinishedChoice] = useState<boolean | null>(null);
+  const stopping = useStopBackgroundTask(workspace, session.id);
   const any = session.agent === "claude" && session.background.total > 0;
   const { tasks, error } = useBackgroundTasks(
     workspace,
     session.id,
-    backgroundCue(session),
+    `${backgroundCue(session)}:${stopping.revision}`,
     any,
   );
   if (!any) return null;
@@ -214,103 +358,115 @@ export function BackgroundTasksButton({
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button
-            size="sm"
-            variant="secondary"
-            data-testid="background-tasks"
-            aria-label={`Background tasks: ${label}`}
-          />
-        }
-      >
-        {/* Running: the spinner every running thing has, in the icon's place. */}
-        {running.length > 0 ? (
-          <WorkingMark />
-        ) : (
-          <HugeiconsIcon
-            icon={TaskDaily01Icon}
-            strokeWidth={1.8}
-            data-icon="inline-start"
-            aria-hidden="true"
-          />
-        )}
-        <span
-          className={cn(
-            "tabular-nums",
-            running.length === 0 && "text-muted-foreground",
-          )}
+    <>
+      {stopping.feedback}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="background-tasks"
+              aria-label={`Background tasks: ${label}`}
+            />
+          }
         >
-          {label}
-        </span>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-[26rem] gap-2 p-1.5">
-        <div className="flex items-baseline gap-2 px-1.5 pt-1">
-          <span className="text-[13px] font-medium">Background tasks</span>
-          <span className="text-muted-foreground tabular-nums">
-            {list.length}
-          </span>
-        </div>
-        {error && !tasks ? (
-          <p role="alert" className="text-destructive px-1.5 text-xs">
-            {error}
-          </p>
-        ) : list.length === 0 ? (
-          <Empty className="py-6">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <HugeiconsIcon
-                  icon={ComputerTerminal01Icon}
-                  strokeWidth={1.8}
-                />
-              </EmptyMedia>
-              <EmptyTitle>No background tasks</EmptyTitle>
-              <EmptyDescription>
-                {tasks
-                  ? "This conversation started nothing in the background."
-                  : "Reading its transcript…"}
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          <div className="flex max-h-80 min-h-0 flex-col overflow-y-auto">
-            {running.map((task) => (
-              <TaskRow key={task.id} task={task} now={now} onOpen={openTask} />
-            ))}
-            {finished.length > 0 && (
-              <>
-                <button
-                  type="button"
-                  aria-expanded={finishedOpen}
-                  onClick={() => setFinishedChoice(!finishedOpen)}
-                  className="text-muted-foreground hover:text-foreground flex h-7 shrink-0 items-center gap-1.5 px-1.5 text-left text-xs transition-colors"
-                >
-                  <HugeiconsIcon
-                    icon={ArrowRight01Icon}
-                    className={cn(
-                      "size-3 transition-transform motion-reduce:transition-none",
-                      finishedOpen && "rotate-90",
-                    )}
-                    strokeWidth={2}
-                    aria-hidden="true"
-                  />
-                  Finished ({finished.length})
-                </button>
-                {finishedOpen &&
-                  finished.map((task) => (
-                    <TaskRow
-                      key={task.id}
-                      task={task}
-                      now={now}
-                      onOpen={openTask}
-                    />
-                  ))}
-              </>
+          {/* Running: the spinner every running thing has, in the icon's place. */}
+          {running.length > 0 ? (
+            <WorkingMark />
+          ) : (
+            <HugeiconsIcon
+              icon={TaskDaily01Icon}
+              strokeWidth={1.8}
+              data-icon="inline-start"
+              aria-hidden="true"
+            />
+          )}
+          <span
+            className={cn(
+              "tabular-nums",
+              running.length === 0 && "text-muted-foreground",
             )}
+          >
+            {label}
+          </span>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-[26rem] gap-2 p-1.5">
+          <div className="flex items-baseline gap-2 px-1.5 pt-1">
+            <span className="text-[13px] font-medium">Background tasks</span>
+            <span className="text-muted-foreground tabular-nums">
+              {list.length}
+            </span>
           </div>
-        )}
-      </PopoverContent>
-    </Popover>
+          {error && !tasks ? (
+            <p role="alert" className="text-destructive px-1.5 text-xs">
+              {error}
+            </p>
+          ) : list.length === 0 ? (
+            <Empty className="py-6">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <HugeiconsIcon
+                    icon={ComputerTerminal01Icon}
+                    strokeWidth={1.8}
+                  />
+                </EmptyMedia>
+                <EmptyTitle>No background tasks</EmptyTitle>
+                <EmptyDescription>
+                  {tasks
+                    ? "This conversation started nothing in the background."
+                    : "Reading its transcript…"}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <div className="flex max-h-80 min-h-0 flex-col overflow-y-auto">
+              {running.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  now={now}
+                  onOpen={openTask}
+                  onStop={(task) => {
+                    setOpen(false);
+                    stopping.requestStop(task);
+                  }}
+                />
+              ))}
+              {finished.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    aria-expanded={finishedOpen}
+                    onClick={() => setFinishedChoice(!finishedOpen)}
+                    className="text-muted-foreground hover:text-foreground flex h-7 shrink-0 items-center gap-1.5 px-1.5 text-left text-xs transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={ArrowRight01Icon}
+                      className={cn(
+                        "size-3 transition-transform motion-reduce:transition-none",
+                        finishedOpen && "rotate-90",
+                      )}
+                      strokeWidth={2}
+                      aria-hidden="true"
+                    />
+                    Finished ({finished.length})
+                  </button>
+                  {finishedOpen &&
+                    finished.map((task) => (
+                      <TaskRow
+                        key={task.id}
+                        task={task}
+                        now={now}
+                        onOpen={openTask}
+                      />
+                    ))}
+                </>
+              )}
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </>
   );
 }

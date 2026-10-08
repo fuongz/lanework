@@ -3,12 +3,14 @@
 // conversation's own transcript, and a shell's output read from the file the
 // CLI said it writes to.
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a spec
-// can drive it under plain Node against a fake home folder and a fake temp.
+// FE-43 also stops a shell's process group. Nothing here imports Electron:
+// main calls it, and specs drive it under Node with isolated task fixtures.
+import { execFile } from "node:child_process";
 import { constants, realpathSync } from "node:fs";
 import { open, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
+import { promisify } from "node:util";
 import {
   BACKGROUND_COMMAND_MAX,
   BACKGROUND_OUTPUT_MAX,
@@ -77,6 +79,9 @@ interface Parsed {
   started: Map<string, Started>;
   notices: Map<string, Notice>;
 }
+
+const runFile = promisify(execFile);
+const stoppedTasks = new Set<string>();
 
 const cache = new Map<string, Parsed>();
 /** One read of a file at a time: a second waits and takes the cache. */
@@ -434,7 +439,7 @@ function parseOnce(file: string): Promise<Parsed> {
   return next;
 }
 
-function tasksOf(parsed: Parsed): BackgroundTask[] {
+function tasksOf(parsed: Parsed, transcript: string): BackgroundTask[] {
   // No word from a task whose conversation went quiet long ago: the CLI that
   // owned it is gone.
   const stale = Date.now() - parsed.mtimeMs > STALE_MS;
@@ -442,7 +447,10 @@ function tasksOf(parsed: Parsed): BackgroundTask[] {
   for (const { task } of parsed.started.values()) {
     const notice = parsed.notices.get(task.id);
     const status: BackgroundTaskStatus =
-      notice?.status ?? (stale ? "lost" : "running");
+      notice?.status === "failed" &&
+      stoppedTasks.has(`${transcript}:${task.id}`)
+        ? "killed"
+        : (notice?.status ?? (stale ? "lost" : "running"));
     out.push({
       ...task,
       status,
@@ -462,7 +470,7 @@ function tasksOf(parsed: Parsed): BackgroundTask[] {
 export async function readTranscriptTasks(
   file: string,
 ): Promise<BackgroundTask[]> {
-  return tasksOf(await parseOnce(file));
+  return tasksOf(await parseOnce(file), file);
 }
 
 /** Conversation `conversation`'s background tasks (FE-42). */
@@ -537,6 +545,174 @@ const MISSING: BackgroundTaskOutput = {
   missing: true,
 };
 
+async function taskOutputPath(
+  started: Started,
+  task: string,
+  roots: string[],
+): Promise<string | null> {
+  const recorded = started.output;
+  if (
+    !recorded ||
+    !isAbsolute(recorded) ||
+    basename(recorded) !== `${task}.output`
+  )
+    throw new Error("That task has no output to read.");
+  let resolved: string;
+  try {
+    resolved = await realpath(recorded);
+  } catch {
+    // Gone, or never written: nothing to refuse.
+    return null;
+  }
+  const allowed = await Promise.all(
+    roots.map((root) => realpath(root).catch(() => null)),
+  );
+  if (
+    !insideTasks(
+      resolved,
+      task,
+      allowed.filter((root): root is string => root !== null),
+    )
+  )
+    throw new Error("That task's output is outside the CLI's task folder.");
+  return resolved;
+}
+
+/** Stop only same-user process groups holding this shell's recorded output. */
+export async function stopBackgroundTask(
+  home: string,
+  folder: string,
+  conversation: string,
+  task: string,
+  roots: string[] = tempRoots(),
+): Promise<{ stopped: number }> {
+  if (!isBackgroundTaskId(task)) throw new Error("A valid task is required");
+  const transcript = claudeTranscriptPath(home, folder, conversation);
+  const parsed = await parseOnce(transcript);
+  const started = parsed.started.get(task);
+  if (!started) throw new Error("That conversation started no such task.");
+  if (started.task.kind !== "shell")
+    throw new Error("Only a shell task can be stopped.");
+  if (
+    tasksOf(parsed, transcript).find((item) => item.id === task)?.status !==
+    "running"
+  )
+    throw new Error("That task is not running.");
+  const resolved = await taskOutputPath(started, task, roots);
+  if (!resolved) return { stopped: 0 };
+  let holders: string;
+  try {
+    holders = (await runFile("lsof", ["-t", "--", resolved])).stdout;
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 1) return { stopped: 0 };
+    throw error;
+  }
+  const uid = process.getuid?.();
+  if (uid === undefined)
+    throw new Error("Stopping tasks requires Unix process groups.");
+  const own = Number(
+    (
+      await runFile("ps", ["-o", "pgid=", "-p", String(process.pid)])
+    ).stdout.trim(),
+  );
+  if (!Number.isInteger(own) || own <= 1)
+    throw new Error("Cannot identify the app process group.");
+  const protectedGroups = new Set([own]);
+  // A CLI or supervisor can also hold the file: never signal an ancestor.
+  let ancestor = process.pid;
+  while (ancestor > 1) {
+    try {
+      const [parent, group] = (
+        await runFile("ps", ["-o", "ppid=,pgid=", "-p", String(ancestor)])
+      ).stdout
+        .trim()
+        .split(/\s+/)
+        .map(Number);
+      if (!Number.isInteger(parent) || parent === ancestor) break;
+      protectedGroups.add(group);
+      ancestor = parent;
+    } catch {
+      break;
+    }
+  }
+  const groups = new Map<number, number>();
+  for (const pid of holders.trim().split(/\s+/)) {
+    if (!/^\d+$/.test(pid)) continue;
+    try {
+      const [pgid, owner] = (
+        await runFile("ps", ["-o", "pgid=,uid=", "-p", pid])
+      ).stdout
+        .trim()
+        .split(/\s+/)
+        .map(Number);
+      if (owner === uid && pgid > 1 && !protectedGroups.has(pgid))
+        groups.set(pgid, (groups.get(pgid) ?? 0) + 1);
+    } catch {
+      /* Holder exited between lsof and ps. */
+    }
+  }
+  // Snapshot every group member, including children that close stdout after TERM.
+  // A surviving original PID + start time prevents escalation into a reused group.
+  const snapshot = async () => {
+    const rows = (await runFile("ps", ["-axo", "pid=,pgid=,uid=,lstart="]))
+      .stdout;
+    return rows.split("\n").flatMap((line) => {
+      const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line);
+      return match
+        ? [
+            {
+              pid: Number(match[1]),
+              pgid: Number(match[2]),
+              uid: Number(match[3]),
+              start: match[4],
+            },
+          ]
+        : [];
+    });
+  };
+  const before = await snapshot();
+  const signaled = new Set<number>();
+  for (const pgid of groups.keys()) {
+    if (!before.some((member) => member.pgid === pgid && member.uid === uid))
+      continue;
+    try {
+      process.kill(-pgid, "SIGTERM");
+      signaled.add(pgid);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  }
+  const stopped = before.filter(
+    (member) => signaled.has(member.pgid) && member.uid === uid,
+  ).length;
+  if (stopped) {
+    stoppedTasks.add(`${transcript}:${task}`);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    const after = await snapshot();
+    for (const pgid of signaled) {
+      const survives = after.some(
+        (member) =>
+          member.pgid === pgid &&
+          member.uid === uid &&
+          before.some(
+            (original) =>
+              original.pid === member.pid &&
+              original.pgid === pgid &&
+              original.uid === member.uid &&
+              original.start === member.start,
+          ),
+      );
+      if (!survives) continue;
+      try {
+        process.kill(-pgid, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    }
+  }
+  return { stopped };
+}
+
 /**
  * The end of background task `task`'s output (FE-42/D5): its last
  * `BACKGROUND_OUTPUT_MAX` bytes, escapes stripped. Read anew on each call —
@@ -560,31 +736,8 @@ export async function readTaskOutput(
   );
   const started = parsed.started.get(task);
   if (!started) throw new Error("That conversation started no such task.");
-  const recorded = started.output;
-  if (
-    !recorded ||
-    !isAbsolute(recorded) ||
-    basename(recorded) !== `${task}.output`
-  )
-    throw new Error("That task has no output to read.");
-  let resolved: string;
-  try {
-    resolved = await realpath(recorded);
-  } catch {
-    // Gone, or never written: nothing to refuse.
-    return MISSING;
-  }
-  const allowed = await Promise.all(
-    roots.map((root) => realpath(root).catch(() => null)),
-  );
-  if (
-    !insideTasks(
-      resolved,
-      task,
-      allowed.filter((root): root is string => root !== null),
-    )
-  )
-    throw new Error("That task's output is outside the CLI's task folder.");
+  const resolved = await taskOutputPath(started, task, roots);
+  if (!resolved) return MISSING;
   let handle: Awaited<ReturnType<typeof open>>;
   try {
     // Resolved already: a symlink swapped in since is refused, not followed.

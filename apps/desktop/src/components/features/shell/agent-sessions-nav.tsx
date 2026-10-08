@@ -18,6 +18,7 @@ import type {
 import {
   backgroundCue,
   TASK_KIND_ICONS,
+  useStopBackgroundTask,
 } from "#/components/shared/agents/background-tasks";
 import { CodexGoalBadge } from "#/components/shared/agents/codex-usage";
 import { factsSummary } from "#/components/shared/agents/conversation-facts";
@@ -177,52 +178,69 @@ function BackgroundShellRows({
   now: number;
 }) {
   const navigate = useNavigate();
+  const stopping = useStopBackgroundTask(workspace, session.id);
   const { tasks } = useBackgroundTasks(
     workspace,
     session.id,
-    backgroundCue(session),
+    `${backgroundCue(session)}:${stopping.revision}`,
   );
   const shells = (tasks ?? []).filter(
     (task) => task.status === "running" && task.kind !== "agent",
   );
-  return shells.map((task) => {
-    const viewed = viewingTask === task.id;
-    const name = task.description || task.command || task.id;
-    return (
-      <button
-        key={task.id}
-        type="button"
-        onClick={() =>
-          void navigate({
-            to: "/w/$slug/agents/task/$conversation/$task",
-            params: { slug, conversation: session.id, task: task.id },
-          })
-        }
-        aria-current={viewed ? "page" : undefined}
-        aria-label={`${name}, a background ${task.kind} of “${session.title}”. Open its output`}
-        title={`${task.command ?? name}\nBackground ${task.kind}, running since ${relativeTime(task.startedAt, now)}`}
-        className={cn(row, SUB_ROW, viewed && active)}
-      >
-        {/* Its kind on the left, so a row says what runs; the spinner on
+  return (
+    <>
+      {" "}
+      {stopping.feedback}
+      {shells.map((task) => {
+        const viewed = viewingTask === task.id;
+        const name = task.description || task.command || task.id;
+        return (
+          <ContextMenu key={task.id}>
+            <ContextMenuTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() =>
+                    void navigate({
+                      to: "/w/$slug/agents/task/$conversation/$task",
+                      params: { slug, conversation: session.id, task: task.id },
+                    })
+                  }
+                  aria-current={viewed ? "page" : undefined}
+                  aria-label={`${name}, a background ${task.kind} of “${session.title}”. Open its output`}
+                  title={`${task.command ?? name}\nBackground ${task.kind}, running since ${relativeTime(task.startedAt, now)}`}
+                  className={cn(row, SUB_ROW, viewed && active)}
+                />
+              }
+            >
+              {/* Its kind on the left, so a row says what runs; the spinner on
             the right, beside its age. */}
-        <HugeiconsIcon
-          icon={TASK_KIND_ICONS[task.kind]}
-          className="text-muted-foreground size-3 shrink-0"
-          strokeWidth={1.8}
-          aria-hidden="true"
-        />
-        <span
-          className={`min-w-0 flex-1 truncate ${viewed ? "" : "text-muted-foreground"}`}
-        >
-          {name}
-        </span>
-        <WorkingMark />
-        <span className="text-muted-foreground shrink-0 tabular-nums">
-          {shortAge(task.startedAt, now)}
-        </span>
-      </button>
-    );
-  });
+              <HugeiconsIcon
+                icon={TASK_KIND_ICONS[task.kind]}
+                className="text-muted-foreground size-3 shrink-0"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+              <span
+                className={`min-w-0 flex-1 truncate ${viewed ? "" : "text-muted-foreground"}`}
+              >
+                {name}
+              </span>
+              <WorkingMark />
+              <span className="text-muted-foreground shrink-0 tabular-nums">
+                {shortAge(task.startedAt, now)}
+              </span>
+            </ContextMenuTrigger>
+            {task.kind === "shell" && (
+              <ContextMenuContent>
+                <StopItem onStop={() => stopping.requestStop(task)} />
+              </ContextMenuContent>
+            )}
+          </ContextMenu>
+        );
+      })}
+    </>
+  );
 }
 
 /** What hover hides to make room for the quick actions. */

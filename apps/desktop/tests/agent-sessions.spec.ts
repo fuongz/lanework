@@ -1,11 +1,12 @@
 // The agent conversations the rail's Agents group lists, and the resume line a
 // tab types for one (FE-23) — driven directly under Node against a fake home.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   appendFile,
   chmod,
   mkdir,
   mkdtemp,
+  open,
   readdir,
   readFile,
   realpath,
@@ -61,6 +62,7 @@ import {
   backgroundRequest,
   readBackgroundTasks,
   readTaskOutput,
+  stopBackgroundTask,
   taskOutputRequest,
 } from "../electron/main/terminal/background-tasks";
 import {
@@ -2820,5 +2822,176 @@ test("FE-46: new and resumed Claude launches install the default statusLine brid
     await app.close();
     await plane.close();
     await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test("FE-43: stop refuses unsafe tasks and kills only the detached shell group", async () => {
+  const home = await tempDir("lanew-stop-home-");
+  const folder = join(await tempDir("lanew-stop-project-"), "repo");
+  const tmp = await tempDir("lanew-stop-tmp-");
+  const { tasks } = await seedBackgroundTasks(home, folder, tmp);
+  const stop = (task: string, roots = [tmp]) =>
+    stopBackgroundTask(home, folder, CLAUDE_BG_ID, task, roots);
+  await expect(stop("nosuch1")).rejects.toThrow(/no such task/);
+  await expect(stop("bgfail1")).rejects.toThrow(/not running/);
+  await expect(stop("agbg01")).rejects.toThrow(/Only a shell/);
+  await expect(stop("bgmon01")).rejects.toThrow(/Only a shell/);
+  await expect(
+    stop("bgrun01", [await tempDir("lanew-stop-outside-")]),
+  ).rejects.toThrow(/outside/);
+  expect(await stop("bgrun01")).toEqual({ stopped: 0 });
+  const output = await open(join(tasks, "bgrun01.output"), "a");
+  const serverCode =
+    "require('node:http').createServer((req,res)=>res.end('ok')).listen(0,'127.0.0.1',function(){console.log('PORT:'+this.address().port)})";
+  const shell = spawn(
+    "sh",
+    [
+      "-c",
+      '"$1" -e "$2" & sleep 60 & wait',
+      "fixture",
+      process.execPath,
+      serverCode,
+    ],
+    { detached: true, stdio: ["ignore", output.fd, output.fd] },
+  );
+  const other = spawn("sleep", ["60"], { stdio: "ignore" });
+  const ended = new Promise((resolve) => shell.once("exit", resolve));
+  try {
+    await expect
+      .poll(() => {
+        try {
+          return execFileSync(
+            "lsof",
+            ["-t", "--", join(tasks, "bgrun01.output")],
+            { encoding: "utf8" },
+          ).includes(String(shell.pid));
+        } catch {
+          return false;
+        }
+      })
+      .toBe(true);
+    let port = 0;
+    await expect
+      .poll(async () => {
+        port = Number(
+          /PORT:(\d+)/.exec(
+            await readFile(join(tasks, "bgrun01.output"), "utf8"),
+          )?.[1],
+        );
+        return port;
+      })
+      .toBeGreaterThan(0);
+    expect((await fetch(`http://127.0.0.1:${port}`)).status).toBe(200);
+    // The test itself holds the output too: its own group must be excluded.
+    expect((await stop("bgrun01")).stopped).toBeGreaterThanOrEqual(2);
+    await ended;
+    expect(shell.signalCode).toBe("SIGTERM");
+    await expect(fetch(`http://127.0.0.1:${port}`)).rejects.toThrow();
+    expect(() => {
+      if (other.pid === undefined)
+        throw new Error("No outsider process started");
+      process.kill(other.pid, 0);
+    }).not.toThrow();
+    const transcript = join(
+      home,
+      ".claude",
+      "projects",
+      claudeProjectDir(folder),
+      `${CLAUDE_BG_ID}.jsonl`,
+    );
+    await appendFile(
+      transcript,
+      `${JSON.stringify({ type: "user", timestamp: new Date().toISOString(), message: { content: "<task-notification><task-id>bgrun01</task-id><status>failed</status><summary>Background command failed with exit code 144</summary></task-notification>" } })}\n`,
+    );
+    expect(
+      (await readBackgroundTasks(home, folder, CLAUDE_BG_ID)).find(
+        (task) => task.id === "bgrun01",
+      ),
+    ).toMatchObject({
+      status: "killed",
+      exitCode: 144,
+      summary: "Background command failed with exit code 144",
+    });
+  } finally {
+    try {
+      if (shell.pid !== undefined) process.kill(-shell.pid, "SIGKILL");
+    } catch {
+      /* already stopped */
+    }
+    other.kill("SIGKILL");
+    await output.close();
+  }
+});
+
+test("FE-43: SIGKILL releases the port when a child ignores TERM and closes output", async () => {
+  const home = await tempDir("lanew-stop-fallback-home-");
+  const folder = join(await tempDir("lanew-stop-fallback-project-"), "repo");
+  const tmp = await tempDir("lanew-stop-fallback-tmp-");
+  const { tasks } = await seedBackgroundTasks(home, folder, tmp);
+  const path = join(tasks, "bgrun01.output");
+  const output = await open(path, "a");
+  const code =
+    "const fs=require('node:fs');process.on('SIGTERM',()=>{fs.closeSync(1);fs.closeSync(2)});require('node:http').createServer((req,res)=>res.end('ok')).listen(0,'127.0.0.1',function(){console.log('PORT:'+this.address().port)})";
+  const shell = spawn(
+    "sh",
+    ["-c", '"$1" -e "$2" & wait', "fixture", process.execPath, code],
+    { detached: true, stdio: ["ignore", output.fd, output.fd] },
+  );
+  const other = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
+  try {
+    let port = 0;
+    await expect
+      .poll(async () => {
+        port = Number(/PORT:(\d+)/.exec(await readFile(path, "utf8"))?.[1]);
+        return port;
+      })
+      .toBeGreaterThan(0);
+    expect((await fetch(`http://127.0.0.1:${port}`)).status).toBe(200);
+    expect(
+      (await stopBackgroundTask(home, folder, CLAUDE_BG_ID, "bgrun01", [tmp]))
+        .stopped,
+    ).toBeGreaterThanOrEqual(2);
+    await expect
+      .poll(async () => {
+        try {
+          await fetch(`http://127.0.0.1:${port}`);
+          return false;
+        } catch {
+          return true;
+        }
+      })
+      .toBe(true);
+    expect(() => {
+      if (other.pid === undefined)
+        throw new Error("No outsider process started");
+      process.kill(other.pid, 0);
+    }).not.toThrow();
+    // Identical task IDs in another transcript do not inherit the stopped marker.
+    const otherHome = await tempDir("lanew-stop-other-home-");
+    await seedBackgroundTasks(otherHome, folder, tmp);
+    const transcript = join(
+      otherHome,
+      ".claude",
+      "projects",
+      claudeProjectDir(folder),
+      `${CLAUDE_BG_ID}.jsonl`,
+    );
+    await appendFile(
+      transcript,
+      `${JSON.stringify({ type: "user", timestamp: new Date().toISOString(), message: { content: "<task-notification><task-id>bgrun01</task-id><status>failed</status><summary>Failed</summary></task-notification>" } })}\n`,
+    );
+    expect(
+      (await readBackgroundTasks(otherHome, folder, CLAUDE_BG_ID)).find(
+        (task) => task.id === "bgrun01",
+      )?.status,
+    ).toBe("failed");
+  } finally {
+    try {
+      if (shell.pid !== undefined) process.kill(-shell.pid, "SIGKILL");
+    } catch {
+      /* already stopped */
+    }
+    other.kill("SIGKILL");
+    await output.close();
   }
 });
