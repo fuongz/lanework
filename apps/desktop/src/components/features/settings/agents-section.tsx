@@ -333,6 +333,27 @@ export function AgentsSection() {
     });
 
   sections.push({
+    title: "Config files",
+    rows: [
+      {
+        label: "Edit Claude Code and Codex settings",
+        description:
+          "settings.json, config.toml, hooks and instructions — the files every project uses — in one editor. Skills have their own page.",
+        keywords: "config edit settings.json config.toml skills features",
+        control: (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void navigate({ to: "/settings/config" })}
+          >
+            Open
+          </Button>
+        ),
+      },
+    ],
+  });
+
+  sections.push({
     title: "Resuming",
     rows: [
       {

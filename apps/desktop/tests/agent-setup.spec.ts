@@ -698,7 +698,7 @@ test.describe("in the app", () => {
     { id: "ws-beta", slug: "beta", name: "Beta", path: null, baseBranch: null },
   ];
 
-  test("Settings › Projects shows the setup: every group, dimmed entries, a skill opened, no secret", async () => {
+  test("Settings › Projects shows the setup: every group, dimmed entries, a command opened, no secret", async () => {
     const plane = await startStubPlane({ workspaces });
     for (const workspace of workspaces)
       plane.setBoard(workspace.id as string, {
@@ -757,7 +757,6 @@ test.describe("in the app", () => {
       const section = page.getByRole("region", { name: "Agent setup" });
       for (const group of [
         "MCP servers",
-        "Skills",
         "Commands",
         "Hooks",
         "Permissions",
@@ -782,14 +781,16 @@ test.describe("in the app", () => {
         plugins.locator("[data-disabled]", { hasText: "quiet@market" }),
       ).toContainText("Turned off in");
 
-      // D4: a skill opens read-only, its body as markdown.
-      const skills = section.getByRole("region", { name: "Skills" });
-      await skills.getByRole("button", { name: "Open user-skill" }).click();
-      const dialog = page.getByRole("dialog");
-      await expect(dialog.getByText("The body.")).toBeVisible();
-      await expect(dialog.getByTestId("agent-setup-frontmatter")).toContainText(
-        "description: Does a user thing.",
+      // Skills have their own page now (FE-47/D9), not a group here.
+      await expect(section.getByRole("region", { name: "Skills" })).toHaveCount(
+        0,
       );
+
+      // D4: a command opens read-only, its body as markdown.
+      const commands = section.getByRole("region", { name: "Commands" });
+      await commands.getByRole("button", { name: "Open /ship" }).click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByText("Steps.")).toBeVisible();
       await expect(
         dialog.getByRole("button", { name: "Reveal in Finder" }),
       ).toBeEnabled();
@@ -810,9 +811,9 @@ test.describe("in the app", () => {
       await expect(
         section.locator('[data-slot="empty"]', { hasText: "No folder linked" }),
       ).toBeVisible();
-      await expect(section.getByRole("region", { name: "Skills" })).toHaveCount(
-        0,
-      );
+      await expect(
+        section.getByRole("region", { name: "Commands" }),
+      ).toHaveCount(0);
 
       await page.getByRole("button", { name: "Select Alpha" }).click();
       await hooks

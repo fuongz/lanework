@@ -64,8 +64,11 @@
   "author": "Lanework",
   "license": "UNLICENSED",
   "dependencies": {
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/legacy-modes": "^6.5.5",
     "@lydell/node-pty": "1.2.0-beta.15",
     "@pierre/diffs": "^1.4.2",
-    "@pierre/trees": "^1.0.0-beta.6"
+    "@pierre/trees": "^1.0.0-beta.6",
+    "smol-toml": "^1.9.0"
   }
 }

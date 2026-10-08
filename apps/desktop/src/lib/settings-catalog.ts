@@ -1,7 +1,9 @@
 import {
+  FileEditIcon,
   FolderLibraryIcon,
   GithubIcon,
   InformationCircleIcon,
+  MagicWand01Icon,
   RoboticIcon,
   Sun01Icon,
   UserAccountIcon,
@@ -62,6 +64,19 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: RoboticIcon,
         keywords:
           "agent agents claude codex handoff checkpoint resume quota usage hook push wip",
+      },
+      {
+        to: "/settings/config",
+        label: "Config files",
+        icon: FileEditIcon,
+        keywords:
+          "config configuration settings.json config.toml hooks.json claude.md agents.md features permissions model edit",
+      },
+      {
+        to: "/settings/skills",
+        label: "Skills",
+        icon: MagicWand01Icon,
+        keywords: "skills skill SKILL.md claude codex agents edit",
       },
     ],
   },

@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 import {
+  agentConfigChannels,
+  type DesktopAgentConfigApi,
+} from "../../shared/agent-config";
+import {
   agentSetupChannels,
   type DesktopAgentSetupApi,
 } from "../../shared/agent-setup";
@@ -139,6 +143,14 @@ const instructions: DesktopInstructionsApi = {
 };
 
 /** A project's agent setup (FE-40): read-only, a slug and an id, never a path. */
+const agentConfig: DesktopAgentConfigApi = {
+  list: () => ipcRenderer.invoke(agentConfigChannels.list),
+  read: (id) => ipcRenderer.invoke(agentConfigChannels.read, id),
+  write: (id, text, baseHash) =>
+    ipcRenderer.invoke(agentConfigChannels.write, id, text, baseHash),
+  reveal: (id) => ipcRenderer.invoke(agentConfigChannels.reveal, id),
+};
+
 const agentSetup: DesktopAgentSetupApi = {
   read: (slug) => ipcRenderer.invoke(agentSetupChannels.read, slug),
   open: (slug, id) => ipcRenderer.invoke(agentSetupChannels.open, slug, id),
@@ -540,5 +552,6 @@ const desktop: DesktopApi = {
   memory,
   instructions,
   agentSetup,
+  agentConfig,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

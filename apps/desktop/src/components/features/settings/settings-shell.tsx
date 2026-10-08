@@ -1,6 +1,6 @@
 import { ArrowLeft02Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Input } from "#/components/ui/input";
 import { useSettingsSearch } from "#/stores/settings-search";
@@ -20,6 +20,13 @@ import { SettingsNav } from "./settings-nav";
 export function SettingsShell({ children }: { children: ReactNode }) {
   const query = useSettingsSearch((state) => state.query);
   const setQuery = useSettingsSearch((state) => state.setQuery);
+  // Config files and Skills are a tree beside an editor (FE-47/D8): they
+  // take the whole pane and draw their own headers, not a column of rows.
+  const wide = useRouterState({
+    select: (state) =>
+      state.location.pathname === "/settings/config" ||
+      state.location.pathname === "/settings/skills",
+  });
 
   return (
     <div className="flex h-screen">
@@ -59,10 +66,14 @@ export function SettingsShell({ children }: { children: ReactNode }) {
         </div>
         <SettingsNav />
       </aside>
-      <div className="bg-background flex-1 overflow-y-auto">
-        <div className="settings-titlebar" aria-hidden="true" />
-        <div className="mx-auto max-w-3xl px-10 pt-8 pb-20">{children}</div>
-      </div>
+      {wide ? (
+        <div className="bg-background min-w-0 flex-1">{children}</div>
+      ) : (
+        <div className="bg-background flex-1 overflow-y-auto">
+          <div className="settings-titlebar" aria-hidden="true" />
+          <div className="mx-auto max-w-3xl px-10 pt-8 pb-20">{children}</div>
+        </div>
+      )}
     </div>
   );
 }

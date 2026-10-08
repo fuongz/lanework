@@ -49,7 +49,7 @@ const PERMISSION_KINDS: Record<SetupPermissionKind, string> = {
   trust: "Trust",
 };
 
-/** Rows a group shows before "Show all" — Skills alone runs to dozens. */
+/** Rows a group shows before "Show all" — Commands and Hooks can run long. */
 const FOLDED = 6;
 
 /**
@@ -242,20 +242,7 @@ function Groups({
           />
         )}
       />
-      <SetupGroup
-        title="Skills"
-        items={setup.skills}
-        empty="No skills."
-        row={(skill) => (
-          <SetupRow
-            key={skill.id}
-            origin={skill}
-            title={skill.name}
-            detail={skill.description}
-            onOpen={() => onOpen(skill)}
-          />
-        )}
-      />
+      {/* Skills have their own page, Settings › Skills (FE-47/D9). */}
       <SetupGroup
         title="Commands"
         items={setup.commands}

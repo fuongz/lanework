@@ -1,3 +1,4 @@
+import type { DesktopAgentConfigApi } from "./agent-config";
 import type { DesktopAgentSetupApi } from "./agent-setup";
 import type { DesktopAuthApi } from "./auth";
 import type { DesktopGitApi } from "./git";
@@ -80,4 +81,6 @@ export interface DesktopApi {
   instructions: DesktopInstructionsApi;
   /** What Claude Code and Codex load in a project's folder, read-only (FE-40). */
   agentSetup: DesktopAgentSetupApi;
+  /** The user's own Claude Code and Codex config files, edited (FE-47). */
+  agentConfig: DesktopAgentConfigApi;
 }

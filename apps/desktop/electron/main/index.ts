@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { app, BrowserWindow, nativeTheme, protocol, session } from "electron";
 import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
+import { registerAgentConfig } from "./agent-config";
 import { registerAgentSetup } from "./agent-setup";
 import { registerAuth } from "./auth";
 import { registerGit } from "./git";
@@ -146,6 +147,7 @@ app
     registerMemory(devUrl);
     registerInstructions(devUrl);
     registerAgentSetup(devUrl);
+    registerAgentConfig(devUrl);
     installMenu();
     createWindow();
     app.on("activate", () => {
