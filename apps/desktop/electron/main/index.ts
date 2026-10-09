@@ -76,11 +76,22 @@ function createWindow() {
     },
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    // The device-flow link opens in the user's browser, never in a new
-    // Electron window. Keep the external destination limited to that page.
-    if (url === "https://github.com/login/device") {
+    // Open GitHub in the OS browser while denying every Electron popup.
+    let github = false;
+    try {
+      const destination = new URL(url);
+      github =
+        destination.protocol === "https:" &&
+        destination.hostname === "github.com" &&
+        !destination.port &&
+        !destination.username &&
+        !destination.password;
+    } catch {
+      /* Malformed destinations stay denied. */
+    }
+    if (github) {
       void shell.openExternal(url).catch((error: unknown) => {
-        console.error("Unable to open GitHub device login", error);
+        console.error("Unable to open GitHub link", error);
       });
     }
     return { action: "deny" };

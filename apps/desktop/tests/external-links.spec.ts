@@ -26,6 +26,10 @@ test("GitHub device login opens in the browser while other popups stay blocked",
     });
     for (const url of [
       "https://github.com/login/device",
+      "https://github.com/acme/widgets/pull/7",
+      "https://github.com/acme/widgets/pull/7/files",
+      "https://github.com.evil.example/acme/widgets/pull/7",
+      "https://user:password@github.com/acme/widgets/pull/7",
       "https://github.com/login/device/other",
       "https://github.com.evil.example/login/device",
       "https://example.com/",
@@ -52,7 +56,12 @@ test("GitHub device login opens in the browser while other popups stay blocked",
           () => (globalThis as typeof globalThis & { opened: string[] }).opened,
         ),
       )
-      .toEqual(["https://github.com/login/device"]);
+      .toEqual([
+        "https://github.com/login/device",
+        "https://github.com/acme/widgets/pull/7",
+        "https://github.com/acme/widgets/pull/7/files",
+        "https://github.com/login/device/other",
+      ]);
     expect(application.windows()).toHaveLength(1);
     expect(page.url()).toMatch(/^app:\/\/lanework\//);
   } finally {

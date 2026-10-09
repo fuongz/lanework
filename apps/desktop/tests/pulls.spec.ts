@@ -192,6 +192,8 @@ async function startStubGitHub(): Promise<{
    */
   setRefusal: (value: "unauthorized" | "missing" | "ratelimit" | null) => void;
   /** Comments this stub has accepted, newest last. */
+  setMerge: (value: Record<string, unknown>) => void;
+  merges: unknown[];
   comments: string[];
   seen: string[];
   close: () => Promise<void>;
@@ -203,6 +205,8 @@ async function startStubGitHub(): Promise<{
   let noChecks = false;
   let commentRefused = false;
   let refusal: "unauthorized" | "missing" | "ratelimit" | null = null;
+  let mergeData: Record<string, unknown> = {};
+  const merges: unknown[] = [];
   const comments: string[] = [];
   /** Every request seen, so a test can prove what was actually asked for. */
   const seen: string[] = [];
@@ -228,6 +232,31 @@ async function startStubGitHub(): Promise<{
       return response.end(JSON.stringify({ message: "rate limit exceeded" }));
     }
 
+    if (request.method === "PUT" && url.endsWith("/merge")) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(chunk as Buffer);
+      merges.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      if (mergeData.reject)
+        return send(422, {
+          message: "Unprocessable Entity",
+          errors: ["Branch policy rejected this merge."],
+        });
+      if (mergeData.notMerged)
+        return send(200, {
+          merged: false,
+          message: "Merge refused by required checks.",
+        });
+      mergeData = { ...mergeData, merged: true, state: "closed" };
+      return send(200, { merged: true });
+    }
+    if (url === "/repos/acme/widgets")
+      return send(200, {
+        permissions: { push: true },
+        allow_merge_commit: true,
+        allow_squash_merge: true,
+        allow_rebase_merge: true,
+        ...(mergeData.repository as object),
+      });
     if (request.method === "POST" && url.startsWith("/graphql")) {
       if (broken) return send(500, { message: "nope" });
       // The state filter is sent to GitHub, so the stub has to honour it —
@@ -331,6 +360,11 @@ async function startStubGitHub(): Promise<{
         },
       });
     }
+    if (request.method === "POST" && url.endsWith("/reviews"))
+      return send(422, {
+        message: "Validation Failed",
+        errors: [{ message: "Review policy rejected this request." }],
+      });
     if (request.method === "POST" && /\/issues\/\d+\/comments$/.test(url)) {
       if (commentRefused)
         return send(403, { message: "You cannot comment on this repository." });
@@ -473,7 +507,10 @@ async function startStubGitHub(): Promise<{
         additions: 36,
         deletions: 24,
         changed_files: 1,
-        html_url: "https://example.invalid/pull/7",
+        html_url: "https://github.com/acme/widgets/pull/7",
+        mergeable: true,
+        mergeable_state: "clean",
+        ...mergeData,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         requested_reviewers: [{ login: "tester" }],
@@ -508,6 +545,10 @@ async function startStubGitHub(): Promise<{
     setRefusal: (value) => {
       refusal = value;
     },
+    setMerge: (value) => {
+      mergeData = value;
+    },
+    merges,
     comments,
     seen,
     close: () =>
@@ -836,6 +877,7 @@ test("never hands the renderer the token", async () => {
       "disconnect",
       "fileText",
       "linkRepo",
+      "merge",
       "onAccountChange",
       "onConnectProgress",
       "openAppConfig",
@@ -1756,6 +1798,273 @@ test("a merged pull request offers no verdict, but still takes a comment", async
     // has shipped.
     await page.getByRole("tab", { name: "Summary" }).click();
     await expect(page.getByLabel("Leave a comment")).toBeVisible();
+  } finally {
+    await cleanup();
+  }
+});
+
+test("FE50 merge split buttons share methods, cancel safely and send viewed head", async () => {
+  const { page, github, cleanup } = await open();
+  try {
+    await gotoPulls(page);
+    await page
+      .getByText("chore(deps): bump @types/node", { exact: true })
+      .click();
+    await page.getByRole("tab", { name: "Summary" }).click();
+    await expect(
+      page.getByRole("button", { name: "Choose merge method" }),
+    ).toHaveCount(2);
+    await page
+      .getByRole("button", { name: "Choose merge method" })
+      .first()
+      .click();
+    await page
+      .getByRole("menuitemradio", { name: /^Squash and merge/ })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Squash and merge", exact: true }),
+    ).toHaveCount(2);
+    await page.screenshot({
+      path: "../../.agents/artifacts/2026-10-09-fe50-header.png",
+    });
+
+    await page
+      .getByRole("button", { name: "Squash and merge", exact: true })
+      .first()
+      .click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(github.merges).toEqual([]);
+    await page
+      .getByRole("button", { name: "Choose merge method" })
+      .last()
+      .click();
+    await page
+      .getByRole("menuitemradio", { name: /^Rebase and merge/ })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Rebase and merge", exact: true }),
+    ).toHaveCount(2);
+    await mkdir(".agents/artifacts", { recursive: true });
+    await page
+      .getByRole("button", { name: "Choose merge method" })
+      .first()
+      .click();
+    await page.screenshot({
+      path: "../../.agents/artifacts/2026-10-09-fe50-merge.png",
+    });
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 760, height: 800 });
+    for (const control of [
+      page.getByRole("link", { name: "Open on GitHub" }),
+      page.getByRole("button", { name: "Focus the diff" }),
+      page.getByRole("button", { name: "Choose merge method" }).first(),
+    ]) {
+      await expect
+        .poll(async () => {
+          const bounds = await control.boundingBox();
+          return bounds ? bounds.x + bounds.width : Number.POSITIVE_INFINITY;
+        })
+        .toBeLessThanOrEqual(760);
+    }
+    await page
+      .getByRole("button", { name: "Rebase and merge", exact: true })
+      .first()
+      .click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByRole("alertdialog")).toBeHidden();
+    await expect(page.getByRole("menu")).toBeHidden();
+    await page.screenshot({
+      path: "../../.agents/artifacts/2026-10-09-fe50-narrow.png",
+    });
+    await page.setViewportSize({ width: 1120, height: 800 });
+    await page
+      .getByRole("button", { name: "Rebase and merge", exact: true })
+      .last()
+      .click();
+    await page
+      .getByRole("button", { name: "Confirm merge", exact: true })
+      .click();
+    await expect
+      .poll(() => github.merges)
+      .toEqual([{ merge_method: "rebase", sha: "a".repeat(40) }]);
+    await expect(
+      page.getByRole("button", { name: "Choose merge method" }),
+    ).toHaveCount(0);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("FE50 merge disables permission, draft, conflicts, unknown and blocked states", async () => {
+  const { page, github, cleanup } = await open();
+  try {
+    for (const state of [
+      { repository: { permissions: { push: false } } },
+      {
+        repository: {
+          allow_rebase_merge: false,
+          allow_merge_commit: false,
+          allow_squash_merge: false,
+        },
+      },
+      { draft: true },
+      { mergeable: false, mergeable_state: "dirty" },
+      { mergeable: null, mergeable_state: "unknown" },
+      { mergeable_state: "blocked" },
+    ]) {
+      github.setMerge(state);
+      await gotoPulls(page);
+      await page
+        .getByText("chore(deps): bump @types/node", { exact: true })
+        .click();
+      await expect(
+        page
+          .getByRole("button", { name: "Merge pull request", exact: true })
+          .first(),
+      ).toBeDisabled();
+      await page.reload();
+    }
+    expect(github.merges).toEqual([]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("FE50 actual PR header link opens OS browser", async () => {
+  const { app, page, cleanup } = await open();
+  try {
+    await app.evaluate(({ shell }) => {
+      (globalThis as typeof globalThis & { opened: string[] }).opened = [];
+      shell.openExternal = async (url) => {
+        (globalThis as typeof globalThis & { opened: string[] }).opened.push(
+          url,
+        );
+      };
+    });
+    await gotoPulls(page);
+    await page
+      .getByText("chore(deps): bump @types/node", { exact: true })
+      .click();
+    await page.getByRole("link", { name: "Open on GitHub" }).click();
+    await expect
+      .poll(() =>
+        app.evaluate(
+          () => (globalThis as typeof globalThis & { opened: string[] }).opened,
+        ),
+      )
+      .toEqual(["https://github.com/acme/widgets/pull/7"]);
+    expect(app.windows()).toHaveLength(1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("FE50 guarded IPC sends each method and refuses changed head, invalid input and API rejection", async () => {
+  const { page, github, cleanup } = await open();
+  const attempt = async (method: string, sha = "a".repeat(40)) =>
+    page.evaluate(
+      async ({ method, sha }) => {
+        const git = (
+          globalThis as unknown as {
+            desktop: {
+              git: {
+                merge: (
+                  slug: string,
+                  number: number,
+                  method: string,
+                  sha: string,
+                ) => Promise<void>;
+              };
+            };
+          }
+        ).desktop.git;
+        try {
+          await git.merge("acme", 7, method, sha);
+          return "ok";
+        } catch (error) {
+          return String(error);
+        }
+      },
+      { method, sha },
+    );
+  try {
+    for (const method of ["merge", "squash", "rebase"]) {
+      github.setMerge({});
+      expect(await attempt(method)).toBe("ok");
+      expect(github.merges.at(-1)).toEqual({
+        merge_method: method,
+        sha: "a".repeat(40),
+      });
+    }
+    github.setMerge({});
+    const count = github.merges.length;
+    expect(await attempt("invalid")).not.toBe("ok");
+    expect(await attempt("merge", "invalid")).not.toBe("ok");
+    github.setMerge({ head: { ref: "topic", sha: "c".repeat(40) } });
+    expect(await attempt("merge")).toMatch(/changed|updated|refresh/i);
+    github.setMerge({ repository: { allow_squash_merge: false } });
+    expect(await attempt("squash")).toMatch(/disabled/i);
+    expect(github.merges).toHaveLength(count);
+    github.setMerge({ reject: true });
+    expect(await attempt("merge")).toContain(
+      "Branch policy rejected this merge.",
+    );
+    github.setMerge({ notMerged: true });
+    expect(await attempt("merge")).toContain(
+      "Merge refused by required checks.",
+    );
+    github.setMerge({ user: { login: "tester" } });
+    await gotoPulls(page);
+    await page
+      .getByText("chore(deps): bump @types/node", { exact: true })
+      .click();
+    await page.getByRole("button", { name: "Review", exact: true }).click();
+    await expect(
+      page.getByText(/does not allow approving or requesting changes/),
+    ).toBeVisible();
+    await page
+      .getByRole("textbox", { name: "Review note" })
+      .fill("A note for this PR.");
+    await expect(
+      page.getByRole("button", { name: "Approve", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Request changes", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Comment", exact: true }),
+    ).toBeEnabled();
+    const review = async () =>
+      page.evaluate(async () => {
+        const git = (
+          globalThis as unknown as {
+            desktop: {
+              git: {
+                review: (
+                  slug: string,
+                  number: number,
+                  verdict: string,
+                  body: string,
+                ) => Promise<void>;
+              };
+            };
+          }
+        ).desktop.git;
+        try {
+          await git.review("acme", 7, "APPROVE", "");
+          return "ok";
+        } catch (error) {
+          return String(error);
+        }
+      });
+    expect(await review()).toMatch(/own pull request/i);
+    expect(github.seen.filter((url) => url.endsWith("/reviews"))).toHaveLength(
+      0,
+    );
+    github.setMerge({});
+    expect(await review()).toContain("Review policy rejected this request.");
   } finally {
     await cleanup();
   }

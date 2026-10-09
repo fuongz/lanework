@@ -266,10 +266,24 @@ export interface PullFile {
   patch: string | null;
 }
 
+/** Merge strategies supported by GitHub; repository settings narrow this list. */
+export const MERGE_METHODS = ["merge", "squash", "rebase"] as const;
+export type MergeMethod = (typeof MERGE_METHODS)[number];
+
+export interface PullMergeState {
+  /** Null while GitHub is still calculating mergeability. */
+  mergeable: boolean | null;
+  state: string | null;
+  canMerge: boolean;
+  methods: MergeMethod[];
+}
+
 export interface PullDetail {
   repo: RepoRef;
   pull: PullRequest;
   body: string;
+  /** Optional for compatibility with older detail fixtures. */
+  merge?: PullMergeState;
   /** The commit the diff is against — what the new side of a file is read at. */
   headSha: string;
   /**
@@ -473,6 +487,7 @@ export const gitChannels = {
   commitDiff: "git:commit",
   fileText: "git:pull:file",
   review: "git:pull:review",
+  merge: "git:pull:merge",
   activity: "git:pull:activity",
   comment: "git:pull:comment",
 } as const;
@@ -614,6 +629,13 @@ export interface DesktopGitApi {
     number: number,
     verdict: ReviewVerdict,
     body: string,
+  ) => Promise<void>;
+  /** Merge only the head commit the user reviewed; GitHub rejects a changed head. */
+  merge: (
+    slug: string,
+    number: number,
+    method: MergeMethod,
+    headSha: string,
   ) => Promise<void>;
   /**
    * A pull request's timeline and CI checks.

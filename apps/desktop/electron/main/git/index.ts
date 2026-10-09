@@ -5,6 +5,8 @@ import {
   type GitAccount,
   type GitAppAccess,
   gitChannels,
+  MERGE_METHODS,
+  type MergeMethod,
   PULL_STATUSES,
   type PullActivity,
   type PullCommit,
@@ -33,6 +35,7 @@ import {
   fetchRepoOptions,
   fetchViewer,
   GitHubError,
+  mergePull,
   submitReview,
 } from "./client";
 import {
@@ -176,6 +179,8 @@ function positive(value: unknown): number {
     throw new Error("That is not a valid number.");
   return value;
 }
+
+const pendingMerges = new Set<string>();
 
 /**
  * A commit, as a URL will accept it.
@@ -409,6 +414,33 @@ export function registerGit(devUrl?: string): void {
     },
   );
 
+  handle(gitChannels.merge, devUrl, async (args): Promise<void> => {
+    if (args.length !== 4) throw new Error("A merge is required.");
+    const slug = text(args[0], 200);
+    const number = positive(args[1]);
+    const method = args[2] as MergeMethod;
+    const sha = text(args[3], 100);
+    if (!MERGE_METHODS.includes(method))
+      throw new Error("That is not a merge method.");
+    if (!/^[0-9a-f]{40,64}$/i.test(sha))
+      throw new Error("A full head commit is required.");
+    const record = await authorizedRecord();
+    const ref = await linkedRepo(record, slug);
+    await withToken(record, async (token) => {
+      const key = `${token.login}/${ref.owner}/${ref.repo}/${number}`;
+      if (pendingMerges.has(key))
+        throw new Error(
+          "A merge is already in progress for this pull request.",
+        );
+      pendingMerges.add(key);
+      try {
+        await mergePull(token.token, ref, number, method, sha);
+      } finally {
+        pendingMerges.delete(key);
+      }
+    });
+  });
+
   handle(gitChannels.review, devUrl, async (args): Promise<void> => {
     if (args.length !== 4) throw new Error("A review is required.");
     const slug = text(args[0], 200);
@@ -420,7 +452,7 @@ export function registerGit(devUrl?: string): void {
     const record = await authorizedRecord();
     const ref = await linkedRepo(record, slug);
     await withToken(record, (token) =>
-      submitReview(token.token, ref, number, verdict, body),
+      submitReview(token.token, ref, number, verdict, body, token.login),
     );
   });
 

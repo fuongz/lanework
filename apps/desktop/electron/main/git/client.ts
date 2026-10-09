@@ -7,6 +7,8 @@ import {
   MAX_PULL_FILES,
   MAX_REPO_OPTIONS,
   MAX_TIMELINE_ITEMS,
+  MERGE_METHODS,
+  type MergeMethod,
   type PullActivity,
   type PullCheck,
   type PullChecks,
@@ -14,6 +16,7 @@ import {
   type PullDetail,
   type PullFile,
   type PullFileStatus,
+  type PullMergeState,
   type PullRequest,
   type PullState,
   type PullStatus,
@@ -136,6 +139,31 @@ async function request(
       404,
       "That repository does not exist, or this connection cannot see it.",
     );
+  if ([405, 409, 422].includes(response.status)) {
+    const data = record(await response.json().catch(() => null));
+    const reasons = Array.isArray(data?.errors)
+      ? data.errors
+          .slice(0, 3)
+          .map((error) =>
+            typeof error === "string" ? error : str(record(error)?.message),
+          )
+          .filter(Boolean)
+      : [];
+    const message = [str(data?.message), ...reasons]
+      .filter(Boolean)
+      .join(". ")
+      .replace(/\p{Cc}/gu, " ")
+      .slice(0, 300);
+    throw new GitHubError(
+      response.status,
+      message ||
+        (response.status === 409
+          ? "The pull request changed. Refresh before trying again."
+          : response.status === 405
+            ? "GitHub cannot merge this pull request. Check its branch rules."
+            : "GitHub could not accept this action. Check the pull request and try again."),
+    );
+  }
   if (!response.ok)
     throw new GitHubError(
       response.status,
@@ -322,7 +350,9 @@ export async function fetchPulls(
         createdAt: str(node.createdAt) ?? "",
         updatedAt: str(node.updatedAt) ?? "",
         reviewRequested,
-        authored: Boolean(viewer && login === viewer),
+        authored: Boolean(
+          viewer && login?.toLowerCase() === viewer.toLowerCase(),
+        ),
         reviewDecision: str(node.reviewDecision),
       });
     }
@@ -531,6 +561,103 @@ function toFile(entry: unknown): PullFile | null {
   };
 }
 
+function mergeState(
+  data: Record<string, unknown>,
+  repository: Record<string, unknown> | null,
+): PullMergeState {
+  const permissions = record(repository?.permissions);
+  return {
+    mergeable: typeof data.mergeable === "boolean" ? data.mergeable : null,
+    state: str(data.mergeable_state),
+    canMerge:
+      permissions?.push === true ||
+      permissions?.maintain === true ||
+      permissions?.admin === true,
+    methods: MERGE_METHODS.filter(
+      (method) =>
+        repository?.[
+          method === "merge" ? "allow_merge_commit" : `allow_${method}_merge`
+        ] === true,
+    ),
+  };
+}
+
+export async function mergePull(
+  token: string,
+  ref: RepoRef,
+  number: number,
+  method: MergeMethod,
+  headSha: string,
+): Promise<void> {
+  if (!MERGE_METHODS.includes(method) || !/^[0-9a-f]{40,64}$/i.test(headSha))
+    throw new GitHubError(
+      422,
+      "A valid merge method and full head commit are required.",
+    );
+  const root = `${api()}/repos/${ref.owner}/${ref.repo}`;
+  const [pull, repository] = await Promise.all([
+    request(token, `${root}/pulls/${number}`).then(json).then(record),
+    request(token, root).then(json).then(record),
+  ]);
+  if (!pull || !repository)
+    throw new GitHubError(0, "GitHub returned an unreadable response.");
+  const state = mergeState(pull, repository);
+  if (pull.state !== "open" || pull.merged === true)
+    throw new GitHubError(
+      422,
+      "This pull request is no longer open. Refresh it.",
+    );
+  if (pull.draft === true)
+    throw new GitHubError(
+      422,
+      "Mark this pull request ready for review before merging.",
+    );
+  if (str(record(pull.head)?.sha)?.toLowerCase() !== headSha.toLowerCase())
+    throw new GitHubError(
+      409,
+      "The head commit changed. Refresh and review the new changes before merging.",
+    );
+  if (!state.canMerge)
+    throw new GitHubError(
+      403,
+      "Write access to this repository is required to merge.",
+    );
+  if (!state.methods.includes(method))
+    throw new GitHubError(
+      422,
+      "This merge method is disabled in the repository settings.",
+    );
+  if (
+    state.mergeable !== true ||
+    !state.state ||
+    !["clean", "unstable", "has_hooks"].includes(state.state)
+  )
+    throw new GitHubError(
+      405,
+      state.mergeable === false || state.state === "dirty"
+        ? "Resolve the merge conflicts before merging."
+        : state.state === "blocked"
+          ? "Branch rules or required checks currently block this merge."
+          : "GitHub is still calculating mergeability. Refresh and try again.",
+    );
+  const result = record(
+    await json(
+      await request(token, `${root}/pulls/${number}/merge`, {
+        method: "PUT",
+        body: JSON.stringify({ merge_method: method, sha: headSha }),
+      }),
+    ),
+  );
+  if (result?.merged !== true)
+    throw new GitHubError(
+      405,
+      str(result?.message)
+        ?.replace(/\p{Cc}/gu, " ")
+        .slice(0, 300) ||
+        "GitHub did not merge this pull request. Refresh and check its branch rules.",
+    );
+}
+
 /**
  * One pull request and its diff.
  *
@@ -549,6 +676,13 @@ export async function fetchPull(
   if (!data)
     throw new GitHubError(0, "GitHub returned an unreadable response.");
 
+  const repository = await request(
+    token,
+    `${api()}/repos/${ref.owner}/${ref.repo}`,
+  )
+    .then(json)
+    .then(record)
+    .catch(() => null);
   const author = record(data.user);
   const login = str(author?.login);
   const requested = data.requested_reviewers;
@@ -583,7 +717,7 @@ export async function fetchPull(
       Array.isArray(requested) && viewer
         ? requested.some((item) => str(record(item)?.login) === viewer)
         : false,
-    authored: Boolean(viewer && login === viewer),
+    authored: Boolean(viewer && login?.toLowerCase() === viewer.toLowerCase()),
     // REST does not carry `reviewDecision`; the list read is where that fact
     // comes from, and inventing one here would contradict it.
     reviewDecision: null,
@@ -611,6 +745,7 @@ export async function fetchPull(
     repo: ref,
     pull,
     body: str(data.body) ?? "",
+    merge: mergeState(data, repository),
     headSha,
     // ⚠️ Empty rather than a throw. A pull request always has a base, but a diff
     // still renders without one — only EXPANDING it needs the old side, and a
@@ -781,7 +916,23 @@ export async function submitReview(
   number: number,
   verdict: ReviewVerdict,
   body: string,
+  viewer?: string | null,
 ): Promise<void> {
+  if (verdict !== "COMMENT" && viewer) {
+    const pull = record(
+      await json(
+        await request(
+          token,
+          `${api()}/repos/${ref.owner}/${ref.repo}/pulls/${number}`,
+        ),
+      ),
+    );
+    if (str(record(pull?.user)?.login)?.toLowerCase() === viewer.toLowerCase())
+      throw new GitHubError(
+        422,
+        "You cannot approve or request changes on your own pull request. Leave a comment instead.",
+      );
+  }
   // GitHub refuses REQUEST_CHANGES and COMMENT with an empty body; saying so
   // here is better than passing the refusal through as a 422.
   if (verdict !== "APPROVE" && !body.trim())

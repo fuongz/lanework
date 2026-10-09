@@ -5,6 +5,7 @@ import type {
   GitAccount,
   GitAppAccess,
   GitConnectProgress,
+  MergeMethod,
   PullActivity,
   PullCommit,
   PullDetail,
@@ -106,6 +107,11 @@ interface PullsState {
   detailError: string | null;
   /** The verdict being submitted, so exactly one button shows as busy. */
   reviewBusy: ReviewVerdict | null;
+  mergeMethod: MergeMethod;
+  mergeBusy: boolean;
+  mergeError: string | null;
+  selectMergeMethod: (method: MergeMethod) => void;
+  mergePull: (number: number, headSha: string) => Promise<{ error?: string }>;
 
   /**
    * The open pull request's commits. `null` until the menu is first opened.
@@ -234,6 +240,9 @@ export const usePulls = create<PullsState>((set, get) => ({
   detailLoading: false,
   detailError: null,
   reviewBusy: null,
+  mergeMethod: "merge",
+  mergeBusy: false,
+  mergeError: null,
   commits: null,
   commitsLoading: false,
   commitsError: null,
@@ -403,6 +412,7 @@ export const usePulls = create<PullsState>((set, get) => ({
     const { slug } = get();
     if (!slug) return;
     const mine = ++ticket.detail;
+    set({ mergeError: null });
     set({ detailLoading: true, detailError: null });
     try {
       const detail = await api().pull(slug, number);
@@ -529,17 +539,98 @@ export const usePulls = create<PullsState>((set, get) => ({
 
   focusFile: (path) => set({ focus: { path, at: Date.now() } }),
 
+  selectMergeMethod: (mergeMethod) => set({ mergeMethod, mergeError: null }),
+
+  mergePull: async (number, headSha) => {
+    const { slug, detail, detailLoading, mergeMethod, mergeBusy, account } =
+      get();
+    if (mergeBusy) return { error: "A merge is already in progress." };
+    if (
+      !slug ||
+      detailLoading ||
+      detail?.pull.number !== number ||
+      detail.headSha !== headSha
+    )
+      return { error: "Refresh this pull request before merging." };
+    const eligibility = detail.merge;
+    if (
+      detail.pull.state !== "open" ||
+      detail.pull.draft ||
+      !eligibility?.canMerge ||
+      eligibility.mergeable !== true ||
+      !["clean", "unstable", "has_hooks"].includes(eligibility.state ?? "") ||
+      !eligibility.methods.includes(mergeMethod)
+    )
+      return {
+        error: "This pull request is not ready to merge. Refresh its status.",
+      };
+    const identity = ticket.detail;
+    const current = () =>
+      get().slug === slug &&
+      ticket.detail === identity &&
+      get().account === account;
+    set({ mergeBusy: true, mergeError: null });
+    try {
+      await api().merge(slug, number, mergeMethod, headSha);
+    } catch (error) {
+      const message = ipcMessage(error, "Could not merge this pull request.");
+      set({ mergeBusy: false, ...(current() ? { mergeError: message } : {}) });
+      return { error: message };
+    }
+    // The write succeeded. Read failures must never invite a second merge.
+    if (current()) {
+      set({ detail: { ...detail, pull: { ...detail.pull, state: "merged" } } });
+      await get().refresh();
+      if (current()) {
+        const mine = ++ticket.detail;
+        const [next, activity] = await Promise.allSettled([
+          api().pull(slug, number),
+          api().activity(slug, number),
+        ]);
+        if (
+          get().slug === slug &&
+          ticket.detail === mine &&
+          get().account === account
+        ) {
+          set({
+            ...(next.status === "fulfilled" ? { detail: next.value } : {}),
+            ...(activity.status === "fulfilled"
+              ? { activity: activity.value, activityError: null }
+              : {}),
+          });
+        }
+      }
+    }
+    set({ mergeBusy: false });
+    return {};
+  },
+
   review: async (number, verdict, body) => {
-    const { slug } = get();
+    const { slug, detail, reviewBusy, account } = get();
+    const identity = ticket.detail;
+    const current = () =>
+      get().slug === slug &&
+      ticket.detail === identity &&
+      get().account === account;
     if (!slug) return { error: "Open a project first." };
+    if (reviewBusy) return { error: "A review is already in progress." };
+    if (verdict !== "COMMENT" && detail?.pull.authored)
+      return {
+        error: "GitHub does not allow reviewing your own pull request.",
+      };
+    if (verdict !== "APPROVE" && !body.trim())
+      return { error: "Enter a review note first." };
     set({ reviewBusy: verdict });
     try {
       await api().review(slug, number, verdict, body);
       set({ reviewBusy: null });
       // The decision changes what the list says about this row, so the list is
       // re-read rather than patched from a response that carries no row.
-      await get().refresh();
-      await get().openPull(number);
+      if (current()) await get().refresh();
+      if (current()) {
+        await get().loadActivity(number, true);
+        if (current()) await get().openPull(number);
+      }
       return {};
     } catch (error) {
       set({ reviewBusy: null });

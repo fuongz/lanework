@@ -185,6 +185,8 @@ const git: DesktopGitApi = {
     ipcRenderer.invoke(gitChannels.commitDiff, slug, sha),
   fileText: (slug, path, sha) =>
     ipcRenderer.invoke(gitChannels.fileText, slug, path, sha),
+  merge: (slug, number, method, headSha) =>
+    ipcRenderer.invoke(gitChannels.merge, slug, number, method, headSha),
   review: (slug, number, verdict, body) =>
     ipcRenderer.invoke(gitChannels.review, slug, number, verdict, body),
   activity: (slug, number) =>

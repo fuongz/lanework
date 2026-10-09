@@ -11,6 +11,7 @@ import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type ReactNode, useEffect, useState } from "react";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
+import { MergeControl } from "#/components/shared/pulls/merge-control";
 import { Badge } from "#/components/ui/badge";
 import { Skeleton } from "#/components/ui/skeleton";
 import { shortAge } from "#/lib/board-view";
@@ -242,16 +243,19 @@ export function PullSummary({ detail }: { detail: PullDetail }) {
             </Section>
 
             <Section title="Activity" count={mine.items.length}>
-              <div className="flex flex-col gap-4">
-                <PullActivityList
-                  items={mine.items}
-                  truncated={mine.truncated}
-                />
-                <CommentBox number={pull.number} />
-              </div>
+              <PullActivityList items={mine.items} truncated={mine.truncated} />
             </Section>
           </>
         )}
+        {pull.state === "open" && (
+          <section
+            aria-label="Merge pull request"
+            className="border-sidebar-border rounded-lg border p-4"
+          >
+            <MergeControl key={pull.number} detail={detail} />
+          </section>
+        )}
+        <CommentBox number={pull.number} />
       </div>
     </div>
   );

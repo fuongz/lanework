@@ -11,6 +11,7 @@ import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
+import { MergeControl } from "#/components/shared/pulls/merge-control";
 import { Button } from "#/components/ui/button";
 import {
   ResizableHandle,
@@ -62,11 +63,16 @@ function Verdict({
 }) {
   const review = usePulls((state) => state.review);
   const busy = usePulls((state) => state.reviewBusy);
+  const authored = usePulls((state) => state.detail?.pull.authored);
   return (
     <Button
       size="sm"
       variant={verdict === "APPROVE" ? "default" : "outline"}
-      disabled={busy !== null}
+      disabled={
+        busy !== null ||
+        (verdict !== "COMMENT" && authored) ||
+        (verdict !== "APPROVE" && !body.trim())
+      }
       onClick={() => {
         void review(number, verdict, body).then((result) =>
           onDone(result.error ?? null),
@@ -125,8 +131,11 @@ export function PullDetail() {
   const commitDiffError = usePulls((state) => state.commitDiffError);
 
   useEffect(() => {
-    if (Number.isInteger(parsed) && parsed > 0) void openPull(parsed);
-  }, [openPull, parsed]);
+    setBody("");
+    setReviewError(null);
+    setComposing(false);
+    if (slug && Number.isInteger(parsed) && parsed > 0) void openPull(parsed);
+  }, [openPull, parsed, slug]);
 
   /**
    * Whether the tree is on screen right now.
@@ -171,7 +180,7 @@ export function PullDetail() {
   const source = diffSource(commit, commitDiff, detail);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+    <div className="@container/pull-detail flex min-w-0 flex-1 flex-col overflow-hidden">
       {/* ⚠️ Two rows with different jobs, and that split is the point. The top
           row is about the PULL REQUEST — what it is called, and which half of it
           you are looking at. The row under it is about the DIFF — where it came
@@ -180,7 +189,7 @@ export function PullDetail() {
           +798 −425` sat among the controls and read as if it were one. */}
       <header
         className={cn(
-          "window-drag-region border-sidebar-border grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b pe-3",
+          "window-drag-region border-sidebar-border grid h-11 shrink-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b pe-3 @max-[420px]/pull-detail:h-auto @max-[420px]/pull-detail:min-h-11 @max-[420px]/pull-detail:grid-cols-[minmax(0,1fr)_auto] @max-[420px]/pull-detail:gap-y-1 @max-[420px]/pull-detail:py-1",
           // Beside the rail only in focus mode, with the list shut; the
           // rest of the time the list is what keeps it clear of the window
           // controls.
@@ -199,13 +208,12 @@ export function PullDetail() {
           </h1>
         </div>
 
-        {/* ⚠️ A `tablist` in the middle column of a three-column grid, so it is
-            centred against the WINDOW rather than against whatever is left over
-            after the title — which changes width with every pull request. */}
+        {/* Reserve space for tabs and merge actions; the title truncates as the
+            detail panel narrows so header actions stay reachable. */}
         <SegmentedControl
           label="Pull request view"
           semantics="tabs"
-          className="justify-self-center"
+          className="justify-self-center @max-[420px]/pull-detail:col-span-2 @max-[420px]/pull-detail:row-start-2"
           value={view}
           options={[
             { value: "summary", label: "Summary" },
@@ -229,7 +237,12 @@ export function PullDetail() {
           }
         />
 
-        <div className="flex items-center justify-end gap-0.5">
+        <div className="window-no-drag flex items-center justify-end gap-2 @max-[420px]/pull-detail:col-start-2 @max-[420px]/pull-detail:row-start-1">
+          <MergeControl
+            key={`${slug}/${pull.number}`}
+            detail={detail}
+            compact
+          />
           <a
             href={pull.url}
             target="_blank"
@@ -404,6 +417,12 @@ export function PullDetail() {
         <footer className="border-sidebar-border shrink-0 border-t px-4 py-2.5">
           {composing ? (
             <div className="flex flex-col gap-2">
+              {pull.authored && (
+                <p className="text-muted-foreground text-xs">
+                  GitHub does not allow approving or requesting changes on your
+                  own pull request. You can leave a comment.
+                </p>
+              )}
               <Textarea
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
