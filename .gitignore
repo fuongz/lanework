@@ -8,6 +8,8 @@ release/
 apps/desktop/src/routeTree.gen.ts
 apps/landing/src/routeTree.gen.ts
 .agents/artifacts/
+# Local agent verification logs may contain machine paths or runtime secrets.
+.agents/**/*.log
 
 # Personal Claude Code settings for this checkout
 .claude/settings.local.json

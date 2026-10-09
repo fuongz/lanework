@@ -18,11 +18,17 @@ export function installMenuBar(showWindow: () => void): void {
     label: "Open Lanework",
     click: showWindow,
   };
+  const quit: MenuItemConstructorOptions = {
+    label: "Quit Lanework",
+    role: "quit",
+  };
   tray.setToolTip("Lanework");
   tray.setContextMenu(
     Menu.buildFromTemplate([
       open,
       { label: "Loading processes…", enabled: false },
+      { type: "separator" },
+      quit,
     ]),
   );
 
@@ -59,6 +65,7 @@ export function installMenuBar(showWindow: () => void): void {
         });
       }
       if (!count) items.push({ label: "No running processes", enabled: false });
+      items.push({ type: "separator" }, quit);
       tray.setContextMenu(Menu.buildFromTemplate(items));
       lastSnapshot = snapshot;
       tray.setToolTip(
@@ -71,6 +78,8 @@ export function installMenuBar(showWindow: () => void): void {
           Menu.buildFromTemplate([
             open,
             { label: "Processes unavailable — open Lanework", enabled: false },
+            { type: "separator" },
+            quit,
           ]),
         );
         tray.setToolTip("Lanework — processes unavailable");
