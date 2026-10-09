@@ -1,5 +1,12 @@
 import { join } from "node:path";
-import { app, BrowserWindow, nativeTheme, protocol, session } from "electron";
+import {
+  app,
+  BrowserWindow,
+  nativeTheme,
+  protocol,
+  session,
+  shell,
+} from "electron";
 import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
 import { registerAgentConfig } from "./agent-config";
 import { registerAgentSetup } from "./agent-setup";
@@ -68,7 +75,16 @@ function createWindow() {
       webviewTag: false,
     },
   });
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    // The device-flow link opens in the user's browser, never in a new
+    // Electron window. Keep the external destination limited to that page.
+    if (url === "https://github.com/login/device") {
+      void shell.openExternal(url).catch((error: unknown) => {
+        console.error("Unable to open GitHub device login", error);
+      });
+    }
+    return { action: "deny" };
+  });
   window.webContents.on("will-navigate", (event, url) => {
     if (!isTrustedUrl(url, devUrl)) event.preventDefault();
   });
