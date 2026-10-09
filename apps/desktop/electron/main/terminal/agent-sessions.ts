@@ -259,6 +259,53 @@ export function lastActivity(
  */
 export const STALE_MS = 10 * 60_000;
 
+/** A real turn end, rather than an interruption, missing file or stale run. */
+export async function transcriptCompleted(
+  file: string,
+  agent: "claude" | "codex",
+): Promise<boolean> {
+  try {
+    const info = await stat(file);
+    if (Date.now() - info.mtimeMs > STALE_MS) return false;
+    const start = Math.max(0, info.size - CHUNK);
+    const tail = lines(await readRange(file, start, CHUNK), {
+      head: start === 0,
+    });
+    if (agent === "codex") {
+      for (const line of tail.reverse()) {
+        if (line.type !== "event_msg") continue;
+        const kind = (line.payload as { type?: unknown } | null)?.type;
+        if (kind === "task_complete") return true;
+        if (kind === "task_started" || kind === "turn_aborted") return false;
+      }
+      return false;
+    }
+    // A stop hook may run even after Ctrl-C. The turn must have an answer,
+    // and no later prompt/interruption, as well as its closing system line.
+    let closed = false;
+    for (const line of tail.reverse()) {
+      if (line.isSidechain) continue;
+      if (
+        line.type === "system" &&
+        (line.subtype === "turn_duration" ||
+          line.subtype === "stop_hook_summary")
+      )
+        closed = true;
+      if (line.type === "user" && !line.isMeta && !localCommand(line))
+        return false;
+      if (line.type === "assistant")
+        return (
+          closed &&
+          (line.message as { stop_reason?: unknown } | undefined)
+            ?.stop_reason === "end_turn"
+        );
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Whether the agent behind `file` is working now, from its transcript's end
  * — a conversation's, or one of its sub-agents' (FE-33).

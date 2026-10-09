@@ -16,6 +16,7 @@ import {
   claudeProjectDir,
   codexRolloutOf,
   lastCardIn,
+  transcriptCompleted,
   transcriptWorking,
 } from "./agent-sessions";
 
@@ -66,10 +67,12 @@ export function watchAgentActivity(
    * or that conversation may only now have the prompt that titles it.
    */
   onWrite?: (agent: TerminalAgent, id: string) => void,
+  onCompleted?: (agent: TerminalAgent, id: string) => void,
 ): () => void {
   const watchers: FSWatcher[] = [];
   const pending = new Map<string, NodeJS.Timeout>();
   const said = new Map<string, string>();
+  const running = new Set<string>();
   /**
    * The card each conversation last named, and how far its transcript has
    * been read for one (FE-27). Only the bytes written since are read again;
@@ -125,6 +128,18 @@ export function watchAgentActivity(
           // (FE-35/D11), and its working state alone stays `true` from its
           // first tool call to its report.
           const news = `${working}:${card?.boardId}:${card?.card}`;
+          if (stopped) return;
+          if (!subagent) {
+            const wasRunning = running.delete(key);
+            if (working) running.add(key);
+            else if (
+              wasRunning &&
+              onCompleted &&
+              (await transcriptCompleted(file, agent as "claude" | "codex"))
+            ) {
+              if (!stopped) onCompleted(agent, id);
+            }
+          }
           if (stopped) return;
           if (!subagent && said.get(key) === news) return;
           said.set(key, news);

@@ -18,6 +18,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   _electron as electron,
   expect,
@@ -79,6 +80,7 @@ import { writeFolders } from "../electron/main/workspaces/store";
 import {
   AGENT_FACTS_READ_MAX,
   BACKGROUND_OUTPUT_MAX,
+  type DesktopTerminalApi,
   isAgentSessionId,
   isCardRef,
   type TerminalHostMessage,
@@ -1885,6 +1887,192 @@ async function openProject(page: Page, name: string) {
     page.getByRole("button", { name: `Switch project — currently ${name}` }),
   ).toBeVisible();
 }
+
+test("FE-49: completed main-agent turns notify once with sound and restore the window", async () => {
+  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  plane.setBoard("ws-alpha", {
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    cards: [],
+  });
+  let claude = "";
+  let codex = "";
+  let sub = "";
+  const { app, profile } = await bootOnAgentHome(
+    plane.origin,
+    async (home, repo) => {
+      await seedAgentHome(home, repo);
+      claude = join(
+        home,
+        ".claude",
+        "projects",
+        claudeProjectDir(repo),
+        `${CLAUDE_ID}.jsonl`,
+      );
+      codex = join(
+        home,
+        ".codex",
+        "sessions",
+        "2026",
+        "09",
+        "26",
+        `rollout-2026-09-26T07-04-45-${CODEX_ID}.jsonl`,
+      );
+      sub = join(
+        home,
+        ".claude",
+        "projects",
+        claudeProjectDir(repo),
+        CLAUDE_ID,
+        "subagents",
+        "agent-notify.jsonl",
+      );
+      await mkdir(join(sub, ".."), { recursive: true });
+    },
+  );
+  try {
+    // Exercise the built Electron app and native Notification objects while
+    // intercepting delivery: an unsigned macOS test binary cannot show banners.
+    await app.evaluate(({ Notification }) => {
+      const state = globalThis as unknown as {
+        notices: Electron.Notification[];
+      };
+      state.notices = [];
+      Notification.isSupported = () => true;
+      Notification.prototype.show = function () {
+        state.notices.push(this);
+      };
+    });
+    const page = await app.firstWindow();
+    await openProject(page, "Alpha");
+    await page.evaluate(() =>
+      (
+        window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+      ).desktop.terminal.agentSessions("ws-alpha"),
+    );
+    const notices = () =>
+      app.evaluate(() =>
+        (
+          globalThis as unknown as { notices: Electron.Notification[] }
+        ).notices.map((n) => ({
+          title: n.title,
+          body: n.body,
+          silent: n.silent,
+        })),
+      );
+    // Initial idle and bookkeeping writes must not announce old answers.
+    await appendFile(claude, line({ type: "ai-title", aiTitle: "Old answer" }));
+    await delay(900);
+    expect(await notices()).toEqual([]);
+    await appendFile(
+      claude,
+      line({ type: "user", message: { content: "Private prompt" } }),
+    );
+    await delay(900);
+    await appendFile(
+      claude,
+      line({
+        type: "assistant",
+        message: { stop_reason: "end_turn", content: "Private answer" },
+      }) + line({ type: "system", subtype: "turn_duration" }),
+    );
+    await expect.poll(notices).toEqual([
+      {
+        title: "Claude finished",
+        body: "Run completed in Alpha.",
+        silent: false,
+      },
+    ]);
+    await appendFile(
+      claude,
+      line({ type: "system", subtype: "stop_hook_summary" }),
+    );
+    await delay(900);
+    expect(await notices()).toHaveLength(1);
+    // An interrupted Claude turn can still run its stop hook.
+    await appendFile(
+      claude,
+      line({ type: "user", message: { content: "Cancel this" } }),
+    );
+    await delay(900);
+    await appendFile(
+      claude,
+      line({
+        type: "user",
+        message: { content: "[Request interrupted by user]" },
+      }) + line({ type: "system", subtype: "stop_hook_summary" }),
+    );
+    await delay(900);
+    expect(await notices()).toHaveLength(1);
+    await writeFile(
+      sub,
+      line({
+        type: "user",
+        isSidechain: true,
+        message: { content: "Subtask" },
+      }),
+    );
+    await delay(900);
+    await appendFile(
+      sub,
+      line({
+        type: "assistant",
+        isSidechain: true,
+        message: { stop_reason: "end_turn" },
+      }),
+    );
+    await delay(900);
+    expect(await notices()).toHaveLength(1);
+    await appendFile(
+      codex,
+      line({ type: "event_msg", payload: { type: "task_started" } }),
+    );
+    await delay(900);
+    await appendFile(
+      codex,
+      line({ type: "event_msg", payload: { type: "turn_aborted" } }),
+    );
+    await delay(900);
+    expect(await notices()).toHaveLength(1);
+    await appendFile(
+      codex,
+      line({ type: "event_msg", payload: { type: "task_started" } }),
+    );
+    await delay(900);
+    await appendFile(
+      codex,
+      line({ type: "event_msg", payload: { type: "task_complete" } }),
+    );
+    await expect.poll(notices).toEqual([
+      {
+        title: "Claude finished",
+        body: "Run completed in Alpha.",
+        silent: false,
+      },
+      {
+        title: "Codex finished",
+        body: "Run completed in Alpha.",
+        silent: false,
+      },
+    ]);
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].hide();
+      (
+        globalThis as unknown as { notices: Electron.Notification[] }
+      ).notices[1].emit("click");
+    });
+    await expect
+      .poll(() =>
+        app.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0].isVisible(),
+        ),
+      )
+      .toBe(true);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
 
 test("FE-41: the rail shows Codex's usage until each window resets, and a goal's status on its conversation", async () => {
   test.skip(process.platform === "win32", "This drives a POSIX shell.");

@@ -59,6 +59,7 @@ import {
   readAgentMarks,
   updateAgentMark,
 } from "./agent-marks";
+import { notifyAgentCompleted } from "./agent-notifications";
 import { agentKey, listAgentSessions } from "./agent-sessions";
 import { claudeAuthOf, createClaudeAuthProbe } from "./agents";
 import {
@@ -267,6 +268,15 @@ function watchWorkspace(workspace: string, folder: string): void {
         id,
         at: Date.now(),
       } satisfies AgentWrite);
+    },
+    (agent) => {
+      void knownWorkspace(workspace)
+        .then(({ workspace: project }) => {
+          // A removed/rebound workspace must not deliver a delayed notification.
+          if (watching.get(workspace)?.folder === folder)
+            notifyAgentCompleted(agent, project.name);
+        })
+        .catch(() => {});
     },
   );
   watching.set(workspace, { folder, stop });
