@@ -2069,3 +2069,58 @@ test("FE50 guarded IPC sends each method and refuses changed head, invalid input
     await cleanup();
   }
 });
+
+/** "Set up for agents", opened from the readiness mark beside the switcher. */
+async function openReadiness(page: Page) {
+  await page.goto(`app://lanework/w/${SLUG}/issues`);
+  await page
+    .getByRole("button", { name: /to set up before an agent can work/ })
+    .click({ timeout: 15_000 });
+  return page.getByRole("region", { name: "GitHub repo" });
+}
+
+test("FE-55: the repo is picked right in Set up for agents once GitHub is connected", async () => {
+  const { page, cleanup } = await open({ repo: false });
+  try {
+    const section = await openReadiness(page);
+    await expect(section).toContainText("@tester");
+    await expect(section).toContainText(
+      "It does not link the repo to the board.",
+    );
+    // The same picker as Pull requests: an owner, then its repositories.
+    await expect(
+      section.getByRole("combobox", { name: "Owner" }),
+    ).toContainText("acme");
+    await section.getByRole("button", { name: /widgets/ }).click();
+    await expect(section.getByTestId("readiness-github-repo-name")).toHaveText(
+      REPO,
+    );
+    await expect(section.getByRole("button", { name: "Change" })).toBeVisible();
+    // Linked for the project, so Pull requests opens straight on its list.
+    await page.keyboard.press("Escape");
+    await gotoPulls(page);
+    await expect(page.getByText("chore(deps): bump @types/node")).toBeVisible({
+      timeout: 15_000,
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("FE-55: with no GitHub connection Set up for agents sends you to connect", async () => {
+  const { page, cleanup } = await open({ token: false, repo: false });
+  try {
+    const section = await openReadiness(page);
+    await expect(section).toContainText("Connect GitHub to pick");
+    await expect(section.getByRole("combobox", { name: "Owner" })).toHaveCount(
+      0,
+    );
+    await section.getByRole("link", { name: "Connect GitHub" }).click();
+    await expect(section).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", { name: "Connect GitHub" }),
+    ).toBeVisible({ timeout: 15_000 });
+  } finally {
+    await cleanup();
+  }
+});

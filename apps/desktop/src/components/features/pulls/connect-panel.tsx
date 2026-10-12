@@ -5,9 +5,9 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
+import { RepoPicker } from "#/components/shared/pulls/repo-picker";
 import { Button } from "#/components/ui/button";
 import { usePulls } from "#/stores/pulls";
-import { RepoPicker } from "./repo-picker";
 
 /**
  * The two steps before there is anything to list: connect GitHub, then say

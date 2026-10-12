@@ -15,6 +15,7 @@ import {
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { useReadiness } from "#/stores/readiness";
+import { ReadinessGithubRepo } from "./readiness-github-repo";
 
 /**
  * Beside the project switcher: whether the open project's folder is ready for
@@ -74,6 +75,11 @@ export function ReadinessIndicator() {
                 setOpen(false);
                 setFix(next);
               }}
+              onNavigate={() => setOpen(false)}
+            />
+            {/* The project's GitHub repo, picked here (FE-55/D1). */}
+            <ReadinessGithubRepo
+              slug={slug}
               onNavigate={() => setOpen(false)}
             />
           </PopoverContent>

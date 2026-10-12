@@ -121,13 +121,24 @@ function ConfigureButton({ owner }: { owner: string | null }) {
   );
 }
 
-export function RepoPicker({ suggestion }: { suggestion: RepoRef | null }) {
+export function RepoPicker({
+  suggestion,
+  onLink,
+}: {
+  suggestion: RepoRef | null;
+  /**
+   * Link the picked `owner/repo` for a project other than the one the pull
+   * requests screen has open (FE-55). Defaults to that screen's own link.
+   */
+  onLink?: (raw: string) => Promise<{ error?: string }>;
+}) {
   const options = usePulls((state) => state.repoOptions);
   const loading = usePulls((state) => state.repoOptionsLoading);
   const capped = usePulls((state) => state.repoOptionsCapped);
   const listError = usePulls((state) => state.repoOptionsError);
   const loadRepoOptions = usePulls((state) => state.loadRepoOptions);
-  const link = usePulls((state) => state.link);
+  const storeLink = usePulls((state) => state.link);
+  const link = onLink ?? storeLink;
 
   const [query, setQuery] = useState("");
   const [owner, setOwner] = useState<string | null>(null);
