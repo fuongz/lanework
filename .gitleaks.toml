@@ -1,0 +1,10 @@
+# Secret scanning for the public repo (INF-04): gitleaks' default rules, minus
+# the fake secret a redaction test plants on purpose.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake secret the agent-setup spec plants to prove redact() strips it"
+condition = "AND"
+paths = ['''apps/desktop/tests/agent-setup\.spec\.ts''']
+regexes = ['''fe40plainsecret7d1c''']

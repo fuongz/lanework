@@ -1,7 +1,7 @@
 // The gate on the ported reader — the one that catches a drift from the board.
 //
 // ⚠️ Two halves, and both are needed. The first runs the reader over a
-// snapshot of this repo's own `.agents/reviews/**` (see `REPO`): real cards, written by the Lanework board
+// trimmed snapshot of this repo's own `.agents/reviews/**` (see `REPO`): real cards, written by the Lanework board
 // itself, so a rule this port got wrong shows up as a real card read wrongly
 // rather than as a fixture disagreeing with a fixture. The second states the
 // rules that live data does not currently exercise — a fenced checkbox, a
@@ -29,15 +29,19 @@ import {
 import { scanTaskBlocks } from "../electron/main/workspaces/review-scan";
 
 /**
- * A frozen copy of THIS repo's own `.agents/reviews/**` as it stood when the
- * board moved to the cloud (BE-09) — `apps/desktop` is the cwd.
+ * THIS repo's own `.agents/reviews/**` as it stood when the board moved to the
+ * cloud (BE-09), trimmed for the public repo (INF-04) — `apps/desktop` is the
+ * cwd.
  *
- * ⚠️ A snapshot, not the live folder: the repo no longer keeps its cards on
- * disk, so reading `../..` would find nothing. The files are still real cards
- * the board wrote, which is the whole point of the first test below. Do not
- * "tidy" them — a hand-edited fixture stops being evidence.
+ * ⚠️ Trimmed, not invented: front matter, headings, the How-to-review
+ * preamble, every checkbox with its handle, tick, group, `*(dropped)*` /
+ * `*(recommended)*` marker and note were kept; only the prose and the words of
+ * each item and note were replaced. The reader extracts the same lanes, keys,
+ * ticks, groups and notes from these as it did from the originals, which is
+ * the whole point of the first test below. Do not "tidy" them further — a
+ * hand-edited fixture stops being evidence.
  */
-const REPO = join(process.cwd(), "tests", "fixtures", "review-repo");
+const REPO = join(process.cwd(), "tests", "fixtures", "review-cards");
 
 test("this repo's own cards read as import records", async () => {
   const plan = await planMigration(REPO);
