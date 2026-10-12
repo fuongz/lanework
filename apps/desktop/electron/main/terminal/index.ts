@@ -22,6 +22,7 @@ import {
   type BackgroundTask,
   type BackgroundTaskOutput,
   type CardBrief,
+  type ClaudeUsage,
   type CodexUsage,
   clampGeometry,
   isAgentSessionId,
@@ -69,6 +70,11 @@ import {
   stopBackgroundTask,
   taskOutputRequest,
 } from "./background-tasks";
+import {
+  type ClaudeOAuthOptions,
+  createClaudeOAuthUsage,
+  readClaudeCredentialFile,
+} from "./claude-oauth-usage";
 import { CLAUDE_USAGE_FILE, readClaudeQuota } from "./claude-usage";
 import { type CodexDirs, readCodexUsage } from "./codex-usage";
 import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
@@ -348,20 +354,24 @@ let lastClaudeIdentity: string | null | undefined;
 let lastClaudeMode: string | undefined;
 let claudeAccountChangedAt = 0;
 let quotaWatch: FSWatcher | null = null;
+/** Tells every listed workspace to ask `codexUsage` again (FE-46, FE-53). */
+function notifyClaudeUsage(): void {
+  for (const [workspace, keys] of listedKeys) {
+    const id = [...keys].find((key) => key.startsWith("claude:"))?.slice(7);
+    broadcast(terminalChannels.agentWritten, {
+      workspace,
+      agent: "claude",
+      id: id ?? "00000000-0000-4000-8000-000000000000",
+      at: Date.now(),
+    } satisfies AgentWrite);
+  }
+}
 function watchClaudeQuota(): void {
   if (quotaWatch) return;
   try {
     quotaWatch = watch(appHomeDir(), (_event, file) => {
       if (file?.toString() !== CLAUDE_USAGE_FILE) return;
-      for (const [workspace, keys] of listedKeys) {
-        const id = [...keys].find((key) => key.startsWith("claude:"))?.slice(7);
-        broadcast(terminalChannels.agentWritten, {
-          workspace,
-          agent: "claude",
-          id: id ?? "00000000-0000-4000-8000-000000000000",
-          at: Date.now(),
-        } satisfies AgentWrite);
-      }
+      notifyClaudeUsage();
     });
     quotaWatch.on("error", () => {
       quotaWatch?.close();
@@ -371,6 +381,131 @@ function watchClaudeQuota(): void {
   } catch {
     /* A later read retries once the application home exists. */
   }
+}
+
+/**
+ * Where main reads Claude's OAuth usage from (FE-53). ⚠️ A test seam guarded
+ * the way `LANEWORK_TEST_USER_DATA` is: under test, the credential comes only
+ * from `LANEWORK_TEST_CLAUDE_CREDENTIALS` and goes only to a loopback
+ * `LANEWORK_TEST_CLAUDE_OAUTH_URL` — never the Keychain or Anthropic, so a
+ * spec can neither prompt for nor spend the developer's own login.
+ */
+function claudeOAuthOptions(): ClaudeOAuthOptions {
+  if (app.isPackaged || !process.env.LANEWORK_TEST_USER_DATA) return {};
+  const file = process.env.LANEWORK_TEST_CLAUDE_CREDENTIALS;
+  const url = process.env.LANEWORK_TEST_CLAUDE_OAUTH_URL;
+  const loopback = Boolean(url && /^http:\/\/127\.0\.0\.1:\d+\//.test(url));
+  return {
+    url: loopback ? url : "http://127.0.0.1:9/",
+    readCredential: async () =>
+      file && loopback ? readClaudeCredentialFile(file) : null,
+  };
+}
+let claudeOAuthCache: ReturnType<typeof createClaudeOAuthUsage> | null = null;
+function claudeOAuth() {
+  claudeOAuthCache ??= createClaudeOAuthUsage(claudeOAuthOptions());
+  return claudeOAuthCache;
+}
+const CLAUDE_USAGE_POLL_MS = 5 * 60_000;
+let claudeUsageTimer: NodeJS.Timeout | null = null;
+/** Fetches without a renderer asking; tells the renderers when it changed. */
+function pollClaudeOAuth(force = false): void {
+  const before = claudeOAuth().current();
+  void claudeOAuth()
+    .read({ force })
+    .then((after) => {
+      if (after.at !== before.at || after.error !== before.error)
+        notifyClaudeUsage();
+    })
+    .catch(() => undefined);
+}
+/** On launch, then every five minutes (FE-53); the cache sets the floor. */
+function startClaudeUsagePoll(): void {
+  if (claudeUsageTimer) return;
+  pollClaudeOAuth();
+  claudeUsageTimer = setInterval(() => pollClaudeOAuth(), CLAUDE_USAGE_POLL_MS);
+  claudeUsageTimer.unref();
+}
+
+/**
+ * Claude's limits for the footer (FE-46, FE-53): the OAuth endpoint's answer
+ * or the last statusline report, whichever is newer. Each is shown only for
+ * the account that produced it; a failed fetch keeps the last good windows
+ * and says why in `error`.
+ */
+async function claudeUsageNow(force: boolean): Promise<ClaudeUsage> {
+  watchClaudeQuota();
+  startClaudeUsagePoll();
+  const testAuth =
+    !app.isPackaged &&
+    process.env.LANEWORK_TEST_USER_DATA &&
+    process.env.LANEWORK_TEST_CLAUDE_AUTH;
+  const [oauth, quota, auth] = await Promise.all([
+    claudeOAuth().read({ force }),
+    readClaudeQuota(join(appHomeDir(), CLAUDE_USAGE_FILE)),
+    testAuth
+      ? Promise.resolve().then(() => {
+          try {
+            return claudeAuthOf(JSON.parse(testAuth));
+          } catch {
+            return claudeAuthOf(null);
+          }
+        })
+      : claudeAuth(),
+  ]);
+  const mode = `${auth.loggedIn}:${auth.authMode}`;
+  if (
+    (lastClaudePlan !== undefined && lastClaudePlan !== auth.plan) ||
+    (lastClaudeIdentity !== undefined &&
+      lastClaudeIdentity !== auth.identity) ||
+    (lastClaudeMode !== undefined && lastClaudeMode !== mode)
+  ) {
+    claudeAccountChangedAt = Date.now();
+    // The cached answer is the previous account's: fetch the new one's.
+    pollClaudeOAuth(true);
+  }
+  lastClaudePlan = auth.plan;
+  lastClaudeIdentity = auth.identity;
+  lastClaudeMode = mode;
+  const subscription =
+    auth.loggedIn &&
+    (auth.authMode === "claude.ai" || auth.authMode === "oauth_token");
+  const statusline =
+    subscription && quota.at && Date.parse(quota.at) > claudeAccountChangedAt
+      ? quota
+      : null;
+  // An API-key login has no subscription limits; an unknown login (the
+  // probe failed or timed out) does not hide what the credential answered.
+  const oauthAt = oauth.at ? Date.parse(oauth.at) : Number.NaN;
+  const fromOAuth = Boolean(
+    !(auth.loggedIn && !subscription) &&
+      (oauth.primary || oauth.secondary) &&
+      oauthAt > claudeAccountChangedAt &&
+      (!statusline?.at || oauthAt >= Date.parse(statusline.at)),
+  );
+  const windows = fromOAuth
+    ? {
+        primary: oauth.primary,
+        secondary: oauth.secondary,
+        at: oauth.at,
+        stale: Date.now() - oauthAt > 600_000,
+      }
+    : (statusline ?? {
+        primary: null,
+        secondary: null,
+        at: null,
+        stale: false,
+      });
+  return {
+    ...windows,
+    plan: auth.plan,
+    authMode: auth.authMode,
+    source: fromOAuth ? "oauth" : statusline ? "statusline" : null,
+    fetchedAt: oauth.fetchedAt,
+    // A fresh statusline report answers for the account even when the
+    // endpoint could not.
+    error: !fromOAuth && statusline && !statusline.stale ? null : oauth.error,
+  };
 }
 
 /**
@@ -616,6 +751,8 @@ async function confirmQuit(): Promise<boolean> {
 }
 
 export function registerTerminal(devUrl?: string): void {
+  // Claude's limits are known before the footer first asks (FE-53).
+  startClaudeUsagePoll();
   // ⚠️ Not `handle()`: the port goes back to THIS sender, so the handler
   // needs the event. The sender check is the same one `handle()` applies.
   ipcMain.handle(terminalChannels.connect, (event) => {
@@ -789,51 +926,21 @@ export function registerTerminal(devUrl?: string): void {
       const ids = [...listed]
         .filter((entry) => entry.startsWith("codex:"))
         .map((entry) => entry.slice("codex:".length));
-      watchClaudeQuota();
-      const testAuth =
-        !app.isPackaged &&
-        process.env.LANEWORK_TEST_USER_DATA &&
-        process.env.LANEWORK_TEST_CLAUDE_AUTH;
-      const [usage, quota, auth] = await Promise.all([
+      const [usage, claude] = await Promise.all([
         readCodexUsage(codexDirs(), ids),
-        readClaudeQuota(join(appHomeDir(), CLAUDE_USAGE_FILE)),
-        testAuth
-          ? Promise.resolve().then(() => {
-              try {
-                return claudeAuthOf(JSON.parse(testAuth));
-              } catch {
-                return claudeAuthOf(null);
-              }
-            })
-          : claudeAuth(),
+        claudeUsageNow(false),
       ]);
-      const mode = `${auth.loggedIn}:${auth.authMode}`;
-      if (
-        (lastClaudePlan !== undefined && lastClaudePlan !== auth.plan) ||
-        (lastClaudeIdentity !== undefined &&
-          lastClaudeIdentity !== auth.identity) ||
-        (lastClaudeMode !== undefined && lastClaudeMode !== mode)
-      )
-        claudeAccountChangedAt = Date.now();
-      lastClaudePlan = auth.plan;
-      lastClaudeIdentity = auth.identity;
-      lastClaudeMode = mode;
-      const subscription =
-        auth.loggedIn &&
-        (auth.authMode === "claude.ai" || auth.authMode === "oauth_token");
-      const compatible =
-        subscription &&
-        (!quota.at || Date.parse(quota.at) > claudeAccountChangedAt);
-      return {
-        ...usage,
-        claude: {
-          ...(compatible
-            ? quota
-            : { primary: null, secondary: null, at: null, stale: false }),
-          plan: auth.plan,
-          authMode: auth.authMode,
-        },
-      };
+      return { ...usage, claude };
+    },
+  );
+  // ⚠️ No arguments, and only the safe `ClaudeUsage` comes back (FE-53): the
+  // credential is read and used inside main, never sent to a renderer.
+  handle(
+    terminalChannels.refreshClaudeUsage,
+    devUrl,
+    async (args): Promise<ClaudeUsage | null> => {
+      if (args.length !== 0) throw new Error("No arguments are accepted");
+      return claudeUsageNow(true);
     },
   );
   // ⚠️ By ids alone, as a sub-agent is read (FE-38): `factsRequest` refuses

@@ -26,7 +26,6 @@ import { useSession } from "#/stores/session";
 import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
 import { BranchSwitcher } from "./branch-switcher";
-import { ClaudeQuotaBar } from "./claude-usage";
 import { ProjectSwitcher } from "./project-switcher";
 import { ReadinessIndicator } from "./readiness-indicator";
 
@@ -353,7 +352,6 @@ export function AppSidebar() {
 
       <div className="mt-2 shrink-0 pt-2 pb-2.5">
         <LocalModeRail />
-        <ClaudeQuotaBar />
         <CodexQuotaBar />
         <Link to="/settings" className={LONE_ROW}>
           <HugeiconsIcon

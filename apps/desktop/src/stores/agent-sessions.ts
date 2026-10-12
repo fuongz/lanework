@@ -52,7 +52,19 @@ interface AgentSessionsState {
    * or when no turn ever reported one.
    */
   codexQuota: CodexQuota | null;
+  /**
+   * The Claude account's usage (FE-46, FE-53): from the listings' usage read
+   * and from `refreshClaudeUsage`, whichever answered last. Null until read,
+   * or when main has nothing to show at all.
+   */
   claudeUsage: ClaudeUsage | null;
+  /** A `refreshClaudeUsage` is in flight — the strip's ⟳ spins (FE-53). */
+  claudeRefreshing: boolean;
+  /**
+   * Fetch Claude's usage now, past main's cache (FE-53). Concurrent calls
+   * share one request. Never throws: a refused call keeps what was shown.
+   */
+  refreshClaudeUsage: () => Promise<void>;
   /** Each workspace's Codex conversations' goals, by thread id (FE-41/D4). */
   codexGoals: Record<string, Record<string, CodexGoal>>;
   /** Read both again, for `workspace`'s listed conversations (FE-41). */
@@ -155,6 +167,22 @@ const usageLater = new Map<string, ReturnType<typeof setTimeout>>();
 /** As `latest`, for the usage reads (FE-41). */
 const usageLatest = new Map<string, number>();
 
+/** The `refreshClaudeUsage` in flight, so a second click joins it (FE-53). */
+let claudeRefresh: Promise<void> | null = null;
+/**
+ * Bumped by every refresh answer: a usage read that started before it is
+ * older than what the refresh brought, and leaves Claude's part alone.
+ */
+let claudeAnswers = 0;
+
+/**
+ * Whether `next` comes from an older fetch than `shown` (FE-53): `fetchedAt`
+ * is when main last tried, so a usage read must not undo a newer refresh.
+ * Without one, an answer counts as the oldest.
+ */
+const olderAttempt = (next: ClaudeUsage | null, shown: ClaudeUsage | null) =>
+  (next?.fetchedAt ?? 0) < (shown?.fetchedAt ?? 0);
+
 /** Whether two serializable answers say the same, so the rail need not redraw. */
 const sameJson = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
@@ -166,7 +194,31 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   open: {},
   codexQuota: null,
   claudeUsage: null,
+  claudeRefreshing: false,
   codexGoals: {},
+
+  refreshClaudeUsage: () => {
+    const surface = window.desktop?.terminal;
+    if (!surface?.refreshClaudeUsage) return Promise.resolve();
+    if (claudeRefresh) return claudeRefresh;
+    set({ claudeRefreshing: true });
+    claudeRefresh = (async () => {
+      try {
+        const usage = await surface.refreshClaudeUsage();
+        claudeAnswers += 1;
+        set((state) =>
+          sameJson(state.claudeUsage, usage) ? {} : { claudeUsage: usage },
+        );
+      } catch {
+        // Main answers a failure as `error` on the last known values; a
+        // refused call (no handler yet, a closing window) keeps what was shown.
+      } finally {
+        claudeRefresh = null;
+        set({ claudeRefreshing: false });
+      }
+    })();
+    return claudeRefresh;
+  },
 
   setOpen: (session, open) =>
     set((state) => ({ open: { ...state.open, [agentKey(session)]: open } })),
@@ -330,6 +382,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     if (!surface) return;
     const mine = (usageLatest.get(workspace) ?? 0) + 1;
     usageLatest.set(workspace, mine);
+    const answers = claudeAnswers;
     try {
       const usage = await surface.codexUsage(workspace);
       if (usageLatest.get(workspace) !== mine) return;
@@ -338,9 +391,13 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
         const quota = sameJson(state.codexQuota, usage.quota)
           ? state.codexQuota
           : usage.quota;
-        const claude = sameJson(state.claudeUsage, usage.claude ?? null)
-          ? state.claudeUsage
-          : (usage.claude ?? null);
+        const claude =
+          answers !== claudeAnswers ||
+          claudeRefresh ||
+          olderAttempt(usage.claude ?? null, state.claudeUsage) ||
+          sameJson(state.claudeUsage, usage.claude ?? null)
+            ? state.claudeUsage
+            : (usage.claude ?? null);
         const goals = sameJson(state.codexGoals[workspace], usage.goals)
           ? state.codexGoals
           : { ...state.codexGoals, [workspace]: usage.goals };

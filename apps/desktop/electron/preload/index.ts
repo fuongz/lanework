@@ -351,6 +351,8 @@ function createTerminal(): DesktopTerminalApi {
       subscribe(terminalChannels.agentActivity, listener),
     codexUsage: (workspace) =>
       ipcRenderer.invoke(terminalChannels.codexUsage, workspace),
+    refreshClaudeUsage: () =>
+      ipcRenderer.invoke(terminalChannels.refreshClaudeUsage),
     agentFacts: (workspace, agent, id) =>
       ipcRenderer.invoke(terminalChannels.agentFacts, workspace, agent, id),
     agentUsage: (workspace) =>

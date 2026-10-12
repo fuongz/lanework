@@ -7,6 +7,15 @@ import {
   claudeAuthOf,
   createClaudeAuthProbe,
 } from "../electron/main/terminal/agents";
+import {
+  claudeCredentialOf,
+  claudeKeychainService,
+  claudeOAuthUsageOf,
+  createClaudeOAuthUsage,
+  fetchClaudeOAuthUsage,
+  readClaudeCredential,
+  readClaudeCredentialFile,
+} from "../electron/main/terminal/claude-oauth-usage";
 import { claudeStatuslineArgs } from "../electron/main/terminal/claude-statusline";
 import {
   claudeQuotaOf,
@@ -176,4 +185,195 @@ test("Claude launch and resume receive process settings with the production host
   } finally {
     sessions.killAll();
   }
+});
+
+const OAUTH_BODY = {
+  five_hour: { utilization: 42.5, resets_at: "2026-10-12T15:00:00.000Z" },
+  seven_day: { utilization: 130, resets_at: null },
+  seven_day_opus: { utilization: 1 },
+  account_email: "private@example.com",
+};
+const SECRET = "sk-ant-oat01-must-never-leave-main";
+const fakeFetch = (
+  answer: (url: string, init: RequestInit) => Promise<Response>,
+) => answer as unknown as typeof fetch;
+
+test("FE-53: OAuth usage keeps only the two windows from Claude's answer", async () => {
+  expect(claudeOAuthUsageOf(OAUTH_BODY)).toEqual({
+    primary: {
+      usedPercent: 42.5,
+      windowMinutes: 300,
+      resetsAt: Date.parse("2026-10-12T15:00:00.000Z"),
+    },
+    secondary: { usedPercent: 100, windowMinutes: 10080, resetsAt: null },
+  });
+  expect(claudeOAuthUsageOf({ five_hour: { utilization: "1" } })).toBeNull();
+  expect(claudeOAuthUsageOf(null)).toBeNull();
+  expect(
+    claudeCredentialOf(
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: ` ${SECRET} `,
+          refreshToken: "r",
+          expiresAt: 1900000000000,
+        },
+      }),
+    ),
+  ).toEqual({ token: SECRET, expiresAt: 1900000000000 });
+  expect(claudeCredentialOf('{"accessToken":"  "}')).toBeNull();
+  expect(claudeCredentialOf("not json")).toBeNull();
+  expect(claudeKeychainService("/tmp/profile")).toBe(
+    "Claude Code-credentials-902e721c",
+  );
+  expect(claudeKeychainService(null)).toBe("Claude Code-credentials");
+
+  const home = await mkdtemp(join(tmpdir(), "lanew-claude-oauth-"));
+  await mkdir(join(home, ".claude"), { recursive: true });
+  const file = join(home, ".claude", ".credentials.json");
+  const before = JSON.stringify({
+    claudeAiOauth: { accessToken: SECRET, expiresAt: Date.now() + 60_000 },
+  });
+  await writeFile(file, before);
+  expect(
+    await readClaudeCredential({ configDir: null, home, platform: "linux" }),
+  ).toEqual({ token: SECRET, expiresAt: expect.any(Number) });
+  const calls: { url: string; headers: Record<string, string> }[] = [];
+  const result = await fetchClaudeOAuthUsage({
+    readCredential: () => readClaudeCredentialFile(file),
+    url: "https://usage.test/api/oauth/usage",
+    fetch: fakeFetch(async (url, init) => {
+      calls.push({ url, headers: init.headers as Record<string, string> });
+      return new Response(JSON.stringify(OAUTH_BODY), { status: 200 });
+    }),
+  });
+  expect(result.ok).toBe(true);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].url).toBe("https://usage.test/api/oauth/usage");
+  expect(calls[0].headers.Authorization).toBe(`Bearer ${SECRET}`);
+  expect(calls[0].headers["anthropic-beta"]).toBe("oauth-2025-04-20");
+  // Read-only: the credential file is exactly as Claude wrote it.
+  expect(await readFile(file, "utf8")).toBe(before);
+});
+
+test("FE-53: an expired token is reported without a request or a refresh", async () => {
+  const home = await mkdtemp(join(tmpdir(), "lanew-claude-expired-"));
+  const file = join(home, ".credentials.json");
+  const before = JSON.stringify({
+    claudeAiOauth: {
+      accessToken: SECRET,
+      refreshToken: "refresh-must-stay",
+      expiresAt: Date.now() - 1,
+    },
+  });
+  await writeFile(file, before);
+  let calls = 0;
+  const counting = fakeFetch(async () => {
+    calls++;
+    return new Response("{}");
+  });
+  const usage = createClaudeOAuthUsage({
+    readCredential: () => readClaudeCredentialFile(file),
+    fetch: counting,
+  });
+  const snapshot = await usage.read({ force: true });
+  expect(snapshot.error).toBe("expired");
+  expect(snapshot.primary).toBeNull();
+  expect(typeof snapshot.fetchedAt).toBe("number");
+  expect(calls).toBe(0);
+  expect(await readFile(file, "utf8")).toBe(before);
+  // No credential at all is `unavailable`, and still no request.
+  const none = createClaudeOAuthUsage({
+    readCredential: async () => null,
+    fetch: counting,
+  });
+  expect((await none.read()).error).toBe("unavailable");
+  expect(calls).toBe(0);
+});
+
+test("FE-53: 401, 403 and a timeout keep the last good snapshot", async () => {
+  let now = 1_000_000;
+  let answer: () => Promise<Response> = async () =>
+    new Response(JSON.stringify(OAUTH_BODY));
+  let calls = 0;
+  const usage = createClaudeOAuthUsage({
+    readCredential: async () => ({ token: SECRET, expiresAt: null }),
+    fetch: fakeFetch(() => {
+      calls++;
+      return answer();
+    }),
+    now: () => now,
+    timeoutMs: 100,
+    minIntervalMs: 60_000,
+    forceIntervalMs: 5_000,
+  });
+  const good = await usage.read();
+  expect(good.error).toBeNull();
+  expect(good.primary?.usedPercent).toBe(42.5);
+  expect(good.at).toBe(new Date(1_000_000).toISOString());
+  // Inside the automatic interval: answered from the cache.
+  now += 30_000;
+  expect((await usage.read()).fetchedAt).toBe(1_000_000);
+  expect(calls).toBe(1);
+  for (const [status, error] of [
+    [401, "expired"],
+    [403, "unavailable"],
+    [500, "failed"],
+  ] as const) {
+    answer = async () => new Response("{}", { status });
+    now += 5_000;
+    // An explicit refresh skips the automatic interval.
+    const failed = await usage.read({ force: true });
+    expect(failed.error).toBe(error);
+    expect(failed.primary).toEqual(good.primary);
+    expect(failed.secondary).toEqual(good.secondary);
+    expect(failed.at).toBe(good.at);
+    expect(failed.fetchedAt).toBe(now);
+  }
+  // ...but not its own debounce.
+  const before = calls;
+  now += 1_000;
+  await usage.read({ force: true });
+  expect(calls).toBe(before);
+  // A request that never answers times out and keeps the snapshot too.
+  answer = () => new Promise<Response>(() => {});
+  now += 5_000;
+  const started = Date.now();
+  const timedOut = await usage.read({ force: true });
+  expect(Date.now() - started).toBeLessThan(2_000);
+  expect(timedOut.error).toBe("failed");
+  expect(timedOut.primary).toEqual(good.primary);
+  // A body that is not usage is a failure, not zero usage.
+  answer = async () => new Response("<html>", { status: 200 });
+  now += 5_000;
+  expect((await usage.read({ force: true })).error).toBe("failed");
+  expect(usage.current().primary).toEqual(good.primary);
+});
+
+test("FE-53: the token never reaches a renderer", async () => {
+  const usage = createClaudeOAuthUsage({
+    readCredential: async () => ({ token: SECRET, expiresAt: null }),
+    fetch: fakeFetch(
+      async () =>
+        new Response(JSON.stringify({ ...OAUTH_BODY, access_token: SECRET })),
+    ),
+  });
+  const ok = await usage.read();
+  expect(JSON.stringify(ok)).not.toContain(SECRET);
+  expect(JSON.stringify(ok)).not.toContain("private@example.com");
+  expect(Object.keys(ok).sort()).toEqual([
+    "at",
+    "error",
+    "fetchedAt",
+    "primary",
+    "secondary",
+  ]);
+  const failing = createClaudeOAuthUsage({
+    readCredential: async () => ({ token: SECRET, expiresAt: null }),
+    fetch: fakeFetch(async () => {
+      throw new Error(`network failed for ${SECRET}`);
+    }),
+  });
+  const failed = await failing.read();
+  expect(failed.error).toBe("failed");
+  expect(JSON.stringify(failed)).not.toContain(SECRET);
 });

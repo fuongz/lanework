@@ -567,6 +567,35 @@ export interface ClaudeQuotaWindow {
 }
 
 /**
+ * Where Claude usage came from (FE-53): `oauth` is Claude's own usage endpoint,
+ * read by main with the CLI's credential; `statusline` is the last
+ * `rate_limits` a Claude statusline reported.
+ */
+export const CLAUDE_USAGE_SOURCES = ["oauth", "statusline"] as const;
+export type ClaudeUsageSource = (typeof CLAUDE_USAGE_SOURCES)[number];
+
+/**
+ * Why the newest fetch did not produce fresh usage (FE-53). The values shown
+ * alongside it, if any, are the last known ones.
+ * - `expired`: the Claude login has expired — sign in to Claude again.
+ * - `unavailable`: there is no Claude login or no source to read.
+ * - `failed`: the request or its answer failed (network, rate limit, shape).
+ */
+export const CLAUDE_USAGE_ERRORS = [
+  "expired",
+  "unavailable",
+  "failed",
+] as const;
+export type ClaudeUsageError = (typeof CLAUDE_USAGE_ERRORS)[number];
+
+export function isClaudeUsageError(value: unknown): value is ClaudeUsageError {
+  return (
+    typeof value === "string" &&
+    (CLAUDE_USAGE_ERRORS as readonly string[]).includes(value)
+  );
+}
+
+/**
  * Safe, serialized Claude account usage for the footer (FE-46).
  * Only account metadata and usage cross to the renderer: never credentials,
  * raw auth responses, email addresses, or tokens. Missing windows do not
@@ -585,6 +614,15 @@ export interface ClaudeUsage {
   at: string | null;
   /** The cache is older than the freshness threshold; values are last known. */
   stale: boolean;
+  /** Which source the windows came from (FE-53); absent/null when none did. */
+  source?: ClaudeUsageSource | null;
+  /**
+   * When main last tried to fetch usage, epoch ms, success or not (FE-53);
+   * `at` stays the time of the last successful fetch.
+   */
+  fetchedAt?: number | null;
+  /** Why the newest fetch failed (FE-53); absent/null when it succeeded. */
+  error?: ClaudeUsageError | null;
 }
 
 /** What `codexUsage` answers for a workspace (FE-41, FE-46). */
@@ -665,6 +703,8 @@ export const terminalChannels = {
   agentActivity: "terminal:agent-activity",
   /** The Codex account's usage, and its conversations' goals (FE-41). */
   codexUsage: "terminal:codex-usage",
+  /** Fetch Claude account usage now, past the cache (FE-53). */
+  refreshClaudeUsage: "terminal:refresh-claude-usage",
   /** Main → renderer: a View-menu command. */
   command: "terminal:command",
 } as const;
@@ -808,6 +848,14 @@ export interface DesktopTerminalApi {
    * main picks the files and the threads; a page names neither.
    */
   codexUsage: (workspace: string) => Promise<CodexUsage>;
+  /**
+   * Fetch Claude account usage now, skipping the cache (FE-53) — the popover's
+   * refresh button. Takes nothing: main reads the credential itself and only
+   * the safe `ClaudeUsage` comes back, never a token, email or raw body. Null
+   * when there is nothing to show at all; a failed fetch answers the last
+   * known values with `error` set.
+   */
+  refreshClaudeUsage: () => Promise<ClaudeUsage | null>;
   /**
    * One conversation's numbers (FE-38). By ids only, as `agentSubagent`:
    * main builds the path inside the CLI's own folder for `workspace`.

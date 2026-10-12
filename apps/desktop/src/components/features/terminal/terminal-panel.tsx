@@ -8,7 +8,7 @@ import {
 } from "@dnd-kit/core";
 import { Add01Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useRef } from "react";
+import { type ReactNode, useCallback, useRef } from "react";
 import {
   TERMINAL_LIMITS,
   type TerminalKind,
@@ -50,7 +50,14 @@ const DRAG_PX = 6;
  * or one is starting (`terminalShown`), and closing the last tab folds it
  * away — so there is no "no terminal" state to draw here.
  */
-export function TerminalPanel({ workspace }: { workspace: string }) {
+export function TerminalPanel({
+  workspace,
+  usage,
+}: {
+  workspace: string;
+  /** What sits left of + and hide: Claude's usage strip (FE-53). */
+  usage?: ReactNode;
+}) {
   const sessions = useTerminal(
     (state) => state.sessions[workspace] ?? NO_SESSIONS,
   );
@@ -133,6 +140,7 @@ export function TerminalPanel({ workspace }: { workspace: string }) {
             ))}
           </ul>
         </DndContext>
+        {usage}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={

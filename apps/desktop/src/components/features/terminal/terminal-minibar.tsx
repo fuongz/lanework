@@ -3,6 +3,7 @@ import {
   ComputerTerminal01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { ReactNode } from "react";
 import { Badge } from "#/components/ui/badge";
 import { useTerminal } from "#/stores/terminal";
 
@@ -18,7 +19,14 @@ import { useTerminal } from "#/stores/terminal";
  * ⚠️ A start that failed lands here too, and says why: there is no empty
  * panel left open to carry the error (FE-19).
  */
-export function TerminalMinibar({ workspace }: { workspace: string }) {
+export function TerminalMinibar({
+  workspace,
+  usage,
+}: {
+  workspace: string;
+  /** What sits at the bar's right end: Claude's usage strip (FE-53). */
+  usage?: ReactNode;
+}) {
   const count = useTerminal((state) => state.sessions[workspace]?.length ?? 0);
   const error = useTerminal((state) => state.error);
   const toggle = useTerminal((state) => state.toggle);
@@ -58,6 +66,7 @@ export function TerminalMinibar({ workspace }: { workspace: string }) {
           {error}
         </p>
       )}
+      <div className="ml-auto flex min-w-0 items-center">{usage}</div>
     </div>
   );
 }
