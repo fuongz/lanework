@@ -6,10 +6,6 @@
 description = "Desktop app in dev: renderer HMR, main/preload restart"
 run = "bun run dev"
 
-[tasks."dev:landing"]
-description = "Landing site, locally"
-run = "bun run dev:landing"
-
 [tasks.build]
 description = "Build the desktop app bundle (dist/)"
 run = "bun run build"

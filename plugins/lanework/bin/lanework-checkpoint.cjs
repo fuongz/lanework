@@ -51,7 +51,6 @@ var import_node_crypto2 = require("node:crypto");
 var import_node_fs3 = require("node:fs");
 var import_node_os4 = require("node:os");
 var import_node_path3 = require("node:path");
-
 // packages/protocol/src/auth.ts
 var LOOPBACK_CALLBACK_PATH = "/oauth/callback";
 // packages/protocol/src/checkpoints.ts

@@ -254,15 +254,6 @@ test("fixes append or add one key, and never rewrite what is there", () => {
   expect(() => applyFix("mcp-json", "[1, 2]")).toThrow("is not a JSON object");
 });
 
-test("the notes match the snippet the docs tell people to paste", async () => {
-  const page = await readFile(
-    new URL("../../landing/src/routes/docs.mcp.tsx", import.meta.url),
-    "utf8",
-  );
-  const match = /const AGENT_NOTES = `((?:\\.|[^`\\])*)`;/.exec(page);
-  expect(match?.[1]?.replace(/\\`/g, "`")).toBe(AGENT_NOTES);
-});
-
 // ── The app ─────────────────────────────────────────────────────────────────
 
 test.describe("in the app", () => {

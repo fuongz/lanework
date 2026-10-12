@@ -6,6 +6,7 @@
 // server that implements it does not. When a route changes shape, change it
 // here in the same commit.
 
+export * from "./agent-notes";
 export * from "./auth";
 export * from "./boards";
 export * from "./checkpoints";

@@ -1,7 +1,7 @@
 # Contributing
 
-Thanks for helping with Lanework. This repository holds the **desktop app**,
-the landing page and the Claude Code plugin. It is licensed under the
+Thanks for helping with Lanework. This repository holds the **desktop app**
+and the Claude Code plugin. It is licensed under the
 [MIT license](LICENSE); the name and logo are covered by
 [TRADEMARKS.md](TRADEMARKS.md).
 
@@ -38,8 +38,7 @@ LANEWORK_API_URL=http://127.0.0.1:8787 bun run dev
 bun run gate:public
 ```
 
-It builds the desktop app and the landing page, runs Biome and the layout
-audit, typechecks both, and checks that the committed plugin bundle is current
+It builds the desktop app, runs Biome and the layout audit, typechecks it, and checks that the committed plugin bundle is current
 (`bun run build:plugin` rebuilds it). It needs nothing from the backend.
 
 Format only the files you changed (`bunx biome check --write <files>`), not
