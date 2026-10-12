@@ -1,7 +1,8 @@
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { Onboarding } from "#/components/features/welcome/onboarding";
 import { SignIn } from "#/components/shared/auth/sign-in";
 import { StartupLoading } from "#/components/shared/loading/startup-loading";
+import { useBoard } from "#/stores/board";
 import { usePreferences } from "#/stores/preferences";
 import { useSession } from "#/stores/session";
 import { lockState } from "../../../../shared/policy";
@@ -34,8 +35,23 @@ export function AuthGate({ children }: { children: ReactNode }) {
     hydrate();
   }, [hydrate]);
 
+  // FE-52: a `local` principal ("Skip for now") is an OPEN state, decided by
+  // `lockState` like every other — there is no second rule here for it.
   const lock = session ? lockState(session) : null;
   const open = ready && hydrated && lock?.locked === false;
+
+  // FE-52/D6a: signing in from INSIDE the app (local → machine) never passes
+  // through the locked screen, so nothing remounts and the project list would
+  // keep showing only the local boards. Re-read it when who-we-are changes
+  // under an open app; the cloud projects join the local ones there.
+  const kind = session?.principal.kind;
+  const lastKind = useRef(kind);
+  useEffect(() => {
+    if (lastKind.current === kind) return;
+    const was = lastKind.current;
+    lastKind.current = kind;
+    if (open && was !== undefined) void useBoard.getState().hydrate();
+  }, [kind, open]);
 
   // ⚠️ Reaching the app counts as having been onboarded, even for a machine
   // that never walked the flow — a credential seeded from elsewhere, or an

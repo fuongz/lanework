@@ -8,12 +8,17 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { Add01Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon, CloudUploadIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Workspace } from "#/../shared/workspaces";
 import { ImportLocalDialog } from "#/components/features/workspaces/import-local-dialog";
+import {
+  isMovedWorkspace,
+  LocalBadge,
+  useSyncToCloud,
+} from "#/components/features/workspaces/local-mode";
 import { RenameProjectDialog } from "#/components/features/workspaces/rename-project-dialog";
 import { SourceFoldersDialog } from "#/components/features/workspaces/source-folders-dialog";
 import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
@@ -35,6 +40,7 @@ import {
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
+import { isLocalWorkspace, useSession } from "#/stores/session";
 import { moveSlug, ProjectRow, shiftFor } from "./project-row";
 import { SelectedProjectSection } from "./selected-project-section";
 
@@ -120,6 +126,13 @@ export function WorkspacesSection() {
   >(null);
   const [failed, setFailed] = useState<string | null>(null);
   const { paths, refresh } = useFolderPaths(workspaces);
+  // FE-52: local mode keeps every project on this machine; signing in adds the
+  // account's beside them (D6a), and a local one can then be moved (D7a).
+  const signedIn = useSession(
+    (state) => state.session?.principal.kind === "machine",
+  );
+  const { sync, syncing, error: syncError } = useSyncToCloud();
+  const failure = failed ?? syncError;
 
   // FE-32: the order the switcher and ⌘1…⌘9 follow. Saved by cloud id, so a
   // project the service sent no id for holds every row still.
@@ -196,7 +209,11 @@ export function WorkspacesSection() {
     <>
       <SettingsPage
         title="Projects"
-        description="Every project on your lanework account, and where each one lives on this machine."
+        description={
+          signedIn
+            ? "Every project on your lanework account, and where each one lives on this machine."
+            : "Every project on this machine. Sign in to move them to a lanework account."
+        }
         sections={[
           {
             title: "Selected project",
@@ -219,15 +236,15 @@ export function WorkspacesSection() {
             ),
           },
           {
-            title: "On this account",
+            title: signedIn ? "On this account" : "On this machine",
             keywords:
               "workspace workspaces project projects create delete remove folder folders add new",
             content: (
               <div className="flex flex-col gap-3">
-                {failed && (
+                {failure && (
                   <Alert variant="destructive">
                     <AlertTitle>That did not work</AlertTitle>
-                    <AlertDescription>{failed}</AlertDescription>
+                    <AlertDescription>{failure}</AlertDescription>
                   </Alert>
                 )}
 
@@ -247,7 +264,9 @@ export function WorkspacesSection() {
                         </p>
                       ) : workspaces.length === 0 ? (
                         <p className="text-muted-foreground px-4 py-3.5 text-sm">
-                          No projects on this account yet.
+                          {signedIn
+                            ? "No projects on this account yet."
+                            : "No projects on this machine yet."}
                         </p>
                       ) : (
                         workspaces.map((workspace, index) => {
@@ -278,10 +297,22 @@ export function WorkspacesSection() {
                                 onClick={() => setPicked(workspace.slug)}
                                 className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1 text-left outline-none focus-visible:underline"
                               >
-                                <span className="truncate text-sm font-medium">
-                                  {workspace.name}
+                                <span className="flex min-w-0 items-center gap-2">
+                                  <span className="truncate text-sm font-medium">
+                                    {workspace.name}
+                                  </span>
+                                  {/* FE-52/D6a: local boards sit in the same
+                                      list as the account's, marked. */}
+                                  {isLocalWorkspace(workspace) && (
+                                    <LocalBadge />
+                                  )}
+                                  {isMovedWorkspace(workspace) && (
+                                    <span className="text-muted-foreground shrink-0 text-xs">
+                                      moved to cloud
+                                    </span>
+                                  )}
                                   {workspace.slug === active?.slug && (
-                                    <span className="text-muted-foreground ml-2 text-xs font-normal">
+                                    <span className="text-muted-foreground shrink-0 text-xs">
                                       open
                                     </span>
                                   )}
@@ -306,6 +337,32 @@ export function WorkspacesSection() {
                                       : `${linked[0]} + ${linked.length - 1} more`}
                                 </span>
                               </button>
+                              {/* FE-52/D7a: one click moves it to the account.
+                                  Only once signed in — there is no account to
+                                  move it to before — and never twice. */}
+                              {signedIn &&
+                                isLocalWorkspace(workspace) &&
+                                !isMovedWorkspace(workspace) && (
+                                  <Button
+                                    variant="outline"
+                                    aria-label={`Sync ${workspace.name} to cloud`}
+                                    disabled={syncing !== null}
+                                    onClick={() => {
+                                      setFailed(null);
+                                      void sync(workspace);
+                                    }}
+                                  >
+                                    <HugeiconsIcon
+                                      icon={CloudUploadIcon}
+                                      strokeWidth={1.8}
+                                      data-icon="inline-start"
+                                      aria-hidden="true"
+                                    />
+                                    {syncing === workspace.id
+                                      ? "Moving…"
+                                      : "Sync to cloud"}
+                                  </Button>
+                                )}
                               {workspace.slug !== active?.slug && (
                                 <Button
                                   variant="ghost"
@@ -390,16 +447,33 @@ export function WorkspacesSection() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              Delete {confirming?.name} from your account?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              This removes the project and its cloud board from your lanework
-              account, along with the folder paths every machine has reported
-              for it. It cannot be undone from this app. Files on this machine
-              are left exactly where they are, and another machine still syncing
-              this project can put it back on its next write.
-            </AlertDialogDescription>
+            {isLocalWorkspace(confirming) ? (
+              <>
+                <AlertDialogTitle>
+                  Delete {confirming?.name} from this machine?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This removes the project and its board from this machine. It
+                  was never on an account, so nothing else holds a copy and it
+                  cannot be undone. Files in its folder are left exactly where
+                  they are.
+                </AlertDialogDescription>
+              </>
+            ) : (
+              <>
+                <AlertDialogTitle>
+                  Delete {confirming?.name} from your account?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This removes the project and its cloud board from your
+                  lanework account, along with the folder paths every machine
+                  has reported for it. It cannot be undone from this app. Files
+                  on this machine are left exactly where they are, and another
+                  machine still syncing this project can put it back on its next
+                  write.
+                </AlertDialogDescription>
+              </>
+            )}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

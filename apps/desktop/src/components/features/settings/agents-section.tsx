@@ -16,6 +16,7 @@ import { relativeTime } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
+import { useCloudFeatures } from "#/stores/session";
 import type {
   AgentHookStatus,
   HandoffStatus,
@@ -53,6 +54,7 @@ export function AgentsSection() {
   const projectKey = useWorkspaceKey(project?.slug);
   const startAgent = useAgentTerminals((state) => state.start);
   const navigate = useNavigate();
+  const { handoff } = useCloudFeatures();
 
   async function approveInCodex() {
     if (!project || !projectKey) return;
@@ -224,7 +226,11 @@ export function AgentsSection() {
       : []),
   ];
 
-  const sections: SettingsSectionSpec[] = [
+  // FE-52/D10: handing a card on is a cloud feature — the checkpoint lands on
+  // the card in the account, under this machine's credential. With "Skip for
+  // now" there is neither, so the switches go rather than sitting disabled
+  // under a reason that reads like a fault. Config files stay: they are local.
+  const handoffSections: SettingsSectionSpec[] = [
     {
       title: "Claude Code",
       rows: [
@@ -273,8 +279,9 @@ export function AgentsSection() {
       ],
     },
   ];
+  const sections: SettingsSectionSpec[] = handoff ? handoffSections : [];
 
-  if (anyOn && status)
+  if (handoff && anyOn && status)
     sections.push({
       title: "Status",
       rows: [
@@ -353,17 +360,18 @@ export function AgentsSection() {
     ],
   });
 
-  sections.push({
-    title: "Resuming",
-    rows: [
-      {
-        label: "Hand a card to another agent",
-        description:
-          "Open the card and copy its resume command, or tell any agent connected to Lanework: resume <task id>.",
-        keywords: "resume codex claude command",
-      },
-    ],
-  });
+  if (handoff)
+    sections.push({
+      title: "Resuming",
+      rows: [
+        {
+          label: "Hand a card to another agent",
+          description:
+            "Open the card and copy its resume command, or tell any agent connected to Lanework: resume <task id>.",
+          keywords: "resume codex claude command",
+        },
+      ],
+    });
 
   if (error)
     sections.push({
@@ -378,7 +386,11 @@ export function AgentsSection() {
   return (
     <SettingsPage
       title="Agents"
-      description="Let one coding agent pick up where another stopped."
+      description={
+        handoff
+          ? "Let one coding agent pick up where another stopped."
+          : "The coding agents' own settings. Handing a card from one agent to another needs a lanework account — sign in from Settings → Account."
+      }
       sections={sections}
     />
   );

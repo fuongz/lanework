@@ -16,6 +16,9 @@ export const electronBuildOptions = {
     "hook/lanework-checkpoint": "electron/hook/lanework-checkpoint.ts",
     // FE-46: process-scoped Claude statusLine wrapper, same Node as the hook.
     "statusline/claude-usage": "electron/statusline/claude-usage.ts",
+    // FE-52: the offline MCP server, same Node as the hook. Agent configs run
+    // `ELECTRON_RUN_AS_NODE=1 <app> dist/electron/mcp-local/server.cjs`.
+    "mcp-local/server": "electron/mcp-local/main.ts",
   },
   bundle: true,
   platform: "node",

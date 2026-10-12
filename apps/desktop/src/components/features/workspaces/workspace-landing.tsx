@@ -15,7 +15,8 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { useBoard } from "#/stores/board";
-import { useSession } from "#/stores/session";
+import { isLocalWorkspace, useSession } from "#/stores/session";
+import { LocalBadge } from "./local-mode";
 
 /**
  * The app's front door, which nobody should ever see for long.
@@ -31,7 +32,7 @@ export function WorkspaceLanding() {
   const identity =
     principal?.kind === "machine"
       ? `${session?.apiUrl}:${principal.userId}:${principal.machineId}`
-      : "anonymous";
+      : (principal?.kind ?? "anonymous");
   return <Landing key={identity} />;
 }
 
@@ -96,6 +97,7 @@ function Landing() {
                     className="hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-9 items-center gap-2.5 rounded-md px-2 text-[13px] outline-none focus-visible:ring-2"
                   >
                     <span className="truncate">{workspace.name}</span>
+                    {isLocalWorkspace(workspace) && <LocalBadge />}
                     <span className="text-muted-foreground ml-auto font-mono text-xs">
                       {workspace.slug}
                     </span>

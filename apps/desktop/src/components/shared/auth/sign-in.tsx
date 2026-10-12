@@ -24,6 +24,7 @@ export function SignIn({ lock, step }: { lock: Locked | null; step?: Step }) {
   const session = useSession((state) => state.session);
   const signIn = useSession((state) => state.signIn);
   const cancelSignIn = useSession((state) => state.cancelSignIn);
+  const enterLocalMode = useSession((state) => state.enterLocalMode);
 
   const heading = busy
     ? "Waiting for your browser"
@@ -112,9 +113,36 @@ export function SignIn({ lock, step }: { lock: Locked | null; step?: Step }) {
         // Full-width and taller than the app's own buttons, like the steps
         // before it: on a screen with exactly one thing to do, the button is
         // the screen rather than a control sitting on it.
-        <Button size="lg" className="h-9 w-full" onClick={() => void signIn()}>
-          {error ? "Try again" : "Sign in with your browser"}
-        </Button>
+        <div className="flex w-full flex-col items-center gap-2">
+          <Button
+            size="lg"
+            className="h-9 w-full"
+            onClick={() => void signIn()}
+          >
+            {error ? "Try again" : "Sign in with your browser"}
+          </Button>
+          {/* FE-52/D5: the app works without an account. Ghost, not a second
+              full-width button: signing in is still what most people came for,
+              and the way past it should not compete with it. Only for someone
+              signed OUT — a revoked machine has a credential on disk to deal
+              with first, and the screen is about that. */}
+          {lock.reason === "signed-out" && (
+            <>
+              <Button
+                variant="ghost"
+                size="lg"
+                className="h-9 w-full"
+                onClick={() => void enterLocalMode()}
+              >
+                Skip for now
+              </Button>
+              <p className="text-muted-foreground text-xs leading-relaxed text-balance">
+                Your projects stay on this machine. Sign in later from Settings
+                to move them to your account.
+              </p>
+            </>
+          )}
+        </div>
       ) : null}
 
       {error ? (

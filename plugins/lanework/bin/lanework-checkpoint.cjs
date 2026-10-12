@@ -47,13 +47,20 @@ __export(exports_lanework_checkpoint, {
 });
 module.exports = __toCommonJS(exports_lanework_checkpoint);
 var import_node_child_process3 = require("node:child_process");
-var import_node_crypto2 = require("node:crypto");
-var import_node_fs3 = require("node:fs");
-var import_node_os4 = require("node:os");
-var import_node_path3 = require("node:path");
+var import_node_crypto3 = require("node:crypto");
+var import_node_fs5 = require("node:fs");
+var import_node_os6 = require("node:os");
+var import_node_path6 = require("node:path");
 // packages/protocol/src/auth.ts
 var LOOPBACK_CALLBACK_PATH = "/oauth/callback";
+// packages/protocol/src/boards.ts
+var WORK_ITEM_TYPES = ["epic", "issue", "task"];
+var PRIORITIES = ["low", "medium", "high"];
+var CHECKLIST_SECTIONS = ["decisions", "verify"];
+var STREAM_ROLES = ["research", "implement", "test"];
+var STREAM_ISOLATIONS = ["worktree", "shared"];
 // packages/protocol/src/checkpoints.ts
+var CHECKPOINTS_KEPT = 5;
 var CHECKPOINT_MAX_BYTES = 16 * 1024;
 // packages/protocol/src/common.ts
 var DEFAULT_API_ORIGIN = "https://api.lanework.dev";
@@ -111,9 +118,9 @@ function withQuery(path, query) {
 }
 // apps/desktop/electron/hook/cli.ts
 var import_node_child_process2 = require("node:child_process");
-var import_node_fs2 = require("node:fs");
-var import_node_os3 = require("node:os");
-var import_node_path2 = require("node:path");
+var import_node_fs3 = require("node:fs");
+var import_node_os5 = require("node:os");
+var import_node_path5 = require("node:path");
 
 // apps/desktop/electron/main/auth/client.ts
 var import_node_os = require("node:os");
@@ -370,19 +377,2206 @@ function newState() {
   return import_node_crypto.randomBytes(16).toString("base64url");
 }
 
+// apps/desktop/electron/mcp-local/server.ts
+var import_node_os3 = require("node:os");
+
+// apps/desktop/electron/local-store/types.ts
+class LocalStoreError extends Error {
+  code;
+  constructor(code, message) {
+    super(message);
+    this.name = "LocalStoreError";
+    this.code = code;
+  }
+}
+
+// apps/desktop/electron/local-store/cards.ts
+function invalid(message) {
+  throw new LocalStoreError("invalid", message);
+}
+function parseJson(value, fallback) {
+  if (typeof value !== "string" || !value)
+    return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+function checkTitle(title) {
+  const value = typeof title === "string" ? title.trim() : "";
+  if (!value || value.length > 300)
+    invalid("title must be 1-300 characters");
+  return value;
+}
+function checkType(type) {
+  if (!WORK_ITEM_TYPES.includes(type))
+    invalid(`type must be one of ${WORK_ITEM_TYPES.join(", ")}`);
+  return type;
+}
+function checkPriority(priority) {
+  if (priority === null || priority === undefined)
+    return null;
+  if (!PRIORITIES.includes(priority))
+    invalid(`priority must be one of ${PRIORITIES.join(", ")}`);
+  return priority;
+}
+function checkCategory(config, key) {
+  if (key === null || key === undefined || key === "")
+    return null;
+  if (!config.categories.some((category) => category.key === key))
+    invalid(`unknown category "${key}"`);
+  return key;
+}
+function checkColumn(config, key) {
+  if (!config.columns.some((column) => column.key === key))
+    invalid(`unknown column "${key}"`);
+  return key;
+}
+function intakeColumn(config) {
+  const column = config.columns.find((entry) => entry.role === "intake") ?? [...config.columns].sort((a, b) => a.position - b.position)[0];
+  if (!column)
+    invalid("the board has no columns");
+  return column.key;
+}
+function isClosedColumn(config, key) {
+  const role = config.columns.find((column) => column.key === key)?.role;
+  return role === "done" || role === "archive";
+}
+function normalizeTags(config, tags) {
+  if (tags === undefined || tags === null)
+    return [];
+  if (!Array.isArray(tags))
+    invalid("tags must be a list");
+  const out = [];
+  for (const tag of tags) {
+    if (typeof tag !== "string")
+      invalid("a tag must be text");
+    const key = tag.trim().toLowerCase().replace(/\s+/g, "-").slice(0, 40);
+    if (key && !out.includes(key))
+      out.push(key);
+  }
+  if (config.tags.max > 0 && out.length > config.tags.max)
+    invalid(`a card carries at most ${config.tags.max} tags`);
+  if (config.tags.allowed.length > 0) {
+    const stray = out.filter((tag) => !config.tags.allowed.includes(tag));
+    if (stray.length > 0)
+      invalid(`tags not allowed here: ${stray.join(", ")}`);
+  }
+  return out;
+}
+function normalizeStreams(input) {
+  if (input === undefined || input === null)
+    return [];
+  if (!Array.isArray(input))
+    invalid("streams must be a list");
+  const list = input;
+  const taken = new Set(list.map((entry) => entry?.key).filter((key) => !!key));
+  let next = 0;
+  const mint = () => {
+    while (taken.has(`W${next}`))
+      next += 1;
+    const key = `W${next}`;
+    taken.add(key);
+    return key;
+  };
+  const streams = list.map((entry, position) => {
+    if (!entry || typeof entry !== "object")
+      invalid("a stream must be an object");
+    const key = entry.key || mint();
+    if (!/^W\d{1,3}$/.test(key))
+      invalid(`stream key "${key}" must be W0…W999`);
+    if (!entry.title?.trim())
+      invalid(`stream ${key} needs a title`);
+    if (!entry.goal?.trim())
+      invalid(`stream ${key} needs a goal`);
+    if (!STREAM_ROLES.includes(entry.role))
+      invalid(`stream ${key} role must be one of ${STREAM_ROLES.join(", ")}`);
+    const isolation = entry.isolation ?? "worktree";
+    if (!STREAM_ISOLATIONS.includes(isolation))
+      invalid(`stream ${key} isolation must be worktree or shared`);
+    if (!Array.isArray(entry.owns) || entry.owns.length === 0)
+      invalid(`stream ${key} must own at least one path`);
+    for (const path of entry.owns)
+      if (typeof path !== "string" || !path || /[*?[\]]/.test(path))
+        invalid(`stream ${key} owns "${path}": exact paths only, no globs`);
+    return {
+      key,
+      title: entry.title.trim(),
+      goal: entry.goal.trim(),
+      role: entry.role,
+      owns: [...entry.owns],
+      reads: [...entry.reads ?? []],
+      dependsOn: [...entry.depends_on ?? []],
+      isolation,
+      position
+    };
+  });
+  const keys = streams.map((stream) => stream.key);
+  if (new Set(keys).size !== keys.length)
+    invalid("two streams share a key");
+  const owner = new Map;
+  for (const stream of streams) {
+    for (const path of stream.owns) {
+      const other = owner.get(path);
+      if (other)
+        invalid(`streams ${other} and ${stream.key} both own ${path}`);
+      owner.set(path, stream.key);
+    }
+    for (const dep of stream.dependsOn)
+      if (!keys.includes(dep) || dep === stream.key)
+        invalid(`stream ${stream.key} depends on unknown stream ${dep}`);
+  }
+  streamWaves(streams);
+  return streams;
+}
+function streamWaves(streams) {
+  const done = new Set;
+  const waves = [];
+  const left = [...streams].sort((a, b) => a.position - b.position);
+  while (left.length > 0) {
+    const wave = left.filter((stream) => stream.dependsOn.every((dep) => done.has(dep)));
+    if (wave.length === 0)
+      invalid("stream dependencies form a cycle");
+    for (const stream of wave) {
+      done.add(stream.key);
+      left.splice(left.indexOf(stream), 1);
+    }
+    waves.push(wave.map((stream) => stream.key));
+  }
+  return waves;
+}
+function list(paths2) {
+  return paths2.length > 0 ? paths2.map((path) => `- \`${path}\``).join(`
+`) : "- (none)";
+}
+function buildDispatch(card, streams, checklist) {
+  if (streams.length === 0)
+    return null;
+  const name = card.taskId ? `${card.taskId} "${card.title}"` : `"${card.title}"`;
+  const briefs = {};
+  for (const stream of streams) {
+    const verify = checklist.filter((item) => item.section === "verify" && item.stream === stream.key).map((item) => `- ${item.key}: ${item.text}`);
+    briefs[stream.key] = [
+      `You are sub-agent for stream **${stream.key} (${stream.title})** of card **${name}**.`,
+      "",
+      "## Goal",
+      stream.goal,
+      "",
+      "## Where you work",
+      stream.isolation === "shared" ? "In the shared checkout, read-only." : "In your own git worktree, which the lead created for this stream. Do not touch any other checkout.",
+      "",
+      "## You own",
+      "Write ONLY inside these paths (a path ending in `/` is a directory):",
+      list(stream.owns),
+      "",
+      "If another file must change, do not change it: say so in your report.",
+      "",
+      "## Read first",
+      list(stream.reads),
+      "",
+      "## Done means",
+      verify.length > 0 ? verify.join(`
+`) : "- (no verify items tagged to this stream)",
+      "",
+      "## Rules",
+      "- Do not commit, push, or rewrite git history; the lead merges.",
+      "- Do not tick checklist boxes; report what you verified and how.",
+      "- Do not call the Lanework MCP.",
+      "",
+      "## Report",
+      "Files changed, commands run with pass/fail, and anything the next stream must know."
+    ].join(`
+`);
+  }
+  return { waves: streamWaves(streams), briefs };
+}
+var CHECKLIST_TEXT_MAX = 2000;
+function normalizeChecklist(input, options) {
+  if (input === undefined || input === null)
+    return [];
+  if (!Array.isArray(input))
+    invalid("checklist must be a list");
+  const rows = input;
+  const before = new Map((options.previous ?? []).map((item) => [item.key, item]));
+  const taken = new Set(rows.map((row) => row?.key).filter((key) => !!key));
+  const seen = { decisions: 0, verify: 0 };
+  const mint = (section) => {
+    const prefix = section === "verify" ? "V" : "D";
+    let key;
+    do {
+      seen[section] += 1;
+      key = `${prefix}${seen[section]}`;
+    } while (taken.has(key));
+    taken.add(key);
+    return key;
+  };
+  const streamKeys = new Set(options.streams.map((stream) => stream.key));
+  const items = rows.map((row) => {
+    if (!row || typeof row !== "object")
+      invalid("a checklist item must be an object");
+    const prev = row.key ? before.get(row.key) : undefined;
+    const section = row.section ?? prev?.section ?? "decisions";
+    if (!CHECKLIST_SECTIONS.includes(section))
+      invalid(`section must be decisions or verify`);
+    const text = typeof row.text === "string" ? row.text.trim() : "";
+    if (!text || text.length > CHECKLIST_TEXT_MAX)
+      invalid(`checklist text must be 1-${CHECKLIST_TEXT_MAX} characters`);
+    const checked = row.checked ?? prev?.checked ?? false;
+    const checkedAt = checked ? row.checkedAt ?? (prev?.checked ? prev.checkedAt : null) ?? options.now : null;
+    const stream = row.stream === undefined ? prev?.stream ?? null : row.stream ?? null;
+    if (stream !== null) {
+      if (section !== "verify")
+        invalid("only a verify item can carry a stream");
+      if (!streamKeys.has(stream))
+        invalid(`unknown stream ${stream}`);
+    }
+    return {
+      key: row.key || mint(section),
+      section,
+      text,
+      checked,
+      checkedAt,
+      note: row.note === undefined ? prev?.note ?? null : row.note ?? null,
+      group: row.group === undefined ? prev?.group ?? null : row.group ?? null,
+      stream
+    };
+  });
+  const keys = items.map((item) => item.key);
+  if (new Set(keys).size !== keys.length)
+    invalid("two checklist items share a key");
+  return items;
+}
+function checkChecklistStreams(checklist, streams) {
+  const keys = new Set(streams.map((stream) => stream.key));
+  for (const item of checklist)
+    if (item.stream && !keys.has(item.stream))
+      invalid(`checklist item ${item.key} names unknown stream ${item.stream}`);
+}
+function clip(value, max) {
+  if (typeof value !== "string")
+    return null;
+  const text = value.trim();
+  return text ? text.slice(0, max) : null;
+}
+function normalizeCheckpoint(request) {
+  const summary = clip(request?.summary, 6000);
+  if (!summary)
+    invalid("a checkpoint needs a summary");
+  const git = request.git ? {
+    branch: clip(request.git.branch, 200),
+    head: clip(request.git.head, 100),
+    wipRef: clip(request.git.wipRef, 300),
+    wipSha: clip(request.git.wipSha, 100),
+    diffStat: clip(request.git.diffStat, 4000)
+  } : null;
+  const content = {
+    request: clip(request.request, 2000),
+    summary,
+    nextStep: clip(request.nextStep, 1000),
+    files: (request.files ?? []).filter((file) => typeof file === "string" && !!file).slice(-100),
+    commands: (request.commands ?? []).filter((entry) => entry && typeof entry.command === "string").slice(-30).map((entry) => ({
+      command: entry.command.slice(0, 500),
+      ok: typeof entry.ok === "boolean" ? entry.ok : null
+    })),
+    host: clip(request.host, 200),
+    session: clip(request.session, 200),
+    git
+  };
+  if (Buffer.byteLength(JSON.stringify(content)) > CHECKPOINT_MAX_BYTES)
+    invalid(`a checkpoint weighs at most ${CHECKPOINT_MAX_BYTES} bytes`);
+  return content;
+}
+function keepCheckpoints(list2) {
+  return list2.slice(0, CHECKPOINTS_KEPT);
+}
+function latestCheckpoint(list2) {
+  const newest = list2[0];
+  if (!newest)
+    return null;
+  if (newest.nextStep)
+    return { ...newest, nextStepFrom: null };
+  const older = list2.slice(1).find((entry) => entry.nextStep);
+  if (!older)
+    return { ...newest, nextStepFrom: null };
+  return {
+    ...newest,
+    nextStep: older.nextStep,
+    nextStepFrom: {
+      id: older.id,
+      agent: older.agent,
+      createdAt: older.createdAt
+    }
+  };
+}
+function toCard(row) {
+  const checklist = parseJson(row.checklist, []);
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    seq: Number(row.change_seq),
+    revision: Number(row.revision),
+    type: row.type,
+    parentId: row.parent_id,
+    columnKey: row.status,
+    rank: row.sort_key,
+    title: row.title,
+    body: row.body,
+    priority: row.priority ?? null,
+    estimate: null,
+    categoryKey: row.category,
+    taskId: row.task_id,
+    tags: parseJson(row.tags, []),
+    checklistProgress: {
+      done: checklist.filter((item) => item.checked).length,
+      total: checklist.length
+    },
+    streams: parseJson(row.streams, []),
+    metadata: null,
+    source: null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    startedAt: null,
+    completedAt: null,
+    dueAt: null,
+    archivedAt: row.deleted_at
+  };
+}
+function toCardDetail(row) {
+  const card = toCard(row);
+  const checklist = parseJson(row.checklist, []);
+  return {
+    ...card,
+    checklist,
+    dispatch: buildDispatch(card, card.streams, checklist),
+    assignees: { users: [], agents: [] },
+    links: [],
+    attachments: [],
+    subscribers: [],
+    subscribed: false,
+    favorite: false,
+    commentCount: 0
+  };
+}
+// apps/desktop/electron/local-store/driver.ts
+var import_node_module = require("node:module");
+var import_node_path = require("node:path");
+function sqliteDriverName() {
+  return "Bun" in globalThis ? "bun:sqlite" : "node:sqlite";
+}
+function openRaw(path) {
+  if (sqliteDriverName() === "bun:sqlite") {
+    const load = import_node_module.createRequire(import_node_path.join(process.cwd(), "noop.js"));
+    const { Database } = load("bun:sqlite");
+    return new Database(path, { create: true });
+  }
+  const sqlite = process.getBuiltinModule("node:sqlite");
+  if (!sqlite)
+    throw new Error("node:sqlite is not available in this runtime (needs Node 22.5 or later)");
+  return new sqlite.DatabaseSync(path);
+}
+function openDatabase(path) {
+  const raw = openRaw(path);
+  const cache = new Map;
+  return {
+    exec(sql) {
+      raw.exec(sql);
+    },
+    prepare(sql) {
+      const cached = cache.get(sql);
+      if (cached)
+        return cached;
+      const statement = raw.prepare(sql);
+      const wrapped = {
+        run: (...params) => statement.run(...params),
+        get: (...params) => statement.get(...params) ?? undefined,
+        all: (...params) => statement.all(...params)
+      };
+      cache.set(sql, wrapped);
+      return wrapped;
+    },
+    close() {
+      cache.clear();
+      raw.close();
+    }
+  };
+}
+// apps/desktop/electron/local-store/ids.ts
+var import_node_crypto2 = require("node:crypto");
+function uuidv7(now = Date.now()) {
+  const bytes = import_node_crypto2.randomBytes(16);
+  let ms = BigInt(now);
+  for (let index = 5;index >= 0; index -= 1) {
+    bytes[index] = Number(ms & 0xffn);
+    ms >>= 8n;
+  }
+  bytes[6] = bytes[6] & 15 | 112;
+  bytes[8] = bytes[8] & 63 | 128;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(value) {
+  return UUID.test(value);
+}
+var RANK_WIDTH = 16;
+var RANK_STEP = 1e6;
+function rankString(value) {
+  return String(value).padStart(RANK_WIDTH, "0");
+}
+function rankValue(rank) {
+  const value = Number(rank);
+  return Number.isFinite(value) ? value : 0;
+}
+function slugify(name) {
+  const slug = name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return slug || "board";
+}
+function normalizeRepo(remote) {
+  const value = remote.trim();
+  if (!value)
+    return null;
+  let host;
+  let path;
+  const scp = value.match(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/\/)(.+)$/);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      return null;
+    }
+    host = url.hostname;
+    path = url.pathname;
+  } else if (scp?.[1] && scp[2]) {
+    host = scp[1];
+    path = scp[2];
+  } else {
+    return null;
+  }
+  const parts = path.replace(/\.git\/?$/i, "").split("/").filter(Boolean);
+  if (!host || parts.length < 2)
+    return null;
+  return [host.toLowerCase(), ...parts].join("/").toLowerCase();
+}
+function formatTaskId(category, seq) {
+  return category.format.replace("{prefix}", category.prefix).replace("{seq}", String(seq).padStart(category.pad, "0"));
+}
+// apps/desktop/electron/local-store/schema.ts
+var MIGRATIONS = [
+  `
+  CREATE TABLE workspace (
+    id          TEXT PRIMARY KEY,
+    slug        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    repo_url    TEXT,
+    config      TEXT NOT NULL DEFAULT '{}',
+    task_heads  TEXT NOT NULL DEFAULT '{}',
+    cloud_id    TEXT,
+    synced_at   TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    deleted_at  TEXT
+  );
+  CREATE UNIQUE INDEX workspace_slug_live ON workspace(slug) WHERE deleted_at IS NULL;
+  CREATE INDEX workspace_repo ON workspace(repo_url) WHERE deleted_at IS NULL;
+
+  CREATE TABLE work_item (
+    id            TEXT PRIMARY KEY,
+    workspace_id  TEXT NOT NULL REFERENCES workspace(id),
+    parent_id     TEXT REFERENCES work_item(id),
+    task_id       TEXT,
+    task_seq      INTEGER,
+    category      TEXT,
+    type          TEXT NOT NULL DEFAULT 'issue',
+    title         TEXT NOT NULL,
+    body          TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL,
+    priority      TEXT,
+    tags          TEXT NOT NULL DEFAULT '[]',
+    checklist     TEXT NOT NULL DEFAULT '[]',
+    streams       TEXT NOT NULL DEFAULT '[]',
+    checkpoint    TEXT,
+    sort_key      TEXT NOT NULL,
+    revision      INTEGER NOT NULL DEFAULT 1,
+    change_seq    INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    deleted_at    TEXT,
+    cloud_id      TEXT
+  );
+  CREATE UNIQUE INDEX work_item_task_id ON work_item(workspace_id, task_id) WHERE task_id IS NOT NULL;
+  CREATE INDEX work_item_lane ON work_item(workspace_id, status, sort_key);
+  CREATE INDEX work_item_changes ON work_item(workspace_id, change_seq);
+  CREATE INDEX work_item_parent ON work_item(parent_id);
+
+  CREATE TABLE meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+  );
+  INSERT INTO meta(key, value) VALUES ('change_seq', '0');
+  `
+];
+var SCHEMA_VERSION = MIGRATIONS.length;
+function userVersion(db) {
+  const row = db.prepare("PRAGMA user_version").get();
+  return Number(row?.user_version ?? 0);
+}
+function migrate(db) {
+  if (userVersion(db) === SCHEMA_VERSION)
+    return SCHEMA_VERSION;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const from = userVersion(db);
+    if (from > SCHEMA_VERSION)
+      throw new Error(`local store is at schema ${from}, newer than this build (${SCHEMA_VERSION})`);
+    for (let version = from;version < SCHEMA_VERSION; version += 1) {
+      db.exec(MIGRATIONS[version]);
+    }
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return SCHEMA_VERSION;
+}
+// apps/desktop/electron/local-store/store.ts
+var import_node_fs = require("node:fs");
+var import_node_path3 = require("node:path");
+
+// apps/desktop/electron/main/paths.ts
+var import_node_os2 = require("node:os");
+var import_node_path2 = require("node:path");
+var APP_HOME_NAME = ".lanew";
+function appHomeDir() {
+  return process.env.LANEWORK_HOME || import_node_path2.join(import_node_os2.homedir(), APP_HOME_NAME);
+}
+
+// apps/desktop/electron/main/workspaces/review-defaults.ts
+var DEFAULT_COLUMNS = [
+  {
+    key: "backlog",
+    name: "Backlog",
+    role: "intake",
+    icon: "idea",
+    tone: "violet"
+  },
+  {
+    key: "todo",
+    name: "To-Do",
+    role: "start",
+    icon: "circle-dashed",
+    tone: "amber"
+  },
+  {
+    key: "processing",
+    name: "In Progress",
+    role: "active",
+    icon: "progress",
+    tone: "blue"
+  },
+  { key: "done", name: "Done", role: "done", icon: "check", tone: "emerald" },
+  {
+    key: "dropped",
+    name: "Archived",
+    role: "archive",
+    icon: "archive",
+    tone: "neutral"
+  }
+];
+var TASK_ID_FORMAT = "{prefix}-{seq}";
+var TASK_ID_PAD = 2;
+var DEFAULT_CATEGORIES = [
+  {
+    key: "product-design",
+    name: "Product Design",
+    prefix: "PD",
+    tone: "violet"
+  },
+  { key: "frontend", name: "Frontend", prefix: "FE", tone: "sky" },
+  { key: "backend", name: "Backend", prefix: "BE", tone: "emerald" },
+  {
+    key: "infrastructure",
+    name: "Infrastructure",
+    prefix: "INF",
+    tone: "amber"
+  },
+  { key: "documentation", name: "Documentation", prefix: "DOC", tone: "teal" }
+].map((category) => ({
+  ...category,
+  format: TASK_ID_FORMAT,
+  pad: TASK_ID_PAD
+}));
+var TAG_MAX = 3;
+
+// apps/desktop/electron/local-store/store.ts
+var DATA_FILE_NAME = "data.sqlite";
+function localStorePath() {
+  return import_node_path3.join(appHomeDir(), DATA_FILE_NAME);
+}
+function defaultBoardConfig() {
+  return {
+    columns: DEFAULT_COLUMNS.map((column, position) => ({
+      ...column,
+      position
+    })),
+    categories: DEFAULT_CATEGORIES.map((category, position) => ({
+      ...category,
+      position
+    })),
+    labels: [],
+    tags: { max: TAG_MAX, allowed: [] }
+  };
+}
+function toWorkspace(row) {
+  const stored = parseJson(row.config, {});
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    repo: row.repo_url,
+    config: { ...defaultBoardConfig(), ...stored },
+    taskHeads: parseJson(row.task_heads, {}),
+    cloudId: row.cloud_id,
+    syncedAt: row.synced_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    deletedAt: row.deleted_at
+  };
+}
+function notFound(what) {
+  throw new LocalStoreError("not_found", `${what} not found`);
+}
+function invalid2(message) {
+  throw new LocalStoreError("invalid", message);
+}
+
+class LocalStore {
+  path;
+  #db;
+  #depth = 0;
+  #seq = 0;
+  constructor(db, path) {
+    this.#db = db;
+    this.path = path;
+  }
+  get db() {
+    if (!this.#db)
+      throw new LocalStoreError("closed", "local store is closed");
+    return this.#db;
+  }
+  close() {
+    this.#db?.close();
+    this.#db = null;
+  }
+  #get(sql, ...params) {
+    return this.db.prepare(sql).get(...params);
+  }
+  #all(sql, ...params) {
+    return this.db.prepare(sql).all(...params);
+  }
+  #run(sql, ...params) {
+    return Number(this.db.prepare(sql).run(...params).changes);
+  }
+  #write(fn) {
+    if (this.#depth > 0)
+      return fn();
+    this.db.exec("BEGIN IMMEDIATE");
+    this.#depth += 1;
+    try {
+      const row = this.#get("UPDATE meta SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'change_seq' RETURNING value");
+      this.#seq = Number(row?.value ?? 0);
+      const result = fn();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    } finally {
+      this.#depth -= 1;
+    }
+  }
+  dataVersion() {
+    const row = this.#get("SELECT value FROM meta WHERE key = 'change_seq'");
+    return Number(row?.value ?? 0);
+  }
+  #now() {
+    return new Date().toISOString();
+  }
+  listWorkspaces(options = {}) {
+    const rows = this.#all(options.includeDeleted ? "SELECT * FROM workspace ORDER BY created_at, id" : "SELECT * FROM workspace WHERE deleted_at IS NULL ORDER BY created_at, id");
+    return rows.map(toWorkspace);
+  }
+  getWorkspace(ref) {
+    const row = this.#get("SELECT * FROM workspace WHERE (id = ? OR slug = ?) AND deleted_at IS NULL", ref, ref);
+    return row ? toWorkspace(row) : null;
+  }
+  #workspace(ref) {
+    return this.getWorkspace(ref) ?? notFound(`workspace ${ref}`);
+  }
+  #uniqueSlug(base, except) {
+    let slug = base;
+    for (let n = 2;; n += 1) {
+      const clash = this.#get("SELECT id FROM workspace WHERE slug = ? AND deleted_at IS NULL", slug);
+      if (!clash || clash.id === except)
+        return slug;
+      slug = `${base}-${n}`;
+    }
+  }
+  createWorkspace(input) {
+    const name = input.name?.trim();
+    if (!name)
+      invalid2("a workspace needs a name");
+    const repo = input.repo ? normalizeRepo(input.repo) : null;
+    if (input.repo && !repo)
+      invalid2(`not a git remote: ${input.repo}`);
+    const config = { ...defaultBoardConfig(), ...input.config };
+    checkConfig(config);
+    return this.#write(() => {
+      const id = uuidv7();
+      const now = this.#now();
+      const slug = this.#uniqueSlug(slugify(input.slug || name));
+      if (repo)
+        this.#releaseRepo(repo, now);
+      this.#run(`INSERT INTO workspace (id, slug, name, repo_url, config, task_heads, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, '{}', ?, ?)`, id, slug, name, repo, JSON.stringify(config), now, now);
+      return this.#workspace(id);
+    });
+  }
+  updateWorkspace(ref, input) {
+    return this.#write(() => {
+      const current = this.#workspace(ref);
+      const name = input.name === undefined ? current.name : input.name.trim();
+      if (!name)
+        invalid2("a workspace needs a name");
+      const slug = input.slug === undefined ? current.slug : this.#uniqueSlug(slugify(input.slug), current.id);
+      const config = input.config ? { ...current.config, ...input.config } : current.config;
+      checkConfig(config);
+      this.#run(`UPDATE workspace SET name = ?, slug = ?, config = ?, cloud_id = ?, synced_at = ?, updated_at = ?
+         WHERE id = ?`, name, slug, JSON.stringify(config), input.cloudId === undefined ? current.cloudId : input.cloudId, input.syncedAt === undefined ? current.syncedAt : input.syncedAt, this.#now(), current.id);
+      return this.#workspace(current.id);
+    });
+  }
+  deleteWorkspace(ref) {
+    this.#write(() => {
+      const current = this.#workspace(ref);
+      const now = this.#now();
+      this.#run("UPDATE workspace SET deleted_at = ?, updated_at = ? WHERE id = ?", now, now, current.id);
+    });
+  }
+  #releaseRepo(repo, now) {
+    this.#run("UPDATE workspace SET repo_url = NULL, updated_at = ? WHERE repo_url = ? AND deleted_at IS NULL", now, repo);
+  }
+  linkRepo(ref, remote) {
+    const repo = remote === null ? null : normalizeRepo(remote);
+    if (remote !== null && !repo)
+      invalid2(`not a git remote: ${remote}`);
+    return this.#write(() => {
+      const current = this.#workspace(ref);
+      const now = this.#now();
+      if (repo)
+        this.#releaseRepo(repo, now);
+      this.#run("UPDATE workspace SET repo_url = ?, updated_at = ? WHERE id = ?", repo, now, current.id);
+      return this.#workspace(current.id);
+    });
+  }
+  findWorkspacesByRepo(remote) {
+    const repo = normalizeRepo(remote);
+    if (!repo)
+      return [];
+    return this.#all("SELECT * FROM workspace WHERE repo_url = ? AND deleted_at IS NULL ORDER BY created_at, id", repo).map(toWorkspace);
+  }
+  boardSummaries(remote) {
+    const list2 = remote === undefined ? this.listWorkspaces() : this.findWorkspacesByRepo(remote);
+    const head = this.dataVersion();
+    return list2.map((workspace) => ({
+      workspaceId: workspace.id,
+      name: workspace.name,
+      role: "owner",
+      changeSeq: head,
+      repo: workspace.repo
+    }));
+  }
+  boardConfig(ref) {
+    const workspace = this.#workspace(ref);
+    return {
+      workspaceId: workspace.id,
+      role: "owner",
+      changeSeq: this.dataVersion(),
+      migratedAt: null,
+      tags: workspace.config.tags,
+      columns: workspace.config.columns,
+      categories: workspace.config.categories,
+      labels: workspace.config.labels,
+      members: []
+    };
+  }
+  #taskIdTaken(workspaceId, taskId) {
+    return !!this.#get("SELECT 1 AS hit FROM work_item WHERE workspace_id = ? AND task_id = ?", workspaceId, taskId);
+  }
+  #setHead(workspace, category, seq) {
+    const heads = { ...workspace.taskHeads };
+    if ((heads[category] ?? 0) >= seq)
+      return;
+    heads[category] = seq;
+    workspace.taskHeads = heads;
+    this.#run("UPDATE workspace SET task_heads = ? WHERE id = ?", JSON.stringify(heads), workspace.id);
+  }
+  #mintTaskId(workspace, categoryKey) {
+    const category = workspace.config.categories.find((entry) => entry.key === categoryKey);
+    if (!category)
+      invalid2(`unknown category "${categoryKey}"`);
+    let seq = (workspace.taskHeads[categoryKey] ?? 0) + 1;
+    while (this.#taskIdTaken(workspace.id, formatTaskId(category, seq)))
+      seq += 1;
+    this.#setHead(workspace, categoryKey, seq);
+    return { taskId: formatTaskId(category, seq), taskSeq: seq };
+  }
+  #lane(workspaceId, status, except) {
+    return this.#all(`SELECT * FROM work_item WHERE workspace_id = ? AND status = ? AND deleted_at IS NULL AND id != ?
+       ORDER BY sort_key, id`, workspaceId, status, except ?? "");
+  }
+  #rankFor(workspaceId, status, placement, self) {
+    for (let attempt = 0;attempt < 2; attempt += 1) {
+      const lane = this.#lane(workspaceId, status, self);
+      const values = lane.map((row) => rankValue(row.sort_key));
+      let low;
+      let high;
+      const anchor = placement?.after ?? placement?.before ?? null;
+      if (anchor) {
+        const index = lane.findIndex((row) => row.id === anchor);
+        if (index < 0)
+          invalid2(`placement card ${anchor} is not in lane ${status}`);
+        if (placement?.after) {
+          low = values[index];
+          high = values[index + 1] ?? null;
+        } else {
+          low = index > 0 ? values[index - 1] : null;
+          high = values[index];
+        }
+      } else {
+        low = values.at(-1) ?? null;
+        high = null;
+      }
+      if (high === null)
+        return rankString((low ?? 0) + RANK_STEP);
+      const from = low ?? 0;
+      if (high - from > 1)
+        return rankString(Math.floor((from + high) / 2));
+      lane.forEach((row, index) => {
+        this.#run("UPDATE work_item SET sort_key = ?, change_seq = ? WHERE id = ?", rankString((index + 1) * RANK_STEP), this.#seq, row.id);
+      });
+    }
+    return invalid2("could not place the card");
+  }
+  #row(id) {
+    return this.#get("SELECT * FROM work_item WHERE id = ?", id);
+  }
+  #resolve(ref, options = {}) {
+    let row;
+    if (isUuid(ref))
+      row = this.#row(ref);
+    else {
+      if (!options.workspace)
+        invalid2(`task id ${ref} needs a workspace`);
+      const workspace = this.#workspace(options.workspace);
+      row = this.#get("SELECT * FROM work_item WHERE workspace_id = ? AND task_id = ?", workspace.id, ref.toUpperCase());
+    }
+    if (!row || row.deleted_at && !options.includeDeleted)
+      return notFound(`card ${ref}`);
+    if (options.workspace) {
+      const workspace = this.#workspace(options.workspace);
+      if (row.workspace_id !== workspace.id)
+        return notFound(`card ${ref}`);
+    } else if (!this.getWorkspace(row.workspace_id)) {
+      return notFound(`card ${ref}`);
+    }
+    return row;
+  }
+  getWorkItem(ref, options = {}) {
+    try {
+      return toCardDetail(this.#resolve(ref, options));
+    } catch (error) {
+      if (error instanceof LocalStoreError && error.code === "not_found")
+        return null;
+      throw error;
+    }
+  }
+  listWorkItems(workspaceRef, query = {}) {
+    const workspace = this.#workspace(workspaceRef);
+    const where = ["workspace_id = ?"];
+    const params = [workspace.id];
+    if (!query.includeDeleted)
+      where.push("deleted_at IS NULL");
+    if (query.column) {
+      where.push("status = ?");
+      params.push(query.column);
+    }
+    if (query.category === "none")
+      where.push("category IS NULL");
+    else if (query.category) {
+      where.push("category = ?");
+      params.push(query.category);
+    }
+    if (query.parent === "none")
+      where.push("parent_id IS NULL");
+    else if (query.parent) {
+      where.push("parent_id = ?");
+      params.push(query.parent);
+    }
+    if (query.priority === "none")
+      where.push("priority IS NULL");
+    else if (query.priority) {
+      where.push("priority = ?");
+      params.push(query.priority);
+    }
+    if (query.tag) {
+      where.push("EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?)");
+      params.push(query.tag.toLowerCase());
+    }
+    return this.#all(`SELECT * FROM work_item WHERE ${where.join(" AND ")} ORDER BY status, sort_key, id`, ...params).map(toCard);
+  }
+  listChanges(workspaceRef, since) {
+    const workspace = this.#workspace(workspaceRef);
+    const head = this.dataVersion();
+    const items = this.#all("SELECT * FROM work_item WHERE workspace_id = ? AND change_seq > ? ORDER BY change_seq, id", workspace.id, since).map(toCard);
+    return { head, items };
+  }
+  #checkParent(workspaceId, parentId, self) {
+    if (!parentId)
+      return null;
+    let cursor = parentId;
+    for (let depth = 0;cursor; depth += 1) {
+      if (cursor === self || depth > 100)
+        invalid2("a card cannot hang under itself");
+      const row = this.#row(cursor);
+      if (!row || row.deleted_at || row.workspace_id !== workspaceId)
+        notFound(`parent card ${cursor}`);
+      cursor = row.parent_id;
+    }
+    return parentId;
+  }
+  createWorkItem(workspaceRef, input) {
+    return this.#write(() => {
+      const workspace = this.#workspace(workspaceRef);
+      const { config } = workspace;
+      const now = this.#now();
+      const title = checkTitle(input.title);
+      const type = checkType(input.type ?? "issue");
+      const priority = checkPriority(input.priority);
+      const category = checkCategory(config, input.categoryKey);
+      const status = input.columnKey ? checkColumn(config, input.columnKey) : intakeColumn(config);
+      const tags = normalizeTags(config, input.tags);
+      const streams = normalizeStreams(input.streams);
+      const restore = input.restore ?? null;
+      const checklist = normalizeChecklist(restore?.checklist ?? input.checklist, {
+        now,
+        streams
+      });
+      const parentId = this.#checkParent(workspace.id, input.parentId ?? null);
+      let taskId = null;
+      let taskSeq = null;
+      if (restore && (restore.taskId || restore.taskSeq)) {
+        if (!restore.taskId || !restore.taskSeq)
+          invalid2("restore.taskId and restore.taskSeq come together");
+        if (!category)
+          invalid2("restoring a task id needs a category");
+        if (!Number.isInteger(restore.taskSeq) || restore.taskSeq < 1)
+          invalid2("restore.taskSeq must be a positive integer");
+        taskId = restore.taskId.toUpperCase();
+        taskSeq = restore.taskSeq;
+        if (this.#taskIdTaken(workspace.id, taskId))
+          throw new LocalStoreError("conflict", `task id ${taskId} is taken`);
+        this.#setHead(workspace, category, taskSeq);
+      } else if (category) {
+        ({ taskId, taskSeq } = this.#mintTaskId(workspace, category));
+      }
+      const id = uuidv7();
+      const rank = this.#rankFor(workspace.id, status, input.placement);
+      this.#run(`INSERT INTO work_item (id, workspace_id, parent_id, task_id, task_seq, category, type, title, body,
+           status, priority, tags, checklist, streams, checkpoint, sort_key, revision, change_seq,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?)`, id, workspace.id, parentId, taskId, taskSeq, category, type, title, input.body ?? "", status, priority, JSON.stringify(tags), JSON.stringify(checklist), JSON.stringify(streams), rank, this.#seq, restore?.createdAt ?? now, restore?.updatedAt ?? now);
+      return toCardDetail(this.#row(id));
+    });
+  }
+  #checkRevision(row, options) {
+    if (options?.ifRevision !== undefined && options.ifRevision !== Number(row.revision))
+      throw new LocalStoreError("conflict", `card is at revision ${row.revision}, not ${options.ifRevision}`);
+  }
+  #touch(id, sets, params) {
+    this.#run(`UPDATE work_item SET ${[...sets, "revision = revision + 1", "change_seq = ?", "updated_at = ?"].join(", ")}
+       WHERE id = ?`, ...params, this.#seq, this.#now(), id);
+    return toCardDetail(this.#row(id));
+  }
+  updateWorkItem(ref, input, options = {}) {
+    return this.#write(() => {
+      const row = this.#resolve(ref, options);
+      this.#checkRevision(row, options);
+      const workspace = this.#workspace(row.workspace_id);
+      const { config } = workspace;
+      const sets = [];
+      const params = [];
+      const set = (column, value) => {
+        sets.push(`${column} = ?`);
+        params.push(value);
+      };
+      if (input.title !== undefined)
+        set("title", checkTitle(input.title));
+      if (input.type !== undefined)
+        set("type", checkType(input.type));
+      if (input.body !== undefined)
+        set("body", input.body ?? "");
+      if (input.priority !== undefined)
+        set("priority", checkPriority(input.priority));
+      if (input.tags !== undefined)
+        set("tags", JSON.stringify(normalizeTags(config, input.tags)));
+      if (input.parentId !== undefined)
+        set("parent_id", this.#checkParent(workspace.id, input.parentId, row.id));
+      if (input.cloudId !== undefined)
+        set("cloud_id", input.cloudId);
+      if (input.categoryKey !== undefined) {
+        const category = checkCategory(config, input.categoryKey);
+        set("category", category);
+        if (category && !row.task_id) {
+          const minted = this.#mintTaskId(workspace, category);
+          set("task_id", minted.taskId);
+          set("task_seq", minted.taskSeq);
+        }
+      }
+      const streams = input.streams !== undefined ? normalizeStreams(input.streams) : parseJson(row.streams, []);
+      if (input.streams !== undefined)
+        set("streams", JSON.stringify(streams));
+      const previous = parseJson(row.checklist, []);
+      const checklist = input.checklist !== undefined ? normalizeChecklist(input.checklist, {
+        now: this.#now(),
+        previous,
+        streams
+      }) : previous;
+      checkChecklistStreams(checklist, streams);
+      if (input.checklist !== undefined)
+        set("checklist", JSON.stringify(checklist));
+      return this.#touch(row.id, sets, params);
+    });
+  }
+  deleteWorkItem(ref, options = {}) {
+    return this.#write(() => {
+      const row = this.#resolve(ref, options);
+      this.#checkRevision(row, options);
+      return this.#touch(row.id, ["deleted_at = ?", "checkpoint = NULL"], [this.#now()]);
+    });
+  }
+  restoreWorkItem(ref, options = {}) {
+    return this.#write(() => {
+      const row = this.#resolve(ref, { ...options, includeDeleted: true });
+      if (!row.deleted_at)
+        return toCardDetail(row);
+      const rank = this.#rankFor(row.workspace_id, row.status, null, row.id);
+      return this.#touch(row.id, ["deleted_at = NULL", "sort_key = ?"], [rank]);
+    });
+  }
+  setStatus(ref, columnKey, options = {}) {
+    return this.#write(() => {
+      const row = this.#resolve(ref, options);
+      this.#checkRevision(row, options);
+      const { config } = this.#workspace(row.workspace_id);
+      const status = columnKey ? checkColumn(config, columnKey) : row.status;
+      if (status === row.status && !options.placement)
+        return toCardDetail(row);
+      const rank = this.#rankFor(row.workspace_id, status, options.placement, row.id);
+      const sets = ["status = ?", "sort_key = ?"];
+      if (isClosedColumn(config, status))
+        sets.push("checkpoint = NULL");
+      return this.#touch(row.id, sets, [status, rank]);
+    });
+  }
+  toggleChecklistItem(ref, key, patch, options = {}) {
+    return this.#write(() => {
+      const row = this.#resolve(ref, options);
+      this.#checkRevision(row, options);
+      const checklist = parseJson(row.checklist, []);
+      const item = checklist.find((entry) => entry.key === key);
+      if (!item)
+        notFound(`checklist item ${key}`);
+      if (patch.checked !== undefined && patch.checked !== item.checked) {
+        item.checked = patch.checked;
+        item.checkedAt = patch.checked ? this.#now() : null;
+      }
+      if (patch.note !== undefined)
+        item.note = patch.note || null;
+      if (patch.text !== undefined) {
+        const text = patch.text.trim();
+        if (!text || text.length > CHECKLIST_TEXT_MAX)
+          invalid2(`checklist text must be 1-${CHECKLIST_TEXT_MAX} characters`);
+        item.text = text;
+      }
+      if (patch.stream !== undefined) {
+        if (patch.stream !== null && item.section !== "verify")
+          invalid2("only a verify item can carry a stream");
+        item.stream = patch.stream;
+        checkChecklistStreams(checklist, parseJson(row.streams, []));
+      }
+      return this.#touch(row.id, ["checklist = ?"], [JSON.stringify(checklist)]);
+    });
+  }
+  addCheckpoint(ref, request, writer = {}) {
+    const content = normalizeCheckpoint(request);
+    return this.#write(() => {
+      const row = this.#resolve(ref, { workspace: writer.workspace });
+      const { config } = this.#workspace(row.workspace_id);
+      if (isClosedColumn(config, row.status))
+        throw new LocalStoreError("conflict", "a finished or archived card takes no checkpoints");
+      const checkpoint = {
+        ...content,
+        id: uuidv7(),
+        agent: writer.agent || "agent",
+        userId: writer.userId || "local",
+        machineId: writer.machineId ?? null,
+        createdAt: this.#now()
+      };
+      const list2 = keepCheckpoints([
+        checkpoint,
+        ...parseJson(row.checkpoint, [])
+      ]);
+      this.#run("UPDATE work_item SET checkpoint = ?, change_seq = ? WHERE id = ?", JSON.stringify(list2), this.#seq, row.id);
+      return checkpoint;
+    });
+  }
+  listCheckpoints(ref, options = {}) {
+    const row = this.#resolve(ref, options);
+    const checkpoints2 = parseJson(row.checkpoint, []);
+    return { checkpoints: checkpoints2, latest: latestCheckpoint(checkpoints2) };
+  }
+}
+function checkConfig(config) {
+  if (!Array.isArray(config.columns) || config.columns.length === 0)
+    invalid2("a board needs at least one column");
+  const columnKeys = config.columns.map((column) => column.key);
+  if (new Set(columnKeys).size !== columnKeys.length)
+    invalid2("two columns share a key");
+  const categoryKeys = config.categories.map((category) => category.key);
+  if (new Set(categoryKeys).size !== categoryKeys.length)
+    invalid2("two categories share a key");
+  const prefixes = config.categories.map((category) => category.prefix);
+  if (new Set(prefixes).size !== prefixes.length)
+    invalid2("two categories share a task-id prefix");
+}
+function openLocalStore(options = {}) {
+  const path = options.path ?? localStorePath();
+  if (path !== ":memory:")
+    import_node_fs.mkdirSync(import_node_path3.dirname(path), { recursive: true });
+  const db = openDatabase(path);
+  try {
+    db.exec(`PRAGMA busy_timeout = ${Math.max(0, options.busyTimeoutMs ?? 5000)}`);
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA synchronous = NORMAL");
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+  return new LocalStore(db, path);
+}
+// apps/desktop/electron/mcp-local/schema.ts
+function paramSchema(param) {
+  const described = (schema) => param.description ? { ...schema, description: param.description } : schema;
+  switch (param.type) {
+    case "string":
+      return described(param.enum ? { type: "string", enum: [...param.enum] } : { type: "string" });
+    case "boolean":
+      return described({ type: "boolean" });
+    case "integer":
+      return described({
+        type: "integer",
+        ...param.minimum !== undefined ? { minimum: param.minimum } : {},
+        ...param.maximum !== undefined ? { maximum: param.maximum } : {}
+      });
+    case "string[]":
+      return described({ type: "array", items: { type: "string" } });
+    case "nullable-string":
+      return described({ type: ["string", "null"] });
+    case "string-map":
+      return described({
+        type: "object",
+        additionalProperties: { type: ["string", "null"] }
+      });
+    case "object":
+      return described(shapeSchema(param));
+    case "object[]":
+      return described({
+        type: "array",
+        items: shapeSchema(param),
+        ...param.minItems ? { minItems: param.minItems } : {}
+      });
+  }
+}
+function shapeSchema(shape) {
+  const properties = {};
+  for (const [name, param] of Object.entries(shape.properties))
+    properties[name] = paramSchema(param);
+  return {
+    type: "object",
+    properties,
+    ...shape.required?.length ? { required: [...shape.required] } : {},
+    additionalProperties: false
+  };
+}
+
+class InvalidParams extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "InvalidParams";
+  }
+}
+var isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+function checkParam(path, param, value) {
+  const fail = (expected) => {
+    throw new InvalidParams(`${path} must be ${expected}`);
+  };
+  switch (param.type) {
+    case "string":
+      if (typeof value !== "string")
+        fail("a string");
+      if (param.enum && !param.enum.includes(value))
+        fail(`one of ${param.enum.join(", ")}`);
+      return value;
+    case "boolean":
+      if (typeof value !== "boolean")
+        fail("true or false");
+      return value;
+    case "integer":
+      if (typeof value !== "number" || !Number.isInteger(value))
+        fail("an integer");
+      if (param.minimum !== undefined && value < param.minimum)
+        fail(`at least ${param.minimum}`);
+      if (param.maximum !== undefined && value > param.maximum)
+        fail(`at most ${param.maximum}`);
+      return value;
+    case "string[]":
+      if (!Array.isArray(value) || value.some((v) => typeof v !== "string"))
+        fail("a list of strings");
+      return value;
+    case "nullable-string":
+      if (value !== null && typeof value !== "string")
+        fail("a string or null");
+      return value;
+    case "string-map":
+      if (!isObject(value) || Object.values(value).some((v) => v !== null && typeof v !== "string"))
+        fail("an object of strings (or null)");
+      return value;
+    case "object":
+      if (!isObject(value))
+        fail("an object");
+      return checkShape(param, value, `${path}.`);
+    case "object[]": {
+      if (!Array.isArray(value))
+        fail("a list");
+      const list2 = value;
+      if (param.minItems && list2.length < param.minItems)
+        fail(`a list of at least ${param.minItems}`);
+      return list2.map((entry, index) => {
+        if (!isObject(entry))
+          fail(`a list of objects (item ${index})`);
+        return checkShape(param, entry, `${path}[${index}].`);
+      });
+    }
+  }
+}
+function checkShape(shape, args, prefix = "") {
+  const input = args === undefined || args === null ? {} : args;
+  if (!isObject(input))
+    throw new InvalidParams("arguments must be an object");
+  const out = {};
+  for (const name of shape.required ?? [])
+    if (input[name] === undefined || input[name] === null)
+      throw new InvalidParams(`${prefix}${name} is required`);
+  for (const [name, param] of Object.entries(shape.properties)) {
+    const value = input[name];
+    if (value === undefined)
+      continue;
+    if (value === null && param.type !== "nullable-string")
+      continue;
+    out[name] = checkParam(`${prefix}${name}`, param, value);
+  }
+  return out;
+}
+
+// apps/desktop/electron/mcp-local/tools.ts
+var BOARD_ID = {
+  type: "string",
+  description: "The board's id (the local workspace id) from list_boards. There is no default."
+};
+var CARD = {
+  type: "string",
+  description: "Card id or task id (e.g. BE-07)"
+};
+var REPO = {
+  type: "string",
+  description: "Output of `git remote get-url origin`, unmodified (ssh or https)"
+};
+var PRIORITY = {
+  type: "string",
+  enum: ["low", "medium", "high"]
+};
+var ASSIGNEES = {
+  type: "object",
+  description: "Agents assigned to the card. `users` is accepted and ignored: a local board has no accounts.",
+  properties: {
+    agents: { type: "string[]" },
+    users: { type: "string[]" }
+  }
+};
+var STREAMS = {
+  type: "object[]",
+  description: "Sub-agent streams (BE-19). Only for 2+ independent write areas. `owns`: exact paths or directories ending in `/`, no globs; two streams never own the same path. Shared files go in a W0 stream the others depend on. At most 4 streams per wave. Every stream needs at least one verify item tagged with its key.",
+  properties: {
+    key: { type: "string", description: "W0…W999; minted when absent" },
+    title: { type: "string" },
+    goal: { type: "string" },
+    role: { type: "string", enum: ["research", "implement", "test"] },
+    owns: { type: "string[]" },
+    reads: { type: "string[]" },
+    depends_on: { type: "string[]", description: "Stream keys" },
+    isolation: {
+      type: "string",
+      enum: ["worktree", "shared"],
+      description: "Default worktree"
+    }
+  },
+  required: ["title", "goal", "role"]
+};
+var CHECKLIST = {
+  type: "object[]",
+  description: "Decisions (what the user approves) and verify items (how the work is proved). Boxes sharing a `group` are pick-ONE options.",
+  properties: {
+    section: { type: "string", enum: ["decisions", "verify"] },
+    text: { type: "string" },
+    checked: { type: "boolean" },
+    group: { type: "string" },
+    key: { type: "string", description: "D1, V3…; minted if omitted" },
+    note: { type: "string" },
+    stream: {
+      type: "string",
+      description: "Verify items only: the stream key this item proves"
+    }
+  },
+  required: ["section", "text"]
+};
+function fail(code, message) {
+  throw new LocalStoreError(code, message);
+}
+function boardOf(store, boardId) {
+  const workspace = store.getWorkspace(String(boardId));
+  if (!workspace)
+    fail("not_found", `board ${String(boardId)} not found; call list_boards for its id`);
+  return workspace;
+}
+function cardOf(store, board, card) {
+  const detail = store.getWorkItem(String(card), { workspace: board.id });
+  if (!detail)
+    fail("not_found", `card ${String(card)} not found on this board`);
+  return detail;
+}
+var str2 = (value) => typeof value === "string" ? value : undefined;
+function startColumn(board) {
+  return board.config.columns.find((column) => column.role === "start")?.key;
+}
+function columnOrder(board) {
+  return new Map(board.config.columns.map((column) => [column.key, column]));
+}
+function checkStreamPlan(streams, checklist) {
+  if (!streams || streams.length === 0)
+    return;
+  const normalized = normalizeStreams(streams);
+  for (const wave of streamWaves(normalized))
+    if (wave.length > 4)
+      fail("invalid", `a wave runs at most 4 streams; ${wave.join(", ")} would run at once`);
+  const proved = new Set(checklist.filter((item) => item.section === "verify" && item.stream).map((item) => item.stream));
+  const unproved = normalized.map((stream) => stream.key).filter((key) => !proved.has(key));
+  if (unproved.length > 0)
+    fail("invalid", `every stream needs at least one verify item tagged with its key; untagged: ${unproved.join(", ")}`);
+}
+function asInput(checklist) {
+  return checklist.map((item) => ({
+    key: item.key,
+    section: item.section,
+    text: item.text,
+    checked: item.checked,
+    note: item.note,
+    group: item.group,
+    stream: item.stream
+  }));
+}
+function decisionState(checklist) {
+  const pending = [];
+  const groups = new Map;
+  for (const item of checklist) {
+    if (item.section !== "decisions")
+      continue;
+    if (item.group) {
+      const members = groups.get(item.group) ?? [];
+      members.push(item);
+      groups.set(item.group, members);
+    } else if (!item.checked)
+      pending.push(item.key);
+  }
+  for (const [group, members] of groups)
+    if (members.filter((item) => item.checked).length !== 1)
+      pending.push(`group:${group}`);
+  return { ready: pending.length === 0, pending };
+}
+function brief(card) {
+  return {
+    id: card.id,
+    taskId: card.taskId,
+    title: card.title,
+    column: card.columnKey,
+    priority: card.priority,
+    revision: card.revision
+  };
+}
+var TOOLS = [
+  {
+    name: "list_boards",
+    description: "Every board on this machine, with its board id and linked repo. Call this FIRST: every other tool needs a `board_id` and there is no default. Pass `repo` (your `git remote get-url origin`, as is) to get only the board(s) linked to the repo you are working in.",
+    readOnly: true,
+    properties: { repo: REPO },
+    run(args, { store }) {
+      const remote = str2(args.repo);
+      if (remote === undefined) {
+        const boards3 = store.boardSummaries();
+        return {
+          boards: boards3,
+          next: boards3.length === 0 ? "No boards yet. Ask the user whether to create one for this repo (create_board)." : "Ask the user which board this repo belongs to; never pick one by its name."
+        };
+      }
+      const repo = normalizeRepo(remote);
+      if (!repo)
+        fail("invalid", `not a git remote: ${remote}`);
+      const boards2 = store.boardSummaries(remote);
+      return {
+        repo,
+        boards: boards2,
+        next: boards2.length === 1 ? "Use this board." : boards2.length === 0 ? "No board is linked to this repo. Call list_boards without repo and ask the user which board it belongs to, or whether to create a new one; then link_repo or create_board." : "Several boards are linked to this repo. Ask the user which one."
+      };
+    }
+  },
+  {
+    name: "create_board",
+    description: "Create a new board and link it to the git repo in one step. ONLY after the user chose to create a new board, never on your own initiative. Suggest `owner/name` from the remote as the name. Returns board_id for every other tool.",
+    readOnly: false,
+    properties: {
+      name: {
+        type: "string",
+        description: "Board name the user agreed to, e.g. `hiip/headless-controller`"
+      },
+      repo: REPO,
+      slug: {
+        type: "string",
+        description: "Lower-case hyphenated key; omitted = derived from the name."
+      }
+    },
+    required: ["name", "repo"],
+    run(args, { store }) {
+      const workspace = store.createWorkspace({
+        name: String(args.name),
+        slug: str2(args.slug),
+        repo: String(args.repo)
+      });
+      return {
+        board_id: workspace.id,
+        board: {
+          workspaceId: workspace.id,
+          name: workspace.name,
+          slug: workspace.slug,
+          repo: workspace.repo
+        },
+        next: "Use this board_id for every other tool. Read board_summary before creating a card."
+      };
+    }
+  },
+  {
+    name: "link_repo",
+    description: "Link a board to a git repo so list_boards({ repo }) finds it. Only after the USER confirmed which board the repo belongs to. A board links to ONE repo; refuses to replace a different linked repo unless `replace` is true. A repo another board held moves to this one.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      repo: REPO,
+      replace: {
+        type: "boolean",
+        description: "Move the link from the repo it has now. Only when the user asked."
+      }
+    },
+    required: ["board_id", "repo"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const repo = normalizeRepo(String(args.repo));
+      if (!repo)
+        fail("invalid", `not a git remote: ${String(args.repo)}`);
+      if (board.repo && board.repo !== repo && args.replace !== true)
+        fail("conflict", `board is linked to ${board.repo}; pass replace: true only if the user asked to move it`);
+      const linked = store.linkRepo(board.id, String(args.repo));
+      return {
+        board: {
+          workspaceId: linked.id,
+          name: linked.name,
+          repo: linked.repo
+        },
+        replaced: board.repo && board.repo !== repo ? board.repo : null
+      };
+    }
+  },
+  {
+    name: "board_summary",
+    description: "Lane-by-lane counts of live cards, plus the board's categories and tag policy. Read this before creating a card so its category and tags match what the board already uses.",
+    readOnly: true,
+    properties: { board_id: BOARD_ID },
+    required: ["board_id"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const cards = store.listWorkItems(board.id);
+      const counts = new Map;
+      const tags = new Map;
+      for (const card of cards) {
+        counts.set(card.columnKey, (counts.get(card.columnKey) ?? 0) + 1);
+        for (const tag of card.tags)
+          tags.set(tag, (tags.get(tag) ?? 0) + 1);
+      }
+      const columns = [...board.config.columns].sort((a, b) => a.position - b.position);
+      return {
+        board: { workspaceId: board.id, name: board.name, repo: board.repo },
+        total: cards.length,
+        lanes: columns.map((column) => ({
+          key: column.key,
+          name: column.name,
+          role: column.role,
+          count: counts.get(column.key) ?? 0
+        })),
+        categories: board.config.categories.map((category) => ({
+          key: category.key,
+          name: category.name,
+          prefix: category.prefix,
+          next: (board.taskHeads[category.key] ?? 0) + 1
+        })),
+        tagPolicy: board.config.tags,
+        tags: [...tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([tag, count]) => ({ tag, count })),
+        labels: board.config.labels
+      };
+    }
+  },
+  {
+    name: "list_reviews",
+    description: "Cards on a board, in the order the board draws them. Filter by lane, category, tag or priority. Archived cards are excluded unless asked for.",
+    readOnly: true,
+    properties: {
+      board_id: BOARD_ID,
+      category: { type: "string", description: "Category key, e.g. backend" },
+      column: {
+        type: "string",
+        description: "Lane key, e.g. todo | processing | done"
+      },
+      include_archived: { type: "boolean" },
+      limit: { type: "integer", minimum: 1, maximum: 200 },
+      priority: PRIORITY,
+      tag: { type: "string" },
+      task_id: {
+        type: "string",
+        description: "Exact task id such as BE-07, matched on the field, not the title"
+      }
+    },
+    required: ["board_id"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const order = columnOrder(board);
+      const taskId = str2(args.task_id)?.toUpperCase();
+      const cards = store.listWorkItems(board.id, {
+        column: str2(args.column),
+        category: str2(args.category),
+        priority: str2(args.priority),
+        tag: str2(args.tag),
+        includeDeleted: args.include_archived === true
+      }).filter((card) => !taskId || card.taskId === taskId).sort((a, b) => (order.get(a.columnKey)?.position ?? 999) - (order.get(b.columnKey)?.position ?? 999) || a.rank.localeCompare(b.rank) || a.id.localeCompare(b.id));
+      const limit = typeof args.limit === "number" ? args.limit : 50;
+      return {
+        total: cards.length,
+        items: cards.slice(0, limit),
+        truncated: cards.length > limit
+      };
+    }
+  },
+  {
+    name: "get_review",
+    description: "One card with its checklist, tags and `streams`, plus the latest `checkpoint` another agent left on it (or null) and `dispatch`: the card's run plan, `{ waves, briefs }`, or null when it has no streams. `card` takes either the card's id or its task id (e.g. BE-07).",
+    readOnly: true,
+    properties: { board_id: BOARD_ID, card: CARD },
+    required: ["board_id", "card"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const item = cardOf(store, board, args.card);
+      const { latest } = store.listCheckpoints(item.id, {
+        workspace: board.id
+      });
+      return { item, checkpoint: latest, dispatch: item.dispatch };
+    }
+  },
+  {
+    name: "create_review",
+    description: "Open a new card on a board. Setting `category` also mints the card's permanent task id. Split into `streams` only for 2+ independent write areas. Shared files go in a W0 stream the others depend on. At most 4 streams per wave, no two streams in one wave own the same path, every stream needs at least one verify item tagged with its key. Isolation defaults to worktree.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      title: { type: "string" },
+      body: { type: "string", description: "Markdown" },
+      category: {
+        type: "string",
+        description: "Category key; mints the task id"
+      },
+      checklist: CHECKLIST,
+      column: {
+        type: "string",
+        description: "Lane key; defaults to the board's start lane"
+      },
+      parent_id: { type: "string" },
+      priority: PRIORITY,
+      streams: STREAMS,
+      tags: { type: "string[]" },
+      type: { type: "string", enum: ["epic", "issue", "task"] },
+      assignees: ASSIGNEES
+    },
+    required: ["board_id", "title"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const checklist = args.checklist ?? [];
+      const streams = args.streams;
+      checkStreamPlan(streams, checklist);
+      let parentId = str2(args.parent_id);
+      if (parentId)
+        parentId = cardOf(store, board, parentId).id;
+      const item = store.createWorkItem(board.id, {
+        title: String(args.title),
+        body: str2(args.body),
+        categoryKey: str2(args.category),
+        checklist,
+        columnKey: str2(args.column) ?? startColumn(board),
+        parentId,
+        priority: str2(args.priority),
+        streams,
+        tags: args.tags,
+        type: str2(args.type)
+      });
+      return {
+        item,
+        next: "Offer to review the new card with the user here (review_card)."
+      };
+    }
+  },
+  {
+    name: "update_review",
+    description: "Patch a card's title, body, priority, tags, assignees, category or streams. Omitted fields are left alone; `tags`, `assignees` and `streams` replace what is there (`streams: []` clears the plan). Streams are checked against the checklist: each needs a verify item tagged with its key (tag them in the same call with `checklist_streams`). Use set_status to move between lanes.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      title: { type: "string" },
+      body: { type: "string" },
+      category: {
+        type: "string",
+        description: "Setting this on a card with no task id yet mints one"
+      },
+      priority: PRIORITY,
+      tags: { type: "string[]", description: "Replaces the card's tags" },
+      assignees: ASSIGNEES,
+      streams: STREAMS,
+      checklist_streams: {
+        type: "string-map",
+        description: 'Verify item key → stream key (null removes the tag), e.g. { "V3": "W1", "V4": null }'
+      },
+      expected_revision: {
+        type: "integer",
+        description: "Refuse unless the card is still at this revision"
+      }
+    },
+    required: ["board_id", "card"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const current = cardOf(store, board, args.card);
+      if (typeof args.expected_revision === "number" && args.expected_revision !== current.revision)
+        fail("conflict", `card is at revision ${current.revision}, not ${args.expected_revision}`);
+      const retag = args.checklist_streams;
+      let checklist;
+      if (retag && Object.keys(retag).length > 0) {
+        const keys = new Set(current.checklist.map((item2) => item2.key));
+        const unknown = Object.keys(retag).filter((key) => !keys.has(key));
+        if (unknown.length > 0)
+          fail("not_found", `checklist item ${unknown.join(", ")} not found`);
+        checklist = asInput(current.checklist).map((item2) => item2.key && (item2.key in retag) ? { ...item2, stream: retag[item2.key] ?? null } : item2);
+      }
+      const streams = args.streams;
+      if (streams)
+        checkStreamPlan(streams, checklist ?? asInput(current.checklist));
+      const item = store.updateWorkItem(current.id, {
+        title: str2(args.title),
+        body: str2(args.body),
+        categoryKey: str2(args.category),
+        priority: str2(args.priority),
+        tags: args.tags,
+        streams,
+        checklist
+      }, { workspace: board.id, ifRevision: current.revision });
+      return { item };
+    }
+  },
+  {
+    name: "toggle_item",
+    description: "Tick or untick one checklist box on a card, and optionally leave a note under it, or tag a verify item with the stream it proves. `key` is the item's stable id, e.g. D1 or V3.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      key: { type: "string", description: "Checklist item key, e.g. D1 or V3" },
+      checked: {
+        type: "boolean",
+        description: "Omit to leave the tick alone"
+      },
+      note: { type: "string", description: "Empty string clears it" },
+      stream: {
+        type: "nullable-string",
+        description: "Verify items only; null removes the tag"
+      },
+      text: {
+        type: "string",
+        description: "Reword the item, keeping its key and tick"
+      }
+    },
+    required: ["board_id", "card", "key"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const patch = {};
+      if (typeof args.checked === "boolean")
+        patch.checked = args.checked;
+      if (typeof args.note === "string")
+        patch.note = args.note;
+      if (typeof args.text === "string")
+        patch.text = args.text;
+      if (args.stream !== undefined)
+        patch.stream = args.stream;
+      const item = store.toggleChecklistItem(String(args.card), String(args.key), patch, { workspace: board.id });
+      return { item, ...decisionState(item.checklist) };
+    }
+  },
+  {
+    name: "review_card",
+    description: "Write the user's review of a card's checklist in one call. ONLY with picks the user just made. Ticking one option of a pick-ONE group unticks the others; boxes not named are left as they are. Free text goes in `note`. Returns `ready: true` once every decision is settled; it does not move the card.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      picks: {
+        type: "object[]",
+        minItems: 1,
+        properties: {
+          key: { type: "string" },
+          checked: { type: "boolean" },
+          note: { type: "string" }
+        },
+        required: ["key", "checked"]
+      },
+      revision: {
+        type: "integer",
+        description: "Refused if the card's revision changed since"
+      }
+    },
+    required: ["board_id", "card", "picks"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const current = cardOf(store, board, args.card);
+      const picks = args.picks;
+      const items = asInput(current.checklist);
+      const byKey = new Map(items.map((item2) => [item2.key, item2]));
+      const missing = picks.filter((pick) => !byKey.has(pick.key));
+      if (missing.length > 0)
+        fail("not_found", `checklist item ${missing.map((pick) => pick.key).join(", ")} not found`);
+      const tickedGroups = new Map;
+      for (const pick of picks) {
+        const item2 = byKey.get(pick.key);
+        item2.checked = pick.checked;
+        if (pick.note !== undefined)
+          item2.note = pick.note || null;
+        if (pick.checked && item2.group) {
+          const other = tickedGroups.get(item2.group);
+          if (other)
+            fail("invalid", `${other} and ${pick.key} are options of the same pick-ONE group "${item2.group}"; pick one`);
+          tickedGroups.set(item2.group, pick.key);
+        }
+      }
+      for (const [group, key] of tickedGroups)
+        for (const item2 of items)
+          if (item2.group === group && item2.key !== key)
+            item2.checked = false;
+      const item = store.updateWorkItem(current.id, { checklist: items }, {
+        workspace: board.id,
+        ifRevision: typeof args.revision === "number" ? args.revision : current.revision
+      });
+      const state = decisionState(item.checklist);
+      return {
+        ...state,
+        revision: item.revision,
+        checklist: item.checklist,
+        next: state.ready ? "Every decision is settled. Move the card with set_status when work starts." : "Some decisions are still open; work does not start until ready is true."
+      };
+    }
+  },
+  {
+    name: "set_status",
+    description: "Move a card to another lane, the board's status columns. Moving it to a done or archive lane clears its checkpoints.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      status: {
+        type: "string",
+        description: "Lane key, e.g. todo | processing | done | dropped"
+      }
+    },
+    required: ["board_id", "card", "status"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const item = store.setStatus(String(args.card), String(args.status), {
+        workspace: board.id
+      });
+      return { item: brief(item) };
+    }
+  },
+  {
+    name: "delete_review",
+    description: "Take a card off the board. This ARCHIVES it: the card and its history stay in the database and can be restored. Nothing here deletes rows.",
+    readOnly: false,
+    properties: { board_id: BOARD_ID, card: CARD },
+    required: ["board_id", "card"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const item = store.deleteWorkItem(String(args.card), {
+        workspace: board.id
+      });
+      return { archived: item.id, item: brief(item) };
+    }
+  },
+  {
+    name: "checkpoint",
+    description: "Record where you stopped on a card so another agent can resume it. Call after each checklist item you finish, and before you stop mid-task. `get_review` returns the latest checkpoint. Summarise; never paste transcripts, secrets, tokens or .env values. Refused on a finished or archived card.",
+    readOnly: false,
+    properties: {
+      board_id: BOARD_ID,
+      card: CARD,
+      summary: { type: "string" },
+      request: { type: "string" },
+      next_step: { type: "string" },
+      files: { type: "string[]" },
+      commands: {
+        type: "object[]",
+        properties: {
+          command: { type: "string" },
+          ok: { type: "boolean" }
+        },
+        required: ["command"]
+      },
+      git: {
+        type: "object",
+        properties: {
+          branch: { type: "string" },
+          head: { type: "string" },
+          wip_ref: { type: "string" },
+          wip_sha: { type: "string" }
+        }
+      }
+    },
+    required: ["board_id", "card", "summary"],
+    run(args, { store, agent, host }) {
+      const board = boardOf(store, args.board_id);
+      const git = args.git;
+      const request = {
+        summary: String(args.summary),
+        request: str2(args.request) ?? null,
+        nextStep: str2(args.next_step) ?? null,
+        files: args.files,
+        commands: args.commands,
+        host,
+        git: git ? {
+          branch: git.branch ?? null,
+          head: git.head ?? null,
+          wipRef: git.wip_ref ?? null,
+          wipSha: git.wip_sha ?? null
+        } : null
+      };
+      const checkpoint = store.addCheckpoint(String(args.card), request, {
+        workspace: board.id,
+        agent
+      });
+      return { checkpoint };
+    }
+  },
+  {
+    name: "lifecycle_status",
+    description: "What the board is waiting on: cards whose decisions are not all ticked (waiting), cards cleared to start (ready), and cards being worked (in flight).",
+    readOnly: true,
+    properties: { board_id: BOARD_ID },
+    required: ["board_id"],
+    run(args, { store }) {
+      const board = boardOf(store, args.board_id);
+      const order = columnOrder(board);
+      const waiting = [];
+      const ready = [];
+      const inFlight = [];
+      for (const card of store.listWorkItems(board.id)) {
+        const role = order.get(card.columnKey)?.role ?? null;
+        if (role === "done" || role === "archive")
+          continue;
+        const detail = store.getWorkItem(card.id);
+        const state = decisionState(detail.checklist);
+        if (role === "active") {
+          const verify = detail.checklist.filter((item) => item.section === "verify");
+          inFlight.push({
+            ...brief(detail),
+            verified: `${verify.filter((item) => item.checked).length}/${verify.length}`
+          });
+        } else if (state.ready)
+          ready.push(brief(detail));
+        else
+          waiting.push({ ...brief(detail), pending: state.pending });
+      }
+      return { waiting, ready, inFlight };
+    }
+  }
+];
+
+// apps/desktop/electron/mcp-local/server.ts
+var SERVER_NAME = "lanework";
+var SERVER_VERSION = "0.1.0";
+var LATEST_PROTOCOL_VERSION = "2025-06-18";
+var KNOWN_PROTOCOL_VERSIONS = [
+  "2024-11-05",
+  "2025-03-26",
+  "2025-06-18",
+  "2025-11-25"
+];
+var INSTRUCTIONS = [
+  "lanework is a Kanban board for AI-driven development. A card is a review checklist: decisions to approve, then verify steps to prove. This server is the OFFLINE board: it lives in a SQLite file on this machine, has no accounts, and the Lanework app shows what you write here.",
+  "Every tool needs a board_id and there is no default. To find it, run `git remote get-url origin` and call list_boards({ repo }) with the output as is. Exactly one board: use it. None: call list_boards without repo and ask the user which board this repo belongs to — the boards you can see, PLUS an option to create a new board for this repo (suggest `owner/name` from the remote as its name). Then link_repo the one they picked, or create_board if they chose a new one; never create a board they did not ask for. A board links to ONE repo: linking a board that already has another repo MOVES it (replace), it never adds a second. Several: ask the user. No git remote: ask the user. Never pick a board by its name.",
+  "Before creating a card, read board_summary so its category and tags match the vocabulary the board already uses; the category is also what mints the card's permanent task id. After create_review, offer to review the new card right here.",
+  "While working a card, call checkpoint after each checklist item you finish and before you stop mid-task. Asked to resume a card: get_review it and read its checkpoint. If checkpoint.git.wipRef is set AND you are not in the checkout it came from (checkpoint.host is another machine, or this is a fresh clone), check out checkpoint.git.head, then `git fetch origin <wipRef> && git cherry-pick --no-commit FETCH_HEAD && git reset` to restore the uncommitted work; in the same checkout that work is already on disk, so skip it. Re-run every check it claims passed, then continue from nextStep (or the summary).",
+  "A card with streams comes back from get_review with `dispatch: { waves, briefs }`, and you are its lead. Run it wave by wave: spawn every stream of a wave at once, one sub-agent per stream, each in its own git worktree from the current HEAD (in the shared checkout when its isolation is shared), and hand each one `dispatch.briefs[key]` verbatim. No sub-agents? Run the streams yourself, one by one, in wave order. Sub-agents never call Lanework and never commit. After each wave, merge each worktree into the main checkout, revert anything outside the stream's `owns`, re-run the stream's checks, tick its verify items, and call checkpoint once for the wave. After the last wave, run the untagged verify items. On resume, re-dispatch only the streams whose verify items are not all ticked. A card without streams (dispatch: null) works as before: one agent, end to end.",
+  "To review a card with the user in the CLI: get_review it, then ask the user with your option picker (AskUserQuestion) if you have one. Each pick-ONE group (boxes sharing a `group`) is one single-select question, its options the group's boxes, the one marked (Recommended) first. Gather the ungrouped decisions into multi-select questions of up to 4 boxes each. At most 4 questions per turn — ask again for the rest. A group with more than 4 options cannot fit: say so and send the user to the app for that group. Then call review_card ONCE with exactly what the user picked: a picked box checked: true, an offered but unpicked ungrouped box checked: false, and anything they typed under Other as that box's note. Never tick a decision the user did not pick; only a plain instruction in chat (e.g. 'tick the recommended ones') stands in for the picker. review_card does not move the card, and work starts only once it answers ready: true."
+].join(`
+
+`);
+var PARSE_ERROR = -32700;
+var INVALID_REQUEST = -32600;
+var METHOD_NOT_FOUND = -32601;
+var INVALID_PARAMS = -32602;
+function agentSlug(clientName) {
+  const name = typeof clientName === "string" ? clientName.toLowerCase() : "";
+  if (name.includes("codex"))
+    return "codex";
+  if (name.includes("claude"))
+    return "claude-code";
+  const slug = name.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug.slice(0, 40) || "agent";
+}
+function toolList() {
+  return TOOLS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: shapeSchema(tool),
+    annotations: {
+      readOnlyHint: tool.readOnly,
+      destructiveHint: tool.name === "delete_review",
+      openWorldHint: false
+    }
+  }));
+}
+function text(value, isError = false) {
+  return {
+    content: [{ type: "text", text: JSON.stringify(value) }],
+    ...isError ? { isError: true } : {}
+  };
+}
+
+class LocalMcpSession {
+  store;
+  #agent = "agent";
+  #host = import_node_os3.hostname();
+  constructor(store) {
+    this.store = store;
+  }
+  handle(message) {
+    if (typeof message !== "object" || message === null || Array.isArray(message))
+      return this.#error(null, INVALID_REQUEST, "not a JSON-RPC request");
+    const { id, method, params } = message;
+    const isNotification = id === undefined;
+    if (typeof method !== "string")
+      return isNotification ? null : this.#error(id ?? null, INVALID_REQUEST, "missing method");
+    if (isNotification)
+      return null;
+    try {
+      return { jsonrpc: "2.0", id, result: this.#dispatch(method, params) };
+    } catch (error) {
+      if (error instanceof RpcError)
+        return this.#error(id, error.code, error.message);
+      throw error;
+    }
+  }
+  #error(id, code, message) {
+    return { jsonrpc: "2.0", id, error: { code, message } };
+  }
+  #dispatch(method, params) {
+    const args = params ?? {};
+    switch (method) {
+      case "initialize": {
+        const asked = typeof args.protocolVersion === "string" ? args.protocolVersion : "";
+        const client = args.clientInfo;
+        this.#agent = agentSlug(client?.name);
+        return {
+          protocolVersion: KNOWN_PROTOCOL_VERSIONS.includes(asked) ? asked : LATEST_PROTOCOL_VERSION,
+          capabilities: { tools: { listChanged: false } },
+          serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+          instructions: INSTRUCTIONS
+        };
+      }
+      case "ping":
+        return {};
+      case "tools/list":
+        return { tools: toolList() };
+      case "tools/call":
+        return this.#call(args);
+      case "resources/list":
+        return { resources: [] };
+      case "prompts/list":
+        return { prompts: [] };
+      default:
+        throw new RpcError(METHOD_NOT_FOUND, `unknown method ${method}`);
+    }
+  }
+  #call(params) {
+    const tool = TOOLS.find((entry) => entry.name === params.name);
+    if (!tool)
+      throw new RpcError(INVALID_PARAMS, `unknown tool ${String(params.name)}`);
+    const ctx = {
+      store: this.store,
+      agent: this.#agent,
+      host: this.#host
+    };
+    try {
+      return text(tool.run(checkShape(tool, params.arguments), ctx));
+    } catch (error) {
+      if (error instanceof LocalStoreError)
+        return text({ error: error.code, message: error.message }, true);
+      if (error instanceof InvalidParams)
+        return text({ error: "invalid", message: error.message }, true);
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`lanework mcp: ${tool.name} failed: ${message}
+`);
+      return text({ error: "internal", message }, true);
+    }
+  }
+}
+
+class RpcError extends Error {
+  code;
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+function handleLine(session, line) {
+  if (!line.trim())
+    return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return [
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: PARSE_ERROR, message: "parse error" }
+      })
+    ];
+  }
+  if (Array.isArray(parsed)) {
+    const answers = parsed.map((message) => session.handle(message)).filter((answer2) => answer2 !== null);
+    return answers.length > 0 ? [JSON.stringify(answers)] : [];
+  }
+  const answer = session.handle(parsed);
+  return answer ? [JSON.stringify(answer)] : [];
+}
+function runLocalMcpServer(options = {}) {
+  const input = options.input ?? process.stdin;
+  const output = options.output ?? process.stdout;
+  return new Promise((resolve) => {
+    const store = openLocalStore({
+      path: options.path,
+      busyTimeoutMs: options.busyTimeoutMs
+    });
+    const session = new LocalMcpSession(store);
+    let buffer = "";
+    const flush = (final) => {
+      let index = buffer.indexOf(`
+`);
+      while (index !== -1) {
+        const line = buffer.slice(0, index).replace(/\r$/, "");
+        buffer = buffer.slice(index + 1);
+        respond(line);
+        index = buffer.indexOf(`
+`);
+      }
+      if (final && buffer.trim()) {
+        respond(buffer);
+        buffer = "";
+      }
+    };
+    const respond = (line) => {
+      try {
+        for (const out of handleLine(session, line))
+          output.write(`${out}
+`);
+      } catch (error) {
+        process.stderr.write(`lanework mcp: ${error instanceof Error ? error.stack : String(error)}
+`);
+      }
+    };
+    let done = false;
+    const finish = () => {
+      if (done)
+        return;
+      done = true;
+      flush(true);
+      store.close();
+      resolve();
+    };
+    input.setEncoding?.("utf8");
+    input.on("data", (chunk) => {
+      buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      flush(false);
+    });
+    input.once("end", finish);
+    input.once("close", finish);
+  });
+}
 // apps/desktop/electron/hook/credential.ts
 var import_node_child_process = require("node:child_process");
-var import_node_fs = require("node:fs");
-var import_node_os2 = require("node:os");
-var import_node_path = require("node:path");
+var import_node_fs2 = require("node:fs");
+var import_node_os4 = require("node:os");
+var import_node_path4 = require("node:path");
 var KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
 function configDir() {
-  return import_node_path.join(process.env.XDG_CONFIG_HOME || import_node_path.join(import_node_os2.homedir(), ".config"), "lanework");
+  return import_node_path4.join(process.env.XDG_CONFIG_HOME || import_node_path4.join(import_node_os4.homedir(), ".config"), "lanework");
 }
 function secretFile() {
   if (process.env.LANEWORK_HOOK_SECRET_FILE)
     return process.env.LANEWORK_HOOK_SECRET_FILE;
-  return process.platform === "darwin" ? null : import_node_path.join(configDir(), "credential");
+  return process.platform === "darwin" ? null : import_node_path4.join(configDir(), "credential");
 }
 function credentialLocation() {
   return secretFile() ?? `macOS Keychain (${KEYCHAIN_SERVICE})`;
@@ -391,7 +2585,7 @@ function readSecret(api) {
   const file = secretFile();
   if (file) {
     try {
-      return import_node_fs.readFileSync(file, "utf8").trim() || null;
+      return import_node_fs2.readFileSync(file, "utf8").trim() || null;
     } catch {
       return null;
     }
@@ -405,10 +2599,10 @@ function readSecret(api) {
 function writeSecret(api, secret) {
   const file = secretFile();
   if (file) {
-    import_node_fs.mkdirSync(import_node_path.dirname(file), { recursive: true, mode: 448 });
-    import_node_fs.writeFileSync(file, `${secret}
+    import_node_fs2.mkdirSync(import_node_path4.dirname(file), { recursive: true, mode: 448 });
+    import_node_fs2.writeFileSync(file, `${secret}
 `, { mode: 384 });
-    import_node_fs.chmodSync(file, 384);
+    import_node_fs2.chmodSync(file, 384);
     return;
   }
   import_node_child_process.execFileSync("security", ["-i"], {
@@ -420,7 +2614,7 @@ function writeSecret(api, secret) {
 function deleteSecret(api) {
   const file = secretFile();
   if (file) {
-    import_node_fs.rmSync(file, { force: true });
+    import_node_fs2.rmSync(file, { force: true });
     return;
   }
   try {
@@ -429,10 +2623,10 @@ function deleteSecret(api) {
 }
 
 // apps/desktop/electron/hook/cli.ts
-var pluginConfigPath = () => import_node_path2.join(configDir(), "hook.json");
+var pluginConfigPath = () => import_node_path5.join(configDir(), "hook.json");
 function readConfig() {
   try {
-    return JSON.parse(import_node_fs2.readFileSync(pluginConfigPath(), "utf8"));
+    return JSON.parse(import_node_fs3.readFileSync(pluginConfigPath(), "utf8"));
   } catch {
     return {};
   }
@@ -485,8 +2679,8 @@ ${outcome()}`;
 async function startDeviceLogin(api, stateDir) {
   const { verifier, challenge } = pkcePair();
   const started = await startDevice(api, { challenge, facts: machineFacts() });
-  import_node_fs2.mkdirSync(stateDir, { recursive: true, mode: 448 });
-  const file = import_node_path2.join(stateDir, `device-${process.pid}-${Date.now()}.json`);
+  import_node_fs3.mkdirSync(stateDir, { recursive: true, mode: 448 });
+  const file = import_node_path5.join(stateDir, `device-${process.pid}-${Date.now()}.json`);
   const pending = {
     api,
     deviceCode: started.deviceCode,
@@ -494,7 +2688,7 @@ async function startDeviceLogin(api, stateDir) {
     interval: started.interval,
     deadline: Date.now() + DEVICE_TTL_MS
   };
-  import_node_fs2.writeFileSync(file, JSON.stringify(pending), { mode: 384 });
+  import_node_fs3.writeFileSync(file, JSON.stringify(pending), { mode: 384 });
   import_node_child_process2.spawn(process.execPath, [process.argv[1] ?? "", "--plugin", "login-wait", file], { detached: true, stdio: "ignore" }).unref();
   console.log([
     `On any device, open ${started.verificationUri} and enter the code:`,
@@ -509,16 +2703,16 @@ async function startDeviceLogin(api, stateDir) {
 async function waitForDeviceLogin(file, stateDir) {
   const note = (line) => {
     try {
-      import_node_fs2.mkdirSync(stateDir, { recursive: true, mode: 448 });
-      import_node_fs2.appendFileSync(import_node_path2.join(stateDir, "hook.log"), `${new Date().toISOString()} device sign-in: ${line}
+      import_node_fs3.mkdirSync(stateDir, { recursive: true, mode: 448 });
+      import_node_fs3.appendFileSync(import_node_path5.join(stateDir, "hook.log"), `${new Date().toISOString()} device sign-in: ${line}
 `);
     } catch {}
   };
   let pending;
   try {
-    pending = JSON.parse(import_node_fs2.readFileSync(file, "utf8"));
+    pending = JSON.parse(import_node_fs3.readFileSync(file, "utf8"));
   } finally {
-    import_node_fs2.rmSync(file, { force: true });
+    import_node_fs3.rmSync(file, { force: true });
   }
   let interval = pending.interval;
   while (Date.now() < pending.deadline) {
@@ -579,10 +2773,10 @@ async function status(api, stateDir, desktopHook) {
   let last = "none yet";
   try {
     let best = null;
-    for (const name of import_node_fs2.readdirSync(stateDir)) {
+    for (const name of import_node_fs3.readdirSync(stateDir)) {
       if (!name.startsWith("session-"))
         continue;
-      const s = JSON.parse(import_node_fs2.readFileSync(import_node_path2.join(stateDir, name), "utf8"));
+      const s = JSON.parse(import_node_fs3.readFileSync(import_node_path5.join(stateDir, name), "utf8"));
       if (typeof s.at === "number" && s.taskId && (!best || s.at > best.at))
         best = { at: s.at, taskId: s.taskId };
     }
@@ -598,7 +2792,7 @@ async function status(api, stateDir, desktopHook) {
     ...desktopHook ? [
       "Desktop app:      its hook is installed, so this plugin's hook stays quiet (one checkpoint per turn)"
     ] : [],
-    `Log:              ${import_node_path2.join(stateDir, "hook.log")}`
+    `Log:              ${import_node_path5.join(stateDir, "hook.log")}`
   ].join(`
 `));
 }
@@ -609,22 +2803,51 @@ function config(key, value) {
     return;
   }
   const next = { ...readConfig(), pushWip: value === "on" };
-  import_node_fs2.mkdirSync(configDir(), { recursive: true, mode: 448 });
-  import_node_fs2.writeFileSync(pluginConfigPath(), `${JSON.stringify(next, null, 2)}
+  import_node_fs3.mkdirSync(configDir(), { recursive: true, mode: 448 });
+  import_node_fs3.writeFileSync(pluginConfigPath(), `${JSON.stringify(next, null, 2)}
 `, {
     mode: 384
   });
   console.log(value === "on" ? "The hook will also push uncommitted work to refs/lanework/wip/<task id>." : "The hook will not push code.");
 }
 function desktopHookInstalled() {
-  const settings = import_node_path2.join(process.env.CLAUDE_CONFIG_DIR || import_node_path2.join(import_node_os3.homedir(), ".claude"), "settings.json");
-  if (!import_node_fs2.existsSync(settings))
+  const settings = import_node_path5.join(process.env.CLAUDE_CONFIG_DIR || import_node_path5.join(import_node_os5.homedir(), ".claude"), "settings.json");
+  if (!import_node_fs3.existsSync(settings))
     return false;
   try {
-    return import_node_fs2.readFileSync(settings, "utf8").includes("lanework-checkpoint");
+    return import_node_fs3.readFileSync(settings, "utf8").includes("lanework-checkpoint");
   } catch {
     return false;
   }
+}
+function mcp() {
+  return runLocalMcpServer();
+}
+
+// apps/desktop/electron/hook/local-board.ts
+var import_node_fs4 = require("node:fs");
+function localBoardFor(remote, path = localStorePath()) {
+  if (!import_node_fs4.existsSync(path))
+    return null;
+  const store = openLocalStore({ path });
+  try {
+    const boards2 = store.findWorkspacesByRepo(remote).filter((workspace) => !workspace.cloudId);
+    const board = boards2.length === 1 ? boards2[0] : undefined;
+    if (!board) {
+      store.close();
+      return null;
+    }
+    return { store, workspaceId: board.id };
+  } catch (error) {
+    store.close();
+    throw error;
+  }
+}
+function writeLocalCheckpoint(board, taskId, body, agent) {
+  return board.store.addCheckpoint(taskId, body, {
+    workspace: board.workspaceId,
+    agent
+  }).id;
 }
 
 // apps/desktop/electron/hook/lanework-checkpoint.ts
@@ -650,7 +2873,7 @@ function hookConfig() {
   if (!file)
     return {};
   try {
-    return JSON.parse(import_node_fs3.readFileSync(file, "utf8"));
+    return JSON.parse(import_node_fs5.readFileSync(file, "utf8"));
   } catch {
     return {};
   }
@@ -658,17 +2881,17 @@ function hookConfig() {
 var PUSH_WIP = ARGS.flags.has("push-wip") || hookConfig().pushWip === true;
 var AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : "claude-code";
 var AGENT_NAME = AGENT === "codex" ? "Codex" : "Claude Code";
-var STATE_DIR = import_node_path3.join(import_node_os4.homedir(), ".cache", "lanework", "checkpoint");
-var LOG = import_node_path3.join(STATE_DIR, "hook.log");
+var STATE_DIR = import_node_path6.join(import_node_os6.homedir(), ".cache", "lanework", "checkpoint");
+var LOG = import_node_path6.join(STATE_DIR, "hook.log");
 var THIN_MS = 60000;
 var PUSH_TIMEOUT_MS = 30000;
 var HTTP_TIMEOUT_MS = 1e4;
 function log(message) {
   try {
-    import_node_fs3.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-    if (import_node_fs3.existsSync(LOG) && import_node_fs3.statSync(LOG).size > 512 * 1024)
-      import_node_fs3.rmSync(LOG);
-    import_node_fs3.appendFileSync(LOG, `${new Date().toISOString()} ${message}
+    import_node_fs5.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
+    if (import_node_fs5.existsSync(LOG) && import_node_fs5.statSync(LOG).size > 512 * 1024)
+      import_node_fs5.rmSync(LOG);
+    import_node_fs5.appendFileSync(LOG, `${new Date().toISOString()} ${message}
 `);
   } catch {}
 }
@@ -688,20 +2911,20 @@ function tryGit(cwd, args) {
     return null;
   }
 }
-var sha256 = (s) => import_node_crypto2.createHash("sha256").update(s).digest("hex");
-function clip(s, max) {
+var sha256 = (s) => import_node_crypto3.createHash("sha256").update(s).digest("hex");
+function clip2(s, max) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 function readJson(file, fallback) {
   try {
-    return JSON.parse(import_node_fs3.readFileSync(file, "utf8"));
+    return JSON.parse(import_node_fs5.readFileSync(file, "utf8"));
   } catch {
     return fallback;
   }
 }
 function writeJson(file, value) {
-  import_node_fs3.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-  import_node_fs3.writeFileSync(file, JSON.stringify(value), { mode: 384 });
+  import_node_fs5.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
+  import_node_fs5.writeFileSync(file, JSON.stringify(value), { mode: 384 });
 }
 function redact(input) {
   return input.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED private key]").replace(/\blw_(?:reg|mch|dev|code)_[A-Za-z0-9_-]+/g, "[REDACTED]").replace(/\b(?:sk|pk|rk)-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{16,}/g, "[REDACTED]").replace(/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, "[REDACTED]").replace(/\bgithub_pat_[A-Za-z0-9_]{20,}/g, "[REDACTED]").replace(/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, "[REDACTED]").replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[REDACTED]").replace(/\bAIza[0-9A-Za-z_-]{30,}/g, "[REDACTED]").replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[REDACTED jwt]").replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi, "$1 [REDACTED]").replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, "$1[REDACTED]@").replace(/\b([A-Za-z0-9_]*(?:api[_-]?key|secret|passw(?:or)?d|token|credential|private[_-]?key)[A-Za-z0-9_]*)(["']?\s*[:=]\s*["']?)[^\s"',;]{6,}/gi, "$1$2[REDACTED]");
@@ -709,10 +2932,10 @@ function redact(input) {
 function humanText(content) {
   const raw = typeof content === "string" ? content : Array.isArray(content) ? content.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text).join(`
 `) : "";
-  const text = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
-  if (!text || text.startsWith("<"))
+  const text2 = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+  if (!text2 || text2.startsWith("<"))
     return null;
-  return text;
+  return text2;
 }
 function resultText(content) {
   if (typeof content === "string")
@@ -788,7 +3011,7 @@ function digest(transcript, root) {
         if (["Edit", "Write", "NotebookEdit"].includes(b.name)) {
           const path = input.file_path ?? input.notebook_path;
           if (typeof path === "string") {
-            const rel = path.startsWith(root) ? import_node_path3.relative(root, path) : path;
+            const rel = path.startsWith(root) ? import_node_path6.relative(root, path) : path;
             if (!rel.startsWith("..")) {
               const at = files.indexOf(rel);
               if (at !== -1)
@@ -804,7 +3027,7 @@ function digest(transcript, root) {
     }
   }
   const commands = commandIds.slice(-15).map((id) => ({
-    command: clip(String(uses.get(id)?.input.command ?? "").split(`
+    command: clip2(String(uses.get(id)?.input.command ?? "").split(`
 `)[0] ?? "", 300),
     ok: failed.has(id) ? !failed.get(id) : null
   }));
@@ -837,24 +3060,24 @@ function unquote(literal) {
 function findCodexRollout(sessionId) {
   if (!sessionId)
     return null;
-  const base = import_node_path3.join(process.env.CODEX_HOME || import_node_path3.join(import_node_os4.homedir(), ".codex"), "sessions");
+  const base = import_node_path6.join(process.env.CODEX_HOME || import_node_path6.join(import_node_os6.homedir(), ".codex"), "sessions");
   const ls = (dir) => {
     try {
-      return import_node_fs3.readdirSync(dir).sort().reverse();
+      return import_node_fs5.readdirSync(dir).sort().reverse();
     } catch {
       return [];
     }
   };
   let days = 0;
   for (const year of ls(base))
-    for (const month of ls(import_node_path3.join(base, year)))
-      for (const day of ls(import_node_path3.join(base, year, month))) {
+    for (const month of ls(import_node_path6.join(base, year)))
+      for (const day of ls(import_node_path6.join(base, year, month))) {
         if (++days > 3)
           return null;
-        const dir = import_node_path3.join(base, year, month, day);
+        const dir = import_node_path6.join(base, year, month, day);
         const hit = ls(dir).find((name) => name.endsWith(`${sessionId}.jsonl`));
         if (hit)
-          return import_node_path3.join(dir, hit);
+          return import_node_path6.join(dir, hit);
       }
   return null;
 }
@@ -873,24 +3096,24 @@ function digestCodex(transcript, root, lastMessage) {
   const scriptFiles = [];
   const scriptCommands = [];
   const calls = new Map;
-  const touch = (list, path) => {
+  const touch = (list2, path) => {
     const trimmed = path.trim().replace(/^file:\/\//, "");
-    const rel = trimmed.startsWith(root) ? import_node_path3.relative(root, trimmed) : trimmed;
+    const rel = trimmed.startsWith(root) ? import_node_path6.relative(root, trimmed) : trimmed;
     if (!rel || rel.startsWith(".."))
       return;
-    const at = list.indexOf(rel);
+    const at = list2.indexOf(rel);
     if (at !== -1)
-      list.splice(at, 1);
-    list.push(rel);
+      list2.splice(at, 1);
+    list2.push(rel);
   };
-  const typed = (text) => {
-    if (!text || text.startsWith("<") || text.startsWith("# AGENTS.md"))
+  const typed = (text2) => {
+    if (!text2 || text2.startsWith("<") || text2.startsWith("# AGENTS.md"))
       return;
-    request = text;
+    request = text2;
     if (replies.length)
       previousReplies = replies;
     replies = [];
-    for (const m of text.match(TASK_ID) ?? [])
+    for (const m of text2.match(TASK_ID) ?? [])
       if (!NOT_TASK_ID.test(m))
         typedTaskId = m;
   };
@@ -911,14 +3134,14 @@ function digestCodex(transcript, root, lastMessage) {
       if (item.type === "UserMessage")
         typed(texts(item.content));
       else if (item.type === "AgentMessage") {
-        const text = texts(item.content);
-        if (text)
-          replies.push(text);
+        const text2 = texts(item.content);
+        if (text2)
+          replies.push(text2);
       } else if (item.type === "CommandExecution") {
         const argv = Array.isArray(item.command) ? item.command : [];
         const script = String(argv[argv.length - 1] ?? "");
         commands.push({
-          command: clip(script.split(`
+          command: clip2(script.split(`
 `)[0] ?? "", 300),
           ok: typeof item.exit_code === "number" ? item.exit_code === 0 : null
         });
@@ -955,7 +3178,7 @@ ${source}`;
         touch(scriptFiles, m[1] ?? "");
       for (const m of blob.matchAll(EXEC_CMD))
         scriptCommands.push({
-          command: clip(unquote(m[1] ?? "").split(`
+          command: clip2(unquote(m[1] ?? "").split(`
 `)[0] ?? "", 300),
           ok: null
         });
@@ -997,7 +3220,7 @@ async function http(path, init = {}) {
   });
 }
 async function boardFor(remote, secret) {
-  const cacheFile = import_node_path3.join(STATE_DIR, "boards.json");
+  const cacheFile = import_node_path6.join(STATE_DIR, "boards.json");
   const cache = readJson(cacheFile, {});
   if (cache[remote])
     return cache[remote];
@@ -1017,7 +3240,7 @@ async function boardFor(remote, secret) {
   return id;
 }
 function snapshot(root, taskId) {
-  const index = import_node_path3.join(import_node_os4.tmpdir(), `lanework-wip-${process.pid}.index`);
+  const index = import_node_path6.join(import_node_os6.tmpdir(), `lanework-wip-${process.pid}.index`);
   try {
     const env = { GIT_INDEX_FILE: index };
     git(root, ["read-tree", "HEAD"], env);
@@ -1048,17 +3271,17 @@ function snapshot(root, taskId) {
       return { wipRef: null, wipSha: sha };
     }
   } finally {
-    import_node_fs3.rmSync(index, { force: true });
+    import_node_fs5.rmSync(index, { force: true });
   }
 }
 function buildBody(d, extra) {
   const heading = d.replyIsPrevious ? `${AGENT_NAME}'s last message, from the turn BEFORE the request below (it stopped before replying to that one):` : `${AGENT_NAME}'s last message before it stopped:`;
   const summary = d.lastReply ? `${heading}
 
-${clip(redact(d.lastReply), 5000)}` : `${AGENT_NAME} stopped before writing any reply in this session.`;
+${clip2(redact(d.lastReply), 5000)}` : `${AGENT_NAME} stopped before writing any reply in this session.`;
   return {
     summary,
-    request: d.request ? clip(redact(d.request), 2000) : null,
+    request: d.request ? clip2(redact(d.request), 2000) : null,
     nextStep: null,
     files: d.files,
     commands: d.commands.map((c) => ({ ...c, command: redact(c.command) })),
@@ -1069,7 +3292,7 @@ ${clip(redact(d.lastReply), 5000)}` : `${AGENT_NAME} stopped before writing any 
 }
 async function work(inputFile) {
   const input = readJson(inputFile, {});
-  import_node_fs3.rmSync(inputFile, { force: true });
+  import_node_fs5.rmSync(inputFile, { force: true });
   if (!input.cwd)
     return;
   const transcriptPath = input.transcript_path || (AGENT === "codex" ? findCodexRollout(input.session_id) : null);
@@ -1079,14 +3302,27 @@ async function work(inputFile) {
   const remote = root && tryGit(root, ["remote", "get-url", "origin"]);
   if (!root || !remote)
     return;
-  const transcript = import_node_fs3.readFileSync(transcriptPath, "utf8");
+  const transcript = import_node_fs5.readFileSync(transcriptPath, "utf8");
   const d = AGENT === "codex" ? digestCodex(transcript, root, input.last_assistant_message ?? null) : digest(transcript, root);
   if (!d.taskId) {
     log(`session ${input.session_id}: no card in the transcript; nothing sent`);
     return;
   }
-  const secret = readSecret2();
-  if (!secret) {
+  let local = null;
+  try {
+    local = localBoardFor(remote);
+  } catch (error) {
+    log(`local board unavailable: ${String(error)}`);
+  }
+  try {
+    await checkpointTo(local, { ...d, taskId: d.taskId }, input, root, remote);
+  } finally {
+    local?.store.close();
+  }
+}
+async function checkpointTo(local, d, input, root, remote) {
+  const secret = local ? null : readSecret2();
+  if (!local && !secret) {
     log("no credential; turn the hook on in the Lanework app (Settings → Agents)");
     return;
   }
@@ -1094,34 +3330,43 @@ async function work(inputFile) {
   const status2 = tryGit(root, ["status", "--porcelain"]) ?? "";
   const diff = tryGit(root, ["diff", "HEAD"]) ?? "";
   const code = sha256([d.taskId, head, status2, sha256(diff)].join("\x00"));
-  const stateFile = import_node_path3.join(STATE_DIR, `session-${sha256(input.session_id ?? "")}.json`);
+  const stateFile = import_node_path6.join(STATE_DIR, `session-${sha256(input.session_id ?? "")}.json`);
   const last = readJson(stateFile, null);
   if (last && last.code === code && Date.now() - last.at < THIN_MS)
     return;
-  const boardId = await boardFor(remote, secret);
-  if (!boardId)
+  const boardId = local ? null : await boardFor(remote, secret);
+  if (!local && !boardId)
     return;
   const pushed = last?.pushedCode === code ? last.wip : null;
   const wip = PUSH_WIP ? pushed ?? snapshot(root, d.taskId) : { wipRef: null, wipSha: null };
   const body = buildBody(d, {
-    host: import_node_os4.hostname(),
+    host: import_node_os6.hostname(),
     session: input.session_id ?? null,
     git: {
       branch: tryGit(root, ["rev-parse", "--abbrev-ref", "HEAD"]),
       head,
       wipRef: wip.wipRef,
       wipSha: wip.wipSha,
-      diffStat: clip(tryGit(root, ["diff", "HEAD", "--stat"]) ?? "", 3000) || null
+      diffStat: clip2(tryGit(root, ["diff", "HEAD", "--stat"]) ?? "", 3000) || null
     }
   });
-  const res = await http(paths.itemCheckpoints(boardId, d.taskId), {
-    method: "POST",
-    secret,
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) {
-    log(`checkpoint for ${d.taskId}: ${res.status} ${clip(await res.text(), 300)}`);
-    return;
+  if (local) {
+    try {
+      writeLocalCheckpoint(local, d.taskId, body, AGENT);
+    } catch (error) {
+      log(`local checkpoint for ${d.taskId}: ${String(error)}`);
+      return;
+    }
+  } else {
+    const res = await http(paths.itemCheckpoints(boardId, d.taskId), {
+      method: "POST",
+      secret,
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      log(`checkpoint for ${d.taskId}: ${res.status} ${clip2(await res.text(), 300)}`);
+      return;
+    }
   }
   const state = {
     at: Date.now(),
@@ -1142,10 +3387,10 @@ async function setup(token) {
     method: "POST",
     body: JSON.stringify({
       token,
-      name: `${import_node_os4.hostname()} · checkpoint hook`,
-      hostname: import_node_os4.hostname(),
-      os: import_node_os4.platform(),
-      arch: import_node_os4.arch()
+      name: `${import_node_os6.hostname()} · checkpoint hook`,
+      hostname: import_node_os6.hostname(),
+      os: import_node_os6.platform(),
+      arch: import_node_os6.arch()
     })
   });
   if (!res.ok) {
@@ -1165,6 +3410,16 @@ async function main() {
   const [mode, arg, value] = ARGS.positional;
   if (mode === "setup")
     return setup(arg);
+  if (mode === "mcp") {
+    try {
+      await mcp();
+    } catch (error) {
+      process.stderr.write(`lanework mcp: ${error instanceof Error ? error.message : String(error)}
+`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   try {
     if (mode === "login")
       return await login(API, ARGS.flags.has("device"), ARGS.flags.has("force"), STATE_DIR);
@@ -1192,10 +3447,10 @@ async function main() {
   if (ARGS.flags.has("plugin") && desktopHookInstalled())
     return;
   try {
-    const stdin = import_node_fs3.readFileSync(0, "utf8");
-    import_node_fs3.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-    const file = import_node_path3.join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
-    import_node_fs3.writeFileSync(file, stdin, { mode: 384 });
+    const stdin = import_node_fs5.readFileSync(0, "utf8");
+    import_node_fs5.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
+    const file = import_node_path6.join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
+    import_node_fs5.writeFileSync(file, stdin, { mode: 384 });
     const flags = process.argv.slice(2).filter((a) => !ARGS.positional.includes(a));
     import_node_child_process3.spawn(process.execPath, [SELF, ...flags, "worker", file], {
       detached: true,
@@ -1205,5 +3460,5 @@ async function main() {
     log(`hook failed: ${String(error)}`);
   }
 }
-if (import_node_path3.basename(SELF).startsWith("lanework-checkpoint"))
+if (import_node_path6.basename(SELF).startsWith("lanework-checkpoint"))
   main();

@@ -23,6 +23,7 @@ import {
 import { useBoard } from "#/stores/board";
 import { useLastRoute } from "#/stores/last-route";
 import { useReadinessWatch } from "#/stores/readiness";
+import { LocalBoardBar } from "./local-mode";
 
 /**
  * One project, open.
@@ -80,6 +81,20 @@ export function WorkspaceLayout() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [poll]);
+
+  // FE-52: the offline MCP and the checkpoint hook write a LOCAL board from
+  // outside this window, and nothing polls the SQLite store — main says when
+  // it changed. An empty list means "re-read everything local".
+  const reload = useBoard((state) => state.reload);
+  const activeId = active?.id ?? null;
+  const activeIsLocal = active?.origin === "local";
+  useEffect(() => {
+    const api = window.desktop?.workspaces;
+    if (!api?.onLocalChange || !activeIsLocal || !activeId) return;
+    return api.onLocalChange((ids) => {
+      if (ids.length === 0 || ids.includes(activeId)) void reload();
+    });
+  }, [reload, activeId, activeIsLocal]);
 
   // ⚠️ A workspace whose id the service never sent. Not a failure and not an
   // empty board: this app shipped a version that refused the whole workspace
@@ -152,6 +167,7 @@ export function WorkspaceLayout() {
           Offline — showing a saved board. Changes will not save.
         </div>
       )}
+      {active && <LocalBoardBar workspace={active} />}
       {(error || conflict) && (
         <div className="flex flex-col gap-2 px-6 pt-4">
           {conflict && (

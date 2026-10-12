@@ -1,6 +1,7 @@
 import { Logout01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
+import { SignInButton } from "#/components/features/workspaces/local-mode";
 import {
   SettingsPage,
   SettingsValue,
@@ -37,6 +38,49 @@ export function AccountSection() {
   const machine = principal?.kind === "machine" ? principal : null;
   const machineName = machine?.name || "this machine";
   const owner = machine?.owner ?? null;
+  const error = useSession((state) => state.error);
+
+  // FE-52/D5 + D10: "Skip for now" leaves no account and no machine to show.
+  // The page becomes the way in instead — the rows a signed-in machine has
+  // would all read "—", and Sign out would have nothing to revoke.
+  if (principal?.kind === "local")
+    return (
+      <SettingsPage
+        title="Account"
+        description="Lanework is running on this machine only. Sign in to keep your projects on a lanework account."
+        sections={[
+          {
+            title: "Not signed in",
+            rows: [
+              {
+                label: "Sign in",
+                description:
+                  "Opens your browser to approve this machine. Projects made here stay on this machine until you sync each one to the account.",
+                keywords: "login sign in account local mode cloud sync",
+                control: (
+                  <SignInButton size="lg" className="h-8 px-3 text-sm" />
+                ),
+              },
+            ],
+          },
+          ...(error
+            ? [
+                {
+                  title: "Problem",
+                  content: (
+                    <p
+                      role="alert"
+                      className="text-destructive text-[13px] break-words"
+                    >
+                      {error}
+                    </p>
+                  ),
+                },
+              ]
+            : []),
+        ]}
+      />
+    );
 
   return (
     <>

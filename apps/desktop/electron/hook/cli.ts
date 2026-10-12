@@ -6,6 +6,7 @@
 //   lanework status              signed in? hook config? last checkpoint?
 //   lanework logout              revoke this machine and forget it
 //   lanework config push-wip on|off
+//   lanework mcp                 the offline board's MCP server, on stdio (FE-52)
 //
 // ⚠️ Sign-in reuses the control plane's `lanework login` flow (its contract is
 // `@lanework/protocol`'s `auth.ts`) and the desktop app's own client for it, so
@@ -34,6 +35,7 @@ import {
 import { listenForCallback } from "../main/auth/loopback";
 import { newState, pkcePair } from "../main/auth/pkce";
 import { CALLBACK_PATH } from "../main/auth/redirect";
+import { runLocalMcpServer } from "../mcp-local/index";
 import {
   configDir,
   credentialLocation,
@@ -351,4 +353,15 @@ export function desktopHookInstalled(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * `lanework mcp` (FE-52): the offline board's MCP server on stdio, for an agent
+ * config that names this command instead of the app's bundle. Same server, same
+ * file (`~/.lanew/data.sqlite`, or `LANEWORK_HOME`), as the app's.
+ *
+ * ⚠️ stdout is the protocol channel while it runs: print nothing here.
+ */
+export function mcp(): Promise<void> {
+  return runLocalMcpServer();
 }

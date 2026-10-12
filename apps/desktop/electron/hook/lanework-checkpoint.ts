@@ -15,6 +15,10 @@
 // https://api.lanework.dev) and `--push-wip`, the opt-in (FE-28/D3) to push the
 // uncommitted tree to `refs/lanework/wip/<task-id>`.
 //
+// FE-52/D9: a repo linked to a board on this machine's LOCAL board (the SQLite
+// file the app and the offline MCP share, never moved to the cloud) gets its
+// checkpoint written there — no credential, no network. See `local-board.ts`.
+//
 // ⚠️ Costs no model quota: it reads the transcript file Claude Code already
 // wrote, and nothing here calls a model. That is the point — when the quota runs
 // out mid-task, the last completed turn is still on the card.
@@ -56,6 +60,7 @@ import {
   desktopHookInstalled,
   login,
   logout,
+  mcp,
   pluginConfigPath,
   status,
   waitForDeviceLogin,
@@ -65,6 +70,11 @@ import {
   readSecret as readCredential,
   writeSecret,
 } from "./credential";
+import {
+  type LocalBoard,
+  localBoardFor,
+  writeLocalCheckpoint,
+} from "./local-board";
 
 /** `--flag value` / `--flag` anywhere; everything else is positional. */
 function parseArgs(argv: string[]) {
@@ -784,8 +794,30 @@ async function work(inputFile: string): Promise<void> {
     return;
   }
 
-  const secret = readSecret();
-  if (!secret) {
+  // FE-52/D9: a repo whose board is on this machine's local board writes there
+  // and needs no credential. Any trouble opening it falls back to the cloud.
+  let local: LocalBoard | null = null;
+  try {
+    local = localBoardFor(remote);
+  } catch (error) {
+    log(`local board unavailable: ${String(error)}`);
+  }
+  try {
+    await checkpointTo(local, { ...d, taskId: d.taskId }, input, root, remote);
+  } finally {
+    local?.store.close();
+  }
+}
+
+async function checkpointTo(
+  local: LocalBoard | null,
+  d: Digest & { taskId: string },
+  input: HookInput,
+  root: string,
+  remote: string,
+): Promise<void> {
+  const secret = local ? null : readSecret();
+  if (!local && !secret) {
     log(
       "no credential; turn the hook on in the Lanework app (Settings → Agents)",
     );
@@ -805,8 +837,8 @@ async function work(inputFile: string): Promise<void> {
   const last = readJson<SessionState | null>(stateFile, null);
   if (last && last.code === code && Date.now() - last.at < THIN_MS) return;
 
-  const boardId = await boardFor(remote, secret);
-  if (!boardId) return;
+  const boardId = local ? null : await boardFor(remote, secret as string);
+  if (!local && !boardId) return;
 
   // Push only when opted in (FE-28/D3), and only when the tree moved since
   // the last push that landed; otherwise the remote ref already holds it.
@@ -827,16 +859,25 @@ async function work(inputFile: string): Promise<void> {
     },
   });
 
-  const res = await http(paths.itemCheckpoints(boardId, d.taskId), {
-    method: "POST",
-    secret,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    log(
-      `checkpoint for ${d.taskId}: ${res.status} ${clip(await res.text(), 300)}`,
-    );
-    return;
+  if (local) {
+    try {
+      writeLocalCheckpoint(local, d.taskId, body, AGENT);
+    } catch (error) {
+      log(`local checkpoint for ${d.taskId}: ${String(error)}`);
+      return;
+    }
+  } else {
+    const res = await http(paths.itemCheckpoints(boardId as string, d.taskId), {
+      method: "POST",
+      secret: secret as string,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      log(
+        `checkpoint for ${d.taskId}: ${res.status} ${clip(await res.text(), 300)}`,
+      );
+      return;
+    }
   }
   const state: SessionState = {
     at: Date.now(),
@@ -897,6 +938,19 @@ const SELF = process.argv[1] ?? "";
 async function main(): Promise<void> {
   const [mode, arg, value] = ARGS.positional;
   if (mode === "setup") return setup(arg);
+  // FE-52: `lanework mcp`, the offline board's MCP server on stdio. Before
+  // anything that could print: stdout is the protocol from here on.
+  if (mode === "mcp") {
+    try {
+      await mcp();
+    } catch (error) {
+      process.stderr.write(
+        `lanework mcp: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      process.exitCode = 1;
+    }
+    return;
+  }
   // INF-03: the plugin's `lanework` command.
   try {
     if (mode === "login")
