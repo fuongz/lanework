@@ -14,13 +14,13 @@ import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Workspace } from "#/../shared/workspaces";
 import { ImportLocalDialog } from "#/components/features/workspaces/import-local-dialog";
+import { RenameProjectDialog } from "#/components/features/workspaces/rename-project-dialog";
+import { SourceFoldersDialog } from "#/components/features/workspaces/source-folders-dialog";
 import {
   isMovedWorkspace,
   LocalBadge,
   useSyncToCloud,
-} from "#/components/features/workspaces/local-mode";
-import { RenameProjectDialog } from "#/components/features/workspaces/rename-project-dialog";
-import { SourceFoldersDialog } from "#/components/features/workspaces/source-folders-dialog";
+} from "#/components/shared/auth/local-mode";
 import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
 import {
   SettingsCard,

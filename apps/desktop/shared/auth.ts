@@ -101,7 +101,61 @@ export interface DesktopAuthApi {
   ) => () => void;
 }
 
+/**
+ * FE-52/D8: the `lanework` MCP server entry in an agent's user config —
+ * `~/.claude.json` for Claude Code, `config.toml` for Codex. `local` is the
+ * offline server over stdio (the app's own shim), `cloud` is
+ * `https://mcp.lanework.dev/v1` over HTTP.
+ */
+export type LaneworkMcpMode = "local" | "cloud";
+export type LaneworkMcpAgent = "claude-code" | "codex";
+
+export interface LaneworkMcpEntry {
+  /** A `lanework` entry is in this agent's config. */
+  installed: boolean;
+  /** …and it points at us — our shim or our cloud host — so the app may switch it. */
+  ours: boolean;
+  /** Where it points, when it is ours. */
+  mode: LaneworkMcpMode | null;
+  transport: "stdio" | "http" | null;
+  configPath: string;
+  /** The file exists but is not something the app will rewrite. */
+  unreadable: boolean;
+}
+
+export interface LaneworkMcpStatus {
+  /** What the current session wants: `local` in local mode, `cloud` signed in. */
+  want: LaneworkMcpMode | null;
+  /** The stdio entry's command. */
+  shimPath: string;
+  claude: LaneworkMcpEntry;
+  codex: LaneworkMcpEntry;
+}
+
+export const laneworkMcpChannels = {
+  status: "lanework-mcp:status",
+  /** Write the entry for one agent, pointed at what the session wants. */
+  install: "lanework-mcp:install",
+  remove: "lanework-mcp:remove",
+} as const;
+
+export interface DesktopLaneworkMcpApi {
+  status: () => Promise<LaneworkMcpStatus>;
+  install: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpStatus>;
+  remove: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpStatus>;
+}
+
 export const anonymous: Principal = { kind: "anonymous" };
+
+/** FE-52: the session "Skip for now" reports — no credential, the local board. */
+export function localSession(apiUrl: string): RedactedSession {
+  return {
+    principal: { kind: "local" },
+    apiUrl,
+    verdict: null,
+    checkedAt: null,
+  };
+}
 
 /** The session an unconfigured or signed-out install reports. */
 export function anonymousSession(apiUrl: string): RedactedSession {

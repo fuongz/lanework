@@ -86,6 +86,7 @@ import {
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { presenceKind } from "#/stores/board-presence";
+import { useCloudFeatures } from "#/stores/session";
 import { IssueActivity } from "./issue-activity";
 import { IssueCheckpoint } from "./issue-checkpoint";
 import { IssueStreams, StreamKey } from "./issue-streams";
@@ -410,6 +411,8 @@ function RailActions({ card }: { card: BoardCard }) {
 
 function Article({ card, slug }: { card: BoardCard; slug: string }) {
   const view = useBoard((state) => state.view);
+  // FE-52/D10: a local board keeps no attachments.
+  const { attachments } = useCloudFeatures(useBoard((state) => state.active));
   const update = useBoard((state) => state.update);
   const stale = view?.stale ?? false;
   const [title, setTitle] = useState(card.title);
@@ -491,7 +494,7 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
         />
       </div>
       <MarkdownBody source={card.body} />
-      <Attachments card={card} />
+      {attachments && <Attachments card={card} />}
       <Checklist card={card} />
       <WorkBreakdown card={card} />
       <SubIssues card={card} slug={slug} />

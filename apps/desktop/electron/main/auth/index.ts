@@ -3,6 +3,7 @@ import { shell } from "electron";
 import {
   anonymousSession,
   authChannels,
+  localSession,
   type Principal,
   type RedactedSession,
   type SignInMode,
@@ -10,9 +11,11 @@ import {
   type Verdict,
 } from "../../../shared/auth";
 import { can } from "../../../shared/policy";
+import { syncLaneworkMcp } from "../agent-setup/mcp-entry";
 import { forgetHookCredential, syncHandoff } from "../handoff";
 import { broadcast, handle } from "../ipc";
 import * as api from "./client";
+import { readLocalMode, writeLocalMode } from "./local-mode";
 import { listenForCallback } from "./loopback";
 import { newState, pkcePair } from "./pkce";
 import { CALLBACK_PATH, parseLoopbackRedirect } from "./redirect";
@@ -90,7 +93,12 @@ function principalOf(
 export async function currentSession(): Promise<RedactedSession> {
   const record = await readRecord();
   const apiUrl = api.resolveApi(record?.apiUrl);
-  if (!record) return anonymousSession(apiUrl);
+  // FE-52/D5: no credential, and "Skip for now" was chosen — the local board.
+  // Nothing here probes: a local session never asks the control plane anything.
+  if (!record)
+    return (await readLocalMode())
+      ? localSession(apiUrl)
+      : anonymousSession(apiUrl);
 
   const { verdict, userId, owner } = await api.probeIfStale(record);
   // Written back when either moved: identity lives on the server, and keeping a
@@ -126,6 +134,10 @@ async function publish(): Promise<RedactedSession> {
   const session = await currentSession();
   lastPublished = sessionKey(session);
   broadcast(authChannels.changed, session);
+  // FE-52/D8: an agent's `lanework` MCP entry follows the mode — the offline
+  // server while local, the cloud one once signed in. Only an entry that is
+  // already there and already ours is repointed; nothing is added here.
+  void syncLaneworkMcp(session.principal.kind).catch(() => undefined);
   return session;
 }
 
@@ -318,6 +330,12 @@ export async function signIn(
 export async function signOut(): Promise<RedactedSession> {
   const session = await currentSession();
   if (!can(session.principal, "session:signOut")) return session;
+  // FE-52: "signing out" of local mode is leaving it. The boards stay in the
+  // local store; choosing "Skip for now" again brings them back.
+  if (session.principal.kind === "local") {
+    await writeLocalMode(false);
+    return publish();
+  }
 
   const record = await readRecord();
   if (record && can(session.principal, "machine:revokeSelf"))
@@ -327,6 +345,28 @@ export async function signOut(): Promise<RedactedSession> {
   // FE-28: the Stop hook's copy of the credential goes with it.
   if (record) await forgetHookCredential(record.apiUrl);
   api.resetVerdict();
+  return publish();
+}
+
+/**
+ * FE-52/D5: "Skip for now". Remembers the choice and answers the session it
+ * produces — `local` — without a single request to the control plane.
+ *
+ * ⚠️ A no-op while a working credential is held: signing in is what the person
+ * did last, and a stray call must not quietly demote them to the local board.
+ * A REVOKED credential is useless to keep, so it goes, as a sign-out would
+ * take it — minus the revoke call, which would be refused anyway.
+ */
+export async function enterLocalMode(): Promise<RedactedSession> {
+  const session = await currentSession();
+  if (session.principal.kind === "machine") return session;
+  if (session.principal.kind === "revoked") {
+    const record = await readRecord();
+    await clearRecord();
+    if (record) await forgetHookCredential(record.apiUrl);
+    api.resetVerdict();
+  }
+  await writeLocalMode(true);
   return publish();
 }
 
@@ -359,6 +399,10 @@ export function registerAuth(devUrl?: string): void {
   handle(authChannels.cancel, devUrl, (args) => {
     if (args.length) throw new Error("This operation takes no arguments");
     cancelSignIn();
+  });
+  handle(authChannels.enterLocal, devUrl, (args) => {
+    if (args.length) throw new Error("This operation takes no arguments");
+    return enterLocalMode();
   });
   startHeartbeat();
 }

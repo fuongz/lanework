@@ -2,6 +2,7 @@ import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { LocalBadge } from "#/components/shared/auth/local-mode";
 import { ProjectListSkeleton } from "#/components/shared/board/skeletons";
 import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
 import { ErrorState } from "#/components/shared/common/error-state";
@@ -16,7 +17,6 @@ import {
 } from "#/components/ui/empty";
 import { useBoard } from "#/stores/board";
 import { isLocalWorkspace, useSession } from "#/stores/session";
-import { LocalBadge } from "./local-mode";
 
 /**
  * The app's front door, which nobody should ever see for long.

@@ -34,7 +34,7 @@ import {
 } from "#/components/ui/dropdown-menu";
 import { columnOf, relativeTime } from "#/lib/board-view";
 import { useBoard } from "#/stores/board";
-import { useSession } from "#/stores/session";
+import { useCloudFeatures, useSession } from "#/stores/session";
 
 const PRIORITY_NAME: Record<string, string> = {
   high: "High",
@@ -503,6 +503,9 @@ export function IssueActivity({ card }: { card: BoardCard }) {
   const loading = useBoard((state) => state.activityLoading);
   const loadActivity = useBoard((state) => state.loadActivity);
   const setSubscribed = useBoard((state) => state.setSubscribed);
+  // FE-52/D10: a local board has no comments and no subscribers.
+  const active = useBoard((state) => state.active);
+  const { comments, subscribers: canSubscribe } = useCloudFeatures(active);
 
   // ⚠️ Read again when the card id changes, not only when the page mounts.
   // Following a sub-issue link swaps the card under a page that never unmounts.
@@ -553,7 +556,7 @@ export function IssueActivity({ card }: { card: BoardCard }) {
           {/* ⚠️ `subscribed === null` means a list read, which never reaches this
               page — but it is still not `false`, so the button says nothing
               rather than inviting a click that would do the opposite. */}
-          {card.subscribed !== null && (
+          {canSubscribe && card.subscribed !== null && (
             <Button
               variant="ghost"
               size="sm"
@@ -563,7 +566,7 @@ export function IssueActivity({ card }: { card: BoardCard }) {
               {card.subscribed ? "Unsubscribe" : "Subscribe"}
             </Button>
           )}
-          {subscribers.length > 0 && (
+          {canSubscribe && subscribers.length > 0 && (
             <span className="flex items-center">
               {subscribers.slice(0, 3).map((userId) => (
                 <Avatar
@@ -616,7 +619,7 @@ export function IssueActivity({ card }: { card: BoardCard }) {
         )}
       </ul>
 
-      <Composer card={card} />
+      {comments && <Composer card={card} />}
     </section>
   );
 }

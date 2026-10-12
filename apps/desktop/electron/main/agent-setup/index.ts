@@ -4,7 +4,10 @@
 // by the id `read` handed out with it; the folder is resolved here, from the
 // folder links this process wrote down, and the file from a fresh read of
 // that folder's setup — so no renderer can point a read, or Finder, at a
-// file of its choosing. There is no channel that writes.
+// file of its choosing. There is no channel that writes a project's files.
+//
+// FE-52/D8 adds the one write: the `lanework` MCP entry in the agents' USER
+// config (`mcp-entry.ts`), and only that entry.
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { app, shell } from "electron";
@@ -14,9 +17,25 @@ import {
   isSetupId,
   type SetupFile,
 } from "../../../shared/agent-setup";
+import {
+  type LaneworkMcpAgent,
+  type LaneworkMcpStatus,
+  laneworkMcpChannels,
+} from "../../../shared/auth";
 import { agentHome } from "../agent-home";
+import { currentSession } from "../auth";
+import { readLocalMode } from "../auth/local-mode";
+import { readRecord } from "../auth/store";
 import { handle } from "../ipc";
 import { terminalFolder } from "../workspaces";
+import {
+  installLaneworkMcp,
+  laneworkMcpStatus,
+  modeFor,
+  removeLaneworkMcp,
+  setMcpHome,
+  syncLaneworkMcp,
+} from "./mcp-entry";
 import { readAgentSetup, readSetupFile } from "./read";
 
 /**
@@ -80,7 +99,57 @@ function idArg(value: unknown): string {
   return value;
 }
 
+/** FE-52/D8: the `lanework` MCP entry, against what the session wants. */
+async function mcpStatus(): Promise<LaneworkMcpStatus> {
+  const session = await currentSession();
+  return laneworkMcpStatus(modeFor(session.principal.kind));
+}
+
+async function mcpInstall(agent: LaneworkMcpAgent): Promise<LaneworkMcpStatus> {
+  const session = await currentSession();
+  const mode = modeFor(session.principal.kind);
+  if (!mode)
+    throw new Error(
+      "Sign in, or continue without an account, before adding the Lanework MCP server.",
+    );
+  await installLaneworkMcp(agent, mode);
+  return laneworkMcpStatus(mode);
+}
+
+async function mcpRemove(agent: LaneworkMcpAgent): Promise<LaneworkMcpStatus> {
+  await removeLaneworkMcp(agent);
+  return mcpStatus();
+}
+
+const isMcpAgent = (value: unknown): value is LaneworkMcpAgent =>
+  value === "claude-code" || value === "codex";
+
 export function registerAgentSetup(devUrl?: string): void {
+  setMcpHome(where);
+  handle(laneworkMcpChannels.status, devUrl, (args) => {
+    if (args.length) throw new Error("This operation takes no arguments");
+    return mcpStatus();
+  });
+  handle(laneworkMcpChannels.install, devUrl, (args) => {
+    if (args.length !== 1 || !isMcpAgent(args[0]))
+      throw new Error('install takes "claude-code" or "codex"');
+    return mcpInstall(args[0]);
+  });
+  handle(laneworkMcpChannels.remove, devUrl, (args) => {
+    if (args.length !== 1 || !isMcpAgent(args[0]))
+      throw new Error('remove takes "claude-code" or "codex"');
+    return mcpRemove(args[0]);
+  });
+  // On every launch: entries that are ours follow the mode, and a stdio one
+  // gets this build's shim. Read from disk rather than `currentSession()`,
+  // which would probe the control plane before any window asked it to.
+  void (async () => {
+    const record = await readRecord();
+    const kind = record ? "machine" : (await readLocalMode()) ? "local" : null;
+    if (kind) await syncLaneworkMcp(kind);
+  })().catch((error: unknown) =>
+    console.warn("could not bring the Lanework MCP entry up to date", error),
+  );
   handle(agentSetupChannels.read, devUrl, (args) => {
     if (args.length !== 1) throw new Error("read takes one project");
     return read(slugArg(args[0]));

@@ -69,6 +69,8 @@ export function buildShim(options: {
   apiUrl: string;
   configPath: string;
   secretFile?: string | null;
+  /** FE-52: pin the app home, so the hook opens the same local store the app does. */
+  home?: string | null;
 }): string {
   return [
     "#!/bin/sh",
@@ -78,6 +80,9 @@ export function buildShim(options: {
     `export LANEWORK_HOOK_CONFIG=${shellQuote(options.configPath)}`,
     ...(options.secretFile
       ? [`export LANEWORK_HOOK_SECRET_FILE=${shellQuote(options.secretFile)}`]
+      : []),
+    ...(options.home
+      ? [`export LANEWORK_HOME=${shellQuote(options.home)}`]
       : []),
     `exec ${shellQuote(options.execPath)} ${shellQuote(options.hookPath)} --api ${shellQuote(options.apiUrl)} "$@"`,
     "",

@@ -251,6 +251,7 @@ test("the renderer gets a redacted session and no way to reach a credential", as
       "signIn",
       "signOut",
       "cancelSignIn",
+      "enterLocalMode",
       "onSessionChange",
       "onSignInProgress",
     ]);

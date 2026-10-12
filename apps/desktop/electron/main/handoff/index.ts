@@ -22,6 +22,7 @@ import {
   handoffChannels,
 } from "../../../shared/handoff";
 import { resolveApi } from "../auth/client";
+import { readLocalMode } from "../auth/local-mode";
 import { type MachineRecord, readRecord } from "../auth/store";
 import { handle } from "../ipc";
 import { appHomeDir } from "../paths";
@@ -116,6 +117,7 @@ async function writeShim(record: MachineRecord | null): Promise<void> {
       apiUrl: resolveApi(record?.apiUrl),
       configPath: configPath(),
       secretFile: process.env.LANEWORK_HOOK_SECRET_FILE || null,
+      home: process.env.LANEWORK_HOME || null,
     }),
     { mode: 0o700 },
   );
@@ -194,14 +196,17 @@ async function enable(agent: HookAgent): Promise<HandoffStatus> {
   if (!secretStoreAvailable())
     throw new Error("Handing work between agents needs macOS for now.");
   const record = await readRecord();
-  if (!record) throw new Error("Sign in first, so the hook has a credential.");
+  // FE-52/D9: in local mode the hook needs no credential — it writes the
+  // checkpoint to the local store for a repo linked to a local board.
+  if (!record && !(await readLocalMode()))
+    throw new Error("Sign in first, so the hook has a credential.");
   const path = settingsPathFor(agent);
   const read = await readSettings(path);
   if (!read.ok)
     throw new Error(
       `${path} is not valid JSON. Fix or remove it, then try again — Lanework will not overwrite it.`,
     );
-  await writeHookSecret(resolveApi(record.apiUrl), record.secret);
+  if (record) await writeHookSecret(resolveApi(record.apiUrl), record.secret);
   await writeShim(record);
   // ⚠️ Rewritten only when the command actually differs. For Codex a new
   // command is a new approval, so re-enabling an entry that is already right

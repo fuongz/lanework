@@ -15,6 +15,12 @@ export const ACTIONS = [
   "machine:revokeSelf",
   "machine:enrol",
   "machine:revokeAny",
+  /**
+   * FE-52/D10: anything that only exists on the control plane — comments,
+   * presence, attachments, subscriptions, handing work between agents, sync.
+   * A `local` principal can use the app but not these.
+   */
+  "cloud:use",
 ] as const;
 
 export type Action = (typeof ACTIONS)[number];
@@ -39,7 +45,11 @@ export function can(principal: Principal, action: Action): boolean {
       // OFFLINE is not being locked out: `unreachable` keeps the principal a
       // `machine` (BE-01 D8), so an enrolled install keeps working — see
       // `lockState` for why that is the whole of FE-01's O1.
-      return principal.kind === "machine";
+      //
+      // FE-52/D5: `local` — "Skip for now" — opens it too, on the SQLite board
+      // this machine keeps. It holds no credential, so every cloud-only action
+      // below stays closed to it (`cloud:use`).
+      return principal.kind === "machine" || principal.kind === "local";
     case "session:read":
       return true;
     case "session:signIn":
@@ -57,6 +67,8 @@ export function can(principal: Principal, action: Action): boolean {
     case "machine:enrol":
     case "machine:revokeAny":
       return false;
+    case "cloud:use":
+      return principal.kind === "machine";
   }
 }
 

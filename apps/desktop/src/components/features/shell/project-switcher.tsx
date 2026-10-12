@@ -9,6 +9,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { TerminalSession } from "#/../shared/terminal";
 import type { Workspace } from "#/../shared/workspaces";
+import { LocalBadge } from "#/components/shared/auth/local-mode";
 import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
 import { ProjectTile } from "#/components/shared/common/project-tile";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
@@ -31,6 +32,7 @@ import {
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
 import { useOpenProject } from "#/stores/last-route";
+import { isLocalWorkspace } from "#/stores/session";
 
 /** The terminal key a project's agents are filed under (FE-19, FE-26). */
 const keyOf = (workspace: Workspace) => workspace.id ?? workspace.slug;
@@ -195,6 +197,7 @@ export function ProjectSwitcher() {
                     className="size-5 rounded-[5px] text-[10px]"
                   />
                   <span className="truncate">{workspace.name}</span>
+                  {isLocalWorkspace(workspace) && <LocalBadge />}
                   <RunningAgents
                     agents={(agentsByKey[keyOf(workspace)] ?? NO_AGENTS).filter(
                       (agent) => !agent.exit,

@@ -1,3 +1,4 @@
+import { BrowserWindow } from "electron";
 import { can } from "../../../shared/policy";
 import {
   type BoardActivityPage,
@@ -20,6 +21,7 @@ import {
   type ImportPreview,
   type ImportReport,
   type LocalFolderState,
+  type LocalSyncResult,
   type PickedFolder,
   type Workspace,
   type WorkspaceSnapshot,
@@ -27,8 +29,9 @@ import {
 } from "../../../shared/workspaces";
 import { currentSession } from "../auth";
 import { resolveApi } from "../auth/client";
+import { readLocalMode } from "../auth/local-mode";
 import { type MachineRecord, readRecord } from "../auth/store";
-import { handle } from "../ipc";
+import { broadcast, handle } from "../ipc";
 import {
   archiveCard,
   attachFile,
@@ -74,6 +77,17 @@ import {
   revealFolder,
 } from "./folder-chooser";
 import { workspaceIcon } from "./icon";
+import {
+  cloudOnly,
+  findLocalWorkspace,
+  type LocalBoard,
+  listLocalWorkspaces,
+  localBoard,
+  localStore,
+  toWorkspace as localToWorkspace,
+  watchLocalStore,
+  writeLocal,
+} from "./local-backend";
 import { folderExists, readLocalFolder } from "./local-folder";
 import { IMPORT_BATCH, planMigration } from "./review-import";
 import { slugify } from "./slug";
@@ -87,6 +101,7 @@ import {
   writeFolders,
   writeMigrationRun,
 } from "./store";
+import { syncLocalWorkspace } from "./sync-to-cloud";
 
 /**
  * The credential this window is allowed to act with, or a refusal.
@@ -123,6 +138,171 @@ async function assertSameSession(record: MachineRecord): Promise<void> {
     current.apiUrl !== record.apiUrl
   )
     throw new Error("Your session changed. Try again.");
+}
+
+// ── FE-52: local boards ─────────────────────────────────────────────────────
+
+/**
+ * The "account" local boards file their per-account state under — the saved
+ * selection and the folder links — through the same `store.ts` functions the
+ * cloud account uses.
+ *
+ * ⚠️ NOT a credential, and built so it can never act as one: no secret, and an
+ * origin (`lanework-local:`) that no `fetch` can reach — a request made with it
+ * by mistake fails on the spot instead of reaching the control plane, which is
+ * what keeps "local mode sends nothing" (FE-52/V2) true even through code that
+ * was written for the cloud. The same record is used signed in and not, so a
+ * local board's folder link survives signing in and out.
+ */
+export const LOCAL_RECORD: MachineRecord = {
+  machineId: "local",
+  secret: "",
+  apiUrl: "lanework-local:",
+  name: "local",
+  userId: null,
+  owner: null,
+};
+
+/**
+ * Local mode: no credential on disk and "Skip for now" chosen — the rule
+ * `currentSession` applies, read from the two files alone.
+ *
+ * ⚠️ Not `currentSession()`, deliberately. That probes the control plane when
+ * its verdict is stale, and the cloud paths below already pay for one probe
+ * in `authorizedRecord`; a second one in front of it moved every cloud read
+ * later and let callers racing the first `load` each fetch the list again.
+ */
+async function inLocalMode(): Promise<boolean> {
+  return !(await readRecord()) && (await readLocalMode());
+}
+
+/** Signed in, or in local mode — anything else is refused. */
+async function assertCanUse(): Promise<void> {
+  if (await inLocalMode()) return;
+  await authorizedRecord();
+}
+
+/** Local boards as the workspace list carries them, each with its folder. */
+async function localList(): Promise<Workspace[]> {
+  const locals = listLocalWorkspaces();
+  if (!locals.length) return [];
+  const folders = await readFolders(LOCAL_RECORD);
+  return locals.map((workspace) =>
+    localToWorkspace(workspace, folders[workspace.slug]?.[0] ?? null),
+  );
+}
+
+/**
+ * The local board a board call names, or null when it names a cloud one.
+ *
+ * ⚠️ Matched by ID only (see `findLocalWorkspace`), and only once the session
+ * may use the app at all — a signed-out window reads no board, local or not.
+ */
+async function localTarget(workspaceId: string): Promise<LocalBoard | null> {
+  const board = localBoard(workspaceId);
+  if (!board) return null;
+  await assertCanUse();
+  return board;
+}
+
+/**
+ * Which account a folder link keyed by `slug` is filed under.
+ *
+ * ⚠️ The folder channels name a workspace by slug alone, and a local board
+ * and a cloud one can share a slug (a moved board and its cloud copy usually
+ * do). The cloud project wins that tie when signed in: it is the one the rest
+ * of the app — terminals, pull requests — already resolves that slug to.
+ */
+async function folderRecordFor(slug: string): Promise<MachineRecord> {
+  if (await inLocalMode()) return LOCAL_RECORD;
+  const record = await authorizedRecord();
+  const cloud =
+    lastList?.session === sessionKey(record) ? lastList.workspaces : null;
+  if (
+    !cloud?.some((workspace) => workspace.slug === slug) &&
+    findLocalWorkspace(slug, { bySlug: true })
+  )
+    return LOCAL_RECORD;
+  return record;
+}
+
+/** The local board `key` names, as a list row with its folder. */
+async function localKnown(
+  key: string,
+  bySlug: boolean,
+): Promise<Workspace | null> {
+  const found = findLocalWorkspace(key, { bySlug });
+  if (!found) return null;
+  const folders = await readFolders(LOCAL_RECORD);
+  return localToWorkspace(found, folders[found.slug]?.[0] ?? null);
+}
+
+/** Local mode's `load`: the local list, and the selection filed under it. */
+async function loadLocal(id?: string): Promise<WorkspaceSnapshot> {
+  const workspaces = await localList();
+  const saved = await readActive(LOCAL_RECORD);
+  const selector = id ?? saved?.value;
+  const active =
+    (selector
+      ? workspaces.find(
+          (workspace) =>
+            workspace.id === selector || workspace.slug === selector,
+        )
+      : undefined) ?? null;
+  if (id !== undefined && !active)
+    throw new Error(
+      "This workspace is no longer available. Refresh the list and choose another.",
+    );
+  if (id !== undefined || saved?.by === "slug" || (saved !== null && !active))
+    await writeActive(LOCAL_RECORD, {
+      id: active?.id ?? null,
+      slug: active?.slug ?? null,
+    });
+  return { workspaces, active };
+}
+
+/** Syncs running now, by local id — one click is one move. */
+const syncing = new Set<string>();
+
+/**
+ * FE-52/D7a: move a local board to the signed-in account, then open its cloud
+ * copy. The folder link goes with it, so the terminal and the agent setup of
+ * the project keep working on the cloud board.
+ */
+async function syncToCloud(localId: string): Promise<LocalSyncResult> {
+  const record = await authorizedRecord();
+  const store = localStore();
+  const workspace = findLocalWorkspace(localId);
+  if (!store || !workspace)
+    throw new Error("That board is not on this machine.");
+  if (syncing.has(localId))
+    throw new Error("This board is already being synced.");
+  syncing.add(localId);
+  try {
+    const paths = (await readFolders(LOCAL_RECORD))[workspace.slug] ?? [];
+    const outcome = await syncLocalWorkspace(store, record, localId, {
+      path: paths[0] ?? null,
+    });
+    await assertSameSession(record);
+    // A fresh read: the account has a project it did not have a moment ago.
+    lastList = null;
+    const listed = await load();
+    const cloud = listed.workspaces.find(
+      (entry) => entry.id === outcome.cloudId && entry.origin !== "local",
+    );
+    const slug = cloud?.slug ?? outcome.cloudSlug;
+    const linked = (await readFolders(record))[slug] ?? [];
+    if (paths.length && !linked.length) await writeFolders(record, slug, paths);
+    const snapshot = await load(outcome.cloudId);
+    return {
+      localId,
+      cloudId: outcome.cloudId,
+      cards: outcome.cards,
+      snapshot,
+    };
+  } finally {
+    syncing.delete(localId);
+  }
 }
 
 /**
@@ -174,6 +354,15 @@ export async function terminalFolder(key: string): Promise<string | null> {
 export async function knownWorkspace(
   key: string,
 ): Promise<{ record: MachineRecord; workspace: Workspace }> {
+  // FE-52: a local board answers with `LOCAL_RECORD`, whose folder links are
+  // the local ones and whose origin no request can reach.
+  if (await inLocalMode()) {
+    const local = await localKnown(key, true);
+    if (!local) throw new Error("That project is not on this machine.");
+    return { record: LOCAL_RECORD, workspace: local };
+  }
+  const byId = await localKnown(key, false);
+  if (byId) return { record: LOCAL_RECORD, workspace: byId };
   const record = await authorizedRecord();
   const known =
     lastList?.session === sessionKey(record)
@@ -182,33 +371,45 @@ export async function knownWorkspace(
   const workspace = known.find(
     (entry) => entry.id === key || entry.slug === key,
   );
-  if (!workspace) throw new Error("That project is not on this account.");
-  return { record, workspace };
+  if (workspace) return { record, workspace };
+  const bySlug = await localKnown(key, true);
+  if (bySlug) return { record: LOCAL_RECORD, workspace: bySlug };
+  throw new Error("That project is not on this account.");
 }
 
 /** Account-scoped projects for native surfaces; never reuse another account's list. */
 export async function menuBarWorkspaces(): Promise<Workspace[]> {
+  if (await inLocalMode()) return localList();
   const record = await authorizedRecord();
-  return lastList?.session === sessionKey(record)
-    ? lastList.workspaces
-    : fetchWorkspaces(record);
+  const cloud =
+    lastList?.session === sessionKey(record)
+      ? lastList.workspaces
+      : await fetchWorkspaces(record);
+  return [...cloud, ...(await localList())];
 }
 
 async function load(id?: string): Promise<WorkspaceSnapshot> {
+  // FE-52: local mode lists the local boards and nothing else — and asks the
+  // control plane nothing.
+  if (await inLocalMode()) return loadLocal(id);
   const record = await authorizedRecord();
   const session = sessionKey(record);
+  // FE-52/D6a: local boards stay in the list, after the account's own.
+  const locals = await localList();
+  const matches = (entry: Workspace) => entry.id === id || entry.slug === id;
   const known =
     id !== undefined && lastList?.session === session
       ? lastList.workspaces
       : null;
   // A selection the remembered list does not know is read fresh: it may be a
-  // project made on another machine since.
-  const workspaces = known?.some(
-    (workspace) => workspace.id === id || workspace.slug === id,
-  )
-    ? known
-    : await fetchWorkspaces(record);
-  lastList = { session, workspaces };
+  // project made on another machine since. A LOCAL selection needs no fresh
+  // read of the account.
+  const cloud =
+    known && (known.some(matches) || locals.some(matches))
+      ? known
+      : await fetchWorkspaces(record);
+  lastList = { session, workspaces: cloud };
+  const workspaces = [...cloud, ...locals];
   const saved = await readActive(record);
   await assertSameSession(record);
 
@@ -413,7 +614,7 @@ function requireQuery(value: unknown): BoardQuery {
  * about why the one they chose stopped working.
  */
 async function folderState(slug: string): Promise<LocalFolderState> {
-  const record = await authorizedRecord();
+  const record = await folderRecordFor(slug);
   // ⚠️ The PRIMARY, which is the first. Every surface below this one — the
   // migration reader, "open in file manager" — is about one folder, and the
   // list says which one that is.
@@ -919,6 +1120,8 @@ export function registerWorkspaces(devUrl?: string): void {
       !(key === null || (typeof key === "string" && key.length <= 300))
     )
       throw new Error("A valid workspace is required");
+    // A local board has no icon: the service is what reads one.
+    if (await localTarget(workspaceId)) return null;
     return workspaceIcon(await authorizedRecord(), workspaceId, key);
   });
   handle(
@@ -937,6 +1140,15 @@ export function registerWorkspaces(devUrl?: string): void {
       // out. A create call cannot name a path, so it cannot link a folder the
       // user never picked — see `folder-chooser.ts`.
       const paths = parseFolderIds(args[1]);
+      // FE-52: in local mode a new project is a local board — created on this
+      // machine, linked to its folders, and opened, exactly like the cloud one.
+      if (await inLocalMode()) {
+        const created = writeLocal((store) =>
+          store.createWorkspace({ name, slug: slugify(name) }),
+        );
+        if (paths.length) await writeFolders(LOCAL_RECORD, created.slug, paths);
+        return load(created.id);
+      }
       const record = await authorizedRecord();
       const created = await createWorkspace(record, {
         slug: slugify(name),
@@ -974,6 +1186,12 @@ export function registerWorkspaces(devUrl?: string): void {
       )
         throw new Error("A project and a new name are required");
       const [id, name] = args as [string, string];
+      if (await localTarget(id)) {
+        // ⚠️ The NAME only, as on the cloud: the folder link is keyed by slug,
+        // and a rename that moved the slug would strand it.
+        writeLocal((store) => store.updateWorkspace(id, { name: name.trim() }));
+        return load();
+      }
       const record = await authorizedRecord();
       await renameWorkspace(record, id, name.trim());
       // ⚠️ `load()`, NOT `load(id)`. Passing the id would write it down as the
@@ -998,8 +1216,15 @@ export function registerWorkspaces(devUrl?: string): void {
         !ids.every((id) => typeof id === "string" && id && id.length <= 64)
       )
         throw new Error("A list of project ids is required");
+      // FE-52: local boards have no saved order — they follow the account's
+      // projects, oldest first — and the service refuses an order naming an
+      // id it does not hold, so only the cloud ids are sent.
+      if (await inLocalMode()) return load();
+      const cloudIds = (ids as string[]).filter(
+        (id) => !findLocalWorkspace(id),
+      );
       const record = await authorizedRecord();
-      await reorderWorkspaces(record, ids as string[]);
+      if (cloudIds.length) await reorderWorkspaces(record, cloudIds);
       // `load()`, not `load(id)`: a fresh read, in the order the service now
       // answers with, and no change to which project is open.
       return load();
@@ -1014,6 +1239,14 @@ export function registerWorkspaces(devUrl?: string): void {
       // machine is keyed by slug, and main holds no id→slug map to derive one
       // from without asking the account a second time.
       const [id, slug] = requireId(args, 2);
+      const local = await localTarget(id);
+      if (local) {
+        // A tombstone: its cards stay in the file, unreachable, like the
+        // cloud's own delete leaves an audit trail behind.
+        writeLocal((store) => store.deleteWorkspace(id));
+        await writeFolders(LOCAL_RECORD, local.workspace.slug, null);
+        return load();
+      }
       const record = await authorizedRecord();
       await deleteWorkspace(record, id);
       // `load` re-reads the account and drops a saved selection that no longer
@@ -1037,16 +1270,21 @@ export function registerWorkspaces(devUrl?: string): void {
       return snapshot;
     },
   );
-  handle(workspaceChannels.board, devUrl, (args) => {
+  handle(workspaceChannels.board, devUrl, async (args) => {
     if (args.length < 1 || args.length > 2)
       throw new Error("A valid workspace is required");
     const [workspaceId] = requireId(args.slice(0, 1), 1);
-    return board(workspaceId, requireQuery(args[1]));
+    const query = requireQuery(args[1]);
+    const local = await localTarget(workspaceId);
+    if (local) return local.view(query);
+    return board(workspaceId, query);
   });
   handle(workspaceChannels.search, devUrl, async (args) => {
     const [workspaceId, query] = requireId(args, 2);
     if (query.trim().length < 2 || query.length > 100)
       throw new Error("A search is 2 to 100 characters");
+    const local = await localTarget(workspaceId);
+    if (local) return local.search(query.trim());
     return searchCards(await authorizedRecord(), workspaceId, query.trim());
   });
   handle(workspaceChannels.more, devUrl, async (args) => {
@@ -1056,6 +1294,8 @@ export function registerWorkspaces(devUrl?: string): void {
       3,
     );
     const query = requireQuery(args[1]);
+    const local = await localTarget(workspaceId);
+    if (local) return local.more();
     const record = await authorizedRecord();
     // ⚠️ The group is re-derived from the board's lanes rather than trusted as
     // a URL fragment: a renderer can only ask for a group its query draws.
@@ -1071,22 +1311,26 @@ export function registerWorkspaces(devUrl?: string): void {
   handle(workspaceChannels.stats, devUrl, async (args) => {
     if (args.length !== 2) throw new Error("A valid workspace is required");
     const [workspaceId] = requireId(args.slice(0, 1), 1);
-    return countsFor(
-      await authorizedRecord(),
-      workspaceId,
-      requireQuery(args[1]),
-    );
+    const query = requireQuery(args[1]);
+    const local = await localTarget(workspaceId);
+    if (local) return local.stats(query);
+    return countsFor(await authorizedRecord(), workspaceId, query);
   });
   handle(workspaceChannels.presence, devUrl, async (args) => {
     const [workspaceId] = requireId(args, 1);
+    if (await localTarget(workspaceId)) cloudOnly("Agent presence");
     return fetchPresence(await authorizedRecord(), workspaceId);
   });
   handle(workspaceChannels.checkpoint, devUrl, async (args) => {
     const [workspaceId, cardId] = requireId(args, 2);
+    const local = await localTarget(workspaceId);
+    if (local) return local.checkpoint(cardId);
     return fetchCheckpoint(await authorizedRecord(), workspaceId, cardId);
   });
   handle(workspaceChannels.card, devUrl, async (args): Promise<BoardCard> => {
     const [workspaceId, cardId] = requireId(args, 2);
+    const local = await localTarget(workspaceId);
+    if (local) return local.card(cardId);
     return fetchCard(await authorizedRecord(), workspaceId, cardId);
   });
   handle(
@@ -1094,6 +1338,8 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<BoardCard | null> => {
       const [workspaceId, taskId] = requireId(args, 2);
+      const local = await localTarget(workspaceId);
+      if (local) return local.lookup(taskId);
       return lookupCard(await authorizedRecord(), workspaceId, taskId);
     },
   );
@@ -1113,6 +1359,8 @@ export function registerWorkspaces(devUrl?: string): void {
       // window was answered "sign in" — advice that cannot fix it, and which
       // hides a caller's bug behind a state the caller will eventually leave.
       const patch = parsePatch(args[2]);
+      const local = await localTarget(workspaceId);
+      if (local) return local.update(cardId, patch, args[3]);
       return updateCard(
         await authorizedRecord(),
         workspaceId,
@@ -1135,6 +1383,8 @@ export function registerWorkspaces(devUrl?: string): void {
     const placement = parsePlacement(args[3]);
     if (columnKey === null && !placement)
       throw new Error("A move needs a column or a placement");
+    const local = await localTarget(workspaceId);
+    if (local) return local.move(cardId, columnKey, placement);
     return moveCard(
       await authorizedRecord(),
       workspaceId,
@@ -1155,6 +1405,8 @@ export function registerWorkspaces(devUrl?: string): void {
       )
         throw new Error("A workspace and a cursor are required");
       const [workspaceId] = requireId(args.slice(0, 1), 1);
+      const local = await localTarget(workspaceId);
+      if (local) return local.changes(args[1]);
       return fetchChanges(await authorizedRecord(), workspaceId, args[1]);
     },
   );
@@ -1172,6 +1424,8 @@ export function registerWorkspaces(devUrl?: string): void {
           "A card, a checklist key, a state and a revision are required",
         );
       const [workspaceId, cardId, key] = requireId(args.slice(0, 3), 3);
+      const local = await localTarget(workspaceId);
+      if (local) return local.toggle(cardId, key, args[3], args[4]);
       return toggleChecklistItem(
         await authorizedRecord(),
         workspaceId,
@@ -1196,6 +1450,8 @@ export function registerWorkspaces(devUrl?: string): void {
       // Shape first, session second — a malformed list is the caller's bug and
       // must not be reported as "sign in".
       const items = parseChecklistDraft(args[2]);
+      const local = await localTarget(workspaceId);
+      if (local) return local.setChecklist(cardId, items, args[3]);
       return replaceChecklist(
         await authorizedRecord(),
         workspaceId,
@@ -1218,6 +1474,7 @@ export function registerWorkspaces(devUrl?: string): void {
       )
         throw new Error("A card and a cursor are required");
       const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      if (await localTarget(workspaceId)) cloudOnly("A card's activity");
       return fetchActivity(
         await authorizedRecord(),
         workspaceId,
@@ -1232,12 +1489,14 @@ export function registerWorkspaces(devUrl?: string): void {
     async (args): Promise<{ id: string }> => {
       const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
       const body = commentBody(args, 3);
+      if (await localTarget(workspaceId)) cloudOnly("Commenting");
       return createComment(await authorizedRecord(), workspaceId, cardId, body);
     },
   );
   handle(workspaceChannels.commentEdit, devUrl, async (args): Promise<void> => {
     const [workspaceId, cardId, commentId] = requireId(args.slice(0, 3), 3);
     const body = commentBody(args, 4);
+    if (await localTarget(workspaceId)) cloudOnly("Commenting");
     return editComment(
       await authorizedRecord(),
       workspaceId,
@@ -1251,6 +1510,7 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<void> => {
       const [workspaceId, cardId, commentId] = requireId(args, 3);
+      if (await localTarget(workspaceId)) cloudOnly("Commenting");
       return deleteComment(
         await authorizedRecord(),
         workspaceId,
@@ -1266,6 +1526,7 @@ export function registerWorkspaces(devUrl?: string): void {
       if (args.length !== 3 || typeof args[2] !== "boolean")
         throw new Error("A card and a state are required");
       const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      if (await localTarget(workspaceId)) cloudOnly("Following a card");
       return setSubscription(
         await authorizedRecord(),
         workspaceId,
@@ -1278,6 +1539,7 @@ export function registerWorkspaces(devUrl?: string): void {
     if (args.length !== 3 || typeof args[2] !== "boolean")
       throw new Error("A card and a state are required");
     const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+    if (await localTarget(workspaceId)) cloudOnly("Starring a card");
     return setFavorite(await authorizedRecord(), workspaceId, cardId, args[2]);
   });
   handle(
@@ -1286,6 +1548,7 @@ export function registerWorkspaces(devUrl?: string): void {
     async (args): Promise<BoardAttachment> => {
       if (args.length !== 3) throw new Error("A card and a file are required");
       const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      if (await localTarget(workspaceId)) cloudOnly("Attaching files");
       return attachFile(
         await authorizedRecord(),
         workspaceId,
@@ -1296,6 +1559,7 @@ export function registerWorkspaces(devUrl?: string): void {
   );
   handle(workspaceChannels.detach, devUrl, async (args): Promise<void> => {
     const [workspaceId, cardId, attachmentId] = requireId(args, 3);
+    if (await localTarget(workspaceId)) cloudOnly("Attaching files");
     return detachFile(
       await authorizedRecord(),
       workspaceId,
@@ -1305,10 +1569,14 @@ export function registerWorkspaces(devUrl?: string): void {
   });
   handle(workspaceChannels.archive, devUrl, async (args): Promise<void> => {
     const [workspaceId, cardId] = requireId(args, 2);
+    const local = await localTarget(workspaceId);
+    if (local) return local.archive(cardId);
     return archiveCard(await authorizedRecord(), workspaceId, cardId);
   });
   handle(workspaceChannels.purge, devUrl, async (args) => {
     const [workspaceId, slug] = requireId(args, 2);
+    const local = await localTarget(workspaceId);
+    if (local) return local.purge(slug);
     return purgeIssues(await authorizedRecord(), workspaceId, slug);
   });
   handle(
@@ -1317,7 +1585,18 @@ export function registerWorkspaces(devUrl?: string): void {
     async (args): Promise<BoardWrite> => {
       if (args.length !== 2 || typeof args[0] !== "string" || !args[0].trim())
         throw new Error("A workspace and a title are required");
-      return createCard(await authorizedRecord(), args[0], parseDraft(args[1]));
+      const draft = parseDraft(args[1]);
+      const local = await localTarget(args[0]);
+      if (local) return local.create(draft);
+      return createCard(await authorizedRecord(), args[0], draft);
+    },
+  );
+  handle(
+    workspaceChannels.syncToCloud,
+    devUrl,
+    async (args): Promise<LocalSyncResult> => {
+      const [localId] = requireId(args, 1);
+      return syncToCloud(localId);
     },
   );
   handle(
@@ -1325,6 +1604,8 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<ImportPreview> => {
       const [workspaceId] = requireId(args, 1);
+      if (await localTarget(workspaceId))
+        cloudOnly("Importing a review folder");
       const { plan, folder } = await planFor(workspaceId);
       return {
         workspaceId,
@@ -1352,6 +1633,8 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<ImportReport> => {
       const [workspaceId] = requireId(args, 1);
+      if (await localTarget(workspaceId))
+        cloudOnly("Importing a review folder");
       const record = await authorizedRecord();
       const { plan, folder } = await planFor(workspaceId);
       if (!plan || !folder)
@@ -1412,6 +1695,8 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<ImportReport> => {
       const [workspaceId] = requireId(args, 1);
+      if (await localTarget(workspaceId))
+        cloudOnly("Importing a review folder");
       const record = await authorizedRecord();
       const run = await readMigrationRun(record, workspaceId);
       if (!run)
@@ -1460,8 +1745,9 @@ export function registerWorkspaces(devUrl?: string): void {
       if (args.length) throw new Error("This operation takes no arguments");
       // ⚠️ Authorized like everything else here even though it writes nothing:
       // a signed-out window has no business opening a chooser, and a folder
-      // picked before sign-in belongs to no account.
-      await authorizedRecord();
+      // picked before sign-in belongs to no account. Local mode (FE-52) may:
+      // its folders are filed under the local board.
+      await assertCanUse();
       return chooseFolders("Add source folders");
     },
   );
@@ -1470,7 +1756,7 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<LocalFolderState> => {
       const [slug] = requireId(args, 1);
-      const record = await authorizedRecord();
+      const record = await folderRecordFor(slug);
       const chosen = await pickFolder(`Choose the folder for ${slug}`);
       // Cancelling is not a failure and must not clear an existing link: the
       // honest answer is whatever was already true.
@@ -1492,7 +1778,7 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<PickedFolder[]> => {
       const [slug] = requireId(args, 1);
-      const record = await authorizedRecord();
+      const record = await folderRecordFor(slug);
       return ((await readFolders(record))[slug] ?? []).map(registerFolder);
     },
   );
@@ -1506,7 +1792,7 @@ export function registerWorkspaces(devUrl?: string): void {
       // Shape first, session second — a malformed list is the caller's bug and
       // must not be reported as "sign in".
       const paths = parseFolderIds(args[1]);
-      await writeFolders(await authorizedRecord(), slug, paths);
+      await writeFolders(await folderRecordFor(slug), slug, paths);
       return folderState(slug);
     },
   );
@@ -1515,7 +1801,7 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<LocalFolderState> => {
       const [slug] = requireId(args, 1);
-      await writeFolders(await authorizedRecord(), slug, null);
+      await writeFolders(await folderRecordFor(slug), slug, null);
       return { kind: "none" };
     },
   );
@@ -1524,12 +1810,19 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<void> => {
       const [slug] = requireId(args, 1);
-      const path = (await readFolders(await authorizedRecord()))[slug]?.[0];
+      const path = (await readFolders(await folderRecordFor(slug)))[slug]?.[0];
       // ⚠️ The path comes from this app's own file, never from the renderer. A
       // channel that opened a path it was handed is a channel that opens
       // anything the user can read.
       if (!path) throw new Error("No folder is linked to this workspace.");
       await revealFolder(path);
     },
+  );
+
+  // FE-52: the offline MCP server and the Stop hook write the local board from
+  // other processes. Polled only while a window is open to show it.
+  watchLocalStore(
+    (workspaceIds) => broadcast(workspaceChannels.localChanged, workspaceIds),
+    { active: () => BrowserWindow.getAllWindows().length > 0 },
   );
 }

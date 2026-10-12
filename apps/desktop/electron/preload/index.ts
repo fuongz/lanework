@@ -7,7 +7,12 @@ import {
   agentSetupChannels,
   type DesktopAgentSetupApi,
 } from "../../shared/agent-setup";
-import { authChannels, type DesktopAuthApi } from "../../shared/auth";
+import {
+  authChannels,
+  type DesktopAuthApi,
+  type DesktopLaneworkMcpApi,
+  laneworkMcpChannels,
+} from "../../shared/auth";
 import { channels, type DesktopApi } from "../../shared/desktop";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
 import { type DesktopHandoffApi, handoffChannels } from "../../shared/handoff";
@@ -156,6 +161,12 @@ const agentSetup: DesktopAgentSetupApi = {
   read: (slug) => ipcRenderer.invoke(agentSetupChannels.read, slug),
   open: (slug, id) => ipcRenderer.invoke(agentSetupChannels.open, slug, id),
   reveal: (slug, id) => ipcRenderer.invoke(agentSetupChannels.reveal, slug, id),
+};
+
+const laneworkMcp: DesktopLaneworkMcpApi = {
+  status: () => ipcRenderer.invoke(laneworkMcpChannels.status),
+  install: (agent) => ipcRenderer.invoke(laneworkMcpChannels.install, agent),
+  remove: (agent) => ipcRenderer.invoke(laneworkMcpChannels.remove, agent),
 };
 
 const git: DesktopGitApi = {
@@ -580,5 +591,6 @@ const desktop: DesktopApi = {
   instructions,
   agentSetup,
   agentConfig,
+  laneworkMcp,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

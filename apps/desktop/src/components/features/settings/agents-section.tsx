@@ -16,7 +16,8 @@ import { relativeTime } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
-import { useCloudFeatures } from "#/stores/session";
+import { useCloudFeatures, useIsLocalMode } from "#/stores/session";
+import type { LaneworkMcpStatus } from "../../../../shared/auth";
 import type {
   AgentHookStatus,
   HandoffStatus,
@@ -54,7 +55,11 @@ export function AgentsSection() {
   const projectKey = useWorkspaceKey(project?.slug);
   const startAgent = useAgentTerminals((state) => state.start);
   const navigate = useNavigate();
-  const { handoff } = useCloudFeatures();
+  const { signedIn } = useCloudFeatures();
+  // FE-52/D9: the hook also runs in local mode, writing checkpoints to the
+  // local store, so its switches stay. Only the credential row is cloud-only.
+  const local = useIsLocalMode();
+  const handoff = signedIn || local;
 
   async function approveInCodex() {
     if (!project || !projectKey) return;
@@ -95,6 +100,31 @@ export function AgentsSection() {
     return () => window.removeEventListener("focus", again);
   }, [refresh]);
 
+  // FE-52/D8: the `lanework` MCP entry in each agent's own config.
+  const [mcpStatus, setMcpStatus] = useState<LaneworkMcpStatus | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the mode changes
+  useEffect(() => {
+    void window.desktop?.laneworkMcp
+      ?.status()
+      .then(setMcpStatus)
+      .catch(() => undefined);
+  }, [signedIn, local]);
+
+  async function runMcp(
+    action: () => Promise<LaneworkMcpStatus>,
+    fallback: string,
+  ) {
+    setBusy(true);
+    try {
+      setMcpStatus(await action());
+      setError(null);
+    } catch (failure) {
+      setError(ipcMessage(failure, fallback));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function run(action: () => Promise<HandoffStatus>, fallback: string) {
     setBusy(true);
     try {
@@ -109,7 +139,9 @@ export function AgentsSection() {
   }
 
   const surface = window.desktop?.handoff;
-  const blocked = !status?.supported || !status.signedIn;
+  const mcpSurface = window.desktop?.laneworkMcp;
+  // FE-52/D9: local mode needs no credential — the hook writes locally.
+  const blocked = !status?.supported || (!status.signedIn && !local);
   const anyOn = !!status && (status.claude.installed || status.codex.installed);
 
   const why = (hook: AgentHookStatus, what: string): string =>
@@ -117,7 +149,7 @@ export function AgentsSection() {
       ? "Checking…"
       : !status.supported
         ? "Available on macOS for now: the hook's credential lives in the Keychain."
-        : !status.signedIn
+        : !status.signedIn && !local
           ? "Sign in first — the hook uses this machine's credential."
           : hook.settingsUnreadable
             ? `${hook.settingsPath} is not valid JSON. Fix or remove it and Lanework can add the hook; it will not overwrite the file.`
@@ -226,10 +258,55 @@ export function AgentsSection() {
       : []),
   ];
 
-  // FE-52/D10: handing a card on is a cloud feature — the checkpoint lands on
-  // the card in the account, under this machine's credential. With "Skip for
-  // now" there is neither, so the switches go rather than sitting disabled
-  // under a reason that reads like a fault. Config files stay: they are local.
+  // FE-52: signed out without "Skip for now" there is nowhere for a checkpoint
+  // to land, so the switches go rather than sitting disabled under a reason
+  // that reads like a fault. Config files stay: they are local.
+  const mcpSections: SettingsSectionSpec[] = [
+    {
+      title: "Lanework MCP",
+      rows: (["claude-code", "codex"] as const).map((agent) => {
+        const entry =
+          agent === "claude-code" ? mcpStatus?.claude : mcpStatus?.codex;
+        return {
+          label: `Board tools in ${NAMES[agent]}`,
+          description: !mcpStatus
+            ? "Checking…"
+            : entry?.unreadable
+              ? `${entry.configPath} is not something Lanework will rewrite. Fix it, then try again.`
+              : entry?.installed && !entry.ours
+                ? `${entry.configPath} already has a lanework server that is not this app's. It is left alone.`
+                : mcpStatus.want === "local"
+                  ? `Adds the lanework server to ${entry?.configPath ?? "the agent's config"}, running on this machine against your local projects. Signing in later points it at your account.`
+                  : `Adds the lanework server to ${entry?.configPath ?? "the agent's config"}, pointed at your account.`,
+          keywords: "mcp server lanework board tools claude codex stdio local",
+          control: (
+            <Switch
+              aria-label={`Lanework MCP — ${NAMES[agent]}`}
+              checked={!!entry?.installed && !!entry.ours}
+              disabled={
+                !mcpSurface ||
+                busy ||
+                !entry ||
+                entry.unreadable ||
+                (entry.installed && !entry.ours)
+              }
+              onCheckedChange={(checked) =>
+                mcpSurface &&
+                void runMcp(
+                  () =>
+                    checked
+                      ? mcpSurface.install(agent)
+                      : mcpSurface.remove(agent),
+                  checked ? "Could not add it." : "Could not remove it.",
+                )
+              }
+            />
+          ),
+        };
+      }),
+    },
+  ];
+
   const handoffSections: SettingsSectionSpec[] = [
     {
       title: "Claude Code",
@@ -279,7 +356,9 @@ export function AgentsSection() {
       ],
     },
   ];
-  const sections: SettingsSectionSpec[] = handoff ? handoffSections : [];
+  const sections: SettingsSectionSpec[] = handoff
+    ? [...mcpSections, ...handoffSections]
+    : [];
 
   if (handoff && anyOn && status)
     sections.push({
@@ -307,23 +386,27 @@ export function AgentsSection() {
               },
             ]
           : []),
-        {
-          label: "Credential",
-          description: status.credential
-            ? "This machine's credential, in the Keychain. Revoking the machine revokes the hook."
-            : "Missing or out of date. Turn a switch off and on again.",
-          control: (
-            <span
-              className={
-                status.credential
-                  ? "text-muted-foreground text-[13px]"
-                  : "text-destructive text-[13px]"
-              }
-            >
-              {status.credential ? "In the Keychain" : "Missing"}
-            </span>
-          ),
-        },
+        ...(local
+          ? []
+          : [
+              {
+                label: "Credential",
+                description: status.credential
+                  ? "This machine's credential, in the Keychain. Revoking the machine revokes the hook."
+                  : "Missing or out of date. Turn a switch off and on again.",
+                control: (
+                  <span
+                    className={
+                      status.credential
+                        ? "text-muted-foreground text-[13px]"
+                        : "text-destructive text-[13px]"
+                    }
+                  >
+                    {status.credential ? "In the Keychain" : "Missing"}
+                  </span>
+                ),
+              },
+            ]),
         {
           label: "Last checkpoint",
           description:

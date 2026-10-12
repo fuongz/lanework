@@ -10,6 +10,7 @@ import {
   useParams,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { LocalBoardBar } from "#/components/shared/auth/local-mode";
 import { ErrorState } from "#/components/shared/common/error-state";
 import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
 import { Button } from "#/components/ui/button";
@@ -23,7 +24,6 @@ import {
 import { useBoard } from "#/stores/board";
 import { useLastRoute } from "#/stores/last-route";
 import { useReadinessWatch } from "#/stores/readiness";
-import { LocalBoardBar } from "./local-mode";
 
 /**
  * One project, open.

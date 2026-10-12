@@ -1,7 +1,7 @@
 import { Logout01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import { SignInButton } from "#/components/features/workspaces/local-mode";
+import { SignInButton } from "#/components/shared/auth/local-mode";
 import {
   SettingsPage,
   SettingsValue,

@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { useBoard } from "#/stores/board";
 import { usePresencePoll } from "#/stores/board-presence";
+import { useCloudFeatures } from "#/stores/session";
 
 export const Route = createFileRoute("/_app/w/$slug/issues")({
   component: IssuesLayout,
@@ -12,10 +13,11 @@ export const Route = createFileRoute("/_app/w/$slug/issues")({
  */
 function IssuesLayout() {
   const { slug } = Route.useParams();
-  const workspaceId = useBoard(
-    (state) =>
-      state.workspaces.find((entry) => entry.slug === slug)?.id ?? null,
+  const workspace = useBoard(
+    (state) => state.workspaces.find((entry) => entry.slug === slug) ?? null,
   );
-  usePresencePoll(workspaceId);
+  // FE-52/D10: nobody else is on a local board, so there is nothing to poll.
+  const { presence } = useCloudFeatures(workspace);
+  usePresencePoll(presence ? (workspace?.id ?? null) : null);
   return <Outlet />;
 }

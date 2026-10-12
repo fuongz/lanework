@@ -1,6 +1,6 @@
 import type { DesktopAgentConfigApi } from "./agent-config";
 import type { DesktopAgentSetupApi } from "./agent-setup";
-import type { DesktopAuthApi } from "./auth";
+import type { DesktopAuthApi, DesktopLaneworkMcpApi } from "./auth";
 import type { DesktopGitApi } from "./git";
 import type { DesktopHandoffApi } from "./handoff";
 import type { DesktopInstructionsApi } from "./instructions";
@@ -83,4 +83,6 @@ export interface DesktopApi {
   agentSetup: DesktopAgentSetupApi;
   /** The user's own Claude Code and Codex config files, edited (FE-47). */
   agentConfig: DesktopAgentConfigApi;
+  /** The `lanework` MCP entry in Claude Code and Codex, local or cloud (FE-52/D8). */
+  laneworkMcp: DesktopLaneworkMcpApi;
 }
