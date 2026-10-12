@@ -1,3 +1,4 @@
+import type { MachineCredential } from "@lanework/protocol";
 import { shell } from "electron";
 import {
   anonymousSession,
@@ -176,7 +177,7 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 /** Store what the control plane issued, and report the session it produces. */
 async function accept(
   apiUrl: string,
-  issued: { machineId: string; secret: string },
+  issued: MachineCredential,
   name: string,
 ): Promise<RedactedSession> {
   api.resetVerdict();

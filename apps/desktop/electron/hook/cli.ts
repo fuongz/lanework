@@ -7,9 +7,9 @@
 //   lanework logout              revoke this machine and forget it
 //   lanework config push-wip on|off
 //
-// ⚠️ Sign-in reuses the control plane's `lanework login` flow
-// (apps/api/src/routes/cli.ts) and the desktop app's own client for it, so the
-// two can never disagree about PKCE, state or the callback. Never a pasted
+// ⚠️ Sign-in reuses the control plane's `lanework login` flow (its contract is
+// `@lanework/protocol`'s `auth.ts`) and the desktop app's own client for it, so
+// the two can never disagree about PKCE, state or the callback. Never a pasted
 // registration token (INF-03/D7): a browser on this machine (loopback), or a
 // short code typed on another one (device).
 import { spawn } from "node:child_process";
@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { type MachineCredential, paths } from "@lanework/protocol";
 import {
   machineFacts,
   redeem,
@@ -76,9 +77,7 @@ const headless = () =>
   !process.env.DISPLAY &&
   !process.env.WAYLAND_DISPLAY;
 
-async function loginLoopback(
-  api: string,
-): Promise<{ machineId: string; secret: string }> {
+async function loginLoopback(api: string): Promise<MachineCredential> {
   const { verifier, challenge } = pkcePair();
   const state = newState();
   const code = await listenForCallback({
@@ -104,7 +103,7 @@ async function loginLoopback(
   return outcome;
 }
 
-/** How long a device code lives on the server (`routes/cli.ts` TTL). */
+/** How long a device code lives on the server (`CliAuthDeviceResponse.expires_in`). */
 const DEVICE_TTL_MS = 10 * 60 * 1000;
 
 type PendingDevice = {
@@ -126,7 +125,7 @@ function outcome(): string {
       : "Claude Code will now leave a checkpoint on the card after every turn.";
 }
 
-function save(api: string, issued: { machineId: string; secret: string }) {
+function save(api: string, issued: MachineCredential) {
   writeSecret(api, issued.secret);
   if (readSecret(api) !== issued.secret)
     throw new Error("Signed in, but the credential could not be read back.");
@@ -248,7 +247,7 @@ export async function logout(api: string): Promise<void> {
   }
   // Best effort, like the desktop app's sign-out: the local copy goes either
   // way, so a network failure never strands someone who asked to leave.
-  const revoked = await fetch(`${api}/v1/machines/me`, {
+  const revoked = await fetch(`${api}${paths.machinesMe()}`, {
     method: "DELETE",
     headers: { authorization: `Bearer ${secret}` },
     signal: AbortSignal.timeout(5_000),
@@ -271,7 +270,7 @@ export async function status(
   const secret = readSecret(api);
   let signedIn = "no — run `lanework login`";
   if (secret) {
-    const res = await fetch(`${api}/v1/machines/me`, {
+    const res = await fetch(`${api}${paths.machinesMe()}`, {
       headers: { authorization: `Bearer ${secret}` },
       signal: AbortSignal.timeout(5_000),
     }).catch(() => null);

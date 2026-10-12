@@ -41,6 +41,17 @@ import {
 import { arch, homedir, hostname, platform, tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import {
+  AGENT_HEADER,
+  type BoardsForRepoResponse,
+  type CheckpointGit,
+  type CheckpointRequest,
+  DEFAULT_API_ORIGIN,
+  type MachineRegisterRequest,
+  type MachineRegisterResponse,
+  paths,
+  TOKEN_PREFIXES,
+} from "@lanework/protocol";
+import {
   config,
   desktopHookInstalled,
   login,
@@ -78,7 +89,7 @@ const API = (
     ? (ARGS.flags.get("api") as string)
     : "") ||
   process.env.LANEWORK_API_URL ||
-  "https://api.lanework.dev"
+  DEFAULT_API_ORIGIN
 ).replace(/\/$/, "");
 /**
  * Settings the app changes without touching the hook's command (FE-29/D3):
@@ -621,7 +632,7 @@ async function http(
     signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
     headers: {
       "Content-Type": "application/json",
-      "x-lanework-agent": AGENT,
+      [AGENT_HEADER]: AGENT,
       ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
       ...(rest.headers as Record<string, string> | undefined),
     },
@@ -635,16 +646,12 @@ async function boardFor(
   const cacheFile = join(STATE_DIR, "boards.json");
   const cache = readJson<Record<string, string>>(cacheFile, {});
   if (cache[remote]) return cache[remote];
-  const res = await http(`/v1/boards?repo=${encodeURIComponent(remote)}`, {
-    secret,
-  });
+  const res = await http(paths.boardsForRepo(remote), { secret });
   if (!res.ok) {
     log(`board lookup ${res.status} for ${remote}`);
     return null;
   }
-  const { boards } = (await res.json()) as {
-    boards: { workspaceId: string }[];
-  };
+  const { boards } = (await res.json()) as BoardsForRepoResponse;
   // Same rule as the MCP server's: exactly one, or none at all.
   if (boards.length !== 1) {
     log(`${boards.length} boards linked to ${remote}; not guessing`);
@@ -733,9 +740,9 @@ export function buildBody(
   extra: {
     host: string;
     session: string | null;
-    git: Record<string, string | null>;
+    git: Partial<CheckpointGit>;
   },
-) {
+): CheckpointRequest {
   const heading = d.replyIsPrevious
     ? `${AGENT_NAME}'s last message, from the turn BEFORE the request below (it stopped before replying to that one):`
     : `${AGENT_NAME}'s last message before it stopped:`;
@@ -820,10 +827,11 @@ async function work(inputFile: string): Promise<void> {
     },
   });
 
-  const res = await http(
-    `/v1/boards/${boardId}/items/${encodeURIComponent(d.taskId)}/checkpoints`,
-    { method: "POST", secret, body: JSON.stringify(body) },
-  );
+  const res = await http(paths.itemCheckpoints(boardId, d.taskId), {
+    method: "POST",
+    secret,
+    body: JSON.stringify(body),
+  });
   if (!res.ok) {
     log(
       `checkpoint for ${d.taskId}: ${res.status} ${clip(await res.text(), 300)}`,
@@ -849,14 +857,14 @@ async function work(inputFile: string): Promise<void> {
  * where any process on the machine could read it from the process list.
  */
 async function setup(token: string | undefined): Promise<void> {
-  if (!token?.startsWith("lw_reg_")) {
+  if (!token?.startsWith(TOKEN_PREFIXES.registration)) {
     console.error(
       `usage: bun apps/desktop/electron/hook/lanework-checkpoint.ts setup <lw_reg_…>\n` +
         `Mint the token at ${API}/setup ("Create registration token").`,
     );
     process.exit(1);
   }
-  const res = await http("/v1/machines/register", {
+  const res = await http(paths.machinesRegister(), {
     method: "POST",
     body: JSON.stringify({
       token,
@@ -864,16 +872,13 @@ async function setup(token: string | undefined): Promise<void> {
       hostname: hostname(),
       os: platform(),
       arch: arch(),
-    }),
+    } satisfies MachineRegisterRequest),
   });
   if (!res.ok) {
     console.error(`registration failed: ${res.status} ${await res.text()}`);
     process.exit(1);
   }
-  const { machineId, secret } = (await res.json()) as {
-    machineId: string;
-    secret: string;
-  };
+  const { machineId, secret } = (await res.json()) as MachineRegisterResponse;
   writeSecret(API, secret);
   if (readSecret() !== secret) {
     console.error("the credential could not be read back");

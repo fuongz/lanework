@@ -1,3 +1,5 @@
+import type { MachineOwner } from "@lanework/protocol";
+
 /**
  * Who is asking, and what the control plane last said about them.
  *
@@ -15,11 +17,7 @@
  * nullable because a client must be able to say "we do not know" rather than
  * render `undefined`.
  */
-export interface AccountOwner {
-  name: string | null;
-  email: string | null;
-  image: string | null;
-}
+export type AccountOwner = MachineOwner;
 
 export type Principal =
   | { kind: "anonymous" }

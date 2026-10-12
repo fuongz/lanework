@@ -6,6 +6,6 @@
     "name": "fuongz"
   },
   "homepage": "https://lanework.dev",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "keywords": ["kanban", "handoff", "checkpoint", "mcp"]
 }

@@ -1,0 +1,21 @@
+{
+  "name": "@lanework/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The HTTP contract between the Lanework desktop app / checkpoint hook and the Lanework API: request and response shapes, types only.",
+  "license": "MIT",
+  "author": "fuongz <hi@phuongphung.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fuongz/lanework.git",
+    "directory": "packages/protocol"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "//": "Types and path builders only, no runtime dependencies. It must never import from apps/ or packages/db: it is the half of the contract the open-source desktop ships, and the private API is the other half.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

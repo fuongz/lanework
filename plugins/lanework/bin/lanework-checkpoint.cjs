@@ -52,6 +52,64 @@ var import_node_fs3 = require("node:fs");
 var import_node_os4 = require("node:os");
 var import_node_path3 = require("node:path");
 
+// packages/protocol/src/auth.ts
+var LOOPBACK_CALLBACK_PATH = "/oauth/callback";
+// packages/protocol/src/checkpoints.ts
+var CHECKPOINT_MAX_BYTES = 16 * 1024;
+// packages/protocol/src/common.ts
+var DEFAULT_API_ORIGIN = "https://api.lanework.dev";
+var AGENT_HEADER = "x-lanework-agent";
+var TOKEN_PREFIXES = {
+  registration: "lw_reg_",
+  machine: "lw_mch_",
+  device: "lw_dev_",
+  code: "lw_code_"
+};
+// packages/protocol/src/endpoints.ts
+var seg = encodeURIComponent;
+var paths = {
+  health: () => "/v1/health",
+  cliAuth: () => "/v1/cli/auth",
+  cliToken: () => "/v1/cli/token",
+  machinesRegister: () => "/v1/machines/register",
+  machinesMe: () => "/v1/machines/me",
+  machinesHeartbeat: () => "/v1/machines/heartbeat",
+  syncState: () => "/v1/sync/state",
+  syncWorkspace: () => "/v1/sync/state/workspace",
+  syncWorkspaceById: (id) => `/v1/sync/state/workspace/${seg(id)}`,
+  syncWorkspaceOrder: () => "/v1/sync/state/workspace-order",
+  boardsForRepo: (remote) => `/v1/boards?repo=${seg(remote)}`,
+  boardConfig: (workspaceId) => `/v1/boards/${seg(workspaceId)}/config`,
+  boardIcon: (workspaceId) => `/v1/boards/${seg(workspaceId)}/icon`,
+  boardPresence: (workspaceId) => `/v1/boards/${seg(workspaceId)}/presence`,
+  boardStats: (workspaceId, query) => withQuery(`/v1/boards/${seg(workspaceId)}/stats`, query),
+  boardChanges: (workspaceId, since, limit) => `/v1/boards/${seg(workspaceId)}/changes?since=${since}${limit === undefined ? "" : `&limit=${limit}`}`,
+  boardLookup: (workspaceId, by) => `/v1/boards/${seg(workspaceId)}/lookup?${"taskId" in by ? `taskId=${seg(by.taskId)}` : `source=${seg(by.source)}`}`,
+  boardImport: (workspaceId) => `/v1/boards/${seg(workspaceId)}/import`,
+  boardMigrated: (workspaceId) => `/v1/boards/${seg(workspaceId)}/migrated`,
+  boardPurge: (workspaceId) => `/v1/boards/${seg(workspaceId)}/purge`,
+  items: (workspaceId, query) => withQuery(`/v1/boards/${seg(workspaceId)}/items`, query),
+  item: (workspaceId, itemId) => `/v1/boards/${seg(workspaceId)}/items/${seg(itemId)}`,
+  itemMove: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/move`,
+  itemRestore: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/restore`,
+  itemChecklist: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/checklist`,
+  itemChecklistItem: (workspaceId, itemId, key) => `${paths.item(workspaceId, itemId)}/checklist/${seg(key)}`,
+  itemLinks: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/links`,
+  itemLink: (workspaceId, itemId, linkId) => `${paths.item(workspaceId, itemId)}/links/${seg(linkId)}`,
+  itemComments: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/comments`,
+  itemComment: (workspaceId, itemId, commentId) => `${paths.item(workspaceId, itemId)}/comments/${seg(commentId)}`,
+  itemSubscription: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/subscription`,
+  itemFavorite: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/favorite`,
+  itemAttachments: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/attachments`,
+  itemAttachment: (workspaceId, itemId, attachmentId) => `${paths.item(workspaceId, itemId)}/attachments/${seg(attachmentId)}`,
+  itemAudit: (workspaceId, itemId) => `${paths.item(workspaceId, itemId)}/audit`,
+  itemActivity: (workspaceId, itemId, query) => withQuery(`${paths.item(workspaceId, itemId)}/activity`, query),
+  itemCheckpoints: (workspaceId, ref) => `/v1/boards/${seg(workspaceId)}/items/${seg(ref)}/checkpoints`
+};
+function withQuery(path, query) {
+  const text = query === undefined ? "" : String(query);
+  return text ? `${path}?${text}` : path;
+}
 // apps/desktop/electron/hook/cli.ts
 var import_node_child_process2 = require("node:child_process");
 var import_node_fs2 = require("node:fs");
@@ -62,7 +120,7 @@ var import_node_path2 = require("node:path");
 var import_node_os = require("node:os");
 
 // apps/desktop/electron/main/auth/redirect.ts
-var CALLBACK_PATH = "/oauth/callback";
+var CALLBACK_PATH = LOOPBACK_CALLBACK_PATH;
 function externalUrlOn(raw, origin) {
   if (typeof raw !== "string" || raw.length > 2048)
     return null;
@@ -142,7 +200,7 @@ function str(value, max = 2048) {
   return typeof value === "string" && value && value.length <= max ? value : null;
 }
 async function startLoopback(api, input, signal) {
-  const { status, ok, data } = await postJson(api, "/v1/cli/auth", {
+  const { status, ok, data } = await postJson(api, paths.cliAuth(), {
     mode: "loopback",
     code_challenge: input.challenge,
     code_challenge_method: "S256",
@@ -159,7 +217,7 @@ async function startLoopback(api, input, signal) {
   return { id, authorizeUrl };
 }
 async function startDevice(api, input, signal) {
-  const { status, ok, data } = await postJson(api, "/v1/cli/auth", {
+  const { status, ok, data } = await postJson(api, paths.cliAuth(), {
     mode: "device",
     code_challenge: input.challenge,
     code_challenge_method: "S256",
@@ -184,7 +242,7 @@ async function startDevice(api, input, signal) {
   };
 }
 async function redeem(api, grant, verifier, signal) {
-  const { status, ok, data } = await postJson(api, "/v1/cli/token", {
+  const { status, ok, data } = await postJson(api, paths.cliToken(), {
     ...grant.code ? { code: grant.code } : {},
     ...grant.deviceCode ? { device_code: grant.deviceCode } : {},
     code_verifier: verifier
@@ -501,7 +559,7 @@ async function logout(api) {
     console.log("Not signed in.");
     return;
   }
-  const revoked = await fetch(`${api}/v1/machines/me`, {
+  const revoked = await fetch(`${api}${paths.machinesMe()}`, {
     method: "DELETE",
     headers: { authorization: `Bearer ${secret}` },
     signal: AbortSignal.timeout(5000)
@@ -513,7 +571,7 @@ async function status(api, stateDir, desktopHook) {
   const secret = readSecret(api);
   let signedIn = "no — run `lanework login`";
   if (secret) {
-    const res = await fetch(`${api}/v1/machines/me`, {
+    const res = await fetch(`${api}${paths.machinesMe()}`, {
       headers: { authorization: `Bearer ${secret}` },
       signal: AbortSignal.timeout(5000)
     }).catch(() => null);
@@ -587,7 +645,7 @@ function parseArgs(argv) {
   return { flags, positional };
 }
 var ARGS = parseArgs(process.argv.slice(2));
-var API = ((typeof ARGS.flags.get("api") === "string" ? ARGS.flags.get("api") : "") || process.env.LANEWORK_API_URL || "https://api.lanework.dev").replace(/\/$/, "");
+var API = ((typeof ARGS.flags.get("api") === "string" ? ARGS.flags.get("api") : "") || process.env.LANEWORK_API_URL || DEFAULT_API_ORIGIN).replace(/\/$/, "");
 function hookConfig() {
   const file = process.env.LANEWORK_HOOK_CONFIG || (ARGS.flags.has("plugin") ? pluginConfigPath() : null);
   if (!file)
@@ -933,7 +991,7 @@ async function http(path, init = {}) {
     signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
     headers: {
       "Content-Type": "application/json",
-      "x-lanework-agent": AGENT,
+      [AGENT_HEADER]: AGENT,
       ...secret ? { Authorization: `Bearer ${secret}` } : {},
       ...rest.headers
     }
@@ -944,19 +1002,17 @@ async function boardFor(remote, secret) {
   const cache = readJson(cacheFile, {});
   if (cache[remote])
     return cache[remote];
-  const res = await http(`/v1/boards?repo=${encodeURIComponent(remote)}`, {
-    secret
-  });
+  const res = await http(paths.boardsForRepo(remote), { secret });
   if (!res.ok) {
     log(`board lookup ${res.status} for ${remote}`);
     return null;
   }
-  const { boards } = await res.json();
-  if (boards.length !== 1) {
-    log(`${boards.length} boards linked to ${remote}; not guessing`);
+  const { boards: boards2 } = await res.json();
+  if (boards2.length !== 1) {
+    log(`${boards2.length} boards linked to ${remote}; not guessing`);
     return null;
   }
-  const id = boards[0]?.workspaceId ?? null;
+  const id = boards2[0]?.workspaceId ?? null;
   if (id)
     writeJson(cacheFile, { ...cache, [remote]: id });
   return id;
@@ -1059,7 +1115,11 @@ async function work(inputFile) {
       diffStat: clip(tryGit(root, ["diff", "HEAD", "--stat"]) ?? "", 3000) || null
     }
   });
-  const res = await http(`/v1/boards/${boardId}/items/${encodeURIComponent(d.taskId)}/checkpoints`, { method: "POST", secret, body: JSON.stringify(body) });
+  const res = await http(paths.itemCheckpoints(boardId, d.taskId), {
+    method: "POST",
+    secret,
+    body: JSON.stringify(body)
+  });
   if (!res.ok) {
     log(`checkpoint for ${d.taskId}: ${res.status} ${clip(await res.text(), 300)}`);
     return;
@@ -1074,12 +1134,12 @@ async function work(inputFile) {
   writeJson(stateFile, state);
 }
 async function setup(token) {
-  if (!token?.startsWith("lw_reg_")) {
+  if (!token?.startsWith(TOKEN_PREFIXES.registration)) {
     console.error(`usage: bun apps/desktop/electron/hook/lanework-checkpoint.ts setup <lw_reg_…>
 ` + `Mint the token at ${API}/setup ("Create registration token").`);
     process.exit(1);
   }
-  const res = await http("/v1/machines/register", {
+  const res = await http(paths.machinesRegister(), {
     method: "POST",
     body: JSON.stringify({
       token,

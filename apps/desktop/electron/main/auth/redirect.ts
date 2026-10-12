@@ -6,8 +6,10 @@
  * after editing it.
  */
 
+import { LOOPBACK_CALLBACK_PATH } from "@lanework/protocol";
+
 /** The one path our loopback listener answers. */
-export const CALLBACK_PATH = "/oauth/callback";
+export const CALLBACK_PATH = LOOPBACK_CALLBACK_PATH;
 
 /** Binding a privileged port needs root, so a redirect there cannot be ours. */
 const MIN_PORT = 1024;

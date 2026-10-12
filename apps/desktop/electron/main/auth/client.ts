@@ -1,4 +1,17 @@
 import { hostname } from "node:os";
+import {
+  type CliAuthDeviceRequest,
+  type CliAuthDeviceResponse,
+  type CliAuthLoopbackRequest,
+  type CliAuthLoopbackResponse,
+  type CliTokenErrorCode,
+  type CliTokenRequest,
+  type CliTokenResponse,
+  DEFAULT_API_ORIGIN,
+  type MachineFacts,
+  type MachineMeResponse,
+  paths,
+} from "@lanework/protocol";
 import type { AccountOwner, Verdict } from "../../../shared/auth";
 import { externalUrlOn, looksLikeUserCode } from "./redirect";
 import type { MachineRecord } from "./store";
@@ -14,7 +27,7 @@ import type { MachineRecord } from "./store";
  * thing to want. Precedence: an explicit origin (a record's own) >
  * `LANEWORK_API_URL` > this.
  */
-const DEFAULT_API = "https://api.lanework.dev";
+const DEFAULT_API = DEFAULT_API_ORIGIN;
 
 /** The control-plane origin in force, with no trailing slash. Never empty. */
 export function resolveApi(apiUrl?: string | null): string {
@@ -25,8 +38,7 @@ export function resolveApi(apiUrl?: string | null): string {
 }
 
 /** What this machine tells the control plane about itself. Display data only. */
-export function machineFacts(name?: string): {
-  name: string;
+export function machineFacts(name?: string): MachineFacts & {
   hostname: string;
   os: string;
   arch: string;
@@ -77,12 +89,19 @@ function refused(api: string, status: number, detail: string): Error {
   );
 }
 
-async function postJson(
+/**
+ * A response body as it arrives: the protocol's field names, every value still
+ * unchecked. The server is on the other side of a network, so nothing it sends
+ * is trusted until `str` or `externalUrlOn` has looked at it.
+ */
+type Unchecked<T> = { [K in keyof T]?: unknown } & Record<string, unknown>;
+
+async function postJson<Res>(
   api: string,
   path: string,
   body: unknown,
   signal?: AbortSignal,
-): Promise<{ status: number; ok: boolean; data: Record<string, unknown> }> {
+): Promise<{ status: number; ok: boolean; data: Unchecked<Res> }> {
   let res: Response;
   try {
     res = await fetch(`${api}${path}`, {
@@ -104,7 +123,7 @@ async function postJson(
   return {
     status: res.status,
     ok: res.ok,
-    data: data as Record<string, unknown>,
+    data: data as Unchecked<Res>,
   };
 }
 
@@ -131,9 +150,9 @@ export async function startLoopback(
   },
   signal?: AbortSignal,
 ): Promise<LoopbackStart> {
-  const { status, ok, data } = await postJson(
+  const { status, ok, data } = await postJson<CliAuthLoopbackResponse>(
     api,
-    "/v1/cli/auth",
+    paths.cliAuth(),
     {
       mode: "loopback",
       code_challenge: input.challenge,
@@ -141,7 +160,7 @@ export async function startLoopback(
       redirect_uri: input.redirectUri,
       state: input.state,
       ...input.facts,
-    },
+    } satisfies CliAuthLoopbackRequest,
     signal,
   );
   if (!ok) throw refused(api, status, str(data.error, 200) ?? "");
@@ -170,15 +189,15 @@ export async function startDevice(
   input: { challenge: string; facts: ReturnType<typeof machineFacts> },
   signal?: AbortSignal,
 ): Promise<DeviceStart> {
-  const { status, ok, data } = await postJson(
+  const { status, ok, data } = await postJson<CliAuthDeviceResponse>(
     api,
-    "/v1/cli/auth",
+    paths.cliAuth(),
     {
       mode: "device",
       code_challenge: input.challenge,
       code_challenge_method: "S256",
       ...input.facts,
-    },
+    } satisfies CliAuthDeviceRequest,
     signal,
   );
   if (!ok) throw refused(api, status, str(data.error, 200) ?? "");
@@ -217,7 +236,7 @@ export type PollOutcome =
   | { state: "slow_down" }
   | { state: "denied" }
   | { state: "expired" }
-  | { state: "issued"; machineId: string; secret: string };
+  | ({ state: "issued" } & CliTokenResponse);
 
 /**
  * Exchange an approved request for a machine credential.
@@ -231,14 +250,16 @@ export async function redeem(
   verifier: string,
   signal?: AbortSignal,
 ): Promise<PollOutcome> {
-  const { status, ok, data } = await postJson(
+  const { status, ok, data } = await postJson<
+    CliTokenResponse & { error: CliTokenErrorCode }
+  >(
     api,
-    "/v1/cli/token",
+    paths.cliToken(),
     {
       ...(grant.code ? { code: grant.code } : {}),
       ...(grant.deviceCode ? { device_code: grant.deviceCode } : {}),
       code_verifier: verifier,
-    },
+    } satisfies CliTokenRequest,
     signal,
   );
 
@@ -246,7 +267,7 @@ export async function redeem(
   const secret = str(data.secret, 200);
   if (ok && machineId && secret) return { state: "issued", machineId, secret };
 
-  switch (data.error) {
+  switch (data.error as CliTokenErrorCode | undefined) {
     case "authorization_pending":
       return { state: "pending" };
     case "slow_down":
@@ -327,7 +348,7 @@ export async function probe(record: MachineRecord): Promise<{
 }> {
   const api = resolveApi(record.apiUrl);
   try {
-    const res = await fetch(`${api}/v1/machines/me`, {
+    const res = await fetch(`${api}${paths.machinesMe()}`, {
       headers: { authorization: `Bearer ${record.secret}` },
       signal: AbortSignal.timeout(5_000),
     });
@@ -338,10 +359,9 @@ export async function probe(record: MachineRecord): Promise<{
     let userId = record.userId;
     let owner = record.owner;
     if (res.ok) {
-      const data = (await res.json().catch(() => ({}))) as Record<
-        string,
-        unknown
-      >;
+      const data = (await res
+        .json()
+        .catch(() => ({}))) as Unchecked<MachineMeResponse>;
       userId = str(data.userId, 64) ?? userId;
       // ⚠️ Kept when the response omits it, rather than cleared. A control
       // plane older than this field is a working control plane, and blanking a
@@ -379,7 +399,7 @@ export async function probeIfStale(record: MachineRecord): Promise<{
 export async function revokeSelf(record: MachineRecord): Promise<boolean> {
   const api = resolveApi(record.apiUrl);
   try {
-    const res = await fetch(`${api}/v1/machines/me`, {
+    const res = await fetch(`${api}${paths.machinesMe()}`, {
       method: "DELETE",
       headers: { authorization: `Bearer ${record.secret}` },
       signal: AbortSignal.timeout(5_000),
