@@ -11,7 +11,6 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { CodexQuotaBar } from "#/components/shared/agents/codex-usage";
 import { LocalModeRail } from "#/components/shared/auth/local-mode";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
@@ -352,7 +351,6 @@ export function AppSidebar() {
 
       <div className="mt-2 shrink-0 pt-2 pb-2.5">
         <LocalModeRail />
-        <CodexQuotaBar />
         <Link to="/settings" className={LONE_ROW}>
           <HugeiconsIcon
             icon={Settings01Icon}

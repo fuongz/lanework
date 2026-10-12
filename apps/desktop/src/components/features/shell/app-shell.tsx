@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { usePanelRef } from "react-resizable-panels";
-import { ClaudeUsageStrip } from "#/components/features/terminal/claude-usage-strip";
+import { AgentUsageStrip } from "#/components/features/terminal/agent-usage-strip";
 import { TerminalMinibar } from "#/components/features/terminal/terminal-minibar";
 import { TerminalPanel } from "#/components/features/terminal/terminal-panel";
 import { useTerminalSessions } from "#/components/features/terminal/use-terminal-sessions";
@@ -361,7 +361,7 @@ export function AppShell() {
                   {terminalShowing && workspaceKey && (
                     <TerminalPanel
                       workspace={workspaceKey}
-                      usage={<ClaudeUsageStrip />}
+                      usage={<AgentUsageStrip workspace={workspaceKey} />}
                     />
                   )}
                 </ResizablePanel>
@@ -370,7 +370,7 @@ export function AppShell() {
             {!terminalShowing && workspaceKey && (
               <TerminalMinibar
                 workspace={workspaceKey}
-                usage={<ClaudeUsageStrip />}
+                usage={<AgentUsageStrip workspace={workspaceKey} />}
               />
             )}
           </div>

@@ -1834,6 +1834,12 @@ async function bootOnAgentHome(
   );
   const claudeBin = join(profile, "claude-stand-in.sh");
   const claudeConfig = join(profile, "claude-config");
+  // A stand-in Claude like Codex's, unless the case drives its statusLine.
+  await writeFile(
+    claudeBin,
+    `#!/bin/sh\nprintf 'ran-claude-%s\\n' "$@"\nwhile IFS= read -r line; do [ "$line" = "/exit" ] && exit 0; done\n`,
+    { mode: 0o755 },
+  );
   if (launchClaudeStatusLine) {
     await mkdir(claudeConfig, { recursive: true });
     const script = join(profile, "claude-stand-in.cjs");
@@ -1867,9 +1873,9 @@ process.stdin.resume();
       LANEWORK_TEST_AGENT_HOME: agentHome,
       LANEWORK_TERMINAL_AGENTS: "claude,codex",
       LANEWORK_CODEX_BIN: codexBin,
+      LANEWORK_CLAUDE_BIN: claudeBin,
       ...(launchClaudeStatusLine
         ? {
-            LANEWORK_CLAUDE_BIN: claudeBin,
             LANEWORK_TEST_CLAUDE_STATUSLINE: "1",
             CLAUDE_CONFIG_DIR: claudeConfig,
           }
@@ -1880,6 +1886,17 @@ process.stdin.resume();
     },
   });
   return { app, profile };
+}
+
+/** A new `agent` conversation, on screen in the main view (FE-26). */
+async function startAgent(page: Page, agent: "Claude" | "Codex") {
+  await page.getByRole("button", { name: "New agent", exact: true }).click();
+  await page
+    .getByRole("menuitem", { name: `New ${agent}`, exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: `${agent} — New ${agent} session` }),
+  ).toBeVisible();
 }
 
 async function openProject(page: Page, name: string) {
@@ -2076,7 +2093,7 @@ test("FE-49: completed main-agent turns notify once with sound and restore the w
   }
 });
 
-test("FE-41: the rail shows Codex's usage until each window resets, and a goal's status on its conversation", async () => {
+test("FE-41: the terminal bar shows Codex's usage until each window resets, and a goal's status on its conversation", async () => {
   test.skip(process.platform === "win32", "This drives a POSIX shell.");
   const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
   const board = {
@@ -2126,42 +2143,33 @@ test("FE-41: the rail shows Codex's usage until each window resets, and a goal's
   try {
     const page = await app.firstWindow();
     await openProject(page, "Alpha");
-    const group = page.getByRole("navigation", { name: "Agents" });
     const quota = page.getByTestId("codex-quota");
-    await expect(group.getByTestId("codex-quota")).toHaveCount(0);
+    // No Codex on screen yet: no strip, and none in the rail any more (FE-54).
+    await expect(quota).toHaveCount(0);
+    await startAgent(page, "Codex");
     await expect(quota).toBeVisible();
-    const settings = page.getByRole("link", { name: "Settings", exact: true });
-    const quotaBounds = await quota.boundingBox();
-    const settingsBounds = await settings.boundingBox();
-    expect(quotaBounds).not.toBeNull();
-    expect(settingsBounds).not.toBeNull();
-    expect(
-      (quotaBounds?.y ?? 0) + (quotaBounds?.height ?? 0),
-    ).toBeLessThanOrEqual(settingsBounds?.y ?? 0);
-    // The footer stays put while the rail's conversation list scrolls.
-    await page
-      .locator('.app-sidebar [data-slot="rail-hover-area"]')
-      .evaluate((node) => {
-        node.scrollTop = node.scrollHeight;
-      });
-    await expect
-      .poll(async () => (await quota.boundingBox())?.y)
-      .toBe(quotaBounds?.y);
-    // Read from the fake home with the listing; the details are in it for
-    // anybody who cannot hover.
-    await expect(quota).toContainText("6%Plus");
-    await expect(quota).toHaveAccessibleName("Codex Plus, 5h usage 6%");
-    await quota.hover();
+    await expect(page.locator("aside").getByTestId("codex-quota")).toHaveCount(
+      0,
+    );
+    // Read from the fake home with the listing.
+    await expect(quota).toHaveAccessibleName(
+      "Codex usage: 5h 6% used, weekly 1% used",
+    );
+    await quota.click();
     const details = page.getByTestId("codex-quota-details");
     await expect(details).toBeVisible();
-    await expect(details).toContainText("5-hour usage6% used");
-    await expect(details).toContainText("Weekly usage1% used");
-    await expect(details).toContainText("week resets");
-    await expect(details).toContainText("As of");
+    await expect(details).toContainText("Codex usage");
+    await expect(page.getByTestId("codex-usage-plan")).toHaveText("Plus plan");
+    await expect(
+      details.getByRole("region", { name: "5-hour limit" }),
+    ).toContainText("6% used");
+    await expect(
+      details.getByRole("region", { name: "Weekly limit" }),
+    ).toContainText("1% used");
     await page.screenshot({
-      path: "../../.agents/artifacts/2026-10-07-codex-usage-badge.png",
+      path: "../../.agents/artifacts/2026-10-12-codex-usage-strip.png",
     });
-    await settings.hover();
+    await page.keyboard.press("Escape");
     await expect(details).not.toBeVisible();
     // The goal that ran out of usage says so on its own row, and only there.
     const codexRow = page.getByRole("button", {
@@ -2194,19 +2202,21 @@ test("FE-41: the rail shows Codex's usage until each window resets, and a goal's
             ),
           ),
       );
-      await expect(quota).toHaveAccessibleName(
-        "Codex Plus, 5h usage unavailable",
-        { timeout: 2_000 },
-      );
+      await expect(quota).toHaveAccessibleName("Codex usage: weekly 2% used", {
+        timeout: 2_000,
+      });
     }).toPass({ timeout: 20_000 });
-    await expect(quota).toContainText("—Plus");
-    await quota.hover();
-    await expect(details).toContainText("Weekly usage2% used");
-    await expect(details).toContainText("5-hour usage is awaiting an update.");
-    await settings.hover();
+    await quota.click();
+    await expect(
+      details.getByRole("region", { name: "5-hour limit" }),
+    ).toContainText("No usage data yet");
+    await expect(
+      details.getByRole("region", { name: "Weekly limit" }),
+    ).toContainText("2% used");
+    await page.keyboard.press("Escape");
     await expect(details).not.toBeVisible();
 
-    // Both past: the bar goes.
+    // Both past: no numbers are left to show.
     await appendFile(
       rollout,
       line(
@@ -2219,7 +2229,10 @@ test("FE-41: the rail shows Codex's usage until each window resets, and a goal's
         ),
       ) + line({ type: "event_msg", payload: { type: "task_complete" } }),
     );
-    await expect(quota).toHaveCount(0, { timeout: 10_000 });
+    await expect(quota).toHaveAccessibleName("Codex usage: unavailable", {
+      timeout: 10_000,
+    });
+    await expect(quota).toContainText("—");
 
     // Its agent view says what the goal is, where it stands, and its tokens
     // against its budget (FE-41/D4).
@@ -2876,7 +2889,7 @@ async function answerClaudeRefresh(
   }, usage);
 }
 
-test("FE-53: Claude usage sits in the terminal bar with live limits and a 5h/weekly popover, not in the sidebar", async () => {
+test("FE-53/FE-54: the terminal bar shows the usage of the agent on screen — Claude's limits and popover, Codex's, none for no agent", async () => {
   test.skip(process.platform === "win32", "This drives a POSIX shell.");
   const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
   plane.setBoard("ws-alpha", {
@@ -2920,6 +2933,14 @@ test("FE-53: Claude usage sits in the terminal bar with live limits and a 5h/wee
     const page = await app.firstWindow();
     await openProject(page, "Alpha");
     const strip = page.getByTestId("claude-quota");
+    const codex = page.getByTestId("codex-quota");
+    // No agent on screen: no strip at all (FE-54/D1b).
+    await expect(
+      page.getByRole("button", { name: "Terminal", exact: true }),
+    ).toBeVisible();
+    await expect(strip).toHaveCount(0);
+    await expect(codex).toHaveCount(0);
+    await startAgent(page, "Claude");
     await expect(strip).toHaveAccessibleName(
       "Claude usage: 5h 11% used, weekly 23% used",
     );
@@ -2933,9 +2954,7 @@ test("FE-53: Claude usage sits in the terminal bar with live limits and a 5h/wee
     await expect(page.locator("aside").getByTestId("claude-quota")).toHaveCount(
       0,
     );
-    await expect(page.getByTestId("codex-quota")).toHaveAccessibleName(
-      "Codex Plus, 5h usage 6%",
-    );
+    await expect(codex).toHaveCount(0);
     await strip.click();
     const details = page.getByTestId("claude-quota-details");
     await expect(details).toBeVisible();
@@ -2974,6 +2993,23 @@ test("FE-53: Claude usage sits in the terminal bar with live limits and a 5h/wee
     await expect(panel.getByTestId("claude-quota")).toHaveAccessibleName(
       "Claude usage: 5h 17% used, weekly 23% used",
     );
+    // A Codex agent on screen swaps the strip for Codex's usage (FE-54)…
+    await startAgent(page, "Codex");
+    await expect(panel.getByTestId("codex-quota")).toHaveAccessibleName(
+      "Codex usage: 5h 6% used, weekly 1% used",
+    );
+    await expect(strip).toHaveCount(0);
+    // …back to the Claude agent, Claude's again…
+    await page.goBack();
+    await expect(panel.getByTestId("claude-quota")).toBeVisible();
+    await expect(codex).toHaveCount(0);
+    // …and with no agent on screen and a shell tab, none.
+    await page
+      .getByRole("navigation", { name: "Project" })
+      .getByRole("link", { name: "Issues" })
+      .click();
+    await expect(strip).toHaveCount(0);
+    await expect(codex).toHaveCount(0);
   } finally {
     await app.close();
     await plane.close();
@@ -2995,11 +3031,9 @@ test("FE-53: with no Claude usage the strip stays hidden, and a focus refresh's 
   try {
     const page = await app.firstWindow();
     await openProject(page, "Alpha");
-    // No subscription usage and no plan; main's `unavailable` (no sign-in on
-    // this machine) is nothing to say, so no strip.
-    await expect(
-      page.getByRole("button", { name: "Terminal", exact: true }),
-    ).toBeVisible();
+    await startAgent(page, "Claude");
+    // Claude on screen, but no subscription usage and no plan; main's
+    // `unavailable` (no sign-in on this machine) is nothing to say, so no strip.
     await delay(1_500);
     await expect(page.getByTestId("claude-quota")).toHaveCount(0);
     // A refresh that answers an expired sign-in brings it back, and the
@@ -3058,6 +3092,7 @@ test("FE-53: refresh asks main through IPC, spins while it waits, and an error k
   try {
     const page = await app.firstWindow();
     await openProject(page, "Alpha");
+    await startAgent(page, "Claude");
     const strip = page.getByTestId("claude-quota");
     // No numbers yet: the plan alone keeps the strip, the cards say so.
     await expect(strip).toHaveText("—");

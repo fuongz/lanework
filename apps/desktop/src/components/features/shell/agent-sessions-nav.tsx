@@ -20,7 +20,6 @@ import {
   TASK_KIND_ICONS,
   useStopBackgroundTask,
 } from "#/components/shared/agents/background-tasks";
-import { CodexGoalBadge } from "#/components/shared/agents/codex-usage";
 import { factsSummary } from "#/components/shared/agents/conversation-facts";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
 import {
@@ -66,6 +65,7 @@ import {
 } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useTerminal } from "#/stores/terminal";
+import { CodexGoalBadge } from "./codex-goal-badge";
 import { RenameAgentDialog } from "./rename-agent-dialog";
 
 /** Stable empty lists: a selector that allocated one would re-render forever. */
