@@ -14,7 +14,7 @@ desktop app (INF-03):
 ## Install
 
 ```
-/plugin marketplace add fuongz/lw
+/plugin marketplace add fuongz/lanework
 /plugin install lanework@lanework
 ```
 

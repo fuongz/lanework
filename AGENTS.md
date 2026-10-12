@@ -98,7 +98,7 @@ the cloud, never in a local file.
   Failures go to `~/.cache/lanework/checkpoint/hook.log`, never to the session.
   The source is `apps/desktop/electron/hook/lanework-checkpoint.ts`. Without
   the app, Claude Code users install the **plugin** (INF-03,
-  `plugins/lanework/`): `/plugin marketplace add fuongz/lw`,
+  `plugins/lanework/`): `/plugin marketplace add fuongz/lanework`,
   `/plugin install lanework@lanework`, then `! lanework login`. The plugin's
   hook stays quiet when the app's hook is installed. Its bundle,
   `plugins/lanework/bin/lanework-checkpoint.cjs`, is committed — rebuild it

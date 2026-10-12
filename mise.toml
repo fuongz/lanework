@@ -6,14 +6,6 @@
 description = "Desktop app in dev: renderer HMR, main/preload restart"
 run = "bun run dev"
 
-[tasks."dev:api"]
-description = "API worker, locally"
-run = "bun run dev:api"
-
-[tasks."dev:mcp"]
-description = "MCP worker, locally"
-run = "bun run dev:mcp"
-
 [tasks."dev:landing"]
 description = "Landing site, locally"
 run = "bun run dev:landing"
