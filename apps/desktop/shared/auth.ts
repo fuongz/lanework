@@ -34,7 +34,13 @@ export type Principal =
    * because "your access was revoked" and "you are not signed in" are different
    * things to tell someone.
    */
-  | { kind: "revoked"; machineId: string; name: string };
+  | { kind: "revoked"; machineId: string; name: string }
+  /**
+   * FE-52: nobody signed in, and the person chose "Skip for now". Boards live
+   * in the local SQLite store and nothing calls the control plane. Signing in
+   * later turns this into `machine`; the local boards stay (FE-52/D6a).
+   */
+  | { kind: "local" };
 
 /** What the control plane last said about our credential. */
 export type Verdict = "ok" | "revoked" | "unreachable";
@@ -73,6 +79,8 @@ export const authChannels = {
   cancel: "auth:cancel",
   changed: "auth:changed",
   progress: "auth:progress",
+  /** FE-52: "Skip for now" — run without an account, on the local store. */
+  enterLocal: "auth:enter-local",
 } as const;
 
 export interface DesktopAuthApi {
@@ -81,6 +89,12 @@ export interface DesktopAuthApi {
   signOut: () => Promise<RedactedSession>;
   /** Abort an in-flight sign-in. Resolves whether or not one was running. */
   cancelSignIn: () => Promise<void>;
+  /**
+   * FE-52/D5: "Skip for now". Remembers the choice and answers a session whose
+   * principal is `local`. A no-op that answers the current session when a
+   * machine credential is already held.
+   */
+  enterLocalMode: () => Promise<RedactedSession>;
   onSessionChange: (listener: (session: RedactedSession) => void) => () => void;
   onSignInProgress: (
     listener: (progress: SignInProgress) => void,

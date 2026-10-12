@@ -35,6 +35,28 @@ export interface Workspace {
    * predate it.
    */
   iconKey?: string | null;
+  /**
+   * FE-52: where the board lives. `local` boards are in the SQLite store on
+   * this machine and their `id` is the local UUIDv7; absent means `cloud`
+   * (every workspace before FE-52).
+   */
+  origin?: "cloud" | "local";
+  /**
+   * FE-52/D7a: a local board that was synced is read-only and points here —
+   * the cloud workspace id it moved to. Null/absent until then.
+   */
+  movedTo?: string | null;
+}
+
+/** FE-52: what "Sync to cloud" answers. */
+export interface LocalSyncResult {
+  /** The local workspace id that was moved. */
+  localId: string;
+  /** The cloud workspace it now lives in. */
+  cloudId: string;
+  /** Cards uploaded. */
+  cards: number;
+  snapshot: WorkspaceSnapshot;
 }
 
 export interface WorkspaceSnapshot {
@@ -945,6 +967,14 @@ export const workspaceChannels = {
   folderLink: "workspaces:folder:link",
   folderForget: "workspaces:folder:forget",
   folderReveal: "workspaces:folder:reveal",
+  /** FE-52/D7a: move a local board to the cloud, one click. */
+  syncToCloud: "workspaces:local:sync",
+  /**
+   * FE-52: main → renderer, the local store changed under us (the offline MCP
+   * or the hook wrote). Payload: the local workspace ids that changed, or
+   * empty for "re-read everything local".
+   */
+  localChanged: "workspaces:local:changed",
 } as const;
 
 export interface DesktopBoardApi {
@@ -1287,6 +1317,14 @@ export interface DesktopWorkspacesApi {
    * field, the same state that stops the project's board from opening.
    */
   remove: (id: string, slug: string) => Promise<WorkspaceSnapshot>;
+  /**
+   * FE-52/D7a: upload a LOCAL board to the signed-in account, keeping task ids,
+   * checklists and lanes, then make the local copy read-only and point it at
+   * the cloud board. Refused while not signed in.
+   */
+  syncToCloud: (localId: string) => Promise<LocalSyncResult>;
+  /** FE-52: the local store changed from outside this window (MCP, hook). */
+  onLocalChange: (listener: (workspaceIds: string[]) => void) => () => void;
   board: DesktopBoardApi;
   folder: DesktopFolderApi;
 }

@@ -61,6 +61,7 @@ const auth: DesktopAuthApi = {
   signIn: (mode) => ipcRenderer.invoke(authChannels.signIn, mode),
   signOut: () => ipcRenderer.invoke(authChannels.signOut),
   cancelSignIn: () => ipcRenderer.invoke(authChannels.cancel),
+  enterLocalMode: () => ipcRenderer.invoke(authChannels.enterLocal),
   onSessionChange: (listener) => subscribe(authChannels.changed, listener),
   onSignInProgress: (listener) => subscribe(authChannels.progress, listener),
 };
@@ -419,6 +420,10 @@ const desktop: DesktopApi = {
     // 400 — while the folder link main has to drop afterwards is keyed by slug.
     remove: (id, slug) =>
       ipcRenderer.invoke(workspaceChannels.deleteWorkspace, id, slug),
+    syncToCloud: (localId) =>
+      ipcRenderer.invoke(workspaceChannels.syncToCloud, localId),
+    onLocalChange: (listener) =>
+      subscribe(workspaceChannels.localChanged, listener),
     board: {
       load: (workspaceId, query) =>
         ipcRenderer.invoke(workspaceChannels.board, workspaceId, query),
