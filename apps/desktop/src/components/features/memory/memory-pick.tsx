@@ -1,6 +1,7 @@
-import { Navigate, useParams } from "@tanstack/react-router";
+import { Navigate } from "@tanstack/react-router";
 import { MEMORY_INDEX } from "#/../shared/memory";
 import { MemoryMessage } from "#/components/shared/memory/memory-message";
+import { useSettingsProject } from "#/components/shared/settings/project-picker";
 import { memoryEntry, useMemory } from "#/stores/memory";
 
 /**
@@ -8,13 +9,14 @@ import { memoryEntry, useMemory } from "#/stores/memory";
  * without one, a word on what to do.
  */
 export function MemoryPick() {
-  const { slug } = useParams({ from: "/_app/w/$slug/memory/" });
+  const slug = useSettingsProject();
   const list = useMemory((state) => (state.slug === slug ? state.list : null));
   if (memoryEntry(list, MEMORY_INDEX))
     return (
       <Navigate
-        to="/w/$slug/memory/$file"
-        params={{ slug, file: MEMORY_INDEX }}
+        to="/settings/memory/$file"
+        params={{ file: MEMORY_INDEX }}
+        search={{ project: slug }}
         replace
       />
     );

@@ -131,6 +131,8 @@ export const useInstructions = create<InstructionsState>((set, get) => ({
 export function useInstructionsWatch(slug: string): void {
   const load = useInstructions((state) => state.load);
   useEffect(() => {
+    // "" is Settings with no project picked yet (FE-51).
+    if (!slug) return;
     void load(slug);
     const onFocus = () => void load(slug);
     window.addEventListener("focus", onFocus);

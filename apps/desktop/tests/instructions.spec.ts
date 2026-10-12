@@ -398,6 +398,21 @@ async function switchTo(page: Page, name: string) {
   ).toBeVisible();
 }
 
+/** Settings › <section>, opened from the app's Settings link (FE-51). */
+async function openSettings(page: Page, section: string) {
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Settings sections" })
+    .getByRole("link", { name: section, exact: true })
+    .click();
+}
+
+/** The project Settings › Memory/Instructions shows (FE-51/D3). */
+async function pickProject(page: Page, name: string) {
+  await page.getByRole("combobox", { name: "Project" }).click();
+  await page.getByRole("option", { name, exact: true }).click();
+}
+
 test("FE-37: Instructions shows what each agent reads, follows an @import, shows the raw file and keeps up with new files", async () => {
   test.skip(process.platform === "win32", "Folders are a POSIX path here.");
   const plane = await startStubPlane({ workspaces });
@@ -436,8 +451,8 @@ test("FE-37: Instructions shows what each agent reads, follows an @import, shows
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    const rail = page.getByRole("navigation", { name: "Project" });
-    await rail.getByRole("link", { name: "Instructions" }).click();
+    // Settings › Instructions opens on the project last open (FE-51/D3).
+    await openSettings(page, "Instructions");
 
     // Everything Claude reads at launch opens first, in order (FE-37/D4).
     const effective = page.getByRole("region", {
@@ -489,11 +504,9 @@ test("FE-37: Instructions shows what each agent reads, follows an @import, shows
     ).toBeVisible();
 
     // A folder nobody wrote instructions for, and no folder at all (V3).
-    await switchTo(page, "Beta");
-    await rail.getByRole("link", { name: "Instructions" }).click();
+    await pickProject(page, "Beta");
     await expect(page.getByText("No instructions yet")).toBeVisible();
-    await switchTo(page, "Gamma");
-    await rail.getByRole("link", { name: "Instructions" }).click();
+    await pickProject(page, "Gamma");
     await expect(page.getByText("No folder linked")).toBeVisible();
   } finally {
     await app.close();

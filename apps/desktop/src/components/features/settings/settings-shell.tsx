@@ -6,6 +6,8 @@ import { Input } from "#/components/ui/input";
 import { useSettingsSearch } from "#/stores/settings-search";
 import { SettingsNav } from "./settings-nav";
 
+const WIDE = /^\/settings\/(config|skills|memory|instructions)(\/|$)/;
+
 /**
  * The full-window settings view: a sidebar of sections beside the open one.
  *
@@ -20,12 +22,11 @@ import { SettingsNav } from "./settings-nav";
 export function SettingsShell({ children }: { children: ReactNode }) {
   const query = useSettingsSearch((state) => state.query);
   const setQuery = useSettingsSearch((state) => state.setQuery);
-  // Config files and Skills are a tree beside an editor (FE-47/D8): they
-  // take the whole pane and draw their own headers, not a column of rows.
+  // Config files and Skills are a tree beside an editor (FE-47/D8), Memory
+  // and Instructions a list beside the file open (FE-51): they take the whole
+  // pane and draw their own headers, not a column of rows.
   const wide = useRouterState({
-    select: (state) =>
-      state.location.pathname === "/settings/config" ||
-      state.location.pathname === "/settings/skills",
+    select: (state) => WIDE.test(state.location.pathname),
   });
 
   return (

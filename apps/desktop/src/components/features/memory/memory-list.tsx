@@ -23,8 +23,9 @@ function Row({
 }) {
   return (
     <Link
-      to="/w/$slug/memory/$file"
-      params={{ slug, file: entry.file }}
+      to="/settings/memory/$file"
+      params={{ file: entry.file }}
+      search={{ project: slug }}
       className="hover:bg-foreground/[0.04] aria-[current]:bg-foreground/[0.06] focus-visible:ring-accent-brand flex min-w-0 flex-col gap-0.5 rounded-md px-2.5 py-2 outline-none focus-visible:ring-2"
     >
       <span className="min-w-0 truncate text-[13px]">{name}</span>

@@ -99,8 +99,8 @@ export function memoryEntry(
  * List `slug`'s memory when it is opened, again on window focus, and every
  * time main says its folder was written (FE-36/D11). Never on a timer.
  *
- * ⚠️ Called by the RAIL, so its count is right before Memory is opened and
- * stays right while it is not.
+ * ⚠️ Called by Settings › Memory while it is open (FE-51); the rail no longer
+ * shows a count.
  */
 export function useMemoryWatch(slug: string | undefined): void {
   const load = useMemory((state) => state.load);

@@ -1,8 +1,10 @@
 import {
+  Brain02Icon,
   FileEditIcon,
   FolderLibraryIcon,
   GithubIcon,
   InformationCircleIcon,
+  LegalDocument01Icon,
   MagicWand01Icon,
   RoboticIcon,
   Sun01Icon,
@@ -64,6 +66,20 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: RoboticIcon,
         keywords:
           "agent agents claude codex handoff checkpoint resume quota usage hook push wip",
+      },
+      {
+        to: "/settings/memory",
+        label: "Memory",
+        icon: Brain02Icon,
+        keywords:
+          "memory memories remember claude MEMORY.md project feedback reference user",
+      },
+      {
+        to: "/settings/instructions",
+        label: "Instructions",
+        icon: LegalDocument01Icon,
+        keywords:
+          "instructions claude.md agents.md import effective project rules prompt",
       },
       {
         to: "/settings/config",

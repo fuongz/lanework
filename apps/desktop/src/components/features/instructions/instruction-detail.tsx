@@ -14,6 +14,7 @@ import {
   MarkdownBody,
 } from "#/components/shared/common/markdown-body";
 import { InstructionsMessage } from "#/components/shared/instructions/instructions-message";
+import { useSettingsProject } from "#/components/shared/settings/project-picker";
 import { Alert, AlertDescription } from "#/components/ui/alert";
 import { Button } from "#/components/ui/button";
 import { relativeTime } from "#/lib/board-view";
@@ -29,7 +30,7 @@ import { shortPath } from "#/lib/memory";
 import { cn } from "#/lib/utils";
 import { useInstructions } from "#/stores/instructions";
 
-const ROUTE = "/_app/w/$slug/instructions/$id" as const;
+const ROUTE = "/settings/instructions/$id" as const;
 
 interface Fact {
   key: string;
@@ -77,7 +78,8 @@ function Facts({ facts }: { facts: Fact[] }) {
  * writes to the folders it lives in (D7) — so what is open is never stale.
  */
 export function InstructionDetail() {
-  const { slug, id } = useParams({ from: ROUTE });
+  const { id } = useParams({ from: ROUTE });
+  const slug = useSettingsProject();
   const list = useInstructions((state) =>
     state.slug === slug ? state.list : null,
   );
@@ -192,8 +194,9 @@ export function InstructionDetail() {
       );
     return (
       <Link
-        to="/w/$slug/instructions/$id"
-        params={{ slug, id: to.id }}
+        to="/settings/instructions/$id"
+        params={{ id: to.id }}
+        search={{ project: slug }}
         className="decoration-foreground/30 hover:decoration-foreground underline underline-offset-2 transition-colors"
       >
         {span.text}

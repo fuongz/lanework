@@ -342,6 +342,21 @@ async function switchTo(page: Page, name: string) {
   ).toBeVisible();
 }
 
+/** Settings › <section>, opened from the app's Settings link (FE-51). */
+async function openSettings(page: Page, section: string) {
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Settings sections" })
+    .getByRole("link", { name: section, exact: true })
+    .click();
+}
+
+/** The project Settings › Memory/Instructions shows (FE-51/D3). */
+async function pickProject(page: Page, name: string) {
+  await page.getByRole("combobox", { name: "Project" }).click();
+  await page.getByRole("option", { name, exact: true }).click();
+}
+
 test("FE-36: Memory lists what Claude saved by kind, opens the index, follows links inside, shows the raw file and keeps up with new writes", async () => {
   test.skip(
     process.platform === "win32",
@@ -387,11 +402,13 @@ test("FE-36: Memory lists what Claude saved by kind, opens the index, follows li
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    const rail = page.getByRole("navigation", { name: "Project" });
-    const memoryRow = rail.getByRole("link", { name: /^Memory/ });
-    // The memories, the index left out — counted before Memory is opened.
-    await expect(memoryRow).toContainText("4");
-    await memoryRow.click();
+    // Settings › Memory opens on the project last open (FE-51/D3).
+    await openSettings(page, "Memory");
+    const memoryHeader = page
+      .getByRole("complementary", { name: "Memory" })
+      .locator("header");
+    // The memories, the index left out.
+    await expect(memoryHeader).toContainText("4");
 
     // The index opens first, as it is what Claude reads first.
     const index = page.getByRole("region", { name: "Memory — Index" });
@@ -465,14 +482,12 @@ test("FE-36: Memory lists what Claude saved by kind, opens the index, follows li
     await expect(
       list.getByRole("link", { name: /^Grafana board/ }),
     ).toBeVisible();
-    await expect(memoryRow).toContainText("5");
+    await expect(memoryHeader).toContainText("5");
 
     // A folder with no memory in it, and no folder at all (V3).
-    await switchTo(page, "Beta");
-    await rail.getByRole("link", { name: /^Memory/ }).click();
+    await pickProject(page, "Beta");
     await expect(page.getByText("No memory yet")).toBeVisible();
-    await switchTo(page, "Gamma");
-    await rail.getByRole("link", { name: /^Memory/ }).click();
+    await pickProject(page, "Gamma");
     await expect(page.getByText("No folder linked")).toBeVisible();
   } finally {
     await app.close();

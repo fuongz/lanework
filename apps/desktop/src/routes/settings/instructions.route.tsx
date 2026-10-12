@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { InstructionsLayout } from "#/components/features/instructions/instructions-layout";
-export const Route = createFileRoute("/_app/w/$slug/instructions")({
+import { projectSearch } from "#/lib/project-search";
+export const Route = createFileRoute("/settings/instructions")({
+  validateSearch: projectSearch,
   component: InstructionsLayout,
 });

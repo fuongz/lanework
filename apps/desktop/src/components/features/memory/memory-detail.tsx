@@ -13,6 +13,7 @@ import {
   MarkdownBody,
 } from "#/components/shared/common/markdown-body";
 import { MemoryMessage } from "#/components/shared/memory/memory-message";
+import { useSettingsProject } from "#/components/shared/settings/project-picker";
 import { Alert, AlertDescription } from "#/components/ui/alert";
 import { Button } from "#/components/ui/button";
 import { relativeTime } from "#/lib/board-view";
@@ -20,7 +21,7 @@ import { MEMORY_TYPE_LABELS, memoryLabel, memoryTarget } from "#/lib/memory";
 import { cn } from "#/lib/utils";
 import { memoryEntry, useMemory } from "#/stores/memory";
 
-const ROUTE = "/_app/w/$slug/memory/$file" as const;
+const ROUTE = "/settings/memory/$file" as const;
 
 interface Fact {
   key: string;
@@ -71,7 +72,8 @@ function Facts({ facts }: { facts: Fact[] }) {
  * every write to the folder (D11) — so what is open is never stale.
  */
 export function MemoryDetail() {
-  const { slug, file } = useParams({ from: ROUTE });
+  const { file } = useParams({ from: ROUTE });
+  const slug = useSettingsProject();
   const list = useMemory((state) => (state.slug === slug ? state.list : null));
   const opened = useMemory((state) =>
     state.slug === slug ? state.files[file] : undefined,
@@ -146,8 +148,9 @@ export function MemoryDetail() {
       );
     return (
       <Link
-        to="/w/$slug/memory/$file"
-        params={{ slug, file: target }}
+        to="/settings/memory/$file"
+        params={{ file: target }}
+        search={{ project: slug }}
         className="decoration-foreground/30 hover:decoration-foreground underline underline-offset-2 transition-colors"
       >
         {span.text}

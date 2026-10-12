@@ -265,8 +265,9 @@ function FileRow({
         {/* Only Markdown that exists opens: anything else is listed by name (FE-37/D6). */}
         {file.markdown && !file.missing ? (
           <Link
-            to="/w/$slug/instructions/$id"
-            params={{ slug, id: file.id }}
+            to="/settings/instructions/$id"
+            params={{ id: file.id }}
+            search={{ project: slug }}
             className={ROW}
             {...rowProps}
           >
@@ -362,8 +363,9 @@ function AgentGroup({
     >
       {/* Everything it reads at launch, in one view (FE-37/D4). */}
       <Link
-        to="/w/$slug/instructions/effective/$agent"
-        params={{ slug, agent }}
+        to="/settings/instructions/effective/$agent"
+        params={{ agent }}
+        search={{ project: slug }}
         className={ROW}
         style={pad(0)}
         data-tree-row={`${agent}/effective`}

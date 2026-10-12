@@ -6,11 +6,12 @@ import {
 } from "#/../shared/instructions";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { InstructionsMessage } from "#/components/shared/instructions/instructions-message";
+import { useSettingsProject } from "#/components/shared/settings/project-picker";
 import { AGENT_LABELS, fileSize, SCOPE_LABELS } from "#/lib/instructions";
 import { shortPath } from "#/lib/memory";
 import { useInstructions } from "#/stores/instructions";
 
-const ROUTE = "/_app/w/$slug/instructions/effective/$agent" as const;
+const ROUTE = "/settings/instructions/effective/$agent" as const;
 
 /**
  * Everything one agent reads at the start of a conversation here, in the
@@ -24,7 +25,7 @@ export function InstructionsEffective() {
   const agent: InstructionAgent | null = isInstructionAgent(params.agent)
     ? params.agent
     : null;
-  const { slug } = params;
+  const slug = useSettingsProject();
   const version = useInstructions((state) =>
     state.slug === slug ? state.version : 0,
   );
@@ -100,8 +101,9 @@ export function InstructionsEffective() {
                 <div className="border-sidebar-border flex min-w-0 items-baseline gap-2 border-b pb-1.5">
                   {section.text !== null ? (
                     <Link
-                      to="/w/$slug/instructions/$id"
-                      params={{ slug, id: file.id }}
+                      to="/settings/instructions/$id"
+                      params={{ id: file.id }}
+                      search={{ project: slug }}
                       className="decoration-foreground/30 hover:decoration-foreground min-w-0 truncate font-mono text-xs underline underline-offset-2"
                       title={file.path}
                     >
