@@ -381,6 +381,50 @@ test.describe("in the app", () => {
     }
   });
 
+  test("BE-20: a repo on another board is moved here from the check, confirming a board on a different repo", async () => {
+    const folder = await makeFolder(true);
+    const { page, plane, cleanup } = await open({ alpha: folder });
+    try {
+      // The repo is on Beta, and Alpha itself is on another repo.
+      plane.setRepoBoards([{ workspaceId: "ws-beta", name: "Beta" }]);
+      plane.setBoardRepo("github.com/acme/old");
+      await page.goto("app://lanework/w/beta/issues");
+      await page.goto("app://lanework/w/alpha/issues");
+      await expect(indicator(page)).toHaveText("1", { timeout: 15_000 });
+      await indicator(page).click();
+      await expect(page.getByText(/file their cards on “Beta”/)).toBeVisible();
+      await page
+        .getByRole("button", { name: "Link here", exact: true })
+        .click();
+
+      const dialog = page.getByRole("alertdialog");
+      await expect(dialog).toContainText("Move this repo here from “Beta”?");
+      await expect(dialog).toContainText("stay there");
+      await dialog.getByRole("button", { name: "Link here" }).click();
+      // The service refused: Alpha is on another repo. Asked again, by name.
+      await expect(dialog).toContainText("Move this board off its repo?");
+      await expect(dialog).toContainText("github.com/acme/old");
+      await dialog.getByRole("button", { name: "Move it here" }).click();
+      await expect(dialog).toBeHidden();
+      await expect(indicator(page)).toBeHidden();
+      expect(plane.repoMoves()).toEqual([
+        {
+          workspaceId: "ws-alpha",
+          repo: "git@github.com:acme/alpha.git",
+          replace: false,
+        },
+        {
+          workspaceId: "ws-alpha",
+          repo: "git@github.com:acme/alpha.git",
+          replace: true,
+        },
+      ]);
+    } finally {
+      await cleanup();
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
   test("switching projects shows the new project's readiness, not the last one's", async () => {
     const broken = await makeFolder(false);
     const fine = await makeFolder(true);

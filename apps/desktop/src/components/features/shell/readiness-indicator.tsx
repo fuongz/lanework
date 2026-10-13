@@ -1,8 +1,13 @@
 import { Alert02Icon, AlertCircleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import { type ReadinessFix, readinessProblems } from "#/../shared/readiness";
+import {
+  type ReadinessCheck,
+  type ReadinessFix,
+  readinessProblems,
+} from "#/../shared/readiness";
 import { ReadinessFixDialog } from "#/components/shared/readiness/readiness-fix-dialog";
+import { ReadinessLinkDialog } from "#/components/shared/readiness/readiness-link-dialog";
 import { ReadinessList } from "#/components/shared/readiness/readiness-list";
 import {
   Popover,
@@ -30,6 +35,7 @@ export function ReadinessIndicator() {
   const report = useReadiness((state) => (slug ? state.reports[slug] : null));
   const [open, setOpen] = useState(false);
   const [fix, setFix] = useState<ReadinessFix | null>(null);
+  const [linking, setLinking] = useState<ReadinessCheck | null>(null);
   const { blockers, warnings } = readinessProblems(report ?? null);
   const count = blockers + warnings;
   if (!slug) return null;
@@ -75,6 +81,10 @@ export function ReadinessIndicator() {
                 setOpen(false);
                 setFix(next);
               }}
+              onLinkBoard={(next) => {
+                setOpen(false);
+                setLinking(next);
+              }}
               onNavigate={() => setOpen(false)}
             />
             {/* The project's GitHub repo, picked here (FE-55/D1). */}
@@ -91,6 +101,11 @@ export function ReadinessIndicator() {
         slug={slug}
         fix={fix}
         onOpenChange={(next) => !next && setFix(null)}
+      />
+      <ReadinessLinkDialog
+        slug={slug}
+        check={linking}
+        onOpenChange={(next) => !next && setLinking(null)}
       />
     </>
   );

@@ -152,7 +152,7 @@ const CODEX_ADD = `codex mcp add lanework --url ${MCP_URL}`;
 
 function check(
   base: Omit<ReadinessCheck, "detail" | "fix" | "action"> &
-    Partial<Pick<ReadinessCheck, "fix" | "action">>,
+    Partial<Pick<ReadinessCheck, "fix" | "action" | "linkedTo">>,
   detail: string,
 ): ReadinessCheck {
   return {
@@ -204,10 +204,15 @@ export function buildReport(facts: ReadinessFacts): ReadinessReport {
             level: "blocker",
             ok: folder.board.kind === "this",
             title: "Repo linked to this board",
+            // One click on the service (BE-20/D3), not an agent's errand.
+            action: "link-board",
+            ...(folder.board.kind === "other"
+              ? { linkedTo: folder.board.name }
+              : {}),
           },
           folder.board.kind === "other"
-            ? `This repo is linked to another board, “${folder.board.name}”, so an agent here files its cards there. Open an agent in this folder and ask it to link the repo to this board with link_repo — that moves the link.`
-            : "This repo is not linked to a board yet. Open Claude Code or Codex in this folder: it asks which board the repo belongs to and links it with link_repo.",
+            ? `Agents in this folder file their cards on “${folder.board.name}”, the board this repo is linked to. Link it here instead: new cards come to this board, and the ones on “${folder.board.name}” stay there.`
+            : "This repo is not linked to a board, so an agent here cannot tell where its cards go. Link it to this board.",
         ),
       );
     checks.push(

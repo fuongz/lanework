@@ -180,6 +180,61 @@ export async function fetchBoardsForRepo(
   });
 }
 
+/**
+ * What `PUT /v1/boards/:workspaceId/repo` answered (BE-20): moved, or a board
+ * on a DIFFERENT repo that moves only when asked again with `replace` (D2).
+ */
+export type BoardRepoMove =
+  | { ok: true; unlinked: { workspaceId: string; name: string }[] }
+  | { ok: false; linked: string };
+
+/**
+ * Make `workspaceId` THE board for `remote` (BE-20): link it, and unlink the
+ * caller's other boards that have it. Any other refusal throws, in the
+ * service's own words.
+ *
+ * ⚠️ The remote goes AS IS, as `fetchBoardsForRepo` sends it: the service
+ * normalizes it.
+ */
+export async function linkRepoToBoard(
+  record: MachineRecord,
+  workspaceId: string,
+  remote: string,
+  replace: boolean,
+): Promise<BoardRepoMove> {
+  const response = await call(
+    record,
+    `/v1/boards/${encodeURIComponent(workspaceId)}/repo`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ repo: remote, ...(replace ? { replace } : {}) }),
+    },
+  );
+  const payload = (await body(response).catch(() => ({}))) as Record<
+    string,
+    unknown
+  >;
+  if (response.ok) {
+    const rows = Array.isArray(payload.unlinked) ? payload.unlinked : [];
+    return {
+      ok: true,
+      unlinked: rows.flatMap((row: unknown) => {
+        const r = (row ?? {}) as Record<string, unknown>;
+        return text(r.workspaceId) && text(r.name)
+          ? [{ workspaceId: r.workspaceId, name: r.name }]
+          : [];
+      }),
+    };
+  }
+  if (response.status === 409 && text(payload.linked))
+    return { ok: false, linked: payload.linked };
+  throw new Error(
+    text(payload.error)
+      ? `Could not link this repo: ${payload.error}`
+      : `Could not link this repo (HTTP ${response.status}).`,
+  );
+}
+
 const priority = (value: unknown): BoardCard["priority"] =>
   value === "low" || value === "medium" || value === "high" ? value : null;
 

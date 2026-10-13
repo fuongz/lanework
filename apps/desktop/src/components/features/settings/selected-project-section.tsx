@@ -5,10 +5,11 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useId, useState } from "react";
-import type { ReadinessFix } from "#/../shared/readiness";
+import type { ReadinessCheck, ReadinessFix } from "#/../shared/readiness";
 import type { Workspace } from "#/../shared/workspaces";
 import { ProjectTile } from "#/components/shared/common/project-tile";
 import { ReadinessFixDialog } from "#/components/shared/readiness/readiness-fix-dialog";
+import { ReadinessLinkDialog } from "#/components/shared/readiness/readiness-link-dialog";
 import { ReadinessList } from "#/components/shared/readiness/readiness-list";
 import { SettingsCard } from "#/components/shared/settings/settings-page";
 import {
@@ -79,6 +80,7 @@ function ReadinessSection({
   const error = useReadiness((state) => state.errors[slug]);
   const check = useReadiness((state) => state.check);
   const [fix, setFix] = useState<ReadinessFix | null>(null);
+  const [linking, setLinking] = useState<ReadinessCheck | null>(null);
   // Asked again when the folders change: linking one is the fix for the
   // first check, and its result should not wait for the next focus.
   const key = folders.join("\n");
@@ -95,6 +97,7 @@ function ReadinessSection({
           <ReadinessList
             report={report}
             onFix={setFix}
+            onLinkBoard={setLinking}
             className="divide-border divide-y"
           />
         ) : (
@@ -107,6 +110,11 @@ function ReadinessSection({
         slug={slug}
         fix={fix}
         onOpenChange={(open) => !open && setFix(null)}
+      />
+      <ReadinessLinkDialog
+        slug={slug}
+        check={linking}
+        onOpenChange={(open) => !open && setLinking(null)}
       />
     </div>
   );

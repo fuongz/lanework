@@ -85,6 +85,7 @@ var paths = {
   syncWorkspaceById: (id) => `/v1/sync/state/workspace/${seg(id)}`,
   syncWorkspaceOrder: () => "/v1/sync/state/workspace-order",
   boardsForRepo: (remote) => `/v1/boards?repo=${seg(remote)}`,
+  boardRepo: (workspaceId) => `/v1/boards/${seg(workspaceId)}/repo`,
   boardConfig: (workspaceId) => `/v1/boards/${seg(workspaceId)}/config`,
   boardIcon: (workspaceId) => `/v1/boards/${seg(workspaceId)}/icon`,
   boardPresence: (workspaceId) => `/v1/boards/${seg(workspaceId)}/presence`,

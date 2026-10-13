@@ -123,6 +123,8 @@ const readiness: DesktopReadinessApi = {
     ipcRenderer.invoke(readinessChannels.preview, slug, fix),
   apply: (slug, fix, before) =>
     ipcRenderer.invoke(readinessChannels.apply, slug, fix, before),
+  linkBoard: (slug, replace) =>
+    ipcRenderer.invoke(readinessChannels.linkBoard, slug, replace),
 };
 
 /** What Claude remembers about a project (FE-36): read-only, by file NAME. */

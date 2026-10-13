@@ -34,8 +34,14 @@ export function isReadinessFix(value: unknown): value is ReadinessFix {
   return READINESS_FIXES.includes(value as ReadinessFix);
 }
 
-/** Where a check that the app cannot fix sends the user instead. */
-export type ReadinessAction = "project-settings" | "agent-settings";
+/**
+ * What a check that writes no file offers instead: a settings page, or
+ * linking the repo to this board on the service (`link-board`, BE-20).
+ */
+export type ReadinessAction =
+  | "project-settings"
+  | "agent-settings"
+  | "link-board";
 
 export interface ReadinessCheck {
   id: ReadinessId;
@@ -46,6 +52,8 @@ export interface ReadinessCheck {
   detail: string;
   fix: ReadinessFix | null;
   action: ReadinessAction | null;
+  /** The `board` check only: the board this repo is linked to now, by name. */
+  linkedTo?: string;
 }
 
 export interface ReadinessReport {
@@ -70,10 +78,20 @@ export interface ReadinessPreview {
   after: string;
 }
 
+/**
+ * What linking the repo to this board answered (BE-20): done, with the fresh
+ * report; or this board is on a DIFFERENT repo, which moves only when asked
+ * again with `replace` (D2).
+ */
+export type ReadinessLinkResult =
+  | { done: true; report: ReadinessReport; unlinked: string[] }
+  | { done: false; linked: string };
+
 export const readinessChannels = {
   check: "readiness:check",
   preview: "readiness:preview",
   apply: "readiness:apply",
+  linkBoard: "readiness:link-board",
 } as const;
 
 export interface DesktopReadinessApi {
@@ -88,6 +106,11 @@ export interface DesktopReadinessApi {
     fix: ReadinessFix,
     before: string | null,
   ) => Promise<ReadinessReport>;
+  /**
+   * Make this project's board THE board for its folder's repo (BE-20): main
+   * reads the remote itself; the renderer names the project and nothing else.
+   */
+  linkBoard: (slug: string, replace: boolean) => Promise<ReadinessLinkResult>;
 }
 
 /** The count the indicator shows: failed checks that are not just information. */

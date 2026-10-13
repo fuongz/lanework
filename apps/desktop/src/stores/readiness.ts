@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import type {
   ReadinessFix,
+  ReadinessLinkResult,
   ReadinessPreview,
   ReadinessReport,
 } from "../../shared/readiness";
@@ -32,6 +33,8 @@ interface ReadinessState {
     fix: ReadinessFix,
     before: string | null,
   ) => Promise<void>;
+  /** Link the folder's repo to this board (BE-20); the new report is filed. */
+  linkBoard: (slug: string, replace: boolean) => Promise<ReadinessLinkResult>;
 }
 
 /** A read that started before a later one for the same project must not land after it. */
@@ -91,6 +94,18 @@ export const useReadiness = create<ReadinessState>((set) => ({
     askedAt[slug] = Date.now();
     if (generation[slug] !== mine) return;
     set((state) => ({ reports: { ...state.reports, [slug]: report } }));
+  },
+  linkBoard: async (slug, replace) => {
+    const surface = window.desktop?.readiness;
+    if (!surface) throw new Error("Not available in this window.");
+    const mine = bump(slug);
+    const result = await surface.linkBoard(slug, replace);
+    if (!result.done || generation[slug] !== mine) return result;
+    askedAt[slug] = Date.now();
+    set((state) => ({
+      reports: { ...state.reports, [slug]: result.report },
+    }));
+    return result;
   },
 }));
 

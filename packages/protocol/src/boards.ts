@@ -157,6 +157,37 @@ export interface BoardsForRepoResponse {
   boards: BoardSummary[];
 }
 
+/**
+ * `PUT /v1/boards/:workspaceId/repo` (BE-20) — make this board THE board for
+ * a repo: link it, and unlink the caller's other boards that have it.
+ */
+export interface BoardRepoRequest {
+  /** A git remote URL, as `git remote get-url origin` prints it. */
+  repo: string;
+  /** Move this board off a DIFFERENT repo it is linked to now. */
+  replace?: boolean;
+}
+
+export interface BoardRepoResponse {
+  /** The normalized repo, `host/owner/name`. */
+  repo: string;
+  /** What this board was linked to before, or null. */
+  previous: string | null;
+  /** The caller's other boards the repo was taken off. */
+  unlinked: { workspaceId: string; name: string }[];
+}
+
+/**
+ * 409 from `PUT /repo`. `linked` is the repo this board is on now when that
+ * is why it refused — ask, then send `replace`; null when another board is
+ * the reason (one only its owner can unlink).
+ */
+export interface BoardRepoConflictError {
+  error: string;
+  code: "conflict";
+  linked: string | null;
+}
+
 // ── Cards ───────────────────────────────────────────────────────────────────
 
 export interface ChecklistProgress {

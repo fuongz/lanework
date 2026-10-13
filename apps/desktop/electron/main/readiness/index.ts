@@ -21,6 +21,7 @@ import { join } from "node:path";
 import {
   isReadinessFix,
   type ReadinessFix,
+  type ReadinessLinkResult,
   type ReadinessPreview,
   type ReadinessReport,
   readinessChannels,
@@ -35,7 +36,7 @@ import {
 import { codexConfigPath, codexHome, codexHooksPath } from "../handoff/codex";
 import { handle } from "../ipc";
 import { knownWorkspace } from "../workspaces";
-import { fetchBoardsForRepo } from "../workspaces/client";
+import { fetchBoardsForRepo, linkRepoToBoard } from "../workspaces/client";
 import { folderExists } from "../workspaces/local-folder";
 import { readFolders } from "../workspaces/store";
 import {
@@ -177,6 +178,32 @@ async function apply(
   return readinessOf(slug);
 }
 
+/**
+ * Make this project's board THE board for its folder's repo (BE-20): the
+ * remote is read here from the folder this process linked, never sent by the
+ * renderer — like every path in this file.
+ */
+async function linkBoard(
+  slug: string,
+  replace: boolean,
+): Promise<ReadinessLinkResult> {
+  const { record, workspace, path } = await resolve(slug);
+  if (!workspace.id)
+    throw new Error("This project has no board on the service to link to.");
+  if (!path || !(await folderExists(path)))
+    throw new Error("This project has no folder on this machine.");
+  const remote = await originUrl(path);
+  if (!remote)
+    throw new Error("This folder has no origin remote to link to the board.");
+  const moved = await linkRepoToBoard(record, workspace.id, remote, replace);
+  if (!moved.ok) return { done: false, linked: moved.linked };
+  return {
+    done: true,
+    report: await readinessOf(slug),
+    unlinked: moved.unlinked.map((board) => board.name),
+  };
+}
+
 function slugArg(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
     throw new Error("A project is required");
@@ -196,6 +223,11 @@ export function registerReadiness(devUrl?: string): void {
   handle(readinessChannels.preview, devUrl, (args) => {
     if (args.length !== 2) throw new Error("preview takes a project and a fix");
     return preview(slugArg(args[0]), fixArg(args[1]));
+  });
+  handle(readinessChannels.linkBoard, devUrl, (args) => {
+    if (args.length !== 2 || typeof args[1] !== "boolean")
+      throw new Error("linkBoard takes a project and whether to replace");
+    return linkBoard(slugArg(args[0]), args[1]);
   });
   handle(readinessChannels.apply, devUrl, (args) => {
     if (args.length !== 3 || !(args[2] === null || typeof args[2] === "string"))

@@ -25,6 +25,8 @@ import type {
   BoardConfigRequest,
   BoardConfigResponse,
   BoardPresenceResponse,
+  BoardRepoRequest,
+  BoardRepoResponse,
   BoardStatsResponse,
   BoardsForRepoResponse,
   CardArchiveResponse,
@@ -96,6 +98,7 @@ export const paths = {
   syncWorkspaceOrder: () => "/v1/sync/state/workspace-order",
 
   boardsForRepo: (remote: string) => `/v1/boards?repo=${seg(remote)}`,
+  boardRepo: (workspaceId: string) => `/v1/boards/${seg(workspaceId)}/repo`,
   boardConfig: (workspaceId: string) => `/v1/boards/${seg(workspaceId)}/config`,
   boardIcon: (workspaceId: string) => `/v1/boards/${seg(workspaceId)}/icon`,
   boardPresence: (workspaceId: string) =>
@@ -226,6 +229,11 @@ export interface Endpoints {
   >;
 
   "GET /v1/boards": Endpoint<void, BoardsForRepoResponse, "actor">;
+  "PUT /v1/boards/:workspaceId/repo": Endpoint<
+    BoardRepoRequest,
+    BoardRepoResponse,
+    "actor"
+  >;
   "GET /v1/boards/:workspaceId/config": Endpoint<
     void,
     BoardConfigResponse,

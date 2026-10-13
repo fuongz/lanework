@@ -306,6 +306,14 @@ export async function startStubPlane(
     value: { workspaceId: string; name: string }[],
     delayMs?: number,
   ) => void;
+  /**
+   * `PUT /v1/boards/:id/repo` (BE-20): the board a call names becomes the one
+   * `setRepoBoards` answers. With a repo set here, a call without `replace`
+   * gets the 409 a board on a different repo gets, naming it.
+   */
+  setBoardRepo: (repo: string | null) => void;
+  /** Every `PUT /v1/boards/:id/repo` so far, in order. */
+  repoMoves: () => { workspaceId: string; repo: string; replace: boolean }[];
   /** Answer `POST /purge` with 404, the way a service older than FE-14 does. */
   setPurgeMissing: (value: boolean) => void;
   /** Answer `GET /stats` with 404, the way a service older than FE-17 does. */
@@ -365,6 +373,9 @@ export async function startStubPlane(
   let boardOffline = false;
   let repoBoards: { workspaceId: string; name: string }[] = [];
   let repoBoardsDelay = 0;
+  let boardRepo: string | null = null;
+  const repoMoves: { workspaceId: string; repo: string; replace: boolean }[] =
+    [];
   let purgeMissing = false;
   let statsMissing = false;
   // BE-18's icons, by workspace id: the key the service names it by and its bytes.
@@ -577,6 +588,45 @@ export async function startStubPlane(
             .end(JSON.stringify({ repo: null, boards: answer })),
         repoBoardsDelay,
       );
+      return;
+    }
+
+    // `PUT /v1/boards/:id/repo` — make one board THE board for a repo (BE-20).
+    const moving = /^\/v1\/boards\/([^/?]+)\/repo$/.exec(req.url ?? "");
+    if (moving && req.method === "PUT" && !revoked) {
+      const json = (status: number, body: unknown) =>
+        res
+          .writeHead(status, { "Content-Type": "application/json" })
+          .end(JSON.stringify(body));
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        const input = JSON.parse(raw || "{}") as {
+          repo: string;
+          replace?: boolean;
+        };
+        const workspaceId = moving[1];
+        repoMoves.push({
+          workspaceId,
+          repo: input.repo,
+          replace: input.replace === true,
+        });
+        if (boardRepo !== null && input.replace !== true)
+          return json(409, {
+            error: `this board is already linked to ${boardRepo}.`,
+            code: "conflict",
+            linked: boardRepo,
+          });
+        const unlinked = repoBoards.filter(
+          (row) => row.workspaceId !== workspaceId,
+        );
+        const name =
+          workspaces.find((entry) => entry.id === workspaceId)?.name ??
+          workspaceId;
+        repoBoards = [{ workspaceId, name }];
+        boardRepo = null;
+        return json(200, { repo: input.repo, previous: null, unlinked });
+      });
       return;
     }
 
@@ -1363,6 +1413,10 @@ export async function startStubPlane(
       repoBoards = value;
       repoBoardsDelay = delayMs;
     },
+    setBoardRepo: (repo) => {
+      boardRepo = repo;
+    },
+    repoMoves: () => [...repoMoves],
     setSearchFailing: (value) => {
       searchFailing = value;
     },

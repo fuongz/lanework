@@ -54,6 +54,7 @@ export function ReadinessList({
   report,
   passing = true,
   onFix,
+  onLinkBoard,
   onNavigate,
   className,
 }: {
@@ -61,6 +62,8 @@ export function ReadinessList({
   /** Show the checks that passed too. */
   passing?: boolean;
   onFix: (fix: ReadinessFix) => void;
+  /** The `link-board` action: the caller confirms it, like a fix (BE-20). */
+  onLinkBoard: (check: ReadinessCheck) => void;
   /** Called before leaving for a settings page — to close a popover. */
   onNavigate?: () => void;
   className?: string;
@@ -70,7 +73,7 @@ export function ReadinessList({
     .filter((check) => passing || !check.ok)
     .sort((a, b) => rank(a) - rank(b));
 
-  function go(action: NonNullable<ReadinessCheck["action"]>) {
+  function go(action: "project-settings" | "agent-settings") {
     onNavigate?.();
     void navigate({
       to:
@@ -103,15 +106,31 @@ export function ReadinessList({
               Fix {FIX_FILE[check.fix]}
             </Button>
           )}
-          {!check.ok && !check.fix && check.action && (
+          {!check.ok && !check.fix && check.action === "link-board" && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => check.action && go(check.action)}
+              onClick={() => onLinkBoard(check)}
             >
-              Open settings
+              Link here
             </Button>
           )}
+          {!check.ok &&
+            !check.fix &&
+            check.action &&
+            check.action !== "link-board" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  check.action &&
+                  check.action !== "link-board" &&
+                  go(check.action)
+                }
+              >
+                Open settings
+              </Button>
+            )}
         </li>
       ))}
     </ul>
