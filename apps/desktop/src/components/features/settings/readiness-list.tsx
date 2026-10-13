@@ -46,35 +46,27 @@ const rank = (check: ReadinessCheck) => (check.ok ? 3 : ORDER[check.level]);
 /**
  * A project's readiness checks, each with the one thing to do about it
  * (FE-30): a Fix that previews its change, or the settings page that fixes it.
+ * Passed checks are listed too, after the ones still to do.
  *
- * ⚠️ The Fix dialog is the CALLER's, via `onFix`. Inside a popover, a dialog
- * rendered here would unmount the moment a click in it closed the popover.
+ * ⚠️ The Fix dialog is the CALLER's, via `onFix`, so it outlives a fix that
+ * changes this list.
  */
 export function ReadinessList({
   report,
-  passing = true,
   onFix,
   onLinkBoard,
-  onNavigate,
   className,
 }: {
   report: ReadinessReport;
-  /** Show the checks that passed too. */
-  passing?: boolean;
   onFix: (fix: ReadinessFix) => void;
   /** The `link-board` action: the caller confirms it, like a fix (BE-20). */
   onLinkBoard: (check: ReadinessCheck) => void;
-  /** Called before leaving for a settings page — to close a popover. */
-  onNavigate?: () => void;
   className?: string;
 }) {
   const navigate = useNavigate();
-  const checks = report.checks
-    .filter((check) => passing || !check.ok)
-    .sort((a, b) => rank(a) - rank(b));
+  const checks = [...report.checks].sort((a, b) => rank(a) - rank(b));
 
   function go(action: "project-settings" | "agent-settings") {
-    onNavigate?.();
     void navigate({
       to:
         action === "agent-settings"

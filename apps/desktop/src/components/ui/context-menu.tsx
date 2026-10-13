@@ -32,7 +32,10 @@ function ContextMenuContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
-            "relative z-50 max-h-(--available-height) min-w-40 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover/70 p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-2xl before:backdrop-saturate-150 **:data-[slot$=-item]:data-highlighted:bg-foreground/10",
+            // Glass: a thin tint over a heavy blur, a hairline rim and a lit top
+            // edge — the macOS menu, not a card. The blur sits on `::before`
+            // so the popup's own scroll clip never cuts it off.
+            "relative z-50 max-h-(--available-height) min-w-48 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-xl bg-popover/55 p-1 dark:bg-muted/60 text-popover-foreground shadow-[0_12px_40px_-8px_rgb(0_0_0/0.45),inset_0_1px_0_0_rgb(255_255_255/0.06)] ring-1 ring-foreground/12 outline-none dark:ring-foreground/15 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-3xl before:backdrop-saturate-[1.8] **:data-[slot$=-item]:data-highlighted:bg-foreground/10",
             className,
           )}
           {...props}
@@ -54,7 +57,7 @@ function ContextMenuItem({
       data-slot="context-menu-item"
       data-variant={variant}
       className={cn(
-        "relative flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed outline-hidden select-none data-[variant=destructive]:text-destructive data-[variant=destructive]:data-highlighted:bg-destructive/10 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 data-[variant=destructive]:*:[svg]:text-destructive dark:data-[variant=destructive]:data-highlighted:bg-destructive/20",
+        "relative flex min-h-8 cursor-default items-center gap-2 rounded-lg px-2.5 py-1 text-[13px] outline-hidden select-none data-[variant=destructive]:text-destructive data-[variant=destructive]:data-highlighted:bg-destructive/15 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 data-[variant=destructive]:*:[svg]:text-destructive dark:data-[variant=destructive]:data-highlighted:bg-destructive/30",
         className,
       )}
       {...props}
@@ -80,7 +83,7 @@ function ContextMenuLabel({
   return (
     <ContextMenuPrimitive.GroupLabel
       data-slot="context-menu-label"
-      className={cn("px-2 py-1.5 text-xs text-muted-foreground", className)}
+      className={cn("px-2.5 py-1.5 text-xs text-muted-foreground", className)}
       {...props}
     />
   );

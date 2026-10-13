@@ -26,7 +26,6 @@ import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
 import { BranchSwitcher } from "./branch-switcher";
 import { ProjectSwitcher } from "./project-switcher";
-import { ReadinessIndicator } from "./readiness-indicator";
 
 /**
  * One row of the rail's scroll area. The active language is `settings-nav`'s,
@@ -150,11 +149,8 @@ export function AppSidebar() {
     <aside className="app-sidebar flex min-h-0 flex-1 flex-col px-2.5">
       {/* Clears the native traffic lights and gives the window a drag handle. */}
       <div className="app-sidebar-titlebar shrink-0" aria-hidden="true" />
-      <div className="mt-2 flex shrink-0 items-center gap-1">
-        <div className="min-w-0 flex-1">
-          <ProjectSwitcher />
-        </div>
-        <ReadinessIndicator />
+      <div className="mt-2 shrink-0">
+        <ProjectSwitcher />
       </div>
 
       {/* ⚠️ Composing sits ABOVE navigating, and the two share one row. The

@@ -13,7 +13,8 @@ import {
 } from "../../../../shared/git";
 
 /**
- * The project's GitHub repo, picked right in "Set up for agents" (FE-55):
+ * The project's GitHub repo, picked under Settings › Projects › "Ready for
+ * agents" (FE-55):
  * connected to GitHub, the repo it reads — or a picker for one; not connected,
  * the way to Pull requests to connect.
  *
@@ -21,14 +22,7 @@ import {
  * board's repo on the service: picking here does not answer "Repo linked to
  * this board" — an agent's `link_repo` still does that. The section says so.
  */
-export function ReadinessGithubRepo({
-  slug,
-  onNavigate,
-}: {
-  slug: string;
-  /** Leaving for Pull requests: the popover closes. */
-  onNavigate: () => void;
-}) {
+export function ReadinessGithubRepo({ slug }: { slug: string }) {
   const [account, setAccount] = useState<GitAccount | null>(null);
   const [repo, setRepo] = useState<RepoState | null>(null);
   const [changing, setChanging] = useState(false);
@@ -72,7 +66,7 @@ export function ReadinessGithubRepo({
   return (
     <section
       aria-label="GitHub repo"
-      className="border-border/60 mt-1 flex flex-col gap-2 border-t pt-2.5"
+      className="border-border flex flex-col gap-2 border-t py-3"
       data-testid="readiness-github-repo"
     >
       <div className="flex items-center gap-2">
@@ -98,7 +92,6 @@ export function ReadinessGithubRepo({
             to="/w/$slug/pulls"
             params={{ slug }}
             search={{ tab: "all", status: "open" }}
-            onClick={onNavigate}
             className="text-foreground underline underline-offset-2"
           >
             {account.kind === "expired" ? "Reconnect GitHub" : "Connect GitHub"}

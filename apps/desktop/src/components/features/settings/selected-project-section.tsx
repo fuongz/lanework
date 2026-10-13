@@ -4,13 +4,10 @@ import {
   TaskRemove01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import type { ReadinessCheck, ReadinessFix } from "#/../shared/readiness";
 import type { Workspace } from "#/../shared/workspaces";
 import { ProjectTile } from "#/components/shared/common/project-tile";
-import { ReadinessFixDialog } from "#/components/shared/readiness/readiness-fix-dialog";
-import { ReadinessLinkDialog } from "#/components/shared/readiness/readiness-link-dialog";
-import { ReadinessList } from "#/components/shared/readiness/readiness-list";
 import { SettingsCard } from "#/components/shared/settings/settings-page";
 import {
   AlertDialog,
@@ -31,9 +28,13 @@ import {
 } from "#/components/ui/empty";
 import { Input } from "#/components/ui/input";
 import { useBoard } from "#/stores/board";
-import { useReadiness } from "#/stores/readiness";
+import { useReadiness, useReadinessWatch } from "#/stores/readiness";
 import { AgentSetupSection } from "./agent-setup-section";
 import { AgentUsageRow } from "./agent-usage-row";
+import { ReadinessFixDialog } from "./readiness-fix-dialog";
+import { ReadinessGithubRepo } from "./readiness-github-repo";
+import { ReadinessLinkDialog } from "./readiness-link-dialog";
+import { ReadinessList } from "./readiness-list";
 
 /** One row of the section's card: what it is on the left, the action on the right. */
 function Row({
@@ -65,9 +66,9 @@ function Row({
 }
 
 /**
- * Every readiness check for one project (FE-30), passed ones included — the
- * full list behind the indicator beside the switcher, for ANY project here,
- * not only the open one.
+ * Every readiness check for one project (FE-30), passed ones included, for ANY
+ * project here, not only the open one — the only place readiness is shown:
+ * nothing on the board or in the sidebar asks for it.
  */
 function ReadinessSection({
   slug,
@@ -78,16 +79,11 @@ function ReadinessSection({
 }) {
   const report = useReadiness((state) => state.reports[slug]);
   const error = useReadiness((state) => state.errors[slug]);
-  const check = useReadiness((state) => state.check);
   const [fix, setFix] = useState<ReadinessFix | null>(null);
   const [linking, setLinking] = useState<ReadinessCheck | null>(null);
   // Asked again when the folders change: linking one is the fix for the
   // first check, and its result should not wait for the next focus.
-  const key = folders.join("\n");
-  useEffect(() => {
-    void key;
-    void check(slug);
-  }, [check, slug, key]);
+  useReadinessWatch(slug, folders.join("\n"));
 
   return (
     <div className="mt-9 flex flex-col gap-3">
@@ -105,6 +101,8 @@ function ReadinessSection({
             {error ?? "Checking this project’s folder…"}
           </p>
         )}
+        {/* The project's GitHub repo, picked here (FE-55/D1). */}
+        <ReadinessGithubRepo slug={slug} />
       </SettingsCard>
       <ReadinessFixDialog
         slug={slug}

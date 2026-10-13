@@ -2070,16 +2070,16 @@ test("FE50 guarded IPC sends each method and refuses changed head, invalid input
   }
 });
 
-/** "Set up for agents", opened from the readiness mark beside the switcher. */
+/** Settings › Projects › "Ready for agents", managing the open project. */
 async function openReadiness(page: Page) {
   await page.goto(`app://lanework/w/${SLUG}/issues`);
-  await page
-    .getByRole("button", { name: /to set up before an agent can work/ })
-    .click({ timeout: 15_000 });
-  return page.getByRole("region", { name: "GitHub repo" });
+  await page.goto("app://lanework/settings/workspaces");
+  const section = page.getByRole("region", { name: "GitHub repo" });
+  await section.waitFor({ timeout: 15_000 });
+  return section;
 }
 
-test("FE-55: the repo is picked right in Set up for agents once GitHub is connected", async () => {
+test("FE-55: the repo is picked in Settings once GitHub is connected", async () => {
   const { page, cleanup } = await open({ repo: false });
   try {
     const section = await openReadiness(page);
@@ -2097,7 +2097,6 @@ test("FE-55: the repo is picked right in Set up for agents once GitHub is connec
     );
     await expect(section.getByRole("button", { name: "Change" })).toBeVisible();
     // Linked for the project, so Pull requests opens straight on its list.
-    await page.keyboard.press("Escape");
     await gotoPulls(page);
     await expect(page.getByText("chore(deps): bump @types/node")).toBeVisible({
       timeout: 15_000,
@@ -2107,7 +2106,7 @@ test("FE-55: the repo is picked right in Set up for agents once GitHub is connec
   }
 });
 
-test("FE-55: with no GitHub connection Set up for agents sends you to connect", async () => {
+test("FE-55: with no GitHub connection Settings sends you to connect", async () => {
   const { page, cleanup } = await open({ token: false, repo: false });
   try {
     const section = await openReadiness(page);

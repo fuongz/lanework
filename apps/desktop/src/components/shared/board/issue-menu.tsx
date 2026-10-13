@@ -1,5 +1,3 @@
-import { Delete02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import type { BoardCard } from "#/../shared/workspaces";
 import {
@@ -71,7 +69,6 @@ export function IssueMenu({
               disabled={stale || busy === card.id}
               onClick={() => setConfirming(true)}
             >
-              <HugeiconsIcon icon={Delete02Icon} strokeWidth={1.8} />
               Delete…
             </ContextMenuItem>
           </ContextMenuGroup>

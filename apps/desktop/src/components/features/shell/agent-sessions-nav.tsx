@@ -1,7 +1,6 @@
 import {
   Add01Icon,
   ArrowRight01Icon,
-  PencilEdit02Icon,
   PinIcon,
   PinOffIcon,
   StopIcon,
@@ -252,12 +251,7 @@ const MAKES_ROOM = "group-hover/row:invisible group-focus-within/row:invisible";
 /** A running agent's Stop, in its row's context menu. */
 function StopItem({ onStop }: { onStop: () => void }) {
   return (
-    <ContextMenuItem
-      variant="destructive"
-      className="text-[13px]"
-      onClick={onStop}
-    >
-      <HugeiconsIcon icon={StopIcon} strokeWidth={1.8} />
+    <ContextMenuItem variant="destructive" onClick={onStop}>
       Stop
     </ContextMenuItem>
   );
@@ -590,21 +584,12 @@ export function AgentSessionsNav({
               </span>
             </ContextMenuTrigger>
             <ContextMenuContent>
-              <ContextMenuItem
-                className="text-[13px]"
-                onClick={() => setRenaming(session)}
-              >
-                <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={1.8} />
+              <ContextMenuItem onClick={() => setRenaming(session)}>
                 Rename
               </ContextMenuItem>
               <ContextMenuItem
-                className="text-[13px]"
                 onClick={() => void pin(workspace, session, !isPinned)}
               >
-                <HugeiconsIcon
-                  icon={isPinned ? PinOffIcon : PinIcon}
-                  strokeWidth={1.8}
-                />
                 {isPinned ? "Unpin" : "Pin"}
               </ContextMenuItem>
               {onStop && <StopItem onStop={onStop} />}

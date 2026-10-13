@@ -416,6 +416,7 @@ export function AssignAgentMenuItems({
       disabled={assign.disabled}
       onPick={assign.assign}
       Item={ContextMenuItem}
+      icons={false}
       label={(agent) => `Assign to ${agent}`}
     />
   );
@@ -427,12 +428,15 @@ function AgentItems({
   disabled = false,
   onPick,
   Item,
+  icons = true,
   label = (agent) => agent,
 }: {
   agents: TerminalAgent[];
   disabled?: boolean;
   onPick: (agent: TerminalAgent) => void;
   Item: typeof DropdownMenuItem | typeof ContextMenuItem;
+  /** The agent's mark before its name; a context menu is text only. */
+  icons?: boolean;
   label?: (agent: string) => string;
 }) {
   if (agents.length === 0)
@@ -444,7 +448,7 @@ function AgentItems({
       disabled={disabled}
       onClick={() => onPick(agent)}
     >
-      <TerminalKindIcon kind={agent} className="size-4 shrink-0" />
+      {icons && <TerminalKindIcon kind={agent} className="size-4 shrink-0" />}
       {label(TERMINAL_KIND_LABELS[agent])}
     </Item>
   ));

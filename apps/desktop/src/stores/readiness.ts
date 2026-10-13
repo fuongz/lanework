@@ -110,16 +110,20 @@ export const useReadiness = create<ReadinessState>((set) => ({
 }));
 
 /**
- * Check `slug` when it is opened or switched to, and again on window focus
- * once the last check is a minute old (FE-30/D9). Never on a timer.
+ * Check `slug` when it is shown, again whenever `key` changes, and on window
+ * focus once the last check is a minute old (FE-30/D9). Never on a timer.
+ *
+ * ⚠️ Only Settings › Projects shows readiness now: the board never asks, so it
+ * never waits for it.
  */
-export function useReadinessWatch(slug: string | null): void {
+export function useReadinessWatch(slug: string | null, key = ""): void {
   const check = useReadiness((state) => state.check);
   useEffect(() => {
+    void key;
     if (!slug) return;
     void check(slug);
     const onFocus = () => void check(slug, { minAgeMs: FOCUS_MIN_AGE_MS });
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [check, slug]);
+  }, [check, slug, key]);
 }

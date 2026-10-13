@@ -23,7 +23,6 @@ import {
 } from "#/components/ui/empty";
 import { useBoard } from "#/stores/board";
 import { useLastRoute } from "#/stores/last-route";
-import { useReadinessWatch } from "#/stores/readiness";
 
 /**
  * One project, open.
@@ -62,10 +61,6 @@ export function WorkspaceLayout() {
   useEffect(() => {
     if (href.startsWith(`/w/${slug}/`)) remember(slug, href);
   }, [remember, slug, href]);
-
-  // FE-30: whether this project's folder is ready for an agent. In the
-  // background — the board never waits for it — and shown beside the switcher.
-  useReadinessWatch(slug);
 
   // A URL naming a project this account does not have is answered with the
   // picker, not with a board that will never load.

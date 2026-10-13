@@ -349,17 +349,23 @@ test.describe("in the app", () => {
     };
   }
 
-  const indicator = (page: Page) =>
-    page.getByRole("button", { name: /to set up before an agent/ });
+  /** Settings › Projects, managing the project `slug` (the open one). */
+  async function openReadiness(page: Page, slug: string) {
+    await page.goto(`app://lanework/w/${slug}/issues`);
+    await page.goto("app://lanework/settings/workspaces");
+    await expect(
+      page.getByRole("heading", { name: "Ready for agents" }),
+    ).toBeVisible({ timeout: 15_000 });
+  }
+  const fixAgents = (page: Page) =>
+    page.getByRole("button", { name: "Fix AGENTS.md" });
 
   test("a folder without AGENTS.md is flagged, and Fix makes it ready", async () => {
     const folder = await makeFolder(false);
     const { page, cleanup } = await open({ alpha: folder });
     try {
-      await page.goto("app://lanework/w/alpha/issues");
-      await expect(indicator(page)).toHaveText("1", { timeout: 15_000 });
-      await indicator(page).click();
-      await page.getByRole("button", { name: "Fix AGENTS.md" }).click();
+      await openReadiness(page, "alpha");
+      await fixAgents(page).click({ timeout: 15_000 });
 
       const dialog = page.getByRole("dialog");
       await expect(dialog.getByText("Create AGENTS.md")).toBeVisible();
@@ -371,7 +377,7 @@ test.describe("in the app", () => {
       await dialog.getByRole("button", { name: "Apply" }).click();
 
       await expect(dialog).toBeHidden();
-      await expect(indicator(page)).toBeHidden();
+      await expect(fixAgents(page)).toBeHidden();
       expect(await readFile(join(folder, "AGENTS.md"), "utf8")).toContain(
         AGENT_NOTES,
       );
@@ -389,10 +395,10 @@ test.describe("in the app", () => {
       plane.setRepoBoards([{ workspaceId: "ws-beta", name: "Beta" }]);
       plane.setBoardRepo("github.com/acme/old");
       await page.goto("app://lanework/w/beta/issues");
-      await page.goto("app://lanework/w/alpha/issues");
-      await expect(indicator(page)).toHaveText("1", { timeout: 15_000 });
-      await indicator(page).click();
-      await expect(page.getByText(/file their cards on “Beta”/)).toBeVisible();
+      await openReadiness(page, "alpha");
+      await expect(page.getByText(/file their cards on “Beta”/)).toBeVisible({
+        timeout: 15_000,
+      });
       await page
         .getByRole("button", { name: "Link here", exact: true })
         .click();
@@ -406,7 +412,9 @@ test.describe("in the app", () => {
       await expect(dialog).toContainText("github.com/acme/old");
       await dialog.getByRole("button", { name: "Move it here" }).click();
       await expect(dialog).toBeHidden();
-      await expect(indicator(page)).toBeHidden();
+      await expect(
+        page.getByRole("button", { name: "Link here", exact: true }),
+      ).toBeHidden();
       expect(plane.repoMoves()).toEqual([
         {
           workspaceId: "ws-alpha",
@@ -430,61 +438,20 @@ test.describe("in the app", () => {
     const fine = await makeFolder(true);
     const { page, cleanup } = await open({ alpha: broken, beta: fine });
     try {
-      await page.goto("app://lanework/w/alpha/issues");
-      await expect(indicator(page)).toHaveText("1", { timeout: 15_000 });
-      await page.goto("app://lanework/w/beta/issues");
+      await openReadiness(page, "alpha");
+      await expect(fixAgents(page)).toBeVisible({ timeout: 15_000 });
+      await openReadiness(page, "beta");
       await expect(
-        page.getByRole("button", { name: /currently Beta/ }),
+        page.getByRole("button", { name: "Rename Beta" }),
       ).toBeVisible();
-      await expect(indicator(page)).toBeHidden();
+      await expect(fixAgents(page)).toBeHidden();
       // And back: alpha's report is still alpha's.
-      await page.goto("app://lanework/w/alpha/issues");
-      await expect(indicator(page)).toHaveText("1");
+      await openReadiness(page, "alpha");
+      await expect(fixAgents(page)).toBeVisible({ timeout: 15_000 });
     } finally {
       await cleanup();
       await rm(broken, { recursive: true, force: true });
       await rm(fine, { recursive: true, force: true });
-    }
-  });
-
-  test("the board opens without waiting for the readiness check", async () => {
-    const folder = await makeFolder(false);
-    const { page, plane, cleanup } = await open({ alpha: folder });
-    try {
-      plane.setBoard("ws-alpha", {
-        columns: [{ key: "todo", name: "To-Do", role: "start" }],
-        cards: [
-          {
-            id: "card-1",
-            revision: 1,
-            title: "Visible before readiness",
-            body: "",
-            columnKey: "todo",
-            categoryKey: null,
-            taskId: null,
-            priority: null,
-            tags: [],
-            rank: "n",
-            createdAt: null,
-            updatedAt: null,
-          },
-        ],
-      });
-      // The check cannot finish until the service answers "which board is
-      // this repo linked to?" — held back well past the board's own reads.
-      plane.setRepoBoards([{ workspaceId: "ws-alpha", name: "Alpha" }], 4_000);
-      await page.goto("app://lanework/w/alpha/issues");
-
-      // The board is on screen while the check is still waiting…
-      await expect(page.getByText("Visible before readiness")).toBeVisible({
-        timeout: 3_000,
-      });
-      await expect(indicator(page)).toBeHidden();
-      // …and the check lands after, on its own.
-      await expect(indicator(page)).toHaveText("1", { timeout: 10_000 });
-    } finally {
-      await cleanup();
-      await rm(folder, { recursive: true, force: true });
     }
   });
 });
