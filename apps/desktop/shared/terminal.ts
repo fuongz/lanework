@@ -185,7 +185,7 @@ export interface BackgroundTask {
   kind: BackgroundTaskKind;
   /** What it was started for, as its caller described it. */
   description: string;
-  /** A shell's command, cut at `BACKGROUND_COMMAND_MAX`; null for the rest. */
+  /** A shell's or monitor's command, cut at `BACKGROUND_COMMAND_MAX`; else null. */
   command: string | null;
   /** An agent's sub-agent id (`agent-<id>.jsonl`), for its viewer; else null. */
   subagentId: string | null;
@@ -198,6 +198,12 @@ export interface BackgroundTask {
   startedAt: string;
   /** When its notification came, ISO; null while running or lost. */
   endedAt: string | null;
+  /**
+   * The pid leading a running shell's or monitor's process group (FE-56),
+   * when exactly one process is found for it; null otherwise. Always null for
+   * an agent: it runs inside the CLI's own process.
+   */
+  pid: number | null;
 }
 
 /** The most of a shell's command a task carries, in characters. */

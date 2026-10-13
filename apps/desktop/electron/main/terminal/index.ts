@@ -66,6 +66,7 @@ import { claudeAuthOf, createClaudeAuthProbe } from "./agents";
 import {
   backgroundRequest,
   readBackgroundTasks,
+  readBackgroundTasksWithPids,
   readTaskOutput,
   stopBackgroundTask,
   taskOutputRequest,
@@ -888,7 +889,7 @@ export function registerTerminal(devUrl?: string): void {
       const { workspace, conversation } = backgroundRequest(args);
       const folder = await terminalFolder(workspace);
       if (!folder) throw new Error("This project has no folder here.");
-      return readBackgroundTasks(agentHome(), folder, conversation);
+      return readBackgroundTasksWithPids(agentHome(), folder, conversation);
     },
   );
   handle(

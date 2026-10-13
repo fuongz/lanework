@@ -54,9 +54,14 @@ const ANSI =
 
 /** A task as the transcript built it, with where its output goes. */
 interface Started {
-  task: Omit<BackgroundTask, "status" | "exitCode" | "summary" | "endedAt">;
+  task: Omit<
+    BackgroundTask,
+    "status" | "exitCode" | "summary" | "endedAt" | "pid"
+  >;
   /** The output file the CLI named in its answer; a shell's only. */
   output: string | null;
+  /** A shell's or monitor's whole command, uncut: what its process runs. */
+  script: string | null;
 }
 
 interface Notice {
@@ -319,8 +324,9 @@ function visit(parsed: Parsed, line: Line) {
       }
       const which = kindOf(call?.name, result);
       if (which) {
+        // A `ws` monitor has no command, and so no process (FE-56).
         const command =
-          which.kind === "shell" ? str(call?.input.command) : null;
+          which.kind === "agent" ? null : str(call?.input.command);
         const description =
           str(call?.input.description) ??
           str(result.description) ??
@@ -341,6 +347,7 @@ function visit(parsed: Parsed, line: Line) {
             startedAt: call?.at ?? at ?? new Date(0).toISOString(),
           },
           output,
+          script: command,
         });
       }
       return;
@@ -458,6 +465,7 @@ function tasksOf(parsed: Parsed, transcript: string): BackgroundTask[] {
       summary: notice?.summary ? tidy(notice.summary) : null,
       endedAt:
         status === "running" || status === "lost" ? null : (notice?.at ?? null),
+      pid: null,
     });
   }
   const running = (task: BackgroundTask) => (task.status === "running" ? 0 : 1);
@@ -578,7 +586,261 @@ async function taskOutputPath(
   return resolved;
 }
 
-/** Stop only same-user process groups holding this shell's recorded output. */
+/** One row of `ps`: enough to tell a task's process from any other. */
+interface Proc {
+  pid: number;
+  ppid: number;
+  pgid: number;
+  uid: number;
+  /** `lstart` as `ps` writes it: with the pid, it tells a reused pid apart. */
+  start: string;
+  args: string;
+}
+
+const PS_ROW =
+  /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s?(.*)$/;
+
+/** Every process on this machine, in one `ps`. */
+async function processTable(): Promise<Proc[]> {
+  const { stdout } = await runFile(
+    "ps",
+    ["-axww", "-o", "pid=,ppid=,pgid=,uid=,lstart=,args="],
+    { env: { ...process.env, LC_ALL: "C" }, maxBuffer: 64 * 1024 * 1024 },
+  );
+  return stdout.split("\n").flatMap((line) => {
+    const match = PS_ROW.exec(line);
+    return match
+      ? [
+          {
+            pid: Number(match[1]),
+            ppid: Number(match[2]),
+            pgid: Number(match[3]),
+            uid: Number(match[4]),
+            start: match[5].replace(/\s+/g, " "),
+            args: match[6],
+          },
+        ]
+      : [];
+  });
+}
+
+function ownUid(): number {
+  const uid = process.getuid?.();
+  if (uid === undefined)
+    throw new Error("Stopping tasks requires Unix process groups.");
+  return uid;
+}
+
+/** The groups never signalled: the app's own, and every ancestor's. */
+function guardedGroups(procs: Proc[]): Set<number> {
+  const byPid = new Map(procs.map((proc) => [proc.pid, proc]));
+  const own = byPid.get(process.pid)?.pgid;
+  if (own === undefined || !Number.isInteger(own) || own <= 1)
+    throw new Error("Cannot identify the app process group.");
+  // A CLI or supervisor can also hold the file: never signal an ancestor.
+  const groups = new Set([own]);
+  const seen = new Set<number>();
+  let at = byPid.get(process.pid);
+  while (at && at.pid > 1 && !seen.has(at.pid)) {
+    seen.add(at.pid);
+    groups.add(at.pgid);
+    at = byPid.get(at.ppid);
+  }
+  return groups;
+}
+
+/**
+ * The same-user groups holding a shell's recorded output open, guarded ones
+ * left out; null when the file is gone.
+ */
+async function shellGroups(
+  started: Started,
+  task: string,
+  roots: string[],
+  procs: Proc[],
+  uid: number,
+  guarded: Set<number>,
+): Promise<Set<number> | null> {
+  const resolved = await taskOutputPath(started, task, roots);
+  if (!resolved) return null;
+  let holders: string;
+  try {
+    holders = (await runFile("lsof", ["-t", "--", resolved])).stdout;
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 1) return new Set();
+    throw error;
+  }
+  const byPid = new Map(procs.map((proc) => [proc.pid, proc]));
+  const groups = new Set<number>();
+  for (const pid of holders.trim().split(/\s+/)) {
+    // A holder missing from the table exited between the two reads.
+    const proc = /^\d+$/.test(pid) ? byPid.get(Number(pid)) : undefined;
+    if (proc && proc.uid === uid && proc.pgid > 1 && !guarded.has(proc.pgid))
+      groups.add(proc.pgid);
+  }
+  return groups;
+}
+
+/** Whether `args` launch Claude conversation `conversation`. */
+function launches(args: string, conversation: string): boolean {
+  const words = args.split(/\s+/);
+  return words.some(
+    (word, at) =>
+      word === `--session-id=${conversation}` ||
+      word === `--resume=${conversation}` ||
+      ((word === "--session-id" || word === "--resume" || word === "-r") &&
+        words[at + 1] === conversation),
+  );
+}
+
+/** A command line as `ps` shows it: a control character, escaped or not, is `?`. */
+function visible(text: string): string {
+  return (
+    text
+      .replace(/\\[0-7]{3}/g, "?")
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: they are what it hides.
+      .replace(/[\u0000-\u001f]/g, "?")
+  );
+}
+
+/** How the CLI hands a command to its shell: `eval '<command>'`. */
+function evalOf(script: string): string {
+  return visible(`eval '${script.replaceAll("'", `'"'"'`)}'`);
+}
+
+/**
+ * Each running monitor's group leader (FE-56/D1): a group leader the
+ * conversation's CLI started, running `eval '<its command>'`. Monitors with
+ * the same command pair with such leaders by start order — only when there
+ * are exactly as many; otherwise none of them gets one.
+ */
+function monitorLeaders(
+  monitors: Started[],
+  conversation: string,
+  procs: Proc[],
+  uid: number,
+  taken: Set<number>,
+): Map<string, number> {
+  const byPid = new Map(procs.map((proc) => [proc.pid, proc]));
+  const byScript = new Map<string, Started[]>();
+  for (const monitor of monitors) {
+    if (!monitor.script) continue;
+    byScript.set(monitor.script, [
+      ...(byScript.get(monitor.script) ?? []),
+      monitor,
+    ]);
+  }
+  const leaders = new Map<string, number>();
+  for (const [script, group] of byScript) {
+    const needle = evalOf(script);
+    const found = procs
+      .filter(
+        (proc) =>
+          proc.uid === uid &&
+          proc.pid === proc.pgid &&
+          proc.pgid > 1 &&
+          !taken.has(proc.pgid) &&
+          visible(proc.args).includes(needle) &&
+          launches(byPid.get(proc.ppid)?.args ?? "", conversation),
+      )
+      .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+    if (found.length !== group.length) continue;
+    const order = [...group].sort((a, b) =>
+      a.task.startedAt.localeCompare(b.task.startedAt),
+    );
+    for (const [at, monitor] of order.entries())
+      leaders.set(monitor.task.id, found[at].pid);
+  }
+  return leaders;
+}
+
+/** The group leading each running shell and monitor, where exactly one does. */
+async function taskLeaders(
+  parsed: Parsed,
+  transcript: string,
+  conversation: string,
+  roots: string[],
+  procs: Proc[],
+): Promise<Map<string, number>> {
+  const uid = ownUid();
+  const guarded = guardedGroups(procs);
+  const running = tasksOf(parsed, transcript).filter(
+    (task) => task.status === "running" && task.kind !== "agent",
+  );
+  const leaders = new Map<string, number>();
+  const taken = new Set(guarded);
+  for (const task of running.filter((entry) => entry.kind === "shell")) {
+    const started = parsed.started.get(task.id);
+    if (!started) continue;
+    try {
+      const groups = await shellGroups(
+        started,
+        task.id,
+        roots,
+        procs,
+        uid,
+        guarded,
+      );
+      for (const group of groups ?? []) taken.add(group);
+      if (groups?.size === 1) leaders.set(task.id, [...groups][0]);
+    } catch {
+      // No output to look at: no pid, never a guess.
+    }
+  }
+  const monitors = running.flatMap((task) => {
+    const started =
+      task.kind === "monitor" ? parsed.started.get(task.id) : undefined;
+    return started ? [started] : [];
+  });
+  for (const [id, pid] of monitorLeaders(
+    monitors,
+    conversation,
+    procs,
+    uid,
+    taken,
+  ))
+    leaders.set(id, pid);
+  return leaders;
+}
+
+/**
+ * Conversation `conversation`'s background tasks with the pid of each running
+ * shell and monitor (FE-56). `ps` runs only while one is running (D5); a
+ * failed read leaves every pid null.
+ */
+export async function readBackgroundTasksWithPids(
+  home: string,
+  folder: string,
+  conversation: string,
+  roots: string[] = tempRoots(),
+): Promise<BackgroundTask[]> {
+  const transcript = claudeTranscriptPath(home, folder, conversation);
+  const parsed = await parseOnce(transcript);
+  const tasks = tasksOf(parsed, transcript);
+  if (!tasks.some((task) => task.status === "running" && task.kind !== "agent"))
+    return tasks;
+  try {
+    const leaders = await taskLeaders(
+      parsed,
+      transcript,
+      conversation,
+      roots,
+      await processTable(),
+    );
+    return tasks.map((task) => ({
+      ...task,
+      pid: leaders.get(task.id) ?? null,
+    }));
+  } catch {
+    return tasks;
+  }
+}
+
+/**
+ * Stop a running shell (FE-43) or monitor (FE-56): only same-user process
+ * groups — a shell's are those holding its recorded output; a monitor's is
+ * the one leader `taskLeaders` finds for it, or it refuses.
+ */
 export async function stopBackgroundTask(
   home: string,
   folder: string,
@@ -591,89 +853,36 @@ export async function stopBackgroundTask(
   const parsed = await parseOnce(transcript);
   const started = parsed.started.get(task);
   if (!started) throw new Error("That conversation started no such task.");
-  if (started.task.kind !== "shell")
-    throw new Error("Only a shell task can be stopped.");
+  if (started.task.kind === "agent")
+    throw new Error("Only a shell or a monitor can be stopped.");
   if (
     tasksOf(parsed, transcript).find((item) => item.id === task)?.status !==
     "running"
   )
     throw new Error("That task is not running.");
-  const resolved = await taskOutputPath(started, task, roots);
-  if (!resolved) return { stopped: 0 };
-  let holders: string;
-  try {
-    holders = (await runFile("lsof", ["-t", "--", resolved])).stdout;
-  } catch (error) {
-    if ((error as { code?: unknown }).code === 1) return { stopped: 0 };
-    throw error;
+  if (started.task.kind === "shell") await taskOutputPath(started, task, roots);
+  const uid = ownUid();
+  const before = await processTable();
+  const guarded = guardedGroups(before);
+  let groups: Set<number>;
+  if (started.task.kind === "shell") {
+    const found = await shellGroups(started, task, roots, before, uid, guarded);
+    if (!found) return { stopped: 0 };
+    groups = found;
+  } else {
+    const leader = (
+      await taskLeaders(parsed, transcript, conversation, roots, before)
+    ).get(task);
+    if (leader === undefined)
+      throw new Error("Could not tell which process runs this monitor.");
+    groups = new Set([leader]);
   }
-  const uid = process.getuid?.();
-  if (uid === undefined)
-    throw new Error("Stopping tasks requires Unix process groups.");
-  const own = Number(
-    (
-      await runFile("ps", ["-o", "pgid=", "-p", String(process.pid)])
-    ).stdout.trim(),
-  );
-  if (!Number.isInteger(own) || own <= 1)
-    throw new Error("Cannot identify the app process group.");
-  const protectedGroups = new Set([own]);
-  // A CLI or supervisor can also hold the file: never signal an ancestor.
-  let ancestor = process.pid;
-  while (ancestor > 1) {
-    try {
-      const [parent, group] = (
-        await runFile("ps", ["-o", "ppid=,pgid=", "-p", String(ancestor)])
-      ).stdout
-        .trim()
-        .split(/\s+/)
-        .map(Number);
-      if (!Number.isInteger(parent) || parent === ancestor) break;
-      protectedGroups.add(group);
-      ancestor = parent;
-    } catch {
-      break;
-    }
-  }
-  const groups = new Map<number, number>();
-  for (const pid of holders.trim().split(/\s+/)) {
-    if (!/^\d+$/.test(pid)) continue;
-    try {
-      const [pgid, owner] = (
-        await runFile("ps", ["-o", "pgid=,uid=", "-p", pid])
-      ).stdout
-        .trim()
-        .split(/\s+/)
-        .map(Number);
-      if (owner === uid && pgid > 1 && !protectedGroups.has(pgid))
-        groups.set(pgid, (groups.get(pgid) ?? 0) + 1);
-    } catch {
-      /* Holder exited between lsof and ps. */
-    }
-  }
-  // Snapshot every group member, including children that close stdout after TERM.
-  // A surviving original PID + start time prevents escalation into a reused group.
-  const snapshot = async () => {
-    const rows = (await runFile("ps", ["-axo", "pid=,pgid=,uid=,lstart="]))
-      .stdout;
-    return rows.split("\n").flatMap((line) => {
-      const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line);
-      return match
-        ? [
-            {
-              pid: Number(match[1]),
-              pgid: Number(match[2]),
-              uid: Number(match[3]),
-              start: match[4],
-            },
-          ]
-        : [];
-    });
-  };
-  const before = await snapshot();
   const signaled = new Set<number>();
-  for (const pgid of groups.keys()) {
-    if (!before.some((member) => member.pgid === pgid && member.uid === uid))
+  for (const pgid of groups) {
+    if (
+      guarded.has(pgid) ||
+      !before.some((member) => member.pgid === pgid && member.uid === uid)
+    )
       continue;
     try {
       process.kill(-pgid, "SIGTERM");
@@ -682,14 +891,16 @@ export async function stopBackgroundTask(
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
   }
+  // Every group member counts, children that close stdout after TERM too.
   const stopped = before.filter(
     (member) => signaled.has(member.pgid) && member.uid === uid,
   ).length;
   if (stopped) {
     stoppedTasks.add(`${transcript}:${task}`);
     await new Promise((resolve) => setTimeout(resolve, 3000));
-    const after = await snapshot();
+    const after = await processTable();
     for (const pgid of signaled) {
+      // A surviving original pid + start time: never escalate into a reused group.
       const survives = after.some(
         (member) =>
           member.pgid === pgid &&

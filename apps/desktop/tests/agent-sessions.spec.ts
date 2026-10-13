@@ -63,6 +63,7 @@ import {
 import {
   backgroundRequest,
   readBackgroundTasks,
+  readBackgroundTasksWithPids,
   readTaskOutput,
   stopBackgroundTask,
   taskOutputRequest,
@@ -2603,7 +2604,7 @@ test("FE-42: a conversation's background tasks are read from its transcript — 
     endedAt: "2026-10-03T04:00:07.000Z",
   });
   expect(tasks.find((task) => task.id === "bgmon01")).toMatchObject({
-    command: null,
+    command: "tail -f log",
     description: "Watch the log",
     summary: 'Monitor event: "Watch the log"',
     endedAt: null,
@@ -3244,8 +3245,9 @@ test("FE-43: stop refuses unsafe tasks and kills only the detached shell group",
     stopBackgroundTask(home, folder, CLAUDE_BG_ID, task, roots);
   await expect(stop("nosuch1")).rejects.toThrow(/no such task/);
   await expect(stop("bgfail1")).rejects.toThrow(/not running/);
-  await expect(stop("agbg01")).rejects.toThrow(/Only a shell/);
-  await expect(stop("bgmon01")).rejects.toThrow(/Only a shell/);
+  await expect(stop("agbg01")).rejects.toThrow(/Only a shell or a monitor/);
+  // No process runs it here: never a guess (FE-56/D1).
+  await expect(stop("bgmon01")).rejects.toThrow(/Could not tell/);
   await expect(
     stop("bgrun01", [await tempDir("lanew-stop-outside-")]),
   ).rejects.toThrow(/outside/);
@@ -3403,5 +3405,102 @@ test("FE-43: SIGKILL releases the port when a child ignores TERM and closes outp
     }
     other.kill("SIGKILL");
     await output.close();
+  }
+});
+
+/**
+ * A stand-in Claude CLI for conversation `CLAUDE_BG_ID`: it starts the
+ * fixture's Monitor command the way the CLI does — its own group,
+ * `eval '<command>'` — and prints that group's pid.
+ */
+async function standInCli(dir: string) {
+  const code =
+    "const c=require('node:child_process').spawn('sh',['-c',\"eval 'tail -f log' < /dev/null\"],{detached:true,stdio:'ignore',cwd:process.argv[1]});process.stdout.write(c.pid+'\\n');setInterval(()=>{},1e6)";
+  const cli = spawn(
+    process.execPath,
+    ["-e", code, dir, "--resume", CLAUDE_BG_ID],
+    { stdio: ["ignore", "pipe", "ignore"] },
+  );
+  const pid = await new Promise<number>((resolve, reject) => {
+    let said = "";
+    setTimeout(() => {
+      cli.kill("SIGKILL");
+      reject(new Error(`The stand-in CLI said no pid: ${said}`));
+    }, 10_000);
+    cli.stdout?.on("data", (chunk) => {
+      said += String(chunk);
+      const line = /^(\d+)$/m.exec(said);
+      if (line) resolve(Number(line[1]));
+    });
+    cli.once("exit", () =>
+      reject(new Error(`The stand-in CLI exited: ${said}`)),
+    );
+  });
+  return { cli, pid };
+}
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+test("FE-56: a monitor's group is found under its CLI, shown as its pid, and stopped without the CLI", async () => {
+  test.skip(process.platform === "win32", "This drives Unix process groups.");
+  const home = await tempDir("lanew-mon-home-");
+  const folder = join(await tempDir("lanew-mon-project-"), "repo");
+  const tmp = await tempDir("lanew-mon-tmp-");
+  await seedBackgroundTasks(home, folder, tmp);
+  const cwd = await tempDir("lanew-mon-cwd-");
+  await writeFile(join(cwd, "log"), "");
+  const pids = async () =>
+    Object.fromEntries(
+      (
+        await readBackgroundTasksWithPids(home, folder, CLAUDE_BG_ID, [tmp])
+      ).map((task) => [task.id, task.pid]),
+    );
+  const clis: ReturnType<typeof spawn>[] = [];
+  const monitors: number[] = [];
+  try {
+    // No process yet: no pid for anyone.
+    expect(await pids()).toMatchObject({ bgmon01: null, bgrun01: null });
+
+    const first = await standInCli(cwd);
+    clis.push(first.cli);
+    monitors.push(first.pid);
+    await expect.poll(async () => (await pids()).bgmon01).toBe(first.pid);
+    // An agent and a finished task never carry one.
+    expect(await pids()).toMatchObject({ agbg01: null, bgfail1: null });
+
+    expect(
+      (await stopBackgroundTask(home, folder, CLAUDE_BG_ID, "bgmon01", [tmp]))
+        .stopped,
+    ).toBeGreaterThanOrEqual(1);
+    await expect.poll(() => alive(first.pid)).toBe(false);
+    expect(first.cli.exitCode).toBeNull();
+    expect(alive(first.cli.pid ?? 0)).toBe(true);
+
+    // Two processes for one monitor: no pid, and Stop refuses.
+    for (let n = 0; n < 2; n++) {
+      const next = await standInCli(cwd);
+      clis.push(next.cli);
+      monitors.push(next.pid);
+    }
+    await expect.poll(async () => (await pids()).bgmon01).toBeNull();
+    await expect(
+      stopBackgroundTask(home, folder, CLAUDE_BG_ID, "bgmon01", [tmp]),
+    ).rejects.toThrow(/Could not tell/);
+    expect(monitors.slice(1).every(alive)).toBe(true);
+  } finally {
+    for (const pid of monitors)
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        /* already stopped */
+      }
+    for (const cli of clis) cli.kill("SIGKILL");
   }
 });

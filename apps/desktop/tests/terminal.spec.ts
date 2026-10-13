@@ -1755,6 +1755,119 @@ test("FE-43: shell Stop confirms all entry points, cancels safely, reports races
   }
 });
 
+test("FE-56: running shells and monitors show their pid, and a found monitor can be stopped", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  const tmp = await realpath(await mkdtemp(join(tmpdir(), "claude-lanew-")));
+  await seedBackgroundTasks(agentHome, repo, tmp);
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+    LANEWORK_CLAUDE_BIN: await standIn(profile, "claude", "ran-%s-%s-%s"),
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const seeded = await page.evaluate(
+      async (conversation) =>
+        (
+          window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+        ).desktop.terminal.agentBackgroundTasks("alpha", conversation),
+      CLAUDE_BG_ID,
+    );
+    // The shell and monitor run as groups 4242 and 4343; the agent is
+    // running too, inside its CLI — no pid of its own (FE-56/D2).
+    const tasks = seeded.map((task) =>
+      task.id === "bgrun01"
+        ? { ...task, pid: 4242 }
+        : task.id === "bgmon01"
+          ? { ...task, pid: 4343 }
+          : task.id === "agbg01"
+            ? { ...task, status: "running", endedAt: null }
+            : task,
+    );
+    await app.evaluate(({ ipcMain }, tasks) => {
+      const state = { calls: [] as string[][], tasks };
+      (
+        globalThis as typeof globalThis & { stopFixture: typeof state }
+      ).stopFixture = state;
+      ipcMain.removeHandler("terminal:agent-background-tasks");
+      ipcMain.handle("terminal:agent-background-tasks", () => state.tasks);
+      ipcMain.removeHandler("terminal:agent-stop-task");
+      ipcMain.handle("terminal:agent-stop-task", (_event, ...ids: string[]) => {
+        state.calls.push(ids);
+        state.tasks = state.tasks.map((task) =>
+          task.id === ids[2]
+            ? {
+                ...task,
+                status: "killed",
+                pid: null,
+                endedAt: new Date().toISOString(),
+              }
+            : task,
+        );
+        return { stopped: 2 };
+      });
+    }, tasks);
+
+    await page
+      .getByRole("button", { name: "Resume “Run the gate” in Claude" })
+      .click();
+    await page.getByTestId("background-tasks").click();
+    const row = (name: string) =>
+      page.getByRole("button", { name, exact: true });
+    await expect(row("Run the gate, shell, running")).toContainText("pid 4242");
+    await expect(row("Watch the log, monitor, running")).toContainText(
+      "pid 4343",
+    );
+    await expect(row("Explore the views, agent, running")).not.toContainText(
+      "pid",
+    );
+
+    await page
+      .getByRole("button", { name: "Stop Watch the log", exact: true })
+      .click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText("tail -f log");
+    await expect(dialog).toContainText("process group 4343");
+    await dialog.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect
+      .poll(() =>
+        app.evaluate(
+          () =>
+            (
+              globalThis as typeof globalThis & {
+                stopFixture: { calls: string[][] };
+              }
+            ).stopFixture.calls,
+        ),
+      )
+      .toEqual([["ws-alpha", CLAUDE_BG_ID, "bgmon01"]]);
+
+    // The shell's page: its pid in the header, ready to copy.
+    await page
+      .getByRole("button", {
+        name: "Run the gate, a background shell of “Run the gate”. Open its output",
+      })
+      .click();
+    const task = page.getByRole("region", {
+      name: "Background task — Run the gate",
+    });
+    await expect(
+      task.getByRole("button", { name: "Copy pid 4242", exact: true }),
+    ).toBeVisible();
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 /** Drag the terminal's handle by `dy` pixels (up is negative). */
 async function dragHandle(page: Page, dy: number) {
   const box = await page

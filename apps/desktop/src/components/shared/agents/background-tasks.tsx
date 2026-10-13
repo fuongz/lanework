@@ -48,7 +48,25 @@ import { relativeTime, shortAge } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
 
-/** One confirmation flow shared by all three shell Stop entry points. */
+/**
+ * Whether the app can stop `task`: a running shell (FE-43), or a running
+ * monitor whose one process was found (FE-56/D1). An agent never.
+ */
+export function canStop(task: BackgroundTask): boolean {
+  return (
+    task.status === "running" &&
+    (task.kind === "shell" || (task.kind === "monitor" && task.pid !== null))
+  );
+}
+
+/** `pid 59852`, for a running task whose process is known (FE-56/D3). */
+export function pidText(task: BackgroundTask): string | null {
+  return task.status === "running" && task.pid !== null
+    ? `pid ${task.pid}`
+    : null;
+}
+
+/** One confirmation flow shared by all three Stop entry points. */
 export function useStopBackgroundTask(
   workspace: string | null,
   conversation: string,
@@ -102,7 +120,7 @@ export function useStopBackgroundTask(
   return {
     revision,
     requestStop: (task: BackgroundTask) => {
-      if (!pending && task.kind === "shell" && task.status === "running") {
+      if (!pending && canStop(task)) {
         setNotice(null);
         setConfirming(task);
       }
@@ -121,11 +139,15 @@ export function useStopBackgroundTask(
                 Stop{" "}
                 {confirming?.description ||
                   confirming?.command ||
-                  "this background shell"}
+                  `this background ${confirming?.kind ?? "task"}`}
                 ?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Its running processes will be stopped.
+                Its running processes will be stopped
+                {confirming?.pid != null
+                  ? ` (process group ${confirming.pid})`
+                  : ""}
+                .
               </AlertDialogDescription>
             </AlertDialogHeader>
             <pre className="max-h-40 overflow-auto rounded-md bg-muted p-2 text-xs">
@@ -233,6 +255,7 @@ function TaskRow({
   const running = task.status === "running";
   const opens = task.kind !== "agent" || task.subagentId !== null;
   const status = taskStatusText(task);
+  const pid = pidText(task);
   return (
     <div className="group/task flex min-w-0 items-center">
       <button
@@ -240,7 +263,7 @@ function TaskRow({
         disabled={!opens}
         onClick={() => onOpen(task)}
         aria-label={`${task.description || task.command || task.id}, ${task.kind}, ${status}`}
-        title={`${task.command ?? task.description}\n${status}, started ${relativeTime(task.startedAt, now)}${task.summary ? `\n${task.summary}` : ""}`}
+        title={`${task.command ?? task.description}\n${status}${pid ? ` (${pid})` : ""}, started ${relativeTime(task.startedAt, now)}${task.summary ? `\n${task.summary}` : ""}`}
         className={cn(
           "hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-[13px] outline-none focus-visible:ring-2 disabled:pointer-events-none",
           task.status === "lost" && "opacity-50",
@@ -280,11 +303,16 @@ function TaskRow({
           </span>
         )}
         {running && <WorkingMark />}
+        {pid && (
+          <span className="text-muted-foreground/70 shrink-0 font-mono text-[11px] tabular-nums">
+            {pid}
+          </span>
+        )}
         <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
           {shortAge(task.endedAt ?? task.startedAt, now)}
         </span>
       </button>
-      {running && task.kind === "shell" && onStop && (
+      {canStop(task) && onStop && (
         <Button
           variant="ghost"
           size="icon-sm"

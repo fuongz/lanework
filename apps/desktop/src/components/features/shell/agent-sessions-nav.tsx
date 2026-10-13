@@ -17,6 +17,8 @@ import type {
 } from "#/../shared/terminal";
 import {
   backgroundCue,
+  canStop,
+  pidText,
   TASK_KIND_ICONS,
   useStopBackgroundTask,
 } from "#/components/shared/agents/background-tasks";
@@ -194,6 +196,7 @@ function BackgroundShellRows({
       {shells.map((task) => {
         const viewed = viewingTask === task.id;
         const name = task.description || task.command || task.id;
+        const pid = pidText(task);
         return (
           <ContextMenu key={task.id}>
             <ContextMenuTrigger
@@ -208,7 +211,7 @@ function BackgroundShellRows({
                   }
                   aria-current={viewed ? "page" : undefined}
                   aria-label={`${name}, a background ${task.kind} of “${session.title}”. Open its output`}
-                  title={`${task.command ?? name}\nBackground ${task.kind}, running since ${relativeTime(task.startedAt, now)}`}
+                  title={`${task.command ?? name}\nBackground ${task.kind}${pid ? ` (${pid})` : ""}, running since ${relativeTime(task.startedAt, now)}`}
                   className={cn(row, SUB_ROW, viewed && active)}
                 />
               }
@@ -231,7 +234,7 @@ function BackgroundShellRows({
                 {shortAge(task.startedAt, now)}
               </span>
             </ContextMenuTrigger>
-            {task.kind === "shell" && (
+            {canStop(task) && (
               <ContextMenuContent>
                 <StopItem onStop={() => stopping.requestStop(task)} />
               </ContextMenuContent>

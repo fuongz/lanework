@@ -3,8 +3,10 @@ import {
   ArrowLeft01Icon,
   CheckmarkCircle02Icon,
   ComputerTerminal01Icon,
+  Copy01Icon,
   HelpCircleIcon,
   StopCircleIcon,
+  Tick02Icon,
   Timer02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
@@ -18,6 +20,8 @@ import {
 } from "#/../shared/terminal";
 import {
   backgroundCue,
+  canStop,
+  pidText,
   TASK_KIND_ICONS,
   useStopBackgroundTask,
 } from "#/components/shared/agents/background-tasks";
@@ -30,6 +34,7 @@ import {
   useBackgroundTasks,
   useTaskOutput,
 } from "#/components/shared/agents/use-background-tasks";
+import { useCopy } from "#/components/shared/common/use-copy";
 import { WorkingMark } from "#/components/shared/terminal/working-mark";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -80,7 +85,8 @@ function useNow(ticking: boolean): number {
  * size in the main view (FE-42/D3): what it runs, where it stands, and the
  * end of its output, followed live while it runs.
  *
- * Running shells can be stopped after confirmation (FE-43). The header link
+ * Running shells and monitors can be stopped after confirmation (FE-43,
+ * FE-56); the header shows the pid of a running one's group. The header link
  * resumes its parent conversation.
  */
 export function ShellTaskView() {
@@ -133,6 +139,8 @@ function ShellTaskPage({
     running,
   );
   const now = useNow(running);
+  const [copied, copy] = useCopy();
+  const pid = task ? pidText(task) : null;
 
   // ⚠️ Follows the end only while the reader is AT the end: scrolled up to
   // read something, the next second's lines must not yank them back down.
@@ -259,7 +267,26 @@ function ShellTaskPage({
             {task.kind}
           </Badge>
         )}
-        {running && task?.kind === "shell" && (
+        {pid && task?.pid != null && (
+          // FE-56/D3: its process, to find in `ps` or Activity Monitor.
+          <Button
+            variant="ghost"
+            size="xs"
+            className="text-muted-foreground shrink-0 font-mono tabular-nums"
+            aria-label={copied === "pid" ? `Copied ${pid}` : `Copy ${pid}`}
+            title="Copy the pid leading its process group"
+            onClick={() => copy("pid", String(task.pid))}
+          >
+            {pid}
+            <HugeiconsIcon
+              icon={copied === "pid" ? Tick02Icon : Copy01Icon}
+              strokeWidth={1.8}
+              data-icon="inline-end"
+              aria-hidden="true"
+            />
+          </Button>
+        )}
+        {task && canStop(task) && (
           <Button
             variant="outline"
             size="sm"
