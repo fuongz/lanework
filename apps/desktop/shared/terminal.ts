@@ -687,6 +687,8 @@ export const terminalChannels = {
   agentSessionRename: "terminal:agent-sessions:rename",
   /** Pin a conversation to the top of the group, or unpin it (FE-25). */
   agentSessionPin: "terminal:agent-sessions:pin",
+  /** Delete a conversation's transcript for good (FE-57). */
+  agentSessionDelete: "terminal:agent-sessions:delete",
   /** One sub-agent's transcript, for the viewer (FE-35). */
   agentSubagent: "terminal:agent-subagent",
   /** A Claude conversation's background tasks (FE-42). */
@@ -793,6 +795,15 @@ export interface DesktopTerminalApi {
     agent: TerminalAgent,
     id: string,
     pinned: boolean,
+  ) => Promise<AgentSession[]>;
+  /**
+   * Delete a conversation's transcript from the CLI's own folder, for good
+   * (FE-57). Refused for one a tab is running. Answers the new listing.
+   */
+  deleteAgentSession: (
+    workspace: string,
+    agent: TerminalAgent,
+    id: string,
   ) => Promise<AgentSession[]>;
   /**
    * One of a conversation's sub-agents, read for the viewer (FE-35). By ids

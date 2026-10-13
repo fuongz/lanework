@@ -47,6 +47,7 @@ import {
 } from "../workspaces";
 import { watchAgentActivity } from "./agent-activity";
 import { agentBindings } from "./agent-binding";
+import { deleteAgentTranscript } from "./agent-delete";
 import { factsRequest, readAgentFacts, readAgentUsage } from "./agent-facts";
 import {
   agentFileMarks,
@@ -863,6 +864,34 @@ export function registerTerminal(devUrl?: string): void {
         ...current,
         pinnedAt: pinned ? (current.pinnedAt ?? Date.now()) : undefined,
       }));
+      return agentSessionsOf(workspace);
+    },
+  );
+  // ⚠️ Deletes the CLI's own files for good (FE-57). The id must be one this
+  // project lists (`markable`), and a conversation a tab of ours is running
+  // is refused: the CLI would only write it again.
+  handle(
+    terminalChannels.agentSessionDelete,
+    devUrl,
+    async (args): Promise<AgentSession[]> => {
+      if (args.length !== 3)
+        throw new Error("A workspace and a conversation are required");
+      const { workspace, key: mark } = await markable(args);
+      const agent = args[1] as TerminalAgent;
+      const id = args[2] as string;
+      const terminals = host
+        ? await request<TerminalSession[]>({ t: "list", workspace })
+        : [];
+      if (
+        terminals.some(
+          (entry) => entry.resume === id && entry.kind === agent && !entry.exit,
+        )
+      )
+        throw new Error("Stop this conversation before deleting it.");
+      const folder = await terminalFolder(workspace);
+      if (!folder) throw new Error("This project has no folder here.");
+      await deleteAgentTranscript(agentHome(), folder, agent, id);
+      await updateAgentMark(agentMarksFile(), mark, () => ({}));
       return agentSessionsOf(workspace);
     },
   );

@@ -42,6 +42,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
 import {
@@ -57,6 +58,7 @@ import {
   TooltipTrigger,
 } from "#/components/ui/tooltip";
 import { relativeTime, shortAge } from "#/lib/board-view";
+import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
 import { useAgentFacts } from "#/stores/agent-facts";
 import {
@@ -324,6 +326,7 @@ export function AgentSessionsNav({
   const live = useAgentSessions((state) => state.live);
   const watchActivity = useAgentSessions((state) => state.watchActivity);
   const pin = useAgentSessions((state) => state.pin);
+  const remove = useAgentSessions((state) => state.remove);
   const openSubagents = useAgentSessions((state) => state.open);
   const setOpenSubagents = useAgentSessions((state) => state.setOpen);
   const [expanded, setExpanded] = useState(false);
@@ -332,6 +335,12 @@ export function AgentSessionsNav({
     new Set(),
   );
   const [renaming, setRenaming] = useState<AgentSession | null>(null);
+  /** The conversation whose transcript is about to go for good (FE-57). */
+  const [deleting, setDeleting] = useState<{
+    session: AgentSession;
+    busy: boolean;
+    error: string | null;
+  } | null>(null);
   // ⚠️ The tooltip lines, not the facts: a view open on an agent reads its
   // facts on every write, and the rail redraws only when a line changes.
   const summaries = useAgentFacts(
@@ -593,6 +602,18 @@ export function AgentSessionsNav({
                 {isPinned ? "Unpin" : "Pin"}
               </ContextMenuItem>
               {onStop && <StopItem onStop={onStop} />}
+              <ContextMenuSeparator />
+              {/* ⚠️ Off while a tab runs it (FE-57/D4): the CLI would only
+                  write the transcript again. Stop first. */}
+              <ContextMenuItem
+                variant="destructive"
+                disabled={Boolean(onStop)}
+                onClick={() =>
+                  setDeleting({ session, busy: false, error: null })
+                }
+              >
+                Delete…
+              </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
           {/* ⚠️ A sibling laid over the icon, like the quick actions: the
@@ -823,6 +844,66 @@ export function AgentSessionsNav({
               }}
             >
               Stop
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && !deleting?.busy && setDeleting(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete “{deleting?.session.title}”?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Its transcript is deleted from this machine for good. There is no
+              undo, and{" "}
+              {deleting?.session.agent === "codex"
+                ? "codex resume"
+                : "claude --resume"}{" "}
+              will no longer find it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleting?.error && (
+            <p role="alert" className="text-destructive text-[13px]">
+              {deleting.error}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting?.busy}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting?.busy}
+              onClick={(event) => {
+                // ⚠️ Kept open until main answers: a refusal is shown here,
+                // not lost with a dialog that already closed.
+                event.preventDefault();
+                if (!deleting) return;
+                const { session } = deleting;
+                setDeleting({ session, busy: true, error: null });
+                remove(workspace, session).then(
+                  () => {
+                    setDeleting(null);
+                    if (viewing === session.id)
+                      void navigate({
+                        to: "/w/$slug/issues",
+                        params: { slug },
+                      });
+                  },
+                  (error: unknown) =>
+                    setDeleting({
+                      session,
+                      busy: false,
+                      error: ipcMessage(error, "Could not delete it."),
+                    }),
+                );
+              }}
+            >
+              {deleting?.busy ? "Deleting…" : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

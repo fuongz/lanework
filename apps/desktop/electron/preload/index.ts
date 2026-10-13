@@ -317,6 +317,13 @@ function createTerminal(): DesktopTerminalApi {
         id,
         pinned,
       ),
+    deleteAgentSession: (workspace, agent, id) =>
+      ipcRenderer.invoke(
+        terminalChannels.agentSessionDelete,
+        workspace,
+        agent,
+        id,
+      ),
     agentSubagent: (workspace, agent, conversation, sub) =>
       ipcRenderer.invoke(
         terminalChannels.agentSubagent,

@@ -44,6 +44,8 @@ interface AgentSessionsState {
     session: AgentSession,
     pinned: boolean,
   ) => Promise<void>;
+  /** Delete its transcript for good (FE-57); throws what main refused. */
+  remove: (workspace: string, session: AgentSession) => Promise<void>;
   /** Start listening for transcript writes; returns the stop. */
   watchActivity: () => () => void;
   /**
@@ -246,6 +248,20 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       session.agent,
       session.id,
       pinned,
+    );
+    latest.set(workspace, (latest.get(workspace) ?? 0) + 1);
+    set((state) => ({
+      byWorkspace: { ...state.byWorkspace, [workspace]: listed },
+    }));
+  },
+
+  remove: async (workspace, session) => {
+    const surface = window.desktop?.terminal;
+    if (!surface) return;
+    const listed = await surface.deleteAgentSession(
+      workspace,
+      session.agent,
+      session.id,
     );
     latest.set(workspace, (latest.get(workspace) ?? 0) + 1);
     set((state) => ({

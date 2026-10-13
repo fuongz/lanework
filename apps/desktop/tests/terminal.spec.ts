@@ -5,8 +5,11 @@ import {
   appendFile,
   mkdir,
   mkdtemp,
+  readdir,
+  readFile,
   realpath,
   rm,
+  stat,
   utimes,
   writeFile,
 } from "node:fs/promises";
@@ -850,7 +853,26 @@ test("an Agents row resumes its conversation in the main view, which outlives le
     const codexRunning = runningGroup.getByRole("button", { name: codexName });
     await codexRunning.click({ button: "right" });
     await expect(page.getByRole("menuitem", { name: "Stop" })).toBeVisible();
+    // FE-57/D4: a running conversation cannot be deleted — off in the menu,
+    // and refused by main whatever the page sends.
+    await expect(
+      page.getByRole("menuitem", { name: "Delete…" }),
+    ).toHaveAttribute("aria-disabled", "true");
     await page.keyboard.press("Escape");
+    expect(
+      await page.evaluate(
+        (id) =>
+          (
+            window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+          ).desktop.terminal
+            .deleteAgentSession("ws-alpha", "codex", id)
+            .then(
+              () => "deleted",
+              (error: Error) => error.message,
+            ),
+        CODEX_ID,
+      ),
+    ).toContain("Stop this conversation before deleting it.");
     await codexRunning.hover();
     const codexActions = codexRunning.locator("xpath=..");
     await expect(
@@ -1036,6 +1058,117 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
     await expect(group().getByRole("button", { name: /^Resume/ })).toHaveCount(
       2,
     );
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("FE-57: an Agents row's transcript is deleted for good from its context menu", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  const claudeDir = join(
+    agentHome,
+    ".claude",
+    "projects",
+    claudeProjectDir(repo),
+  );
+  // Its sub-agents and tool results live in a folder named after it.
+  await mkdir(join(claudeDir, CLAUDE_ID, "subagents"), { recursive: true });
+  await writeFile(join(claudeDir, CLAUDE_ID, "subagents", "x.jsonl"), "{}\n");
+  const codexDay = join(agentHome, ".codex", "sessions", "2026", "09", "26");
+  const gone = (path: string) =>
+    stat(path).then(
+      () => false,
+      () => true,
+    );
+  const app = await boot(profile, home, plane.origin, {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+  });
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const rail = page.locator("nav");
+    const claude = rail.getByRole("button", { name: /in Claude$/ });
+    const codex = rail.getByRole("button", { name: /in Codex$/ });
+    await expect(claude).toHaveAccessibleName(
+      "Resume “Flaky login test” in Claude",
+    );
+
+    // An id this project does not list is refused by main (FE-57).
+    expect(
+      await page.evaluate(() =>
+        (
+          window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+        ).desktop.terminal
+          .deleteAgentSession(
+            "ws-alpha",
+            "claude",
+            "33333333-2222-4333-8444-555555555555",
+          )
+          .then(
+            () => "deleted",
+            (error: Error) => error.message,
+          ),
+      ),
+    ).toContain("not one of this project's");
+    expect(
+      await gone(join(claudeDir, "33333333-2222-4333-8444-555555555555.jsonl")),
+    ).toBe(false);
+
+    // Pinned first, so the mark has to go with it.
+    await claude.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Pin" }).click();
+    await expect(
+      page.getByRole("navigation", { name: "Pinned" }),
+    ).toBeVisible();
+
+    // Cancel keeps everything.
+    await claude.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Delete…" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText("Delete “Flaky login test”?");
+    await expect(dialog).toContainText("claude --resume");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    expect(await gone(join(claudeDir, `${CLAUDE_ID}.jsonl`))).toBe(false);
+
+    await claude.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Delete…" }).click();
+    await dialog.getByRole("button", { name: "Delete" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(claude).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Pinned" })).toHaveCount(
+      0,
+    );
+    expect(await gone(join(claudeDir, `${CLAUDE_ID}.jsonl`))).toBe(true);
+    expect(await gone(join(claudeDir, CLAUDE_ID))).toBe(true);
+    // Its neighbours are not touched.
+    expect(
+      await gone(join(claudeDir, "33333333-2222-4333-8444-555555555555.jsonl")),
+    ).toBe(false);
+    expect(
+      await readFile(join(home, "agent-sessions.json"), "utf8"),
+    ).not.toContain(CLAUDE_ID);
+
+    // Codex: its rollout, and its lines in Codex's own index (FE-57/D3).
+    await codex.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Delete…" }).click();
+    await expect(dialog).toContainText("codex resume");
+    await dialog.getByRole("button", { name: "Delete" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(codex).toHaveCount(0);
+    const left = await readdir(codexDay);
+    expect(left.some((name) => name.includes(CODEX_ID))).toBe(false);
+    expect(left).toContain("rollout-2026-09-26T08-00-00-elsewhere.jsonl");
+    expect(
+      await readFile(join(agentHome, ".codex", "session_index.jsonl"), "utf8"),
+    ).not.toContain(CODEX_ID);
   } finally {
     await app.close();
     await plane.close();
