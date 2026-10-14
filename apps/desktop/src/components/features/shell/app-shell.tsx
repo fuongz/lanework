@@ -24,8 +24,11 @@ import { useLayout } from "#/stores/layout";
 import { terminalShown, useTerminal } from "#/stores/terminal";
 import { AppSidebar } from "./app-sidebar";
 import { CommandPalette } from "./command-palette";
+import { HistoryButtons } from "./history-nav";
 
 const RAIL_DEFAULT_PX = 240;
+/** The rail folded to its icons (FE-58): one 36px slot and its margins. */
+const RAIL_MINI_PX = 56;
 const RAIL_WIDTH_KEY = "lanework:rail-width";
 const RAIL_HIDDEN_KEY = "lanework:rail-hidden";
 /** How long the rail glides when its button, ⌘B or focus mode moves it. */
@@ -94,6 +97,8 @@ export function AppShell() {
   const focusMode = useLayout((state) => state.focusMode);
   const sidebarRef = usePanelRef();
   const railElement = useRef<HTMLDivElement | null>(null);
+  // "Hidden" is the rail FOLDED: since FE-58 that is the mini rail, never
+  // nothing at all.
   const [railHidden, setRailHidden] = useState(false);
   const railWidth = useRef(readRailWidth());
   const glideTimer = useRef<number | undefined>(undefined);
@@ -125,16 +130,57 @@ export function AppShell() {
   const showRail = useCallback(() => {
     sidebarRef.current?.resize(`${railWidth.current}px`);
   }, [sidebarRef]);
-  /** The button beside the window controls, and ⌘B: hide ↔ show (FE-20). */
+  /**
+   * Where a glide by the button, ⌘B or focus mode is headed, while it runs.
+   *
+   * ⚠️ The folded title bar and the rail's content are choreographed around
+   * it, not around the rail's size (FE-58): folding, the title bar starts
+   * growing at once, so the page title slides down under it as the rail
+   * narrows — switched only once the rail reached 56px, the title jumped
+   * left onto the window controls in the last frame. Opening, the open
+   * rail's content shows at once and slides in, while the title bar stays
+   * until the end, so the title never passes under back and forward.
+   */
+  const glideTo = useRef<"mini" | "open" | null>(null);
+  const glideEnd = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(glideEnd.current), []);
+  const setMiniFlag = useCallback((on: boolean) => {
+    if (on) document.documentElement.dataset.railMini = "true";
+    else delete document.documentElement.dataset.railMini;
+  }, []);
+  const foldRail = useCallback(() => {
+    const panel = sidebarRef.current;
+    if (!panel || panel.isCollapsed()) return;
+    glide();
+    glideTo.current = "mini";
+    setMiniFlag(true);
+    window.clearTimeout(glideEnd.current);
+    glideEnd.current = window.setTimeout(() => {
+      glideTo.current = null;
+      setRailHidden(true);
+    }, RAIL_GLIDE_MS);
+    panel.collapse();
+  }, [sidebarRef, glide, setMiniFlag]);
+  const openRail = useCallback(() => {
+    glide();
+    glideTo.current = "open";
+    setRailHidden(false);
+    window.clearTimeout(glideEnd.current);
+    glideEnd.current = window.setTimeout(() => {
+      glideTo.current = null;
+      setMiniFlag(false);
+    }, RAIL_GLIDE_MS);
+    showRail();
+  }, [glide, showRail, setMiniFlag]);
+  /** The sidebar button and ⌘B: fold ↔ open (FE-20, FE-58). */
   const toggleRail = useCallback(() => {
     const panel = sidebarRef.current;
     if (!panel) return;
     const hiding = !panel.isCollapsed();
-    glide();
-    if (hiding) panel.collapse();
-    else showRail();
+    if (hiding) foldRail();
+    else openRail();
     saveRailHidden(hiding);
-  }, [sidebarRef, showRail, glide]);
+  }, [sidebarRef, foldRail, openRail]);
 
   // The rail as it was last LEFT, before the first paint.
   useLayoutEffect(() => {
@@ -214,7 +260,11 @@ export function AppShell() {
       applied = zoom;
       root.style.setProperty("--sidebar-toggle-left", `${94 / zoom}px`);
       root.style.setProperty("--sidebar-toggle-top", `${22 / zoom - 12}px`);
-      root.style.setProperty("--titlebar-reach", `${106 / zoom + 24}px`);
+      // The reach up to where the window's own buttons start; app.css adds
+      // the buttons themselves, which are fewer while the rail is folded.
+      root.style.setProperty("--titlebar-reach-base", `${106 / zoom}px`);
+      // The folded window's title bar, as tall as the controls' line needs.
+      root.style.setProperty("--titlebar-height", `${44 / zoom}px`);
     };
     update();
     window.addEventListener("resize", update);
@@ -259,20 +309,25 @@ export function AppShell() {
     if (!panel) return;
     if (focusMode) {
       railBeforeFocus.current = panel.isCollapsed() ? "hidden" : "shown";
-      if (!panel.isCollapsed()) glide();
-      panel.collapse();
+      foldRail();
     } else if (railBeforeFocus.current) {
-      if (railBeforeFocus.current === "shown") {
-        glide();
-        showRail();
-      }
+      if (railBeforeFocus.current === "shown") openRail();
       railBeforeFocus.current = null;
     }
-  }, [focusMode, sidebarRef, showRail, glide]);
+  }, [focusMode, sidebarRef, foldRail, openRail]);
 
   return (
-    <div className="h-screen overflow-hidden">
+    <div className="flex h-screen flex-col overflow-hidden">
+      {/* ⚠️ Folded (FE-58), the window gets a title bar of its own across its
+          whole width — the window controls, back and forward — and the mini
+          rail and every page start under it, so no header has to step around
+          the controls. Shown by app.css off `data-rail-mini`, macOS only. */}
+      <div
+        aria-hidden="true"
+        className="mini-titlebar window-drag-region bg-sidebar border-sidebar-border shrink-0 border-b"
+      />
       <ResizablePanelGroup
+        className="h-auto min-h-0 flex-1"
         id="lanework:shell"
         defaultLayout={defaultLayout}
         onLayoutChanged={(layout, meta) => {
@@ -312,11 +367,22 @@ export function AppShell() {
           minSize="180px"
           maxSize="380px"
           collapsible
-          collapsedSize="0px"
+          collapsedSize={`${RAIL_MINI_PX}px`}
           groupResizeBehavior="preserve-pixel-size"
-          onResize={(size) => setRailHidden(size.inPixels < 1)}
+          onResize={(size) => {
+            // A glide by the button, ⌘B or focus mode sets these itself, on
+            // its own schedule (`glideTo`); a drag, a launch or a window
+            // resize follows the rail's size.
+            if (glideTo.current) return;
+            const mini = size.inPixels < RAIL_MINI_PX + 1;
+            // ⚠️ Written on the root straight away, not through a render: the
+            // title bar (app.css) follows it, and a re-render would land a
+            // frame after the rail has already moved.
+            setMiniFlag(mini);
+            setRailHidden(mini);
+          }}
         >
-          <AppSidebar />
+          <AppSidebar mini={railHidden} onExpand={toggleRail} />
         </ResizablePanel>
         <ResizableHandle aria-label="Resize sidebar" />
         <ResizablePanel id="main" minSize="40%">
@@ -386,20 +452,27 @@ export function AppShell() {
           drag regions are laid down in document order and a later one wins:
           placed before the rail, the rail's drag strip was laid over it and
           ate every click — which a test's synthetic click never shows. */}
-      <button
-        type="button"
-        onClick={toggleRail}
-        aria-label={railHidden ? "Show sidebar" : "Hide sidebar"}
-        title={`${railHidden ? "Show" : "Hide"} sidebar (⌘B)`}
-        className="sidebar-toggle text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground size-6 place-items-center rounded-md transition-colors duration-150"
-      >
-        <HugeiconsIcon
-          icon={SidebarLeftIcon}
-          className="size-4"
-          strokeWidth={1.6}
-          aria-hidden="true"
-        />
-      </button>
+      <nav aria-label="Window" className="sidebar-nav items-center gap-0.5">
+        <HistoryButtons />
+        {/* Folded, the sidebar button is the mini rail's first slot (FE-58/D5a)
+            and this one is hidden — by app.css, off the same `data-rail-mini`
+            the title bar's clearance reads, so the two never disagree for a
+            frame; back and forward stay here, beside the window controls. */}
+        <button
+          type="button"
+          onClick={toggleRail}
+          aria-label={railHidden ? "Show sidebar" : "Hide sidebar"}
+          title={`${railHidden ? "Show" : "Hide"} sidebar (⌘B)`}
+          className="sidebar-toggle text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground size-6 place-items-center rounded-md transition-colors duration-150"
+        >
+          <HugeiconsIcon
+            icon={SidebarLeftIcon}
+            className="size-4"
+            strokeWidth={1.6}
+            aria-hidden="true"
+          />
+        </button>
+      </nav>
     </div>
   );
 }

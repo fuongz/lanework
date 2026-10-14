@@ -86,7 +86,11 @@ function RunningAgents({ agents }: { agents: TerminalSession[] }) {
  * at the top of the rail, rather than behind a button that only appears when a
  * board is already open.
  */
-export function ProjectSwitcher() {
+/**
+ * `compact`: the mini rail's form (FE-58) — the project's tile alone, its
+ * list opening to the side instead of below.
+ */
+export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [sort, setSort] = useState<ProjectSort>("default");
@@ -156,22 +160,35 @@ export function ProjectSwitcher() {
               // screen-reader user what they are looking at and nothing about
               // what pressing it would do.
               aria-label={`Switch project — currently ${active?.name ?? "none"}`}
-              className="hover:bg-foreground/[0.05] flex h-8 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors duration-150"
+              title={compact ? (active?.name ?? "Choose a project") : undefined}
+              className={
+                compact
+                  ? "hover:bg-foreground/[0.05] grid size-9 shrink-0 place-items-center rounded-lg transition-colors duration-150"
+                  : "hover:bg-foreground/[0.05] flex h-8 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors duration-150"
+              }
             >
               <ProjectTile workspace={active} className="size-6 text-[11px]" />
-              <span className="truncate text-[13px] font-medium">
-                {active?.name ?? "Choose a project"}
-              </span>
-              <HugeiconsIcon
-                icon={UnfoldMoreIcon}
-                className="text-muted-foreground ml-auto size-3.5 shrink-0"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              />
+              {!compact && (
+                <>
+                  <span className="truncate text-[13px] font-medium">
+                    {active?.name ?? "Choose a project"}
+                  </span>
+                  <HugeiconsIcon
+                    icon={UnfoldMoreIcon}
+                    className="text-muted-foreground ml-auto size-3.5 shrink-0"
+                    strokeWidth={1.5}
+                    aria-hidden="true"
+                  />
+                </>
+              )}
             </button>
           }
         />
-        <PopoverContent align="start" className="w-60 gap-0 p-1">
+        <PopoverContent
+          align="start"
+          side={compact ? "right" : undefined}
+          className="w-60 gap-0 p-1"
+        >
           <RailHover className="max-h-80 overflow-y-auto">
             <div
               role="listbox"

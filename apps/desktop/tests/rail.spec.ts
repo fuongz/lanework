@@ -87,6 +87,9 @@ async function menu(app: ElectronApplication, id: string) {
   }, id);
 }
 
+/** The rail folded to its icons (FE-58). */
+const MINI = 56;
+
 const width = async (page: Page) =>
   (await page.getByTestId("sidebar").boundingBox())?.width ?? 0;
 
@@ -122,38 +125,41 @@ test("the sidebar hides and comes back — by its button beside the window contr
       () => document.documentElement.dataset.vibrancy === "true",
     );
 
-    // Dragged shut: gone, not folded to a strip (FE-20, the Codex way).
+    // Dragged shut: folded to its icons, not gone (FE-58/D1a).
     await dragRail(page, -(full - 20));
-    await expect.poll(() => width(page)).toBe(0);
+    await expect.poll(() => width(page)).toBeLessThan(MINI + 1);
+    expect(await width(page)).toBeGreaterThan(MINI - 1);
+    const show = page.getByRole("button", { name: "Show sidebar" });
+    // The way back is the mini rail's first slot (FE-58/D5a)…
+    expect((await show.boundingBox())?.x ?? 99).toBeLessThan(MINI);
     if (vibrancy) {
-      // The way back sits beside the window controls, clear of them — the
-      // current, larger ones end about 79pt in — at Codex's spacing…
-      const show = page.getByRole("button", { name: "Show sidebar" });
-      await expect(show).toHaveAttribute("title", "Show sidebar (⌘B)");
-      expect((await show.boundingBox())?.x ?? 0).toBeGreaterThanOrEqual(90);
-      // …and the header starts clear of both: 12pt after the button.
-      const first = async () =>
+      // …while back and forward stay beside the window controls, clear of
+      // them — the current, larger ones end about 79pt in — at Codex's
+      // spacing…
+      const back = page.getByRole("button", { name: "Go back" });
+      expect((await back.boundingBox())?.x ?? 0).toBeGreaterThanOrEqual(90);
+      // …in the window's own title bar, across its whole width — and the
+      // page starts BELOW it rather than stepping around the controls.
+      const barBottom = () =>
+        page
+          .locator(".mini-titlebar")
+          .evaluate((node) => node.getBoundingClientRect().bottom);
+      const firstTop = async () =>
         (await page.getByRole("heading", { level: 1 }).first().boundingBox())
-          ?.x ?? 0;
-      const button = async () => {
-        const box = await show.boundingBox();
-        return (box?.x ?? 0) + (box?.width ?? 0);
-      };
-      expect(await first()).toBeGreaterThanOrEqual((await button()) + 12);
-      // …on the line the window controls sit on: the lights, the button and
-      // the title share one centre, 22pt down (FE-20, as Codex has it).
+          ?.y ?? 0;
+      // (It grows in on the rail's curve, so read once it has settled.)
+      await expect.poll(barBottom).toBeGreaterThan(30);
+      expect(await firstTop()).toBeGreaterThanOrEqual(await barBottom());
+      // …on the line the window controls sit on, 22pt down (FE-20).
       const middle = async (
         box: Promise<{ y: number; height: number } | null>,
       ) => {
         const b = await box;
         return (b?.y ?? 0) + (b?.height ?? 0) / 2;
       };
-      const across = await middle(show.boundingBox());
+      const across = await middle(back.boundingBox());
       expect(Math.abs(across - 22)).toBeLessThanOrEqual(1);
-      const title = page.getByRole("heading", { level: 1 }).first();
-      expect(
-        Math.abs((await middle(title.boundingBox())) - across),
-      ).toBeLessThanOrEqual(1.5);
+      expect(across).toBeLessThan(await barBottom());
       const lights = await app.evaluate(({ BrowserWindow }) =>
         BrowserWindow.getAllWindows()[0]?.getWindowButtonPosition(),
       );
@@ -165,7 +171,7 @@ test("the sidebar hides and comes back — by its button beside the window contr
       await page.evaluate(() => {
         const w = window as unknown as { __toggleXs: number[] };
         w.__toggleXs = [];
-        const toggle = document.querySelector(".sidebar-toggle");
+        const toggle = document.querySelector(".sidebar-nav");
         window.addEventListener("resize", () =>
           w.__toggleXs.push(toggle?.getBoundingClientRect().left ?? -1),
         );
@@ -192,11 +198,14 @@ test("the sidebar hides and comes back — by its button beside the window contr
         }, factor);
       await zoom(0.9);
       await expect
-        .poll(async () => (await show.boundingBox())?.x ?? 0)
+        .poll(async () => (await back.boundingBox())?.x ?? 0)
         .toBeGreaterThanOrEqual(90 / 0.9);
       await expect
-        .poll(async () => (await first()) - (await button()))
-        .toBeGreaterThanOrEqual(12 / 0.9 - 1);
+        .poll(async () => (await firstTop()) - (await barBottom()))
+        .toBeGreaterThanOrEqual(0);
+      await expect
+        .poll(async () => across - (await barBottom()))
+        .toBeLessThan(0);
       await zoom(1);
 
       // The button brings it back, at the width it was dragged to.
@@ -206,7 +215,9 @@ test("the sidebar hides and comes back — by its button beside the window contr
         page.getByRole("button", { name: "Hide sidebar" }),
       ).toBeVisible();
 
-      // ⚠️ And no frame of hiding it draws the title under the controls.
+      // ⚠️ And no frame of folding it draws the title under the controls:
+      // each frame the title is either clear of them to the right (open) or
+      // below the title bar that holds them (folded).
       // Read where the page is about to paint: in a ResizeObserver on the
       // rail, called in every frame the rail changes size and — made after
       // the shell's own — after the shell has set the header's clearance for
@@ -216,22 +227,23 @@ test("the sidebar hides and comes back — by its button beside the window contr
         const w = window as unknown as { __titleGaps: number[] };
         w.__titleGaps = [];
         const rail = document.querySelector('[data-testid="sidebar"]');
-        const toggle = document.querySelector(".sidebar-toggle");
+        const toggle = document.querySelector(".sidebar-nav");
         const heading = document.querySelector("h1");
         if (!rail || !toggle || !heading) throw new Error("no rail or title");
-        new ResizeObserver(() =>
+        new ResizeObserver(() => {
+          const title = heading.getBoundingClientRect();
+          const nav = toggle.getBoundingClientRect();
           w.__titleGaps.push(
-            heading.getBoundingClientRect().left -
-              toggle.getBoundingClientRect().right,
-          ),
-        ).observe(rail);
+            Math.max(title.left - nav.right, title.top - nav.bottom),
+          );
+        }).observe(rail);
         // Its first call — the rail as it stands — before it is hidden.
         return new Promise((done) =>
           requestAnimationFrame(() => setTimeout(done, 50)),
         );
       });
       await menu(app, "sidebar-toggle");
-      await expect.poll(() => width(page)).toBe(0);
+      await expect.poll(() => width(page)).toBeLessThan(MINI + 1);
       await page.evaluate(
         () =>
           new Promise((done) =>
@@ -243,7 +255,7 @@ test("the sidebar hides and comes back — by its button beside the window contr
       );
       // The first call is the rail as it stood; at least one more is it gone.
       expect(gaps.length).toBeGreaterThan(1);
-      expect(Math.min(...gaps)).toBeGreaterThanOrEqual(12 - 0.5);
+      expect(Math.min(...gaps)).toBeGreaterThanOrEqual(8);
       await menu(app, "sidebar-toggle");
       await expect.poll(() => width(page)).toBeGreaterThan(full - 4);
     } else {
@@ -256,7 +268,7 @@ test("the sidebar hides and comes back — by its button beside the window contr
     await expect.poll(() => width(page)).toBeGreaterThan(full + 40);
     const dragged = await width(page);
     await menu(app, "sidebar-toggle");
-    await expect.poll(() => width(page)).toBe(0);
+    await expect.poll(() => width(page)).toBeLessThan(MINI + 1);
     await menu(app, "sidebar-toggle");
     await expect.poll(() => width(page)).toBeGreaterThan(dragged - 4);
     expect(await width(page)).toBeLessThan(dragged + 4);
@@ -264,14 +276,14 @@ test("the sidebar hides and comes back — by its button beside the window contr
     // ⚠️ Hidden by ⌘B — which the group's own saved layout ignores, since
     // only a drag writes it — and hidden still after a relaunch.
     await menu(app, "sidebar-toggle");
-    await expect.poll(() => width(page)).toBe(0);
+    await expect.poll(() => width(page)).toBeLessThan(MINI + 1);
     await app.close();
     app = await boot();
     page = await app.firstWindow();
     await expect(
       page.getByRole("button", { name: "Switch project — currently Alpha" }),
     ).toBeAttached();
-    await expect.poll(() => width(page)).toBe(0);
+    await expect.poll(() => width(page)).toBeLessThan(MINI + 1);
     await menu(app, "sidebar-toggle");
     await expect.poll(() => width(page)).toBeGreaterThan(dragged - 4);
   } finally {
@@ -456,6 +468,165 @@ test("shared hover follows project, settings, select, filter and issue rows", as
           .evaluate((node) => Number(getComputedStyle(node).opacity)),
       )
       .toBe(0);
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("back and forward move through the window's history like a browser's, from buttons against the rail's right edge", async () => {
+  const { plane, profile, boot } = await seed();
+  const app = await boot();
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    const vibrancy = await page.evaluate(
+      () => document.documentElement.dataset.vibrancy === "true",
+    );
+    test.skip(!vibrancy, "the title-bar buttons are drawn on macOS only");
+    const back = page.getByRole("button", { name: "Go back" });
+    const forward = page.getByRole("button", { name: "Go forward" });
+
+    // One group, flush right in the rail: back, forward, then the sidebar.
+    const nav = await page
+      .getByRole("navigation", { name: "Window" })
+      .boundingBox();
+    const rail = await page.getByTestId("sidebar").boundingBox();
+    expect(
+      Math.abs(
+        (rail?.x ?? 0) +
+          (rail?.width ?? 0) -
+          10 -
+          ((nav?.x ?? 0) + (nav?.width ?? 0)),
+      ),
+    ).toBeLessThanOrEqual(1);
+    const xs = await Promise.all(
+      [back, forward, page.getByRole("button", { name: "Hide sidebar" })].map(
+        async (button) => (await button.boundingBox())?.x ?? 0,
+      ),
+    );
+    expect([...xs].sort((a, b) => a - b)).toEqual(xs);
+
+    // Forward needs somewhere to go: nothing ahead yet.
+    await expect(forward).toBeDisabled();
+    await page.getByText("Card number 1", { exact: true }).click();
+    await expect.poll(() => page.url()).toContain("/issues/FE-01");
+    await expect(forward).toBeDisabled();
+
+    await back.click();
+    await expect.poll(() => page.url()).toMatch(/\/issues(\?.*)?$/);
+    await expect(forward).toBeEnabled();
+    await forward.click();
+    await expect.poll(() => page.url()).toContain("/issues/FE-01");
+    await expect(forward).toBeDisabled();
+
+    // A new navigation drops what was ahead, as a browser does.
+    await back.click();
+    await expect(forward).toBeEnabled();
+    await page.getByText("Card number 2", { exact: true }).click();
+    await expect.poll(() => page.url()).toContain("/issues/FE-02");
+    await expect(forward).toBeDisabled();
+    await expect(back).toBeEnabled();
+    await page.screenshot({
+      path: "../../.agents/artifacts/test-results/history-nav.png",
+      clip: { x: 0, y: 0, width: 420, height: 60 },
+    });
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("folded, the rail keeps every destination as an icon — named, lit when open, reachable by Tab — and its first slot opens it", async () => {
+  const { plane, profile, boot } = await seed();
+  const app = await boot();
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    await menu(app, "sidebar-toggle");
+    await expect.poll(() => width(page)).toBeLessThan(MINI + 1);
+    const rail = page.getByTestId("sidebar");
+
+    // D2: every slot, top to bottom, by the name its open row has.
+    const names = [
+      "Show sidebar",
+      "Switch project — currently Alpha",
+      "New issue",
+      "Search",
+      "Issues",
+      "Changes",
+      "History",
+      "Pull requests",
+      "Settings",
+    ];
+    const ys: number[] = [];
+    for (const name of names) {
+      const slot = rail.getByRole(
+        /^(Issues|Changes|History|Pull requests|Settings)$/.test(name)
+          ? "link"
+          : "button",
+        { name, exact: true },
+      );
+      await expect(slot).toBeVisible();
+      const box = await slot.boundingBox();
+      expect((box?.x ?? 99) + (box?.width ?? 0)).toBeLessThanOrEqual(MINI);
+      ys.push(box?.y ?? 0);
+    }
+    expect([...ys].sort((a, b) => a - b)).toEqual(ys);
+    // …all of them drawn: the column fills the rail's height, and the last
+    // slot sits inside the window, not in a sliver that scrolls.
+    const railBox = await rail.boundingBox();
+    const column = await rail.locator(".app-sidebar").boundingBox();
+    expect(column?.height ?? 0).toBeGreaterThan((railBox?.height ?? 0) - 2);
+    const settings = await rail
+      .getByRole("link", { name: "Settings", exact: true })
+      .boundingBox();
+    const viewport =
+      page.viewportSize() ??
+      (await page.evaluate(() => ({ width: innerWidth, height: innerHeight })));
+    expect((settings?.y ?? 0) + (settings?.height ?? 0)).toBeLessThanOrEqual(
+      viewport.height,
+    );
+    // The quota bars and the local-mode card are the open rail's only.
+    await expect(rail.getByText("Settings", { exact: true })).toHaveCount(0);
+
+    // V2: a slot goes where its row does, and the open page is lit.
+    const issues = rail.getByRole("link", { name: "Issues", exact: true });
+    await expect(issues).toHaveAttribute("aria-current", "page");
+    const history = rail.getByRole("link", { name: "History", exact: true });
+    await history.click();
+    await expect.poll(() => page.url()).toContain("/w/alpha/history");
+    await expect(history).toHaveAttribute("aria-current", "page");
+    await expect(issues).not.toHaveAttribute("aria-current", "page");
+
+    // Named on hover, with the shortcut.
+    await rail.getByRole("button", { name: "Search", exact: true }).hover();
+    const tip = page.locator('[data-slot="tooltip-content"]');
+    await expect(tip).toContainText("Search");
+    await expect(tip).toContainText("⌘K");
+
+    // Reachable from the keyboard, in order.
+    await rail.getByRole("button", { name: "New issue", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await expect(
+      rail.getByRole("button", { name: "Search", exact: true }),
+    ).toBeFocused();
+
+    await page.screenshot({
+      path: "../../.agents/artifacts/test-results/mini-rail.png",
+      clip: { x: 0, y: 0, width: 420, height: 520 },
+    });
+
+    // Its first slot opens it again.
+    await rail
+      .getByRole("button", { name: "Show sidebar", exact: true })
+      .click();
+    await expect.poll(() => width(page)).toBeGreaterThan(180);
+    await expect(
+      page.getByRole("button", { name: "Hide sidebar" }),
+    ).toBeVisible();
   } finally {
     await app.close();
     await plane.close();

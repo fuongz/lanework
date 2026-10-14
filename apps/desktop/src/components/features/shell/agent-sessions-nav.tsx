@@ -7,6 +7,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type {
@@ -283,9 +284,15 @@ export function AgentSessionsNav({
   hasFolder,
   row,
   active: activeClass,
+  mini = false,
 }: {
   workspace: string;
   slug: string;
+  /**
+   * The folded rail's form (FE-58): one icon per agent — running, then
+   * pinned, then the most recent idle ones — and no sub-agents.
+   */
+  mini?: boolean;
   /** Whether this project has a folder here, so a new agent has somewhere to run. */
   hasFolder: boolean;
   /** The rail's row classes, so these read as its rows. */
@@ -469,6 +476,99 @@ export function AgentSessionsNav({
     .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
   const rest = idle.filter((session) => session.pinnedAt === null);
   const shown = expanded ? rest : rest.slice(0, FOLDED);
+
+  if (mini) {
+    const slot = (
+      key: string,
+      kind: AgentSession["agent"],
+      label: string,
+      tip: string,
+      state: "working" | "running" | null,
+      current: boolean,
+      onClick: () => void,
+    ) => (
+      <Tooltip key={key}>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              onClick={onClick}
+              aria-label={label}
+              aria-current={current ? "page" : undefined}
+              aria-busy={state === "working" || undefined}
+              className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] aria-[current]:bg-foreground/[0.08] aria-[current]:text-foreground relative grid size-9 shrink-0 place-items-center rounded-lg transition-colors duration-150"
+            />
+          }
+        >
+          <TerminalKindIcon kind={kind} className="size-4" />
+          {state && (
+            <span
+              aria-hidden="true"
+              className={`ring-sidebar absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ${state === "working" ? "bg-tone-sky animate-pulse" : "bg-tone-emerald"}`}
+            />
+          )}
+        </TooltipTrigger>
+        <TooltipContent side="right" className="max-w-56">
+          {tip}
+        </TooltipContent>
+      </Tooltip>
+    );
+    const sessionSlot = (session: AgentSession) => {
+      const agent = TERMINAL_KIND_LABELS[session.agent];
+      const working = isWorking(session);
+      const terminal = runningFor(session);
+      return slot(
+        agentKey(session),
+        session.agent,
+        `Resume “${session.title}” in ${agent}`,
+        `${session.title} — ${agent}, ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}`,
+        working ? "working" : terminal ? "running" : null,
+        onScreen?.resume === session.id && onScreen.kind === session.agent,
+        () => void resume(workspace, session).then(go),
+      );
+    };
+    const slotGroups: [string, ReactNode[]][] = [
+      [
+        "running",
+        [
+          ...fresh.map((entry) => {
+            const agent = TERMINAL_KIND_LABELS[entry.kind];
+            return slot(
+              entry.id,
+              entry.kind as AgentSession["agent"],
+              `Open new ${agent} session`,
+              `New ${agent} session — running`,
+              "running",
+              entry.id === terminalId,
+              () => go(entry),
+            );
+          }),
+          ...inRunning.map(sessionSlot),
+        ],
+      ],
+      ["pinned", pinned.map(sessionSlot)],
+      ["recent", rest.slice(0, FOLDED).map(sessionSlot)],
+    ];
+    const groups = slotGroups.filter(([, group]) => group.length > 0);
+    if (groups.length === 0) return null;
+    return (
+      <TooltipProvider delay={300}>
+        <nav aria-label="Agents" className="flex flex-col items-center gap-1">
+          {groups.map(([name, group], index) => (
+            <Fragment key={name}>
+              {index > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="bg-foreground/10 my-0.5 h-px w-5"
+                />
+              )}
+              {group}
+            </Fragment>
+          ))}
+        </nav>
+      </TooltipProvider>
+    );
+  }
 
   const sessionRow = (session: AgentSession, inPinned = false) => {
     const agent = TERMINAL_KIND_LABELS[session.agent];

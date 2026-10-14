@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 // The terminal panel end to end, with real shells in the real pty host
 // (FE-19 V2). What these pin is the reason the host exists: a shell outlives
 // every view of it — a hidden panel, another project, a reloaded window.
@@ -2572,6 +2573,124 @@ test("FE-34: a group with no recommendation can only be reviewed in session — 
     expect(await spawn("shell", null, { card: "FE-43", mode: "work" })).toMatch(
       /A card starts a new agent/,
     );
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
+
+test("folded, the window gets a title bar and the rail shows each agent as an icon, without its sub-agents", async () => {
+  const plane = await startStubPlane({ workspaces });
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const { profile, home, repo } = await seedProfile(plane.origin);
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  const claudeDir = join(
+    agentHome,
+    ".claude",
+    "projects",
+    claudeProjectDir(repo),
+  );
+  await mkdir(join(claudeDir, CLAUDE_ID, "subagents"), { recursive: true });
+  await writeFile(join(claudeDir, CLAUDE_ID, "subagents", "x.jsonl"), "{}\n");
+  // A real repository, so Changes and History draw their own headers.
+  for (const args of [
+    ["init", "-q", "-b", "main"],
+    [
+      "-c",
+      "user.email=t@example.com",
+      "-c",
+      "user.name=T",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "first",
+    ],
+  ])
+    execFileSync("git", args, { cwd: repo });
+  await writeFile(join(repo, "notes.md"), "changed\n");
+  const env = {
+    LANEWORK_TEST_AGENT_HOME: agentHome,
+    LANEWORK_TERMINAL_AGENTS: "claude,codex",
+  };
+  const app = await boot(profile, home, plane.origin, env);
+  try {
+    const page = await app.firstWindow();
+    await switchTo(page, "Alpha");
+    await expect(
+      page.locator("nav").getByRole("button", { name: /in Claude$/ }),
+    ).toBeVisible();
+    // Folded, the way ⌘B does it.
+    await app.evaluate(({ Menu }) => {
+      Menu.getApplicationMenu()?.getMenuItemById("sidebar-toggle")?.click();
+    });
+    const rail = page.getByTestId("sidebar");
+    await expect
+      .poll(async () => (await rail.boundingBox())?.width ?? 0)
+      .toBeLessThan(57);
+
+    const agents = rail.getByRole("navigation", { name: "Agents" });
+    const claude = agents.getByRole("button", {
+      name: "Resume “Flaky login test” in Claude",
+    });
+    await expect(claude).toBeVisible();
+    await expect(
+      agents.getByRole("button", { name: /in Codex$/ }),
+    ).toBeVisible();
+    const box = await claude.boundingBox();
+    expect((box?.x ?? 99) + (box?.width ?? 0)).toBeLessThanOrEqual(56);
+    // No sub-agent rows: those are the open rail's.
+    await expect(
+      rail.getByRole("button", { name: /a sub-agent of/ }),
+    ).toHaveCount(0);
+
+    // Folded, the window has a title bar of its own across its width (macOS),
+    // holding back and forward; every page starts under it rather than
+    // stepping around the window controls.
+    const bar = async () =>
+      page.locator(".mini-titlebar").evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return box.height > 0 ? box.bottom : 0;
+      });
+    const vibrancy = await page.evaluate(
+      () => document.documentElement.dataset.vibrancy === "true",
+    );
+    if (vibrancy) {
+      // It grows in; read it once it has.
+      await expect.poll(bar).toBeGreaterThan(30);
+      const back = await page
+        .getByRole("button", { name: "Go back" })
+        .boundingBox();
+      expect((back?.y ?? 99) + (back?.height ?? 0)).toBeLessThanOrEqual(
+        await bar(),
+      );
+    }
+    const below = async (target: import("@playwright/test").Locator) => {
+      await expect(target).toBeVisible();
+      await expect
+        .poll(
+          async () => ((await target.boundingBox())?.y ?? 0) - (await bar()),
+        )
+        .toBeGreaterThanOrEqual(0);
+      const box = await target.boundingBox();
+      expect(box?.x ?? 0).toBeGreaterThanOrEqual(56);
+    };
+    await below(page.getByRole("heading", { level: 1 }).first());
+    await rail.getByRole("link", { name: "Changes", exact: true }).click();
+    await below(page.getByText("Changes", { exact: true }).last());
+    await rail.getByRole("link", { name: "History", exact: true }).click();
+    await below(page.getByPlaceholder(/Search commits/));
+    await rail
+      .getByRole("link", { name: "Pull requests", exact: true })
+      .click();
+    await below(page.getByRole("heading", { level: 2 }).first());
+    await page.screenshot({
+      path: "../../.agents/artifacts/test-results/mini-agents.png",
+      clip: { x: 0, y: 0, width: 420, height: 760 },
+    });
   } finally {
     await app.close();
     await plane.close();

@@ -249,8 +249,10 @@ export function RepoPicker({
       </Empty>
     );
 
+  // ⚠️ Fills the panel: the list takes what is left and scrolls on its own,
+  // so the owner, the search and "Missing a repository?" stay in view.
   return (
-    <div className="flex min-h-0 flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       <Select
         value={selected ?? undefined}
         onValueChange={(value) => {
@@ -260,7 +262,7 @@ export function RepoPicker({
           setQuery("");
         }}
       >
-        <SelectTrigger size="sm" className="w-full" aria-label="Owner">
+        <SelectTrigger className="w-full" aria-label="Owner">
           <SelectValue placeholder="Owner" />
         </SelectTrigger>
         <SelectContent>
@@ -294,7 +296,7 @@ export function RepoPicker({
       {shown.length > 0 ? (
         <ul
           className={cn(
-            "-mx-1 max-h-56 min-h-0 overflow-y-auto px-1",
+            "-mx-1 min-h-0 flex-1 overflow-y-auto px-1",
             busy && "pointer-events-none",
           )}
         >
@@ -344,7 +346,7 @@ export function RepoPicker({
       )}
 
       {shown.length > 0 && (
-        <div className="flex items-center justify-between gap-2 pt-0.5">
+        <div className="flex shrink-0 items-center justify-between gap-2 pt-0.5">
           <span className="text-muted-foreground text-[11px]">
             Missing a repository?
           </span>

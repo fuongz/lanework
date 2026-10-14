@@ -5,9 +5,9 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import { RepoPicker } from "#/components/shared/pulls/repo-picker";
 import { Button } from "#/components/ui/button";
 import { usePulls } from "#/stores/pulls";
+import { RepoPicker } from "./repo-picker";
 
 /**
  * The two steps before there is anything to list: connect GitHub, then say
@@ -118,7 +118,7 @@ export function ConnectPanel() {
     );
 
   return (
-    <div className="flex min-h-0 flex-col gap-3 p-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
       <h2 className="text-[13px] font-medium">Connect a repository</h2>
       <p className="text-muted-foreground text-xs/relaxed">
         One repository per project. Connected as @{account.login}.

@@ -10,7 +10,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { LocalModeRail } from "#/components/shared/auth/local-mode";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
@@ -25,6 +25,7 @@ import { useSession } from "#/stores/session";
 import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
 import { BranchSwitcher } from "./branch-switcher";
+import { MiniRail } from "./mini-rail";
 import { ProjectSwitcher } from "./project-switcher";
 
 /**
@@ -60,7 +61,17 @@ function SectionLabel({
   );
 }
 
-export function AppSidebar() {
+/**
+ * `mini`: the rail folded to its icons (FE-58); `onExpand` opens it again —
+ * from its sidebar button, or from Agents, whose list only reads open.
+ */
+export function AppSidebar({
+  mini = false,
+  onExpand,
+}: {
+  mini?: boolean;
+  onExpand?: () => void;
+} = {}) {
   // ⚠️ Read from the URL, not from the store. The rail has to draw correctly on
   // the very first paint of a deep link, before anything has been fetched — and
   // the URL is the only thing that is already true at that moment.
@@ -145,8 +156,43 @@ export function AppSidebar() {
       ? (session.principal.userId ?? "")
       : "";
 
+  // ⚠️ Swapping between the open rail and the icons fades the new one in,
+  // so the swap reads as part of the glide; the first paint, at launch,
+  // does not fade.
+  // Worked out while rendering, not in an effect: a flag set after the swap
+  // would draw the new rail fully once, then start its fade from nothing.
+  const firstMini = useRef(mini);
+  const swappedOnce = useRef(false);
+  if (mini !== firstMini.current) swappedOnce.current = true;
+  const swapped = swappedOnce.current;
+
+  if (mini)
+    return (
+      <MiniRail
+        slug={slug}
+        accountSeed={accountSeed}
+        projectSwitcher={<ProjectSwitcher compact />}
+        agents={
+          workspaceKey && slug ? (
+            <AgentSessionsNav
+              workspace={workspaceKey}
+              slug={slug}
+              hasFolder={hasFolder}
+              row={ROW}
+              active={ACTIVE.className}
+              mini
+            />
+          ) : null
+        }
+        onExpand={() => onExpand?.()}
+        appear={swapped}
+      />
+    );
+
   return (
-    <aside className="app-sidebar flex min-h-0 flex-1 flex-col px-2.5">
+    <aside
+      className={`app-sidebar flex min-h-0 flex-1 flex-col px-2.5 ${swapped ? "motion-safe:animate-in motion-safe:fade-in-0 duration-200" : ""}`}
+    >
       {/* Clears the native traffic lights and gives the window a drag handle. */}
       <div className="app-sidebar-titlebar shrink-0" aria-hidden="true" />
       <div className="mt-2 shrink-0">

@@ -521,6 +521,11 @@
   [data-rail-gliding] .app-sidebar {
     min-width: var(--rail-w);
   }
+  /* …but the mini rail (FE-58) is its own narrow column: pinned at the full
+     width its icons would sit off-centre for the whole glide. */
+  [data-rail-gliding] .app-sidebar[data-mini] {
+    min-width: 0;
+  }
   @media (prefers-reduced-motion: reduce) {
     [data-rail-gliding] > [data-panel] {
       transition: none;
@@ -538,22 +543,74 @@
      ⚠️ And from the ZOOM: the controls sit at fixed points while the page
      zooms, so `--titlebar-reach` is set in CSS px by the shell. */
   html[data-vibrancy="true"] {
+    /* Back, forward and the sidebar button: 3 × 24px and two 2px gaps; folded
+       (FE-58) the sidebar button moves into the mini rail and two remain. */
+    --sidebar-nav-width: 76px;
+    --titlebar-reach: calc(
+      var(--titlebar-reach-base, 106px) +
+      var(--sidebar-nav-width)
+    );
     --titlebar-clear: max(
       0px,
       calc(var(--titlebar-reach, 130px) - var(--rail-width, 240px))
     );
   }
-  /* The sidebar button (FE-20), beside the window controls — so macOS only.
-     Its display lives HERE, not in a utility: a `grid` class would outrank
-     this `none` and draw it on every platform. */
-  .sidebar-toggle {
+  /* The window's own buttons — back, forward and the sidebar (FE-20) — in
+     the title bar beside the window controls, so macOS only. The group's
+     display lives HERE, not in a utility: a `flex` class would outrank this
+     `none` and draw it on every platform. */
+  .sidebar-nav {
     display: none;
   }
-  html[data-vibrancy="true"] .sidebar-toggle {
+  /* Back, forward and the sidebar button, as one group: against the rail's
+     right edge while it shows, beside the window controls once it is hidden
+     (or too narrow to hold them clear of the lights). 76px is the group —
+     three 24px buttons and two 2px gaps — and 10px the rail's inset. */
+  /* Folded (FE-58): the window's own title bar takes the controls and back
+     and forward, and every header starts below it — nothing to clear. */
+  html[data-vibrancy="true"][data-rail-mini="true"] {
+    --sidebar-nav-width: 50px;
+    --titlebar-clear: 0px;
+  }
+  .mini-titlebar {
+    display: none;
+  }
+  /* ⚠️ It GROWS in rather than appearing: shown in one frame it pushed every
+     page down 44px at once, which read as a jolt next to the rail's glide.
+     ⚠️ Quicker than the rail (160ms to its 240): on the same curve the title
+     was still on the controls' line when the narrowing rail brought it under
+     back and forward. Grown first, the title is already below them. */
+  html[data-vibrancy="true"] .mini-titlebar {
+    display: block;
+    height: 0;
+    overflow: hidden;
+    border-bottom-width: 0;
+    transition: height 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  html[data-vibrancy="true"][data-rail-mini="true"] .mini-titlebar {
+    height: var(--titlebar-height, 44px);
+    border-bottom-width: 1px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html[data-vibrancy="true"] .mini-titlebar {
+      transition: none;
+    }
+  }
+  /* Its display here too, for the same reason as the group's. */
+  .sidebar-nav .sidebar-toggle {
     display: grid;
+  }
+  html[data-rail-mini="true"] .sidebar-nav .sidebar-toggle {
+    display: none;
+  }
+  html[data-vibrancy="true"] .sidebar-nav {
+    display: flex;
     position: fixed;
     z-index: 60;
-    left: var(--sidebar-toggle-left, 94px);
+    left: max(
+      var(--sidebar-toggle-left, 94px),
+      calc(var(--rail-width, 240px) - 76px - 10px)
+    );
     top: var(--sidebar-toggle-top, 10px);
     app-region: no-drag;
   }
