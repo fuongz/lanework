@@ -1,12 +1,7 @@
-import {
-  ArrowDown01Icon,
-  ArrowUp01Icon,
-  Undo02Icon,
-} from "@hugeicons/core-free-icons";
+import { Undo02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useMemo, useState } from "react";
 import { type LoadSides, PatchView } from "#/components/shared/diff/patch-view";
-import { DiffToolbar } from "#/components/shared/repo/diff-toolbar";
 import { RestoreDialog } from "#/components/shared/repo/restore-dialog";
 import { StageBox } from "#/components/shared/repo/stage-box";
 import { Button } from "#/components/ui/button";
@@ -38,20 +33,12 @@ export function ChangesDiff({
   const patchError = useWorktree((state) => state.patchError);
   const diffStyle = useWorktree((state) => state.diffStyle);
   const focus = useWorktree((state) => state.focus);
-  const focusFile = useWorktree((state) => state.focusFile);
-  const stage = useWorktree((state) => state.stage);
-  const unstage = useWorktree((state) => state.unstage);
-  const busy = useWorktree((state) => state.busy);
   const [restoring, setRestoring] = useState<WorktreeFile[] | null>(null);
 
   const byPath = useMemo(
     () => new Map(files.map((file) => [file.path, file])),
     [files],
   );
-  const additions = files.reduce((sum, file) => sum + file.additions, 0);
-  const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
-  const current = focus ? byPath.get(focus.path) : undefined;
-  const index = current ? files.indexOf(current) : -1;
 
   /**
    * ⚠️ The old side is HEAD's copy and the new side is the file on disk — what
@@ -112,11 +99,6 @@ export function ChangesDiff({
   );
 
   const counts = byPath;
-  const step = (delta: number) => {
-    if (!files.length) return;
-    const next = files[(index + delta + files.length) % files.length];
-    if (next) focusFile(next.path);
-  };
 
   const notes =
     patchError || (patch?.skipped ?? 0) > 0 ? (
@@ -130,50 +112,6 @@ export function ChangesDiff({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <DiffToolbar additions={additions} deletions={deletions}>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Previous file"
-          title="Previous file"
-          disabled={files.length < 2}
-          onClick={() => step(-1)}
-        >
-          <HugeiconsIcon
-            icon={ArrowUp01Icon}
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Next file"
-          title="Next file"
-          disabled={files.length < 2}
-          onClick={() => step(1)}
-        >
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        </Button>
-        {current && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy !== null}
-            onClick={() =>
-              void (current.staged === "full"
-                ? unstage([current.path])
-                : stage([current.path]))
-            }
-          >
-            {current.staged === "full" ? "Unstage" : "Stage"}
-          </Button>
-        )}
-      </DiffToolbar>
       {patch === null && !patchError ? (
         <p className="text-muted-foreground p-4 text-xs">Reading the diff…</p>
       ) : (

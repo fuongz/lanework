@@ -8,11 +8,11 @@ import { useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { type LoadSides, PatchView } from "#/components/shared/diff/patch-view";
-import { DiffToolbar } from "#/components/shared/repo/diff-toolbar";
 import { RepoMessage } from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
 import { useWorktree } from "#/stores/worktree";
 import type { CommitSummary } from "../../../../shared/worktree";
+import { DiffToolbar } from "./diff-toolbar";
 
 const api = () => {
   const surface = window.desktop?.worktree;
@@ -64,7 +64,7 @@ function CopySha({ sha }: { sha: string }) {
 
 function CommitHeader({ commit }: { commit: CommitSummary }) {
   return (
-    <header className="window-drag-region border-sidebar-border flex gap-3 border-b px-4 py-3">
+    <header className="border-sidebar-border flex gap-3 border-b px-4 py-3">
       <AccountOrb seed={commit.authorEmail} className="size-9" />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 items-start gap-2">

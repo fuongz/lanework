@@ -1384,9 +1384,11 @@ test("the files panel starts under the title row, not beside it", async () => {
     if (panelBox === null || listBox === null || header === null)
       throw new Error("no box");
 
-    expect(panelBox.y).toBeGreaterThan(listBox.y);
-    // Below the title row, and the tab control sits in that row.
-    expect(panelBox.y).toBeGreaterThan(header.y);
+    // The title row is the WINDOW's title bar now (FE-58), above the whole
+    // card, so the tree starts at the card's top — level with the list, and
+    // below the row the tab control sits in.
+    expect(Math.abs(panelBox.y - listBox.y)).toBeLessThanOrEqual(1);
+    expect(panelBox.y).toBeGreaterThan(header.y + header.height);
     // ⚠️ And it runs the full height of the DIFF beside it — it is a column of
     // the detail pane, not a box floating inside the diff. It stops where the
     // review footer starts, because that footer spans both: approving is about

@@ -9,7 +9,7 @@ import {
 } from "#/components/ui/resizable";
 import { useWorktree } from "#/stores/worktree";
 import { ChangesDiff } from "./changes-diff";
-import { ChangesList } from "./changes-list";
+import { ChangesList, ChangesTitlebar } from "./changes-list";
 import { CommitBox } from "./commit-box";
 
 /**
@@ -43,18 +43,35 @@ export function ChangesLayout() {
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
+  // ⚠️ The title bar is drawn in every state (FE-58), so the screen keeps its
+  // name while the repository is read, and when it is not one.
+  const title = (
+    <ChangesTitlebar files={state?.kind === "ready" ? state.files : []} />
+  );
+
   if (!state)
-    return error ? (
-      <RepoMessage
-        title="The repository could not be read"
-        description={error}
-      />
-    ) : (
-      <p className="text-muted-foreground p-4 text-xs">
-        Reading the repository…
-      </p>
+    return (
+      <>
+        {title}
+        {error ? (
+          <RepoMessage
+            title="The repository could not be read"
+            description={error}
+          />
+        ) : (
+          <p className="text-muted-foreground p-4 text-xs">
+            Reading the repository…
+          </p>
+        )}
+      </>
     );
-  if (state.kind !== "ready") return <RepoEmpty state={state} />;
+  if (state.kind !== "ready")
+    return (
+      <>
+        {title}
+        <RepoEmpty state={state} />
+      </>
+    );
 
   return (
     <ResizablePanelGroup
@@ -73,6 +90,7 @@ export function ChangesLayout() {
           aria-label="Changed files"
           className="bg-sidebar flex h-full min-h-0 flex-col"
         >
+          {title}
           {state.files.length ? (
             <ChangesList files={state.files} />
           ) : (

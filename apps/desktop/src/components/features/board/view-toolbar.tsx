@@ -13,6 +13,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "#/components/shared/navigation/select";
+import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
 import { Button } from "#/components/ui/button";
 import {
   Tooltip,
@@ -127,95 +131,102 @@ export function ViewToolbar({
   const reload = useBoard((state) => state.reload);
 
   return (
-    <div className="window-drag-region border-border flex shrink-0 flex-col gap-2 border-b pe-6 ps-[max(1.5rem,var(--titlebar-clear,0px))] pt-2 pb-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
-        {/* ⚠️ Beside the title, not with the controls on the right. "Group"
+    // ⚠️ The whole toolbar — title, view, filters, grouping, refresh — lives
+    // in the WINDOW's title bar (FE-58), the way Codex has it, so the card
+    // starts with the issues.
+    <WindowTitlebar>
+      <h1 className={WINDOW_TITLE}>{title}</h1>
+      {/* ⚠️ Beside the title, not with the controls on the right. "Group"
             only exists on the list, so on the right the switch jumped sideways
             by that select's width every time it was pressed — the one control
             that must not move is the one you just clicked. */}
-        <div className="mr-auto">
-          <ViewSwitch search={search} onSearch={onSearch} />
-        </div>
+      <div className="shrink-0">
+        <ViewSwitch search={search} onSearch={onSearch} />
+      </div>
+      {/* ⚠️ One row that never wraps: the bar is 44px tall. Many chips
+            scroll sideways inside this strip instead of pushing Group and
+            Refresh out of the window. */}
+      <FilterBar
+        search={search}
+        onSearch={onSearch}
+        className="mr-auto min-w-0 flex-1 flex-nowrap overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0"
+      />
 
-        {grouping && (
-          <Select
-            value={search.group ?? "status"}
-            onValueChange={(value) =>
-              onSearch({ ...search, group: value as GroupBy })
-            }
-          >
-            {/* ⚠️ `size="default"` is what makes this 28px. The `sm` variant
+      {grouping && (
+        <Select
+          value={search.group ?? "status"}
+          onValueChange={(value) =>
+            onSearch({ ...search, group: value as GroupBy })
+          }
+        >
+          {/* ⚠️ `size="default"` is what makes this 28px. The `sm` variant
                 sets its height through a `data-[size=sm]` variant, which a
                 plain `h-7` in `className` cannot override — the trigger stayed
                 24px beside a 28px Filter button, and the two read as different
                 kinds of control. */}
-            <SelectTrigger
-              size="default"
-              aria-label="Group by"
-              className="gap-1.5 text-xs"
-            >
-              <span className="text-muted-foreground">Group</span>
-              {/* ⚠️ A formatter, not a bare `SelectValue`. Left to itself it
+          <SelectTrigger
+            size="default"
+            aria-label="Group by"
+            className="gap-1.5 text-xs"
+          >
+            <span className="text-muted-foreground">Group</span>
+            {/* ⚠️ A formatter, not a bare `SelectValue`. Left to itself it
                   renders the item's VALUE — the trigger read "status" where the
                   menu it opens says "Status". */}
-              <SelectValue>
-                {(value: string) => GROUP_LABEL[value as GroupBy] ?? value}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {GROUP_BY.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {GROUP_LABEL[option]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+            <SelectValue>
+              {(value: string) => GROUP_LABEL[value as GroupBy] ?? value}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {GROUP_BY.map((option) => (
+              <SelectItem key={option} value={option}>
+                {GROUP_LABEL[option]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
 
-        <FilterBar search={search} onSearch={onSearch} />
-
-        {/* ⚠️ The freshness lives in the TOOLTIP now, and in the button's name
+      {/* ⚠️ The freshness lives in the TOOLTIP now, and in the button's name
             for anybody who cannot hover. A SAVED copy still marks the button
             itself — the one state that must not wait for a hover to be seen. */}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative size-7"
-                aria-label={
-                  view
-                    ? `Refresh board — ${view.stale ? "Saved copy" : "Live"}, ${when(view.fetchedAt)}`
-                    : "Refresh board"
-                }
-                disabled={loading}
-                onClick={() => void reload()}
-              />
-            }
-          >
-            <HugeiconsIcon
-              icon={Refresh01Icon}
-              className="size-4"
-              strokeWidth={1.5}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative size-7"
+              aria-label={
+                view
+                  ? `Refresh board — ${view.stale ? "Saved copy" : "Live"}, ${when(view.fetchedAt)}`
+                  : "Refresh board"
+              }
+              disabled={loading}
+              onClick={() => void reload()}
             />
-            {view?.stale && (
-              <span
-                aria-hidden="true"
-                className="bg-tone-amber absolute top-1 right-1 size-1.5 rounded-full"
-              />
-            )}
-          </TooltipTrigger>
-          <TooltipContent>
-            {view ? (
-              <Freshness stale={view.stale} at={view.fetchedAt} />
-            ) : (
-              "Refresh board"
-            )}
-          </TooltipContent>
-        </Tooltip>
-      </div>
-    </div>
+          }
+        >
+          <HugeiconsIcon
+            icon={Refresh01Icon}
+            className="size-4"
+            strokeWidth={1.5}
+          />
+          {view?.stale && (
+            <span
+              aria-hidden="true"
+              className="bg-tone-amber absolute top-1 right-1 size-1.5 rounded-full"
+            />
+          )}
+        </TooltipTrigger>
+        <TooltipContent>
+          {view ? (
+            <Freshness stale={view.stale} at={view.fetchedAt} />
+          ) : (
+            "Refresh board"
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </WindowTitlebar>
   );
 }

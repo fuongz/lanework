@@ -27,6 +27,7 @@ import {
   PopoverTrigger,
 } from "#/components/ui/popover";
 import type { IssueSearch } from "#/lib/issue-search";
+import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import {
   activeFilters,
@@ -423,9 +424,11 @@ function FilterChip({
 export function FilterBar({
   search,
   onSearch,
+  className,
 }: {
   search: IssueSearch;
   onSearch: (next: IssueSearch) => void;
+  className?: string;
 }) {
   const view = useBoard((state) => state.view);
   const fields = filterFields(view);
@@ -434,7 +437,7 @@ export function FilterBar({
     onSearch({ ...search, [key]: value });
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
       {active.map(({ field, option }) => (
         <FilterChip
           key={field.key}

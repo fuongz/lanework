@@ -35,6 +35,10 @@ import {
   useTaskOutput,
 } from "#/components/shared/agents/use-background-tasks";
 import { useCopy } from "#/components/shared/common/use-copy";
+import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
 import { WorkingMark } from "#/components/shared/terminal/working-mark";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -220,8 +224,9 @@ function ShellTaskPage({
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
       {stopping.feedback}
-      {/* Lined up with the body's `px-6`, as the sub-agent viewer's is. */}
-      <header className="window-drag-region border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-[max(1.5rem,var(--titlebar-clear,0px))] pe-6">
+      {/* ⚠️ In the window's title bar (FE-58), as the sub-agent viewer's
+          is: the bar drags the window and clears its controls. */}
+      <WindowTitlebar>
         {running ? (
           <span role="img" aria-label="Running" className="flex shrink-0">
             <WorkingMark />
@@ -257,7 +262,7 @@ function ShellTaskPage({
           </>
         )}
         <h1
-          className={`min-w-0 truncate text-[13px] font-medium ${running ? "text-shimmer" : ""}`}
+          className={`${WINDOW_TITLE} ${running ? "text-shimmer" : ""}`}
           title={title}
         >
           {title}
@@ -297,7 +302,7 @@ function ShellTaskPage({
             Stop
           </Button>
         )}
-      </header>
+      </WindowTitlebar>
       {task && <Facts facts={facts} data-testid="task-meta" />}
 
       {!task ? (

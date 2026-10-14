@@ -53,6 +53,10 @@ import {
   SelectValue,
 } from "#/components/shared/navigation/select";
 import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
+import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
@@ -125,20 +129,18 @@ export function IssueDetail() {
   return (
     <div className="flex min-h-0 flex-1">
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* ⚠️ ABOVE the scroller, not sticky inside it. A sticky header is laid
-            out in the scroll container's CONTENT box, which stops where the
-            scrollbar gutter starts — so its `border-b` ended 10px short of the
-            divider and left a notch in the line between the two panes. Out here
-            the bar owns the pane's full width, and the scroll region starts
-            under it instead of running behind it. */}
-        <header className="window-drag-region border-border flex h-11 shrink-0 items-center gap-1 border-b pe-6 ps-[max(1.5rem,var(--titlebar-clear,0px))]">
+        {/* ⚠️ The breadcrumb and the card's actions live in the WINDOW's title
+            bar (FE-58), the way Codex has it, so the pane is the card's body
+            from its first line. Portalled out of this tree, but React still
+            delivers its events through it. */}
+        <WindowTitlebar className="gap-1">
           <Link
             to="/w/$slug/issues"
             params={{ slug }}
             search={{}}
-            className="hover:bg-foreground/[0.05] -ml-2 flex h-7 min-w-0 items-center rounded-md px-2 text-[13px] transition-colors"
+            className="hover:bg-foreground/[0.05] -ml-2 flex h-7 min-w-0 items-center rounded-md px-2 transition-colors"
           >
-            <span className="truncate">{active?.name ?? "Issues"}</span>
+            <span className={WINDOW_TITLE}>{active?.name ?? "Issues"}</span>
           </Link>
           <span className="text-muted-foreground shrink-0 text-[13px]">›</span>
           <span className="text-muted-foreground shrink-0 px-1 font-mono text-xs">
@@ -146,7 +148,7 @@ export function IssueDetail() {
           </span>
           {card && <CardAgentsLine card={card} />}
           {card && <HeaderActions card={card} />}
-        </header>
+        </WindowTitlebar>
         <AlertDialog
           open={blocker.status === "blocked"}
           onOpenChange={(open) => {
@@ -194,9 +196,11 @@ export function IssueDetail() {
         aria-label="Card properties"
         className="border-border flex w-72 shrink-0 flex-col border-l"
       >
-        {/* The rail's own header band, the same height as the one beside it, so
-            the divider between the panels has one unbroken line to draw. */}
-        <header className="window-drag-region border-border flex h-11 shrink-0 items-center gap-1 border-b px-4">
+        {/* The rail's own header band. ⚠️ It stays in the card when the
+            breadcrumb moves to the window's title bar (FE-58): its id and
+            actions belong to this rail, not to the page. Not a drag region
+            any more either — it no longer sits at the window's top edge. */}
+        <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b px-4">
           <span className="text-muted-foreground font-mono text-xs">
             {card?.taskId ?? taskId}
           </span>
@@ -426,7 +430,7 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
 
   const parent = view?.cards.find((entry) => entry.id === card.parentId);
 
-  // Whether the title has scrolled up to the header and is sitting under it.
+  // Whether the title has scrolled up to the pane's top and is sitting there.
   // A marker where the title starts in the page: once it is out of view, the
   // title is stuck. The marker sits ABOVE the title, so the title growing or
   // shrinking cannot move it and flip the answer back.
@@ -459,10 +463,11 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
       )}
       {/* `-mb-5` cancels the article's gap: the marker takes no room. */}
       <div ref={titleMark} aria-hidden="true" className="-mb-5 h-0" />
-      {/* ⚠️ Row two under the header once the page scrolls: the title stays
-          in view, smaller, over frosted glass — the page showing through,
-          blurred, as the app's popovers do. It is its own row rather than
-          part of the header, so the header keeps one height on every
+      {/* ⚠️ Stuck to the top of the pane once the page scrolls — right under
+          the window's title bar since the breadcrumb moved there (FE-58): the
+          title stays in view, smaller, over frosted glass — the page showing
+          through, blurred, as the app's popovers do. It is its own row rather
+          than part of the title bar, so the bar keeps one height on every
           screen. */}
       <div
         data-stuck={stuck || undefined}

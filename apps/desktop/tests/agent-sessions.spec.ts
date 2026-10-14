@@ -2241,7 +2241,11 @@ test("FE-41: the terminal bar shows Codex's usage until each window resets, and 
     const view = page.getByRole("region", {
       name: "Codex — Settings page cleanup",
     });
-    const goal = view.getByTestId("agent-facts");
+    await expect(view).toBeVisible();
+    // The goal is among the header's facts, in the window's title bar (FE-58).
+    const goal = page
+      .locator('[data-slot="window-titlebar"]')
+      .getByTestId("agent-facts");
     await expect(goal).toContainText("Ship the quota bar");
     await expect(goal).toContainText("usage limit");
     await expect(goal).toContainText("363.1K / 500K tokens");

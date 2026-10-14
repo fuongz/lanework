@@ -1,6 +1,10 @@
 import { GitPullRequestIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -17,6 +21,12 @@ export function PullsEmpty() {
 
   return (
     <div className="flex min-w-0 flex-1 items-center justify-center">
+      {/* ⚠️ The screen's name in the title bar (FE-58) only while no pull
+          request is open: the bar holds one header, and `PullDetail` puts the
+          pull request's own there. */}
+      <WindowTitlebar>
+        <h1 className={WINDOW_TITLE}>Pull requests</h1>
+      </WindowTitlebar>
       <Empty className="py-16">
         <EmptyHeader>
           <EmptyMedia variant="icon">

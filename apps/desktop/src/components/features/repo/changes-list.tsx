@@ -1,15 +1,23 @@
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
+  ArrowUp01Icon,
   Folder01Icon,
   FolderOpenIcon,
   RefreshIcon,
+  StretchHorizontalIcon,
+  StretchVerticalIcon,
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMemo, useState } from "react";
+import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { splitPath } from "#/components/shared/diff/diff-file-header";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
+import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
 import {
   buildTree,
   type Folder,
@@ -26,7 +34,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
-import { stagedTally, useWorktree } from "#/stores/worktree";
+import { type DiffStyle, stagedTally, useWorktree } from "#/stores/worktree";
 import type { WorktreeFile } from "../../../../shared/worktree";
 import { ChangeAgents } from "./change-agents";
 
@@ -270,54 +278,74 @@ function Section({
   );
 }
 
-export function ChangesList({ files }: { files: WorktreeFile[] }) {
-  const stage = useWorktree((state) => state.stage);
-  const unstage = useWorktree((state) => state.unstage);
+/**
+ * The screen's header, in the window's title bar (FE-58): its name, what the
+ * working tree adds and removes, and Refresh.
+ *
+ * ⚠️ Drawn by `ChangesLayout`, not by the list: the list is only there while
+ * something changed, and the screen still needs its name — and Refresh — when
+ * nothing has.
+ */
+export function ChangesTitlebar({ files }: { files: WorktreeFile[] }) {
   const refresh = useWorktree((state) => state.refresh);
   const loading = useWorktree((state) => state.loading);
+  const additions = files.reduce((sum, file) => sum + file.additions, 0);
+  const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
+  const stage = useWorktree((state) => state.stage);
+  const unstage = useWorktree((state) => state.unstage);
   const busy = useWorktree((state) => state.busy);
+  const allStaged = files.length > 0 && stagedTally(files) === "full";
+
+  return (
+    <WindowTitlebar>
+      <h1 className={WINDOW_TITLE}>Changes</h1>
+      <Counts additions={additions} deletions={deletions} />
+      {files.length > 0 ? (
+        <ChangesDiffControls files={files} />
+      ) : (
+        <span className="ml-auto" />
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={busy !== null || files.length === 0}
+        onClick={() => {
+          const paths = files.map((file) => file.path);
+          void (allStaged ? unstage(paths) : stage(paths));
+        }}
+      >
+        {allStaged ? "Unstage All" : "Stage All"}
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Refresh changes"
+        title="Refresh"
+        disabled={loading}
+        onClick={() => void refresh()}
+      >
+        <HugeiconsIcon
+          icon={RefreshIcon}
+          strokeWidth={1.8}
+          aria-hidden="true"
+          className={loading ? "animate-spin" : undefined}
+        />
+      </Button>
+    </WindowTitlebar>
+  );
+}
+
+export function ChangesList({ files }: { files: WorktreeFile[] }) {
   const [restoring, setRestoring] = useState<WorktreeFile[] | null>(null);
 
   const tracked = files.filter((file) => file.status !== "untracked");
   const untracked = files.filter((file) => file.status === "untracked");
-  const additions = files.reduce((sum, file) => sum + file.additions, 0);
-  const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
-  const allStaged = stagedTally(files) === "full";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="window-drag-region flex h-10 shrink-0 items-center gap-2 px-3">
-        <span className="text-[13px] font-medium">Changes</span>
-        <Counts additions={additions} deletions={deletions} />
-        <span className="ml-auto" />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Refresh changes"
-          title="Refresh"
-          disabled={loading}
-          onClick={() => void refresh()}
-        >
-          <HugeiconsIcon
-            icon={RefreshIcon}
-            strokeWidth={1.8}
-            aria-hidden="true"
-            className={loading ? "animate-spin" : undefined}
-          />
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy !== null || files.length === 0}
-          onClick={() => {
-            const paths = files.map((file) => file.path);
-            void (allStaged ? unstage(paths) : stage(paths));
-          }}
-        >
-          {allStaged ? "Unstage All" : "Stage All"}
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+      {/* The screen's name, counts, the diff's controls, Stage All and
+          Refresh are all in the title bar — see `ChangesTitlebar`. */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pt-2 pb-2">
         <Section
           title="Tracked"
           files={tracked}
@@ -331,5 +359,91 @@ export function ChangesList({ files }: { files: WorktreeFile[] }) {
       </div>
       <RestoreDialog files={restoring} onClose={() => setRestoring(null)} />
     </div>
+  );
+}
+
+/**
+ * How the diff beside the list is drawn and walked: Split/Unified, the
+ * previous and next file, and staging the one in view. Drawn in the window's
+ * title bar (FE-58) by `ChangesTitlebar`; the screen's +/− is already beside
+ * its name there, so the diff carries no strip of its own.
+ *
+ * ⚠️ Unified by default, with Split one click away — the owner's call, over
+ * FE-22/D4's Split. The choice is remembered per viewer (`readStyle`).
+ */
+export function ChangesDiffControls({ files }: { files: WorktreeFile[] }) {
+  const diffStyle = useWorktree((state) => state.diffStyle);
+  const setDiffStyle = useWorktree((state) => state.setDiffStyle);
+  const focus = useWorktree((state) => state.focus);
+  const focusFile = useWorktree((state) => state.focusFile);
+  const stage = useWorktree((state) => state.stage);
+  const unstage = useWorktree((state) => state.unstage);
+  const busy = useWorktree((state) => state.busy);
+
+  const current = focus
+    ? files.find((file) => file.path === focus.path)
+    : undefined;
+  const index = current ? files.indexOf(current) : -1;
+  const step = (delta: number) => {
+    if (!files.length) return;
+    const next = files[(index + delta + files.length) % files.length];
+    if (next) focusFile(next.path);
+  };
+
+  return (
+    <>
+      <SegmentedControl<DiffStyle>
+        label="Diff layout"
+        value={diffStyle}
+        options={[
+          { value: "split", label: "Split", icon: StretchVerticalIcon },
+          { value: "unified", label: "Unified", icon: StretchHorizontalIcon },
+        ]}
+        onChange={setDiffStyle}
+      />
+      <span className="ml-auto" />
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Previous file"
+        title="Previous file"
+        disabled={files.length < 2}
+        onClick={() => step(-1)}
+      >
+        <HugeiconsIcon
+          icon={ArrowUp01Icon}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Next file"
+        title="Next file"
+        disabled={files.length < 2}
+        onClick={() => step(1)}
+      >
+        <HugeiconsIcon
+          icon={ArrowDown01Icon}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      </Button>
+      {current && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy !== null}
+          onClick={() =>
+            void (current.staged === "full"
+              ? unstage([current.path])
+              : stage([current.path]))
+          }
+        >
+          {current.staged === "full" ? "Unstage" : "Stage"}
+        </Button>
+      )}
+    </>
   );
 }

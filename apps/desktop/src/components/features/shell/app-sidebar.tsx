@@ -62,7 +62,7 @@ function SectionLabel({
 }
 
 /**
- * `mini`: the rail folded to its icons (FE-58); `onExpand` opens it again —
+ * `mini`: the rail folded to its icons (FE-57); `onExpand` opens it again —
  * from its sidebar button, or from Agents, whose list only reads open.
  */
 export function AppSidebar({
@@ -193,8 +193,8 @@ export function AppSidebar({
     <aside
       className={`app-sidebar flex min-h-0 flex-1 flex-col px-2.5 ${swapped ? "motion-safe:animate-in motion-safe:fade-in-0 duration-200" : ""}`}
     >
-      {/* Clears the native traffic lights and gives the window a drag handle. */}
-      <div className="app-sidebar-titlebar shrink-0" aria-hidden="true" />
+      {/* No spacer for the window controls: the window's title bar above the
+          rail holds them, open or folded (FE-58). */}
       <div className="mt-2 shrink-0">
         <ProjectSwitcher />
       </div>
@@ -263,7 +263,7 @@ export function AppSidebar({
               // ⚠️ The filters are cleared on the way in. "Issues" has to mean
               // every issue; a rail entry that silently kept the last category
               // filter would show a board that is missing work with no visible
-              // reason why. The VIEW is kept (FE-13/D5): list or lanes is how
+              // reason why. The VIEW is kept (FE-12/D5): list or lanes is how
               // you read, not what you are looking for.
               search={lastView === "board" ? { view: "board" } : {}}
               className={ROW}
@@ -286,7 +286,7 @@ export function AppSidebar({
           </nav>
         )}
         {/* The repository, not the board: its working tree, its history and its
-            pull requests (FE-22). */}
+            pull requests (FE-21). */}
         {slug && (
           <nav aria-label="Repository" className="flex flex-col gap-0.5">
             {/* ⚠️ The ROW takes the label's vertical padding, so the label and
@@ -383,7 +383,7 @@ export function AppSidebar({
             workspace={workspaceKey}
             slug={slug}
             // ⚠️ The group shows for a project with a folder even before its
-            // first conversation, so its + has somewhere to live (FE-26/D3).
+            // first conversation, so its + has somewhere to live (FE-25/D3).
             hasFolder={hasFolder}
             row={ROW}
             active={ACTIVE.className}

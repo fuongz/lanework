@@ -26,6 +26,10 @@ import {
 } from "#/components/shared/agents/facts";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
+import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
@@ -321,8 +325,9 @@ function SubagentPage({
       aria-label={`Sub-agent — ${title}`}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      {/* Lined up with the body's `px-6`, as the issue page's header is. */}
-      <header className="window-drag-region border-sidebar-border flex h-11 shrink-0 items-center gap-2 border-b ps-[max(1.5rem,var(--titlebar-clear,0px))] pe-6">
+      {/* ⚠️ In the window's title bar (FE-58), as the agent's own view is:
+          the bar drags the window and clears its controls. */}
+      <WindowTitlebar>
         {working ? (
           <span role="img" aria-label="Working" className="flex shrink-0">
             <WorkingMark />
@@ -353,12 +358,12 @@ function SubagentPage({
           </>
         )}
         <h1
-          className={`min-w-0 truncate text-[13px] font-medium ${working ? "text-shimmer" : ""}`}
+          className={`${WINDOW_TITLE} ${working ? "text-shimmer" : ""}`}
           title={title}
         >
           {title}
         </h1>
-      </header>
+      </WindowTitlebar>
       {transcript && <Facts facts={facts} data-testid="subagent-meta" />}
 
       <div className="min-h-0 flex-1 overflow-y-auto">

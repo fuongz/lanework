@@ -16,6 +16,10 @@ import {
 import type { Fact } from "#/components/shared/agents/facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
+import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
@@ -172,7 +176,10 @@ export function AgentView() {
       aria-label={`${label} — ${title}`}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      <header className="agent-titlebar border-sidebar-border flex h-11 shrink-0 items-center gap-2.5 border-b ps-[max(0.75rem,var(--titlebar-clear,0px))] pe-3">
+      {/* ⚠️ The header is the window's title bar now (FE-58), as Codex has
+          it: the bar drags the window and clears its controls, so the row
+          keeps only its content, in its order. */}
+      <WindowTitlebar className="gap-2.5">
         {working ? (
           <span role="img" aria-label="Working" className="flex shrink-0">
             <OrbitSpinner className="text-foreground size-[13px]" />
@@ -181,7 +188,7 @@ export function AgentView() {
           <TerminalKindIcon kind={agent} className="size-[13px] shrink-0" />
         )}
         <h1
-          className={`min-w-0 truncate text-[13px] font-medium ${working ? "text-shimmer" : ""}`}
+          className={`${WINDOW_TITLE} ${working ? "text-shimmer" : ""}`}
           title={title}
         >
           {title}
@@ -250,7 +257,7 @@ export function AgentView() {
             Stop
           </Button>
         )}
-      </header>
+      </WindowTitlebar>
       {facts?.recap && <ConversationRecap recap={facts.recap} />}
       <div className="bg-background relative min-h-0 flex-1 px-2 pt-1">
         <XtermPane

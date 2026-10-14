@@ -1,4 +1,4 @@
-// The sidebar hidden and shown again (FE-20), and a rail at its narrowest
+// The sidebar hidden and shown again (FE-19), and a rail at its narrowest
 // that keeps every label on one line. Real app, stub control plane.
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -87,7 +87,7 @@ async function menu(app: ElectronApplication, id: string) {
   }, id);
 }
 
-/** The rail folded to its icons (FE-58). */
+/** The rail folded to its icons (FE-57). */
 const MINI = 56;
 
 const width = async (page: Page) =>
@@ -107,6 +107,27 @@ async function dragRail(page: Page, dx: number) {
   await page.mouse.up();
 }
 
+/** A box in the page, from the DOM — opacity-0 things included. */
+const rect = (page: Page, selector: string) =>
+  page
+    .locator(selector)
+    .first()
+    .evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      return {
+        left: box.left,
+        right: box.right,
+        top: box.top,
+        bottom: box.bottom,
+        height: box.height,
+        opacity: Number(getComputedStyle(node).opacity),
+      };
+    });
+
+/** The window's title bar (FE-58) and its slot. */
+const BAR = ".window-titlebar";
+const SLOT = ".window-titlebar-slot";
+
 test("the sidebar hides and comes back — by its button beside the window controls, ⌘B or a drag — and a relaunch keeps it hidden", async () => {
   const { plane, profile, boot } = await seed();
   let app = await boot();
@@ -124,33 +145,50 @@ test("the sidebar hides and comes back — by its button beside the window contr
     const vibrancy = await page.evaluate(
       () => document.documentElement.dataset.vibrancy === "true",
     );
+    const barBottom = async () => (await rect(page, BAR)).bottom;
+    // The rail and the page's card start UNDER the window's title bar, open
+    // or folded (FE-58), so nothing in them steps around the window controls.
+    const underBar = async () => {
+      const bottom = await barBottom();
+      const rail = await page.getByTestId("sidebar").boundingBox();
+      const main = await page.getByTestId("main").boundingBox();
+      expect(rail?.y ?? 0).toBeGreaterThanOrEqual(bottom - 0.5);
+      expect(main?.y ?? 0).toBeGreaterThanOrEqual(bottom - 0.5);
+    };
+    // Open: the bar is there, its slot starting where the rail ends — with
+    // no rule drawn between the two.
+    expect((await rect(page, BAR)).height).toBeGreaterThan(30);
+    await underBar();
+    await expect(page.locator(".window-titlebar-divider")).toHaveCount(0);
+    expect((await rect(page, SLOT)).left).toBeGreaterThan(full + 8);
 
-    // Dragged shut: folded to its icons, not gone (FE-58/D1a).
+    // Dragged shut: folded to its icons, not gone (FE-57/D1a).
     await dragRail(page, -(full - 20));
     await expect.poll(() => width(page)).toBeLessThan(MINI + 1);
     expect(await width(page)).toBeGreaterThan(MINI - 1);
     const show = page.getByRole("button", { name: "Show sidebar" });
-    // The way back is the mini rail's first slot (FE-58/D5a)…
+    // The way back is the mini rail's first slot (FE-57/D5a)…
     expect((await show.boundingBox())?.x ?? 99).toBeLessThan(MINI);
+    // …and the title bar stays, as tall as it was open.
+    expect((await rect(page, BAR)).height).toBeGreaterThan(30);
+    await underBar();
     if (vibrancy) {
       // …while back and forward stay beside the window controls, clear of
       // them — the current, larger ones end about 79pt in — at Codex's
       // spacing…
       const back = page.getByRole("button", { name: "Go back" });
+      const nav = page.getByRole("navigation", { name: "Window" });
       expect((await back.boundingBox())?.x ?? 0).toBeGreaterThanOrEqual(90);
-      // …in the window's own title bar, across its whole width — and the
-      // page starts BELOW it rather than stepping around the controls.
-      const barBottom = () =>
-        page
-          .locator(".mini-titlebar")
-          .evaluate((node) => node.getBoundingClientRect().bottom);
-      const firstTop = async () =>
-        (await page.getByRole("heading", { level: 1 }).first().boundingBox())
-          ?.y ?? 0;
-      // (It grows in on the rail's curve, so read once it has settled.)
-      await expect.poll(barBottom).toBeGreaterThan(30);
-      expect(await firstTop()).toBeGreaterThanOrEqual(await barBottom());
-      // …on the line the window controls sit on, 22pt down (FE-20).
+      // …and the page's slot starts after them, not at the rail's 56px
+      // edge, under the window controls.
+      const slotClear = async () => {
+        const box = await nav.boundingBox();
+        return (
+          (await rect(page, SLOT)).left - (box?.x ?? 0) - (box?.width ?? 0)
+        );
+      };
+      await expect.poll(slotClear).toBeGreaterThanOrEqual(8);
+      // …on the line the window controls sit on, 22pt down (FE-19).
       const middle = async (
         box: Promise<{ y: number; height: number } | null>,
       ) => {
@@ -200,12 +238,11 @@ test("the sidebar hides and comes back — by its button beside the window contr
       await expect
         .poll(async () => (await back.boundingBox())?.x ?? 0)
         .toBeGreaterThanOrEqual(90 / 0.9);
-      await expect
-        .poll(async () => (await firstTop()) - (await barBottom()))
-        .toBeGreaterThanOrEqual(0);
+      await expect.poll(slotClear).toBeGreaterThanOrEqual(8);
       await expect
         .poll(async () => across - (await barBottom()))
         .toBeLessThan(0);
+      await underBar();
       await zoom(1);
 
       // The button brings it back, at the width it was dragged to.
@@ -215,27 +252,23 @@ test("the sidebar hides and comes back — by its button beside the window contr
         page.getByRole("button", { name: "Hide sidebar" }),
       ).toBeVisible();
 
-      // ⚠️ And no frame of folding it draws the title under the controls:
-      // each frame the title is either clear of them to the right (open) or
-      // below the title bar that holds them (folded).
+      // ⚠️ And no frame of folding it draws the page's title under back and
+      // forward: each frame the slot starts clear of them to the right.
       // Read where the page is about to paint: in a ResizeObserver on the
       // rail, called in every frame the rail changes size and — made after
-      // the shell's own — after the shell has set the header's clearance for
-      // that frame. The clearance used to follow a re-render, which landed a
-      // frame late, and "All issues" flashed up under the lights.
+      // the shell's own — after the shell has set `--rail-width` for that
+      // frame. The clearance used to follow a re-render, which landed a frame
+      // late, and "All issues" flashed up under the lights.
       await page.evaluate(() => {
         const w = window as unknown as { __titleGaps: number[] };
         w.__titleGaps = [];
         const rail = document.querySelector('[data-testid="sidebar"]');
         const toggle = document.querySelector(".sidebar-nav");
-        const heading = document.querySelector("h1");
-        if (!rail || !toggle || !heading) throw new Error("no rail or title");
+        const slot = document.querySelector(".window-titlebar-slot");
+        if (!rail || !toggle || !slot) throw new Error("no rail or slot");
         new ResizeObserver(() => {
-          const title = heading.getBoundingClientRect();
           const nav = toggle.getBoundingClientRect();
-          w.__titleGaps.push(
-            Math.max(title.left - nav.right, title.top - nav.bottom),
-          );
+          w.__titleGaps.push(slot.getBoundingClientRect().left - nav.right);
         }).observe(rail);
         // Its first call — the rail as it stands — before it is hidden.
         return new Promise((done) =>
@@ -267,6 +300,8 @@ test("the sidebar hides and comes back — by its button beside the window contr
     await dragRail(page, 60);
     await expect.poll(() => width(page)).toBeGreaterThan(full + 40);
     const dragged = await width(page);
+    // The title bar's slot follows the rail's edge.
+    expect((await rect(page, SLOT)).left).toBeGreaterThan(dragged + 8);
     await menu(app, "sidebar-toggle");
     await expect.poll(() => width(page)).toBeLessThan(MINI + 1);
     await menu(app, "sidebar-toggle");
@@ -315,7 +350,7 @@ test("at its narrowest the rail keeps every label on one line, and a ghost butto
       expect((await row.boundingBox())?.height ?? 99, name).toBeLessThan(32);
     }
 
-    // Ghost is ghost: nothing is drawn round Load more (FE-20). An unlayered
+    // Ghost is ghost: nothing is drawn round Load more (FE-19). An unlayered
     // default border colour used to outrank `border-transparent`.
     const more = page.getByRole("button", { name: /^Load more in/ }).first();
     await expect(more).toBeVisible();

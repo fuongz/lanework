@@ -770,7 +770,10 @@ test("FE-39: Changes marks the one file a conversation edited since HEAD, and it
     // Its Changes: git's count of what it edited — the router's one line,
     // not notes.md's. The router opens its diff; `src/new.ts` (committed
     // since) and `src/helper.ts` (never on disk here) have nothing to show.
-    const changes = agent.getByTestId("agent-changes");
+    // In the agent's header, which is the window's title bar (FE-58).
+    const changes = page
+      .locator('[data-slot="window-titlebar"]')
+      .getByTestId("agent-changes");
     await expect(changes).toHaveAccessibleName(
       "Changes: 3 files edited, +1 −0 in git",
     );

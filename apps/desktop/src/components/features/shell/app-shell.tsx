@@ -13,6 +13,7 @@ import { AgentUsageStrip } from "#/components/features/terminal/agent-usage-stri
 import { TerminalMinibar } from "#/components/features/terminal/terminal-minibar";
 import { TerminalPanel } from "#/components/features/terminal/terminal-panel";
 import { useTerminalSessions } from "#/components/features/terminal/use-terminal-sessions";
+import { WindowTitlebarHost } from "#/components/shared/navigation/window-titlebar";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -27,7 +28,7 @@ import { CommandPalette } from "./command-palette";
 import { HistoryButtons } from "./history-nav";
 
 const RAIL_DEFAULT_PX = 240;
-/** The rail folded to its icons (FE-58): one 36px slot and its margins. */
+/** The rail folded to its icons (FE-57): one 36px slot and its margins. */
 const RAIL_MINI_PX = 56;
 const RAIL_WIDTH_KEY = "lanework:rail-width";
 const RAIL_HIDDEN_KEY = "lanework:rail-hidden";
@@ -97,7 +98,7 @@ export function AppShell() {
   const focusMode = useLayout((state) => state.focusMode);
   const sidebarRef = usePanelRef();
   const railElement = useRef<HTMLDivElement | null>(null);
-  // "Hidden" is the rail FOLDED: since FE-58 that is the mini rail, never
+  // "Hidden" is the rail FOLDED: since FE-57 that is the mini rail, never
   // nothing at all.
   const [railHidden, setRailHidden] = useState(false);
   const railWidth = useRef(readRailWidth());
@@ -133,13 +134,12 @@ export function AppShell() {
   /**
    * Where a glide by the button, ⌘B or focus mode is headed, while it runs.
    *
-   * ⚠️ The folded title bar and the rail's content are choreographed around
-   * it, not around the rail's size (FE-58): folding, the title bar starts
-   * growing at once, so the page title slides down under it as the rail
-   * narrows — switched only once the rail reached 56px, the title jumped
-   * left onto the window controls in the last frame. Opening, the open
-   * rail's content shows at once and slides in, while the title bar stays
-   * until the end, so the title never passes under back and forward.
+   * ⚠️ The folded flag (`data-rail-mini`) and the rail's content are
+   * choreographed around it, not around the rail's size (FE-57): folding,
+   * the flag goes on at once, so the title bar's rule fades and its slot
+   * already clears back and forward while the rail narrows. Opening, the
+   * open rail's content shows at once and slides in, while the flag stays
+   * until the end, so the sidebar button never pops in mid-glide.
    */
   const glideTo = useRef<"mini" | "open" | null>(null);
   const glideEnd = useRef<number | undefined>(undefined);
@@ -172,7 +172,7 @@ export function AppShell() {
     }, RAIL_GLIDE_MS);
     showRail();
   }, [glide, showRail, setMiniFlag]);
-  /** The sidebar button and ⌘B: fold ↔ open (FE-20, FE-58). */
+  /** The sidebar button and ⌘B: fold ↔ open (FE-19, FE-57). */
   const toggleRail = useCallback(() => {
     const panel = sidebarRef.current;
     if (!panel) return;
@@ -240,13 +240,12 @@ export function AppShell() {
     else panel.collapse();
   }, [terminalShowing, terminalRef]);
 
-  // Where the sidebar button sits and how far the window controls and it
-  // reach, in this page's CSS px (app.css). The controls sit at fixed points
+  // Where back, forward and the sidebar button sit, and how tall the title
+  // bar is, in this page's CSS px (app.css). The controls sit at fixed points
   // while the page zooms, and on current macOS they are the larger ones: 14pt
-  // lights 22.5pt apart, the last ending about 79pt in. The button's glyph
-  // follows 19pt after that — Codex's spacing — so the 24px button starts at
-  // 94pt, centred on their 22pt line; a hidden rail's headers start 12pt after
-  // it.
+  // lights 22.5pt apart, the last ending about 79pt in. The first button's
+  // glyph follows 19pt after that — Codex's spacing — so the 24px button
+  // starts at 94pt, centred on their 22pt line, as is the 44pt title bar.
   // ⚠️ Rewritten only when the ZOOM changes (a zoom fires `resize` too), and
   // the zoom is Electron's own — a resize of the window moves none of it.
   useEffect(() => {
@@ -260,10 +259,7 @@ export function AppShell() {
       applied = zoom;
       root.style.setProperty("--sidebar-toggle-left", `${94 / zoom}px`);
       root.style.setProperty("--sidebar-toggle-top", `${22 / zoom - 12}px`);
-      // The reach up to where the window's own buttons start; app.css adds
-      // the buttons themselves, which are fewer while the rail is folded.
-      root.style.setProperty("--titlebar-reach-base", `${106 / zoom}px`);
-      // The folded window's title bar, as tall as the controls' line needs.
+      // The window's title bar, as tall as the controls' line needs.
       root.style.setProperty("--titlebar-height", `${44 / zoom}px`);
     };
     update();
@@ -271,13 +267,14 @@ export function AppShell() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
-  // The rail's width as it is DRAWN, for the headers' clearance (app.css).
+  // The rail's width as it is DRAWN, for the title bar's rule and slot and
+  // for back and forward (app.css).
   // ⚠️ From a ResizeObserver, not from React state: the panel changes size
   // straight away, while a re-render lands a frame or more later — and in that
-  // frame the header had lost the rail beside it but not yet gained its
+  // frame the page's title had lost the rail beside it but not yet gained its
   // clearance, so "All issues" flashed under the window controls. A
   // ResizeObserver runs after layout and before paint, so the frame that shows
-  // the rail gone also shows the header clear of them.
+  // the rail gone also shows the title clear of them.
   useEffect(() => {
     const rail = railElement.current;
     if (!rail) return;
@@ -290,7 +287,7 @@ export function AppShell() {
     return () => watch.disconnect();
   }, []);
 
-  // View › Toggle Sidebar (⌘B), the same as the button (FE-20/D5).
+  // View › Toggle Sidebar (⌘B), the same as the button (FE-19/D5).
   useEffect(
     () =>
       window.desktop?.onViewCommand((command) => {
@@ -317,15 +314,17 @@ export function AppShell() {
   }, [focusMode, sidebarRef, foldRail, openRail]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
-      {/* ⚠️ Folded (FE-58), the window gets a title bar of its own across its
-          whole width — the window controls, back and forward — and the mini
-          rail and every page start under it, so no header has to step around
-          the controls. Shown by app.css off `data-rail-mini`, macOS only. */}
-      <div
-        aria-hidden="true"
-        className="mini-titlebar window-drag-region bg-sidebar border-sidebar-border shrink-0 border-b"
-      />
+    // The window's ground is the rail's colour, and the page sits on it as an
+    // inset card: the card's own border is the edge between the two,
+    // so the separator below draws nothing until it is pointed at.
+    <div className="bg-sidebar flex h-screen flex-col overflow-hidden">
+      {/* ⚠️ The window's title bar across its whole width, open or folded
+          (FE-58): the window controls, back and forward over the rail, and
+          the page's header — `<WindowTitlebar>` — beside them. The rail and
+          the page's card start under it, so no header has to step around the
+          controls. `app-titlebar` keeps its slot clear of back and forward
+          too (app.css). */}
+      <WindowTitlebarHost className="app-titlebar" />
       <ResizablePanelGroup
         className="h-auto min-h-0 flex-1"
         id="lanework:shell"
@@ -384,14 +383,19 @@ export function AppShell() {
         >
           <AppSidebar mini={railHidden} onExpand={toggleRail} />
         </ResizablePanel>
-        <ResizableHandle aria-label="Resize sidebar" />
+        <ResizableHandle
+          aria-label="Resize sidebar"
+          className="bg-transparent"
+        />
         <ResizablePanel id="main" minSize="40%">
           {/* ⚠️ The terminal is a panel of the CONTENT column, under whatever
               route is showing — not a route of its own, and not under the
               rail — so it survives every navigation and never covers the
-              project switcher (FE-19/D4). Hidden, it folds into the bar below
+              project switcher (FE-18/D4). Hidden, it folds into the bar below
               the group and stops no shell. */}
-          <div className="flex h-full min-h-0 flex-col">
+          {/* ⚠️ `overflow-hidden` clips the page, the terminal and its bar to
+              the card's corners; each of them still scrolls on its own. */}
+          <div className="bg-background my-1.5 mr-1.5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-edge">
             <div className="min-h-0 flex-1">
               <ResizablePanelGroup
                 id="lanework:terminal"
@@ -443,21 +447,21 @@ export function AppShell() {
         </ResizablePanel>
       </ResizablePanelGroup>
       <CommandPalette />
-      {/* ⚠️ Beside the window controls, the way Codex has it, and there in
-          BOTH states: over the rail's title bar while it shows, over the
-          header once it is hidden — so the way back is always where the way
-          out was. Drawn on macOS only (app.css), where the controls it sits
-          beside are.
+      {/* ⚠️ In the window's title bar, the way Codex has it, and there in
+          BOTH states: against the rail's edge while it is open, beside the
+          window controls once it is folded — so the way back is always where
+          the way out was. Drawn on macOS only (app.css), where the controls
+          it sits beside are.
           ⚠️ LAST in the shell, after every title bar it floats over. Window
           drag regions are laid down in document order and a later one wins:
           placed before the rail, the rail's drag strip was laid over it and
           ate every click — which a test's synthetic click never shows. */}
       <nav aria-label="Window" className="sidebar-nav items-center gap-0.5">
         <HistoryButtons />
-        {/* Folded, the sidebar button is the mini rail's first slot (FE-58/D5a)
+        {/* Folded, the sidebar button is the mini rail's first slot (FE-57/D5a)
             and this one is hidden — by app.css, off the same `data-rail-mini`
-            the title bar's clearance reads, so the two never disagree for a
-            frame; back and forward stay here, beside the window controls. */}
+            the title bar's slot reads, so the two never disagree for a frame;
+            back and forward stay here, beside the window controls. */}
         <button
           type="button"
           onClick={toggleRail}

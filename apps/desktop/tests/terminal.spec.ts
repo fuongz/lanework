@@ -47,6 +47,13 @@ import {
 } from "./auth-fixtures";
 
 /**
+ * The window's title bar (FE-58). An agent's header — its name, facts, Model,
+ * Tasks, Stop — is drawn there, outside the page's region, so a locator for
+ * any of it starts here.
+ */
+const titlebar = (page: Page) => page.locator('[data-slot="window-titlebar"]');
+
+/**
  * A stand-in for an agent's CLI: it prints what it was asked in a form the
  * typed line does not contain, then stays running — as a real CLI does —
  * until it is told `/exit`.
@@ -547,7 +554,7 @@ test("the Agents + offers only the CLIs this machine has, and a new agent opens 
     });
     await expect(view).toBeVisible();
     await expect(view.locator(".xterm-rows")).toContainText("claude-started");
-    await expect(view).toContainText(basename(repo));
+    await expect(titlebar(page)).toContainText(basename(repo));
     // Its own row, under Running, marked as the one on screen — and no tab
     // in the panel.
     await expect(
@@ -770,9 +777,11 @@ test("an agent whose CLI cannot start stays on screen to say why — only a clea
     });
     // The shell's own words, shown rather than held back, and a way on.
     await expect(view.locator(".xterm-rows")).toContainText("no-such-claude");
-    await expect(view.getByText("exited", { exact: true })).toBeVisible();
     await expect(
-      view.getByRole("button", { name: "Start again" }),
+      titlebar(page).getByText("exited", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      titlebar(page).getByRole("button", { name: "Start again" }),
     ).toBeVisible();
   } finally {
     await app.close();
@@ -923,8 +932,8 @@ test("an Agents row resumes its conversation in the main view, which outlives le
       ),
       `${JSON.stringify({ type: "assistant" })}\n`,
     );
-    await expect(claude.getByLabel("Working")).toBeVisible();
-    await claude.getByRole("button", { name: "Stop" }).click();
+    await expect(titlebar(page).getByLabel("Working")).toBeVisible();
+    await titlebar(page).getByRole("button", { name: "Stop" }).click();
     const confirm = page.getByRole("alertdialog");
     await expect(confirm).toContainText("while it is working");
     await confirm.getByRole("button", { name: "Stop" }).click();
@@ -1338,7 +1347,7 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
       name: "Sub-agent — Map the rail code",
     });
     await expect(
-      viewer.getByRole("heading", { name: "Map the rail code" }),
+      titlebar(page).getByRole("heading", { name: "Map the rail code" }),
     ).toBeVisible();
     // The header's second row: each fact by its icon, read with what it is.
     const facts = viewer.getByTestId("subagent-meta");
@@ -1397,7 +1406,9 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
     const live = page.getByRole("region", {
       name: "Sub-agent — Count the tests",
     });
-    await expect(live.getByRole("img", { name: "Working" })).toBeVisible();
+    await expect(
+      titlebar(page).getByRole("img", { name: "Working" }),
+    ).toBeVisible();
     // Its own folds, not the last one's: the prompt opened there is shut.
     await expect(live.getByRole("button", { name: "Prompt" })).toHaveAttribute(
       "aria-expanded",
@@ -1457,14 +1468,16 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
     await expect(live.getByRole("region", { name: "Report" })).toContainText(
       "There are 42 tests.",
     );
-    await expect(live.getByRole("img", { name: "Working" })).toHaveCount(0);
+    await expect(
+      titlebar(page).getByRole("img", { name: "Working" }),
+    ).toHaveCount(0);
 
     // Back is the router's: the transcript before it.
     await page.goBack();
     await expect(viewer).toBeVisible();
 
     // Its conversation is a link away, resumed as its row resumes it (D9).
-    await viewer
+    await titlebar(page)
       .getByRole("button", {
         name: "Open its conversation, “Flaky login test”, in Claude",
       })
@@ -1527,18 +1540,18 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
       name: "Claude — Flaky login test",
     });
     // In the header's row: how long it ran, by its icon (D1).
-    const facts = claude.getByTestId("agent-facts");
+    const facts = titlebar(page).getByTestId("agent-facts");
     await expect(facts.getByRole("term")).toHaveText(["Run time"]);
     await expect(facts.getByRole("definition")).toHaveText(["4m 12s"]);
     // Claude's own count of its lines is inside Changes.
-    await claude.getByTestId("agent-changes").click();
+    await titlebar(page).getByTestId("agent-changes").click();
     await expect(page.locator('[data-slot="popover-content"]')).toContainText(
       "+120 −8",
     );
     await page.keyboard.press("Escape");
     // The model names it, its ring how full the context is: Claude's window
     // taken from the model, 1M (D2).
-    const model = claude.getByTestId("agent-model");
+    const model = titlebar(page).getByTestId("agent-model");
     await expect(model).toHaveText("Opus 5.5");
     await expect(model).toHaveAccessibleName(
       "Opus 5.5, context 14% full. Show its usage",
@@ -1642,8 +1655,8 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
     const codex = page.getByRole("region", {
       name: "Codex — Settings page cleanup",
     });
-    await expect(codex.getByTestId("agent-facts")).toHaveCount(0);
-    await codex.getByTestId("agent-model").click();
+    await expect(titlebar(page).getByTestId("agent-facts")).toHaveCount(0);
+    await titlebar(page).getByTestId("agent-model").click();
     const codexFacts = page.getByTestId("model-facts");
     await expect(codexFacts.getByRole("term")).toHaveText([
       "Model",
@@ -1715,9 +1728,11 @@ test("FE-42: an agent's header counts its background tasks; a shell opens its co
     await page
       .getByRole("button", { name: "Resume “Run the gate” in Claude" })
       .click();
-    const claude = page.getByRole("region", { name: "Claude — Run the gate" });
+    await expect(
+      page.getByRole("region", { name: "Claude — Run the gate" }),
+    ).toBeVisible();
     // The header's chip counts the running ones, by kind (D1).
-    const chip = claude.getByTestId("background-tasks");
+    const chip = titlebar(page).getByTestId("background-tasks");
     await expect(chip).toHaveText("1 shell, 1 monitor");
 
     // Running first; the finished folded, with how they ended (D2).
@@ -1743,7 +1758,7 @@ test("FE-42: an agent's header counts its background tasks; a shell opens its co
       name: "Background task — Run the gate",
     });
     await expect(
-      task.getByRole("heading", { name: "Run the gate" }),
+      titlebar(page).getByRole("heading", { name: "Run the gate" }),
     ).toBeVisible();
     await expect(task.getByRole("region", { name: "Command" })).toContainText(
       "bun run gate",
@@ -1867,16 +1882,20 @@ test("FE-43: shell Stop confirms all entry points, cancels safely, reports races
       name: "Background task — Run the gate",
     });
     await setMode("error");
-    await task.getByRole("button", { name: "Stop", exact: true }).click();
+    await titlebar(page)
+      .getByRole("button", { name: "Stop", exact: true })
+      .click();
     await dialog.getByRole("button", { name: "Stop", exact: true }).click();
     await expect(page.getByText(/Process inspection failed/)).toBeVisible();
     await page.getByRole("button", { name: "Dismiss notification" }).click();
     await setMode("success");
-    await task.getByRole("button", { name: "Stop", exact: true }).click();
+    await titlebar(page)
+      .getByRole("button", { name: "Stop", exact: true })
+      .click();
     await dialog.getByRole("button", { name: "Stop", exact: true }).click();
     await expect(task.getByTestId("task-meta")).toContainText("killed");
     await expect(
-      task.getByRole("button", { name: "Stop", exact: true }),
+      titlebar(page).getByRole("button", { name: "Stop", exact: true }),
     ).toHaveCount(0);
     expect(await calls()).toEqual(
       Array.from({ length: 3 }, () => ["ws-alpha", CLAUDE_BG_ID, "bgrun01"]),
@@ -1988,11 +2007,16 @@ test("FE-56: running shells and monitors show their pid, and a found monitor can
         name: "Run the gate, a background shell of “Run the gate”. Open its output",
       })
       .click();
-    const task = page.getByRole("region", {
-      name: "Background task — Run the gate",
-    });
     await expect(
-      task.getByRole("button", { name: "Copy pid 4242", exact: true }),
+      page.getByRole("region", {
+        name: "Background task — Run the gate",
+      }),
+    ).toBeVisible();
+    await expect(
+      titlebar(page).getByRole("button", {
+        name: "Copy pid 4242",
+        exact: true,
+      }),
     ).toBeVisible();
   } finally {
     await app.close();
@@ -2647,11 +2671,11 @@ test("folded, the window gets a title bar and the rail shows each agent as an ic
       rail.getByRole("button", { name: /a sub-agent of/ }),
     ).toHaveCount(0);
 
-    // Folded, the window has a title bar of its own across its width (macOS),
-    // holding back and forward; every page starts under it rather than
-    // stepping around the window controls.
+    // The window's title bar runs across its whole width (FE-58), holding the
+    // window controls, back and forward; every page's header sits IN its slot
+    // or starts under it, never beside the controls.
     const bar = async () =>
-      page.locator(".mini-titlebar").evaluate((node) => {
+      page.locator(".window-titlebar").evaluate((node) => {
         const box = node.getBoundingClientRect();
         return box.height > 0 ? box.bottom : 0;
       });
@@ -2659,7 +2683,6 @@ test("folded, the window gets a title bar and the rail shows each agent as an ic
       () => document.documentElement.dataset.vibrancy === "true",
     );
     if (vibrancy) {
-      // It grows in; read it once it has.
       await expect.poll(bar).toBeGreaterThan(30);
       const back = await page
         .getByRole("button", { name: "Go back" })
@@ -2670,17 +2693,25 @@ test("folded, the window gets a title bar and the rail shows each agent as an ic
     }
     const below = async (target: import("@playwright/test").Locator) => {
       await expect(target).toBeVisible();
-      await expect
-        .poll(
-          async () => ((await target.boundingBox())?.y ?? 0) - (await bar()),
-        )
-        .toBeGreaterThanOrEqual(0);
+      const inSlot = await target.evaluate(
+        (node) => !!node.closest(".window-titlebar-slot"),
+      );
+      if (!inSlot)
+        await expect
+          .poll(
+            async () => ((await target.boundingBox())?.y ?? 0) - (await bar()),
+          )
+          .toBeGreaterThanOrEqual(0);
       const box = await target.boundingBox();
       expect(box?.x ?? 0).toBeGreaterThanOrEqual(56);
     };
     await below(page.getByRole("heading", { level: 1 }).first());
     await rail.getByRole("link", { name: "Changes", exact: true }).click();
-    await below(page.getByText("Changes", { exact: true }).last());
+    await below(
+      page
+        .locator(".window-titlebar-slot")
+        .getByText("Changes", { exact: true }),
+    );
     await rail.getByRole("link", { name: "History", exact: true }).click();
     await below(page.getByPlaceholder(/Search commits/));
     await rail

@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { BoardCard } from "#/../shared/workspaces";
 import {
   CategoryDot,
@@ -22,6 +22,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "#/components/shared/navigation/select";
+import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
 import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
 import { categoryOf, columnOf } from "#/lib/board-view";
@@ -58,6 +62,7 @@ export function NewIssue() {
   const [categoryKey, setCategoryKey] = useState(NONE);
   const [priority, setPriority] = useState(NONE);
   const [tags, setTags] = useState<string[]>([]);
+  const formId = useId();
 
   const columns = view?.columns ?? [];
   const categories = view?.categories ?? [];
@@ -102,8 +107,9 @@ export function NewIssue() {
 
   return (
     <form
+      id={formId}
       // ⚠️ TWO PANELS, not one page with a rail floating in it. The divider runs
-      // the full height and each side owns its own header band, so "what this
+      // the full height and each side scrolls on its own, so "what this
       // issue says" and "what this issue is" read as two places rather than one
       // column that happens to have fields at the end of it.
       className="flex min-h-0 flex-1"
@@ -123,12 +129,17 @@ export function NewIssue() {
       }}
     >
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="window-drag-region border-border flex h-11 shrink-0 items-center gap-2 border-b pe-6 ps-[max(1.5rem,var(--titlebar-clear,0px))]">
+        {/* ⚠️ In the WINDOW's title bar (FE-58), the way Codex has it. The
+            bar is portalled out of this form's DOM, so Save names the form
+            with `form` — a bare submit button out there submits nothing. ⌘↵
+            and Escape still reach the form's handler: React bubbles a
+            portal's events through the tree it was rendered from. */}
+        <WindowTitlebar>
           <span className="bg-foreground/[0.06] text-muted-foreground truncate rounded px-1.5 py-0.5 text-xs">
             {active?.name ?? "Project"}
           </span>
           <span className="text-muted-foreground text-xs">›</span>
-          <span className="text-[13px]">New issue</span>
+          <h1 className={WINDOW_TITLE}>New issue</h1>
 
           <div className="ml-auto flex items-center gap-1.5">
             <Button type="button" variant="ghost" onClick={leave}>
@@ -136,6 +147,7 @@ export function NewIssue() {
             </Button>
             <Button
               type="submit"
+              form={formId}
               disabled={!ready}
               title={
                 stale
@@ -146,7 +158,7 @@ export function NewIssue() {
               {saving ? "Saving…" : "Save"}
             </Button>
           </div>
-        </header>
+        </WindowTitlebar>
 
         <div className="flex min-h-0 flex-1 flex-col gap-3 px-6 py-6">
           <Input
@@ -191,9 +203,10 @@ export function NewIssue() {
         aria-label="Card properties"
         className="border-border flex w-72 shrink-0 flex-col border-l"
       >
-        {/* The rail's own header band, the same height as the one beside it, so
-            the divider between the panels has one unbroken line to draw. */}
-        <header className="window-drag-region border-border flex h-11 shrink-0 items-center border-b px-4">
+        {/* The rail's own header band. ⚠️ It stays in the card when the page's
+            header moves to the window's title bar (FE-58), and is no drag
+            region any more — it no longer sits at the window's top edge. */}
+        <header className="border-border flex h-11 shrink-0 items-center border-b px-4">
           <span className="text-[13px] font-medium">Details</span>
         </header>
 

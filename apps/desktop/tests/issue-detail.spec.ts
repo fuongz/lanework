@@ -161,9 +161,11 @@ test("the title stays in view as row two while the issue scrolls", async () => {
     const page = await app.firstWindow();
     await openIssue(page);
     const title = page.getByLabel("Card title");
-    const header = await page.locator("main header").first().boundingBox();
-    if (!header) throw new Error("no issue header");
-    const below = header.y + header.height;
+    // The issue's header is in the window's title bar (FE-58), so the scroll
+    // area starts at the top of the page's card: the title sticks there.
+    const pane = await page.locator("main").first().boundingBox();
+    if (!pane) throw new Error("no issue pane");
+    const below = pane.y;
 
     await page
       .getByText("Paragraph 60 of a long description.")
@@ -172,7 +174,7 @@ test("the title stays in view as row two while the issue scrolls", async () => {
     await expect(
       page.getByText("Paragraph 1 of a long description.", { exact: true }),
     ).not.toBeInViewport();
-    // …and the title is still there, stuck right under the header.
+    // …and the title is still there, stuck at the top of the card.
     await expect(title).toBeInViewport();
     const stuck = (await title.boundingBox())?.y ?? -1;
     expect(stuck).toBeGreaterThanOrEqual(below - 1);

@@ -1,5 +1,9 @@
 import { Outlet, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
+import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
 import { RepoEmpty, RepoMessage } from "#/components/shared/repo/repo-empty";
 import {
   ResizableHandle,
@@ -35,18 +39,39 @@ export function HistoryLayout() {
     void open(slug).then(() => openHistory(slug));
   }, [open, openHistory, slug]);
 
+  // ⚠️ The screen's name in the window's title bar (FE-58), drawn by the
+  // layout — not the list — so it is there while the repository is read and
+  // when there is none. A commit's own header stays in its pane: the bar holds
+  // one header, and the commit's is the diff's first row.
+  const title = (
+    <WindowTitlebar>
+      <h1 className={WINDOW_TITLE}>History</h1>
+    </WindowTitlebar>
+  );
+
   if (!state)
-    return error ? (
-      <RepoMessage
-        title="The repository could not be read"
-        description={error}
-      />
-    ) : (
-      <p className="text-muted-foreground p-4 text-xs">
-        Reading the repository…
-      </p>
+    return (
+      <>
+        {title}
+        {error ? (
+          <RepoMessage
+            title="The repository could not be read"
+            description={error}
+          />
+        ) : (
+          <p className="text-muted-foreground p-4 text-xs">
+            Reading the repository…
+          </p>
+        )}
+      </>
     );
-  if (state.kind !== "ready") return <RepoEmpty state={state} />;
+  if (state.kind !== "ready")
+    return (
+      <>
+        {title}
+        <RepoEmpty state={state} />
+      </>
+    );
 
   return (
     <ResizablePanelGroup
@@ -65,6 +90,7 @@ export function HistoryLayout() {
           aria-label="History"
           className="bg-sidebar flex h-full min-h-0 flex-col"
         >
+          {title}
           <HistoryList />
         </aside>
       </ResizablePanel>

@@ -11,6 +11,10 @@ import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
+import {
+  WINDOW_TITLE,
+  WindowTitlebar,
+} from "#/components/shared/navigation/window-titlebar";
 import { MergeControl } from "#/components/shared/pulls/merge-control";
 import { Button } from "#/components/ui/button";
 import {
@@ -28,6 +32,21 @@ import { CommitPicker } from "./commit-picker";
 import { DiffView } from "./diff-view";
 import { FilesPanel } from "./file-tree";
 import { PullSummary } from "./pull-summary";
+
+/**
+ * The screen's name in the window's title bar, until a pull request has a
+ * title to put there (FE-58). `PullsEmpty` draws the same one.
+ *
+ * ⚠️ Rendered by the pane, not by `PullsLayout`: the bar holds ONE header,
+ * and an open pull request's replaces this rather than standing beside it.
+ */
+function PullsTitlebar() {
+  return (
+    <WindowTitlebar>
+      <h1 className={WINDOW_TITLE}>Pull requests</h1>
+    </WindowTitlebar>
+  );
+}
 
 /**
  * Which half of a pull request is on screen.
@@ -157,9 +176,12 @@ export function PullDetail() {
     if (!showFiles && !panel.isCollapsed()) panel.collapse();
   }, [showFiles, filesRef]);
 
+  // ⚠️ The screen's name stays in the title bar until this pull request has a
+  // title to put there, so the bar is never blank while one loads.
   if (loading && !detail)
     return (
       <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
+        <PullsTitlebar />
         Loading pull request…
       </div>
     );
@@ -167,11 +189,12 @@ export function PullDetail() {
   if (error)
     return (
       <div className="flex flex-1 items-start justify-center p-8">
+        <PullsTitlebar />
         <p className="text-destructive max-w-prose text-xs/relaxed">{error}</p>
       </div>
     );
 
-  if (!detail) return null;
+  if (!detail) return <PullsTitlebar />;
 
   const { pull } = detail;
   // ⚠️ The same function the file tree calls. Two answers to "which files are
@@ -180,40 +203,37 @@ export function PullDetail() {
   const source = diffSource(commit, commitDiff, detail);
 
   return (
-    <div className="@container/pull-detail flex min-w-0 flex-1 flex-col overflow-hidden">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
       {/* ⚠️ Two rows with different jobs, and that split is the point. The top
           row is about the PULL REQUEST — what it is called, and which half of it
           you are looking at. The row under it is about the DIFF — where it came
           from and what is being shown of it — so it is drawn only when a diff is
           what is on screen. Held in one row, as it was, `#20 · @author ·
-          +798 −425` sat among the controls and read as if it were one. */}
-      <header
-        className={cn(
-          "window-drag-region border-sidebar-border grid h-11 shrink-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b pe-3 @max-[420px]/pull-detail:h-auto @max-[420px]/pull-detail:min-h-11 @max-[420px]/pull-detail:grid-cols-[minmax(0,1fr)_auto] @max-[420px]/pull-detail:gap-y-1 @max-[420px]/pull-detail:py-1",
-          // Beside the rail only in focus mode, with the list shut; the
-          // rest of the time the list is what keeps it clear of the window
-          // controls.
-          focusMode ? "ps-[max(0.75rem,var(--titlebar-clear,0px))]" : "ps-3",
-        )}
-      >
-        <div className="flex min-w-0 items-center gap-2">
+          +798 −425` sat among the controls and read as if it were one.
+
+          ⚠️ The top row is the window's title bar now (FE-58), the way Codex
+          draws a thread's header. The bar keeps it clear of the window
+          controls — in focus mode too, with the list shut — so the row has no
+          clearance of its own to work out. */}
+      <WindowTitlebar>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <HugeiconsIcon
             icon={GitPullRequestIcon}
             className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
             strokeWidth={1.8}
             aria-hidden="true"
           />
-          <h1 className="truncate text-[13px] font-medium" title={pull.title}>
+          <h1 className={WINDOW_TITLE} title={pull.title}>
             {pull.title}
           </h1>
         </div>
 
         {/* Reserve space for tabs and merge actions; the title truncates as the
-            detail panel narrows so header actions stay reachable. */}
+            bar narrows so header actions stay reachable. */}
         <SegmentedControl
           label="Pull request view"
           semantics="tabs"
-          className="justify-self-center @max-[420px]/pull-detail:col-span-2 @max-[420px]/pull-detail:row-start-2"
+          className="shrink-0"
           value={view}
           options={[
             { value: "summary", label: "Summary" },
@@ -237,7 +257,7 @@ export function PullDetail() {
           }
         />
 
-        <div className="window-no-drag flex items-center justify-end gap-2 @max-[420px]/pull-detail:col-start-2 @max-[420px]/pull-detail:row-start-1">
+        <div className="window-no-drag flex shrink-0 items-center justify-end gap-2">
           <MergeControl
             key={`${slug}/${pull.number}`}
             detail={detail}
@@ -280,7 +300,7 @@ export function PullDetail() {
             />
           </button>
         </div>
-      </header>
+      </WindowTitlebar>
 
       {view === "summary" ? (
         <PullSummary detail={detail} />
