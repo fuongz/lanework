@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import type {
   ReadinessFix,
-  ReadinessLinkResult,
   ReadinessPreview,
   ReadinessReport,
 } from "../../shared/readiness";
@@ -11,8 +10,8 @@ import type {
  * How long a report stands before focusing the window asks again (FE-30/D9).
  *
  * ⚠️ Opening or switching to a project always asks; only focus is throttled.
- * Every check reads a handful of files, runs `git` once and makes one request,
- * and people flick between windows far more often than they edit AGENTS.md.
+ * Every check reads a handful of files, and people flick between windows far
+ * more often than they edit AGENTS.md.
  */
 const FOCUS_MIN_AGE_MS = 60_000;
 
@@ -33,8 +32,6 @@ interface ReadinessState {
     fix: ReadinessFix,
     before: string | null,
   ) => Promise<void>;
-  /** Link the folder's repo to this board (BE-20); the new report is filed. */
-  linkBoard: (slug: string, replace: boolean) => Promise<ReadinessLinkResult>;
 }
 
 /** A read that started before a later one for the same project must not land after it. */
@@ -94,18 +91,6 @@ export const useReadiness = create<ReadinessState>((set) => ({
     askedAt[slug] = Date.now();
     if (generation[slug] !== mine) return;
     set((state) => ({ reports: { ...state.reports, [slug]: report } }));
-  },
-  linkBoard: async (slug, replace) => {
-    const surface = window.desktop?.readiness;
-    if (!surface) throw new Error("Not available in this window.");
-    const mine = bump(slug);
-    const result = await surface.linkBoard(slug, replace);
-    if (!result.done || generation[slug] !== mine) return result;
-    askedAt[slug] = Date.now();
-    set((state) => ({
-      reports: { ...state.reports, [slug]: result.report },
-    }));
-    return result;
   },
 }));
 

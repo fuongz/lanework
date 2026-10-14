@@ -54,13 +54,10 @@ const rank = (check: ReadinessCheck) => (check.ok ? 3 : ORDER[check.level]);
 export function ReadinessList({
   report,
   onFix,
-  onLinkBoard,
   className,
 }: {
   report: ReadinessReport;
   onFix: (fix: ReadinessFix) => void;
-  /** The `link-board` action: the caller confirms it, like a fix (BE-20). */
-  onLinkBoard: (check: ReadinessCheck) => void;
   className?: string;
 }) {
   const navigate = useNavigate();
@@ -98,31 +95,15 @@ export function ReadinessList({
               Fix {FIX_FILE[check.fix]}
             </Button>
           )}
-          {!check.ok && !check.fix && check.action === "link-board" && (
+          {!check.ok && !check.fix && check.action && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => onLinkBoard(check)}
+              onClick={() => check.action && go(check.action)}
             >
-              Link here
+              Open settings
             </Button>
           )}
-          {!check.ok &&
-            !check.fix &&
-            check.action &&
-            check.action !== "link-board" && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  check.action &&
-                  check.action !== "link-board" &&
-                  go(check.action)
-                }
-              >
-                Open settings
-              </Button>
-            )}
         </li>
       ))}
     </ul>

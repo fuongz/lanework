@@ -1,7 +1,6 @@
 // FE-30: whether a project's folder is ready for an agent to work its board.
 // The rules are driven directly under Node (V1); the last cases boot the app
 // on real folders and click through the indicator (V2, V3).
-import { execFileSync } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
@@ -21,7 +20,6 @@ import {
 import type { MachineRecord } from "../electron/main/auth/store";
 import {
   applyFix,
-  boardLinkOf,
   buildReport,
   claudeHasLanework,
   codexHasLanework,
@@ -108,24 +106,11 @@ test("Codex's config.toml is read for a lanework server", () => {
   expect(codexHasLanework(`[notes]\nlink = "${MCP_URL}"\n`)).toBe(false);
 });
 
-test("which board a repo is linked to", () => {
-  expect(boardLinkOf([], "ws-a")).toEqual({ kind: "none" });
-  expect(boardLinkOf([{ workspaceId: "ws-a", name: "A" }], "ws-a")).toEqual({
-    kind: "this",
-  });
-  expect(boardLinkOf([{ workspaceId: "ws-b", name: "B" }], "ws-a")).toEqual({
-    kind: "other",
-    name: "B",
-  });
-});
-
 const ready: ReadinessFacts = {
   slug: "alpha",
   folder: {
     kind: "linked",
     path: FOLDER,
-    remote: "git@github.com:acme/alpha.git",
-    board: { kind: "this" },
     agentsMd: AGENT_NOTES,
     claudeMd: "@AGENTS.md\n",
     claudeMcp: true,
@@ -145,8 +130,6 @@ test("a ready folder passes every check that applies", () => {
   const report = buildReport(ready);
   expect(report.checks.map((check) => check.id)).toEqual([
     "folder",
-    "remote",
-    "board",
     "agents-md",
     "claude-md",
     "claude-mcp",
@@ -172,28 +155,10 @@ test("each missing piece is reported at its own level", () => {
     failed({ ...ready, folder: { kind: "missing", path: FOLDER } }),
   ).toEqual([["folder", "blocker"]]);
 
-  // No remote: no board question either — there is nothing to ask about.
-  const noRemote = buildReport({
-    ...ready,
-    folder: { ...linked, remote: null },
-  });
-  expect(noRemote.checks.some((check) => check.id === "board")).toBe(false);
-  expect(failed({ ...ready, folder: { ...linked, remote: null } })).toEqual([
-    ["remote", "blocker"],
-  ]);
-
-  // The service could not be asked: left out, never failed.
-  expect(
-    buildReport({ ...ready, folder: { ...linked, board: { kind: "unknown" } } })
-      .checks.map((check) => check.id)
-      .includes("board"),
-  ).toBe(false);
-  const other = buildReport({
-    ...ready,
-    folder: { ...linked, board: { kind: "other", name: "Beta" } },
-  }).checks.find((check) => check.id === "board");
-  expect(other?.ok).toBe(false);
-  expect(other?.detail).toContain("“Beta”");
+  // Git is not asked about: no remote is not a problem here.
+  expect(buildReport(ready).checks.map((check) => check.id)).not.toContain(
+    "remote",
+  );
 
   expect(
     failed({
@@ -257,8 +222,6 @@ test("fixes append or add one key, and never rewrite what is there", () => {
 // ── The app ─────────────────────────────────────────────────────────────────
 
 test.describe("in the app", () => {
-  test.skip(process.platform === "win32", "These drive a POSIX git.");
-
   const workspaces: Workspace[] = [
     {
       id: "ws-alpha",
@@ -270,16 +233,10 @@ test.describe("in the app", () => {
     { id: "ws-beta", slug: "beta", name: "Beta", path: null, baseBranch: null },
   ];
 
-  /** A git folder with an origin remote, linked to the board. */
+  /** A plain folder — no git at all: readiness does not ask about it. */
   async function makeFolder(notes: boolean): Promise<string> {
     const folder = await realpath(
       await mkdtemp(join(tmpdir(), "lanew-ready-")),
-    );
-    execFileSync("git", ["init", "-q"], { cwd: folder });
-    execFileSync(
-      "git",
-      ["remote", "add", "origin", "git@github.com:acme/alpha.git"],
-      { cwd: folder },
     );
     if (notes) await writeFile(join(folder, "AGENTS.md"), `${AGENT_NOTES}\n`);
     await writeFile(join(folder, "CLAUDE.md"), "@AGENTS.md\n");
@@ -293,10 +250,6 @@ test.describe("in the app", () => {
         columns: [{ key: "todo", name: "To-Do", role: "start" }],
         cards: [],
       });
-    plane.setRepoBoards([
-      { workspaceId: "ws-alpha", name: "Alpha" },
-      { workspaceId: "ws-beta", name: "Beta" },
-    ]);
     const profile = await mkdtemp(join(tmpdir(), "lanew-ready-ui-"));
     const home = join(profile, "home");
     await mkdir(home, { recursive: true });
@@ -381,52 +334,6 @@ test.describe("in the app", () => {
       expect(await readFile(join(folder, "AGENTS.md"), "utf8")).toContain(
         AGENT_NOTES,
       );
-    } finally {
-      await cleanup();
-      await rm(folder, { recursive: true, force: true });
-    }
-  });
-
-  test("BE-20: a repo on another board is moved here from the check, confirming a board on a different repo", async () => {
-    const folder = await makeFolder(true);
-    const { page, plane, cleanup } = await open({ alpha: folder });
-    try {
-      // The repo is on Beta, and Alpha itself is on another repo.
-      plane.setRepoBoards([{ workspaceId: "ws-beta", name: "Beta" }]);
-      plane.setBoardRepo("github.com/acme/old");
-      await page.goto("app://lanework/w/beta/issues");
-      await openReadiness(page, "alpha");
-      await expect(page.getByText(/file their cards on “Beta”/)).toBeVisible({
-        timeout: 15_000,
-      });
-      await page
-        .getByRole("button", { name: "Link here", exact: true })
-        .click();
-
-      const dialog = page.getByRole("alertdialog");
-      await expect(dialog).toContainText("Move this repo here from “Beta”?");
-      await expect(dialog).toContainText("stay there");
-      await dialog.getByRole("button", { name: "Link here" }).click();
-      // The service refused: Alpha is on another repo. Asked again, by name.
-      await expect(dialog).toContainText("Move this board off its repo?");
-      await expect(dialog).toContainText("github.com/acme/old");
-      await dialog.getByRole("button", { name: "Move it here" }).click();
-      await expect(dialog).toBeHidden();
-      await expect(
-        page.getByRole("button", { name: "Link here", exact: true }),
-      ).toBeHidden();
-      expect(plane.repoMoves()).toEqual([
-        {
-          workspaceId: "ws-alpha",
-          repo: "git@github.com:acme/alpha.git",
-          replace: false,
-        },
-        {
-          workspaceId: "ws-alpha",
-          repo: "git@github.com:acme/alpha.git",
-          replace: true,
-        },
-      ]);
     } finally {
       await cleanup();
       await rm(folder, { recursive: true, force: true });

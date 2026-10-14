@@ -1,9 +1,9 @@
 // Is this project's folder ready for an agent to work its board? (FE-30)
 //
 // Gathered here, in main, because every answer is on the disk or behind the
-// machine credential: the folder link, `git remote`, AGENTS.md, CLAUDE.md,
-// `.mcp.json`, `~/.claude.json`, Codex's config.toml, the checkpoint hooks,
-// and the service's own answer to "which board is this repo linked to?".
+// machine: the folder link, AGENTS.md, CLAUDE.md, `.mcp.json`,
+// `~/.claude.json`, Codex's config.toml and the checkpoint hooks. Nothing
+// about git: the folder's remote and the repo's board are not checked here.
 // Judging the facts is `checks.ts`, which is pure.
 //
 // ⚠️ The renderer names a project by SLUG and a fix by NAME. Every path is
@@ -21,13 +21,11 @@ import { join } from "node:path";
 import {
   isReadinessFix,
   type ReadinessFix,
-  type ReadinessLinkResult,
   type ReadinessPreview,
   type ReadinessReport,
   readinessChannels,
 } from "../../../shared/readiness";
 import { claudeDir, claudeJsonPath, readText } from "../agent-home";
-import { originUrl } from "../git/remote";
 import {
   claudeSettingsPath,
   findHook,
@@ -36,13 +34,10 @@ import {
 import { codexConfigPath, codexHome, codexHooksPath } from "../handoff/codex";
 import { handle } from "../ipc";
 import { knownWorkspace } from "../workspaces";
-import { fetchBoardsForRepo, linkRepoToBoard } from "../workspaces/client";
 import { folderExists } from "../workspaces/local-folder";
 import { readFolders } from "../workspaces/store";
 import {
   applyFix,
-  type BoardLink,
-  boardLinkOf,
   buildReport,
   claudeHasLanework,
   codexHasLanework,
@@ -72,11 +67,11 @@ async function hasLegacyReviews(folder: string): Promise<boolean> {
 async function resolve(slug: string) {
   const { record, workspace } = await knownWorkspace(slug);
   const [path] = (await readFolders(record))[workspace.slug] ?? [];
-  return { record, workspace, path: path ?? null };
+  return { workspace, path: path ?? null };
 }
 
 async function gather(slug: string): Promise<ReadinessFacts> {
-  const { record, workspace, path } = await resolve(slug);
+  const { workspace, path } = await resolve(slug);
   const [claudeUsed, codexUsed] = await Promise.all([
     Promise.all([exists(claudeDir()), exists(claudeJsonPath())]).then((found) =>
       found.some(Boolean),
@@ -94,24 +89,15 @@ async function gather(slug: string): Promise<ReadinessFacts> {
   if (!path) folder = { kind: "none" };
   else if (!(await folderExists(path))) folder = { kind: "missing", path };
   else {
-    const [remote, agentsMd, claudeMd, mcpJson, legacyReviews] =
-      await Promise.all([
-        originUrl(path),
-        readText(join(path, "AGENTS.md")),
-        readText(join(path, "CLAUDE.md")),
-        readText(join(path, ".mcp.json")),
-        hasLegacyReviews(path),
-      ]);
-    let board: BoardLink = { kind: "unknown" };
-    if (remote && workspace.id)
-      board = await fetchBoardsForRepo(record, remote)
-        .then((boards) => boardLinkOf(boards, workspace.id as string))
-        .catch(() => ({ kind: "unknown" }) as const);
+    const [agentsMd, claudeMd, mcpJson, legacyReviews] = await Promise.all([
+      readText(join(path, "AGENTS.md")),
+      readText(join(path, "CLAUDE.md")),
+      readText(join(path, ".mcp.json")),
+      hasLegacyReviews(path),
+    ]);
     folder = {
       kind: "linked",
       path,
-      remote,
-      board,
       agentsMd,
       claudeMd,
       claudeMcp: claudeHasLanework({ folder: path, mcpJson, claudeJson }),
@@ -178,32 +164,6 @@ async function apply(
   return readinessOf(slug);
 }
 
-/**
- * Make this project's board THE board for its folder's repo (BE-20): the
- * remote is read here from the folder this process linked, never sent by the
- * renderer — like every path in this file.
- */
-async function linkBoard(
-  slug: string,
-  replace: boolean,
-): Promise<ReadinessLinkResult> {
-  const { record, workspace, path } = await resolve(slug);
-  if (!workspace.id)
-    throw new Error("This project has no board on the service to link to.");
-  if (!path || !(await folderExists(path)))
-    throw new Error("This project has no folder on this machine.");
-  const remote = await originUrl(path);
-  if (!remote)
-    throw new Error("This folder has no origin remote to link to the board.");
-  const moved = await linkRepoToBoard(record, workspace.id, remote, replace);
-  if (!moved.ok) return { done: false, linked: moved.linked };
-  return {
-    done: true,
-    report: await readinessOf(slug),
-    unlinked: moved.unlinked.map((board) => board.name),
-  };
-}
-
 function slugArg(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
     throw new Error("A project is required");
@@ -223,11 +183,6 @@ export function registerReadiness(devUrl?: string): void {
   handle(readinessChannels.preview, devUrl, (args) => {
     if (args.length !== 2) throw new Error("preview takes a project and a fix");
     return preview(slugArg(args[0]), fixArg(args[1]));
-  });
-  handle(readinessChannels.linkBoard, devUrl, (args) => {
-    if (args.length !== 2 || typeof args[1] !== "boolean")
-      throw new Error("linkBoard takes a project and whether to replace");
-    return linkBoard(slugArg(args[0]), args[1]);
   });
   handle(readinessChannels.apply, devUrl, (args) => {
     if (args.length !== 3 || !(args[2] === null || typeof args[2] === "string"))

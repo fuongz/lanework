@@ -106,24 +106,6 @@ export function codexHasLanework(toml: string | null): boolean {
   return false;
 }
 
-/** Which board a repo is linked to, from `GET /v1/boards?repo=`. */
-export type BoardLink =
-  | { kind: "this" }
-  | { kind: "other"; name: string }
-  | { kind: "none" }
-  /** The service could not be asked. Said nothing about, not guessed at. */
-  | { kind: "unknown" };
-
-export function boardLinkOf(
-  boards: { workspaceId: string; name: string }[],
-  workspaceId: string,
-): BoardLink {
-  if (boards.some((board) => board.workspaceId === workspaceId))
-    return { kind: "this" };
-  const [other] = boards;
-  return other ? { kind: "other", name: other.name } : { kind: "none" };
-}
-
 /** Everything main gathers about one project before judging it. */
 export interface ReadinessFacts {
   slug: string;
@@ -133,9 +115,6 @@ export interface ReadinessFacts {
     | {
         kind: "linked";
         path: string;
-        /** `git remote get-url origin`, as is; null for none. */
-        remote: string | null;
-        board: BoardLink;
         agentsMd: string | null;
         claudeMd: string | null;
         claudeMcp: boolean;
@@ -152,7 +131,7 @@ const CODEX_ADD = `codex mcp add lanework --url ${MCP_URL}`;
 
 function check(
   base: Omit<ReadinessCheck, "detail" | "fix" | "action"> &
-    Partial<Pick<ReadinessCheck, "fix" | "action" | "linkedTo">>,
+    Partial<Pick<ReadinessCheck, "fix" | "action">>,
   detail: string,
 ): ReadinessCheck {
   return {
@@ -183,38 +162,6 @@ export function buildReport(facts: ReadinessFacts): ReadinessReport {
   );
 
   if (folder.kind === "linked") {
-    checks.push(
-      check(
-        {
-          id: "remote",
-          level: "blocker",
-          ok: folder.remote !== null,
-          title: "Git remote",
-        },
-        "This folder has no origin remote, so an agent cannot tell which board it belongs to. Add one with git remote add origin <url>.",
-      ),
-    );
-    // ⚠️ Left out, not failed, when the service could not be asked: an
-    // offline laptop is not a misconfigured repo.
-    if (folder.remote !== null && folder.board.kind !== "unknown")
-      checks.push(
-        check(
-          {
-            id: "board",
-            level: "blocker",
-            ok: folder.board.kind === "this",
-            title: "Repo linked to this board",
-            // One click on the service (BE-20/D3), not an agent's errand.
-            action: "link-board",
-            ...(folder.board.kind === "other"
-              ? { linkedTo: folder.board.name }
-              : {}),
-          },
-          folder.board.kind === "other"
-            ? `Agents in this folder file their cards on “${folder.board.name}”, the board this repo is linked to. Link it here instead: new cards come to this board, and the ones on “${folder.board.name}” stay there.`
-            : "This repo is not linked to a board, so an agent here cannot tell where its cards go. Link it to this board.",
-        ),
-      );
     checks.push(
       check(
         {

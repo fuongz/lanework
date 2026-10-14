@@ -5,7 +5,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState } from "react";
-import type { ReadinessCheck, ReadinessFix } from "#/../shared/readiness";
+import type { ReadinessFix } from "#/../shared/readiness";
 import type { Workspace } from "#/../shared/workspaces";
 import { ProjectTile } from "#/components/shared/common/project-tile";
 import { SettingsCard } from "#/components/shared/settings/settings-page";
@@ -32,8 +32,6 @@ import { useReadiness, useReadinessWatch } from "#/stores/readiness";
 import { AgentSetupSection } from "./agent-setup-section";
 import { AgentUsageRow } from "./agent-usage-row";
 import { ReadinessFixDialog } from "./readiness-fix-dialog";
-import { ReadinessGithubRepo } from "./readiness-github-repo";
-import { ReadinessLinkDialog } from "./readiness-link-dialog";
 import { ReadinessList } from "./readiness-list";
 
 /** One row of the section's card: what it is on the left, the action on the right. */
@@ -80,7 +78,6 @@ function ReadinessSection({
   const report = useReadiness((state) => state.reports[slug]);
   const error = useReadiness((state) => state.errors[slug]);
   const [fix, setFix] = useState<ReadinessFix | null>(null);
-  const [linking, setLinking] = useState<ReadinessCheck | null>(null);
   // Asked again when the folders change: linking one is the fix for the
   // first check, and its result should not wait for the next focus.
   useReadinessWatch(slug, folders.join("\n"));
@@ -93,7 +90,6 @@ function ReadinessSection({
           <ReadinessList
             report={report}
             onFix={setFix}
-            onLinkBoard={setLinking}
             className="divide-border divide-y"
           />
         ) : (
@@ -101,18 +97,11 @@ function ReadinessSection({
             {error ?? "Checking this project’s folder…"}
           </p>
         )}
-        {/* The project's GitHub repo, picked here (FE-55/D1). */}
-        <ReadinessGithubRepo slug={slug} />
       </SettingsCard>
       <ReadinessFixDialog
         slug={slug}
         fix={fix}
         onOpenChange={(open) => !open && setFix(null)}
-      />
-      <ReadinessLinkDialog
-        slug={slug}
-        check={linking}
-        onOpenChange={(open) => !open && setLinking(null)}
       />
     </div>
   );
