@@ -44,6 +44,17 @@ function readFonts(value: unknown): FontPreferences {
   return { ui: pick("ui"), content: pick("content"), code: pick("code") };
 }
 
+/** How the project switcher orders its list. */
+export const PROJECT_SORTS = ["default", "name", "activate"] as const;
+export type ProjectSort = (typeof PROJECT_SORTS)[number];
+
+function isProjectSort(value: unknown): value is ProjectSort {
+  return (
+    typeof value === "string" &&
+    (PROJECT_SORTS as readonly string[]).includes(value)
+  );
+}
+
 interface Preferences {
   theme: ThemeSource;
   setTheme: (value: ThemeSource) => void;
@@ -59,6 +70,12 @@ interface Preferences {
    */
   onboarded: boolean;
   completeOnboarding: () => void;
+  /**
+   * The project switcher's order. Kept here rather than in the switcher, so
+   * it survives a restart and the rail's two forms (FE-58) share one choice.
+   */
+  projectSort: ProjectSort;
+  setProjectSort: (value: ProjectSort) => void;
   /**
    * True once `persist.rehydrate()` has settled.
    *
@@ -80,6 +97,8 @@ export const usePreferences = create<Preferences>()(
         set((state) => ({ fonts: { ...state.fonts, [role]: value } })),
       onboarded: false,
       completeOnboarding: () => set({ onboarded: true }),
+      projectSort: "default",
+      setProjectSort: (projectSort) => set({ projectSort }),
       hydrated: false,
     }),
     {
@@ -87,10 +106,11 @@ export const usePreferences = create<Preferences>()(
       version: 1,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
-      partialize: ({ theme, onboarded, fonts }) => ({
+      partialize: ({ theme, onboarded, fonts, projectSort }) => ({
         theme,
         onboarded,
         fonts,
+        projectSort,
       }),
       onRehydrateStorage: () => () =>
         usePreferences.setState({ hydrated: true }),
@@ -105,6 +125,10 @@ export const usePreferences = create<Preferences>()(
           // A new key, so still version 1: a record without it reads as the
           // defaults, and a malformed one as the defaults role by role.
           fonts: readFonts(saved?.fonts),
+          // Also a new key: missing or unknown reads as the default order.
+          projectSort: isProjectSort(saved?.projectSort)
+            ? saved.projectSort
+            : "default",
           // A record that predates this key belongs to someone who has already
           // used the app; only a machine with NOTHING saved is actually new.
           // Otherwise shipping the tour would replay it for every existing

@@ -469,6 +469,26 @@ export function AgentSessionsNav({
       });
   };
 
+  /**
+   * A conversation's row (FE-62/D3): Claude's opens as a chat — its Terminal
+   * button is the way to a pty — and Codex's resumes in a terminal as before.
+   */
+  const openSession = (session: AgentSession) => {
+    if (session.agent === "claude")
+      void navigate({
+        to: "/w/$slug/agents/chat/$conversation",
+        params: { slug, conversation: session.id },
+      });
+    else void resume(workspace, session).then(go);
+  };
+  /** On screen: its terminal, or — Claude's — its chat. */
+  const isCurrent = (session: AgentSession) =>
+    (onScreen?.resume === session.id && onScreen.kind === session.agent) ||
+    (session.agent === "claude" &&
+      viewing === session.id &&
+      !viewingSub &&
+      !viewingTask);
+
   // ⚠️ Pinned is its own group, newest pin on top, and ALWAYS shown in full
   // — the fold only ever hides Agents' rows (FE-25/D1).
   const pinned = idle
@@ -520,11 +540,13 @@ export function AgentSessionsNav({
       return slot(
         agentKey(session),
         session.agent,
-        `Resume “${session.title}” in ${agent}`,
+        session.agent === "claude"
+          ? `Open “${session.title}”`
+          : `Resume “${session.title}” in ${agent}`,
         `${session.title} — ${agent}, ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}`,
         working ? "working" : terminal ? "running" : null,
-        onScreen?.resume === session.id && onScreen.kind === session.agent,
-        () => void resume(workspace, session).then(go),
+        isCurrent(session),
+        () => openSession(session),
       );
     };
     const slotGroups: [string, ReactNode[]][] = [
@@ -595,8 +617,7 @@ export function AgentSessionsNav({
     const all = allSubagents.has(key);
     const shownSubagents = all ? ordered : ordered.slice(0, SUBAGENTS_FOLDED);
     const isPinned = session.pinnedAt !== null;
-    const current =
-      onScreen?.resume === session.id && onScreen.kind === session.agent;
+    const current = isCurrent(session);
     const terminal = runningFor(session);
     const onStop = terminal
       ? () =>
@@ -604,7 +625,7 @@ export function AgentSessionsNav({
             ? setConfirming({ terminal, label: agent })
             : void stop(workspace, terminal.id)
       : undefined;
-    const onResume = () => void resume(workspace, session).then(go);
+    const onResume = () => openSession(session);
     /** A sub-agent opens read-only, in the main view (FE-35/D9). */
     const view = (sub: AgentSubagent) =>
       void navigate({
@@ -628,7 +649,11 @@ export function AgentSessionsNav({
                   type="button"
                   onClick={onResume}
                   aria-current={current ? "page" : undefined}
-                  aria-label={`Resume “${session.title}” in ${agent}`}
+                  aria-label={
+                    session.agent === "claude"
+                      ? `Open “${session.title}”`
+                      : `Resume “${session.title}” in ${agent}`
+                  }
                   aria-busy={working || undefined}
                   title={`${session.title}\n${agent}, ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}${summary ? `\n${summary}` : ""}`}
                   onPointerEnter={() => peek(session)}

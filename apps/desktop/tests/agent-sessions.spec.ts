@@ -100,8 +100,10 @@ import {
   CODEX_GUARDIAN_ID,
   CODEX_ID,
   CODEX_SPAWNED_ID,
+  claudeRowName,
   codexRateLimits,
   codexTokenCount,
+  resumeClaudeInTerminal,
   seedAgentFacts,
   seedAgentHome,
   seedBackgroundTasks,
@@ -2182,7 +2184,7 @@ test("FE-41: the terminal bar shows Codex's usage until each window resets, and 
     );
     await expect(
       page
-        .getByRole("button", { name: "Resume “Flaky login test” in Claude" })
+        .getByRole("button", { name: claudeRowName("Flaky login test") })
         .getByTestId("codex-goal-badge"),
     ).toHaveCount(0);
 
@@ -3210,9 +3212,8 @@ test("FE-46: new and resumed Claude launches install the default statusLine brid
     await expect(strip).toHaveAccessibleName(
       "Claude usage: 5h 19% used, weekly 23% used",
     );
-    await page
-      .getByRole("button", { name: "Resume “Flaky login test” in Claude" })
-      .click();
+    // Resumed in a terminal: its row opens the chat, Terminal the pty (FE-62).
+    await resumeClaudeInTerminal(page, "Flaky login test");
     await expect(strip).toHaveAccessibleName(
       "Claude usage: 5h 31% used, weekly 23% used",
     );

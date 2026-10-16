@@ -13,6 +13,11 @@ import {
   type DesktopLaneworkMcpApi,
   laneworkMcpChannels,
 } from "../../shared/auth";
+import {
+  type ConversationEvent,
+  conversationChannels,
+  type DesktopConversationApi,
+} from "../../shared/conversation";
 import { channels, type DesktopApi } from "../../shared/desktop";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
 import { type DesktopHandoffApi, handoffChannels } from "../../shared/handoff";
@@ -114,6 +119,46 @@ const handoff: DesktopHandoffApi = {
   enable: (agent) => ipcRenderer.invoke(handoffChannels.enable, agent),
   disable: (agent) => ipcRenderer.invoke(handoffChannels.disable, agent),
   setPushWip: (on) => ipcRenderer.invoke(handoffChannels.setPushWip, on),
+};
+
+/**
+ * The conversation view (FE-62). Every call names a workspace and a
+ * conversation id, never a folder or a command; main checks the settings
+ * against its own lists before any of them becomes a flag.
+ */
+const conversation: DesktopConversationApi = {
+  read: (workspace, id) =>
+    ipcRenderer.invoke(conversationChannels.read, workspace, id),
+  send: (request) => ipcRenderer.invoke(conversationChannels.send, request),
+  stop: (workspace, id) =>
+    ipcRenderer.invoke(conversationChannels.stop, workspace, id),
+  clearQueue: (workspace, id) =>
+    ipcRenderer.invoke(conversationChannels.clearQueue, workspace, id),
+  answerPermission: (workspace, id, request, answer) =>
+    ipcRenderer.invoke(
+      conversationChannels.answerPermission,
+      workspace,
+      id,
+      request,
+      answer,
+    ),
+  fork: (workspace, id) =>
+    ipcRenderer.invoke(conversationChannels.fork, workspace, id),
+  takeOver: (workspace, id) =>
+    ipcRenderer.invoke(conversationChannels.takeOver, workspace, id),
+  release: (workspace, id) =>
+    ipcRenderer.invoke(conversationChannels.release, workspace, id),
+  engineState: (workspace, id) =>
+    ipcRenderer.invoke(conversationChannels.engineState, workspace, id),
+  lastSettings: () => ipcRenderer.invoke(conversationChannels.lastSettings),
+  linkPreview: (url) =>
+    ipcRenderer.invoke(conversationChannels.linkPreview, url),
+  suggest: (workspace, kind, query) =>
+    ipcRenderer.invoke(conversationChannels.suggest, workspace, kind, query),
+  openLink: (url) => ipcRenderer.invoke(conversationChannels.openLink, url),
+  pathForFile: (file) => webUtils.getPathForFile(file),
+  onEvent: (listener) =>
+    subscribe<ConversationEvent>(conversationChannels.event, listener),
 };
 
 /** Whether a project's folder is ready for an agent (FE-30). A slug, never a path. */
@@ -594,6 +639,7 @@ const desktop: DesktopApi = {
   git,
   worktree,
   terminal: createTerminal(),
+  conversation,
   handoff,
   readiness,
   memory,

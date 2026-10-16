@@ -1311,6 +1311,8 @@ test("the project menu shows the agents running in each project", async () => {
     const sortBy = async (name: string) => {
       await page.getByRole("button", { name: "Sort projects" }).click();
       await page.getByRole("menuitemradio", { name, exact: true }).click();
+      // Picking an order closes the sort menu, leaving the list open.
+      await expect(page.getByRole("menuitemradio")).toHaveCount(0);
       await expect(
         page.getByRole("listbox", { name: "Projects" }),
       ).toBeVisible();
@@ -1330,8 +1332,37 @@ test("the project menu shows the agents running in each project", async () => {
     await expect(
       page.getByRole("button", { name: /^Switch project/ }),
     ).toHaveAccessibleName("Switch project — currently Cloud project");
-  } finally {
+
+    // The order is kept: a restart opens the switcher still sorted by name.
     await app.close();
+    const again = await electron.launch({
+      args: [process.cwd()],
+      env: {
+        ...launchEnv({ profile, home, apiUrl: plane.origin }),
+        LANEWORK_TERMINAL_SHELL: "/bin/sh",
+        LANEWORK_TERMINAL_AGENTS: "claude",
+        LANEWORK_CLAUDE_BIN: claude,
+      },
+    });
+    try {
+      const next = await again.firstWindow();
+      await next.getByRole("button", { name: /^Switch project/ }).click();
+      await expect(
+        next
+          .getByRole("listbox", { name: "Projects" })
+          .getByRole("option")
+          .first(),
+      ).toHaveAccessibleName(/^Cloud project/);
+      await next.getByRole("button", { name: "Sort projects" }).click();
+      await expect(
+        next.getByRole("menuitemradio", { name: "Name", exact: true }),
+      ).toBeChecked();
+    } finally {
+      await again.close();
+    }
+  } finally {
+    // Already closed once the restart step ran; closing again is a no-op.
+    await app.close().catch(() => undefined);
     await plane.close();
     await removeProfile(profile);
   }

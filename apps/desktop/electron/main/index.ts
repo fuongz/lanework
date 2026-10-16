@@ -11,6 +11,7 @@ import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
 import { registerAgentConfig } from "./agent-config";
 import { registerAgentSetup } from "./agent-setup";
 import { registerAuth } from "./auth";
+import { pidFileBridge, registerConversation } from "./conversation";
 import { registerGit } from "./git";
 import { registerHandoff } from "./handoff";
 import { registerInstructions } from "./instructions";
@@ -21,7 +22,7 @@ import { installMenuBar } from "./menu-bar";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { appOrigin, isTrustedUrl } from "./security";
-import { registerTerminal } from "./terminal";
+import { agentTerminalOn, killTerminal, registerTerminal } from "./terminal";
 import { registerWorkspaces } from "./workspaces";
 
 app.setName("Lanework");
@@ -170,6 +171,15 @@ app
     registerWorkspaces(devUrl);
     registerGit(devUrl);
     registerTerminal(devUrl);
+    // A Lanework tab is found and stopped by its id (FE-62); a Claude in any
+    // other terminal app is still caught by its pid file.
+    const pids = pidFileBridge();
+    registerConversation(devUrl, {
+      terminalOn: async (workspace, conversation, ours) =>
+        (await agentTerminalOn(workspace, conversation)) ??
+        pids.terminalOn(workspace, conversation, ours),
+      kill: (id) => (id.startsWith("pid:") ? pids.kill(id) : killTerminal(id)),
+    });
     registerHandoff(devUrl);
     registerReadiness(devUrl);
     registerMemory(devUrl);
