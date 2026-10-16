@@ -1,6 +1,7 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { cn } from "cn";
 import type * as React from "react";
+import { MENU_SURFACE } from "./menu-surface";
 
 function Popover({ ...props }: PopoverPrimitive.Root.Props) {
   return <PopoverPrimitive.Root data-slot="popover" {...props} />;
@@ -12,6 +13,7 @@ function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
 
 function PopoverContent({
   className,
+  variant = "default",
   align = "center",
   alignOffset = 0,
   side = "bottom",
@@ -21,7 +23,14 @@ function PopoverContent({
   Pick<
     PopoverPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset"
-  >) {
+  > & {
+    /**
+     * `menu`: a picker — a search over a list — drawn as the dropdown menus
+     * are: menu glass, no padding of its own, as wide as its rows (within
+     * bounds), and no open/close animation.
+     */
+    variant?: "default" | "menu";
+  }) {
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Positioner
@@ -35,6 +44,8 @@ function PopoverContent({
           data-slot="popover-content"
           className={cn(
             "z-50 flex w-72 origin-(--transform-origin) flex-col gap-4 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            variant === "menu" &&
+              `${MENU_SURFACE} max-h-(--available-height) w-max max-w-80 min-w-52 gap-0 overflow-hidden p-0 text-[13px]`,
             className,
           )}
           {...props}

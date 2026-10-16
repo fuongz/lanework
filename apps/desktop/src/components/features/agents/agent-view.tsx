@@ -137,6 +137,26 @@ export function AgentView() {
       });
   };
 
+  const [toChat, setToChat] = useState(false);
+  /** Stop this tab, then open its conversation as a chat (FE-62/D3). */
+  const openChat = async () => {
+    const id = session?.resume;
+    if (!workspace || !id || toChat || working) return;
+    setToChat(true);
+    try {
+      if (!session?.exit)
+        await window.desktop?.conversation.takeOver(workspace, id);
+      void navigate({
+        to: "/w/$slug/agents/chat/$conversation",
+        params: { slug, conversation: id },
+      });
+    } catch {
+      // Still running here: the tab stays, and so does the view.
+    } finally {
+      setToChat(false);
+    }
+  };
+
   const again = async (kind: TerminalAgent) => {
     if (!workspace) return;
     open(
@@ -237,19 +257,21 @@ export function AgentView() {
             facts={facts}
           />
         )}
-        {/* The same conversation as a chat (FE-62/D3). While this tab runs
-            it, the chat waits — one writer at a time — and offers to take
-            over. */}
+        {/* The same conversation as a chat (FE-62/D3). One writer at a
+            time: this tab is stopped first, so not mid-turn — the chat's
+            Terminal button waits the same way. */}
         {agent === "claude" && session.resume && (
           <Button
             size="sm"
             variant="outline"
-            onClick={() =>
-              void navigate({
-                to: "/w/$slug/agents/chat/$conversation",
-                params: { slug, conversation: session.resume ?? "" },
-              })
+            aria-disabled={working || toChat || undefined}
+            title={
+              working
+                ? "Wait for the turn to end, or stop it"
+                : "Continue this conversation as a chat"
             }
+            onClick={() => void openChat()}
+            className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
           >
             <HugeiconsIcon
               icon={MessageMultiple01Icon}

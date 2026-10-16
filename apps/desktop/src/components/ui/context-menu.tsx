@@ -2,6 +2,7 @@
 
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { cn } from "cn";
+import { MENU_SURFACE } from "./menu-surface";
 
 /**
  * Right click, or long press.
@@ -32,10 +33,9 @@ function ContextMenuContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
-            // Glass: a thin tint over a heavy blur, a hairline rim and a lit top
-            // edge — the macOS menu, not a card. The blur sits on `::before`
-            // so the popup's own scroll clip never cuts it off.
-            "relative z-50 max-h-(--available-height) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover/40 p-1 dark:bg-muted/45 text-popover-foreground shadow-[0_12px_40px_-8px_rgb(0_0_0/0.45),inset_0_1px_0_0_rgb(255_255_255/0.06)] ring-1 ring-foreground/12 outline-none dark:ring-foreground/15 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-3xl before:backdrop-saturate-[1.8] **:data-[slot$=-item]:data-highlighted:bg-foreground/10",
+            // The menu glass — the macOS menu, not a card — as every menu has.
+            "z-50 max-h-(--available-height) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto p-1 text-popover-foreground outline-none **:data-[slot$=-item]:data-highlighted:bg-foreground/10",
+            MENU_SURFACE,
             className,
           )}
           {...props}

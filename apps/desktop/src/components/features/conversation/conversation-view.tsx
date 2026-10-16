@@ -25,6 +25,8 @@ import {
   type PermissionRequest,
 } from "#/../shared/conversation";
 import type { AgentSession } from "#/../shared/terminal";
+import { useConversationFacts } from "#/components/features/agents/use-agent-facts";
+import { ContextButton } from "#/components/shared/agents/conversation-facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import {
   WINDOW_TITLE,
@@ -53,6 +55,8 @@ import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { Composer, type ComposerHandle } from "./composer";
+import { takeFirstMessage } from "./first-message";
+import { JobCapsules } from "./job-capsules";
 import { TocRail } from "./toc-rail";
 import {
   promptLines,
@@ -92,7 +96,7 @@ export function ConversationView() {
 function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const workspace = useWorkspaceKey(slug);
   const navigate = useNavigate();
-  const { conversation, error, engine, delta, permissions, setEngine, reload } =
+  const { conversation, error, engine, delta, permissions, setEngine } =
     useConversation(workspace, id);
   const listed = useAgentSessions((state) =>
     workspace
@@ -102,9 +106,15 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       : undefined,
   );
   const resume = useAgentTerminals((state) => state.resume);
+  const facts = useConversationFacts(workspace, "claude", id);
 
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
-  const [sent, setSent] = useState<Sent[]>([]);
+  // A conversation just started from the new page: its first message,
+  // until the transcript has it.
+  const [sent, setSent] = useState<Sent[]>(() => {
+    const first = takeFirstMessage(id);
+    return first ? [{ key: "first", ...first, expect: 1 }] : [];
+  });
   const [actionError, setActionError] = useState<string | null>(null);
   const [forking, setForking] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -145,7 +155,21 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   }, [users]);
 
   const running = engine.state === "running" || engine.state === "starting";
-  const inTerminal = engine.state === "terminal";
+  // ⚠️ One writer per conversation (D3). A Lanework tab running it is where
+  // it lives now: the chat opens that tab instead of asking. A Claude in
+  // another terminal app has no tab to open; a send then says so.
+  const tab =
+    engine.state === "terminal" && !engine.terminalId.startsWith("pid:")
+      ? engine.terminalId
+      : null;
+  useEffect(() => {
+    if (tab)
+      void navigate({
+        to: "/w/$slug/agents/$terminalId",
+        params: { slug, terminalId: tab },
+        replace: true,
+      });
+  }, [tab, navigate, slug]);
   const working = running || (conversation?.working ?? false);
   const queued = engine.state === "running" ? engine.queued : 0;
 
@@ -328,15 +352,22 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     atBottom.current = true;
     requestAnimationFrame(() => toBottom(true));
     try {
-      setEngine(
-        await surface.send({
-          workspace,
-          conversation: id,
-          text,
-          attachments,
-          settings,
-        }),
-      );
+      const next = await surface.send({
+        workspace,
+        conversation: id,
+        text,
+        attachments,
+        settings,
+      });
+      setEngine(next);
+      if (next.state === "terminal") {
+        // Nothing was sent: another process writes it (D3).
+        setSent((previous) => previous.filter((entry) => entry.key !== key));
+        setActionError(
+          "Claude is running this conversation in another terminal. Exit it there to continue here.",
+        );
+        return false;
+      }
       return true;
     } catch (caught) {
       setSent((previous) => previous.filter((entry) => entry.key !== key));
@@ -384,10 +415,15 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const openTerminal = async () => {
     if (!workspace) return;
     if (engine.state === "terminal") {
-      void navigate({
-        to: "/w/$slug/agents/$terminalId",
-        params: { slug, terminalId: engine.terminalId },
-      });
+      if (tab)
+        void navigate({
+          to: "/w/$slug/agents/$terminalId",
+          params: { slug, terminalId: tab },
+        });
+      else
+        setActionError(
+          "Claude is running this conversation in another terminal.",
+        );
       return;
     }
     setSwitching(true);
@@ -407,19 +443,6 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     }
   };
 
-  const takeOver = () => {
-    if (!workspace) return;
-    void window.desktop?.conversation
-      .takeOver(workspace, id)
-      .then((next) => {
-        setEngine(next);
-        reload();
-      })
-      .catch((caught: unknown) =>
-        setActionError(ipcMessage(caught, "Could not continue here.")),
-      );
-  };
-
   // ─── Drawing ──────────────────────────────────────────────────────────────
   const firstPrompt = turns.find((turn) => turn.role === "user");
   const title =
@@ -427,6 +450,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     (firstPrompt?.role === "user" ? firstLine(firstPrompt.text) : "") ||
     "Claude conversation";
 
+  const lastPromptAt =
+    [...turns].reverse().find((turn) => turn.role === "user")?.at ?? null;
   const last = turns[turns.length - 1];
   const lastOpen = last?.role === "assistant" && last.open ? last : null;
   // Streamed text or a permission before the turn has a line of its own.
@@ -473,6 +498,35 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           >
             {title}
           </h1>
+          <span className="ml-auto" />
+          {/* The same conversation in a terminal (D3), where the agent view
+              has its Chat: one writer at a time, so not while a turn runs. */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  // ⚠️ aria-disabled, not disabled: a disabled button gets
+                  // no pointer events, and its tooltip says why it is off.
+                  aria-disabled={blocked || undefined}
+                  onClick={() => {
+                    if (!blocked) void openTerminal();
+                  }}
+                  className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                />
+              }
+            >
+              <HugeiconsIcon
+                icon={ComputerTerminal01Icon}
+                strokeWidth={1.8}
+                data-icon="inline-start"
+                aria-hidden="true"
+              />
+              Terminal
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{terminalTip}</TooltipContent>
+          </Tooltip>
         </WindowTitlebar>
 
         <div className="relative min-h-0 flex-1">
@@ -600,85 +654,40 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           )}
         </div>
 
-        <div className="mx-auto flex w-full max-w-[940px] min-w-0 flex-col gap-1.5 px-8 pb-2">
+        <div className="mx-auto flex w-full max-w-[940px] min-w-0 flex-col gap-1.5 px-8 pb-4">
           {(actionError || engine.state === "error") && (
             <p role="alert" className="text-destructive px-1 text-xs">
               {actionError ??
                 (engine.state === "error" ? engine.message : null)}
             </p>
           )}
-          {inTerminal ? (
-            // ⚠️ One writer per conversation (D3): while a pty runs Claude on
-            // it, nothing is sent from here until one of the two lets go.
-            <div className="bg-card border-border flex items-center gap-3 rounded-xl border px-4 py-3">
-              <HugeiconsIcon
-                icon={ComputerTerminal01Icon}
-                className="text-muted-foreground size-4 shrink-0"
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
-              <span className="min-w-0 flex-1 text-[13px]">
-                Running in Terminal
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void openTerminal()}
-              >
-                Open Terminal
-              </Button>
-              <Button size="sm" onClick={takeOver}>
-                Continue here
-              </Button>
-            </div>
-          ) : (
-            workspace &&
-            settings && (
-              <Composer
-                ref={composer}
-                workspace={workspace}
-                branch={conversation?.branch ?? null}
-                settings={settings}
-                onSettings={(next) =>
-                  setSettings((previous) =>
-                    previous ? { ...previous, ...next } : previous,
-                  )
-                }
-                working={running}
-                queued={queued}
-                onSend={send}
-                onStop={stop}
-                onClearQueue={clearQueue}
-              />
-            )
+          {workspace && (
+            <JobCapsules
+              slug={slug}
+              workspace={workspace}
+              session={listed}
+              since={lastPromptAt}
+            />
           )}
-          <div className="flex h-6 items-center justify-end">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    // ⚠️ aria-disabled, not disabled: a disabled button gets
-                    // no pointer events, and its tooltip says why it is off.
-                    aria-disabled={blocked || undefined}
-                    onClick={() => {
-                      if (!blocked) void openTerminal();
-                    }}
-                    className="text-tone-sky hover:text-foreground aria-disabled:hover:text-tone-sky flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-                  />
-                }
-              >
-                <HugeiconsIcon
-                  icon={ComputerTerminal01Icon}
-                  className="size-3.5"
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                />
-                Terminal
-              </TooltipTrigger>
-              <TooltipContent side="top">{terminalTip}</TooltipContent>
-            </Tooltip>
-          </div>
+          {workspace && settings && (
+            <Composer
+              ref={composer}
+              slug={slug}
+              corner={<ContextButton facts={facts} />}
+              workspace={workspace}
+              settings={settings}
+              onSettings={(next) =>
+                setSettings((previous) =>
+                  previous ? { ...previous, ...next } : previous,
+                )
+              }
+              working={running}
+              queued={queued}
+              onSend={send}
+              onStop={stop}
+              onClearQueue={clearQueue}
+            />
+          )}
         </div>
       </section>
     </TooltipProvider>

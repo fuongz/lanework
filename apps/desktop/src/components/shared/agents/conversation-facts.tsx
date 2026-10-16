@@ -277,3 +277,44 @@ export function ModelButton({
     </Popover>
   );
 }
+
+/**
+ * `ModelButton` as the chat composer's corner has it (FE-62): the context
+ * ring alone — the composer names the model already — opening the same
+ * usage.
+ */
+export function ContextButton({
+  facts,
+}: {
+  facts: AgentFacts | null | undefined;
+}) {
+  if (!facts?.model) return null;
+  const share = contextUse(facts)?.share ?? null;
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            data-testid="chat-context"
+            aria-label={`Context${share !== null ? ` ${Math.round(share * 100)}% full` : ""}. Show its usage`}
+            className="hover:bg-foreground/[0.06] aria-expanded:bg-foreground/[0.06] focus-visible:ring-ring/30 flex size-6 shrink-0 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2"
+          />
+        }
+      >
+        <ContextRing
+          share={share}
+          className={cn(
+            "size-3.5",
+            share !== null && share >= 0.8
+              ? "text-tone-amber"
+              : "text-muted-foreground",
+          )}
+        />
+      </PopoverTrigger>
+      <PopoverContent align="end" side="top" className="w-72 gap-1 p-1.5">
+        <FactList facts={modelFacts(facts)} data-testid="model-facts" />
+      </PopoverContent>
+    </Popover>
+  );
+}

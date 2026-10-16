@@ -126,42 +126,24 @@ function ValuePicker({
   const shown = matched.slice(0, MAX_OPTIONS);
 
   return (
-    // ⚠️ ONE 4px inset for the whole picker, and it comes from `Command`'s own
-    // padding. The input wrapper and the list each add another 4 by default, so
-    // both are zeroed here — stacking them made every outer gap 8 while the gaps
-    // between controls stayed 4, which is the mismatch this removes. The
-    // wrapper keeps a 4px bottom: that is the gap down to the first row.
-    <Command
-      shouldFilter={false}
-      className="[&_[data-slot=command-input-wrapper]]:p-0 [&_[data-slot=command-input-wrapper]]:pb-1"
-    >
-      {onClear ? (
-        <div className="flex items-start gap-1">
-          <div className="min-w-0 flex-1">
-            <CommandInput
-              className="text-[13px]"
-              placeholder={field.label}
-              value={query}
-              onValueChange={setQuery}
-            />
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 shrink-0 px-2 text-xs"
-            onClick={onClear}
-          >
-            Clear
-          </Button>
-        </div>
-      ) : (
-        <CommandInput
-          className="text-[13px]"
-          placeholder={field.label}
-          value={query}
-          onValueChange={setQuery}
-        />
-      )}
+    <Command shouldFilter={false}>
+      <CommandInput
+        placeholder={field.label}
+        value={query}
+        onValueChange={setQuery}
+        trailing={
+          onClear && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground h-6 shrink-0 px-2 text-xs"
+              onClick={onClear}
+            >
+              Clear
+            </Button>
+          )
+        }
+      />
       <CommandList>
         <RailHover
           key={query}
@@ -179,7 +161,7 @@ function ValuePicker({
               // the same state, and it did not match the menus beside it.
               data-checked={selected === option.value ? "true" : undefined}
               onSelect={() => onPick(option.value)}
-              className={`${RAIL_ROW} min-h-8 gap-2.5 text-[13px]`}
+              className={`${RAIL_ROW} gap-2.5`}
             >
               <OptionGlyph field={field} option={option} />
               <span className="truncate">{option.label}</span>
@@ -265,7 +247,7 @@ function FilterMenu({
           </Button>
         }
       />
-      <PopoverContent align="end" className="w-52 p-1.5">
+      <PopoverContent variant="menu" align="end" className="p-1">
         {/* ⚠️ The field list STAYS while its values are open. Swapping the
             panel for the values hid the other fields behind a back button and
             cost a click to compare two of them — the whole point of a submenu
@@ -299,7 +281,7 @@ function FilterMenu({
                       // "Filter" produced two panels — the field list and
                       // whichever submenu happened to be first. Hover opens it;
                       // pressing the row (Enter, Space, click) opens it too.
-                      className={`${RAIL_ROW} relative aria-expanded:bg-foreground/[0.05] flex h-8 items-center gap-2.5 rounded-md px-2 text-left text-[13px]`}
+                      className={`${RAIL_ROW} relative aria-expanded:bg-foreground/[0.05] flex h-7 items-center gap-2.5 rounded-md px-2 text-left text-[13px]`}
                     >
                       <HugeiconsIcon
                         icon={entry.icon}
@@ -318,10 +300,10 @@ function FilterMenu({
                   }
                 />
                 <PopoverContent
+                  variant="menu"
                   side="right"
                   align="start"
                   sideOffset={6}
-                  className="w-56 p-0"
                 >
                   <ValuePicker
                     field={entry}
@@ -390,7 +372,7 @@ function FilterChip({
             </button>
           }
         />
-        <PopoverContent align="start" className="w-56 p-0">
+        <PopoverContent variant="menu" align="start">
           <ValuePicker
             field={field}
             selected={option.value}

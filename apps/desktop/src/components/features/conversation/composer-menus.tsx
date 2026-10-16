@@ -1,5 +1,7 @@
 import {
+  Add01Icon,
   ArrowDown01Icon,
+  FileAddIcon,
   FlashIcon,
   PencilEdit02Icon,
   Search01Icon,
@@ -24,7 +26,9 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSub,
@@ -244,7 +248,7 @@ export function ModelMenu({
         side="top"
         align="start"
         sideOffset={6}
-        className="w-60 rounded-xl p-1.5"
+        className="w-60 p-1.5"
       >
         <DropdownMenuItem
           closeOnClick={false}
@@ -266,10 +270,7 @@ export function ModelMenu({
               {EFFORT_LABELS[settings.effort]}
             </span>
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent
-            className="w-44 rounded-xl p-1.5"
-            sideOffset={6}
-          >
+          <DropdownMenuSubContent className="w-44 p-1.5" sideOffset={6}>
             <DropdownMenuRadioGroup
               value={settings.effort}
               onValueChange={(value) =>
@@ -297,7 +298,7 @@ export function ModelMenu({
             </span>
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent
-            className="overflow-hidden rounded-xl p-0"
+            className="overflow-hidden p-0"
             sideOffset={6}
           >
             <ModelPanel
@@ -369,7 +370,9 @@ export function PermissionMenu({
         side="top"
         align="start"
         sideOffset={6}
-        className="w-[22rem] rounded-xl p-1.5"
+        // ⚠️ A gap between the rows: the picked one is tinted, and so is the
+        // one under the pointer — touching, the two read as one block.
+        className="flex w-[22rem] flex-col gap-1 p-1.5"
       >
         {PERMISSIONS.map((entry) => (
           <DropdownMenuItem
@@ -391,6 +394,59 @@ export function PermissionMenu({
             </span>
           </DropdownMenuItem>
         ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The composer's + (ảnh 6): what can be added to the message. Upload file is
+ * the only entry for now; the menu is where the next ones go.
+ */
+export function AttachMenu({
+  onUpload,
+  disabled,
+}: {
+  onUpload: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        disabled={disabled}
+        aria-label="Add to message"
+        className="text-muted-foreground hover:text-foreground bg-foreground/[0.05] hover:bg-foreground/[0.08] aria-expanded:bg-foreground/[0.08] aria-expanded:text-foreground focus-visible:ring-ring/30 flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-2"
+      >
+        <HugeiconsIcon icon={Add01Icon} className="size-4" strokeWidth={1.8} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side="top"
+        align="start"
+        sideOffset={6}
+        className="flex w-[17rem] flex-col gap-1 p-1.5"
+      >
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="px-3 pt-1.5 pb-1 text-[11px] font-medium tracking-wide uppercase">
+            Add to message
+          </DropdownMenuLabel>
+          <DropdownMenuItem
+            onClick={onUpload}
+            className="items-start gap-3 rounded-lg px-3 py-2.5"
+          >
+            <HugeiconsIcon
+              icon={FileAddIcon}
+              className="mt-0.5 size-4 shrink-0"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[13px] font-medium">Upload file</span>
+              <span className="text-muted-foreground text-xs leading-snug">
+                Attach files or images
+              </span>
+            </span>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

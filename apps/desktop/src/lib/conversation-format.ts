@@ -21,14 +21,21 @@ export function clock(iso: string | null): string | null {
 
 /** The first non-empty line of `text`, without markdown's leading marks. */
 export function firstLine(text: string): string {
+  return textLines(text, 1)[0] ?? "";
+}
+
+/** Up to `max` of `text`'s lines, as `firstLine` cleans one. */
+export function textLines(text: string, max: number): string[] {
+  const out: string[] = [];
   for (const raw of text.split("\n")) {
     const line = raw
       .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s?)/, "")
       .replace(/[*`]/g, "")
       .trim();
-    if (line) return line;
+    if (line) out.push(line);
+    if (out.length >= max) break;
   }
-  return "";
+  return out;
 }
 
 /** The text of an assistant turn, its text blocks joined: what Copy copies. */

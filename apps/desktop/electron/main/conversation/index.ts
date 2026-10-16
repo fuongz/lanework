@@ -5,11 +5,14 @@
 // never a folder or a command: the folder is the one main wrote down for the
 // workspace (`terminalFolder`), the id a UUID whose transcript is in Claude's
 // folder for it, and settings come from the fixed lists.
+import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { app, shell } from "electron";
 import {
+  ANSWER_MAX,
+  ANSWERS_MAX,
   type ComposerSettings,
   type Conversation,
   conversationChannels,
@@ -103,6 +106,26 @@ async function folderOf(workspace: string): Promise<string> {
 function permissionAnswer(value: unknown): PermissionAnswer {
   const v = (value ?? {}) as Record<string, unknown>;
   if (v.behavior === "allow") {
+    if (v.answers !== undefined) {
+      const answers = v.answers as Record<string, unknown> | null;
+      if (!answers || typeof answers !== "object" || Array.isArray(answers))
+        throw new Error("Answers must be an object");
+      const entries = Object.entries(answers);
+      if (
+        entries.length > ANSWERS_MAX ||
+        entries.some(
+          ([question, value]) =>
+            question.length > ANSWER_MAX ||
+            typeof value !== "string" ||
+            value.length > ANSWER_MAX,
+        )
+      )
+        throw new Error("Answers are too long");
+      return {
+        behavior: "allow",
+        answers: Object.fromEntries(entries) as Record<string, string>,
+      };
+    }
     if (v.mode === undefined) return { behavior: "allow" };
     if (!isPermission(v.mode)) throw new Error("Unknown mode");
     return { behavior: "allow", mode: v.mode };
@@ -178,8 +201,51 @@ export function registerConversation(
         throw new Error("A workspace and a conversation are required");
       const { workspace, conversation } = conversationOf(args);
       const folder = await folderOf(workspace);
+      const file = transcriptPath(agentHome(), folder, conversation);
+      // A conversation started here whose first line the CLI has not
+      // written yet: what its engine holds so far.
+      const pending = (await stat(file).catch(() => null))?.isFile()
+        ? null
+        : engines.pending(workspace, conversation);
+      if (pending)
+        return {
+          id: conversation,
+          cwd: folder,
+          branch: null,
+          turns: pending.turns,
+          working: pending.working,
+          card: null,
+          settings: await store.of(conversation),
+          truncated: false,
+        };
       const read = await readConversation(agentHome(), folder, conversation);
       return { ...read, settings: await store.of(conversation) };
+    },
+  );
+
+  handle(
+    conversationChannels.start,
+    devUrl,
+    async (args): Promise<{ conversation: string; engine: EngineState }> => {
+      if (args.length !== 1) throw new Error("A request is required");
+      // ⚠️ The id is main's own, never the page's: a new one cannot name a
+      // conversation that already exists.
+      const conversation = randomUUID();
+      const request = sendRequest({
+        ...((args[0] ?? {}) as object),
+        conversation,
+      });
+      if (!request.text.trim() && request.attachments.length === 0)
+        throw new Error("Write something first.");
+      const folder = await folderOf(request.workspace);
+      const content = await contentOf(request.text, request.attachments);
+      const engine = await engines.start(
+        request.workspace,
+        conversation,
+        folder,
+        { content, settings: request.settings },
+      );
+      return { conversation, engine };
     },
   );
 
@@ -193,7 +259,10 @@ export function registerConversation(
       // ⚠️ Only a conversation this folder has: its transcript is where the
       // CLI keeps this folder's, under the id it was asked for.
       const file = transcriptPath(agentHome(), folder, request.conversation);
-      if (!(await stat(file).catch(() => null))?.isFile())
+      if (
+        !(await stat(file).catch(() => null))?.isFile() &&
+        !engines.pending(request.workspace, request.conversation)
+      )
         throw new Error("That conversation is not in this project.");
       const content = await contentOf(request.text, request.attachments);
       return noted(
@@ -261,6 +330,22 @@ export function registerConversation(
         conversation,
         engines.takeOver(workspace, conversation),
       );
+    },
+  );
+
+  handle(conversationChannels.close, devUrl, async (args): Promise<void> => {
+    if (args.length !== 2)
+      throw new Error("A workspace and a conversation are required");
+    const { workspace, conversation } = conversationOf(args);
+    await engines.close(workspace, conversation);
+  });
+
+  handle(
+    conversationChannels.alive,
+    devUrl,
+    async (args): Promise<string[]> => {
+      if (args.length !== 1) throw new Error("A workspace is required");
+      return engines.alive(key(args[0], "workspace"));
     },
   );
 

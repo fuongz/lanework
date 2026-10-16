@@ -212,11 +212,8 @@ function FamilyCombobox({
           </button>
         }
       />
-      <PopoverContent align="end" className="w-64 gap-0 p-0">
-        <Command
-          shouldFilter={false}
-          className="[&_[data-slot=command-input-wrapper]]:p-0 [&_[data-slot=command-input-wrapper]]:pb-1"
-        >
+      <PopoverContent variant="menu" align="end">
+        <Command shouldFilter={false}>
           <CommandInput
             placeholder="Search fonts"
             value={query}

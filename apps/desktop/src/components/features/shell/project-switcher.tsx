@@ -186,9 +186,10 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           }
         />
         <PopoverContent
+          variant="menu"
           align="start"
           side={compact ? "right" : undefined}
-          className="w-60 gap-0 p-1"
+          className="p-1"
         >
           <RailHover className="max-h-80 overflow-y-auto">
             <div
@@ -208,7 +209,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                   role="option"
                   aria-selected={workspace.slug === active?.slug}
                   onClick={() => go(workspace.slug)}
-                  className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-8 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
+                  className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
                 >
                   <ProjectTile
                     workspace={workspace}
@@ -225,7 +226,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
               ))}
             </div>
           </RailHover>
-          <RailHover className="border-border mt-1 flex gap-0.5 border-t pt-1">
+          <RailHover className="border-foreground/10 mt-1 flex gap-0.5 border-t pt-1">
             {/* ⚠️ A row that opens a DIALOG, and the menu closes behind it. A
               project is named and pointed at its folders in one go now, and
               that does not fit — nor belong — inside a menu people open to
@@ -236,7 +237,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 setOpen(false);
                 setCreating(true);
               }}
-              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
+              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] flex h-7 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
             >
               <HugeiconsIcon
                 icon={Add01Icon}
@@ -255,7 +256,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 setOpen(false);
                 void navigate({ to: "/settings/workspaces" });
               }}
-              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-8 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
+              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
             >
               <HugeiconsIcon
                 icon={Settings01Icon}
@@ -271,7 +272,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                     type="button"
                     aria-label="Sort projects"
                     title="Sort projects"
-                    className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-8 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
+                    className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
                   >
                     <HugeiconsIcon
                       icon={Sorting05Icon}

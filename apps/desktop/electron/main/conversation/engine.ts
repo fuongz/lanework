@@ -15,6 +15,7 @@
 import { type ChildProcess, spawn as spawnChild } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  type AskQuestion,
   type ComposerSettings,
   type ConversationEvent,
   checkSettings,
@@ -53,8 +54,16 @@ export interface Outgoing {
   settings: ComposerSettings;
 }
 
-/** The CLI's arguments for `settings` — every value from a fixed list. */
-export function engineArgs(id: string, value: ComposerSettings): string[] {
+/**
+ * The CLI's arguments for `settings` — every value from a fixed list. A
+ * `fresh` conversation has no transcript yet: the CLI starts it under `id`
+ * (`--session-id`) instead of resuming it.
+ */
+export function engineArgs(
+  id: string,
+  value: ComposerSettings,
+  fresh = false,
+): string[] {
   const settings = checkSettings(value);
   if (!settings || !isAgentSessionId(id)) throw new Error("Unknown settings");
   const args = [
@@ -66,7 +75,7 @@ export function engineArgs(id: string, value: ComposerSettings): string[] {
     "--verbose",
     "--include-partial-messages",
     "--replay-user-messages",
-    "--resume",
+    fresh ? "--session-id" : "--resume",
     id,
     "--model",
     settings.model,
@@ -82,6 +91,33 @@ export function engineArgs(id: string, value: ComposerSettings): string[] {
   if (settings.fast)
     args.push("--settings", JSON.stringify({ fastMode: true }));
   return args;
+}
+
+/** `AskUserQuestion`'s questions, or null when its input is not that shape. */
+export function askQuestions(input: unknown): AskQuestion[] | null {
+  const list = (input as { questions?: unknown } | null)?.questions;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const text = (value: unknown, max: number) =>
+    typeof value === "string" ? value.slice(0, max) : "";
+  const questions = list.slice(0, 8).map((entry) => {
+    const q = (entry ?? {}) as Record<string, unknown>;
+    return {
+      question: text(q.question, 1000),
+      header: text(q.header, 100),
+      options: (Array.isArray(q.options) ? q.options : [])
+        .slice(0, 12)
+        .map((option) => {
+          const o = (option ?? {}) as Record<string, unknown>;
+          return {
+            label: text(o.label, 200),
+            description: text(o.description, 500),
+          };
+        })
+        .filter((option) => option.label),
+      multiSelect: q.multiSelect === true,
+    };
+  });
+  return questions.every((q) => q.question) ? questions : null;
 }
 
 /** The CLI calls the composer's "Supervised" mode `default` in its status. */
@@ -122,6 +158,12 @@ class Engine {
     readonly conversation: string,
     readonly folder: string,
     readonly deps: EngineDeps,
+    /**
+     * Started from the new-conversation page: no transcript until the CLI
+     * writes its first line, so the first process names the id instead of
+     * resuming it. Cleared once a line of the conversation comes back.
+     */
+    public fresh = false,
   ) {}
 
   state(): EngineState {
@@ -130,6 +172,17 @@ class Engine {
     if (this.busy && this.starting) return { state: "starting" };
     if (this.busy) return { state: "running", queued: this.queue.length };
     return { state: "idle" };
+  }
+
+  /** The running turn so far, for a read before the transcript exists. */
+  turns(): Turn[] {
+    const turns = buildTurns(this.rows, this.folder);
+    const last = turns.at(-1);
+    if (last?.role === "assistant" && this.busy) {
+      last.open = true;
+      last.endedAt = null;
+    }
+    return turns;
   }
 
   emit(event: Record<string, unknown> & { type: ConversationEvent["type"] }) {
@@ -179,11 +232,15 @@ class Engine {
   async start(settings: ComposerSettings): Promise<void> {
     const cli = await this.deps.cli();
     const spawn = this.deps.spawn ?? spawnChild;
-    const child = spawn(cli.file, engineArgs(this.conversation, settings), {
-      cwd: this.folder,
-      env: cli.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    const child = spawn(
+      cli.file,
+      engineArgs(this.conversation, settings, this.fresh),
+      {
+        cwd: this.folder,
+        env: cli.env,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
     this.child = child;
     this.applied = settings;
     this.starting = true;
@@ -307,6 +364,8 @@ class Engine {
       case "assistant": {
         if (line.parent_tool_use_id) return;
         this.starting = false;
+        // The CLI wrote the conversation down: a restart resumes it now.
+        this.fresh = false;
         const row: Line = { ...line };
         if (typeof row.timestamp !== "string")
           row.timestamp = new Date().toISOString();
@@ -370,6 +429,8 @@ class Engine {
       summary: firstLine.trim().slice(0, 300),
       input,
       suggestMode,
+      questions:
+        tool === "AskUserQuestion" ? askQuestions(request.input) : null,
     };
     this.permissions.set(id, permission);
     this.inputs.set(id, request.input ?? {});
@@ -384,7 +445,10 @@ class Engine {
       answer.behavior === "allow"
         ? {
             behavior: "allow",
-            updatedInput: input ?? {},
+            // ⚠️ AskUserQuestion reads its answers off its own input.
+            updatedInput: answer.answers
+              ? { ...((input ?? {}) as object), answers: answer.answers }
+              : (input ?? {}),
             ...(answer.mode
               ? {
                   updatedPermissions: [
@@ -594,6 +658,41 @@ export function createEngines(deps: EngineDeps) {
       return engine.state();
     },
 
+    /**
+     * A NEW conversation under `conversation` — an id main just made — with
+     * `out` as its first turn.
+     */
+    async start(
+      workspace: string,
+      conversation: string,
+      folder: string,
+      out: Outgoing,
+    ): Promise<EngineState> {
+      const key = keyOf(workspace, conversation);
+      if (engines.has(key)) throw new Error("That conversation exists.");
+      const engine = new Engine(workspace, conversation, folder, deps, true);
+      engines.set(key, engine);
+      await engine.deliver(out).catch((error: Error) => {
+        engine.error = error.message;
+        engine.emitState();
+        throw error;
+      });
+      return engine.state();
+    },
+
+    /**
+     * What an engine holds of a conversation the CLI has not written down
+     * yet (started here, first turn running), or null.
+     */
+    pending(
+      workspace: string,
+      conversation: string,
+    ): { turns: Turn[]; working: boolean } | null {
+      const engine = engines.get(keyOf(workspace, conversation));
+      if (!engine) return null;
+      return { turns: engine.turns(), working: engine.busy };
+    },
+
     async stop(workspace: string, conversation: string): Promise<void> {
       await engines.get(keyOf(workspace, conversation))?.stop();
     },
@@ -650,6 +749,28 @@ export function createEngines(deps: EngineDeps) {
       if (engine.busy) throw new Error("Stop the running turn first.");
       await engine.halt();
       engines.delete(key);
+      engine.emitState();
+    },
+
+    /** The conversations of `workspace` whose engine process is alive. */
+    alive(workspace: string): string[] {
+      return [...engines.values()]
+        .filter((engine) => engine.workspace === workspace && engine.child)
+        .map((engine) => engine.conversation);
+    },
+
+    /**
+     * Stop the engine outright — the rail's Stop: whatever turn runs is cut
+     * off, the queue dropped, and the process ended.
+     */
+    async close(workspace: string, conversation: string): Promise<void> {
+      const key = keyOf(workspace, conversation);
+      const engine = engines.get(key);
+      if (!engine) return;
+      engine.queue = [];
+      await engine.halt();
+      engines.delete(key);
+      engine.busy = false;
       engine.emitState();
     },
 

@@ -134,6 +134,7 @@ const handoff: DesktopHandoffApi = {
 const conversation: DesktopConversationApi = {
   read: (workspace, id) =>
     ipcRenderer.invoke(conversationChannels.read, workspace, id),
+  start: (request) => ipcRenderer.invoke(conversationChannels.start, request),
   send: (request) => ipcRenderer.invoke(conversationChannels.send, request),
   stop: (workspace, id) =>
     ipcRenderer.invoke(conversationChannels.stop, workspace, id),
@@ -153,6 +154,10 @@ const conversation: DesktopConversationApi = {
     ipcRenderer.invoke(conversationChannels.takeOver, workspace, id),
   release: (workspace, id) =>
     ipcRenderer.invoke(conversationChannels.release, workspace, id),
+  close: (workspace, id) =>
+    ipcRenderer.invoke(conversationChannels.close, workspace, id),
+  alive: (workspace) =>
+    ipcRenderer.invoke(conversationChannels.alive, workspace),
   engineState: (workspace, id) =>
     ipcRenderer.invoke(conversationChannels.engineState, workspace, id),
   lastSettings: () => ipcRenderer.invoke(conversationChannels.lastSettings),

@@ -68,6 +68,7 @@ import {
   useAgentSessions,
 } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
+import { NO_CHATS, useChatEngines } from "#/stores/chat-engines";
 import { useTerminal } from "#/stores/terminal";
 import { CodexGoalBadge } from "./codex-goal-badge";
 import { RenameAgentDialog } from "./rename-agent-dialog";
@@ -308,6 +309,10 @@ export function AgentSessionsNav({
     (state) => state.sessions[workspace] ?? NO_TERMINALS,
   );
   const refreshRunning = useAgentTerminals((state) => state.refresh);
+  // Conversations the chat runs (FE-62): Running too, like a live tab.
+  const chats = useChatEngines((state) => state.alive[workspace] ?? NO_CHATS);
+  const refreshChats = useChatEngines((state) => state.refresh);
+  const watchChats = useChatEngines((state) => state.watch);
   const resume = useAgentTerminals((state) => state.resume);
   const start = useAgentTerminals((state) => state.start);
   const stop = useAgentTerminals((state) => state.stop);
@@ -382,11 +387,15 @@ export function AgentSessionsNav({
   };
   /** The working agent whose Stop asked first (FE-26/D5), as the view does. */
   const [confirming, setConfirming] = useState<{
-    terminal: TerminalSession;
+    stop: () => void;
     label: string;
   } | null>(null);
 
   useEffect(() => watchActivity(), [watchActivity]);
+  useEffect(() => watchChats(), [watchChats]);
+  useEffect(() => {
+    void refreshChats(workspace);
+  }, [refreshChats, workspace]);
 
   // ⚠️ Re-read on entering the project, on focus, and when its terminals
   // change — an agent tab exiting is when a conversation gets its last
@@ -436,6 +445,12 @@ export function AgentSessionsNav({
         entry.kind === session.agent &&
         !entry.exit,
     );
+  /** The chat's own engine is running `session` (FE-62). */
+  const chatFor = (session: AgentSession) =>
+    session.agent === "claude" && chats.includes(session.id);
+  /** Running: a live terminal on it, or the chat's engine. */
+  const isRunning = (session: AgentSession) =>
+    Boolean(runningFor(session)) || chatFor(session);
 
   /**
    * Agents running a NEW conversation — started from + — whose transcript is
@@ -456,8 +471,8 @@ export function AgentSessionsNav({
   // ⚠️ A conversation is in ONE group: Running while its agent is, Agents
   // once it is only a transcript again — never both, so the rail marks one
   // row as on screen.
-  const inRunning = sessions.filter((session) => runningFor(session));
-  const idle = sessions.filter((session) => !runningFor(session));
+  const inRunning = sessions.filter(isRunning);
+  const idle = sessions.filter((session) => !isRunning(session));
   const hasRunning = fresh.length > 0 || inRunning.length > 0;
   if (!hasRunning && idle.length === 0 && !hasFolder) return null;
 
@@ -470,11 +485,14 @@ export function AgentSessionsNav({
   };
 
   /**
-   * A conversation's row (FE-62/D3): Claude's opens as a chat — its Terminal
-   * button is the way to a pty — and Codex's resumes in a terminal as before.
+   * A conversation's row (FE-62/D3): Claude's opens as a chat — unless a tab
+   * is running it, where it was last used, and that tab opens — and Codex's
+   * resumes in a terminal as before.
    */
   const openSession = (session: AgentSession) => {
-    if (session.agent === "claude")
+    const tab = runningFor(session);
+    if (session.agent === "claude" && tab) go(tab);
+    else if (session.agent === "claude")
       void navigate({
         to: "/w/$slug/agents/chat/$conversation",
         params: { slug, conversation: session.id },
@@ -536,7 +554,7 @@ export function AgentSessionsNav({
     const sessionSlot = (session: AgentSession) => {
       const agent = TERMINAL_KIND_LABELS[session.agent];
       const working = isWorking(session);
-      const terminal = runningFor(session);
+      const terminal = isRunning(session);
       return slot(
         agentKey(session),
         session.agent,
@@ -618,13 +636,30 @@ export function AgentSessionsNav({
     const shownSubagents = all ? ordered : ordered.slice(0, SUBAGENTS_FOLDED);
     const isPinned = session.pinnedAt !== null;
     const current = isCurrent(session);
-    const terminal = runningFor(session);
-    const onStop = terminal
+    const tab = runningFor(session);
+    const chat = chatFor(session);
+    const terminal = Boolean(tab) || chat;
+    // ⚠️ Stop asks first while it works, as for a tab; a chat's ends its
+    // engine — the turn is cut off, the conversation kept.
+    const stopChat = () =>
+      void window.desktop?.conversation
+        .close(workspace, session.id)
+        .catch(() => {})
+        .finally(() => void refreshChats(workspace));
+    const onStop = tab
       ? () =>
           working
-            ? setConfirming({ terminal, label: agent })
-            : void stop(workspace, terminal.id)
-      : undefined;
+            ? setConfirming({
+                stop: () => void stop(workspace, tab.id),
+                label: agent,
+              })
+            : void stop(workspace, tab.id)
+      : chat
+        ? () =>
+            working
+              ? setConfirming({ stop: stopChat, label: agent })
+              : stopChat()
+        : undefined;
     const onResume = () => openSession(session);
     /** A sub-agent opens read-only, in the main view (FE-35/D9). */
     const view = (sub: AgentSubagent) =>
@@ -915,12 +950,21 @@ export function AgentSessionsNav({
                   strokeWidth={2}
                 />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-40">
+              <DropdownMenuContent align="end" className="w-max min-w-40">
                 {agents.map((agent) => (
                   <DropdownMenuItem
                     key={agent}
-                    className="text-[13px]"
-                    onClick={() => void start(workspace, agent).then(go)}
+                    className="text-[13px] whitespace-nowrap"
+                    // Claude's opens as a chat (FE-62): the new page's
+                    // composer starts it.
+                    onClick={() =>
+                      agent === "claude"
+                        ? void navigate({
+                            to: "/w/$slug/agents/chat/new",
+                            params: { slug },
+                          })
+                        : void start(workspace, agent).then(go)
+                    }
                   >
                     <TerminalKindIcon
                       kind={agent}
@@ -964,7 +1008,7 @@ export function AgentSessionsNav({
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
-                if (confirming) void stop(workspace, confirming.terminal.id);
+                confirming?.stop();
                 setConfirming(null);
               }}
             >

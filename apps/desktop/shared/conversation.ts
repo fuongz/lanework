@@ -294,6 +294,9 @@ export interface SendRequest {
   settings: ComposerSettings;
 }
 
+/** A new conversation's first message: main names the conversation. */
+export type StartRequest = Omit<SendRequest, "conversation">;
+
 /**
  * The CLI asked to use a tool (`control_request` / `can_use_tool`) and waits.
  * Shown as a card in the chat; answered with `answerPermission`.
@@ -308,12 +311,34 @@ export interface PermissionRequest {
   input: string;
   /** The CLI offers "allow and switch to this mode for the session". */
   suggestMode: Permission | null;
+  /**
+   * `AskUserQuestion`: the questions Claude asks before acting, drawn as a
+   * question card instead of Allow/Deny. Null for every other tool.
+   */
+  questions: AskQuestion[] | null;
 }
+
+/** One of `AskUserQuestion`'s questions, as the CLI's input has it. */
+export interface AskQuestion {
+  question: string;
+  header: string;
+  options: { label: string; description: string }[];
+  multiSelect: boolean;
+}
+
+/** Most answers one reply carries, and the longest one. */
+export const ANSWERS_MAX = 8;
+export const ANSWER_MAX = 2000;
 
 export type PermissionAnswer =
   | {
       behavior: "allow" /** Also switch the session to this mode. */;
       mode?: Permission;
+      /**
+       * `AskUserQuestion`'s answers, by question text: an option's label —
+       * several joined by ", " — or what was typed under "Something else".
+       */
+      answers?: Record<string, string>;
     }
   | { behavior: "deny"; message?: string };
 
@@ -388,6 +413,8 @@ export function isPreviewUrl(value: unknown): value is string {
 
 export const conversationChannels = {
   read: "conversation:read",
+  /** Start a NEW conversation with its first message; answers its id. */
+  start: "conversation:start",
   send: "conversation:send",
   /** Interrupt the running turn (the Stop button). */
   stop: "conversation:stop",
@@ -400,6 +427,10 @@ export const conversationChannels = {
   takeOver: "conversation:take-over",
   /** Stop the engine process so a terminal can resume the conversation (D3). */
   release: "conversation:release",
+  /** The rail's Stop: end the engine, cutting off a running turn. */
+  close: "conversation:close",
+  /** A workspace's conversations whose engine process is alive (Running). */
+  alive: "conversation:alive",
   engineState: "conversation:engine-state",
   /** The last settings used anywhere, for a conversation never sent from chat. */
   lastSettings: "conversation:last-settings",
@@ -414,6 +445,13 @@ export const conversationChannels = {
 
 export interface DesktopConversationApi {
   read: (workspace: string, conversation: string) => Promise<Conversation>;
+  /**
+   * A new conversation, `request` its first message: main makes the id and
+   * answers it once the turn has started — not when it ends.
+   */
+  start: (
+    request: StartRequest,
+  ) => Promise<{ conversation: string; engine: EngineState }>;
   /** Resolves once queued or started — not when the turn ends. */
   send: (request: SendRequest) => Promise<EngineState>;
   stop: (workspace: string, conversation: string) => Promise<void>;
@@ -427,6 +465,8 @@ export interface DesktopConversationApi {
   fork: (workspace: string, conversation: string) => Promise<string>;
   takeOver: (workspace: string, conversation: string) => Promise<EngineState>;
   release: (workspace: string, conversation: string) => Promise<void>;
+  close: (workspace: string, conversation: string) => Promise<void>;
+  alive: (workspace: string) => Promise<string[]>;
   engineState: (
     workspace: string,
     conversation: string,

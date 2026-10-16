@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { cn } from "#/lib/utils";
+import type { PromptLine } from "./turn-view";
 
 /** Fewer prompts than this and there is nothing to find: no rail (D5). */
 export const TOC_MIN = 3;
 /** One tick's slot, px — its hit area; the rail shrinks them to fit. */
-const TICK = 9;
+const TICK = 12;
 
 /**
  * The conversation's table of contents (D5): one short tick per prompt on
@@ -16,7 +17,7 @@ export function TocRail({
   current,
   onJump,
 }: {
-  entries: { id: string; prompt: string; reply: string }[];
+  entries: PromptLine[];
   current: string | null;
   onJump: (id: string) => void;
 }) {
@@ -29,7 +30,7 @@ export function TocRail({
     <nav
       aria-label="Prompts in this conversation"
       onPointerLeave={() => setHover(null)}
-      className="absolute top-1/2 right-1.5 z-10 flex w-6 -translate-y-1/2 flex-col"
+      className="absolute top-1/2 right-2 z-10 flex w-7 -translate-y-1/2 flex-col"
       style={{ height: `min(${entries.length * TICK}px, 70%)` }}
     >
       {entries.map((entry, index) => {
@@ -63,29 +64,31 @@ export function TocRail({
             <span
               aria-hidden="true"
               className={cn(
-                "h-px rounded-full transition-[width,background-color] duration-150",
+                "h-[1.5px] rounded-full transition-[width,background-color] duration-150 motion-reduce:transition-none",
                 active
-                  ? "bg-foreground w-4"
-                  : "bg-foreground/25 group-hover/tick:bg-foreground/60 group-focus-visible/tick:bg-foreground/60 w-2.5",
+                  ? "bg-foreground w-[18px]"
+                  : "bg-foreground/25 group-hover/tick:bg-foreground/60 group-focus-visible/tick:bg-foreground/60 w-3",
               )}
             />
           </button>
         );
       })}
       {shown && hover && (
+        // Glass, as the composer's menus: the chat blurred under it.
         <div
           role="tooltip"
-          className="bg-popover text-popover-foreground ring-foreground/10 pointer-events-none absolute right-8 w-72 -translate-y-1/2 rounded-xl px-3.5 py-3 text-[13px] shadow-lg ring-1"
+          className="text-popover-foreground ring-foreground/12 dark:ring-foreground/15 bg-popover/40 dark:bg-muted/45 pointer-events-none absolute right-9 flex w-80 -translate-y-1/2 flex-col gap-1.5 rounded-2xl px-4 py-3.5 text-[13px] shadow-[0_12px_40px_-8px_rgb(0_0_0/0.45),inset_0_1px_0_0_rgb(255_255_255/0.06)] ring-1 before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-3xl before:backdrop-saturate-[1.8]"
           style={{ top: hover.top }}
         >
-          <p className="truncate">
-            {/* "remove title:", as the reference reads — but a prompt that
-                  already ends in punctuation keeps its own. */}
-            {/[.?!:…]$/.test(shown.prompt) ? shown.prompt : `${shown.prompt}:`}
-          </p>
+          <p className="truncate text-[14px] font-medium">{shown.prompt}</p>
           {shown.reply && (
-            <p className="text-muted-foreground mt-1 line-clamp-2">
+            <p className="text-muted-foreground line-clamp-2 leading-relaxed">
               {shown.reply}
+            </p>
+          )}
+          {shown.more && (
+            <p className="text-muted-foreground/80 border-foreground/15 mt-0.5 line-clamp-2 border-l-2 ps-3 leading-relaxed">
+              {shown.more}
             </p>
           )}
         </div>

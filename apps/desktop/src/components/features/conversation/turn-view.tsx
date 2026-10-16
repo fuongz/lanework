@@ -18,6 +18,7 @@ import {
   downloadMarkdown,
   fileNameFor,
   firstLine,
+  textLines,
   turnText,
 } from "#/lib/conversation-format";
 import { cn } from "#/lib/utils";
@@ -304,25 +305,32 @@ function UserTurnView({ turn }: { turn: UserTurn }) {
   );
 }
 
+/** A TOC entry (D5): a prompt, its answer's first line, and the next. */
+export interface PromptLine {
+  id: string;
+  prompt: string;
+  reply: string;
+  /** The answer's next line, quoted under the first in the hover card. */
+  more: string;
+}
+
 /** The TOC's line for a prompt and its answer (D5). */
-export function promptLines(
-  turns: Turn[],
-): { id: string; prompt: string; reply: string }[] {
-  const out: { id: string; prompt: string; reply: string }[] = [];
+export function promptLines(turns: Turn[]): PromptLine[] {
+  const out: PromptLine[] = [];
   for (let i = 0; i < turns.length; i++) {
     const turn = turns[i];
     if (turn?.role !== "user") continue;
-    let reply = "";
-    for (let j = i + 1; j < turns.length; j++) {
+    const said: string[] = [];
+    for (let j = i + 1; j < turns.length && said.length < 2; j++) {
       const next = turns[j];
       if (!next || next.role === "user") break;
-      reply = firstLine(turnText(next));
-      if (reply) break;
+      said.push(...textLines(turnText(next), 2 - said.length));
     }
     out.push({
       id: turn.id,
       prompt: firstLine(turn.text) || "(attachment)",
-      reply,
+      reply: said[0] ?? "",
+      more: said[1] ?? "",
     });
   }
   return out;

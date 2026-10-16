@@ -1,10 +1,7 @@
 import {
-  Add01Icon,
   ArrowUp02Icon,
   Cancel01Icon,
   File01Icon,
-  Folder01Icon,
-  GitBranchIcon,
   Image01Icon,
   Loading03Icon,
   StopIcon,
@@ -13,6 +10,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   forwardRef,
   type KeyboardEvent,
+  type ReactNode,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -26,8 +24,9 @@ import {
   type Suggestion,
   type SuggestionKind,
 } from "#/../shared/conversation";
+import { BranchSwitcher } from "#/components/features/shell/branch-switcher";
 import { cn } from "#/lib/utils";
-import { ModelMenu, PermissionMenu } from "./composer-menus";
+import { AttachMenu, ModelMenu, PermissionMenu } from "./composer-menus";
 
 export interface ComposerHandle {
   /** Put `text` in the composer — a reply's quote — and focus it. */
@@ -86,8 +85,13 @@ function readBase64(file: File): Promise<string> {
 export const Composer = forwardRef<
   ComposerHandle,
   {
+    /** The project, for its branch switcher. */
+    slug: string;
+    /** Take the caret on mount — the new-conversation page has nothing else. */
+    autoFocus?: boolean;
+    /** The top row's right corner: the conversation's context ring. */
+    corner?: ReactNode;
     workspace: string;
-    branch: string | null;
     settings: ComposerSettings;
     onSettings: (next: Partial<ComposerSettings>) => void;
     working: boolean;
@@ -102,8 +106,10 @@ export const Composer = forwardRef<
   }
 >(function Composer(
   {
+    slug,
+    autoFocus,
+    corner,
     workspace,
-    branch,
     settings,
     onSettings,
     working,
@@ -141,6 +147,11 @@ export const Composer = forwardRef<
     node.setSelectionRange(caret.current, caret.current);
     caret.current = null;
   });
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on mount only.
+  useEffect(() => {
+    if (autoFocus) area.current?.focus();
+  }, []);
 
   useImperativeHandle(ref, () => ({
     insert: (value) => {
@@ -309,7 +320,7 @@ export const Composer = forwardRef<
   const stopping = working && empty;
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: a drop target for files; the + button is the keyboard's way to attach.
+    // biome-ignore lint/a11y/noStaticElementInteractions: a drop target for files; the + menu's Upload file is the keyboard's way to attach.
     <div
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
@@ -359,26 +370,9 @@ export const Composer = forwardRef<
       )}
 
       <div className="text-muted-foreground flex h-6 min-w-0 items-center gap-4 text-[13px]">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <HugeiconsIcon
-            icon={Folder01Icon}
-            className="size-3.5 shrink-0"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-          <span className="truncate">Current checkout</span>
-        </span>
-        {branch && (
-          <span className="flex min-w-0 items-center gap-1.5">
-            <HugeiconsIcon
-              icon={GitBranchIcon}
-              className="size-3.5 shrink-0"
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-            <span className="truncate">{branch}</span>
-          </span>
-        )}
+        {/* The checkout's branch — where the next turn runs — and the way to
+            another one. */}
+        <BranchSwitcher slug={slug} variant="composer" />
         <span className="ml-auto" />
         {queued > 0 && (
           <span className="flex shrink-0 items-center gap-1.5 text-xs">
@@ -402,6 +396,7 @@ export const Composer = forwardRef<
             />
           </span>
         )}
+        {corner}
       </div>
 
       {attachments.length > 0 && (
@@ -481,18 +476,7 @@ export const Composer = forwardRef<
             void addFiles(files, false);
           }}
         />
-        <button
-          type="button"
-          aria-label="Attach files"
-          onClick={() => picker.current?.click()}
-          className="text-muted-foreground hover:text-foreground bg-foreground/[0.05] hover:bg-foreground/[0.08] flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors"
-        >
-          <HugeiconsIcon
-            icon={Add01Icon}
-            className="size-4"
-            strokeWidth={1.8}
-          />
-        </button>
+        <AttachMenu onUpload={() => picker.current?.click()} />
         <ModelMenu settings={settings} onChange={onSettings} />
         <PermissionMenu
           permission={settings.permission}
