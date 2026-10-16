@@ -1,4 +1,9 @@
-import { Loading03Icon, PlayIcon, StopIcon } from "@hugeicons/core-free-icons";
+import {
+  Loading03Icon,
+  MessageMultiple01Icon,
+  PlayIcon,
+  StopIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -231,6 +236,29 @@ export function AgentView() {
             working={working}
             facts={facts}
           />
+        )}
+        {/* The same conversation as a chat (FE-62/D3). While this tab runs
+            it, the chat waits — one writer at a time — and offers to take
+            over. */}
+        {agent === "claude" && session.resume && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              void navigate({
+                to: "/w/$slug/agents/chat/$conversation",
+                params: { slug, conversation: session.resume ?? "" },
+              })
+            }
+          >
+            <HugeiconsIcon
+              icon={MessageMultiple01Icon}
+              strokeWidth={1.8}
+              data-icon="inline-start"
+              aria-hidden="true"
+            />
+            Chat
+          </Button>
         )}
         {session.exit ? (
           <Button size="sm" variant="outline" onClick={() => void again(agent)}>

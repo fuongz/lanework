@@ -752,6 +752,31 @@ async function confirmQuit(): Promise<boolean> {
   return true;
 }
 
+/**
+ * The live Claude tab on `conversation`, if any — so the chat's composer
+ * never writes a conversation a tab is writing too (FE-62).
+ */
+export async function agentTerminalOn(
+  workspace: string,
+  conversation: string,
+): Promise<string | null> {
+  if (!host) return null;
+  const tabs = await agentTerminals(workspace).catch(
+    (): TerminalSession[] => [],
+  );
+  return (
+    tabs.find(
+      (entry) =>
+        entry.kind === "claude" && !entry.exit && entry.resume === conversation,
+    )?.id ?? null
+  );
+}
+
+/** Stop one tab from main, as the renderer's Stop does (FE-62 take-over). */
+export async function killTerminal(id: string): Promise<void> {
+  if (host) await request({ t: "kill", id });
+}
+
 export function registerTerminal(devUrl?: string): void {
   // Claude's limits are known before the footer first asks (FE-53).
   startClaudeUsagePoll();

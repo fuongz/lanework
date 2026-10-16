@@ -1,6 +1,7 @@
 import type { DesktopAgentConfigApi } from "./agent-config";
 import type { DesktopAgentSetupApi } from "./agent-setup";
 import type { DesktopAuthApi, DesktopLaneworkMcpApi } from "./auth";
+import type { DesktopConversationApi } from "./conversation";
 import type { DesktopGitApi } from "./git";
 import type { DesktopHandoffApi } from "./handoff";
 import type { DesktopInstructionsApi } from "./instructions";
@@ -71,6 +72,8 @@ export interface DesktopApi {
   /** The project's local repository — changes, commits, history (FE-22). */
   worktree: DesktopWorktreeApi;
   terminal: DesktopTerminalApi;
+  /** A Claude conversation as a chat, and its composer (FE-62). */
+  conversation: DesktopConversationApi;
   /** Settings → Agents: the checkpoint hook for Claude Code (FE-28). */
   handoff: DesktopHandoffApi;
   /** Whether a project's folder is ready for an agent to work its board (FE-30). */

@@ -2,10 +2,45 @@
 // and Codex would have written for a project's folder.
 import { appendFile, mkdir, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
 
 export const CLAUDE_ID = "11111111-2222-4333-8444-555555555555";
 export const CODEX_ID = "01a0db07-52f1-7020-abe9-92d305f1ecd4";
+
+/** A Claude conversation's rail row: it opens the chat (FE-62/D3). */
+export const claudeRowName = (title: string) => `Open “${title}”`;
+
+/**
+ * Resume a Claude conversation in a terminal the way a person now does
+ * (FE-62/D3): its rail row opens the chat, whose Terminal button hands the
+ * conversation to a pty — the running one, if a tab already has it. Resolves
+ * once the xterm is on screen. `within` narrows where the row is found.
+ *
+ * ⚠️ The chat's section and the terminal's region share the name
+ * `Claude — <title>`: only the xterm inside tells them apart.
+ */
+export async function resumeClaudeInTerminal(
+  page: Page,
+  title: string,
+  within: Page | Locator = page,
+): Promise<Locator> {
+  await within
+    .getByRole("button", { name: claudeRowName(title), exact: true })
+    .click();
+  const region = page.getByRole("region", { name: `Claude — ${title}` });
+  const terminal = region.getByRole("button", {
+    name: "Terminal",
+    exact: true,
+  });
+  await expect(terminal).toBeVisible();
+  // Off (aria-disabled) while a turn runs: a click then does nothing.
+  await expect(terminal).not.toHaveAttribute("aria-disabled", "true");
+  await terminal.click();
+  const xterm = region.locator(".xterm");
+  await expect(xterm).toBeVisible();
+  return region;
+}
 
 const jsonl = (lines: unknown[]) =>
   `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
