@@ -22,6 +22,11 @@ import { channels, type DesktopApi } from "../../shared/desktop";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
 import { type DesktopHandoffApi, handoffChannels } from "../../shared/handoff";
 import {
+  type DesktopHarnessApi,
+  type HarnessInfo,
+  harnessChannels,
+} from "../../shared/harness";
+import {
   type DesktopInstructionsApi,
   type InstructionChange,
   instructionChannels,
@@ -162,6 +167,18 @@ const conversation: DesktopConversationApi = {
 };
 
 /** Whether a project's folder is ready for an agent (FE-30). A slug, never a path. */
+const harness: DesktopHarnessApi = {
+  list: () => ipcRenderer.invoke(harnessChannels.list),
+  check: () => ipcRenderer.invoke(harnessChannels.check),
+  update: (agent) => ipcRenderer.invoke(harnessChannels.update, agent),
+  dismiss: (agent, version) =>
+    ipcRenderer.invoke(harnessChannels.dismiss, agent, version),
+  openInTerminal: (agent) =>
+    ipcRenderer.invoke(harnessChannels.openInTerminal, agent),
+  onChanged: (listener) =>
+    subscribe<HarnessInfo[]>(harnessChannels.changed, listener),
+};
+
 const readiness: DesktopReadinessApi = {
   check: (slug) => ipcRenderer.invoke(readinessChannels.check, slug),
   preview: (slug, fix) =>
@@ -642,6 +659,7 @@ const desktop: DesktopApi = {
   conversation,
   handoff,
   readiness,
+  harness,
   memory,
   instructions,
   agentSetup,

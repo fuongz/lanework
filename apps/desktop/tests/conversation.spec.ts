@@ -670,10 +670,13 @@ test("V5: a Claude conversation opens as a chat, sends a prompt and switches to 
     expect(await readFile(transcript, "utf8")).toContain(
       "ping from the composer",
     );
+    // ⚠️ The engine's run, not the first: the harness probe (FE-61) also
+    // asks this stand-in for `--version`.
     const engineArgs = (await readFile(log, "utf8"))
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as string[]);
+      .map((line) => JSON.parse(line) as string[])
+      .filter((args) => args.includes("-p"));
     expect(engineArgs[0]).toEqual(
       expect.arrayContaining([
         "-p",

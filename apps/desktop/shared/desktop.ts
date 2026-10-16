@@ -4,6 +4,7 @@ import type { DesktopAuthApi, DesktopLaneworkMcpApi } from "./auth";
 import type { DesktopConversationApi } from "./conversation";
 import type { DesktopGitApi } from "./git";
 import type { DesktopHandoffApi } from "./handoff";
+import type { DesktopHarnessApi } from "./harness";
 import type { DesktopInstructionsApi } from "./instructions";
 import type { DesktopMemoryApi } from "./memory";
 import type { DesktopReadinessApi } from "./readiness";
@@ -78,6 +79,7 @@ export interface DesktopApi {
   handoff: DesktopHandoffApi;
   /** Whether a project's folder is ready for an agent to work its board (FE-30). */
   readiness: DesktopReadinessApi;
+  harness: DesktopHarnessApi;
   /** What Claude Code remembers about a project, read-only (FE-36). */
   memory: DesktopMemoryApi;
   /** What a project's agents are told, read-only (FE-37). */
