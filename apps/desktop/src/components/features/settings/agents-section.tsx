@@ -1,7 +1,12 @@
-import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  Copy01Icon,
+  Loading03Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { HARNESS_NAMES } from "#/components/shared/agents/harness-island";
 import { useCopy } from "#/components/shared/common/use-copy";
 import {
   SettingsPage,
@@ -16,6 +21,7 @@ import { relativeTime } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
+import { useHarness, useHarnessWatch } from "#/stores/harness";
 import { useCloudFeatures, useIsLocalMode } from "#/stores/session";
 import type { LaneworkMcpStatus } from "../../../../shared/auth";
 import type {
@@ -23,11 +29,117 @@ import type {
   HandoffStatus,
   HookAgent,
 } from "../../../../shared/handoff";
+import {
+  compareVersions,
+  type HarnessInfo,
+  type InstallMethod,
+} from "../../../../shared/harness";
 
 const NAMES: Record<HookAgent, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
 };
+
+const INSTALLED_WITH: Record<InstallMethod, string> = {
+  native: "the native installer",
+  "brew-cask": "a Homebrew cask",
+  "brew-formula": "Homebrew",
+  npm: "npm",
+  unknown: "a method Lanework cannot tell",
+};
+
+/**
+ * Which version of each CLI runs here and which is out (FE-61) — the same
+ * facts the update island works from, with a way to ask again now.
+ */
+function useVersionSection(now: number): SettingsSectionSpec {
+  useHarnessWatch();
+  const list = useHarness((state) => state.list);
+  const loaded = useHarness((state) => state.loaded);
+  const checking = useHarness((state) => state.checking);
+  const error = useHarness((state) => state.error);
+  const check = useHarness((state) => state.check);
+  const checkedAt = list
+    .map((info) => info.checkedAt)
+    .filter((at): at is string => at !== null)
+    .sort()
+    .at(-1);
+
+  const row = (info: HarnessInfo): SettingsRowSpec => {
+    const name = HARNESS_NAMES[info.agent];
+    const newer =
+      info.version !== null &&
+      info.latest !== null &&
+      compareVersions(info.latest, info.version) > 0;
+    return {
+      label: name,
+      description: !info.version
+        ? `${name} is not installed on this machine, or its version could not be read.`
+        : `Installed with ${INSTALLED_WITH[info.installMethod]}.${
+            newer && !info.updateCommand
+              ? " Lanework cannot tell how to update it — update it the way you installed it."
+              : ""
+          }`,
+      keywords: `${info.agent} version update latest harness cli ${info.installMethod} ${info.path ?? ""}`,
+      control: (
+        <span
+          data-testid={`harness-version-${info.agent}`}
+          className="text-muted-foreground font-mono text-[13px] tabular-nums"
+        >
+          {!info.version ? (
+            "Not installed"
+          ) : newer ? (
+            <>
+              {info.version} →{" "}
+              <span className="text-foreground">{info.latest}</span>
+            </>
+          ) : info.latest ? (
+            `${info.version} · latest`
+          ) : (
+            info.version
+          )}
+        </span>
+      ),
+    };
+  };
+
+  return {
+    title: "Versions",
+    rows: [
+      ...(loaded
+        ? list.map(row)
+        : [{ label: "Claude Code and Codex", description: "Checking…" }]),
+      {
+        label: "Check for updates",
+        description: error
+          ? error
+          : checkedAt
+            ? `Lanework checks on its own now and then. Last checked ${relativeTime(checkedAt, now)}.`
+            : "Lanework checks on its own now and then. New models often need the latest version.",
+        keywords: "check updates harness version latest claude codex upgrade",
+        control: (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={checking || !window.desktop?.harness}
+            aria-busy={checking}
+            onClick={() => void check()}
+          >
+            {checking && (
+              <HugeiconsIcon
+                icon={Loading03Icon}
+                className="size-3.5 animate-spin motion-reduce:animate-none"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+            )}
+            {checking ? "Checking…" : "Check for updates"}
+          </Button>
+        ),
+      },
+    ],
+  };
+}
 
 /**
  * Handing a card from one agent to the next (FE-28, FE-29).
@@ -60,6 +172,7 @@ export function AgentsSection() {
   // local store, so its switches stay. Only the credential row is cloud-only.
   const local = useIsLocalMode();
   const handoff = signedIn || local;
+  const versions = useVersionSection(now);
 
   async function approveInCodex() {
     if (!project || !projectKey) return;
@@ -357,8 +470,8 @@ export function AgentsSection() {
     },
   ];
   const sections: SettingsSectionSpec[] = handoff
-    ? [...mcpSections, ...handoffSections]
-    : [];
+    ? [versions, ...mcpSections, ...handoffSections]
+    : [versions];
 
   if (handoff && anyOn && status)
     sections.push({

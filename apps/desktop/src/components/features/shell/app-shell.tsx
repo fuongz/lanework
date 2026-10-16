@@ -13,6 +13,7 @@ import { AgentUsageStrip } from "#/components/features/terminal/agent-usage-stri
 import { TerminalMinibar } from "#/components/features/terminal/terminal-minibar";
 import { TerminalPanel } from "#/components/features/terminal/terminal-panel";
 import { useTerminalSessions } from "#/components/features/terminal/use-terminal-sessions";
+import { HarnessIsland } from "#/components/shared/agents/harness-island";
 import { WindowTitlebarHost } from "#/components/shared/navigation/window-titlebar";
 import {
   ResizableHandle,
@@ -477,6 +478,11 @@ export function AppShell() {
           />
         </button>
       </nav>
+      {/* The harness update island (FE-61): fixed at the top centre, over the
+          title bar's edge and the page. ⚠️ After the nav for the same reason
+          as the nav: its `no-drag` must be laid down after the title bar's
+          drag strip, or the strip eats its clicks. */}
+      <HarnessIsland />
     </div>
   );
 }

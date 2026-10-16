@@ -14,6 +14,7 @@ import { registerAuth } from "./auth";
 import { pidFileBridge, registerConversation } from "./conversation";
 import { registerGit } from "./git";
 import { registerHandoff } from "./handoff";
+import { registerHarness } from "./harness";
 import { registerInstructions } from "./instructions";
 import { broadcast, handle } from "./ipc";
 import { registerMemory } from "./memory";
@@ -186,6 +187,7 @@ app
     registerInstructions(devUrl);
     registerAgentSetup(devUrl);
     registerAgentConfig(devUrl);
+    registerHarness(devUrl);
     installMenu();
     createWindow();
     installMenuBar(() => {
