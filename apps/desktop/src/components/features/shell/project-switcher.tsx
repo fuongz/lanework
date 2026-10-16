@@ -32,13 +32,13 @@ import {
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
 import { useOpenProject } from "#/stores/last-route";
+import { type ProjectSort, usePreferences } from "#/stores/preferences";
 import { isLocalWorkspace } from "#/stores/session";
 
 /** The terminal key a project's agents are filed under (FE-19, FE-26). */
 const keyOf = (workspace: Workspace) => workspace.id ?? workspace.slug;
 
 const NO_AGENTS: TerminalSession[] = [];
-type ProjectSort = "default" | "name" | "activate";
 
 /**
  * The agents running in a project on this machine, as overlapping marks.
@@ -93,7 +93,8 @@ function RunningAgents({ agents }: { agents: TerminalSession[] }) {
 export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [sort, setSort] = useState<ProjectSort>("default");
+  const sort = usePreferences((state) => state.projectSort);
+  const setSort = usePreferences((state) => state.setProjectSort);
   const workspaces = useBoard((state) => state.workspaces);
   const active = useBoard((state) => state.active);
   const openProject = useOpenProject();
@@ -282,17 +283,20 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 }
               />
               <DropdownMenuContent align="end">
+                {/* ⚠️ `closeOnClick`: a radio item keeps Base UI's menu open by
+                    default, and the next press of the trigger then only
+                    closed it instead of letting a second order be picked. */}
                 <DropdownMenuRadioGroup
                   value={sort}
                   onValueChange={(value) => setSort(value as ProjectSort)}
                 >
-                  <DropdownMenuRadioItem value="default">
+                  <DropdownMenuRadioItem value="default" closeOnClick>
                     Default
                   </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="name">
+                  <DropdownMenuRadioItem value="name" closeOnClick>
                     Name
                   </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="activate">
+                  <DropdownMenuRadioItem value="activate" closeOnClick>
                     Activate
                   </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
