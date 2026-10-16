@@ -250,14 +250,12 @@ recur.
 
 - Never mark a task complete without proving it works. Run the project's
   typecheck/build; for behavior changes, boot the app and verify.
-- **Do not run the test suite for ordinary work — however large the task.** It
-  runs when the user says **"commit"** (or "commit + push"), and not before.
-  Typecheck is cheap and stays; a full Playwright run is ~60s of output nobody
-  asked for in the middle of iterating.
-- **While iterating, run only the CASES the change touches** — `playwright test
-  tests/<file>.spec.ts -g "<name>" --project=production`. Not the suite, and not
-  the whole spec file either: a one-line UI change does not earn every Electron
-  boot in that file. The full file, and the suite, run on **"commit"**.
+- **Do not run tests unless the user asks — however large the task.** Not the
+  suite, not a spec file, not a single `-g` case, and not on "commit" either:
+  tests run only when the user says to run them (or they run them by hand).
+  Build and typecheck are cheap and stay.
+- When asked to run tests, run only what was asked — e.g. `playwright test
+  tests/<file>.spec.ts -g "<name>" --project=production` for one case.
 - **`bun run build` before any Playwright run**, including a single `-g` case.
   The specs boot `dist/` and `playwright.config.ts` has no build step, so a run
   started without building tests the previous bundle and reports green for code
