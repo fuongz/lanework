@@ -271,6 +271,28 @@ export const Composer = forwardRef<
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // ⌘U, a terminal's ^U: what is before the caret on its line goes — at a
+    // line's start, the line break, so pressing again keeps going.
+    if (
+      event.key.toLowerCase() === "u" &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      event.preventDefault();
+      const node = event.currentTarget;
+      const { selectionStart: start, selectionEnd: end, value } = node;
+      if (start === end) {
+        if (start === 0) return;
+        const line = value.lastIndexOf("\n", start - 1) + 1;
+        node.setSelectionRange(line < start ? line : start - 1, start);
+      }
+      // ⚠️ execCommand, not setText: the cut lands on the field's undo stack —
+      // ⌘Z brings it back — and fires the input onChange reads.
+      document.execCommand("delete");
+      return;
+    }
     if (suggest) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
@@ -488,7 +510,7 @@ export const Composer = forwardRef<
             type="button"
             aria-label="Stop"
             onClick={onStop}
-            className="bg-foreground text-background hover:bg-foreground/80 flex size-7 items-center justify-center rounded-lg transition-colors"
+            className="bg-primary text-primary-foreground hover:bg-primary/85 flex size-7 items-center justify-center rounded-lg transition-colors"
           >
             <HugeiconsIcon
               icon={StopIcon}
@@ -502,7 +524,7 @@ export const Composer = forwardRef<
             aria-label={working ? "Queue message" : "Send"}
             disabled={empty || sending}
             onClick={() => void send()}
-            className="bg-foreground text-background hover:bg-foreground/80 disabled:bg-foreground/10 disabled:text-muted-foreground flex size-7 items-center justify-center rounded-lg transition-colors"
+            className="bg-primary text-primary-foreground hover:bg-primary/85 disabled:bg-foreground/10 disabled:text-muted-foreground flex size-7 items-center justify-center rounded-lg transition-colors"
           >
             <HugeiconsIcon
               icon={ArrowUp02Icon}

@@ -1,3 +1,4 @@
+import { Collapsible } from "@base-ui/react/collapsible";
 import {
   ArrowRight01Icon,
   CommandLineIcon,
@@ -33,6 +34,15 @@ const KIND_ICONS: Record<ToolKind, IconSvgElement> = {
   mcp: Plug01Icon,
   other: Wrench01Icon,
 };
+
+/**
+ * What a fold's open and close share: the panel's height eases between 0 and
+ * what Base UI measured (`auto` once open, so a call opening inside a group
+ * still grows it), the calls fading with it. Short, and a strong ease-out:
+ * height costs layout every frame, and the reader is waiting on the rows.
+ */
+const EASE = "duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]";
+const PANEL = `h-(--collapsible-panel-height) overflow-hidden transition-[height,opacity] ${EASE} data-starting-style:h-0 data-starting-style:opacity-0 data-ending-style:h-0 data-ending-style:opacity-0 motion-reduce:transition-none`;
 
 /** A file the call read or wrote: its icon and its path, mono (ảnh 3). */
 function FileChip({ path }: { path: string }) {
@@ -103,20 +113,19 @@ function CallRow({
   slug: string;
   conversation: string;
 }) {
-  const [open, setOpen] = useState(false);
   const running = call.output === null;
   return (
-    <li className="relative flex min-w-0 flex-col">
+    <Collapsible.Root
+      render={<li />}
+      className="relative flex min-w-0 flex-col"
+    >
       {/* The tree's elbow into this row. */}
       <span
         aria-hidden="true"
         className="border-foreground/15 absolute top-0 -left-3 h-3.5 w-2.5 rounded-bl-md border-b border-l"
       />
       <div className="flex min-w-0 items-center gap-1">
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
+        <Collapsible.Trigger
           title={call.summary || call.tool}
           className={cn(
             "hover:bg-foreground/[0.04] flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-[13px] transition-colors",
@@ -134,7 +143,7 @@ function CallRow({
           {call.filePath && call.kind !== "read" && call.kind !== "edit" && (
             <span className="shrink-0 text-xs">{baseName(call.filePath)}</span>
           )}
-        </button>
+        </Collapsible.Trigger>
         {call.kind === "agent" && call.subagent && (
           <Link
             to="/w/$slug/agents/sub/$conversation/$sub"
@@ -146,8 +155,8 @@ function CallRow({
           </Link>
         )}
       </div>
-      {open && (
-        // Wide output scrolls inside its own box; the page never scrolls sideways.
+      <Collapsible.Panel className={PANEL}>
+        {/* Wide output scrolls inside its own box; the page never scrolls sideways. */}
         <div className="bg-foreground/[0.04] my-1 ms-6 flex max-h-96 flex-col gap-2 overflow-auto rounded-lg p-3 font-mono text-[11px] leading-relaxed">
           <pre className="whitespace-pre-wrap break-all">
             <code>{call.input || "{}"}</code>
@@ -166,8 +175,8 @@ function CallRow({
             </>
           )}
         </div>
-      )}
-    </li>
+      </Collapsible.Panel>
+    </Collapsible.Root>
   );
 }
 
@@ -195,11 +204,12 @@ export const ToolGroup = memo(function ToolGroup({
   const open = chosen ?? running;
   const failed = calls.some((call) => call.error);
   return (
-    <div className="flex min-w-0 flex-col">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setChosen(!open)}
+    <Collapsible.Root
+      open={open}
+      onOpenChange={setChosen}
+      className="flex min-w-0 flex-col"
+    >
+      <Collapsible.Trigger
         className={cn(
           "group/tools text-muted-foreground hover:text-foreground flex h-7 min-w-0 items-center gap-2 self-start rounded-md text-left text-[13px] transition-colors",
           running && "text-shimmer",
@@ -210,6 +220,7 @@ export const ToolGroup = memo(function ToolGroup({
             icon={ArrowRight01Icon}
             className={cn(
               "absolute size-3.5 transition-[transform,opacity] motion-reduce:transition-none",
+              EASE,
               open
                 ? "rotate-90 opacity-100"
                 : "opacity-0 group-hover/tools:opacity-100 group-focus-visible/tools:opacity-100",
@@ -241,8 +252,8 @@ export const ToolGroup = memo(function ToolGroup({
         {failed && (
           <span className="text-destructive shrink-0 text-xs">failed</span>
         )}
-      </button>
-      {open && (
+      </Collapsible.Trigger>
+      <Collapsible.Panel className={PANEL}>
         <ul className="ms-[7px] flex min-w-0 flex-col ps-3">
           {calls.map((call) => (
             <CallRow
@@ -253,7 +264,7 @@ export const ToolGroup = memo(function ToolGroup({
             />
           ))}
         </ul>
-      )}
-    </div>
+      </Collapsible.Panel>
+    </Collapsible.Root>
   );
 });
