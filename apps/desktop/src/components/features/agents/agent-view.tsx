@@ -19,6 +19,7 @@ import {
   ModelButton,
 } from "#/components/shared/agents/conversation-facts";
 import type { Fact } from "#/components/shared/agents/facts";
+import { useConversationFacts } from "#/components/shared/agents/use-agent-facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import {
   WINDOW_TITLE,
@@ -53,7 +54,6 @@ import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { AgentFilesButton } from "./agent-files";
 import { goalFacts } from "./codex-goal";
-import { useConversationFacts } from "./use-agent-facts";
 
 /** Stable empties: a selector that allocated one would re-render forever. */
 const NO_TERMINALS: TerminalSession[] = [];

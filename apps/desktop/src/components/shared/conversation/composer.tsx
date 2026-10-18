@@ -24,9 +24,9 @@ import {
   type Suggestion,
   type SuggestionKind,
 } from "#/../shared/conversation";
-import { BranchSwitcher } from "#/components/features/shell/branch-switcher";
+import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
 import { cn } from "#/lib/utils";
-import { AttachMenu, ModelMenu, PermissionMenu } from "./composer-menus";
+import { AttachMenu, ModelMenu, PermissionMenu } from "./composer.menus";
 
 export interface ComposerHandle {
   /** Put `text` in the composer — a reply's quote — and focus it. */

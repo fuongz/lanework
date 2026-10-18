@@ -5,6 +5,8 @@ import {
   DEFAULT_SETTINGS,
   type OutgoingAttachment,
 } from "#/../shared/conversation";
+import { Composer } from "#/components/shared/conversation/composer";
+import { handFirstMessage } from "#/components/shared/conversation/first-message";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -13,8 +15,6 @@ import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-ico
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { ipcMessage } from "#/lib/ipc-error";
 import { useBoard } from "#/stores/board";
-import { Composer } from "./composer";
-import { handFirstMessage } from "./first-message";
 
 const ROUTE = "/_app/w/$slug/agents/chat/new" as const;
 

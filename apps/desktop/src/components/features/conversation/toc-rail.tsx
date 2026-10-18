@@ -1,6 +1,6 @@
 import { useState } from "react";
+import type { PromptLine } from "#/components/shared/conversation/turn-view";
 import { cn } from "#/lib/utils";
-import type { PromptLine } from "./turn-view";
 
 /** Fewer prompts than this and there is nothing to find: no rail (D5). */
 export const TOC_MIN = 3;

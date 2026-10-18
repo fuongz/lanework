@@ -25,10 +25,21 @@ import {
   type PermissionRequest,
 } from "#/../shared/conversation";
 import type { AgentSession } from "#/../shared/terminal";
-import { useConversationFacts } from "#/components/features/agents/use-agent-facts";
 import { ContextButton } from "#/components/shared/agents/conversation-facts";
 import { PermissionCard } from "#/components/shared/agents/permission-card";
+import { useConversationFacts } from "#/components/shared/agents/use-agent-facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
+import {
+  Composer,
+  type ComposerHandle,
+} from "#/components/shared/conversation/composer";
+import { takeFirstMessage } from "#/components/shared/conversation/first-message";
+import {
+  promptLines,
+  type TurnHandlers,
+  TurnView,
+  UserBubble,
+} from "#/components/shared/conversation/turn-view";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -55,16 +66,8 @@ import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
-import { Composer, type ComposerHandle } from "./composer";
-import { takeFirstMessage } from "./first-message";
 import { JobCapsules } from "./job-capsules";
 import { TocRail } from "./toc-rail";
-import {
-  promptLines,
-  type TurnHandlers,
-  TurnView,
-  UserBubble,
-} from "./turn-view";
 import { useConversation } from "./use-conversation";
 
 const ROUTE = "/_app/w/$slug/agents/chat/$conversation" as const;

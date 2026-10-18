@@ -23,9 +23,9 @@ import {
   turnText,
 } from "#/lib/conversation-format";
 import { cn } from "#/lib/utils";
-import { chatLink } from "./link-chip";
-import { ToolGroup } from "./tool-group";
-import { AssistantActions, UserActions } from "./turn-actions";
+import { AssistantActions, UserActions } from "./turn-view.actions";
+import { chatLink } from "./turn-view.link-chip";
+import { ToolGroup } from "./turn-view.tool-group";
 
 /**
  * ⚠️ Off-screen turns skip layout and paint (`content-visibility: auto`), and

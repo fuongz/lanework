@@ -14,6 +14,7 @@ import { useEffect, useRef } from "react";
 import { LocalModeRail } from "#/components/shared/auth/local-mode";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
+import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
 import { Kbd } from "#/components/ui/kbd";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { cn } from "#/lib/utils";
@@ -24,7 +25,6 @@ import { usePulls } from "#/stores/pulls";
 import { useSession } from "#/stores/session";
 import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
-import { BranchSwitcher } from "./branch-switcher";
 import { MiniRail } from "./mini-rail";
 import { ProjectSwitcher } from "./project-switcher";
 
