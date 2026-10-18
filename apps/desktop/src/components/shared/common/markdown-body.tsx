@@ -1,4 +1,8 @@
 import { createContext, Fragment, type ReactNode, useContext } from "react";
+import {
+  FileTypeIcon,
+  fileIconToken,
+} from "#/components/shared/diff/diff-icons";
 import { Empty, EmptyDescription, EmptyHeader } from "#/components/ui/empty";
 import {
   type Block,
@@ -31,13 +35,174 @@ const VariantContext = createContext<MarkdownVariant>("default");
  */
 const BARE_URL = /https?:\/\/[^\s<>()[\]`]*[^\s<>()[\]`.,;:!?'"]/g;
 
-/** `text`, its bare URLs drawn by `link` (FE-62) and the rest as written. */
-function autolinked(text: string, link: LinkRenderer): ReactNode {
+/** A CSS colour as it is written in prose: hex, or a colour function. */
+const COLOR_SHAPE =
+  /^(?:#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^()]*\))$/i;
+
+/**
+ * A bare hex colour in running text: six or eight digits, standing alone.
+ * ⚠️ Not three or four, and not all digits — `#123` and `#204812` are an
+ * issue or a pull request far more often than a colour.
+ */
+const BARE_HEX = /(?<![\w&#/])#(?:[0-9a-f]{8}|[0-9a-f]{6})(?![\w-])/gi;
+
+/**
+ * `text` when it is exactly one CSS colour, else null.
+ *
+ * ⚠️ The browser has the last word (`CSS.supports`), so `rgb(nope)` stays
+ * plain code. Where there is no `CSS` — the prerender — the shape alone.
+ */
+function cssColor(text: string): string | null {
+  const value = text.trim();
+  if (!COLOR_SHAPE.test(value)) return null;
+  if (typeof CSS === "undefined" || !CSS.supports) return value;
+  return CSS.supports("color", value) ? value : null;
+}
+
+/** A path as code is written: no spaces, no parentheses, no scheme. */
+const PATH_SHAPE = /^[\w@~.+\-/[\]$]+$/;
+/** `file.ts:42`, `file.ts:42-50`, `file.ts:42:7` — a place in the file. */
+const LINE_SUFFIX = /:\d+(?:[-:]\d+)*$/;
+
+/**
+ * The file `text` names, when the inline code is one — `permission-card.tsx`,
+ * `apps/desktop/src/styles/app.css:152` — else null.
+ *
+ * ⚠️ The icon set decides, not a dot: it knows `.tsx` is React and
+ * `Dockerfile` is Docker, and answers `default` for `window.desktop` and
+ * `useBoard.dismiss`. `text` — which it gives `console.log` and `process.env`
+ * too — counts only for `.txt`, a dotfile, or a path with a folder in it.
+ */
+function filePath(text: string): string | null {
+  const value = text.trim();
+  if (value.length === 0 || value.length > 300) return null;
+  const path = value.replace(LINE_SUFFIX, "");
+  if (!PATH_SHAPE.test(path) || path.endsWith("/")) return null;
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  if (!name || /^\.+$/.test(name)) return null;
+  const folder = path.includes("/");
+  const token = fileIconToken(path);
+  if (token === undefined || token === "default")
+    return folder && /\.[A-Za-z0-9]{1,10}$/.test(name) ? path : null;
+  if (token === "text")
+    return folder || name.startsWith(".") || /\.txt$/i.test(name) ? path : null;
+  return path;
+}
+
+const CODE_CHAT =
+  "bg-foreground/[0.07] rounded-md px-1.5 py-0.5 font-mono text-[0.82em] [overflow-wrap:anywhere]";
+const CODE_DEFAULT =
+  "bg-foreground/[0.06] rounded px-1 py-0.5 font-mono text-[0.85em]";
+
+/**
+ * A badge — inline code with an icon before it (a colour, a file).
+ *
+ * ⚠️ `inline-flex items-center`, the icon `1em` — as tall as the text, on its
+ * middle — and the badge `align-middle` in the line. Drawn inline with a
+ * `vertical-align` nudge instead, the icon sat below the text and the two
+ * never quite lined up. `leading-[1.25]` keeps the pill as tall as a plain
+ * code pill: a flex box takes the paragraph's whole line-height otherwise.
+ *
+ * ⚠️ A badge is one box, so a line never breaks between its icon and its
+ * name: it moves to the next line whole. Only a name wider than the column
+ * wraps, inside the badge — whose radius is then fixed, not `rounded-full`,
+ * which turned a two-line badge into a lozenge.
+ */
+const badgeClass = (chat: boolean) =>
+  `${chat ? "bg-foreground/[0.07] text-[0.82em]" : "bg-foreground/[0.06] text-[0.85em]"} inline-flex max-w-full rounded-[0.85em] py-0.5 pr-1.5 pl-1 align-middle font-mono leading-[1.25]`;
+
+/**
+ * A colour value as a badge: a round swatch of the colour itself, then the
+ * value as written — the way GitHub draws `#e87e42` in code.
+ *
+ * ⚠️ The swatch has an inset ring, so white on a white page and black on a
+ * dark one still show where the colour is.
+ */
+function ColorBadge({
+  value,
+  color,
+  chat,
+}: {
+  value: string;
+  color: string;
+  chat: boolean;
+}) {
+  return (
+    <code
+      data-color={color}
+      className={`${badgeClass(chat)} items-center gap-[0.4em] whitespace-nowrap`}
+    >
+      <span
+        aria-hidden="true"
+        className="ring-foreground/20 size-[0.8em] shrink-0 rounded-full ring-1 ring-inset"
+        style={{ background: color }}
+      />
+      <span>{value}</span>
+    </code>
+  );
+}
+
+/**
+ * A file named in inline code as a badge: its language's icon, then the name
+ * as written — the same icon the Changes list and the diff draw for it.
+ */
+function FileBadge({
+  value,
+  path,
+  chat,
+}: {
+  value: string;
+  path: string;
+  chat: boolean;
+}) {
+  return (
+    <code
+      data-file={path}
+      className={`${badgeClass(chat)} items-start gap-[0.3em]`}
+    >
+      {/* On the FIRST line's middle — (1.25 − 1) / 2 — which on one line is
+          `items-center`, and on a wrapped path keeps the icon by its start. */}
+      <FileTypeIcon path={path} className="mt-[0.125em] size-[1em] shrink-0" />
+      {/* A long path still wraps, inside the badge. */}
+      <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>
+    </code>
+  );
+}
+
+/** `text` with each bare hex colour in it drawn as a badge (chat only). */
+function colored(text: string, at: number): ReactNode {
+  const parts: ReactNode[] = [];
+  let from = 0;
+  for (const match of text.matchAll(BARE_HEX)) {
+    const start = match.index ?? 0;
+    const hex = match[0];
+    // All digits is a number with a hash in front, not a colour.
+    const color = /[a-f]/i.test(hex) ? cssColor(hex) : null;
+    if (!color) continue;
+    if (start > from) parts.push(text.slice(from, start));
+    parts.push(
+      <ColorBadge key={`hex-${at + start}`} value={hex} color={color} chat />,
+    );
+    from = start + hex.length;
+  }
+  if (from === 0) return text;
+  if (from < text.length) parts.push(text.slice(from));
+  return parts;
+}
+
+/**
+ * Running text in the chat (FE-62): its bare URLs drawn by `link`, its bare
+ * hex colours as badges, the rest as written.
+ *
+ * ⚠️ URLs first: a `#…` inside one is its fragment, not a colour.
+ */
+function prose(text: string, link: LinkRenderer | null): ReactNode {
+  if (!link) return colored(text, 0);
   const parts: ReactNode[] = [];
   let at = 0;
   for (const match of text.matchAll(BARE_URL)) {
     const start = match.index ?? 0;
-    if (start > at) parts.push(text.slice(at, start));
+    if (start > at) parts.push(colored(text.slice(at, start), at));
     const url = match[0];
     parts.push(
       <Fragment key={`url-${start}`}>
@@ -46,8 +211,8 @@ function autolinked(text: string, link: LinkRenderer): ReactNode {
     );
     at = start + url.length;
   }
-  if (at === 0) return text;
-  if (at < text.length) parts.push(text.slice(at));
+  if (at === 0) return colored(text, 0);
+  if (at < text.length) parts.push(colored(text.slice(at), at));
   return parts;
 }
 
@@ -60,19 +225,28 @@ function Spans({ spans }: { spans: Inline[] }) {
         const key = `${span.kind}-${index}`;
         if (span.kind === "link")
           return <Fragment key={key}>{link ? link(span) : span.raw}</Fragment>;
-        if (span.kind === "code")
+        if (span.kind === "code") {
+          const color = cssColor(span.text);
+          if (color)
+            return (
+              <ColorBadge
+                key={key}
+                value={span.text}
+                color={color}
+                chat={chat}
+              />
+            );
+          const path = filePath(span.text);
+          if (path)
+            return (
+              <FileBadge key={key} value={span.text} path={path} chat={chat} />
+            );
           return (
-            <code
-              key={key}
-              className={
-                chat
-                  ? "bg-foreground/[0.07] rounded-md px-1.5 py-0.5 font-mono text-[0.82em] [overflow-wrap:anywhere]"
-                  : "bg-foreground/[0.06] rounded px-1 py-0.5 font-mono text-[0.85em]"
-              }
-            >
+            <code key={key} className={chat ? CODE_CHAT : CODE_DEFAULT}>
               {span.text}
             </code>
           );
+        }
         if (span.kind === "strong")
           return (
             <strong key={key} className="font-semibold">
@@ -80,10 +254,10 @@ function Spans({ spans }: { spans: Inline[] }) {
             </strong>
           );
         if (span.kind === "em") return <em key={key}>{span.text}</em>;
-        // ⚠️ Bare URLs only in the chat (FE-62): a card body keeps every
-        // link exactly as written.
-        if (chat && link)
-          return <Fragment key={key}>{autolinked(span.text, link)}</Fragment>;
+        // ⚠️ Bare URLs and bare colours only in the chat (FE-62): a card
+        // body keeps its text exactly as written.
+        if (chat)
+          return <Fragment key={key}>{prose(span.text, link)}</Fragment>;
         return <Fragment key={key}>{span.text}</Fragment>;
       })}
     </>
@@ -279,7 +453,7 @@ function ChatTable({
           <tr className="border-border border-b">
             {header.map((cell, index) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: a parsed document is positional and never reorders — the index is the row's identity.
-              <th key={index} className="px-3 py-2 font-semibold">
+              <th key={index} className="px-3 py-2 leading-[1.7] font-semibold">
                 <Spans spans={inlines(cell, { links })} />
               </th>
             ))}
@@ -293,8 +467,10 @@ function ChatTable({
               className="border-border/70 border-b last:border-b-0"
             >
               {row.map((cell, index) => (
+                // ⚠️ `leading-[1.7]`: a cell of code pills that wraps had its
+                // pills touching line to line at the table's 13px.
                 // biome-ignore lint/suspicious/noArrayIndexKey: a parsed document is positional and never reorders — the index is the row's identity.
-                <td key={index} className="px-3 py-2 align-top">
+                <td key={index} className="px-3 py-2 align-top leading-[1.7]">
                   <Spans spans={inlines(cell, { links })} />
                 </td>
               ))}

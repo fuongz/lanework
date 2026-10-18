@@ -180,6 +180,14 @@ function installSprite(): void {
 installSprite();
 
 /**
+ * The file type the icon set gives `path` — `react`, `json`, `docker` — or
+ * `default` / `text` when it only knows the generic glyph.
+ */
+export function fileIconToken(path: string): string | undefined {
+  return resolver.resolveIcon("file-tree-icon-file", path).token;
+}
+
+/**
  * The icon for one path.
  *
  * ⚠️ `aria-hidden`, always. It says the same thing as the filename beside it,

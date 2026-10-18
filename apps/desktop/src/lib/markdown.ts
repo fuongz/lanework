@@ -46,10 +46,24 @@ export type Block =
   | { kind: "code"; text: string; lang: string | null }
   | { kind: "table"; header: string[]; rows: string[][] };
 
-const INLINE = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*)/g;
+/**
+ * A code span, as Markdown has it: a run of backticks, then everything up to
+ * a run of the SAME length — so `` `x` `` is code that shows its backticks.
+ *
+ * ⚠️ Was `` `[^`]+` ``, which paired the inner "` `" of `` `` `x` `` `` into
+ * two code spans of one space each and left `x` as plain text. The run is
+ * group 2 in both patterns below.
+ */
+const CODE_SPAN = "(?<!`)(`+)(?!`)(?:.+?)(?<!`)\\2(?!`)";
+const INLINE = new RegExp(
+  `(${CODE_SPAN}|\\*\\*[^*]+\\*\\*|\\*[^*\\n]+\\*)`,
+  "g",
+);
 /** The same, with links. Code comes first: a link inside it stays code. */
-const INLINE_LINKS =
-  /(`[^`]+`|\[\[[^\]\n]+\]\]|\[[^\]\n]+\]\([^)\s]+\)|\*\*[^*]+\*\*|\*[^*\n]+\*)/g;
+const INLINE_LINKS = new RegExp(
+  `(${CODE_SPAN}|\\[\\[[^\\]\\n]+\\]\\]|\\[[^\\]\\n]+\\]\\([^)\\s]+\\)|\\*\\*[^*]+\\*\\*|\\*[^*\\n]+\\*)`,
+  "g",
+);
 const LINK = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/;
 
 /** Split one line into spans. Unmatched text stays exactly as written. */
@@ -78,9 +92,18 @@ export function inlines(line: string, options: MarkdownOptions = {}): Inline[] {
         wiki: false,
         raw: token,
       });
-    else if (token.startsWith("`"))
-      spans.push({ kind: "code", text: token.slice(1, -1) });
-    else if (token.startsWith("**"))
+    else if (token.startsWith("`")) {
+      const run = match[2]?.length ?? 1;
+      const body = token.slice(run, -run);
+      // One space either side is padding, there so the code can start or
+      // end with a backtick — unless the whole span is spaces.
+      const padded =
+        body.length > 1 &&
+        body.startsWith(" ") &&
+        body.endsWith(" ") &&
+        body.trim() !== "";
+      spans.push({ kind: "code", text: padded ? body.slice(1, -1) : body });
+    } else if (token.startsWith("**"))
       spans.push({ kind: "strong", text: token.slice(2, -2) });
     else spans.push({ kind: "em", text: token.slice(1, -1) });
     at = start + token.length;
