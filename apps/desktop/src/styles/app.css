@@ -147,7 +147,9 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  /* The brand, #bb4d00 (FE-64): every primary button, radio, checkbox and
+     switch. White on it is 5.0:1, so the SAME value holds in both themes. */
+  --primary: oklch(0.557 0.158 45.4);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -159,7 +161,7 @@
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: var(--accent-brand);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -167,12 +169,12 @@
   --chart-5: oklch(0.269 0 0);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-ring: var(--accent-brand);
   /* The 1px rule between two resizable panels. See the dark value below. */
   --panel-rule: oklch(0.922 0 0);
   /* The edge of the page's card on the window's ground. */
@@ -181,8 +183,10 @@
   /* The ONE chromatic accent, for selection and focus. Everything else on this
      board stays neutral — colour that means something has to be scarce, and a
      board where lanes, categories, priorities and the cursor are all coloured
-     is a board where none of them reads. */
-  --accent-brand: oklch(0.52 0.2 285);
+     is a board where none of them reads.
+     ⚠️ The brand itself in light mode (FE-64), so a button and a focus ring
+     are one colour. Dark mode lifts it: see there. */
+  --accent-brand: oklch(0.557 0.158 45.4);
   --accent-brand-foreground: oklch(0.985 0 0);
 
   /* Board tones. The board NAMES these — `column.tone` and `category.tone` — so
@@ -255,8 +259,8 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0.008 58);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.557 0.158 45.4);
+  --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.269 0.008 58);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0.008 58);
@@ -267,7 +271,7 @@
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: var(--accent-brand);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -275,12 +279,12 @@
   --chart-5: oklch(0.269 0 0);
   --sidebar: oklch(0.148 0.007 58);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: oklch(0.269 0.008 58);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: var(--accent-brand);
   /* ⚠️ OPAQUE, unlike `--sidebar-border`. A panel handle has no surface of its
      own underneath it — only the window — so white 10% there was composited
      over whatever the window was painted with, and read as a bright stripe
@@ -290,7 +294,10 @@
      `--border` (white 10%) drew a bright frame round the whole page. */
   --panel-edge: oklch(0.2 0.009 58);
 
-  --accent-brand: oklch(0.7 0.17 285);
+  /* ⚠️ The brand's hue, lifted (FE-64/D2a). A button is a filled surface and
+     keeps #bb4d00 (`--primary`); a focus ring, a drop line or a link is a
+     hairline on the dark ground, where #bb4d00 is only 3.8:1 — this is 6.8:1. */
+  --accent-brand: oklch(0.7 0.15 48);
   --accent-brand-foreground: oklch(0.145 0 0);
 
   --tone-neutral: oklch(0.7 0 0);

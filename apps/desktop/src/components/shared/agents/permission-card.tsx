@@ -257,8 +257,11 @@ function QuestionCard({
                 className={cn(
                   "mt-0.5 flex size-4 shrink-0 items-center justify-center border transition-colors",
                   question.multiSelect ? "rounded-[5px]" : "rounded-full",
+                  // ⚠️ `primary`, as the app's own radio and checkbox fill
+                  // (components/ui): a board tone here read as a second
+                  // accent beside the neutral Continue.
                   on
-                    ? "border-tone-sky bg-tone-sky text-background"
+                    ? "border-primary bg-primary text-primary-foreground"
                     : "border-foreground/25",
                 )}
               >
@@ -270,7 +273,7 @@ function QuestionCard({
                       strokeWidth={2.5}
                     />
                   ) : (
-                    <span className="bg-background size-1.5 rounded-full" />
+                    <span className="bg-primary-foreground size-1.5 rounded-full" />
                   ))}
               </span>
               <span className="flex min-w-0 flex-col gap-0.5">

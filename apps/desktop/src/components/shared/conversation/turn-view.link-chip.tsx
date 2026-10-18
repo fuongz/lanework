@@ -90,7 +90,7 @@ export const LinkChip = memo(function LinkChip({
                 event.preventDefault();
                 void window.desktop?.conversation.openLink(href);
               }}
-              className="text-tone-sky decoration-tone-sky/50 hover:decoration-tone-sky underline underline-offset-[3px] transition-colors [overflow-wrap:anywhere]"
+              className="text-accent-brand decoration-accent-brand/50 hover:decoration-accent-brand underline underline-offset-[3px] transition-colors [overflow-wrap:anywhere]"
             />
           ) : (
             <span className="decoration-foreground/30 underline decoration-dotted underline-offset-[3px] [overflow-wrap:anywhere]" />
