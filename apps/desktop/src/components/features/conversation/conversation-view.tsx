@@ -34,7 +34,6 @@ import {
   type ComposerHandle,
 } from "#/components/shared/conversation/composer";
 import { takeFirstMessage } from "#/components/shared/conversation/first-message";
-import { ImageLightboxProvider } from "#/components/shared/conversation/image-lightbox";
 import {
   promptLines,
   type TurnHandlers,
@@ -67,6 +66,7 @@ import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
+import { FileOpenerProvider } from "./file-opener";
 import { JobCapsules } from "./job-capsules";
 import { TocRail } from "./toc-rail";
 import { useConversation } from "./use-conversation";
@@ -596,7 +596,11 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                   </EmptyHeader>
                 </Empty>
               ) : (
-                <ImageLightboxProvider workspace={workspace} conversation={id}>
+                <FileOpenerProvider
+                  slug={slug}
+                  workspace={workspace}
+                  conversation={id}
+                >
                   {turns.map((turn) => (
                     <TurnView
                       key={turn.id}
@@ -635,7 +639,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                       }
                     />
                   ))}
-                </ImageLightboxProvider>
+                </FileOpenerProvider>
               )}
             </div>
           </div>

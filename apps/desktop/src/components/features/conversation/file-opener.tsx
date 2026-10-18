@@ -1,39 +1,55 @@
 import { LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import type { ImagePreview } from "#/../shared/conversation";
-import { ImageOpenerContext } from "#/components/shared/common/markdown-body";
+import { FileOpenerContext } from "#/components/shared/common/markdown-body";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { Button } from "#/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
 import { Skeleton } from "#/components/ui/skeleton";
+import { useFiles } from "#/stores/files";
+
+/** A file the lightbox can still show when the repository cannot. */
+const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
 
 /**
- * The chat's image lightbox (FE-65): a badge naming an image — `details.png`,
- * `assets/x/still-v1.png` — opens it here, read by main from the workspace's
- * folder or the conversation's attachments. Read on click, never before.
+ * What a file badge in the chat does (FE-66): opens the file in Repository ›
+ * Files — a kept tab, the tree opened down to it. Images too; they used to
+ * open in a lightbox here (FE-65).
+ *
+ * ⚠️ Main finds the file (`worktree.locate`): Claude writes paths relative
+ * to the project's folder, to the repository, absolute, or as a bare name.
+ *
+ * ⚠️ The lightbox stays for what the repository does not hold — an image
+ * pasted into this conversation lives outside the folder, and Files cannot
+ * open it. Anything else that cannot be found says so, in the same dialog.
  */
-export function ImageLightboxProvider({
+export function FileOpenerProvider({
+  slug,
   workspace,
   conversation,
   children,
 }: {
+  slug: string;
   workspace: string | null;
   conversation: string;
   children: ReactNode;
 }) {
+  const navigate = useNavigate();
+  const reveal = useFiles((state) => state.reveal);
   const [asked, setAsked] = useState<string | null>(null);
   const [preview, setPreview] = useState<ImagePreview | null>(null);
   const [opening, setOpening] = useState(false);
   const latest = useRef(0);
 
-  const open = useCallback(
-    (path: string) => {
+  /** The lightbox, for an image only the conversation has. */
+  const lightbox = useCallback(
+    (path: string, mine: number) => {
       const surface = window.desktop?.conversation;
-      const mine = ++latest.current;
       setAsked(path);
       setPreview(null);
-      if (!surface || !workspace) {
+      if (!surface || !workspace || !IMAGE_FILE.test(path)) {
         setPreview({ found: false, path });
         return;
       }
@@ -47,6 +63,24 @@ export function ImageLightboxProvider({
     [workspace, conversation],
   );
 
+  const open = useCallback(
+    (path: string) => {
+      const mine = ++latest.current;
+      const surface = window.desktop?.worktree;
+      if (!surface) return lightbox(path, mine);
+      void surface
+        .locate(slug, path)
+        .catch(() => null)
+        .then((found) => {
+          if (mine !== latest.current) return;
+          if (!found) return lightbox(path, mine);
+          reveal(slug, found);
+          void navigate({ to: "/w/$slug/files", params: { slug } });
+        });
+    },
+    [slug, reveal, navigate, lightbox],
+  );
+
   const openInApp = () => {
     const surface = window.desktop?.conversation;
     if (!surface || !workspace || !asked || opening) return;
@@ -58,8 +92,9 @@ export function ImageLightboxProvider({
   };
 
   const name = asked?.slice(asked.lastIndexOf("/") + 1) ?? "";
+  const image = asked !== null && IMAGE_FILE.test(asked);
   return (
-    <ImageOpenerContext.Provider value={workspace ? open : null}>
+    <FileOpenerContext.Provider value={open}>
       {children}
       <Dialog
         open={asked !== null}
@@ -79,7 +114,7 @@ export function ImageLightboxProvider({
             />
           ) : preview ? (
             <div className="text-muted-foreground flex h-48 w-[min(92vw,28rem)] items-center justify-center rounded-lg text-[13px]">
-              Image not found
+              {image ? "Image not found" : "Not found in this project’s files"}
             </div>
           ) : (
             <Skeleton className="h-64 w-[min(92vw,28rem)] rounded-lg" />
@@ -106,6 +141,6 @@ export function ImageLightboxProvider({
           </div>
         </DialogContent>
       </Dialog>
-    </ImageOpenerContext.Provider>
+    </FileOpenerContext.Provider>
   );
 }

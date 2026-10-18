@@ -1,5 +1,6 @@
 import {
   Clock01Icon,
+  FolderFileStorageIcon,
   GitCompareIcon,
   GitPullRequestIcon,
   ListViewIcon,
@@ -297,6 +298,21 @@ export function AppSidebar({
               <SectionLabel className="shrink-0 py-0">Repository</SectionLabel>
               <BranchSwitcher slug={slug} />
             </div>
+            {/* The working tree itself, as an editor's explorer (FE-66). */}
+            <Link
+              to="/w/$slug/files"
+              params={{ slug }}
+              className={ROW}
+              activeProps={ACTIVE}
+            >
+              <HugeiconsIcon
+                icon={FolderFileStorageIcon}
+                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 truncate">Files</span>
+            </Link>
             <Link
               to="/w/$slug/changes"
               params={{ slug }}

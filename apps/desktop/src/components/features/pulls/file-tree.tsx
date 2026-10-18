@@ -2,18 +2,12 @@ import { Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { GitStatus, GitStatusEntry } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
-import {
-  type CSSProperties,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FILE_TREE_ICONS,
   TREE_ICON_TINT_CSS,
-  TREE_ICON_TONES,
 } from "#/components/shared/diff/diff-icons";
+import { treeHostStyle } from "#/components/shared/diff/tree-style";
 import { useDark } from "#/components/shared/diff/use-dark";
 import {
   InputGroup,
@@ -65,43 +59,6 @@ function toGitStatus(status: PullFileStatus): GitStatus | null {
       // which says "not part of this" about a file that is.
       return null;
   }
-}
-
-/**
- * App tokens, poured into the library's own variables.
- *
- * ⚠️ Every one of these is an OVERRIDE the library documents, set on the host
- * element — custom properties inherit through a shadow boundary, and an inline
- * style on the host beats the `:host` rule that declares the default.
- *
- * ⚠️ `colorScheme` is here for the same reason `useDark` exists at all: the
- * library's defaults are `light-dark()` values, `light-dark()` reads
- * `color-scheme`, and `color-scheme` follows the OS — which this window's theme
- * does not (see `use-theme.ts`). Stating it explicitly is what stops the tree
- * from rendering a light palette inside a dark window.
- */
-function hostStyle(dark: boolean): CSSProperties {
-  return {
-    ...TREE_ICON_TONES,
-    colorScheme: dark ? "dark" : "light",
-    "--trees-bg-override": "var(--color-sidebar)",
-    "--trees-fg-override": "var(--color-foreground)",
-    "--trees-fg-muted-override": "var(--color-muted-foreground)",
-    "--trees-accent-override": "var(--color-accent-brand)",
-    "--trees-border-color-override": "var(--color-sidebar-border)",
-    "--trees-focus-ring-color-override": "var(--color-accent-brand)",
-    "--trees-font-family-override": "inherit",
-    "--trees-font-size-override": "12px",
-    // 8px rather than 16. The pane is 240px and every one of those pixels is a
-    // character of a filename at the bottom of a deep path.
-    "--trees-padding-inline-override": "8px",
-    "--trees-status-added-override": "var(--color-tone-emerald)",
-    "--trees-status-deleted-override": "var(--color-tone-rose)",
-    "--trees-status-modified-override": "var(--color-tone-amber)",
-    "--trees-status-renamed-override": "var(--color-tone-violet)",
-    "--trees-status-untracked-override": "var(--color-tone-emerald)",
-    "--trees-status-ignored-override": "var(--color-tone-neutral)",
-  } as CSSProperties;
 }
 
 function Tree({ files }: { files: PullFile[] }) {
@@ -201,7 +158,7 @@ function Tree({ files }: { files: PullFile[] }) {
       <FileTree
         model={model}
         className="min-h-0 flex-1"
-        style={hostStyle(dark)}
+        style={treeHostStyle(dark)}
       />
     </>
   );

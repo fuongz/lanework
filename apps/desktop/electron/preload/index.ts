@@ -89,6 +89,15 @@ const auth: DesktopAuthApi = {
  * before it acts.
  */
 const worktree: DesktopWorktreeApi = {
+  files: (slug) => ipcRenderer.invoke(worktreeChannels.files, slug),
+  dir: (slug, path) => ipcRenderer.invoke(worktreeChannels.dir, slug, path),
+  view: (slug, path) => ipcRenderer.invoke(worktreeChannels.view, slug, path),
+  reveal: (slug, path) =>
+    ipcRenderer.invoke(worktreeChannels.reveal, slug, path),
+  locate: (slug, path) =>
+    ipcRenderer.invoke(worktreeChannels.locate, slug, path),
+  openDefault: (slug, path) =>
+    ipcRenderer.invoke(worktreeChannels.openDefault, slug, path),
   status: (slug) => ipcRenderer.invoke(worktreeChannels.status, slug),
   patch: (slug) => ipcRenderer.invoke(worktreeChannels.patch, slug),
   fileText: (slug, path, side) =>

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { open, realpath, rm, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { open, readdir, realpath, rm, stat } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, sep } from "node:path";
 import {
   type BranchList,
   type BranchState,
@@ -8,7 +8,9 @@ import {
   type CommitHistory,
   type CommitMode,
   type CommitSummary,
+  type FileListing,
   type FileSide,
+  type FileView,
   HISTORY_PAGE,
   patchStats,
   type StagedState,
@@ -739,6 +741,214 @@ export async function fileText(
   if (code !== 0) return null;
   if (stdout.length > MAX_FILE_BYTES || stdout.includes("\0")) return null;
   return stdout;
+}
+
+/** Paths one Files read hands the tree (FE-66). Past this the listing stops short. */
+const MAX_LISTED = 50_000;
+
+/** Images the Files screen draws (FE-66), by extension. */
+const IMAGE_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".bmp": "image/bmp",
+};
+
+/** The largest image the Files screen is sent — the chat's lightbox limit. */
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+/** Entries one directory read hands the tree. A folder of more is cut short. */
+const MAX_DIR_ENTRIES = 5_000;
+
+function splitZ(stdout: string): string[] {
+  return stdout.split("\0").filter(Boolean);
+}
+
+/**
+ * A path of the working tree, resolved ALL the way through (FE-66).
+ *
+ * ⚠️ Stricter than `inside`, which resolves only the parent: the Files screen
+ * opens whatever the folder holds, symlinks included, and a link pointing out
+ * of the repository must not become a way to read or list what it points at.
+ * Null when the path is not there.
+ */
+async function resolved(top: string, path: string): Promise<string | null> {
+  if (!path || isAbsolute(path) || path.split(/[\\/]/).includes(".."))
+    throw new Error("That file is not in this repository.");
+  const root = await realpath(top);
+  const full = await realpath(join(root, path)).catch(() => null);
+  if (!full) return null;
+  const rel = relative(root, full);
+  if (rel.startsWith("..") || isAbsolute(rel))
+    throw new Error("That file is not in this repository.");
+  return full;
+}
+
+/**
+ * The working tree for Repository › Files (FE-66): tracked and untracked
+ * files, plus what git ignores — folders of it unread.
+ *
+ * ⚠️ git's list, not a walk. `ls-files` already knows `.gitignore`, never
+ * lists `.git`, and answers a big repository in one call; the ignored part
+ * comes back as its topmost folders (`--directory`), so `node_modules/` is one
+ * row until somebody opens it (`listDir`).
+ */
+export async function listFiles(top: string): Promise<FileListing> {
+  const [kept, deleted, ignoredRaw] = await Promise.all([
+    out(top, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]),
+    out(top, ["ls-files", "-z", "--deleted"]),
+    out(top, [
+      "ls-files",
+      "-z",
+      "--others",
+      "--ignored",
+      "--exclude-standard",
+      "--directory",
+    ]),
+  ]);
+  // A tracked file deleted from the folder is still in the index; it is a
+  // change (Changes shows it), not a file there is anything to open.
+  const gone = new Set(splitZ(deleted));
+  const ignored = splitZ(ignoredRaw);
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  // Ignored first: a handful of rows, and the cap below must not be what
+  // decides whether `node_modules/` appears at all.
+  for (const path of [...ignored, ...splitZ(kept)]) {
+    // ⚠️ Deduplicated: `--cached` prints a conflicted file once per stage.
+    if (seen.has(path) || gone.has(path)) continue;
+    seen.add(path);
+    paths.push(path);
+  }
+  const truncated = paths.length > MAX_LISTED;
+  return {
+    root: top,
+    paths: truncated ? paths.slice(0, MAX_LISTED) : paths,
+    lazy: ignored.filter((path) => path.endsWith("/")),
+    ignored,
+    truncated,
+  };
+}
+
+/** One directory's own entries; every subdirectory comes back unread. */
+export async function listDir(top: string, dir: string): Promise<FileListing> {
+  const base = dir.replace(/\/+$/, "");
+  const full = await resolved(top, base);
+  if (!full)
+    return { root: top, paths: [], lazy: [], ignored: [], truncated: false };
+  const entries = await readdir(full, { withFileTypes: true });
+  const shown = entries.slice(0, MAX_DIR_ENTRIES);
+  // ⚠️ A symlink is drawn as what it points at. bun's `node_modules` is mostly
+  // links into its store, and a package shown as a file could not be opened.
+  const folders = await Promise.all(
+    shown.map(async (entry) =>
+      entry.isSymbolicLink()
+        ? ((
+            await stat(join(full, entry.name)).catch(() => null)
+          )?.isDirectory() ?? false)
+        : entry.isDirectory(),
+    ),
+  );
+  const paths: string[] = [];
+  const lazy: string[] = [];
+  shown.forEach((entry, index) => {
+    const path = `${base}/${entry.name}${folders[index] ? "/" : ""}`;
+    paths.push(path);
+    if (folders[index]) lazy.push(path);
+  });
+  return {
+    root: top,
+    paths,
+    lazy,
+    ignored: [],
+    truncated: entries.length > shown.length,
+  };
+}
+
+/** One file of the working tree, or why the Files screen cannot show it. */
+export async function viewFile(top: string, path: string): Promise<FileView> {
+  const full = await resolved(top, path);
+  if (!full) return { kind: "missing" };
+  const handle = await open(full, "r").catch(() => null);
+  if (!handle) return { kind: "missing" };
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) return { kind: "missing" };
+    // ⚠️ By the name it resolves to, not the one asked for: a link called
+    // `x.png` pointing at a text file is read as text.
+    const type = IMAGE_TYPES[extname(full).toLowerCase()];
+    if (type) {
+      if (info.size > MAX_IMAGE_BYTES)
+        return { kind: "too-large", size: info.size };
+      const bytes = Buffer.alloc(info.size);
+      await handle.read(bytes, 0, info.size, 0);
+      return {
+        kind: "image",
+        url: `data:${type};base64,${bytes.toString("base64")}`,
+        size: info.size,
+      };
+    }
+    if (info.size > MAX_FILE_BYTES)
+      return { kind: "too-large", size: info.size };
+    const buffer = Buffer.alloc(info.size);
+    await handle.read(buffer, 0, info.size, 0);
+    // The same test git uses: a NUL in the content means binary.
+    if (buffer.includes(0)) return { kind: "binary", size: info.size };
+    return { kind: "text", text: buffer.toString("utf8"), size: info.size };
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * The repository path of the one file `path` means (FE-66) — how the chat
+ * names files: relative to the project's folder (which may be a subfolder of
+ * the repository), relative to the repository, absolute, or just a name.
+ *
+ * ⚠️ A bare name or a partial path is looked up in git's list, and only ONE
+ * match counts: two `index.ts` are a question, not an answer.
+ */
+export async function locateInRepo(
+  top: string,
+  folder: string,
+  path: string,
+): Promise<string | null> {
+  const asked = path.trim().replace(/^\.\//, "");
+  if (!asked || asked.includes("\0")) return null;
+  const root = await realpath(top);
+  const fileAt = async (full: string): Promise<string | null> => {
+    const real = await realpath(full).catch(() => null);
+    if (!real) return null;
+    const rel = relative(root, real);
+    if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
+    const info = await stat(real).catch(() => null);
+    return info?.isFile() ? rel.split(sep).join("/") : null;
+  };
+  if (isAbsolute(asked)) return fileAt(asked);
+  if (asked.split(/[\\/]/).includes("..")) return null;
+  const base = await realpath(folder).catch(() => root);
+  const direct =
+    (await fileAt(join(base, asked))) ?? (await fileAt(join(root, asked)));
+  if (direct) return direct;
+  const tail = `/${asked}`;
+  const { paths } = await listFiles(top);
+  const found = paths.filter(
+    (candidate) => !candidate.endsWith("/") && `/${candidate}`.endsWith(tail),
+  );
+  return found.length === 1 ? found[0] : null;
+}
+
+/** The full path of one working-tree file, for Finder. Null when it is gone. */
+export async function locateFile(
+  top: string,
+  path: string,
+): Promise<string | null> {
+  return resolved(top, path);
 }
 
 /**

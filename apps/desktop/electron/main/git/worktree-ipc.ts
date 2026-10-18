@@ -1,9 +1,14 @@
+import { stat } from "node:fs/promises";
+import { shell } from "electron";
 import {
   type BranchList,
   type CommitChange,
   type CommitHistory,
   type CommitMode,
+  type FileListing,
   type FileSide,
+  type FileView,
+  LAUNCHABLE,
   type SyncAction,
   type WorktreePatch,
   type WorktreeState,
@@ -16,7 +21,11 @@ import {
   branches,
   commit,
   fileText,
+  listDir,
+  listFiles,
   locate,
+  locateFile,
+  locateInRepo,
   log,
   patch,
   restore,
@@ -26,6 +35,7 @@ import {
   switchBranch,
   sync,
   unstage,
+  viewFile,
 } from "./worktree";
 
 /**
@@ -97,7 +107,74 @@ async function current(slug: string): Promise<WorktreeState> {
   return "state" in found ? found.state : status(found.top);
 }
 
+/** A path inside the repository, as the Files screen names one (FE-66). */
+function pathOf(value: unknown): string {
+  if (typeof value !== "string" || !value || value.length > 4_096)
+    throw new Error("That is not a file in this repository.");
+  return value;
+}
+
 export function registerWorktree(devUrl?: string): void {
+  // Repository › Files (FE-66). Read-only: listing, reading, and Finder.
+  handle(
+    worktreeChannels.files,
+    devUrl,
+    async (args): Promise<FileListing> => listFiles(await top(slugOf(args[0]))),
+  );
+
+  handle(
+    worktreeChannels.dir,
+    devUrl,
+    async (args): Promise<FileListing> =>
+      listDir(await top(slugOf(args[0])), pathOf(args[1])),
+  );
+
+  handle(
+    worktreeChannels.view,
+    devUrl,
+    async (args): Promise<FileView> =>
+      viewFile(await top(slugOf(args[0])), pathOf(args[1])),
+  );
+
+  // A file the chat names, as the Files screen can open it.
+  handle(
+    worktreeChannels.locate,
+    devUrl,
+    async (args): Promise<string | null> => {
+      const slug = slugOf(args[0]);
+      const path = pathOf(args[1]);
+      const record = await authorizedRecord();
+      const primary = (await readFolders(record))[slug]?.[0] ?? null;
+      const found = await locate(primary);
+      if (found.kind !== "ready" || !primary) return null;
+      return locateInRepo(found.top, primary, path);
+    },
+  );
+
+  // "Open in Default App" from the Files tree's menu (FE-66).
+  //
+  // ⚠️ Opening an app, a script or an executable RUNS it, and a repository is
+  // full of files an agent wrote. Those are refused here, not only hidden in
+  // the menu — Reveal in Finder is the way to them.
+  handle(worktreeChannels.openDefault, devUrl, async (args): Promise<void> => {
+    const path = pathOf(args[1]);
+    const full = await locateFile(await top(slugOf(args[0])), path);
+    if (!full) throw new Error("That file is not there any more.");
+    const info = await stat(full);
+    if (LAUNCHABLE.test(full) || (info.isFile() && (info.mode & 0o111) !== 0))
+      throw new Error("Lanework does not open files that would run.");
+    const failed = await shell.openPath(full);
+    if (failed) throw new Error(failed);
+  });
+
+  // ⚠️ Finder, never `shell.openPath`. Opening a file in its default app runs
+  // a `.command` or an `.app` — reading a repository must not execute it.
+  handle(worktreeChannels.reveal, devUrl, async (args): Promise<void> => {
+    const full = await locateFile(await top(slugOf(args[0])), pathOf(args[1]));
+    if (!full) throw new Error("That file is not there any more.");
+    shell.showItemInFolder(full);
+  });
+
   handle(
     worktreeChannels.status,
     devUrl,

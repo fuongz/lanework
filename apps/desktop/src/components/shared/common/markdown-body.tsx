@@ -22,15 +22,13 @@ export type LinkRenderer = (span: LinkSpan) => ReactNode;
 const LinkContext = createContext<LinkRenderer | null>(null);
 
 /**
- * What a badge naming an image does when clicked (FE-65): opens it. Only the
- * chat provides one — it alone knows the workspace a path is relative to —
- * so every other reader's image badges stay plain.
+ * What a file badge does when clicked: opens the file in Repository › Files
+ * (FE-66; an image's badge opened a lightbox before, FE-65). Only the chat
+ * provides one — it alone knows the project a path is relative to — so every
+ * other reader's badges stay plain.
  */
-export type ImageOpener = (path: string) => void;
-export const ImageOpenerContext = createContext<ImageOpener | null>(null);
-
-/** A file a badge names that the lightbox can show. */
-const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
+export type FileOpener = (path: string) => void;
+export const FileOpenerContext = createContext<FileOpener | null>(null);
 
 /**
  * How the body is drawn. `default` is every card body's; `chat` is the
@@ -166,7 +164,7 @@ function FileBadge({
   path: string;
   chat: boolean;
 }) {
-  const open = useContext(ImageOpenerContext);
+  const open = useContext(FileOpenerContext);
   const body = (
     <>
       {/* On the FIRST line's middle — (1.25 − 1) / 2 — which on one line is
@@ -176,13 +174,13 @@ function FileBadge({
       <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>
     </>
   );
-  // An image, in the chat: the badge opens it in the lightbox (FE-65).
-  if (open && IMAGE_FILE.test(path))
+  // In the chat, the badge opens the file in Repository › Files (FE-66).
+  if (open)
     return (
       <button
         type="button"
         data-file={path}
-        title="Preview image"
+        title={`Open ${path}`}
         onClick={() => open(path)}
         className={`${badgeClass(chat)} hover:bg-foreground/[0.12] focus-visible:ring-ring/40 cursor-pointer items-start gap-[0.3em] text-left transition-colors outline-none focus-visible:ring-2`}
       >

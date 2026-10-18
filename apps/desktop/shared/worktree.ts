@@ -167,7 +167,43 @@ export type SyncAction =
   | "push"
   | "force-push";
 
+/**
+ * Paths for Repository › Files (FE-66): directories end with `/`, the way
+ * `@pierre/trees` takes them.
+ *
+ * ⚠️ `lazy` are directories listed WITHOUT their contents — what git ignores
+ * (`node_modules/`, `dist/`) at the top read, and every subdirectory of a
+ * directory read with `dir`. The tree asks for one when somebody opens it;
+ * walking a `node_modules` up front to draw a sidebar would be a hundred
+ * thousand stats nobody looks at.
+ */
+export interface FileListing {
+  /** The repository's folder on this machine, for "Copy Path". */
+  root: string;
+  paths: string[];
+  lazy: string[];
+  /** Paths git ignores — drawn greyed, the way an editor does. */
+  ignored: string[];
+  /** True when the listing hit its cap and stops short. */
+  truncated: boolean;
+}
+
+/** One file as the Files screen shows it. */
+export type FileView =
+  | { kind: "text"; text: string; size: number }
+  /** An image, as a `data:` URL — drawn rather than called binary. */
+  | { kind: "image"; url: string; size: number }
+  | { kind: "binary"; size: number }
+  | { kind: "too-large"; size: number }
+  | { kind: "missing" };
+
 export const worktreeChannels = {
+  files: "worktree:files",
+  dir: "worktree:dir",
+  view: "worktree:view",
+  reveal: "worktree:reveal",
+  locate: "worktree:locate",
+  openDefault: "worktree:open-default",
   status: "worktree:status",
   patch: "worktree:patch",
   fileText: "worktree:file",
@@ -191,6 +227,25 @@ export const worktreeChannels = {
  * files — from being a way to delete anything else.
  */
 export interface DesktopWorktreeApi {
+  /** The working tree for Repository › Files (FE-66), ignored folders unread. */
+  files: (slug: string) => Promise<FileListing>;
+  /** One directory's own entries; every subdirectory comes back `lazy`. */
+  dir: (slug: string, path: string) => Promise<FileListing>;
+  /** One file of the working tree, or why it cannot be shown. */
+  view: (slug: string, path: string) => Promise<FileView>;
+  /** Show one file of the working tree in Finder / Explorer. */
+  reveal: (slug: string, path: string) => Promise<void>;
+  /**
+   * A path as somebody wrote it — relative to the project's folder, to the
+   * repository, absolute, or a bare name — as the repository path of the one
+   * file it means. Null when it is not in the repository, or is ambiguous.
+   */
+  locate: (slug: string, path: string) => Promise<string | null>;
+  /**
+   * Open a file or folder of the working tree in its default app. Refused for
+   * anything that would RUN — an app, a script, an executable.
+   */
+  openDefault: (slug: string, path: string) => Promise<void>;
   status: (slug: string) => Promise<WorktreeState>;
   patch: (slug: string) => Promise<WorktreePatch>;
   /** One side of one file in full, or null when that side does not exist. */
@@ -238,6 +293,14 @@ export interface DesktopWorktreeApi {
  * numbers a row shows and the lines the viewer draws then come from ONE read,
  * and cannot disagree because the tree changed between two.
  */
+/**
+ * Files "Open in Default App" will not open (FE-66): opening them runs them.
+ * Main also refuses anything with an execute bit; this list is what the menu
+ * can know without asking.
+ */
+export const LAUNCHABLE =
+  /\.(app|command|tool|terminal|workflow|action|scpt|applescript|sh|bash|zsh|fish|py|rb|pl|jar|exe|bat|cmd|ps1|msi|pkg|mpkg|dmg|webloc|inetloc|url|desktop)\/?$/i;
+
 export function patchStats(
   patch: string,
 ): Map<string, { additions: number; deletions: number; binary: boolean }> {
