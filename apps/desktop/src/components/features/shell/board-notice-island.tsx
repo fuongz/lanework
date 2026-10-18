@@ -1,6 +1,7 @@
 import {
   Cancel01Icon,
   InformationCircleIcon,
+  WifiDisconnected01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useParams } from "@tanstack/react-router";
@@ -40,17 +41,21 @@ function conflictLead(message: string): string {
   return /[.!?]$/.test(sentence) ? `${sentence} ` : `${sentence}. `;
 }
 const LOAD_TITLE = "Could not load this board";
+const OFFLINE_TITLE = "Offline";
+const OFFLINE_TEXT = "Showing a saved board. Changes will not save.";
 
 interface Notice {
   error: string | null;
   conflict: BoardConflict | null;
   /** Whether a board is on screen: without one, an error is a failed READ. */
   hasView: boolean;
+  /** The board on screen is the saved copy: the service could not be reached. */
+  offline: boolean;
 }
 
 /**
- * The board's notice, or null: a write that failed or lost a race, while a
- * project is open.
+ * The board's notice, or null: a write that failed or lost a race, or a saved
+ * board shown offline, while a project is open.
  *
  * ⚠️ Only under `/w/$slug` and only once the project resolved — as the banner
  * it replaces was. With no project the layout draws its own full-page error
@@ -62,11 +67,12 @@ export function useBoardNotice(): Notice | null {
   const error = useBoard((state) => state.error);
   const conflict = useBoard((state) => state.conflict);
   const hasView = useBoard((state) => state.view !== null);
+  const offline = useBoard((state) => state.view?.stale === true);
   const ready = useBoard(
     (state) => state.active !== null && state.active.id !== null,
   );
-  if (!slug || !ready || (!error && !conflict)) return null;
-  return { error, conflict, hasView };
+  if (!slug || !ready || (!error && !conflict && !offline)) return null;
+  return { error, conflict, hasView, offline };
 }
 
 /**
@@ -78,6 +84,11 @@ export function useBoardNotice(): Notice | null {
  * pill stays until Dismiss: a failed write that vanished by itself would take
  * the only record of it with it. A pointer over it, or focus in it, holds it
  * open.
+ *
+ * ⚠️ Offline is a condition of the window, not something that happened once
+ * (it was a red bar across the pane): it arrives open like the rest, but its
+ * pill has no Dismiss and stays for as long as the board is the saved copy. A
+ * failed write or a lost race speaks over it while both are up.
  *
  * ⚠️ Opening by itself never takes focus, and Escape is heard only from inside
  * it: a document-wide Escape for five seconds would close the dialog or the
@@ -97,6 +108,7 @@ export function BoardNoticeIsland({ notice }: { notice: Notice | null }) {
   const shown = notice ?? last.current;
   const error = notice?.error ?? null;
   const conflict = notice?.conflict ?? null;
+  const offline = notice?.offline ?? false;
 
   const fold = (after: number) => {
     window.clearTimeout(timer.current);
@@ -108,14 +120,15 @@ export function BoardNoticeIsland({ notice }: { notice: Notice | null }) {
   const hold = () => window.clearTimeout(timer.current);
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
-  // A new notice — a new failure, a new lost race — arrives open again.
+  // A new notice — a new failure, a new lost race, going offline — arrives
+  // open again.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `fold` is fresh each render and only reads refs.
   useEffect(() => {
-    if (!error && !conflict) return;
+    if (!error && !conflict && !offline) return;
     setOpen(true);
     setPinned(false);
     fold(OPEN_MS);
-  }, [error, conflict]);
+  }, [error, conflict, offline]);
 
   // Open: a press anywhere else folds it.
   useEffect(() => {
@@ -148,13 +161,18 @@ export function BoardNoticeIsland({ notice }: { notice: Notice | null }) {
           ? "Your change was not applied: the card changed on the board."
           : ""}
       </p>
+      <p className="sr-only" role="status" aria-live="polite">
+        {offline ? "Offline: changes to this board will not save." : ""}
+      </p>
       <AnimatePresence initial={false} mode="popLayout">
         {visible && (
           <motion.div
             key={reduced ? view : "island"}
             ref={island}
             data-testid="board-notice-island"
-            data-state={shown?.conflict ? "conflict" : "error"}
+            data-state={
+              shown?.conflict ? "conflict" : shown?.error ? "error" : "offline"
+            }
             data-view={view}
             layout={!reduced}
             transition={reduced ? { duration: 0.2 } : ISLAND_MORPH}
@@ -222,19 +240,21 @@ export function BoardNoticeIsland({ notice }: { notice: Notice | null }) {
   );
 }
 
-function Glyph({
-  kind,
-  className,
-}: {
-  kind: "error" | "conflict";
-  className?: string;
-}) {
+type Kind = "error" | "conflict" | "offline";
+
+const GLYPH = {
+  error: Cancel01Icon,
+  conflict: InformationCircleIcon,
+  offline: WifiDisconnected01Icon,
+};
+
+function Glyph({ kind, className }: { kind: Kind; className?: string }) {
   return (
     <HugeiconsIcon
-      icon={kind === "error" ? Cancel01Icon : InformationCircleIcon}
+      icon={GLYPH[kind]}
       className={cn(
         "size-3.5 shrink-0",
-        kind === "error" ? "text-red-400" : "text-white/70",
+        kind === "conflict" ? "text-white/70" : "text-red-400",
         className,
       )}
       strokeWidth={kind === "error" ? 2.4 : 2}
@@ -250,13 +270,21 @@ function Glyph({
  * one that carries somebody else's change, and the panel shows both anyway.
  */
 function Pill({ notice, onOpen }: { notice: Notice; onOpen: () => void }) {
-  const kind = notice.conflict ? "conflict" : "error";
-  const text = notice.conflict
-    ? CONFLICT_TITLE
-    : notice.hasView
-      ? (notice.error ?? "")
-      : LOAD_TITLE;
-  const more = notice.conflict && notice.error ? 1 : 0;
+  const kind: Kind = notice.conflict
+    ? "conflict"
+    : notice.error
+      ? "error"
+      : "offline";
+  const text =
+    kind === "conflict"
+      ? CONFLICT_TITLE
+      : kind === "offline"
+        ? OFFLINE_TITLE
+        : notice.hasView
+          ? (notice.error ?? "")
+          : LOAD_TITLE;
+  const more =
+    [notice.conflict, notice.error, notice.offline].filter(Boolean).length - 1;
   return (
     <button
       type="button"
@@ -287,7 +315,7 @@ function Panel({
   useEffect(() => {
     if (focus) self.current?.focus({ preventScroll: true });
   }, [focus]);
-  const { conflict, error, hasView } = notice;
+  const { conflict, error, hasView, offline } = notice;
   return (
     <section
       ref={self}
@@ -328,14 +356,28 @@ function Panel({
           )}
         </div>
       )}
-      <div className="flex justify-end">
-        <Button
-          onClick={onDismiss}
-          className="h-7 rounded-full bg-white/[0.14] px-3 text-[12px] text-white hover:bg-white/[0.22] focus-visible:ring-white/40"
-        >
-          Dismiss
-        </Button>
-      </div>
+      {offline && (
+        <div className="flex items-start gap-2">
+          <Glyph kind="offline" className="mt-0.5" />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <h2 className="text-[13px] font-semibold tracking-tight">
+              {OFFLINE_TITLE}
+            </h2>
+            <p className="text-[12px] text-white/70">{OFFLINE_TEXT}</p>
+          </div>
+        </div>
+      )}
+      {/* ⚠️ Nothing to dismiss when only offline: it ends when the board does. */}
+      {(conflict || error) && (
+        <div className="flex justify-end">
+          <Button
+            onClick={onDismiss}
+            className="h-7 rounded-full bg-white/[0.14] px-3 text-[12px] text-white hover:bg-white/[0.22] focus-visible:ring-white/40"
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
     </section>
   );
 }

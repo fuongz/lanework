@@ -793,11 +793,16 @@ test("opening a workspace shows its cloud board, and a tick carries the revision
     // re-create a card that already exists.
     plane.setBoardOffline(true);
     await page.getByRole("button", { name: "Refresh board" }).click();
-    // ⚠️ One bar across the pane, not a boxed alert: the condition belongs to
-    // the window, so it reads as chrome rather than as a message about a card.
+    // ⚠️ The board notice island, not a bar across the pane: it arrives open
+    // and, with nothing to dismiss, stays as a pill while the board is saved.
+    const island = page.getByTestId("board-notice-island");
+    await expect(island).toHaveAttribute("data-state", "offline");
     await expect(
-      page.getByText(/^Offline — showing a saved board/),
+      island.getByText("Showing a saved board. Changes will not save."),
     ).toBeVisible();
+    await expect(island.getByRole("button", { name: "Dismiss" })).toHaveCount(
+      0,
+    );
     await expect(page.getByText(/Cache the composer/)).toBeVisible();
 
     expect(errors).toEqual([]);

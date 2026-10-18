@@ -1,7 +1,4 @@
-import {
-  InformationCircleIcon,
-  WifiDisconnected01Icon,
-} from "@hugeicons/core-free-icons";
+import { InformationCircleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Outlet,
@@ -25,7 +22,7 @@ import { useLastRoute } from "#/stores/last-route";
 /**
  * One project, open.
  *
- * ⚠️ A failed write and a lost race are not drawn here any more: they are the
+ * ⚠️ A failed write, a lost race and being offline are not drawn here any more: they are the
  * board notice island in the shell (FE-63), for the same reason they once
  * lived here rather than in each view — they are a property of the board, not
  * of the screen looking at it.
@@ -35,7 +32,6 @@ export function WorkspaceLayout() {
   const open = useBoard((state) => state.open);
   const poll = useBoard((state) => state.poll);
   const error = useBoard((state) => state.error);
-  const view = useBoard((state) => state.view);
   const active = useBoard((state) => state.active);
   const notFound = useBoard((state) => state.notFound);
   const navigate = useNavigate();
@@ -139,25 +135,6 @@ export function WorkspaceLayout() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* ⚠️ A bar across the whole pane, not a card in the banner stack. Being
-          offline is a condition of the WINDOW — it colours everything below it
-          and it does not go away when you navigate — so it reads as chrome,
-          one line, always at the top. A boxed alert competing for width with
-          the board underneath said the same thing in four times the space. */}
-      {view?.stale && (
-        <div
-          role="status"
-          className="bg-destructive text-destructive-foreground flex h-7 shrink-0 items-center justify-center gap-2 px-6 text-xs font-medium"
-        >
-          <HugeiconsIcon
-            icon={WifiDisconnected01Icon}
-            className="size-3.5"
-            strokeWidth={2}
-            aria-hidden="true"
-          />
-          Offline — showing a saved board. Changes will not save.
-        </div>
-      )}
       {active && <LocalBoardBar workspace={active} />}
       <Outlet />
     </div>
