@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { forgetDraft } from "#/components/shared/conversation/draft";
 import type {
   AgentActivity,
   AgentCard,
@@ -263,6 +264,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       session.agent,
       session.id,
     );
+    forgetDraft(session.id);
     latest.set(workspace, (latest.get(workspace) ?? 0) + 1);
     set((state) => ({
       byWorkspace: { ...state.byWorkspace, [workspace]: listed },

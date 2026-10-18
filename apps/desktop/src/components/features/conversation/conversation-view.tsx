@@ -695,6 +695,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               <Composer
                 ref={composer}
                 slug={slug}
+                draftKey={id}
                 corner={<ContextButton facts={facts} />}
                 workspace={workspace}
                 settings={settings}

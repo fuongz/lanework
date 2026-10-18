@@ -27,6 +27,7 @@ import {
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
 import { cn } from "#/lib/utils";
 import { AttachMenu, ModelMenu, PermissionMenu } from "./composer.menus";
+import { readDraft, writeDraft } from "./draft";
 
 export interface ComposerHandle {
   /** Put `text` in the composer — a reply's quote — and focus it. */
@@ -65,6 +66,9 @@ function trigger(
 
 let keys = 0;
 
+/** How long typing rests before the draft is written down. */
+const DRAFT_DELAY = 300;
+
 function readBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -87,6 +91,11 @@ export const Composer = forwardRef<
   {
     /** The project, for its branch switcher. */
     slug: string;
+    /**
+     * Where the unsent text is kept (`./draft`): the conversation's id, or
+     * `new:<slug>`.
+     */
+    draftKey?: string;
     /** Take the caret on mount — the new-conversation page has nothing else. */
     autoFocus?: boolean;
     /** The top row's right corner: the conversation's context ring. */
@@ -107,6 +116,7 @@ export const Composer = forwardRef<
 >(function Composer(
   {
     slug,
+    draftKey,
     autoFocus,
     corner,
     workspace,
@@ -120,7 +130,7 @@ export const Composer = forwardRef<
   },
   ref,
 ) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => (draftKey ? readDraft(draftKey) : ""));
   const [attachments, setAttachments] = useState<Pending[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -150,8 +160,26 @@ export const Composer = forwardRef<
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: on mount only.
   useEffect(() => {
-    if (autoFocus) area.current?.focus();
+    const node = area.current;
+    if (!autoFocus || !node) return;
+    node.focus();
+    // A restored draft: the caret at its end, where typing left off.
+    node.setSelectionRange(node.value.length, node.value.length);
   }, []);
+
+  // The draft is written once typing rests — and at once on the way out, so a
+  // switch inside the delay keeps the last keys too.
+  const latest = useRef(text);
+  latest.current = text;
+  useEffect(() => {
+    if (!draftKey) return;
+    const timer = setTimeout(() => writeDraft(draftKey, text), DRAFT_DELAY);
+    return () => clearTimeout(timer);
+  }, [draftKey, text]);
+  useEffect(() => {
+    if (!draftKey) return;
+    return () => writeDraft(draftKey, latest.current);
+  }, [draftKey]);
 
   useImperativeHandle(ref, () => ({
     insert: (value) => {

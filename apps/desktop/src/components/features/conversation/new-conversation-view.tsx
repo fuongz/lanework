@@ -108,6 +108,7 @@ export function NewConversationView() {
           {workspace && settings && (
             <Composer
               slug={slug}
+              draftKey={`new:${slug}`}
               autoFocus
               workspace={workspace}
               settings={settings}
