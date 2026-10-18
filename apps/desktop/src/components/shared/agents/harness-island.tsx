@@ -31,17 +31,32 @@ export const HARNESS_NAMES: Record<HarnessAgent, string> = {
 /** How long "✓ Codex 0.163.0" stands before the island goes (FE-61). */
 const DONE_MS = 2000;
 /** A pointer that slips off the panel for a moment does not fold it. */
-const LEAVE_MS = 220;
+export const ISLAND_LEAVE_MS = 220;
 /**
  * The morph: low bounce, about half a second, and — being a spring on a
  * layout animation — re-targeted from wherever it is when the pointer changes
  * its mind halfway.
  */
-const MORPH: Transition = { type: "spring", bounce: 0.18, duration: 0.45 };
+export const ISLAND_MORPH: Transition = {
+  type: "spring",
+  bounce: 0.18,
+  duration: 0.45,
+};
 /** Content swaps faster than the container moves, so it never reads squeezed. */
-const SWAP: Transition = { duration: 0.16, ease: [0.25, 0.1, 0.25, 1] };
-const PILL_RADIUS = 14;
-const PANEL_RADIUS = 24;
+export const ISLAND_SWAP: Transition = {
+  duration: 0.16,
+  ease: [0.25, 0.1, 0.25, 1],
+};
+export const ISLAND_PILL_RADIUS = 14;
+export const ISLAND_PANEL_RADIUS = 24;
+/** The fixed strip an island floats in: top centre, over the title bar. */
+export const ISLAND_HOST =
+  "pointer-events-none fixed inset-x-0 z-[70] flex justify-center px-4";
+export const ISLAND_HOST_TOP =
+  "calc((var(--titlebar-height, 44px) - 28px) / 2)";
+/** The black capsule itself, the same in both themes. */
+export const ISLAND_SURFACE =
+  "pointer-events-auto relative overflow-hidden bg-black text-white [app-region:no-drag] shadow-[0_8px_30px_rgb(0_0_0/0.28),0_0_0_1px_rgb(255_255_255/0.06)_inset] select-none";
 
 /** The mark of a harness, drawn for a black surface in both themes. */
 export function HarnessIcon({
@@ -163,8 +178,12 @@ function announce(row: Row | undefined): string {
  * region at all, so the title bar either side of it still drags the window;
  * and it is mounted LAST in the shell, because a later region wins over the
  * title bar's drag strip.
+ *
+ * ⚠️ `yieldTo`: a board notice has the island (FE-63). An update is an offer
+ * and a failed write is not, so the pill steps aside while the notice is up
+ * and comes back once it is dismissed.
  */
-export function HarnessIsland() {
+export function HarnessIsland({ yieldTo = false }: { yieldTo?: boolean }) {
   useHarnessWatch();
   const rows = useRows();
   const top = lead(rows);
@@ -173,7 +192,7 @@ export function HarnessIsland() {
   const leaveTimer = useRef<number | undefined>(undefined);
   const island = useRef<HTMLDivElement>(null);
   const reduced = useReducedMotion() ?? false;
-  const visible = rows.length > 0;
+  const visible = rows.length > 0 && !yieldTo;
 
   useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
   // Gone means folded: the next one starts as a pill.
@@ -211,18 +230,21 @@ export function HarnessIsland() {
   const leave = () => {
     if (pinned) return;
     window.clearTimeout(leaveTimer.current);
-    leaveTimer.current = window.setTimeout(() => setOpen(false), LEAVE_MS);
+    leaveTimer.current = window.setTimeout(
+      () => setOpen(false),
+      ISLAND_LEAVE_MS,
+    );
   };
 
   const view = open ? "panel" : "pill";
   return (
     <div
       data-testid="harness-island-host"
-      className="pointer-events-none fixed inset-x-0 z-[70] flex justify-center px-4"
-      style={{ top: "calc((var(--titlebar-height, 44px) - 28px) / 2)" }}
+      className={ISLAND_HOST}
+      style={{ top: ISLAND_HOST_TOP }}
     >
       <p className="sr-only" role="status" aria-live="polite">
-        {announce(top)}
+        {visible ? announce(top) : ""}
       </p>
       <AnimatePresence initial={false} mode="popLayout">
         {visible && top && (
@@ -236,17 +258,16 @@ export function HarnessIsland() {
             data-state={top.shown}
             data-view={view}
             layout={!reduced}
-            transition={reduced ? { duration: 0.2 } : MORPH}
+            transition={reduced ? { duration: 0.2 } : ISLAND_MORPH}
             initial={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
-            style={{ borderRadius: open ? PANEL_RADIUS : PILL_RADIUS }}
+            style={{
+              borderRadius: open ? ISLAND_PANEL_RADIUS : ISLAND_PILL_RADIUS,
+            }}
             onPointerEnter={enter}
             onPointerLeave={leave}
-            className={cn(
-              "pointer-events-auto relative overflow-hidden bg-black text-white [app-region:no-drag]",
-              "shadow-[0_8px_30px_rgb(0_0_0/0.28),0_0_0_1px_rgb(255_255_255/0.06)_inset] select-none",
-            )}
+            className={ISLAND_SURFACE}
           >
             <AnimatePresence initial={false} mode="popLayout">
               <motion.div
@@ -255,7 +276,7 @@ export function HarnessIsland() {
                 initial={{ opacity: 0, filter: "blur(4px)" }}
                 animate={{ opacity: 1, filter: "blur(0px)" }}
                 exit={{ opacity: 0, filter: "blur(4px)" }}
-                transition={SWAP}
+                transition={ISLAND_SWAP}
               >
                 {open ? (
                   <Panel

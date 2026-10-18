@@ -12,8 +12,6 @@ import {
 import { useEffect } from "react";
 import { LocalBoardBar } from "#/components/shared/auth/local-mode";
 import { ErrorState } from "#/components/shared/common/error-state";
-import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
-import { Button } from "#/components/ui/button";
 import {
   Empty,
   EmptyDescription,
@@ -27,18 +25,16 @@ import { useLastRoute } from "#/stores/last-route";
 /**
  * One project, open.
  *
- * ⚠️ The banners live HERE rather than in each view, because what they report is
- * a property of the board and not of the screen looking at it: a lost race is
- * still a lost race after you switch from the list to the lanes, and a banner
- * that unmounted with the view would take the only record of it with it.
+ * ⚠️ A failed write and a lost race are not drawn here any more: they are the
+ * board notice island in the shell (FE-63), for the same reason they once
+ * lived here rather than in each view — they are a property of the board, not
+ * of the screen looking at it.
  */
 export function WorkspaceLayout() {
   const { slug } = useParams({ from: "/_app/w/$slug" });
   const open = useBoard((state) => state.open);
   const poll = useBoard((state) => state.poll);
   const error = useBoard((state) => state.error);
-  const conflict = useBoard((state) => state.conflict);
-  const dismiss = useBoard((state) => state.dismiss);
   const view = useBoard((state) => state.view);
   const active = useBoard((state) => state.active);
   const notFound = useBoard((state) => state.notFound);
@@ -163,44 +159,6 @@ export function WorkspaceLayout() {
         </div>
       )}
       {active && <LocalBoardBar workspace={active} />}
-      {(error || conflict) && (
-        <div className="flex flex-col gap-2 px-6 pt-4">
-          {conflict && (
-            <Alert>
-              <AlertTitle>Someone else changed this card</AlertTitle>
-              <AlertDescription>
-                {conflict.message} The board now shows “{conflict.current.title}
-                ”. Your change was not applied.
-              </AlertDescription>
-              <Button
-                variant="ghost"
-                className="mt-1 self-start"
-                onClick={dismiss}
-              >
-                Dismiss
-              </Button>
-            </Alert>
-          )}
-          {error && (
-            <Alert variant="destructive">
-              {/* ⚠️ A read failure and a write failure are different sentences.
-                  "That did not save" about a board that could not be READ sends
-                  somebody looking for the edit they lost, and there wasn't one. */}
-              <AlertTitle>
-                {view ? "That did not save" : "Could not load this board"}
-              </AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-              <Button
-                variant="ghost"
-                className="mt-1 self-start"
-                onClick={dismiss}
-              >
-                Dismiss
-              </Button>
-            </Alert>
-          )}
-        </div>
-      )}
       <Outlet />
     </div>
   );

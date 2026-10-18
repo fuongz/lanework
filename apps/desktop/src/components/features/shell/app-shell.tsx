@@ -25,6 +25,7 @@ import { useBoard } from "#/stores/board";
 import { useLayout } from "#/stores/layout";
 import { terminalShown, useTerminal } from "#/stores/terminal";
 import { AppSidebar } from "./app-sidebar";
+import { BoardNoticeIsland, useBoardNotice } from "./board-notice-island";
 import { CommandPalette } from "./command-palette";
 import { HistoryButtons } from "./history-nav";
 
@@ -192,6 +193,7 @@ export function AppShell() {
     else if (!hidden && panel.isCollapsed()) showRail();
   }, [sidebarRef, showRail]);
   const terminalRef = usePanelRef();
+  const notice = useBoardNotice();
   // ⚠️ The project in the URL, not the board store's `active`: on the project
   // picker there is no project, so no terminal — neither the panel nor its
   // bar — rather than whichever project's was open last.
@@ -478,11 +480,14 @@ export function AppShell() {
           />
         </button>
       </nav>
-      {/* The harness update island (FE-61): fixed at the top centre, over the
-          title bar's edge and the page. ⚠️ After the nav for the same reason
-          as the nav: its `no-drag` must be laid down after the title bar's
-          drag strip, or the strip eats its clicks. */}
-      <HarnessIsland />
+      {/* The islands — harness updates (FE-61) and board notices (FE-63):
+          fixed at the top centre, over the title bar's edge and the page.
+          ⚠️ After the nav for the same reason as the nav: their `no-drag`
+          must be laid down after the title bar's drag strip, or the strip
+          eats their clicks. One spot, one island: a notice has it, and the
+          harness pill waits. */}
+      <HarnessIsland yieldTo={notice !== null} />
+      <BoardNoticeIsland notice={notice} />
     </div>
   );
 }
