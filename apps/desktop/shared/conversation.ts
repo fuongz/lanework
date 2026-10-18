@@ -193,6 +193,15 @@ export interface Attachment {
   path: string | null;
 }
 
+/**
+ * An image named in the chat, read back (FE-65): its real path and its
+ * bytes as a `data:` URL — or, when it is not there or out of scope, the
+ * path as asked.
+ */
+export type ImagePreview =
+  | { found: true; path: string; url: string }
+  | { found: false; path: string };
+
 /** Spans of one assistant turn, in the order they were written. */
 export type Block =
   | { type: "text"; text: string }
@@ -441,6 +450,10 @@ export const conversationChannels = {
   suggest: "conversation:suggest",
   /** Open a link the person clicked in the chat in the OS browser. */
   openLink: "conversation:open-link",
+  /** An image the chat names, read back for its lightbox (FE-65). */
+  image: "conversation:image",
+  /** That image, opened in the OS's default app. */
+  openImage: "conversation:open-image",
   /** Main → renderer: a `ConversationEvent`. */
   event: "conversation:event",
 } as const;
@@ -496,6 +509,22 @@ export interface DesktopConversationApi {
    * reaches this.
    */
   openLink: (url: string) => Promise<void>;
+  /**
+   * The image a chat badge names (FE-65) — `details.png`, `assets/x.png`, an
+   * attached `/tmp/…/1.png` — as a `data:` URL. Main reads only the
+   * workspace's folder and the conversation's own attachments.
+   */
+  image: (
+    workspace: string,
+    conversation: string,
+    path: string,
+  ) => Promise<ImagePreview>;
+  /** That image in the OS's default app; the same scope as `image`. */
+  openImage: (
+    workspace: string,
+    conversation: string,
+    path: string,
+  ) => Promise<void>;
   /** A path for a dropped or pasted `File`, as Electron knows it. */
   pathForFile: (file: File) => string;
   onEvent: (listener: (event: ConversationEvent) => void) => () => void;

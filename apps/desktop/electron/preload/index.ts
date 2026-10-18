@@ -168,6 +168,10 @@ const conversation: DesktopConversationApi = {
   suggest: (workspace, kind, query) =>
     ipcRenderer.invoke(conversationChannels.suggest, workspace, kind, query),
   openLink: (url) => ipcRenderer.invoke(conversationChannels.openLink, url),
+  image: (workspace, id, path) =>
+    ipcRenderer.invoke(conversationChannels.image, workspace, id, path),
+  openImage: (workspace, id, path) =>
+    ipcRenderer.invoke(conversationChannels.openImage, workspace, id, path),
   pathForFile: (file) => webUtils.getPathForFile(file),
   onEvent: (listener) =>
     subscribe<ConversationEvent>(conversationChannels.event, listener),

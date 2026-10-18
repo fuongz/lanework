@@ -22,6 +22,17 @@ export type LinkRenderer = (span: LinkSpan) => ReactNode;
 const LinkContext = createContext<LinkRenderer | null>(null);
 
 /**
+ * What a badge naming an image does when clicked (FE-65): opens it. Only the
+ * chat provides one — it alone knows the workspace a path is relative to —
+ * so every other reader's image badges stay plain.
+ */
+export type ImageOpener = (path: string) => void;
+export const ImageOpenerContext = createContext<ImageOpener | null>(null);
+
+/** A file a badge names that the lightbox can show. */
+const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
+
+/**
  * How the body is drawn. `default` is every card body's; `chat` is the
  * conversation view's (FE-62): bigger type, bordered tables with rounded
  * corners, inline code as pills, and bare `https://…` read as links.
@@ -155,16 +166,35 @@ function FileBadge({
   path: string;
   chat: boolean;
 }) {
-  return (
-    <code
-      data-file={path}
-      className={`${badgeClass(chat)} items-start gap-[0.3em]`}
-    >
+  const open = useContext(ImageOpenerContext);
+  const body = (
+    <>
       {/* On the FIRST line's middle — (1.25 − 1) / 2 — which on one line is
           `items-center`, and on a wrapped path keeps the icon by its start. */}
       <FileTypeIcon path={path} className="mt-[0.125em] size-[1em] shrink-0" />
       {/* A long path still wraps, inside the badge. */}
       <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>
+    </>
+  );
+  // An image, in the chat: the badge opens it in the lightbox (FE-65).
+  if (open && IMAGE_FILE.test(path))
+    return (
+      <button
+        type="button"
+        data-file={path}
+        title="Preview image"
+        onClick={() => open(path)}
+        className={`${badgeClass(chat)} hover:bg-foreground/[0.12] focus-visible:ring-ring/40 cursor-pointer items-start gap-[0.3em] text-left transition-colors outline-none focus-visible:ring-2`}
+      >
+        {body}
+      </button>
+    );
+  return (
+    <code
+      data-file={path}
+      className={`${badgeClass(chat)} items-start gap-[0.3em]`}
+    >
+      {body}
     </code>
   );
 }

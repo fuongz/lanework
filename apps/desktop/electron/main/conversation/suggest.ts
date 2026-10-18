@@ -189,19 +189,22 @@ async function walkFiles(folder: string): Promise<string[]> {
 
 const fileCache = new Map<string, { at: number; files: Promise<string[]> }>();
 
+/** The folder's files, relative to it — git's list, else a walk; cached. */
+export function workspaceFiles(folder: string): Promise<string[]> {
+  const cached = fileCache.get(folder);
+  if (cached && Date.now() - cached.at < CACHE_MS) return cached.files;
+  const files = gitFiles(folder).then((listed) => listed ?? walkFiles(folder));
+  fileCache.set(folder, { at: Date.now(), files });
+  if (fileCache.size > 16)
+    fileCache.delete(fileCache.keys().next().value as string);
+  return files;
+}
+
 export async function suggestFiles(
   folder: string,
   query: string,
 ): Promise<Suggestion[]> {
-  const cached = fileCache.get(folder);
-  let files: Promise<string[]>;
-  if (cached && Date.now() - cached.at < CACHE_MS) files = cached.files;
-  else {
-    files = gitFiles(folder).then((listed) => listed ?? walkFiles(folder));
-    fileCache.set(folder, { at: Date.now(), files });
-    if (fileCache.size > 16)
-      fileCache.delete(fileCache.keys().next().value as string);
-  }
+  const files = workspaceFiles(folder);
   const clean = query.replace(/^@/, "");
   const items = (await files).map((path) => ({
     value: `@${path}`,

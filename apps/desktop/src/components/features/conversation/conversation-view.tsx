@@ -34,6 +34,7 @@ import {
   type ComposerHandle,
 } from "#/components/shared/conversation/composer";
 import { takeFirstMessage } from "#/components/shared/conversation/first-message";
+import { ImageLightboxProvider } from "#/components/shared/conversation/image-lightbox";
 import {
   promptLines,
   type TurnHandlers,
@@ -595,7 +596,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                   </EmptyHeader>
                 </Empty>
               ) : (
-                <>
+                <ImageLightboxProvider workspace={workspace} conversation={id}>
                   {turns.map((turn) => (
                     <TurnView
                       key={turn.id}
@@ -634,7 +635,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                       }
                     />
                   ))}
-                </>
+                </ImageLightboxProvider>
               )}
             </div>
           </div>

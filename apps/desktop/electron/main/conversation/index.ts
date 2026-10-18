@@ -17,6 +17,7 @@ import {
   type Conversation,
   conversationChannels,
   type EngineState,
+  type ImagePreview,
   isOpenableUrl,
   isPermission,
   type LinkPreview,
@@ -31,11 +32,12 @@ import { terminalFolder } from "../workspaces";
 import { createClaudeCli } from "./claude-cli";
 import { createEngines } from "./engine";
 import { forkConversation } from "./fork";
+import { type ImageScope, openableImage, previewImage } from "./image-preview";
 import { createLinkPreviews } from "./link-preview";
 import { claudePidsOn } from "./live-claude";
 import { contentOf, sendRequest } from "./outgoing";
 import { createSettingsStore } from "./settings-store";
-import { suggestCommands, suggestFiles } from "./suggest";
+import { suggestCommands, suggestFiles, workspaceFiles } from "./suggest";
 import { readConversation, transcriptPath } from "./transcript";
 
 /**
@@ -102,6 +104,41 @@ async function folderOf(workspace: string): Promise<string> {
   const folder = await terminalFolder(workspace);
   if (!folder) throw new Error("This project has no folder here.");
   return folder;
+}
+
+/**
+ * What a chat badge's image may be read from (FE-65): the workspace's folder
+ * and the images attached to the conversation — read from its transcript
+ * here, never taken from the page.
+ */
+async function imageScope(args: unknown[]): Promise<{
+  path: string;
+  scope: ImageScope;
+}> {
+  if (args.length !== 3)
+    throw new Error("A workspace, a conversation and a path are required");
+  const { workspace, conversation } = conversationOf(args);
+  const path = args[2];
+  if (
+    typeof path !== "string" ||
+    !path.trim() ||
+    path.length > 1024 ||
+    path.includes("\0")
+  )
+    throw new Error("A valid path is required");
+  const folder = await folderOf(workspace);
+  const read = await readConversation(agentHome(), folder, conversation).catch(
+    () => null,
+  );
+  const attachments = (read?.turns ?? []).flatMap((turn) =>
+    turn.role === "user"
+      ? turn.attachments.flatMap((entry) => (entry.path ? [entry.path] : []))
+      : [],
+  );
+  return {
+    path: path.trim(),
+    scope: { folder, attachments, files: () => workspaceFiles(folder) },
+  };
 }
 
 function permissionAnswer(value: unknown): PermissionAnswer {
@@ -406,6 +443,27 @@ export function registerConversation(
       throw new Error("An http(s) link is required");
     await shell.openExternal(args[0]);
   });
+
+  handle(
+    conversationChannels.image,
+    devUrl,
+    async (args): Promise<ImagePreview> => {
+      const { path, scope } = await imageScope(args);
+      return previewImage(path, scope);
+    },
+  );
+
+  handle(
+    conversationChannels.openImage,
+    devUrl,
+    async (args): Promise<void> => {
+      const { path, scope } = await imageScope(args);
+      const file = await openableImage(path, scope);
+      if (!file) throw new Error("The image is not there.");
+      const failed = await shell.openPath(file);
+      if (failed) throw new Error(failed);
+    },
+  );
 
   handle(
     conversationChannels.suggest,
