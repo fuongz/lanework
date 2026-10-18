@@ -9,6 +9,7 @@ import type {
   Turn,
   UserTurn,
 } from "#/../shared/conversation";
+import { PermissionCard } from "#/components/shared/agents/permission-card";
 import {
   LinkedText,
   MarkdownBody,
@@ -23,7 +24,6 @@ import {
 } from "#/lib/conversation-format";
 import { cn } from "#/lib/utils";
 import { chatLink } from "./link-chip";
-import { PermissionCard } from "./permission-card";
 import { ToolGroup } from "./tool-group";
 import { AssistantActions, UserActions } from "./turn-actions";
 
@@ -145,7 +145,11 @@ function AssistantView({
       .filter((block) => block.type === "permission")
       .map((block) => block.request.id),
   );
-  const waiting = permissions.filter((request) => !answered.has(request.id));
+  // ⚠️ Questions are not drawn in the turn: they take the composer's place
+  // (conversation-view), where the answer is typed.
+  const waiting = permissions.filter(
+    (request) => !answered.has(request.id) && !request.questions,
+  );
   const pendingIds = new Set(permissions.map((request) => request.id));
   const text = turnText({ ...turn, blocks });
   const lastIndex = blocks.length - 1;
@@ -181,7 +185,12 @@ function AssistantView({
             />
           );
         // A permission still waiting gets its card; an answered one is gone.
-        if (!turn.open || !pendingIds.has(block.request.id)) return null;
+        if (
+          !turn.open ||
+          !pendingIds.has(block.request.id) ||
+          block.request.questions
+        )
+          return null;
         return (
           <PermissionCard
             key={block.request.id}

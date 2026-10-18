@@ -208,7 +208,7 @@ function QuestionCard({
   return (
     <section
       aria-label={`Claude asks: ${question.question}`}
-      className="bg-card border-border flex max-w-[30rem] flex-col gap-3 rounded-xl border p-4 shadow-xs"
+      className="bg-card border-border flex flex-col gap-3 rounded-xl border px-3.5 pt-3 pb-2.5 shadow-xs"
     >
       <div className="flex min-w-0 items-start gap-3">
         <h3 className="min-w-0 flex-1 text-[14px] leading-snug font-medium text-pretty">

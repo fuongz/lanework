@@ -31,6 +31,7 @@ import {
 } from "#/components/ui/popover";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
+import { NO_CHATS, useChatEngines } from "#/stores/chat-engines";
 import { useOpenProject } from "#/stores/last-route";
 import { type ProjectSort, usePreferences } from "#/stores/preferences";
 import { isLocalWorkspace } from "#/stores/session";
@@ -40,13 +41,16 @@ const keyOf = (workspace: Workspace) => workspace.id ?? workspace.slug;
 
 const NO_AGENTS: TerminalSession[] = [];
 
+/** One running agent: a live agent tab, or a chat whose engine is alive. */
+type RunningAgent = Pick<TerminalSession, "id" | "kind">;
+
 /**
  * The agents running in a project on this machine, as overlapping marks.
  *
  * ⚠️ Capped at three with the rest counted, like `AvatarStack`: a project with
  * five agents going says five, not three and silence.
  */
-function RunningAgents({ agents }: { agents: TerminalSession[] }) {
+function RunningAgents({ agents }: { agents: RunningAgent[] }) {
   if (agents.length === 0) return null;
   const shown = agents.slice(0, 3);
   const rest = agents.length - shown.length;
@@ -101,11 +105,26 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const navigate = useNavigate();
   const agentsByKey = useAgentTerminals((state) => state.sessions);
   const refreshAgents = useAgentTerminals((state) => state.refresh);
-  const hasAgents = (workspace: Workspace) =>
-    (agentsByKey[keyOf(workspace)] ?? NO_AGENTS).some(
-      (agent) =>
-        !agent.exit && (agent.kind === "claude" || agent.kind === "codex"),
+  const chatsByKey = useChatEngines((state) => state.alive);
+  const refreshChats = useChatEngines((state) => state.refresh);
+  /**
+   * A project's running agents: its live agent tabs, then the conversations
+   * the chat runs (FE-62).
+   *
+   * ⚠️ The chats count too. "New Claude" opens a chat now, so a project whose
+   * Claude runs there has no agent tab at all — counting tabs alone left its
+   * row blank while the rail listed it under Running.
+   */
+  const runningIn = (workspace: Workspace): RunningAgent[] => {
+    const tabs = (agentsByKey[keyOf(workspace)] ?? NO_AGENTS).filter(
+      (agent) => !agent.exit,
     );
+    const chats = (chatsByKey[keyOf(workspace)] ?? NO_CHATS)
+      .filter((id) => !tabs.some((tab) => tab.resume === id))
+      .map((id): RunningAgent => ({ id, kind: "claude" }));
+    return [...tabs, ...chats];
+  };
+  const hasAgents = (workspace: Workspace) => runningIn(workspace).length > 0;
   const sortedWorkspaces =
     sort === "default"
       ? workspaces
@@ -120,8 +139,11 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   // whatever was running the last time each one was open — or nothing.
   useEffect(() => {
     if (!open) return;
-    for (const workspace of workspaces) void refreshAgents(keyOf(workspace));
-  }, [open, workspaces, refreshAgents]);
+    for (const workspace of workspaces) {
+      void refreshAgents(keyOf(workspace));
+      void refreshChats(keyOf(workspace));
+    }
+  }, [open, workspaces, refreshAgents, refreshChats]);
 
   const go = (slug: string) => {
     setOpen(false);
@@ -217,11 +239,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                   />
                   <span className="truncate">{workspace.name}</span>
                   {isLocalWorkspace(workspace) && <LocalBadge />}
-                  <RunningAgents
-                    agents={(agentsByKey[keyOf(workspace)] ?? NO_AGENTS).filter(
-                      (agent) => !agent.exit,
-                    )}
-                  />
+                  <RunningAgents agents={runningIn(workspace)} />
                 </button>
               ))}
             </div>

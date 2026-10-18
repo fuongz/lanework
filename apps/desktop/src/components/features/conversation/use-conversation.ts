@@ -125,6 +125,27 @@ export function useConversation(
       })
       .catch(() => {});
 
+    // ⚠️ A question asked while this page was not open came as an event
+    // nobody heard, and the CLI waits on it for as long as it takes: read
+    // what the engine is still waiting on. `?.`: an older preload has none.
+    void surface
+      .permissions?.(workspace, id)
+      .then((waiting) => {
+        if (gone || waiting.length === 0) return;
+        setState((previous) => {
+          if (previous.key !== key) return previous;
+          const known = new Set(previous.permissions.map((entry) => entry.id));
+          return {
+            ...previous,
+            permissions: [
+              ...waiting.filter((entry) => !known.has(entry.id)),
+              ...previous.permissions,
+            ],
+          };
+        });
+      })
+      .catch(() => {});
+
     const offActivity = terminal?.onAgentActivity((activity) => {
       if (
         activity.workspace === workspace &&

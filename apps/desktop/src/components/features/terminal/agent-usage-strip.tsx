@@ -1,6 +1,6 @@
 import { Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useParams, useSearch } from "@tanstack/react-router";
+import { useLocation, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useReducer, useState } from "react";
 import type {
   ClaudeUsage,
@@ -164,10 +164,17 @@ const usageAgent = (kind: string | undefined): UsageAgent | null =>
 
 /**
  * Whose usage the strip shows (FE-54): the agent on screen in the main view —
- * a running agent, or a sub-agent's conversation — else the agent in the
- * terminal panel's active tab. Null for a shell, or nothing (D1b).
+ * a running agent, a sub-agent's conversation, or a Claude chat — else the
+ * agent in the terminal panel's active tab. Null for a shell, or nothing (D1b).
+ *
+ * ⚠️ The chat pages (`agents/chat/…`, FE-62) are Claude's own: the chat
+ * engine runs only Claude. Missed, a chat showed no usage at all unless the
+ * terminal panel happened to have a Claude tab active.
  */
 function useUsageAgent(workspace: string): UsageAgent | null {
+  const chat = useLocation({
+    select: (location) => location.pathname.includes("/agents/chat/"),
+  });
   const { terminalId, sub } = useParams({ strict: false }) as {
     terminalId?: string;
     sub?: string;
@@ -187,6 +194,7 @@ function useUsageAgent(workspace: string): UsageAgent | null {
   });
   if (terminalId) return usageAgent(viewed);
   if (sub) return usageAgent(subAgent);
+  if (chat) return "claude";
   return usageAgent(tab);
 }
 
@@ -206,9 +214,9 @@ function useClock() {
  * a small 5-hour bar, each window's percentage and time to reset, and ⟳.
  * Clicking it opens the 5-hour and weekly cards.
  *
- * ⚠️ Follows the session on screen: a Claude agent shows Claude's usage, a
- * Codex agent Codex's — the main view's agent first, else the panel's active
- * tab. A shell, or no agent at all, shows nothing (FE-54/D1b).
+ * ⚠️ Follows the session on screen: a Claude agent or chat shows Claude's
+ * usage, a Codex agent Codex's — the main view's agent first, else the
+ * panel's active tab. A shell, or no agent at all, shows nothing (FE-54/D1b).
  *
  * ⚠️ Claude's numbers come from its account and ⟳ asks Anthropic again;
  * Codex's are only as fresh as its newest turn here, and ⟳ reads them again

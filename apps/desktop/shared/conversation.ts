@@ -432,6 +432,8 @@ export const conversationChannels = {
   /** A workspace's conversations whose engine process is alive (Running). */
   alive: "conversation:alive",
   engineState: "conversation:engine-state",
+  /** What the engine is waiting on the person for: a tool, or questions. */
+  permissions: "conversation:permissions",
   /** The last settings used anywhere, for a conversation never sent from chat. */
   lastSettings: "conversation:last-settings",
   linkPreview: "conversation:link-preview",
@@ -471,6 +473,14 @@ export interface DesktopConversationApi {
     workspace: string,
     conversation: string,
   ) => Promise<EngineState>;
+  /**
+   * The requests the engine is still waiting on, for a page that opens after
+   * they were asked: `permission` events reach only the pages already open.
+   */
+  permissions: (
+    workspace: string,
+    conversation: string,
+  ) => Promise<PermissionRequest[]>;
   lastSettings: () => Promise<ComposerSettings>;
   suggest: (
     workspace: string,

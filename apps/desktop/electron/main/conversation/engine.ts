@@ -693,6 +693,12 @@ export function createEngines(deps: EngineDeps) {
       return { turns: engine.turns(), working: engine.busy };
     },
 
+    /** The requests the engine is still waiting on, oldest first. */
+    permissions(workspace: string, conversation: string): PermissionRequest[] {
+      const engine = engines.get(keyOf(workspace, conversation));
+      return engine ? [...engine.permissions.values()] : [];
+    },
+
     async stop(workspace: string, conversation: string): Promise<void> {
       await engines.get(keyOf(workspace, conversation))?.stop();
     },

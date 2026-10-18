@@ -16,6 +16,12 @@ import { backgroundCount, readTranscriptTasks } from "./background-tasks";
 
 /** How much of a transcript's start and end is read; never the whole file. */
 const CHUNK = 64 * 1024;
+/**
+ * How far into a transcript its first prompt is looked for when the head
+ * holds none: a prompt with an image pasted in is one line of base64 — 400KB
+ * for one screenshot — and is cut by any head.
+ */
+const PROMPT_SCAN = 16 * 1024 * 1024;
 /** A Codex `session_meta` line carries the whole system prompt. */
 export const META_CHUNK = 256 * 1024;
 /** Codex keeps every folder's rollouts in one tree; stop looking after this. */
@@ -533,6 +539,47 @@ async function claudeSubagents(
   );
 }
 
+/**
+ * The transcript's `cwd` and first prompt, read line by line from the start
+ * until both are found — for a head that held neither.
+ *
+ * ⚠️ Only for a transcript whose head had no title: the read goes as far as
+ * the first prompt's line ends, up to `PROMPT_SCAN`, and an image pasted into
+ * that prompt makes it hundreds of KB.
+ */
+async function claudeOpening(
+  file: string,
+): Promise<{ cwd: unknown; prompt: string | null }> {
+  const handle = await open(file, "r");
+  let cwd: unknown;
+  try {
+    let pending = Buffer.alloc(0);
+    let at = 0;
+    while (at < PROMPT_SCAN) {
+      const chunk = Buffer.alloc(META_CHUNK);
+      const { bytesRead } = await handle.read(chunk, 0, META_CHUNK, at);
+      if (bytesRead === 0) break;
+      at += bytesRead;
+      pending = Buffer.concat([pending, chunk.subarray(0, bytesRead)]);
+      for (;;) {
+        const end = pending.indexOf(0x0a);
+        if (end < 0) break;
+        const [line] = lines(`${pending.subarray(0, end).toString("utf8")}\n`, {
+          head: true,
+        });
+        pending = pending.subarray(end + 1);
+        if (!line) continue;
+        if (cwd === undefined && typeof line.cwd === "string") cwd = line.cwd;
+        const prompt = claudePrompt(line);
+        if (prompt) return { cwd, prompt };
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+  return { cwd, prompt: null };
+}
+
 async function claudeSession(
   file: string,
   id: string,
@@ -542,7 +589,7 @@ async function claudeSession(
   const head = lines(await readRange(file, 0, CHUNK), { head: true });
   // ⚠️ The folder name is lossy — `a_b` and `a-b` both become `a-b` — so the
   // transcript's own `cwd` has the last word.
-  const cwd = head.find((line) => typeof line.cwd === "string")?.cwd;
+  let cwd = head.find((line) => typeof line.cwd === "string")?.cwd;
   if (cwd !== undefined && cwd !== folder) return null;
   const tail =
     info.size > CHUNK
@@ -554,7 +601,15 @@ async function claudeSession(
     .find(
       (line) => line.type === "ai-title" && typeof line.aiTitle === "string",
     )?.aiTitle as string | undefined;
-  const prompt = head.map(claudePrompt).find(Boolean);
+  let prompt = head.map(claudePrompt).find(Boolean) ?? null;
+  // ⚠️ A first prompt longer than the head — an image pasted into it — left
+  // the conversation without a title, and so off the rail altogether.
+  if (!named && !prompt) {
+    const opening = await claudeOpening(file);
+    prompt = opening.prompt;
+    cwd ??= opening.cwd;
+    if (cwd !== undefined && cwd !== folder) return null;
+  }
   const title = named ? tidy(named) : prompt;
   // Nothing was ever asked in it: a CLI opened and closed, nothing to resume.
   if (!title) return null;

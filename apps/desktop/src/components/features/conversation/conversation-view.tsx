@@ -27,6 +27,7 @@ import {
 import type { AgentSession } from "#/../shared/terminal";
 import { useConversationFacts } from "#/components/features/agents/use-agent-facts";
 import { ContextButton } from "#/components/shared/agents/conversation-facts";
+import { PermissionCard } from "#/components/shared/agents/permission-card";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import {
   WINDOW_TITLE,
@@ -454,9 +455,11 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     [...turns].reverse().find((turn) => turn.role === "user")?.at ?? null;
   const last = turns[turns.length - 1];
   const lastOpen = last?.role === "assistant" && last.open ? last : null;
+  // AskUserQuestion, waiting: drawn in the composer's place, not the turn.
+  const question = permissions.find((request) => request.questions) ?? null;
   // Streamed text or a permission before the turn has a line of its own.
   const stream: AssistantTurn | null =
-    !lastOpen && (delta || permissions.length > 0)
+    !lastOpen && (delta || permissions.some((request) => !request.questions))
       ? {
           role: "assistant",
           id: "__stream",
@@ -669,24 +672,36 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               since={lastPromptAt}
             />
           )}
-          {workspace && settings && (
-            <Composer
-              ref={composer}
-              slug={slug}
-              corner={<ContextButton facts={facts} />}
-              workspace={workspace}
-              settings={settings}
-              onSettings={(next) =>
-                setSettings((previous) =>
-                  previous ? { ...previous, ...next } : previous,
-                )
-              }
-              working={running}
-              queued={queued}
-              onSend={send}
-              onStop={stop}
-              onClearQueue={clearQueue}
+          {/* ⚠️ Claude's question stands where the prompt is typed, the way
+              the CLI asks it at its own prompt. The composer stays mounted
+              under it — hidden, not unmounted — so a draft survives. */}
+          {question && (
+            <PermissionCard
+              key={question.id}
+              request={question}
+              onAnswer={answer}
             />
+          )}
+          {workspace && settings && (
+            <div className={question ? "hidden" : "contents"}>
+              <Composer
+                ref={composer}
+                slug={slug}
+                corner={<ContextButton facts={facts} />}
+                workspace={workspace}
+                settings={settings}
+                onSettings={(next) =>
+                  setSettings((previous) =>
+                    previous ? { ...previous, ...next } : previous,
+                  )
+                }
+                working={running}
+                queued={queued}
+                onSend={send}
+                onStop={stop}
+                onClearQueue={clearQueue}
+              />
+            </div>
           )}
         </div>
       </section>

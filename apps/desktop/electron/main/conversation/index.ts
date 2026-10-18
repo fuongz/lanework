@@ -21,6 +21,7 @@ import {
   isPermission,
   type LinkPreview,
   type PermissionAnswer,
+  type PermissionRequest,
   type Suggestion,
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
@@ -368,6 +369,17 @@ export function registerConversation(
         conversation,
         engines.state(workspace, conversation),
       );
+    },
+  );
+
+  handle(
+    conversationChannels.permissions,
+    devUrl,
+    async (args): Promise<PermissionRequest[]> => {
+      if (args.length !== 2)
+        throw new Error("A workspace and a conversation are required");
+      const { workspace, conversation } = conversationOf(args);
+      return engines.permissions(workspace, conversation);
     },
   );
 
