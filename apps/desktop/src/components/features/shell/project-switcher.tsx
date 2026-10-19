@@ -1,12 +1,13 @@
 import {
   Add01Icon,
+  Search01Icon,
   Settings01Icon,
   Sorting05Icon,
   UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TerminalSession } from "#/../shared/terminal";
 import type { Workspace } from "#/../shared/workspaces";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
@@ -40,6 +41,14 @@ import { isLocalWorkspace } from "#/stores/session";
 const keyOf = (workspace: Workspace) => workspace.id ?? workspace.slug;
 
 const NO_AGENTS: TerminalSession[] = [];
+
+/** Lower case, accents off: `Đơn` finds `don`, `Hiip` finds `hiip`. */
+const fold = (text: string) =>
+  text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase();
 
 /** One running agent: a live agent tab, or a chat whose engine is alive. */
 type RunningAgent = Pick<TerminalSession, "id" | "kind">;
@@ -97,6 +106,9 @@ function RunningAgents({ agents }: { agents: RunningAgent[] }) {
 export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState("");
+  const search = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const sort = usePreferences((state) => state.projectSort);
   const setSort = usePreferences((state) => state.setProjectSort);
   const workspaces = useBoard((state) => state.workspaces);
@@ -133,6 +145,16 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
             ? a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
             : Number(hasAgents(b)) - Number(hasAgents(a)),
         );
+
+  // By name or slug. ⌘1…⌘9 keep the whole list's order, whatever is typed.
+  const needle = fold(query.trim());
+  const shownWorkspaces = needle
+    ? sortedWorkspaces.filter(
+        (workspace) =>
+          fold(workspace.name).includes(needle) ||
+          fold(workspace.slug).includes(needle),
+      )
+    : sortedWorkspaces;
 
   // ⚠️ Asked for EVERY project each time the menu opens. The rail only lists
   // the open project's agents, so without this the other rows would show
@@ -173,7 +195,14 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
 
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          // Each opening starts from the whole list.
+          if (next) setQuery("");
+        }}
+      >
         <PopoverTrigger
           render={
             <button
@@ -211,20 +240,79 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           variant="menu"
           align="start"
           side={compact ? "right" : undefined}
-          className="p-1"
+          initialFocus={search}
+          // ⚠️ A set width: as wide as its rows, it would narrow with every
+          // letter typed.
+          className="w-72 p-1"
         >
+          {workspaces.length > 0 && (
+            <div className="border-foreground/10 mb-1 flex h-8 shrink-0 items-center gap-2 border-b px-2 pb-1">
+              <HugeiconsIcon
+                icon={Search01Icon}
+                className="text-muted-foreground size-3.5 shrink-0"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+              <input
+                ref={search}
+                type="text"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && shownWorkspaces[0]) {
+                    event.preventDefault();
+                    go(shownWorkspaces[0].slug);
+                  } else if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    list.current
+                      ?.querySelector<HTMLButtonElement>("[role=option]")
+                      ?.focus();
+                  }
+                }}
+                placeholder="Search projects"
+                aria-label="Search projects"
+                autoComplete="off"
+                spellCheck={false}
+                className="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-[13px] outline-none"
+              />
+            </div>
+          )}
           <RailHover className="max-h-80 overflow-y-auto">
             <div
+              ref={list}
               role="listbox"
               aria-label="Projects"
               className="flex flex-col gap-0.5"
+              onKeyDown={(event) => {
+                // ↑ ↓ walk the rows; ↑ from the first goes back to the search.
+                if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
+                  return;
+                const rows = [
+                  ...(list.current?.querySelectorAll<HTMLButtonElement>(
+                    "[role=option]",
+                  ) ?? []),
+                ];
+                const at = rows.indexOf(
+                  document.activeElement as HTMLButtonElement,
+                );
+                if (at < 0) return;
+                event.preventDefault();
+                const next = at + (event.key === "ArrowDown" ? 1 : -1);
+                if (next < 0) search.current?.focus();
+                else rows[Math.min(next, rows.length - 1)]?.focus();
+              }}
             >
               {workspaces.length === 0 && (
                 <p className="text-muted-foreground px-2 py-3 text-[13px]">
                   No projects on this account yet.
                 </p>
               )}
-              {sortedWorkspaces.map((workspace) => (
+              {workspaces.length > 0 && shownWorkspaces.length === 0 && (
+                <p className="text-muted-foreground truncate px-2 py-3 text-[13px]">
+                  No project matches “{query.trim()}”.
+                </p>
+              )}
+              {shownWorkspaces.map((workspace) => (
                 <button
                   key={workspace.slug}
                   type="button"
