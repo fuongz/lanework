@@ -23,11 +23,13 @@ import {
 } from "#/components/ui/resizable";
 import { useBoard } from "#/stores/board";
 import { useLayout } from "#/stores/layout";
+import { useMcpAuthWatch } from "#/stores/mcp-auth";
 import { terminalShown, useTerminal } from "#/stores/terminal";
 import { AppSidebar } from "./app-sidebar";
 import { BoardNoticeIsland, useBoardNotice } from "./board-notice-island";
 import { CommandPalette } from "./command-palette";
 import { HistoryButtons } from "./history-nav";
+import { McpAuthIsland, useMcpAuthRows } from "./mcp-auth-island";
 
 const RAIL_DEFAULT_PX = 240;
 /** The rail folded to its icons (FE-57): one 36px slot and its margins. */
@@ -194,6 +196,10 @@ export function AppShell() {
   }, [sidebarRef, showRail]);
   const terminalRef = usePanelRef();
   const notice = useBoardNotice();
+  // Whether Claude Code and Codex are signed in to the cloud Lanework MCP,
+  // asked again on a timer and on focus; the island speaks when they are not.
+  useMcpAuthWatch();
+  const mcpAuthUp = useMcpAuthRows().length > 0;
   // ⚠️ The project in the URL, not the board store's `active`: on the project
   // picker there is no project, so no terminal — neither the panel nor its
   // bar — rather than whichever project's was open last.
@@ -480,13 +486,15 @@ export function AppShell() {
           />
         </button>
       </nav>
-      {/* The islands — harness updates (FE-61) and board notices (FE-63):
+      {/* The islands — harness updates (FE-61), board notices (FE-63) and
+          the Lanework MCP sign-in:
           fixed at the top centre, over the title bar's edge and the page.
           ⚠️ After the nav for the same reason as the nav: their `no-drag`
           must be laid down after the title bar's drag strip, or the strip
-          eats their clicks. One spot, one island: a notice has it, and the
-          harness pill waits. */}
-      <HarnessIsland yieldTo={notice !== null} />
+          eats their clicks. One spot, one island: a notice has it, then
+          sign-in, and the harness pill waits for both. */}
+      <HarnessIsland yieldTo={notice !== null || mcpAuthUp} />
+      <McpAuthIsland yieldTo={notice !== null} />
       <BoardNoticeIsland notice={notice} />
     </div>
   );

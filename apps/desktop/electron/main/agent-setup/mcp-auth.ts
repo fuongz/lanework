@@ -1,0 +1,118 @@
+// Whether Claude Code and Codex are signed in to the cloud `lanework` MCP
+// server, and a way to sign them in from Settings → Agents.
+//
+// ⚠️ Asked of each CLI — `codex mcp list --json`, `claude mcp get lanework` —
+// never read out of their token stores. Claude Code keeps its tokens in the
+// Keychain under its own item (reading it would prompt the user), and either
+// CLI may move them in any release; the CLI is the one that knows.
+//
+// ⚠️ Through the user's login shell (`runInLoginShell`), like the harness
+// probe: an app opened from the Dock has launchd's PATH, not the profile's.
+// Electron-free, so the parsers can be driven by a spec.
+import type { LaneworkMcpAgent, LaneworkMcpAuth } from "../../../shared/auth";
+import { afterMarker, runInLoginShell } from "../harness/shell";
+import { MCP_NAME } from "./mcp-entry";
+
+const COMMAND: Record<LaneworkMcpAgent, string> = {
+  "claude-code": "claude",
+  codex: "codex",
+};
+
+/** `codex mcp list --json`: `auth_status` of our server. */
+export function parseCodexAuth(output: string): LaneworkMcpAuth {
+  let list: unknown;
+  try {
+    list = JSON.parse(output.trim());
+  } catch {
+    return "unknown";
+  }
+  if (!Array.isArray(list)) return "unknown";
+  const entry: unknown = list.find(
+    (server: unknown) =>
+      !!server &&
+      typeof server === "object" &&
+      (server as { name?: unknown }).name === MCP_NAME,
+  );
+  if (!entry || typeof entry !== "object") return "unknown";
+  const status = (entry as { auth_status?: unknown }).auth_status;
+  // `o_auth` holds a token; `bearer_token` is a header the user set by hand.
+  if (status === "o_auth" || status === "bearer_token") return "signed-in";
+  if (status === "not_logged_in") return "needs-login";
+  return "unknown";
+}
+
+/**
+ * `claude mcp get lanework`: its `Status:` line — `✔ Connected`,
+ * `! Needs authentication`, `✗ Failed to connect`. Claude Code prints text
+ * only, so any other line is "unknown", never a guess.
+ */
+export function parseClaudeAuth(output: string): LaneworkMcpAuth {
+  const line = /^\s*Status:\s*(.+)$/m.exec(output)?.[1] ?? "";
+  if (/needs authentication/i.test(line)) return "needs-login";
+  if (/failed to connect/i.test(line)) return "failed";
+  if (/\bconnected\b/i.test(line)) return "signed-in";
+  return "unknown";
+}
+
+const mark = (agent: LaneworkMcpAgent, part: string) =>
+  `__lanework_mcp_auth_${agent}_${part}__`;
+
+/** The script's own output, after the profile's, or null without the CLI. */
+async function inShell(
+  agent: LaneworkMcpAgent,
+  args: string,
+  timeoutMs: number,
+): Promise<string | null | undefined> {
+  const command = COMMAND[agent];
+  const [missing, start] = [mark(agent, "missing"), mark(agent, "start")];
+  const line = (marker: string) => `printf '\\n%s\\n' '${marker}'`;
+  const script = [
+    `if ! command -v ${command} >/dev/null 2>&1; then ${line(missing)}; exit 0; fi`,
+    line(start),
+    `${command} ${args} </dev/null 2>&1`,
+  ].join("; ");
+  const { stdout } = await runInLoginShell(script, { timeoutMs });
+  if (afterMarker(stdout, missing) !== null) return null;
+  return afterMarker(stdout, start) ?? undefined;
+}
+
+/**
+ * Ask `agent` whether it holds a credential for our server. `no-cli` when
+ * the CLI is not on the shell's PATH; `unknown` when it did not answer.
+ */
+export async function laneworkMcpAuth(
+  agent: LaneworkMcpAgent,
+): Promise<LaneworkMcpAuth> {
+  if (process.platform === "win32") return "unknown";
+  const output = await inShell(
+    agent,
+    agent === "codex" ? "mcp list --json" : `mcp get ${MCP_NAME}`,
+    15_000,
+  );
+  if (output === null) return "no-cli";
+  if (output === undefined) return "unknown";
+  return agent === "codex" ? parseCodexAuth(output) : parseClaudeAuth(output);
+}
+
+/** One login per agent at a time; a second click waits on the first. */
+const pending = new Map<LaneworkMcpAgent, Promise<LaneworkMcpAuth>>();
+
+/**
+ * `<cli> mcp login lanework`: the CLI opens the browser on the server's
+ * OAuth page and waits for its callback. Five minutes to finish, then the
+ * shell is killed; either way the answer is what the CLI reports after.
+ */
+export function loginLaneworkMcp(
+  agent: LaneworkMcpAgent,
+): Promise<LaneworkMcpAuth> {
+  const running = pending.get(agent);
+  if (running) return running;
+  const login = (async () => {
+    if (process.platform === "win32") return "unknown" as const;
+    const output = await inShell(agent, `mcp login ${MCP_NAME}`, 300_000);
+    if (output === null) return "no-cli" as const;
+    return laneworkMcpAuth(agent);
+  })().finally(() => pending.delete(agent));
+  pending.set(agent, login);
+  return login;
+}

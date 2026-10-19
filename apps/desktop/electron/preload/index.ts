@@ -250,6 +250,8 @@ const laneworkMcp: DesktopLaneworkMcpApi = {
   status: () => ipcRenderer.invoke(laneworkMcpChannels.status),
   install: (agent) => ipcRenderer.invoke(laneworkMcpChannels.install, agent),
   remove: (agent) => ipcRenderer.invoke(laneworkMcpChannels.remove, agent),
+  auth: (agent) => ipcRenderer.invoke(laneworkMcpChannels.auth, agent),
+  login: (agent) => ipcRenderer.invoke(laneworkMcpChannels.login, agent),
 };
 
 const git: DesktopGitApi = {

@@ -123,6 +123,19 @@ export interface LaneworkMcpEntry {
   unreadable: boolean;
 }
 
+/**
+ * Whether the agent's CLI holds a credential for the cloud server, as the
+ * CLI itself reports it. `failed`: it has one but could not reach the
+ * server with it; `no-cli`: not on the shell's PATH; `unknown`: it did not
+ * answer, or answered in a shape the app cannot read.
+ */
+export type LaneworkMcpAuth =
+  | "signed-in"
+  | "needs-login"
+  | "failed"
+  | "no-cli"
+  | "unknown";
+
 export interface LaneworkMcpStatus {
   /** What the current session wants: `local` in local mode, `cloud` signed in. */
   want: LaneworkMcpMode | null;
@@ -137,12 +150,18 @@ export const laneworkMcpChannels = {
   /** Write the entry for one agent, pointed at what the session wants. */
   install: "lanework-mcp:install",
   remove: "lanework-mcp:remove",
+  /** Ask one agent's CLI whether it is signed in to the cloud server. */
+  auth: "lanework-mcp:auth",
+  /** Run `<cli> mcp login lanework`, then ask again. */
+  login: "lanework-mcp:login",
 } as const;
 
 export interface DesktopLaneworkMcpApi {
   status: () => Promise<LaneworkMcpStatus>;
   install: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpStatus>;
   remove: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpStatus>;
+  auth: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpAuth>;
+  login: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpAuth>;
 }
 
 export const anonymous: Principal = { kind: "anonymous" };

@@ -22,8 +22,17 @@ import { ipcMessage } from "#/lib/ipc-error";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
 import { useHarness, useHarnessWatch } from "#/stores/harness";
+import {
+  cloudAgents,
+  type McpAuthView,
+  useMcpAuth,
+  useMcpAuthWatch,
+} from "#/stores/mcp-auth";
 import { useCloudFeatures, useIsLocalMode } from "#/stores/session";
-import type { LaneworkMcpStatus } from "../../../../shared/auth";
+import type {
+  LaneworkMcpAgent,
+  LaneworkMcpStatus,
+} from "../../../../shared/auth";
 import type {
   AgentHookStatus,
   HandoffStatus,
@@ -213,15 +222,26 @@ export function AgentsSection() {
     return () => window.removeEventListener("focus", again);
   }, [refresh]);
 
-  // FE-52/D8: the `lanework` MCP entry in each agent's own config.
-  const [mcpStatus, setMcpStatus] = useState<LaneworkMcpStatus | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the mode changes
-  useEffect(() => {
-    void window.desktop?.laneworkMcp
-      ?.status()
-      .then(setMcpStatus)
-      .catch(() => undefined);
-  }, [signedIn, local]);
+  // FE-52/D8: the `lanework` MCP entry in each agent's own config, and
+  // whether each CLI is signed in to the cloud server — the same store the
+  // shell's sign-in island reads. ⚠️ Settings is outside the app shell, so
+  // it runs the watch itself.
+  useMcpAuthWatch();
+  const mcpStatus = useMcpAuth((state) => state.status);
+  const setMcpStatus = useMcpAuth((state) => state.setStatus);
+  const mcpAuth = useMcpAuth((state) => state.view);
+  const checkMcpAuth = useMcpAuth((state) => state.check);
+  const loginTo = useMcpAuth((state) => state.login);
+  const cloud = cloudAgents(mcpStatus);
+
+  async function loginMcp(agent: LaneworkMcpAgent) {
+    const auth = await loginTo(agent);
+    setError(
+      auth === "needs-login" || auth === "unknown"
+        ? `${NAMES[agent]} did not finish signing in. Try again, or run ${agent === "codex" ? "codex" : "claude"} mcp login lanework in a terminal.`
+        : null,
+    );
+  }
 
   async function runMcp(
     action: () => Promise<LaneworkMcpStatus>,
@@ -371,16 +391,93 @@ export function AgentsSection() {
       : []),
   ];
 
+  const authRow = (
+    agent: LaneworkMcpAgent,
+    auth: McpAuthView | undefined,
+  ): SettingsRowSpec => {
+    const cli = agent === "codex" ? "codex" : "claude";
+    const name = NAMES[agent];
+    const waiting = !auth || auth === "checking" || auth === "login";
+    const attention = auth === "needs-login" || auth === "failed";
+    const DESCRIPTION: Partial<Record<McpAuthView, string>> = {
+      login: `Finish signing in in your browser. ${name} keeps the token, not Lanework.`,
+      "needs-login": `${name} is signed out, or its token expired. Log in again through your browser.`,
+      failed: `${name} has a token but could not reach the server with it. Check again, or log in again if it keeps failing.`,
+      "no-cli": `${cli} is not on your shell's PATH, so there is nothing to sign in.`,
+      unknown: `${name} did not say. Run ${cli} mcp list in a terminal to see for yourself.`,
+    };
+    const LABEL: Record<McpAuthView, string> = {
+      "signed-in": "Signed in",
+      "needs-login": "Needs login",
+      failed: "Could not connect",
+      login: "Waiting for browser…",
+      "no-cli": "Not installed",
+      unknown: "Could not check",
+      checking: "Checking…",
+    };
+    return {
+      label: `${name} sign-in`,
+      description:
+        (auth && DESCRIPTION[auth]) ??
+        `${name} signs in to the board on its own, through your browser, and keeps its own token.`,
+      keywords:
+        "mcp login sign in oauth authenticate token expired claude codex",
+      control: (
+        <div className="flex items-center gap-3">
+          <span
+            className={
+              attention
+                ? "text-[13px] text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground text-[13px]"
+            }
+          >
+            {LABEL[auth ?? "checking"]}
+          </span>
+          {waiting ? (
+            <HugeiconsIcon
+              icon={Loading03Icon}
+              className="text-muted-foreground size-3.5 animate-spin"
+              strokeWidth={1.5}
+              aria-hidden="true"
+            />
+          ) : (
+            <>
+              {auth !== "needs-login" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={auth === "no-cli"}
+                  onClick={() => void checkMcpAuth(agent)}
+                >
+                  Check again
+                </Button>
+              )}
+              {attention && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void loginMcp(agent)}
+                >
+                  Log in
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      ),
+    };
+  };
+
   // FE-52: signed out without "Skip for now" there is nowhere for a checkpoint
   // to land, so the switches go rather than sitting disabled under a reason
   // that reads like a fault. Config files stay: they are local.
   const mcpSections: SettingsSectionSpec[] = [
     {
       title: "Lanework MCP",
-      rows: (["claude-code", "codex"] as const).map((agent) => {
+      rows: (["claude-code", "codex"] as const).flatMap((agent) => {
         const entry =
           agent === "claude-code" ? mcpStatus?.claude : mcpStatus?.codex;
-        return {
+        const board: SettingsRowSpec = {
           label: `Board tools in ${NAMES[agent]}`,
           description: !mcpStatus
             ? "Checking…"
@@ -416,6 +513,9 @@ export function AgentsSection() {
             />
           ),
         };
+        return cloud.includes(agent)
+          ? [board, authRow(agent, mcpAuth[agent])]
+          : [board];
       }),
     },
   ];

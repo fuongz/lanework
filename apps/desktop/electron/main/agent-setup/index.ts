@@ -28,6 +28,7 @@ import { readLocalMode } from "../auth/local-mode";
 import { readRecord } from "../auth/store";
 import { handle } from "../ipc";
 import { terminalFolder } from "../workspaces";
+import { laneworkMcpAuth, loginLaneworkMcp } from "./mcp-auth";
 import {
   installLaneworkMcp,
   laneworkMcpStatus,
@@ -139,6 +140,16 @@ export function registerAgentSetup(devUrl?: string): void {
     if (args.length !== 1 || !isMcpAgent(args[0]))
       throw new Error('remove takes "claude-code" or "codex"');
     return mcpRemove(args[0]);
+  });
+  handle(laneworkMcpChannels.auth, devUrl, (args) => {
+    if (args.length !== 1 || !isMcpAgent(args[0]))
+      throw new Error('auth takes "claude-code" or "codex"');
+    return laneworkMcpAuth(args[0]);
+  });
+  handle(laneworkMcpChannels.login, devUrl, (args) => {
+    if (args.length !== 1 || !isMcpAgent(args[0]))
+      throw new Error('login takes "claude-code" or "codex"');
+    return loginLaneworkMcp(args[0]);
   });
   // On every launch: entries that are ours follow the mode, and a stdio one
   // gets this build's shim. Read from disk rather than `currentSession()`,
