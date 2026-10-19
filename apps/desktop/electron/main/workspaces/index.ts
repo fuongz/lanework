@@ -345,6 +345,22 @@ export async function terminalFolder(key: string): Promise<string | null> {
 }
 
 /**
+ * Every folder of `key` still on this machine, primary first (FE-68): a
+ * port belongs to the project when its process runs inside one of them.
+ * Resolved here, like `terminalFolder`, never from the renderer.
+ */
+export async function projectFolders(key: string): Promise<string[]> {
+  const { record, workspace } = await knownWorkspace(key);
+  const folders = (await readFolders(record))[workspace.slug] ?? [];
+  const present = await Promise.all(
+    folders.map(async (folder) =>
+      (await folderExists(folder)) ? folder : null,
+    ),
+  );
+  return present.filter((folder): folder is string => folder !== null);
+}
+
+/**
  * The workspace `key` (id or slug) names on this account, from the list this
  * process last read — or a fresh one — and the credential that read it.
  *

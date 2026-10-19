@@ -78,22 +78,26 @@ function createWindow() {
     },
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    // Open GitHub in the OS browser while denying every Electron popup.
-    let github = false;
+    // Open GitHub — and a project's dev server on this machine (FE-68) — in
+    // the OS browser while denying every Electron popup.
+    let external = false;
     try {
       const destination = new URL(url);
-      github =
-        destination.protocol === "https:" &&
-        destination.hostname === "github.com" &&
-        !destination.port &&
+      external =
         !destination.username &&
-        !destination.password;
+        !destination.password &&
+        ((destination.protocol === "https:" &&
+          destination.hostname === "github.com" &&
+          !destination.port) ||
+          (destination.protocol === "http:" &&
+            destination.hostname === "localhost" &&
+            destination.port !== ""));
     } catch {
       /* Malformed destinations stay denied. */
     }
-    if (github) {
+    if (external) {
       void shell.openExternal(url).catch((error: unknown) => {
-        console.error("Unable to open GitHub link", error);
+        console.error("Unable to open link", error);
       });
     }
     return { action: "deny" };

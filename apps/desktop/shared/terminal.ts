@@ -226,6 +226,27 @@ export interface BackgroundTaskOutput {
 }
 
 /**
+ * One process listening on a TCP port inside a project (FE-68): its cwd is
+ * in one of the project's folders, or it runs under one of its terminals.
+ */
+export interface ListeningPort {
+  port: number;
+  pid: number;
+  /** `lstart` as `ps` wrote it: with `pid`, what Stop must still match. */
+  start: string;
+  /** Epoch ms the process started, or null when `start` would not parse. */
+  startedAt: number | null;
+  /** The process's short name, as `lsof` gives it: `node`, `bun`, `python3`. */
+  name: string;
+  /** Its command line, control characters shown as `?`, cut to 300. */
+  command: string;
+  /** Every address it listens on for this port: `127.0.0.1`, `[::1]`, `*`. */
+  addresses: string[];
+  /** Why it is this project's: its folder, or a terminal of the project. */
+  via: "folder" | "terminal";
+}
+
+/**
  * Whether `value` can name a background task: the CLI's ids are short
  * letters and digits. Same rule as a sub-agent id — one file name, no `.`.
  */
@@ -697,6 +718,10 @@ export const terminalChannels = {
   agentTaskOutput: "terminal:agent-task-output",
   /** Stop one running background shell (FE-43). */
   agentStopTask: "terminal:agent-stop-task",
+  /** The TCP ports a project's processes listen on (FE-68). */
+  ports: "terminal:ports",
+  /** Stop the process behind one of those ports (FE-68). */
+  stopPort: "terminal:stop-port",
   /** One conversation's numbers, for the agent view and the rail (FE-38). */
   agentFacts: "terminal:agent-facts",
   /** A project's agent usage over 7 and 30 days, for Settings (FE-38/D6). */
@@ -842,6 +867,20 @@ export interface DesktopTerminalApi {
     workspace: string,
     conversation: string,
     task: string,
+  ) => Promise<{ stopped: number }>;
+  /**
+   * The TCP ports this project's processes listen on (FE-68), by port. Main
+   * reads the folders and terminals itself; empty off macOS.
+   */
+  ports: (workspace: string) => Promise<ListeningPort[]>;
+  /**
+   * Stop the process listening on a port of this project, and what it runs
+   * (FE-68). Refused unless `pid` still listens there and started at `start`.
+   */
+  stopPort: (
+    workspace: string,
+    pid: number,
+    start: string,
   ) => Promise<{ stopped: number }>;
   /**
    * The files conversation `id` edited with its file tools, its sub-agents'

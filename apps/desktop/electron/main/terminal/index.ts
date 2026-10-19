@@ -29,6 +29,7 @@ import {
   isBoardId,
   isCardBrief,
   isTerminalKind,
+  type ListeningPort,
   type SubagentTranscript,
   TERMINAL_LIMITS,
   type TerminalAgent,
@@ -43,6 +44,7 @@ import {
   authorizedRecord,
   knownWorkspace,
   menuBarWorkspaces,
+  projectFolders,
   terminalFolder,
 } from "../workspaces";
 import { watchAgentActivity } from "./agent-activity";
@@ -79,6 +81,7 @@ import {
 } from "./claude-oauth-usage";
 import { CLAUDE_USAGE_FILE, readClaudeQuota } from "./claude-usage";
 import { type CodexDirs, readCodexUsage } from "./codex-usage";
+import { listPorts, stopPort } from "./ports";
 import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
 
 let host: UtilityProcess | null = null;
@@ -543,6 +546,13 @@ function watchMoves(): void {
  *
  * ⚠️ Best effort: a folder that cannot be read keeps what the host had.
  */
+/** The pty pids of `workspace`'s open terminals; none before any was started. */
+async function liveTerminalPids(workspace: string): Promise<number[]> {
+  if (!host) return [];
+  const listed = await request<TerminalSession[]>({ t: "list", workspace });
+  return listed.filter((entry) => !entry.exit).map((entry) => entry.pid);
+}
+
 async function agentTerminals(workspace: string): Promise<TerminalSession[]> {
   const listed = await request<TerminalSession[]>({ t: "list", workspace });
   if (!listed.some((entry) => entry.kind !== "shell" && !entry.exit))
@@ -991,6 +1001,36 @@ export function registerTerminal(devUrl?: string): void {
       const folder = await terminalFolder(workspace);
       if (!folder) throw new Error("This project has no folder here.");
       return stopBackgroundTask(agentHome(), folder, conversation, task);
+    },
+  );
+  // ⚠️ By workspace alone (FE-68): the folders and the terminals whose
+  // processes count are main's to resolve; Stop names a pid, and main checks
+  // it still listens in this project before anything is signalled.
+  handle(
+    terminalChannels.ports,
+    devUrl,
+    async (args): Promise<ListeningPort[]> => {
+      if (args.length !== 1) throw new Error("A workspace is required");
+      const workspace = key(args[0], "workspace");
+      return listPorts(
+        await projectFolders(workspace),
+        await liveTerminalPids(workspace),
+      );
+    },
+  );
+  handle(
+    terminalChannels.stopPort,
+    devUrl,
+    async (args): Promise<{ stopped: number }> => {
+      if (args.length !== 3)
+        throw new Error("A workspace and a pid are required");
+      const workspace = key(args[0], "workspace");
+      return stopPort(
+        await projectFolders(workspace),
+        await liveTerminalPids(workspace),
+        args[1] as number,
+        args[2] as string,
+      );
     },
   );
   // ⚠️ By workspace alone (FE-41): the goals are those of the Codex

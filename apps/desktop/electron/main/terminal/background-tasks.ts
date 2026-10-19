@@ -587,7 +587,7 @@ async function taskOutputPath(
 }
 
 /** One row of `ps`: enough to tell a task's process from any other. */
-interface Proc {
+export interface Proc {
   pid: number;
   ppid: number;
   pgid: number;
@@ -601,7 +601,7 @@ const PS_ROW =
   /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s?(.*)$/;
 
 /** Every process on this machine, in one `ps`. */
-async function processTable(): Promise<Proc[]> {
+export async function processTable(): Promise<Proc[]> {
   const { stdout } = await runFile(
     "ps",
     ["-axww", "-o", "pid=,ppid=,pgid=,uid=,lstart=,args="],
@@ -624,7 +624,7 @@ async function processTable(): Promise<Proc[]> {
   });
 }
 
-function ownUid(): number {
+export function ownUid(): number {
   const uid = process.getuid?.();
   if (uid === undefined)
     throw new Error("Stopping tasks requires Unix process groups.");
@@ -632,7 +632,7 @@ function ownUid(): number {
 }
 
 /** The groups never signalled: the app's own, and every ancestor's. */
-function guardedGroups(procs: Proc[]): Set<number> {
+export function guardedGroups(procs: Proc[]): Set<number> {
   const byPid = new Map(procs.map((proc) => [proc.pid, proc]));
   const own = byPid.get(process.pid)?.pgid;
   if (own === undefined || !Number.isInteger(own) || own <= 1)
@@ -694,7 +694,7 @@ function launches(args: string, conversation: string): boolean {
 }
 
 /** A command line as `ps` shows it: a control character, escaped or not, is `?`. */
-function visible(text: string): string {
+export function visible(text: string): string {
   return (
     text
       .replace(/\\[0-7]{3}/g, "?")
