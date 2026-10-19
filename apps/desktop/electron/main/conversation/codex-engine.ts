@@ -11,8 +11,9 @@
 // - Codex asks before acting as SERVER requests — a command, a file change,
 //   more permissions, a question, an MCP confirmation — shown as the chat's
 //   permission and question cards and answered on stdin.
-// - Sends while a turn runs are queued and started after `turn/completed`;
-//   Stop is `turn/interrupt`.
+// - A send while a turn runs goes into it with `turn/steer` (FE-67); one it
+//   cannot take yet waits in `held` (`./queue`) and starts after
+//   `turn/completed`. Stop is `turn/interrupt`.
 //
 // ⚠️ Nothing the page typed becomes an argument: the process is started
 // with none but `app-server`, settings are checked again against the fixed
@@ -38,6 +39,7 @@ import {
 import { isAgentSessionId } from "../../../shared/terminal";
 import type { ClaudeCli } from "./claude-cli";
 import type { ContentBlock } from "./outgoing";
+import { Held, type Outgoing, sameSettings } from "./queue";
 import { cut, inputText } from "./transcript";
 
 export interface CodexEngineDeps {
@@ -49,10 +51,7 @@ export interface CodexEngineDeps {
   requestTimeoutMs?: number;
 }
 
-export interface CodexOutgoing {
-  content: ContentBlock[];
-  settings: ComposerSettings;
-}
+export type CodexOutgoing = Outgoing;
 
 const EXT: Record<string, string> = {
   "image/png": "png",
@@ -200,7 +199,10 @@ export class CodexEngine {
   starting = false;
   stopping = false;
   error: string | null = null;
-  queue: CodexOutgoing[] = [];
+  /** What waits to be sent (FE-67). */
+  held = new Held();
+  /** `drain` is running: one at a time, so the order holds. */
+  private pumping = false;
   permissions = new Map<string, PermissionRequest>();
   waiting = new Map<string, { rpcId: number | string; waiting: Waiting }>();
   /** Items Codex started this turn, by id — a file change's diff. */
@@ -211,8 +213,8 @@ export class CodexEngine {
   turnId: string | null = null;
   /** The settings the running turn was started with. */
   applied: ComposerSettings | null = null;
-  /** The images of the running turn, removed when it ends. */
-  dir: string | null = null;
+  /** The images of the running turn and its steers, removed when it ends. */
+  dirs: string[] = [];
   exited: Promise<void> = Promise.resolve();
   /** Resolves with the id once Codex names a new conversation. */
   named: Promise<string>;
@@ -240,11 +242,12 @@ export class CodexEngine {
   }
 
   state(): EngineState {
+    const held = this.held.state();
     if (this.error && !this.busy)
-      return { state: "error", message: this.error };
-    if (this.busy && this.starting) return { state: "starting" };
-    if (this.busy) return { state: "running", queued: this.queue.length };
-    return { state: "idle" };
+      return { state: "error", message: this.error, ...held };
+    if (this.busy && this.starting) return { state: "starting", ...held };
+    if (this.busy) return { state: "running", ...held };
+    return { state: "idle", ...held };
   }
 
   /** Nothing is held here: the rollout is the turn, as soon as it exists. */
@@ -343,7 +346,7 @@ export class CodexEngine {
       this.dropPermissions();
       if (this.busy && !this.stopping) {
         this.error = said;
-        this.queue = [];
+        this.held.paused = this.held.length > 0;
       }
       if (!this.conversation)
         this.refuse(new Error(this.error ?? "Codex did not start."));
@@ -444,6 +447,7 @@ export class CodexEngine {
         this.turnId = str(record(params.turn).id) ?? this.turnId;
         this.starting = false;
         this.emitState();
+        this.pump();
         return;
       case "item/started": {
         const item = record(params.item);
@@ -725,22 +729,95 @@ export class CodexEngine {
     this.starting = false;
     this.turnId = null;
     this.items.clear();
-    if (this.dir)
-      void rm(this.dir, { recursive: true, force: true }).catch(() => {});
-    this.dir = null;
+    for (const dir of this.dirs)
+      void rm(dir, { recursive: true, force: true }).catch(() => {});
+    this.dirs = [];
   }
 
   onTurnEnd(): void {
     this.dropPermissions();
     this.endTurn();
     this.stopping = false;
-    const next = this.queue.shift();
-    if (next)
-      void this.deliver(next).catch((error: Error) => {
-        this.error = error.message;
+    this.emitState();
+    this.pump();
+  }
+
+  /** Send `out` — into the running turn, or as a turn — or hold it. */
+  async accept(out: Outgoing): Promise<void> {
+    if (!this.busy && !this.held.length) {
+      await this.deliver(out);
+      return;
+    }
+    // A new message picks a paused queue back up (D5).
+    this.held.paused = false;
+    this.held.items.push(out);
+    // ⚠️ Pumped first: one that steers at once is never drawn as queued.
+    this.pump();
+    this.emitState();
+  }
+
+  /** Let a paused queue go on. */
+  resume(): void {
+    this.held.paused = false;
+    for (const item of this.held.items) item.error = null;
+    this.emitState();
+    this.pump();
+  }
+
+  pump(): void {
+    if (this.pumping) return;
+    this.pumping = true;
+    void this.drain().finally(() => {
+      this.pumping = false;
+    });
+  }
+
+  /** What is held goes, in order, for as long as Codex can take it. */
+  private async drain(): Promise<void> {
+    while (!this.held.paused && this.held.length) {
+      const head = this.held.items[0] as Outgoing;
+      if (!this.busy) {
+        this.held.items.shift();
+        try {
+          await this.deliver(head);
+        } catch (error) {
+          this.held.restore([head], (error as Error).message);
+          this.emitState();
+          return;
+        }
+        continue;
+      }
+      const turnId = this.turnId;
+      if (
+        !turnId ||
+        !this.conversation ||
+        this.starting ||
+        this.stopping ||
+        !sameSettings(this.applied, head.settings)
+      )
+        return;
+      this.held.items.shift();
+      try {
+        const { input, dir } = await inputOf(head.content);
+        if (dir) this.dirs.push(dir);
+        await this.request("turn/steer", {
+          threadId: this.conversation,
+          expectedTurnId: turnId,
+          input,
+        });
+        head.error = null;
         this.emitState();
-      });
-    else this.emitState();
+      } catch (error) {
+        // The turn ended first: it goes as a turn of its own (D7).
+        if (!this.busy || this.turnId !== turnId) {
+          this.held.items.unshift(head);
+          continue;
+        }
+        this.held.restore([head], (error as Error).message);
+        this.emitState();
+        return;
+      }
+    }
   }
 
   /** Start `out` as the next turn, the app-server first if it is not up. */
@@ -756,7 +833,7 @@ export class CodexEngine {
       this.ready ??= this.start(settings);
       await this.ready;
       const { input, dir } = await inputOf(out.content);
-      this.dir = dir;
+      if (dir) this.dirs.push(dir);
       this.applied = settings;
       const policy = codexPolicy(settings.permission);
       if (this.conversation) this.deps.remember(this.conversation, settings);
@@ -773,6 +850,8 @@ export class CodexEngine {
       });
       this.turnId = str(record(started.turn).id) ?? this.turnId;
       this.emitState();
+      // Sent while this one was getting ready: it steers it now.
+      this.pump();
     } catch (error) {
       this.endTurn();
       this.refuse(error as Error);
@@ -793,7 +872,8 @@ export class CodexEngine {
   }
 
   async stop(): Promise<void> {
-    this.queue = [];
+    // What waits stays, paused (D5): Resume or the next send lets it go.
+    if (this.held.length) this.held.paused = true;
     if (!this.busy || !this.child) {
       this.emitState();
       return;

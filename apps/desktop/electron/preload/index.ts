@@ -149,6 +149,17 @@ const conversation: DesktopConversationApi = {
     ipcRenderer.invoke(conversationChannels.stop, workspace, id),
   clearQueue: (workspace, id) =>
     ipcRenderer.invoke(conversationChannels.clearQueue, workspace, id),
+  takeQueued: (workspace, id, message) =>
+    ipcRenderer.invoke(conversationChannels.takeQueued, workspace, id, message),
+  removeQueued: (workspace, id, message) =>
+    ipcRenderer.invoke(
+      conversationChannels.removeQueued,
+      workspace,
+      id,
+      message,
+    ),
+  resumeQueue: (workspace, id) =>
+    ipcRenderer.invoke(conversationChannels.resumeQueue, workspace, id),
   answerPermission: (workspace, id, request, answer) =>
     ipcRenderer.invoke(
       conversationChannels.answerPermission,

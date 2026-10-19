@@ -33,6 +33,14 @@ import { readDraft, writeDraft } from "./draft";
 export interface ComposerHandle {
   /** Put `text` in the composer — a reply's quote — and focus it. */
   insert: (text: string) => void;
+  /** A queued message, back in the composer to be edited (FE-67). */
+  restore: (taken: Unqueued) => void;
+}
+
+/** A queued message, taken back to be edited. */
+export interface Unqueued {
+  text: string;
+  attachments: { name: string; image: boolean; out: OutgoingAttachment }[];
 }
 
 interface Pending {
@@ -110,6 +118,7 @@ export const Composer = forwardRef<
     settings: ComposerSettings;
     onSettings: (next: Partial<ComposerSettings>) => void;
     working: boolean;
+    /** How many messages wait above: ↑ in an empty composer takes the last. */
     queued: number;
     onSend: (
       text: string,
@@ -117,7 +126,8 @@ export const Composer = forwardRef<
       names: { name: string; image: boolean }[],
     ) => Promise<boolean>;
     onStop: () => void;
-    onClearQueue: () => void;
+    /** ↑ in an empty composer: the last queued message, back to edit. */
+    onEditLastQueued?: () => void;
   }
 >(function Composer(
   {
@@ -133,7 +143,7 @@ export const Composer = forwardRef<
     queued,
     onSend,
     onStop,
-    onClearQueue,
+    onEditLastQueued,
   },
   ref,
 ) {
@@ -195,6 +205,19 @@ export const Composer = forwardRef<
         : value;
       caret.current = next.length;
       setText(next);
+    },
+    restore: (taken) => {
+      // Typed meanwhile: kept, after what was queued before it.
+      const current = latest.current;
+      const next = current.trim()
+        ? `${taken.text}\n\n${current}`.trim()
+        : taken.text;
+      caret.current = next.length;
+      setText(next);
+      setAttachments((previous) => [
+        ...previous,
+        ...taken.attachments.map((file) => ({ key: `a${++keys}`, ...file })),
+      ]);
     },
   }));
 
@@ -358,6 +381,23 @@ export const Composer = forwardRef<
         return;
       }
     }
+    // ↑ in an empty composer: the last queued message comes back to be
+    // edited, as a terminal's history would.
+    if (
+      event.key === "ArrowUp" &&
+      empty &&
+      queued > 0 &&
+      onEditLastQueued &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      event.preventDefault();
+      onEditLastQueued();
+      return;
+    }
     if (
       event.key === "Enter" &&
       !event.shiftKey &&
@@ -431,18 +471,6 @@ export const Composer = forwardRef<
             another one. */}
         <BranchSwitcher slug={slug} variant="composer" />
         <span className="ml-auto" />
-        {queued > 0 && (
-          <span className="flex shrink-0 items-center gap-1.5 text-xs">
-            {queued} queued
-            <button
-              type="button"
-              onClick={onClearQueue}
-              className="hover:text-foreground underline underline-offset-2 transition-colors"
-            >
-              Clear
-            </button>
-          </span>
-        )}
         {working && (
           <span role="status" aria-label="Working" className="flex">
             <HugeiconsIcon

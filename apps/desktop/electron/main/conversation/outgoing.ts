@@ -29,6 +29,11 @@ export type ContentBlock =
       source: { type: "base64"; media_type: string; data: string };
     };
 
+/** A message's id, as the page names it: short, and nothing but a name. */
+export function isMessageId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(value);
+}
+
 /** A send request off the wire, every field checked; throws on any other. */
 export function sendRequest(value: unknown): SendRequest {
   if (!value || typeof value !== "object")
@@ -77,9 +82,12 @@ export function sendRequest(value: unknown): SendRequest {
   });
   if (!v.text.trim() && attachments.length === 0)
     throw new Error("Nothing to send.");
+  if (v.id !== undefined && !isMessageId(v.id))
+    throw new Error("A valid message id is required");
   return {
     workspace: v.workspace,
     conversation: v.conversation,
+    ...(v.id === undefined ? {} : { id: v.id }),
     text: v.text,
     attachments,
     settings,

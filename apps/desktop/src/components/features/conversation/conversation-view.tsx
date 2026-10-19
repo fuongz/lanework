@@ -24,6 +24,7 @@ import {
   type OutgoingAttachment,
   type PermissionAnswer,
   type PermissionRequest,
+  type QueuedMessage,
   settingsFor,
 } from "#/../shared/conversation";
 import type { AgentSession } from "#/../shared/terminal";
@@ -35,6 +36,7 @@ import { setChatAgent } from "#/components/shared/conversation/chat-agent";
 import {
   Composer,
   type ComposerHandle,
+  type Unqueued,
 } from "#/components/shared/conversation/composer";
 import { takeFirstMessage } from "#/components/shared/conversation/first-message";
 import {
@@ -71,6 +73,7 @@ import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { FileOpenerProvider } from "./file-opener";
 import { JobCapsules } from "./job-capsules";
+import { MessageQueue } from "./message-queue";
 import { TocRail } from "./toc-rail";
 import { useConversation } from "./use-conversation";
 
@@ -85,8 +88,33 @@ interface Sent {
   key: string;
   text: string;
   attachments: Attachment[];
-  /** User turns the transcript must reach for this one to be in it. */
-  expect: number;
+  /**
+   * User turns the transcript must reach for this one to be in it — null
+   * while the engine holds it back (FE-67): it is counted once it goes.
+   */
+  expect: number | null;
+}
+
+const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
+const NOTHING: QueuedMessage[] = [];
+
+/** A queued message's files, as the composer shows them again. */
+function unqueued(taken: {
+  text: string;
+  attachments: OutgoingAttachment[];
+}): Unqueued {
+  return {
+    text: taken.text,
+    attachments: taken.attachments.map((out) =>
+      out.kind === "path"
+        ? {
+            name: out.path.split("/").pop() || out.path,
+            image: IMAGE.test(out.path),
+            out,
+          }
+        : { name: out.name, image: true, out },
+    ),
+  };
 }
 
 /**
@@ -162,15 +190,55 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
 
   const turns = conversation?.turns ?? [];
   const users = turns.filter((turn) => turn.role === "user").length;
+  // What the engine holds back (FE-67), drawn above the composer instead.
+  const queue = (engine.state !== "terminal" && engine.queue) || NOTHING;
+  const paused = engine.state !== "terminal" && engine.paused === true;
+  const held = useMemo(() => new Set(queue.map((entry) => entry.id)), [queue]);
   // What was sent from here and is in the transcript now drops away.
-  const waiting = sent.filter((entry) => users < entry.expect);
+  const waiting = sent.filter(
+    (entry) =>
+      !held.has(entry.key) && (entry.expect === null || users < entry.expect),
+  );
   useEffect(() => {
     setSent((previous) =>
-      previous.some((entry) => users >= entry.expect)
-        ? previous.filter((entry) => users < entry.expect)
+      previous.some((entry) => entry.expect !== null && users >= entry.expect)
+        ? previous.filter(
+            (entry) => entry.expect === null || users < entry.expect,
+          )
         : previous,
     );
   }, [users]);
+
+  const usersRef = useRef(users);
+  usersRef.current = users;
+  const heldRef = useRef(held);
+  heldRef.current = held;
+  /** Queued messages being taken back out: not gone to the CLI. */
+  const taking = useRef(new Set<string>());
+  /** Held messages the engine let go: in flight now, landing in order. */
+  const release = useCallback(() => {
+    setSent((previous) => {
+      const now = usersRef.current;
+      let flying = previous.filter(
+        (entry) => entry.expect !== null && now < entry.expect,
+      ).length;
+      let changed = false;
+      const next = previous.map((entry) => {
+        if (
+          entry.expect !== null ||
+          heldRef.current.has(entry.key) ||
+          taking.current.has(entry.key)
+        )
+          return entry;
+        changed = true;
+        flying++;
+        return { ...entry, expect: now + flying };
+      });
+      return changed ? next : previous;
+    });
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a change of what is held.
+  useEffect(release, [held, release]);
 
   const running = engine.state === "running" || engine.state === "starting";
   // ⚠️ One writer per conversation (D3). A Lanework tab running it is where
@@ -189,7 +257,6 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       });
   }, [tab, navigate, slug]);
   const working = running || (conversation?.working ?? false);
-  const queued = engine.state === "running" ? engine.queued : 0;
 
   // ─── Scrolling ────────────────────────────────────────────────────────────
   const scroller = useRef<HTMLDivElement>(null);
@@ -358,7 +425,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     const surface = window.desktop?.conversation;
     if (!workspace || !surface || !settings) return false;
     setActionError(null);
-    const key = `s${Date.now()}${Math.random()}`;
+    const key = `s${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     setSent((previous) => [
       ...previous,
       {
@@ -369,7 +436,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           mediaType: entry.image ? "image/*" : "text/plain",
           path: null,
         })),
-        expect: users + previous.filter((e) => users < e.expect).length + 1,
+        expect:
+          users +
+          previous.filter((e) => e.expect !== null && users < e.expect).length +
+          1,
       },
     ]);
     atBottom.current = true;
@@ -378,11 +448,19 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       const next = await surface.send({
         workspace,
         conversation: id,
+        id: key,
         text,
         attachments,
         settings,
       });
       setEngine(next);
+      // Held back: counted once the engine lets it go.
+      if (next.state !== "terminal" && next.queue?.some((m) => m.id === key))
+        setSent((previous) =>
+          previous.map((entry) =>
+            entry.key === key ? { ...entry, expect: null } : entry,
+          ),
+        );
       if (next.state === "terminal") {
         // Nothing was sent: another process writes it (D3).
         setSent((previous) => previous.filter((entry) => entry.key !== key));
@@ -408,16 +486,65 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       );
   };
 
+  /**
+   * Queued messages taken out — dropped, or back to the composer. ⚠️ One
+   * may go to the CLI meanwhile: only what main says it removed leaves.
+   */
+  const unqueue = async (
+    keys: string[],
+    take: () => Promise<string[]>,
+  ): Promise<void> => {
+    for (const key of keys) taking.current.add(key);
+    try {
+      const gone = new Set(await take());
+      setSent((previous) => previous.filter((entry) => !gone.has(entry.key)));
+    } finally {
+      for (const key of keys) taking.current.delete(key);
+      release();
+    }
+  };
+
   const clearQueue = () => {
+    const surface = window.desktop?.conversation;
+    if (!workspace || !surface) return;
+    const keys = [...held];
+    void unqueue(keys, async () =>
+      (await surface.clearQueue(workspace, id)) ? keys : [],
+    ).catch((caught: unknown) =>
+      setActionError(ipcMessage(caught, "Could not clear the queue.")),
+    );
+  };
+
+  const removeQueued = (key: string) => {
+    const surface = window.desktop?.conversation;
+    if (!workspace || !surface) return;
+    void unqueue([key], async () =>
+      (await surface.removeQueued(workspace, id, key)) ? [key] : [],
+    ).catch((caught: unknown) =>
+      setActionError(ipcMessage(caught, "Could not remove it.")),
+    );
+  };
+
+  /** Back to the composer to be edited; sent again, it queues again (D3). */
+  const editQueued = (key: string) => {
+    const surface = window.desktop?.conversation;
+    if (!workspace || !surface) return;
+    void unqueue([key], async () => {
+      const taken = await surface.takeQueued(workspace, id, key);
+      if (!taken) return [];
+      composer.current?.restore(unqueued(taken));
+      return [key];
+    }).catch((caught: unknown) =>
+      setActionError(ipcMessage(caught, "Could not edit it.")),
+    );
+  };
+
+  const resumeQueue = () => {
     if (!workspace) return;
     void window.desktop?.conversation
-      .clearQueue(workspace, id)
-      .then(() =>
-        // The queued ones will never land: the last `queued` sent go.
-        setSent((previous) => previous.slice(0, previous.length - queued)),
-      )
+      .resumeQueue(workspace, id)
       .catch((caught: unknown) =>
-        setActionError(ipcMessage(caught, "Could not clear the queue.")),
+        setActionError(ipcMessage(caught, "Could not resume.")),
       );
   };
 
@@ -647,16 +774,13 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                       forking={forking}
                     />
                   )}
-                  {waiting.map((entry, index) => (
+                  {waiting.map((entry) => (
                     <UserBubble
                       key={entry.key}
                       text={entry.text}
                       attachments={entry.attachments}
                       time={null}
-                      // The last `queued` wait behind the running turn.
-                      pending={
-                        index >= waiting.length - queued ? "Queued" : "Sending…"
-                      }
+                      pending="Sending…"
                     />
                   ))}
                 </FileOpenerProvider>
@@ -712,7 +836,15 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
             />
           )}
           {workspace && settings && (
-            <div className={question ? "hidden" : "contents"}>
+            <div className={question ? "hidden" : "flex flex-col"}>
+              <MessageQueue
+                queue={queue}
+                paused={paused}
+                onEdit={editQueued}
+                onRemove={removeQueued}
+                onResume={resumeQueue}
+                onClear={clearQueue}
+              />
               <Composer
                 ref={composer}
                 slug={slug}
@@ -727,10 +859,13 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                   )
                 }
                 working={running}
-                queued={queued}
+                queued={queue.length}
                 onSend={send}
                 onStop={stop}
-                onClearQueue={clearQueue}
+                onEditLastQueued={() => {
+                  const last = queue.at(-1);
+                  if (last) editQueued(last.id);
+                }}
               />
             </div>
           )}

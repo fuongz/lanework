@@ -128,7 +128,6 @@ export function NewConversationView() {
               queued={0}
               onSend={send}
               onStop={() => {}}
-              onClearQueue={() => {}}
             />
           )}
         </div>

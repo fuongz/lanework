@@ -5,7 +5,10 @@
 //   turn's lines come back on stdout, and a `result` line ends the turn.
 // - Permission prompts are the CLI's `control_request` / `can_use_tool`,
 //   answered on stdin; Stop is a host `interrupt` control request.
-// - Sends while a turn runs are queued here and written after its `result`.
+// - A send while a turn runs is written at once (FE-67): the CLI takes it
+//   in at the turn's next tool result, or runs it as a turn of its own after
+//   the `result`. Its replay (`isReplay`) says it was taken in. One it cannot
+//   take yet waits in `held` (`./queue`).
 // - Only one process writes a conversation at a time: a live pty running
 //   Claude on it wins, and the composer waits (`terminal`).
 //
@@ -29,7 +32,7 @@ import {
 import { isAgentSessionId } from "../../../shared/terminal";
 import type { ClaudeCli } from "./claude-cli";
 import { CodexEngine } from "./codex-engine";
-import type { ContentBlock } from "./outgoing";
+import { Held, type Outgoing, sameSettings } from "./queue";
 import { buildTurns, inputText, type Line } from "./transcript";
 
 export interface EngineDeps {
@@ -52,10 +55,7 @@ export interface EngineDeps {
   controlTimeoutMs?: number;
 }
 
-export interface Outgoing {
-  content: ContentBlock[];
-  settings: ComposerSettings;
-}
+export type { Outgoing } from "./queue";
 
 /**
  * The CLI's arguments for `settings` — every value from a fixed list. A
@@ -145,7 +145,20 @@ class Engine {
   /** A restart in `deliver`: its exit is not news. */
   quiet = false;
   error: string | null = null;
-  queue: Outgoing[] = [];
+  /** What waits to be written (FE-67). */
+  held = new Held();
+  /**
+   * Written to the CLI and not taken in yet — no replay back. While any are,
+   * a `result` does not end the work: the CLI runs them next.
+   */
+  inflight: Outgoing[] = [];
+  /** The running turn's own message is written: others may steer it now. */
+  posted = false;
+  /**
+   * Stopped with messages written and not taken in: the process ends on the
+   * interrupt's `result`, before it runs them, and they wait again.
+   */
+  reclaim = false;
   permissions = new Map<string, PermissionRequest>();
   inputs = new Map<string, unknown>();
   controls = new Map<string, Control>();
@@ -170,11 +183,12 @@ class Engine {
   ) {}
 
   state(): EngineState {
+    const held = this.held.state();
     if (this.error && !this.busy)
-      return { state: "error", message: this.error };
-    if (this.busy && this.starting) return { state: "starting" };
-    if (this.busy) return { state: "running", queued: this.queue.length };
-    return { state: "idle" };
+      return { state: "error", message: this.error, ...held };
+    if (this.busy && this.starting) return { state: "starting", ...held };
+    if (this.busy) return { state: "running", ...held };
+    return { state: "idle", ...held };
   }
 
   /** The running turn so far, for a read before the transcript exists. */
@@ -280,8 +294,13 @@ class Engine {
         this.error =
           said?.slice(0, 300) ||
           `Claude stopped (${signal ?? `exit ${code ?? "?"}`}).`;
-        this.queue = [];
+        this.held.paused = this.held.length > 0;
       }
+      // Never taken in: they wait again, not lost.
+      this.held.restore(this.inflight);
+      this.inflight = [];
+      this.reclaim = false;
+      this.posted = false;
       this.busy = false;
       this.rows = [];
       if (!this.quiet) this.emitState();
@@ -366,6 +385,8 @@ class Engine {
       case "user":
       case "assistant": {
         if (line.parent_tool_use_id) return;
+        // A message written to the CLI, taken in.
+        if (line.isReplay === true) this.inflight.shift();
         this.starting = false;
         // The CLI wrote the conversation down: a restart resumes it now.
         this.fresh = false;
@@ -489,18 +510,95 @@ class Engine {
   }
 
   onResult(): void {
+    this.rows = [];
+    this.dropPermissions();
+    if (this.reclaim && this.inflight.length) {
+      // Stopped: what the CLI would run next waits again instead.
+      this.reclaim = false;
+      this.held.restore(this.inflight);
+      this.inflight = [];
+      this.busy = false;
+      this.starting = false;
+      this.posted = false;
+      void this.halt();
+      this.emitState();
+      return;
+    }
+    if (this.inflight.length) {
+      // Written while text streamed: the CLI runs it as the next turn.
+      this.emitState();
+      return;
+    }
     this.busy = false;
     this.starting = false;
     this.stopping = false;
-    this.rows = [];
-    this.dropPermissions();
-    const next = this.queue.shift();
-    if (next)
-      void this.deliver(next).catch((error: Error) => {
-        this.error = error.message;
+    this.reclaim = false;
+    this.posted = false;
+    this.emitState();
+    this.pump();
+  }
+
+  /** Send `out` — into the running turn, or as a turn — or hold it. */
+  async accept(out: Outgoing): Promise<void> {
+    if (!this.busy && !this.held.length) {
+      await this.deliver(out);
+      return;
+    }
+    // A new message picks a paused queue back up (D5).
+    this.held.paused = false;
+    this.held.items.push(out);
+    this.pump();
+    this.emitState();
+  }
+
+  /** What is held goes, in order, for as long as the CLI can take it. */
+  pump(): void {
+    while (!this.held.paused && this.held.length) {
+      const head = this.held.items[0] as Outgoing;
+      if (!this.busy) {
+        this.held.items.shift();
+        void this.deliver(head).catch((error: Error) => {
+          // Not sent: it waits again, with why (D7).
+          this.error = error.message;
+          this.held.restore([head], error.message);
+          this.emitState();
+        });
+        return;
+      }
+      if (
+        !this.posted ||
+        this.stopping ||
+        !sameSettings(this.applied, head.settings)
+      )
+        return;
+      this.held.items.shift();
+      try {
+        this.post(head);
+      } catch (error) {
+        this.held.restore([head], (error as Error).message);
         this.emitState();
-      });
-    else this.emitState();
+        return;
+      }
+    }
+  }
+
+  /** Write `out` to the CLI, to be taken in. */
+  post(out: Outgoing): void {
+    this.write({
+      type: "user",
+      message: { role: "user", content: out.content },
+      parent_tool_use_id: null,
+    });
+    out.error = null;
+    this.inflight.push(out);
+  }
+
+  /** Let a paused queue go on. */
+  resume(): void {
+    this.held.paused = false;
+    for (const item of this.held.items) item.error = null;
+    this.pump();
+    this.emitState();
   }
 
   /**
@@ -510,6 +608,7 @@ class Engine {
    */
   async deliver(out: Outgoing): Promise<void> {
     this.busy = true;
+    this.posted = false;
     this.error = null;
     // No process yet: it boots first.
     if (!this.child) this.starting = true;
@@ -544,12 +643,11 @@ class Engine {
       this.error = null;
       this.deps.remember(this.conversation, out.settings);
       this.rows = [];
-      this.write({
-        type: "user",
-        message: { role: "user", content: out.content },
-        parent_tool_use_id: null,
-      });
+      this.post(out);
+      this.posted = true;
       this.emitState();
+      // Sent while this one was getting ready: it steers it now.
+      this.pump();
     } catch (error) {
       this.busy = false;
       throw error;
@@ -571,12 +669,17 @@ class Engine {
   }
 
   async stop(): Promise<void> {
-    this.queue = [];
+    // What waits stays, paused (D5): Resume or the next send lets it go.
+    if (this.held.length) this.held.paused = true;
     if (!this.busy || !this.child) {
       this.emitState();
       return;
     }
     this.stopping = true;
+    // ⚠️ The CLI runs what it has not taken in yet after an interrupt, as a
+    // turn of its own: the process ends at the interrupt's `result` instead.
+    if (this.inflight.length) this.reclaim = true;
+    this.emitState();
     try {
       await this.control({ subtype: "interrupt" });
     } catch {
@@ -655,9 +758,8 @@ export function createEngines(deps: EngineDeps) {
         engines.delete(key);
         engine = undefined;
       }
-      if (engine?.busy) {
-        engine.queue.push(out);
-        engine.emitState();
+      if (engine?.busy || engine?.held.length) {
+        await engine.accept(out);
         return engine.state();
       }
       if (!engine?.child) {
@@ -673,7 +775,7 @@ export function createEngines(deps: EngineDeps) {
         engines.set(key, engine);
       }
       const running = engine;
-      await running.deliver(out).catch((error: Error) => {
+      await running.accept(out).catch((error: Error) => {
         running.error = error.message;
         running.emitState();
         throw error;
@@ -761,11 +863,28 @@ export function createEngines(deps: EngineDeps) {
       await engines.get(keyOf(workspace, conversation))?.stop();
     },
 
-    clearQueue(workspace: string, conversation: string): void {
+    clearQueue(workspace: string, conversation: string): number {
       const engine = engines.get(keyOf(workspace, conversation));
-      if (!engine) return;
-      engine.queue = [];
+      if (!engine) return 0;
+      const dropped = engine.held.clear();
       engine.emitState();
+      return dropped;
+    },
+
+    /** One queued message taken back out to be edited, or null: it went. */
+    takeQueued(
+      workspace: string,
+      conversation: string,
+      id: string,
+    ): Outgoing | null {
+      const engine = engines.get(keyOf(workspace, conversation));
+      const taken = engine?.held.remove(id) ?? null;
+      engine?.emitState();
+      return taken;
+    },
+
+    resumeQueue(workspace: string, conversation: string): void {
+      engines.get(keyOf(workspace, conversation))?.resume();
     },
 
     answer(
@@ -833,7 +952,7 @@ export function createEngines(deps: EngineDeps) {
       const key = keyOf(workspace, conversation);
       const engine = engines.get(key);
       if (!engine) return;
-      engine.queue = [];
+      engine.held.clear();
       await engine.halt();
       engines.delete(key);
       engine.busy = false;

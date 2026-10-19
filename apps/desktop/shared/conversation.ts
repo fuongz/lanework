@@ -405,6 +405,11 @@ export interface Suggestion {
 export interface SendRequest {
   workspace: string;
   conversation: string;
+  /**
+   * The page's name for this message, so it is the same one while it waits
+   * in the queue (FE-67). Main makes one when absent.
+   */
+  id?: string;
   text: string;
   attachments: OutgoingAttachment[];
   settings: ComposerSettings;
@@ -459,16 +464,36 @@ export type PermissionAnswer =
   | { behavior: "deny"; message?: string };
 
 /**
+ * A message the engine holds back (FE-67): sent while the CLI could not take
+ * it in — the queue is paused, the turn is not ready, or it asks for other
+ * settings than the running turn's. It goes once it can.
+ */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  attachments: { name: string; image: boolean }[];
+  /** Why it did not go — it stays until sent, edited or removed. */
+  error: string | null;
+}
+
+/** What the engine holds back, when it holds anything. */
+export interface EngineQueue {
+  queue?: QueuedMessage[];
+  /** Stopped with messages waiting: they go on Resume, or the next send. */
+  paused?: boolean;
+}
+
+/**
  * Where a conversation's engine stands. Only one process writes a
  * conversation at a time: `terminal` means a pty is running Claude on it, and
  * the composer stays paused until that tab is stopped.
  */
 export type EngineState =
-  | { state: "idle" }
-  | { state: "starting" }
-  | { state: "running"; queued: number }
+  | ({ state: "idle" } & EngineQueue)
+  | ({ state: "starting" } & EngineQueue)
+  | ({ state: "running" } & EngineQueue)
   | { state: "terminal"; terminalId: string }
-  | { state: "error"; message: string };
+  | ({ state: "error"; message: string } & EngineQueue);
 
 /** Main → renderer, as a turn streams in. */
 export type ConversationEvent =
@@ -539,8 +564,14 @@ export const conversationChannels = {
   send: "conversation:send",
   /** Interrupt the running turn (the Stop button). */
   stop: "conversation:stop",
-  /** Drop what is queued behind the running turn. */
+  /** Drop what is queued behind the running turn; answers how many went. */
   clearQueue: "conversation:clear-queue",
+  /** Take one queued message back out, to be edited (FE-67). */
+  takeQueued: "conversation:take-queued",
+  /** Drop one queued message. */
+  removeQueued: "conversation:remove-queued",
+  /** Let a paused queue go on. */
+  resumeQueue: "conversation:resume-queue",
   answerPermission: "conversation:answer-permission",
   /** Fork into a new conversation (`--fork-session`), answer its id (D7). */
   fork: "conversation:fork",
@@ -584,7 +615,20 @@ export interface DesktopConversationApi {
   /** Resolves once queued or started — not when the turn ends. */
   send: (request: SendRequest) => Promise<EngineState>;
   stop: (workspace: string, conversation: string) => Promise<void>;
-  clearQueue: (workspace: string, conversation: string) => Promise<void>;
+  /** Answers how many were dropped: one may have started meanwhile. */
+  clearQueue: (workspace: string, conversation: string) => Promise<number>;
+  /** Null when it is no longer queued: it went meanwhile. */
+  takeQueued: (
+    workspace: string,
+    conversation: string,
+    id: string,
+  ) => Promise<{ text: string; attachments: OutgoingAttachment[] } | null>;
+  removeQueued: (
+    workspace: string,
+    conversation: string,
+    id: string,
+  ) => Promise<boolean>;
+  resumeQueue: (workspace: string, conversation: string) => Promise<void>;
   answerPermission: (
     workspace: string,
     conversation: string,

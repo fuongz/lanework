@@ -24,8 +24,10 @@ import {
   isOpenableUrl,
   isPermission,
   type LinkPreview,
+  type OutgoingAttachment,
   type PermissionAnswer,
   type PermissionRequest,
+  type SendRequest,
   type Suggestion,
   setCodexModels,
 } from "../../../shared/conversation";
@@ -41,7 +43,8 @@ import { forkConversation } from "./fork";
 import { type ImageScope, openableImage, previewImage } from "./image-preview";
 import { createLinkPreviews } from "./link-preview";
 import { claudePidsOn } from "./live-claude";
-import { contentOf, sendRequest } from "./outgoing";
+import { contentOf, isMessageId, sendRequest } from "./outgoing";
+import type { Outgoing } from "./queue";
 import { createSettingsStore } from "./settings-store";
 import { suggestCommands, suggestFiles, workspaceFiles } from "./suggest";
 import { readConversation, transcriptPath } from "./transcript";
@@ -104,6 +107,30 @@ function conversationOf(args: unknown[]): {
   if (!isAgentSessionId(args[1]))
     throw new Error("A valid conversation is required");
   return { workspace, conversation: args[1] };
+}
+
+/** A queued message's address: its conversation, and its own id. */
+function queuedOf(args: unknown[]): {
+  workspace: string;
+  conversation: string;
+  message: string;
+} {
+  if (args.length !== 3)
+    throw new Error("A workspace, a conversation and a message are required");
+  const { workspace, conversation } = conversationOf(args);
+  if (!isMessageId(args[2])) throw new Error("A valid message is required");
+  return { workspace, conversation, message: args[2] };
+}
+
+/** A checked request as the message an engine sends, or holds. */
+async function outgoingOf(request: SendRequest): Promise<Outgoing> {
+  return {
+    id: request.id ?? randomUUID(),
+    text: request.text,
+    attachments: request.attachments,
+    content: await contentOf(request.text, request.attachments),
+    settings: request.settings,
+  };
 }
 
 async function folderOf(workspace: string): Promise<string> {
@@ -317,18 +344,15 @@ export function registerConversation(
       if (!request.text.trim() && request.attachments.length === 0)
         throw new Error("Write something first.");
       const folder = await folderOf(request.workspace);
-      const content = await contentOf(request.text, request.attachments);
+      const out = await outgoingOf(request);
       // The model picks the CLI: Codex names its conversation itself.
       if (agentOfModel(request.settings.model) === "codex")
-        return engines.startCodex(request.workspace, folder, {
-          content,
-          settings: request.settings,
-        });
+        return engines.startCodex(request.workspace, folder, out);
       const engine = await engines.start(
         request.workspace,
         conversation,
         folder,
-        { content, settings: request.settings },
+        out,
       );
       return { conversation, engine };
     },
@@ -353,7 +377,6 @@ export function registerConversation(
         throw new Error(
           `Pick a ${agent === "codex" ? "Codex" : "Claude"} model for this conversation.`,
         );
-      const content = await contentOf(request.text, request.attachments);
       return noted(
         request.workspace,
         request.conversation,
@@ -361,7 +384,7 @@ export function registerConversation(
           request.workspace,
           request.conversation,
           folder,
-          { content, settings: request.settings },
+          await outgoingOf(request),
           agent,
         ),
       );
@@ -378,11 +401,45 @@ export function registerConversation(
   handle(
     conversationChannels.clearQueue,
     devUrl,
+    async (args): Promise<number> => {
+      if (args.length !== 2)
+        throw new Error("A workspace and a conversation are required");
+      const { workspace, conversation } = conversationOf(args);
+      return engines.clearQueue(workspace, conversation);
+    },
+  );
+
+  handle(
+    conversationChannels.takeQueued,
+    devUrl,
+    async (
+      args,
+    ): Promise<{ text: string; attachments: OutgoingAttachment[] } | null> => {
+      const { workspace, conversation, message } = queuedOf(args);
+      const taken = engines.takeQueued(workspace, conversation, message);
+      return taken
+        ? { text: taken.text, attachments: taken.attachments }
+        : null;
+    },
+  );
+
+  handle(
+    conversationChannels.removeQueued,
+    devUrl,
+    async (args): Promise<boolean> => {
+      const { workspace, conversation, message } = queuedOf(args);
+      return engines.takeQueued(workspace, conversation, message) !== null;
+    },
+  );
+
+  handle(
+    conversationChannels.resumeQueue,
+    devUrl,
     async (args): Promise<void> => {
       if (args.length !== 2)
         throw new Error("A workspace and a conversation are required");
       const { workspace, conversation } = conversationOf(args);
-      engines.clearQueue(workspace, conversation);
+      engines.resumeQueue(workspace, conversation);
     },
   );
 

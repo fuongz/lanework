@@ -173,6 +173,28 @@ function mediaOfPath(path: string): string {
 }
 
 /**
+ * A message sent while a turn ran, as the user line it stands for — or
+ * null. The CLI writes one it took in mid-turn as an `attachment` of type
+ * `queued_command`, not as a user line (FE-67); a background task's
+ * notification is one too, with another `commandMode`.
+ */
+function steered(line: Line): Line | null {
+  if (line.type !== "attachment") return null;
+  const attachment = record(line.attachment);
+  if (
+    attachment.type !== "queued_command" ||
+    attachment.commandMode !== "prompt" ||
+    (typeof attachment.prompt !== "string" && !Array.isArray(attachment.prompt))
+  )
+    return null;
+  return {
+    ...line,
+    type: "user",
+    message: { role: "user", content: attachment.prompt },
+  };
+}
+
+/**
  * A user line that is somebody's prompt, read as a turn — or null: a tool
  * result, an interruption, a compaction summary, a command's output or
  * caveat, anything the CLI wrapped in a tag for itself.
@@ -367,7 +389,7 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
       command = null;
       continue;
     }
-    const prompt = promptOf(line);
+    const prompt = promptOf(steered(line) ?? line);
     if (prompt) {
       close();
       command = prompt.command ? turns.length : null;
