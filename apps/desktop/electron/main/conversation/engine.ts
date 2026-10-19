@@ -28,11 +28,14 @@ import {
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
 import type { ClaudeCli } from "./claude-cli";
+import { CodexEngine } from "./codex-engine";
 import type { ContentBlock } from "./outgoing";
 import { buildTurns, inputText, type Line } from "./transcript";
 
 export interface EngineDeps {
   cli: () => Promise<ClaudeCli>;
+  /** The `codex` binary, for a Codex conversation. */
+  codexCli?: () => Promise<ClaudeCli>;
   emit: (event: ConversationEvent) => void;
   /** The id of a live pty running Claude on this conversation, or null. */
   terminalOn: (
@@ -584,7 +587,15 @@ class Engine {
 
 /** Every conversation's engine, by workspace and id. */
 export function createEngines(deps: EngineDeps) {
-  const engines = new Map<string, Engine>();
+  const engines = new Map<string, Engine | CodexEngine>();
+  const codexDeps = () => ({
+    cli:
+      deps.codexCli ??
+      (() => Promise.reject(new Error("Codex is not available."))),
+    emit: deps.emit,
+    remember: deps.remember,
+    spawn: deps.spawn,
+  });
   const keyOf = (workspace: string, conversation: string) =>
     `${workspace}\0${conversation}`;
 
@@ -621,16 +632,24 @@ export function createEngines(deps: EngineDeps) {
     pids,
     state,
 
-    /** Queue `out` behind a running turn, or write it now. */
+    /**
+     * Queue `out` behind a running turn, or write it now — through the CLI
+     * of `agent`, the conversation's own.
+     */
     async send(
       workspace: string,
       conversation: string,
       folder: string,
       out: Outgoing,
+      agent: "claude" | "codex" = "claude",
     ): Promise<EngineState> {
       const key = keyOf(workspace, conversation);
       let engine = engines.get(key);
-      if (engine && engine.folder !== folder) {
+      if (
+        engine &&
+        (engine.folder !== folder ||
+          engine instanceof CodexEngine !== (agent === "codex"))
+      ) {
         if (engine.busy) throw new Error("A turn is still running.");
         await engine.halt();
         engines.delete(key);
@@ -647,15 +666,50 @@ export function createEngines(deps: EngineDeps) {
         if (terminal) return terminal;
       }
       if (!engine) {
-        engine = new Engine(workspace, conversation, folder, deps);
+        engine =
+          agent === "codex"
+            ? new CodexEngine(workspace, conversation, folder, codexDeps())
+            : new Engine(workspace, conversation, folder, deps);
         engines.set(key, engine);
       }
-      await engine.deliver(out).catch((error: Error) => {
-        engine.error = error.message;
-        engine.emitState();
+      const running = engine;
+      await running.deliver(out).catch((error: Error) => {
+        running.error = error.message;
+        running.emitState();
         throw error;
       });
-      return engine.state();
+      return running.state();
+    },
+
+    /**
+     * A NEW Codex conversation with `out` as its first turn. Codex names
+     * the id itself, on its first line: answered once it has.
+     */
+    async startCodex(
+      workspace: string,
+      folder: string,
+      out: Outgoing,
+    ): Promise<{ conversation: string; engine: EngineState }> {
+      const engine = new CodexEngine(workspace, null, folder, codexDeps());
+      await engine.deliver(out);
+      let timer: NodeJS.Timeout | undefined;
+      const conversation = await Promise.race([
+        engine.named,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Codex did not start the conversation.")),
+            30_000,
+          );
+        }),
+      ])
+        .catch(async (error: Error) => {
+          await engine.halt();
+          throw error;
+        })
+        .finally(() => clearTimeout(timer));
+      engines.set(keyOf(workspace, conversation), engine);
+      engine.emitState();
+      return { conversation, engine: engine.state() };
     },
 
     /**
@@ -687,10 +741,14 @@ export function createEngines(deps: EngineDeps) {
     pending(
       workspace: string,
       conversation: string,
-    ): { turns: Turn[]; working: boolean } | null {
+    ): { agent: "claude" | "codex"; turns: Turn[]; working: boolean } | null {
       const engine = engines.get(keyOf(workspace, conversation));
       if (!engine) return null;
-      return { turns: engine.turns(), working: engine.busy };
+      return {
+        agent: engine instanceof CodexEngine ? "codex" : "claude",
+        turns: engine.turns(),
+        working: engine.busy,
+      };
     },
 
     /** The requests the engine is still waiting on, oldest first. */
@@ -762,7 +820,9 @@ export function createEngines(deps: EngineDeps) {
     alive(workspace: string): string[] {
       return [...engines.values()]
         .filter((engine) => engine.workspace === workspace && engine.child)
-        .map((engine) => engine.conversation);
+        .flatMap((engine) =>
+          engine.conversation ? [engine.conversation] : [],
+        );
     },
 
     /**

@@ -12,14 +12,27 @@ import type { AgentCard } from "./terminal";
 
 // ─── Composer settings (FE-62/D9) ───────────────────────────────────────────
 
-/** A Claude model the picker offers, newest first within a family. */
-export interface ClaudeModel {
-  /** What `--model` is given — an alias or a full id. */
+/** The CLI a conversation runs on: Claude Code, or Codex. */
+export type ConversationAgent = "claude" | "codex";
+
+export const AGENT_LABELS: Record<ConversationAgent, string> = {
+  claude: "Claude",
+  codex: "Codex",
+};
+
+/** A model the picker offers, newest first within a family. */
+export interface AgentModel {
+  /** What `--model` / `-m` is given — an alias or a full id. */
   id: string;
   label: string;
+  /** The CLI that runs it: picking it picks the agent (new conversation). */
+  agent: ConversationAgent;
   /** Shown below the current generation, after a divider. */
   legacy?: boolean;
 }
+
+/** @deprecated The old name, from when every model was Claude's. */
+export type ClaudeModel = AgentModel;
 
 /**
  * The picker's list, fixed in code (FE-62/D9).
@@ -27,31 +40,123 @@ export interface ClaudeModel {
  * ⚠️ `id` is checked against this list in main: it becomes an argument, and
  * nothing the page typed may.
  */
-export const CLAUDE_MODELS: readonly ClaudeModel[] = [
-  { id: "claude-opus-5-5", label: "Opus 5.5" },
-  { id: "claude-fable-5-1", label: "Fable 5.1" },
-  { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
-  { id: "claude-haiku-5-5", label: "Haiku 5.5" },
-  { id: "claude-haiku-4-5", label: "Haiku 4.5", legacy: true },
-  { id: "claude-sonnet-5", label: "Sonnet 5", legacy: true },
-  { id: "claude-opus-5", label: "Opus 5", legacy: true },
-  { id: "claude-fable-5", label: "Fable 5", legacy: true },
-  { id: "claude-opus-4-8", label: "Opus 4.8", legacy: true },
-  { id: "claude-opus-4-7", label: "Opus 4.7", legacy: true },
-  { id: "claude-opus-4-6", label: "Opus 4.6", legacy: true },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6", legacy: true },
+export const CLAUDE_MODELS: readonly AgentModel[] = [
+  { id: "claude-opus-5-5", label: "Opus 5.5", agent: "claude" },
+  { id: "claude-fable-5-1", label: "Fable 5.1", agent: "claude" },
+  { id: "claude-sonnet-5-5", label: "Sonnet 5.5", agent: "claude" },
+  { id: "claude-haiku-5-5", label: "Haiku 5.5", agent: "claude" },
+  { id: "claude-haiku-4-5", label: "Haiku 4.5", agent: "claude", legacy: true },
+  { id: "claude-sonnet-5", label: "Sonnet 5", agent: "claude", legacy: true },
+  { id: "claude-opus-5", label: "Opus 5", agent: "claude", legacy: true },
+  { id: "claude-fable-5", label: "Fable 5", agent: "claude", legacy: true },
+  { id: "claude-opus-4-8", label: "Opus 4.8", agent: "claude", legacy: true },
+  { id: "claude-opus-4-7", label: "Opus 4.7", agent: "claude", legacy: true },
+  { id: "claude-opus-4-6", label: "Opus 4.6", agent: "claude", legacy: true },
+  {
+    id: "claude-sonnet-4-6",
+    label: "Sonnet 4.6",
+    agent: "claude",
+    legacy: true,
+  },
 ];
+
+/**
+ * Codex's (ChatGPT's) models when its own list cannot be read — no
+ * `~/.codex/models_cache.json` yet. Main reads that file (`codexModels`)
+ * and hands the list over with `setCodexModels`.
+ */
+export const CODEX_MODELS: readonly AgentModel[] = [
+  { id: "gpt-6.1-sol", label: "GPT-6.1-Sol", agent: "codex" },
+  { id: "gpt-6-astra", label: "GPT-6-Astra", agent: "codex" },
+  { id: "gpt-6-sol", label: "GPT-6-Sol", agent: "codex" },
+  { id: "gpt-6-luna", label: "GPT-6-Luna", agent: "codex" },
+  { id: "gpt-5.6-sol", label: "GPT-5.6-Sol", agent: "codex", legacy: true },
+  { id: "gpt-5.6-terra", label: "GPT-5.6-Terra", agent: "codex", legacy: true },
+  { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", agent: "codex", legacy: true },
+];
+
+/** What a Codex model id may be: it becomes `-m`'s value. */
+export const CODEX_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/**
+ * Codex's models as this process knows them: the fallback until main has
+ * read Codex's own cache (in main) or the page has asked main (renderer).
+ */
+let codexList: readonly AgentModel[] = CODEX_MODELS;
+let everyModel: readonly AgentModel[] = [...CLAUDE_MODELS, ...codexList];
+const listeners = new Set<() => void>();
+
+/**
+ * Take `list` as Codex's models — the ones `codex` itself lists. An empty
+ * list keeps the fallback; ids that are not plain names are dropped.
+ */
+export function setCodexModels(list: readonly AgentModel[]): void {
+  const clean = list.filter(
+    (entry) =>
+      entry.agent === "codex" &&
+      CODEX_MODEL_ID.test(entry.id) &&
+      !entry.id.startsWith("claude-"),
+  );
+  const next = clean.length > 0 ? clean : CODEX_MODELS;
+  if (JSON.stringify(next) === JSON.stringify(codexList)) return;
+  codexList = next;
+  everyModel = [...CLAUDE_MODELS, ...codexList];
+  for (const listener of listeners) listener();
+}
+
+/** Told when `setCodexModels` changed the list (the picker re-draws). */
+export function onModelsChanged(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/**
+ * Every model the picker offers: Claude's, then Codex's current list. The
+ * same array until the list changes — a snapshot React may compare.
+ */
+export function allModels(): readonly AgentModel[] {
+  return everyModel;
+}
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
 
-export function isClaudeModel(value: unknown): value is string {
-  return typeof value === "string" && CLAUDE_MODELS.some((m) => m.id === value);
+/** Each CLI's default: Codex's is the first of its list. */
+export function defaultModel(agent: ConversationAgent): string {
+  return agent === "codex"
+    ? (codexList[0]?.id ?? "gpt-6.1-sol")
+    : DEFAULT_MODEL;
+}
+
+export function isModel(value: unknown): value is string {
+  return typeof value === "string" && allModels().some((m) => m.id === value);
+}
+
+/** @deprecated Every listed model, Codex's too: use `isModel`. */
+export const isClaudeModel = isModel;
+
+/** The CLI that runs model `id`; Claude for one not listed. */
+export function agentOfModel(id: string | null): ConversationAgent {
+  return allModels().find((m) => m.id === id)?.agent ?? "claude";
 }
 
 /** The model's label, or the id as the CLI named it when it is not listed. */
 export function modelName(id: string | null): string | null {
   if (!id) return null;
-  return CLAUDE_MODELS.find((m) => m.id === id)?.label ?? id;
+  return allModels().find((m) => m.id === id)?.label ?? id;
+}
+
+/**
+ * `settings` for a conversation on `agent`: a model of another CLI — the
+ * last settings used anywhere were Claude's, this one is Codex — becomes
+ * that agent's default.
+ */
+export function settingsFor(
+  agent: ConversationAgent,
+  settings: ComposerSettings,
+): ComposerSettings {
+  return agentOfModel(settings.model) === agent
+    ? settings
+    : { ...settings, model: defaultModel(agent) };
 }
 
 /** `--effort`, in the CLI's own order. */
@@ -134,7 +239,7 @@ export function checkSettings(value: unknown): ComposerSettings | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
   if (
-    !isClaudeModel(v.model) ||
+    !isModel(v.model) ||
     !isEffort(v.effort) ||
     typeof v.fast !== "boolean" ||
     !isPermission(v.permission)
@@ -252,6 +357,8 @@ export type Turn = UserTurn | AssistantTurn;
 
 export interface Conversation {
   id: string;
+  /** The CLI whose transcript it is, and that sends its next turn. */
+  agent: ConversationAgent;
   /** The folder it runs in, for the composer's "Current checkout" (display only). */
   cwd: string | null;
   /** Its git branch when it was last written, for the composer row. */
@@ -373,6 +480,11 @@ export type ConversationEvent =
     }
   /** The transcript moved on: read it again (or patch from `turn`). */
   | { type: "turn"; workspace: string; conversation: string; turn: Turn }
+  /**
+   * The engine saw the transcript move on — a Codex item finished — and the
+   * page reads it again, without waiting for the file watcher.
+   */
+  | { type: "moved"; workspace: string; conversation: string }
   /** Text arriving for the open turn's last text block, before the line lands. */
   | { type: "delta"; workspace: string; conversation: string; text: string }
   | {
@@ -445,6 +557,8 @@ export const conversationChannels = {
   permissions: "conversation:permissions",
   /** The last settings used anywhere, for a conversation never sent from chat. */
   lastSettings: "conversation:last-settings",
+  /** Codex's models, as `codex` lists them in its own cache. */
+  codexModels: "conversation:codex-models",
   linkPreview: "conversation:link-preview",
   /** Slash commands, or files in the workspace's folder, matching a query. */
   suggest: "conversation:suggest",
@@ -495,6 +609,8 @@ export interface DesktopConversationApi {
     conversation: string,
   ) => Promise<PermissionRequest[]>;
   lastSettings: () => Promise<ComposerSettings>;
+  /** Codex's models, read from `~/.codex/models_cache.json` by main. */
+  codexModels: () => Promise<AgentModel[]>;
   suggest: (
     workspace: string,
     kind: SuggestionKind,

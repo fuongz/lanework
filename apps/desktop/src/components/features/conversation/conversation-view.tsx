@@ -16,6 +16,7 @@ import {
   useState,
 } from "react";
 import {
+  AGENT_LABELS,
   type AssistantTurn,
   type Attachment,
   type ComposerSettings,
@@ -23,12 +24,14 @@ import {
   type OutgoingAttachment,
   type PermissionAnswer,
   type PermissionRequest,
+  settingsFor,
 } from "#/../shared/conversation";
 import type { AgentSession } from "#/../shared/terminal";
 import { ContextButton } from "#/components/shared/agents/conversation-facts";
 import { PermissionCard } from "#/components/shared/agents/permission-card";
 import { useConversationFacts } from "#/components/shared/agents/use-agent-facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
+import { setChatAgent } from "#/components/shared/conversation/chat-agent";
 import {
   Composer,
   type ComposerHandle,
@@ -103,15 +106,22 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const navigate = useNavigate();
   const { conversation, error, engine, delta, permissions, setEngine } =
     useConversation(workspace, id);
+  // The CLI whose conversation it is — Claude Code or Codex — once read.
+  const agent = conversation?.agent ?? null;
+  const label = AGENT_LABELS[agent ?? "claude"];
+  useEffect(() => {
+    setChatAgent(agent);
+    return () => setChatAgent(null);
+  }, [agent]);
   const listed = useAgentSessions((state) =>
-    workspace
+    workspace && agent
       ? state.byWorkspace[workspace]?.find(
-          (entry) => entry.agent === "claude" && entry.id === id,
+          (entry) => entry.agent === agent && entry.id === id,
         )
       : undefined,
   );
   const resume = useAgentTerminals((state) => state.resume);
-  const facts = useConversationFacts(workspace, "claude", id);
+  const facts = useConversationFacts(workspace, agent ?? "claude", id);
 
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
   // A conversation just started from the new page: its first message,
@@ -129,10 +139,12 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   // else the last used anywhere.
   const loaded = conversation !== null;
   const own = conversation?.settings ?? null;
+  // ⚠️ On the conversation's own CLI: the last used anywhere may be the
+  // other one's model.
   useEffect(() => {
-    if (!loaded || settings) return;
+    if (!loaded || settings || !agent) return;
     if (own) {
-      setSettings(own);
+      setSettings(settingsFor(agent, own));
       return;
     }
     let gone = false;
@@ -140,12 +152,13 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     void (surface ? surface.lastSettings() : Promise.resolve(DEFAULT_SETTINGS))
       .catch(() => DEFAULT_SETTINGS)
       .then((last) => {
-        if (!gone) setSettings((current) => current ?? last);
+        if (!gone)
+          setSettings((current) => current ?? settingsFor(agent, last));
       });
     return () => {
       gone = true;
     };
-  }, [loaded, own, settings]);
+  }, [loaded, own, settings, agent]);
 
   const turns = conversation?.turns ?? [];
   const users = turns.filter((turn) => turn.role === "user").length;
@@ -300,23 +313,27 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
 
   const handlers = useMemo<TurnHandlers>(
     () => ({
-      onFork: () => {
-        if (!workspace || forking) return;
-        setForking(true);
-        setActionError(null);
-        void window.desktop?.conversation
-          .fork(workspace, id)
-          .then((next) =>
-            navigate({
-              to: "/w/$slug/agents/chat/$conversation",
-              params: { slug, conversation: next },
-            }),
-          )
-          .catch((caught: unknown) =>
-            setActionError(ipcMessage(caught, "Could not fork.")),
-          )
-          .finally(() => setForking(false));
-      },
+      // ⚠️ Forking copies a Claude transcript; Codex's are not forked here.
+      onFork:
+        agent === "codex"
+          ? undefined
+          : () => {
+              if (!workspace || forking) return;
+              setForking(true);
+              setActionError(null);
+              void window.desktop?.conversation
+                .fork(workspace, id)
+                .then((next) =>
+                  navigate({
+                    to: "/w/$slug/agents/chat/$conversation",
+                    params: { slug, conversation: next },
+                  }),
+                )
+                .catch((caught: unknown) =>
+                  setActionError(ipcMessage(caught, "Could not fork.")),
+                )
+                .finally(() => setForking(false));
+            },
       onReply: (text) => {
         const lines = text
           .split("\n")
@@ -328,8 +345,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         );
       },
       onAnswer: answer,
+      agent: label,
     }),
-    [workspace, id, forking, navigate, slug, answer],
+    [workspace, id, forking, navigate, slug, answer, agent, label],
   );
 
   const send = async (
@@ -369,7 +387,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         // Nothing was sent: another process writes it (D3).
         setSent((previous) => previous.filter((entry) => entry.key !== key));
         setActionError(
-          "Claude is running this conversation in another terminal. Exit it there to continue here.",
+          `${label} is running this conversation in another terminal. Exit it there to continue here.`,
         );
         return false;
       }
@@ -405,7 +423,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
 
   const session: AgentSession = listed ?? {
     id,
-    agent: "claude",
+    agent: agent ?? "claude",
     title: "",
     cliTitle: "",
     updatedAt: new Date().toISOString(),
@@ -427,7 +445,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         });
       else
         setActionError(
-          "Claude is running this conversation in another terminal.",
+          `${label} is running this conversation in another terminal.`,
         );
       return;
     }
@@ -453,7 +471,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const title =
     listed?.title ||
     (firstPrompt?.role === "user" ? firstLine(firstPrompt.text) : "") ||
-    "Claude conversation";
+    `${label} conversation`;
 
   const lastPromptAt =
     [...turns].reverse().find((turn) => turn.role === "user")?.at ?? null;
@@ -488,7 +506,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   return (
     <TooltipProvider delay={200}>
       <section
-        aria-label={`Claude — ${title}`}
+        aria-label={`${label} — ${title}`}
         className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
       >
         <WindowTitlebar className="gap-2.5">
@@ -497,7 +515,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               <OrbitSpinner className="text-foreground size-[13px]" />
             </span>
           ) : (
-            <TerminalKindIcon kind="claude" className="size-[13px] shrink-0" />
+            agent && (
+              <TerminalKindIcon kind={agent} className="size-[13px] shrink-0" />
+            )
           )}
           <h1
             className={cn(WINDOW_TITLE, working && "text-shimmer")}
@@ -687,6 +707,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
             <PermissionCard
               key={question.id}
               request={question}
+              agent={label}
               onAnswer={answer}
             />
           )}
@@ -698,6 +719,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 draftKey={id}
                 corner={<ContextButton facts={facts} />}
                 workspace={workspace}
+                agent={agent}
                 settings={settings}
                 onSettings={(next) =>
                   setSettings((previous) =>

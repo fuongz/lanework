@@ -172,7 +172,8 @@ export function AssistantActions({
   time: string | null;
   usage: TurnUsage | null;
   onSave: () => void;
-  onFork: () => void;
+  /** None for a conversation that cannot be forked (Codex's). */
+  onFork?: () => void;
   onReply: () => void;
   forking: boolean;
 }) {
@@ -180,12 +181,14 @@ export function AssistantActions({
     <Row align="start" time={time}>
       <CopyAction text={text} label="Copy" />
       <Action label="Save as note" icon={NoteAddIcon} onClick={onSave} />
-      <Action
-        label="Fork into a new conversation"
-        icon={GitForkIcon}
-        onClick={onFork}
-        disabled={forking}
-      />
+      {onFork && (
+        <Action
+          label="Fork into a new conversation"
+          icon={GitForkIcon}
+          onClick={onFork}
+          disabled={forking}
+        />
+      )}
       <Action label="Reply" icon={Comment01Icon} onClick={onReply} />
       {usage && (
         <Action label="Usage" icon={Analytics01Icon} tip={usageTip(usage)} />

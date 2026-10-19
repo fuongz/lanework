@@ -172,6 +172,7 @@ const conversation: DesktopConversationApi = {
   permissions: (workspace, id) =>
     ipcRenderer.invoke(conversationChannels.permissions, workspace, id),
   lastSettings: () => ipcRenderer.invoke(conversationChannels.lastSettings),
+  codexModels: () => ipcRenderer.invoke(conversationChannels.codexModels),
   linkPreview: (url) =>
     ipcRenderer.invoke(conversationChannels.linkPreview, url),
   suggest: (workspace, kind, query) =>

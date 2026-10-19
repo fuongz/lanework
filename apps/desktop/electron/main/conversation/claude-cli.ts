@@ -1,4 +1,5 @@
-// Where the user's own `claude` is, for the headless engine (FE-62/D1).
+// Where the user's own `claude` — or `codex` — is, for the headless engine
+// (FE-62/D1).
 //
 // ⚠️ Found the way the terminal finds agent CLIs (`terminal/agents.ts`): the
 // user's login AND interactive shell is asked, because Claude's installer may
@@ -17,7 +18,10 @@ export interface ClaudeCli {
   env: Record<string, string>;
 }
 
-const MARK = "__lanework_claude_cli__";
+/** The CLIs the chat runs. */
+export type CliName = "claude" | "codex";
+
+const MARK = "__lanework_agent_cli__";
 const TTL_MS = 5 * 60_000;
 
 async function executable(file: string): Promise<boolean> {
@@ -29,11 +33,16 @@ async function executable(file: string): Promise<boolean> {
   }
 }
 
-/** `command -v claude`'s answer: a path, or an alias whose target is one. */
-export function cliPath(answer: string): string | null {
+/** `command -v <name>`'s answer: a path, or an alias whose target is one. */
+export function cliPath(
+  answer: string,
+  name: CliName = "claude",
+): string | null {
   const line = answer.trim().split("\n").pop()?.trim() ?? "";
   if (isAbsolute(line)) return line;
-  const alias = /^(?:alias\s+)?claude=(['"]?)(.+?)\1$/.exec(line)?.[2]?.trim();
+  const alias = new RegExp(`^(?:alias\\s+)?${name}=(['"]?)(.+?)\\1$`)
+    .exec(line)?.[2]
+    ?.trim();
   if (!alias) return null;
   const first = alias.split(/\s+/)[0] ?? "";
   const expanded = first.startsWith("~/")
@@ -44,11 +53,12 @@ export function cliPath(answer: string): string | null {
 
 function probe(
   env: NodeJS.ProcessEnv,
+  name: CliName,
 ): Promise<{ path: string | null; PATH: string | null }> {
   if (process.platform === "win32")
     return Promise.resolve({ path: null, PATH: null });
   const shell = defaultShell(env);
-  const script = `printf '%s\\n' '${MARK}'; command -v claude; printf '%s\\n' '${MARK}'; printf '%s\\n' "$PATH"`;
+  const script = `printf '%s\\n' '${MARK}'; command -v ${name}; printf '%s\\n' '${MARK}'; printf '%s\\n' "$PATH"`;
   return new Promise((resolve) => {
     let out = "";
     const child = spawn(shell.file, [...shell.args, "-i", "-c", script], {
@@ -67,18 +77,47 @@ function probe(
       // [profile noise, command -v answer, PATH]
       const answer = parts.length >= 3 ? (parts[parts.length - 2] ?? "") : "";
       const PATH = parts.length >= 3 ? (parts.at(-1)?.trim() ?? "") : "";
-      resolve({ path: cliPath(answer), PATH: PATH || null });
+      resolve({ path: cliPath(answer, name), PATH: PATH || null });
     };
     child.once("error", settle);
     child.once("close", settle);
   });
 }
 
+/** Each CLI's own installers' places, when the shell could not say. */
+function installed(name: CliName): string[] {
+  return name === "claude"
+    ? [
+        join(homedir(), ".local", "bin", "claude"),
+        join(homedir(), ".claude", "local", "claude"),
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+      ]
+    : [
+        join(homedir(), ".local", "bin", "codex"),
+        "/opt/homebrew/bin/codex",
+        "/usr/local/bin/codex",
+      ];
+}
+
+const MISSING: Record<CliName, string> = {
+  claude: "Claude Code is not installed on this Mac.",
+  codex: "Codex is not installed on this Mac.",
+};
+
+/** The `claude` binary; see `createAgentCli`. */
+export function createClaudeCli(override?: () => string | undefined) {
+  return createAgentCli("claude", override);
+}
+
 /**
- * The `claude` binary and the environment to run it with, cached a while.
+ * The `name` binary and the environment to run it with, cached a while.
  * `override` is the test seam (`LANEWORK_CLAUDE_BIN` in a test run).
  */
-export function createClaudeCli(override?: () => string | undefined) {
+export function createAgentCli(
+  name: CliName,
+  override?: () => string | undefined,
+) {
   let cached: { at: number; cli: ClaudeCli | null } | null = null;
   let running: Promise<ClaudeCli | null> | null = null;
   return async function claudeCli(): Promise<ClaudeCli> {
@@ -88,17 +127,12 @@ export function createClaudeCli(override?: () => string | undefined) {
     if (cached && Date.now() - cached.at < TTL_MS && cached.cli)
       return cached.cli;
     running ??= (async () => {
-      const found = await probe(process.env);
+      const found = await probe(process.env, name);
       const env = { ...base };
       if (found.PATH) env.PATH = found.PATH;
-      // Claude's own installers' places, when the shell could not say.
-      const candidates = [
-        found.path,
-        join(homedir(), ".local", "bin", "claude"),
-        join(homedir(), ".claude", "local", "claude"),
-        "/opt/homebrew/bin/claude",
-        "/usr/local/bin/claude",
-      ].filter((entry): entry is string => Boolean(entry));
+      const candidates = [found.path, ...installed(name)].filter(
+        (entry): entry is string => Boolean(entry),
+      );
       for (const file of candidates)
         if (await executable(file)) return { file, env };
       return null;
@@ -107,7 +141,7 @@ export function createClaudeCli(override?: () => string | undefined) {
     });
     const cli = await running;
     cached = { at: Date.now(), cli };
-    if (!cli) throw new Error("Claude Code is not installed on this Mac.");
+    if (!cli) throw new Error(MISSING[name]);
     return cli;
   };
 }

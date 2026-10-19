@@ -11,10 +11,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { app, shell } from "electron";
 import {
+  type AgentModel,
   ANSWER_MAX,
   ANSWERS_MAX,
+  agentOfModel,
   type ComposerSettings,
   type Conversation,
+  type ConversationAgent,
   conversationChannels,
   type EngineState,
   type ImagePreview,
@@ -24,12 +27,15 @@ import {
   type PermissionAnswer,
   type PermissionRequest,
   type Suggestion,
+  setCodexModels,
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
 import { broadcast, handle } from "../ipc";
 import { onRunningChanged } from "../terminal";
 import { terminalFolder } from "../workspaces";
-import { createClaudeCli } from "./claude-cli";
+import { createAgentCli, createClaudeCli } from "./claude-cli";
+import { createCodexModels } from "./codex-models";
+import { codexRolloutPath, readCodexConversation } from "./codex-transcript";
 import { createEngines } from "./engine";
 import { forkConversation } from "./fork";
 import { type ImageScope, openableImage, previewImage } from "./image-preview";
@@ -107,6 +113,29 @@ async function folderOf(workspace: string): Promise<string> {
 }
 
 /**
+ * Whose transcript conversation `id` of `folder` is: Claude's when its file
+ * is in Claude's folder for it, Codex's when a rollout of that folder has
+ * the id; null when neither CLI has written it down.
+ */
+async function agentOf(
+  folder: string,
+  id: string,
+): Promise<ConversationAgent | null> {
+  const file = transcriptPath(agentHome(), folder, id);
+  if ((await stat(file).catch(() => null))?.isFile()) return "claude";
+  if (await codexRolloutPath(agentHome(), folder, id).catch(() => null))
+    return "codex";
+  return null;
+}
+
+/** Conversation `id` of `folder`, read from whichever CLI wrote it. */
+async function readAny(folder: string, id: string): Promise<Conversation> {
+  return (await agentOf(folder, id)) === "codex"
+    ? readCodexConversation(agentHome(), folder, id)
+    : readConversation(agentHome(), folder, id);
+}
+
+/**
  * What a chat badge's image may be read from (FE-65): the workspace's folder
  * and the images attached to the conversation — read from its transcript
  * here, never taken from the page.
@@ -127,9 +156,7 @@ async function imageScope(args: unknown[]): Promise<{
   )
     throw new Error("A valid path is required");
   const folder = await folderOf(workspace);
-  const read = await readConversation(agentHome(), folder, conversation).catch(
-    () => null,
-  );
+  const read = await readAny(folder, conversation).catch(() => null);
   const attachments = (read?.turns ?? []).flatMap((turn) =>
     turn.role === "user"
       ? turn.attachments.flatMap((entry) => (entry.path ? [entry.path] : []))
@@ -189,9 +216,21 @@ export function registerConversation(
   });
   const testing =
     !app.isPackaged && Boolean(process.env.LANEWORK_TEST_USER_DATA);
+  // ⚠️ Read before any settings are checked: a Codex model is only known
+  // once its list is, and a stored one not on the fallback would be dropped.
+  const readCodexModels = createCodexModels(agentHome);
+  const codexModels = async (): Promise<AgentModel[]> => {
+    const models = await readCodexModels().catch(() => []);
+    setCodexModels(models);
+    return models;
+  };
+  const ready = codexModels();
   const engines = createEngines({
     cli: createClaudeCli(() =>
       testing ? process.env.LANEWORK_CLAUDE_BIN : undefined,
+    ),
+    codexCli: createAgentCli("codex", () =>
+      testing ? process.env.LANEWORK_CODEX_BIN : undefined,
     ),
     emit: (event) => broadcast(conversationChannels.event, event),
     terminalOn: bridge.terminalOn,
@@ -235,19 +274,19 @@ export function registerConversation(
     conversationChannels.read,
     devUrl,
     async (args): Promise<Conversation> => {
+      await ready;
       if (args.length !== 2)
         throw new Error("A workspace and a conversation are required");
       const { workspace, conversation } = conversationOf(args);
       const folder = await folderOf(workspace);
-      const file = transcriptPath(agentHome(), folder, conversation);
+      const agent = await agentOf(folder, conversation);
       // A conversation started here whose first line the CLI has not
       // written yet: what its engine holds so far.
-      const pending = (await stat(file).catch(() => null))?.isFile()
-        ? null
-        : engines.pending(workspace, conversation);
+      const pending = agent ? null : engines.pending(workspace, conversation);
       if (pending)
         return {
           id: conversation,
+          agent: pending.agent,
           cwd: folder,
           branch: null,
           turns: pending.turns,
@@ -256,7 +295,7 @@ export function registerConversation(
           settings: await store.of(conversation),
           truncated: false,
         };
-      const read = await readConversation(agentHome(), folder, conversation);
+      const read = await readAny(folder, conversation);
       return { ...read, settings: await store.of(conversation) };
     },
   );
@@ -265,6 +304,8 @@ export function registerConversation(
     conversationChannels.start,
     devUrl,
     async (args): Promise<{ conversation: string; engine: EngineState }> => {
+      // A model Codex listed since the last read is known now.
+      await codexModels();
       if (args.length !== 1) throw new Error("A request is required");
       // ⚠️ The id is main's own, never the page's: a new one cannot name a
       // conversation that already exists.
@@ -277,6 +318,12 @@ export function registerConversation(
         throw new Error("Write something first.");
       const folder = await folderOf(request.workspace);
       const content = await contentOf(request.text, request.attachments);
+      // The model picks the CLI: Codex names its conversation itself.
+      if (agentOfModel(request.settings.model) === "codex")
+        return engines.startCodex(request.workspace, folder, {
+          content,
+          settings: request.settings,
+        });
       const engine = await engines.start(
         request.workspace,
         conversation,
@@ -291,25 +338,32 @@ export function registerConversation(
     conversationChannels.send,
     devUrl,
     async (args): Promise<EngineState> => {
+      await codexModels();
       if (args.length !== 1) throw new Error("A request is required");
       const request = sendRequest(args[0]);
       const folder = await folderOf(request.workspace);
       // ⚠️ Only a conversation this folder has: its transcript is where the
       // CLI keeps this folder's, under the id it was asked for.
-      const file = transcriptPath(agentHome(), folder, request.conversation);
-      if (
-        !(await stat(file).catch(() => null))?.isFile() &&
-        !engines.pending(request.workspace, request.conversation)
-      )
-        throw new Error("That conversation is not in this project.");
+      const agent =
+        (await agentOf(folder, request.conversation)) ??
+        engines.pending(request.workspace, request.conversation)?.agent;
+      if (!agent) throw new Error("That conversation is not in this project.");
+      // A conversation stays on the CLI that wrote it.
+      if (agentOfModel(request.settings.model) !== agent)
+        throw new Error(
+          `Pick a ${agent === "codex" ? "Codex" : "Claude"} model for this conversation.`,
+        );
       const content = await contentOf(request.text, request.attachments);
       return noted(
         request.workspace,
         request.conversation,
-        engines.send(request.workspace, request.conversation, folder, {
-          content,
-          settings: request.settings,
-        }),
+        engines.send(
+          request.workspace,
+          request.conversation,
+          folder,
+          { content, settings: request.settings },
+          agent,
+        ),
       );
     },
   );
@@ -349,6 +403,8 @@ export function registerConversation(
       throw new Error("A workspace and a conversation are required");
     const { workspace, conversation } = conversationOf(args);
     const folder = await folderOf(workspace);
+    if ((await agentOf(folder, conversation)) === "codex")
+      throw new Error("A Codex conversation cannot be forked here yet.");
     const fork = await forkConversation(agentHome(), folder, conversation);
     const settings = await store.of(conversation);
     if (settings) await store.remember(fork, settings);
@@ -424,8 +480,18 @@ export function registerConversation(
     conversationChannels.lastSettings,
     devUrl,
     async (args): Promise<ComposerSettings> => {
+      await ready;
       if (args.length !== 0) throw new Error("No arguments are taken");
       return store.last();
+    },
+  );
+
+  handle(
+    conversationChannels.codexModels,
+    devUrl,
+    async (args): Promise<AgentModel[]> => {
+      if (args.length !== 0) throw new Error("No arguments are taken");
+      return codexModels();
     },
   );
 

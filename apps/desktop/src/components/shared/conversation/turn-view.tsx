@@ -110,7 +110,10 @@ export function UserBubble({
 }
 
 export interface TurnHandlers {
-  onFork: () => void;
+  /** Who the permission cards say asks: Claude or Codex. */
+  agent?: string;
+  /** None for a conversation that cannot be forked (Codex's). */
+  onFork?: () => void;
   onReply: (text: string) => void;
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
 }
@@ -195,6 +198,7 @@ function AssistantView({
           <PermissionCard
             key={block.request.id}
             request={block.request}
+            agent={handlers.agent}
             onAnswer={handlers.onAnswer}
           />
         );
@@ -203,6 +207,7 @@ function AssistantView({
         <PermissionCard
           key={request.id}
           request={request}
+          agent={handlers.agent}
           onAnswer={handlers.onAnswer}
         />
       ))}

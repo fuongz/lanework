@@ -1,17 +1,18 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
+  agentOfModel,
   type ComposerSettings,
   DEFAULT_SETTINGS,
   type OutgoingAttachment,
 } from "#/../shared/conversation";
+import { setChatAgent } from "#/components/shared/conversation/chat-agent";
 import { Composer } from "#/components/shared/conversation/composer";
 import { handFirstMessage } from "#/components/shared/conversation/first-message";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
-import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { ipcMessage } from "#/lib/ipc-error";
 import { useBoard } from "#/stores/board";
@@ -19,9 +20,10 @@ import { useBoard } from "#/stores/board";
 const ROUTE = "/_app/w/$slug/agents/chat/new" as const;
 
 /**
- * A new Claude conversation (FE-62): the composer alone, under a question.
- * Sending starts the user's own `claude` on a new conversation and opens it
- * as a chat.
+ * A new conversation (FE-62): the composer alone, under a question. The
+ * model picked picks the CLI — Claude Code or Codex — so the page names no
+ * agent until then; sending starts the user's own `claude` or `codex` on a
+ * new conversation and opens it as a chat.
  */
 export function NewConversationView() {
   const { slug } = useParams({ from: ROUTE });
@@ -35,6 +37,12 @@ export function NewConversationView() {
   });
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The usage strip follows the model picked: its CLI's quota.
+  const model = settings?.model ?? null;
+  useEffect(() => {
+    setChatAgent(model ? agentOfModel(model) : null);
+    return () => setChatAgent(null);
+  }, [model]);
 
   useEffect(() => {
     let gone = false;
@@ -86,11 +94,10 @@ export function NewConversationView() {
 
   return (
     <section
-      aria-label="New Claude conversation"
+      aria-label="New conversation"
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
       <WindowTitlebar className="gap-2.5">
-        <TerminalKindIcon kind="claude" className="size-[13px] shrink-0" />
         <h1 className={WINDOW_TITLE}>New conversation</h1>
       </WindowTitlebar>
 

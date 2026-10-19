@@ -53,7 +53,7 @@ function patched(turns: Turn[], turn: Turn): Turn[] {
 }
 
 /**
- * One Claude conversation as a chat (FE-62): read once, read again each time
+ * One conversation — Claude's or Codex's — as a chat (FE-62): read once, read again each time
  * the watcher says IT was written, with main's events laid over the read —
  * streamed text, a permission waiting, the engine's state.
  *
@@ -146,10 +146,11 @@ export function useConversation(
       })
       .catch(() => {});
 
+    // Either CLI's: the id is a UUID, and a Codex conversation's rollout
+    // moves the same way a Claude transcript does.
     const offActivity = terminal?.onAgentActivity((activity) => {
       if (
         activity.workspace === workspace &&
-        activity.agent === "claude" &&
         activity.id === id &&
         activity.subagent === null
       )
@@ -176,6 +177,9 @@ export function useConversation(
               : previous,
           );
           if (event.engine.state !== "running") read();
+          break;
+        case "moved":
+          read();
           break;
         case "delta":
           setState((previous) =>

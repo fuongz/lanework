@@ -8,6 +8,7 @@ import type {
   CodexQuota,
   CodexQuotaWindow,
 } from "#/../shared/terminal";
+import { useChatAgent } from "#/components/shared/conversation/chat-agent";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { Button } from "#/components/ui/button";
 import {
@@ -167,9 +168,10 @@ const usageAgent = (kind: string | undefined): UsageAgent | null =>
  * a running agent, a sub-agent's conversation, or a Claude chat — else the
  * agent in the terminal panel's active tab. Null for a shell, or nothing (D1b).
  *
- * ⚠️ The chat pages (`agents/chat/…`, FE-62) are Claude's own: the chat
- * engine runs only Claude. Missed, a chat showed no usage at all unless the
- * terminal panel happened to have a Claude tab active.
+ * ⚠️ The chat pages (`agents/chat/…`, FE-62) say whose they are: a
+ * conversation its CLI's, the new page the one its picked model runs on
+ * (`useChatAgent`). Missed, a chat showed no usage at all unless the
+ * terminal panel happened to have that agent's tab active.
  */
 function useUsageAgent(workspace: string): UsageAgent | null {
   const chat = useLocation({
@@ -188,13 +190,14 @@ function useUsageAgent(workspace: string): UsageAgent | null {
           ?.kind
       : undefined,
   );
+  const chatAgent = useChatAgent();
   const tab = useTerminal((state) => {
     const id = state.active[workspace];
     return state.sessions[workspace]?.find((entry) => entry.id === id)?.kind;
   });
   if (terminalId) return usageAgent(viewed);
   if (sub) return usageAgent(subAgent);
-  if (chat) return "claude";
+  if (chat) return chatAgent;
   return usageAgent(tab);
 }
 

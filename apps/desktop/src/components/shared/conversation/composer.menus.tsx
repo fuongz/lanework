@@ -14,8 +14,11 @@ import {
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useMemo, useState } from "react";
 import {
-  CLAUDE_MODELS,
+  AGENT_LABELS,
+  type AgentModel,
+  agentOfModel,
   type ComposerSettings,
+  type ConversationAgent,
   EFFORT_LABELS,
   EFFORTS,
   modelName,
@@ -23,6 +26,7 @@ import {
   PERMISSIONS,
   type Permission,
 } from "#/../shared/conversation";
+import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,9 +40,9 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
-import { ClaudeAiIcon } from "#/components/ui/svgs/claudeAiIcon";
 import { Switch } from "#/components/ui/switch";
 import { cn } from "#/lib/utils";
+import { useModels } from "./use-models";
 
 /** A pill in the composer's bottom row (ảnh 7). */
 const PILL =
@@ -66,19 +70,29 @@ function writeFavorites(ids: string[]) {
   }
 }
 
+const AGENTS: readonly ConversationAgent[] = ["claude", "codex"];
+
 /**
- * The model panel (ảnh 8): a narrow column — favourites, Claude — and a
- * search over the models, the legacy ones after a divider.
+ * The model panel (ảnh 8): a narrow column — favourites, then one tab per
+ * CLI, Claude and Codex — and a search over that tab's models, the legacy
+ * ones after a divider. `agent` locks it to one CLI's: a conversation stays
+ * on the CLI that wrote it.
  */
 function ModelPanel({
   model,
+  agent,
   onPick,
 }: {
   model: string;
+  agent: ConversationAgent | null;
   onPick: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [only, setOnly] = useState<"all" | "favorites">("all");
+  const [only, setOnly] = useState<ConversationAgent | "favorites">(
+    () => agent ?? agentOfModel(model),
+  );
+  const tabs = agent ? [agent] : AGENTS;
+  const models = useModels();
   const [favorites, setFavorites] = useState(readFavorites);
   const toggle = (id: string) => {
     const next = favorites.includes(id)
@@ -89,21 +103,27 @@ function ModelPanel({
   };
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return CLAUDE_MODELS.filter(
+    return models.filter(
       (entry) =>
-        (only === "all" || favorites.includes(entry.id)) &&
+        (!agent || entry.agent === agent) &&
+        (only === "favorites"
+          ? favorites.includes(entry.id)
+          : entry.agent === only) &&
         (!q || entry.label.toLowerCase().includes(q) || entry.id.includes(q)),
     );
-  }, [query, only, favorites]);
+  }, [query, only, favorites, agent, models]);
   const current = shown.filter((entry) => !entry.legacy);
   const legacy = shown.filter((entry) => entry.legacy);
 
-  const row = (entry: (typeof CLAUDE_MODELS)[number]) => (
+  const row = (entry: AgentModel) => (
     <DropdownMenuItem
       key={entry.id}
       onClick={() => onPick(entry.id)}
       className="group/model h-9 gap-2 rounded-lg px-2.5 text-[13px]"
     >
+      {only === "favorites" && (
+        <TerminalKindIcon kind={entry.agent} className="size-3.5 shrink-0" />
+      )}
       <span className="flex-1 truncate">{entry.label}</span>
       <button
         type="button"
@@ -148,15 +168,19 @@ function ModelPanel({
         >
           <HugeiconsIcon icon={StarIcon} className="size-4" strokeWidth={1.8} />
         </button>
-        <button
-          type="button"
-          aria-label="Claude models"
-          aria-pressed={only === "all"}
-          onClick={() => setOnly("all")}
-          className="aria-pressed:bg-foreground/10 hover:bg-foreground/[0.06] flex size-8 items-center justify-center rounded-lg transition-colors"
-        >
-          <ClaudeAiIcon className="size-4" />
-        </button>
+        {tabs.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            aria-label={`${AGENT_LABELS[tab]} models`}
+            title={AGENT_LABELS[tab]}
+            aria-pressed={only === tab}
+            onClick={() => setOnly(tab)}
+            className="aria-pressed:bg-foreground/10 hover:bg-foreground/[0.06] flex size-8 items-center justify-center rounded-lg transition-colors"
+          >
+            <TerminalKindIcon kind={tab} className="size-4" />
+          </button>
+        ))}
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <label className="border-foreground/10 flex h-10 shrink-0 items-center gap-2 border-b px-2.5">
@@ -205,18 +229,25 @@ function ModelPanel({
 }
 
 /**
- * The model pill and its menu (D9, ảnh 7–8): Fast, Effort ›, Model ›.
+ * The model pill and its menu (D9, ảnh 7–8): Fast, Effort ›, Model ›. The
+ * mark is the model's CLI.
  */
 export function ModelMenu({
   settings,
+  agent = null,
   onChange,
   disabled,
 }: {
   settings: ComposerSettings;
+  /** Only this CLI's models; null offers both. */
+  agent?: ConversationAgent | null;
   onChange: (next: Partial<ComposerSettings>) => void;
   disabled?: boolean;
 }) {
+  // Re-drawn when Codex's list arrives: its labels come with it.
+  useModels();
   const name = modelName(settings.model) ?? settings.model;
+  const kind = agentOfModel(settings.model);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -224,7 +255,7 @@ export function ModelMenu({
         aria-label={`Model: ${name}, effort ${EFFORT_LABELS[settings.effort]}${settings.fast ? ", fast" : ""}`}
         className={PILL}
       >
-        <ClaudeAiIcon className="size-3.5" />
+        <TerminalKindIcon kind={kind} className="size-3.5" />
         <span>{name}</span>
         <span className="text-muted-foreground">
           {EFFORT_LABELS[settings.effort]}
@@ -293,7 +324,7 @@ export function ModelMenu({
           <DropdownMenuSubTrigger className="h-9 rounded-lg px-2.5 text-[13px]">
             <span className="flex-1">Model</span>
             <span className="text-muted-foreground flex items-center gap-1.5">
-              <ClaudeAiIcon className="size-3.5" />
+              <TerminalKindIcon kind={kind} className="size-3.5" />
               {name}
             </span>
           </DropdownMenuSubTrigger>
@@ -303,6 +334,7 @@ export function ModelMenu({
           >
             <ModelPanel
               model={settings.model}
+              agent={agent}
               onPick={(model) => onChange({ model })}
             />
           </DropdownMenuSubContent>
@@ -340,7 +372,7 @@ function PermissionIcon({
   );
 }
 
-/** The permission pill and its menu (D9, ảnh 9). */
+/** The permission pill and its menu (D9, ảnh 9): the same four for both CLIs. */
 export function PermissionMenu({
   permission,
   onChange,
@@ -350,15 +382,16 @@ export function PermissionMenu({
   onChange: (permission: Permission) => void;
   disabled?: boolean;
 }) {
+  const copy = PERMISSION_COPY;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         disabled={disabled}
-        aria-label={`Permissions: ${PERMISSION_COPY[permission].label}`}
+        aria-label={`Permissions: ${copy[permission].label}`}
         className={PILL}
       >
         <PermissionIcon permission={permission} className="size-3.5" />
-        <span>{PERMISSION_COPY[permission].label}</span>
+        <span>{copy[permission].label}</span>
         <HugeiconsIcon
           icon={ArrowDown01Icon}
           className="text-muted-foreground size-3.5"
@@ -386,10 +419,10 @@ export function PermissionMenu({
             <PermissionIcon permission={entry} className="mt-0.5" />
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className="text-[13px] font-medium">
-                {PERMISSION_COPY[entry].label}
+                {copy[entry].label}
               </span>
               <span className="text-muted-foreground text-xs leading-snug">
-                {PERMISSION_COPY[entry].description}
+                {copy[entry].description}
               </span>
             </span>
           </DropdownMenuItem>

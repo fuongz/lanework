@@ -25,27 +25,35 @@ import { cn } from "#/lib/utils";
  */
 export function PermissionCard({
   request,
+  agent = "Claude",
   onAnswer,
 }: {
   request: PermissionRequest;
+  /** Who asks, by name: Claude or Codex. */
+  agent?: string;
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
 }) {
   if (request.questions)
     return (
       <QuestionCard
         id={request.id}
+        agent={agent}
         questions={request.questions}
         onAnswer={onAnswer}
       />
     );
-  return <ToolPermissionCard request={request} onAnswer={onAnswer} />;
+  return (
+    <ToolPermissionCard request={request} agent={agent} onAnswer={onAnswer} />
+  );
 }
 
 function ToolPermissionCard({
   request,
+  agent,
   onAnswer,
 }: {
   request: PermissionRequest;
+  agent: string;
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -68,7 +76,7 @@ function ToolPermissionCard({
         />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-[13px] font-medium">
-            Claude wants to use {request.tool}
+            {agent} wants to use {request.tool}
           </span>
           <span className="text-muted-foreground text-[13px] [overflow-wrap:anywhere]">
             {request.summary}
@@ -153,10 +161,12 @@ function said(picked: Picked): string {
  */
 function QuestionCard({
   id,
+  agent,
   questions,
   onAnswer,
 }: {
   id: string;
+  agent: string;
   questions: AskQuestion[];
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
 }) {
@@ -207,7 +217,7 @@ function QuestionCard({
 
   return (
     <section
-      aria-label={`Claude asks: ${question.question}`}
+      aria-label={`${agent} asks: ${question.question}`}
       className="bg-card border-border flex flex-col gap-3 rounded-xl border px-3.5 pt-3 pb-2.5 shadow-xs"
     >
       <div className="flex min-w-0 items-start gap-3">

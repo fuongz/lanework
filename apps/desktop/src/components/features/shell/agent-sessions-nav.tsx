@@ -47,12 +47,6 @@ import {
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "#/components/ui/dropdown-menu";
-import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -313,8 +307,6 @@ export function AgentSessionsNav({
   const chats = useChatEngines((state) => state.alive[workspace] ?? NO_CHATS);
   const refreshChats = useChatEngines((state) => state.refresh);
   const watchChats = useChatEngines((state) => state.watch);
-  const resume = useAgentTerminals((state) => state.resume);
-  const start = useAgentTerminals((state) => state.start);
   const stop = useAgentTerminals((state) => state.stop);
   const navigate = useNavigate();
   const {
@@ -446,8 +438,7 @@ export function AgentSessionsNav({
         !entry.exit,
     );
   /** The chat's own engine is running `session` (FE-62). */
-  const chatFor = (session: AgentSession) =>
-    session.agent === "claude" && chats.includes(session.id);
+  const chatFor = (session: AgentSession) => chats.includes(session.id);
   /** Running: a live terminal on it, or the chat's engine. */
   const isRunning = (session: AgentSession) =>
     Boolean(runningFor(session)) || chatFor(session);
@@ -485,27 +476,22 @@ export function AgentSessionsNav({
   };
 
   /**
-   * A conversation's row (FE-62/D3): Claude's opens as a chat — unless a tab
-   * is running it, where it was last used, and that tab opens — and Codex's
-   * resumes in a terminal as before.
+   * A conversation's row (FE-62/D3): Claude's and Codex's open as a chat —
+   * unless a tab is running it, where it was last used, and that tab opens.
    */
   const openSession = (session: AgentSession) => {
     const tab = runningFor(session);
-    if (session.agent === "claude" && tab) go(tab);
-    else if (session.agent === "claude")
+    if (tab) go(tab);
+    else
       void navigate({
         to: "/w/$slug/agents/chat/$conversation",
         params: { slug, conversation: session.id },
       });
-    else void resume(workspace, session).then(go);
   };
-  /** On screen: its terminal, or — Claude's — its chat. */
+  /** On screen: its terminal, or its chat. */
   const isCurrent = (session: AgentSession) =>
     (onScreen?.resume === session.id && onScreen.kind === session.agent) ||
-    (session.agent === "claude" &&
-      viewing === session.id &&
-      !viewingSub &&
-      !viewingTask);
+    (viewing === session.id && !viewingSub && !viewingTask);
 
   // ⚠️ Pinned is its own group, newest pin on top, and ALWAYS shown in full
   // — the fold only ever hides Agents' rows (FE-25/D1).
@@ -558,9 +544,7 @@ export function AgentSessionsNav({
       return slot(
         agentKey(session),
         session.agent,
-        session.agent === "claude"
-          ? `Open “${session.title}”`
-          : `Resume “${session.title}” in ${agent}`,
+        `Open “${session.title}”`,
         `${session.title} — ${agent}, ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}`,
         working ? "working" : terminal ? "running" : null,
         isCurrent(session),
@@ -684,11 +668,7 @@ export function AgentSessionsNav({
                   type="button"
                   onClick={onResume}
                   aria-current={current ? "page" : undefined}
-                  aria-label={
-                    session.agent === "claude"
-                      ? `Open “${session.title}”`
-                      : `Resume “${session.title}” in ${agent}`
-                  }
+                  aria-label={`Open “${session.title}”`}
                   aria-busy={working || undefined}
                   title={`${session.title}\n${agent}, ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}${summary ? `\n${summary}` : ""}`}
                   onPointerEnter={() => peek(session)}
@@ -937,44 +917,27 @@ export function AgentSessionsNav({
             <span className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
               Agents
             </span>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                aria-label="New agent"
-                title="New agent"
-                disabled={!hasFolder}
-                className="hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
-              >
-                <HugeiconsIcon
-                  icon={Add01Icon}
-                  className="size-3.5"
-                  strokeWidth={2}
-                />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-max min-w-40">
-                {agents.map((agent) => (
-                  <DropdownMenuItem
-                    key={agent}
-                    className="text-[13px] whitespace-nowrap"
-                    // Claude's opens as a chat (FE-62): the new page's
-                    // composer starts it.
-                    onClick={() =>
-                      agent === "claude"
-                        ? void navigate({
-                            to: "/w/$slug/agents/chat/new",
-                            params: { slug },
-                          })
-                        : void start(workspace, agent).then(go)
-                    }
-                  >
-                    <TerminalKindIcon
-                      kind={agent}
-                      className="size-4 shrink-0"
-                    />
-                    New {TERMINAL_KIND_LABELS[agent]}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* A new conversation opens as a chat (FE-62): its model picks
+                the CLI, Claude Code or Codex, and its composer starts it. */}
+            <button
+              type="button"
+              aria-label="New conversation"
+              title="New conversation"
+              disabled={!hasFolder}
+              onClick={() =>
+                void navigate({
+                  to: "/w/$slug/agents/chat/new",
+                  params: { slug },
+                })
+              }
+              className="hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+            >
+              <HugeiconsIcon
+                icon={Add01Icon}
+                className="size-3.5"
+                strokeWidth={2}
+              />
+            </button>
           </div>
           {shown.map((session) => sessionRow(session))}
           {rest.length > FOLDED && (

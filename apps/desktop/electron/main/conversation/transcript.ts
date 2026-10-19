@@ -533,6 +533,7 @@ export function conversationOf(
   }
   return {
     id,
+    agent: "claude",
     cwd,
     branch,
     turns,

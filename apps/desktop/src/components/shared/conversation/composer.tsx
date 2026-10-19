@@ -19,6 +19,7 @@ import {
 } from "react";
 import {
   type ComposerSettings,
+  type ConversationAgent,
   type OutgoingAttachment,
   PASTE_MAX,
   type Suggestion,
@@ -101,6 +102,11 @@ export const Composer = forwardRef<
     /** The top row's right corner: the conversation's context ring. */
     corner?: ReactNode;
     workspace: string;
+    /**
+     * The CLI the conversation is on: its models only. Null on a new one,
+     * where the model picked picks the CLI.
+     */
+    agent?: ConversationAgent | null;
     settings: ComposerSettings;
     onSettings: (next: Partial<ComposerSettings>) => void;
     working: boolean;
@@ -120,6 +126,7 @@ export const Composer = forwardRef<
     autoFocus,
     corner,
     workspace,
+    agent = null,
     settings,
     onSettings,
     working,
@@ -527,7 +534,7 @@ export const Composer = forwardRef<
           }}
         />
         <AttachMenu onUpload={() => picker.current?.click()} />
-        <ModelMenu settings={settings} onChange={onSettings} />
+        <ModelMenu settings={settings} agent={agent} onChange={onSettings} />
         <PermissionMenu
           permission={settings.permission}
           onChange={(permission) => onSettings({ permission })}
