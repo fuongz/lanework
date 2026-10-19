@@ -725,6 +725,33 @@ export async function runningProjects(): Promise<RunningProject[]> {
 }
 
 /**
+ * Which projects the running terminals belong to, one line each —
+ * `fuongz/may: claude, zsh` — for the quit prompt: they may all be in
+ * projects other than the one on screen. Empty when they cannot be read.
+ */
+async function liveTerminalsText(): Promise<string> {
+  const tabs = await request<TerminalSession[]>({ t: "list" }, 2_000).catch(
+    (): TerminalSession[] => [],
+  );
+  const byWorkspace = new Map<string, string[]>();
+  for (const tab of tabs) {
+    if (tab.exit) continue;
+    const kinds = byWorkspace.get(tab.workspace) ?? [];
+    kinds.push(tab.kind === "shell" ? tab.shell : tab.kind);
+    byWorkspace.set(tab.workspace, kinds);
+  }
+  const lines = await Promise.all(
+    [...byWorkspace].map(async ([key, kinds]) => {
+      const name = await knownWorkspace(key)
+        .then(({ workspace }) => workspace.name)
+        .catch(() => key);
+      return `${name}: ${kinds.join(", ")}`;
+    }),
+  );
+  return lines.length > 0 ? `${lines.join("\n")}\n\n` : "";
+}
+
+/**
  * Quitting with shells still running asks first (FE-19/D8).
  *
  * ⚠️ Skipped only in an unpackaged app booted by the test suite, which cannot
@@ -744,7 +771,7 @@ async function confirmQuit(): Promise<boolean> {
         live === 1
           ? "A terminal is still running."
           : `${live} terminals are still running.`,
-      detail: "Quitting Lanework stops them.",
+      detail: `${await liveTerminalsText()}Quitting Lanework stops them.`,
     });
     if (response !== 0) return false;
   }
