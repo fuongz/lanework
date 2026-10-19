@@ -82,8 +82,7 @@ function CopyAction({ text, label }: { text: string; label: string }) {
 }
 
 /**
- * The row under a message (D7): its actions on hover or keyboard focus, its
- * time always.
+ * The row under a message (D7): its actions and its time, always shown.
  */
 function Row({
   align,
@@ -101,19 +100,10 @@ function Row({
         align === "end" ? "justify-end" : "justify-start",
       )}
     >
-      <div className="hidden items-center gap-0.5 group-focus-within/turn:flex group-hover/turn:flex">
-        {children}
-      </div>
+      <div className="flex items-center gap-0.5">{children}</div>
       {time && (
         <span className="text-muted-foreground flex items-center gap-1.5 px-1 text-xs tabular-nums">
-          {align === "start" && (
-            <span
-              aria-hidden="true"
-              className="hidden group-focus-within/turn:inline group-hover/turn:inline"
-            >
-              ·
-            </span>
-          )}
+          {align === "start" && <span aria-hidden="true">·</span>}
           {time}
         </span>
       )}
