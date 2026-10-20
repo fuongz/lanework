@@ -6,8 +6,10 @@ import { WindowTitlebarHost } from "#/components/shared/navigation/window-titleb
 import { Input } from "#/components/ui/input";
 import { useSettingsSearch } from "#/stores/settings-search";
 import { SettingsNav } from "./settings-nav";
+import { SettingsProjectPicker } from "./settings-project-picker";
 
-const WIDE = /^\/settings\/(config|skills|memory|instructions)(\/|$)/;
+const WIDE =
+  /^\/settings\/(config|skills|project-skills|memory|instructions)(\/|$)/;
 
 /**
  * The full-window settings view: a sidebar of sections beside the open one.
@@ -35,14 +37,18 @@ export function SettingsShell({ children }: { children: ReactNode }) {
 
   return (
     // The same window as the app shell: a title bar across it (FE-58), and
-    // under it the rail beside an inset card. The bar holds only the window
-    // controls here — a settings page keeps its title in its own content.
+    // under it the rail beside an inset card. Most pages keep their title in
+    // their own content; the file pages (Skills, Config files) put theirs in
+    // the bar as Files does, and the Projects pages their project picker.
     // ⚠️ The split is stated, not read from `--rail-width`: that one is the
     // app rail's, and it stays on <html> at whatever width the rail had when
     // the app shell went away.
     <div className="bg-sidebar flex h-screen flex-col">
       <WindowTitlebarHost
         style={{ "--titlebar-split": "15rem" } as CSSProperties}
+        // On every page, not only the Projects ones: which project the
+        // Projects pages are about is worth seeing from anywhere here.
+        lead={<SettingsProjectPicker />}
       />
       <div className="flex min-h-0 flex-1">
         <aside className="settings-sidebar flex w-60 shrink-0 flex-col overflow-y-auto px-2.5">

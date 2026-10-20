@@ -284,7 +284,7 @@ function Groups({
                     className="text-muted-foreground"
                     onClick={() => void navigate({ to: "/settings/agents" })}
                   >
-                    Settings › Agents
+                    Settings › Harness
                     <HugeiconsIcon
                       icon={ArrowRight01Icon}
                       strokeWidth={1.8}

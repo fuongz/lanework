@@ -8,14 +8,17 @@
 //
 // FE-52/D8 adds the one write: the `lanework` MCP entry in the agents' USER
 // config (`mcp-entry.ts`), and only that entry.
+import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { app, shell } from "electron";
 import {
   type AgentSetup,
   agentSetupChannels,
   isSetupId,
   type SetupFile,
+  type SetupScope,
 } from "../../../shared/agent-setup";
 import {
   type LaneworkMcpAgent,
@@ -53,6 +56,42 @@ function where() {
 async function read(slug: string): Promise<AgentSetup> {
   const folder = await terminalFolder(slug);
   return (await readAgentSetup(folder, where())).setup;
+}
+
+const GLOBAL_SCOPES = new Set<SetupScope>(["user", "plugin", "system"]);
+
+/**
+ * What every project gets (Settings › MCP): the user's own config, the
+ * plugins installed for the user, and Codex's system skills — no folder's.
+ *
+ * ⚠️ Read against a folder that is not there: `readAgentSetup` reads the
+ * user's files whatever the folder, and finds nothing of a project's in one
+ * that does not exist. The scope filter is what makes it global, though —
+ * it drops anything keyed to that path (a `local` entry, a project plugin).
+ */
+async function readGlobal(): Promise<AgentSetup> {
+  const nowhere = join(
+    app.getPath("temp"),
+    `lanework-no-project-${randomUUID()}`,
+  );
+  const there = await stat(nowhere).then(
+    () => true,
+    () => false,
+  );
+  if (there) throw new Error("Could not read your agent setup. Try again.");
+  const { setup } = await readAgentSetup(nowhere, where());
+  const global = <T extends { scope: SetupScope }>(items: T[]) =>
+    items.filter((item) => GLOBAL_SCOPES.has(item.scope));
+  return {
+    ...setup,
+    folder: null,
+    mcp: global(setup.mcp),
+    skills: global(setup.skills),
+    commands: global(setup.commands),
+    hooks: global(setup.hooks),
+    permissions: global(setup.permissions),
+    plugins: global(setup.plugins),
+  };
 }
 
 /** The skill or command `id` names, as this folder's setup reads NOW. */
@@ -164,6 +203,10 @@ export function registerAgentSetup(devUrl?: string): void {
   handle(agentSetupChannels.read, devUrl, (args) => {
     if (args.length !== 1) throw new Error("read takes one project");
     return read(slugArg(args[0]));
+  });
+  handle(agentSetupChannels.readGlobal, devUrl, (args) => {
+    if (args.length) throw new Error("readGlobal takes no arguments");
+    return readGlobal();
   });
   handle(agentSetupChannels.open, devUrl, (args) => {
     if (args.length !== 2) throw new Error("open takes a project and an id");

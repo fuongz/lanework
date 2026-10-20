@@ -1,92 +1,75 @@
-import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import { RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConfigFile } from "#/../shared/agent-config";
 import { AgentConfigPane } from "#/components/features/settings/agent-config-editor";
-import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
+import { EditorTabs } from "#/components/shared/editor/editor-tabs";
+import {
+  FileBrowserLayout,
+  FileBrowserTree,
+  treePath,
+} from "#/components/shared/settings/file-browser";
+import { Button } from "#/components/ui/button";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
 } from "#/components/ui/empty";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-  usePersistedLayout,
-} from "#/components/ui/resizable";
 import { ipcMessage } from "#/lib/ipc-error";
-import { cn } from "#/lib/utils";
 
-const AGENTS = [
-  { agent: "claude", title: "Claude Code" },
-  { agent: "codex", title: "Codex" },
-] as const;
-
-const ROW =
-  "hover:bg-foreground/[0.04] aria-[current]:bg-foreground/[0.06] focus-visible:ring-accent-brand flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md pe-2 text-start outline-none focus-visible:ring-2";
-
-function size(bytes: number | null): string {
-  if (bytes === null) return "—";
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
-}
-
-/** Which groups are folded; anything not in it is open. Per viewer. */
-function useCollapsed() {
-  const key = "lanework:agent-config-collapsed";
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+/**
+ * The files open as tabs, per page kind, in the order they were opened.
+ * Per viewer, like the folds; the active one is `?file=`, not kept here.
+ */
+function useOpenTabs(kind: "config" | "skill") {
+  const key = `lanework:agent-config-tabs:${kind}`;
+  const [tabs, setTabs] = useState<string[]>(() => {
     try {
-      return new Set(JSON.parse(localStorage.getItem(key) ?? "[]") as string[]);
+      const stored: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+      return Array.isArray(stored)
+        ? stored.filter((id): id is string => typeof id === "string")
+        : [];
     } catch {
-      return new Set();
+      return [];
     }
   });
-  const toggle = useCallback((id: string) => {
-    setCollapsed((previous) => {
-      const next = new Set(previous);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      try {
-        localStorage.setItem(key, JSON.stringify([...next]));
-      } catch {
-        // Folding is a convenience; a blocked store just forgets it.
-      }
-      return next;
-    });
-  }, []);
-  return { collapsed, toggle };
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(tabs));
+    } catch {
+      // Tabs are a convenience; a blocked store just forgets them.
+    }
+  }, [key, tabs]);
+  return [tabs, setTabs] as const;
 }
+
+const CLOSE_DIRTY =
+  "Close this file without saving? Your changes will be lost.";
 
 const PAGES = {
   config: {
     route: "/settings/config",
     title: "Config files",
     empty:
-      "Claude Code's and Codex's own settings and instructions — the ones every project uses. Saving keeps the previous version beside the file.",
+      "Claude Code and Codex settings for every project. Saving keeps a backup.",
   },
   skill: {
     route: "/settings/skills",
     title: "Skills",
-    empty:
-      "Your own skills: ~/.claude/skills for Claude Code, ~/.agents/skills (and the older ~/.codex/skills) for Codex. Saving keeps the previous version beside SKILL.md.",
+    empty: "Your skills for every project. Saving keeps a backup.",
   },
 } as const;
 
 /**
  * Settings › Config files and Settings › Skills (FE-47/D8, D9): the user's
  * own Claude Code and Codex config files — or skills — as a tree by agent,
- * beside the one open in an editor, laid out the way Instructions is.
+ * beside the ones open as tabs in an editor, the way the Files screen is.
  *
- * ⚠️ The open file is in the URL (`?file=<id>`), so Back returns to the
- * previous one. Leaving a file with edits not saved asks first.
+ * ⚠️ The active tab is in the URL (`?file=<id>`), so Back returns to the
+ * previous one. Every open tab's pane stays mounted, only hidden, so its
+ * edits survive switching away; closing one with edits not saved asks first.
  */
 export function AgentConfigPage({ kind }: { kind: "config" | "skill" }) {
   const page = PAGES[kind];
@@ -94,12 +77,8 @@ export function AgentConfigPage({ kind }: { kind: "config" | "skill" }) {
   const navigate = useNavigate();
   const [files, setFiles] = useState<ConfigFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const dirty = useRef(false);
-  const { collapsed, toggle } = useCollapsed();
-  const { defaultLayout, onLayoutChanged } = usePersistedLayout(
-    `lanework:agent-config:${kind}`,
-    ["tree", "editor"],
-  );
+  const [tabs, setTabs] = useOpenTabs(kind);
+  const [dirty, setDirty] = useState<ReadonlySet<string>>(() => new Set());
 
   const refresh = useCallback(async () => {
     const surface = window.desktop?.agentConfig;
@@ -121,201 +100,185 @@ export function AgentConfigPage({ kind }: { kind: "config" | "skill" }) {
     return () => window.removeEventListener("focus", again);
   }, [refresh]);
 
-  const setDirty = useCallback((value: boolean) => {
-    dirty.current = value;
-  }, []);
+  const mine = (files ?? []).filter((file) => file.kind === kind);
+
+  // Once the list is in: drop the tabs of files that are gone, and give the
+  // active file a tab if it has none — Back and links land here too.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `mine` comes from `files`
+  useEffect(() => {
+    if (!files) return;
+    const ids = new Set<string>(mine.map((file) => file.id));
+    setTabs((previous) => {
+      const kept = previous.filter((id) => ids.has(id));
+      if (openId && ids.has(openId) && !kept.includes(openId))
+        kept.push(openId);
+      return kept.length === previous.length &&
+        kept.every((id, index) => id === previous[index])
+        ? previous
+        : kept;
+    });
+  }, [files, openId, setTabs]);
+
+  // One stable callback per file, so a pane does not report again each render.
+  const dirtyCallbacks = useRef(new Map<string, (value: boolean) => void>());
+  function onDirtyChange(id: string) {
+    let callback = dirtyCallbacks.current.get(id);
+    if (!callback) {
+      callback = (value: boolean) =>
+        setDirty((previous) => {
+          if (previous.has(id) === value) return previous;
+          const next = new Set(previous);
+          if (value) next.add(id);
+          else next.delete(id);
+          return next;
+        });
+      dirtyCallbacks.current.set(id, callback);
+    }
+    return callback;
+  }
 
   function open(id: string) {
     if (id === openId) return;
-    if (
-      dirty.current &&
-      !window.confirm(
-        "Leave this file without saving? Your changes will be lost.",
-      )
-    )
-      return;
-    dirty.current = false;
+    // A file already in a tab keeps its edits in its pane: nothing to ask.
+    setTabs((previous) =>
+      previous.includes(id) ? previous : [...previous, id],
+    );
     void navigate({ to: page.route, search: { file: id } });
   }
 
-  const mine = (files ?? []).filter((file) => file.kind === kind);
-  const selected = mine.find((file) => file.id === openId) ?? null;
-
-  const row = (file: ConfigFile, depth: number) => (
-    <button
-      key={file.id}
-      type="button"
-      aria-current={file.id === openId ? "page" : undefined}
-      title={file.description || file.path}
-      onClick={() => open(file.id)}
-      className={ROW}
-      style={{ paddingInlineStart: 6 + depth * 12 }}
-    >
-      <span className="size-4 shrink-0" />
-      <FileTypeIcon
-        path={file.kind === "skill" ? "SKILL.md" : file.label}
-        className={cn("size-4 shrink-0", !file.exists && "opacity-50")}
-      />
-      <span
-        className={cn(
-          "min-w-0 flex-1 truncate text-[13px]",
-          !file.exists && "text-muted-foreground",
-        )}
-      >
-        {file.label}
-        {file.id.startsWith("skill:codex:") && (
-          <span className="text-muted-foreground ms-1.5 text-[11px]">
-            ~/.codex
-          </span>
-        )}
-      </span>
-      <span className="text-muted-foreground shrink-0 text-[11px]">
-        {file.exists ? size(file.size) : "New"}
-      </span>
-    </button>
+  const close = useCallback(
+    (id: string) => {
+      if (dirty.has(id) && !window.confirm(CLOSE_DIRTY)) return;
+      const index = tabs.indexOf(id);
+      const rest = tabs.filter((tab) => tab !== id);
+      setTabs(rest);
+      setDirty((previous) => {
+        if (!previous.has(id)) return previous;
+        const next = new Set(previous);
+        next.delete(id);
+        return next;
+      });
+      dirtyCallbacks.current.delete(id);
+      if (id !== openId) return;
+      // The neighbour on the right, else the one on the left, else none.
+      const next = rest[index] ?? rest[index - 1];
+      void navigate({ to: page.route, search: next ? { file: next } : {} });
+    },
+    [dirty, tabs, openId, navigate, page.route, setTabs],
   );
 
-  const tree = (
-    <nav aria-label={page.title} className="flex flex-col px-2 pb-4">
-      {AGENTS.map(({ agent, title }) => {
-        const rows = mine.filter((file) => file.agent === agent);
-        return (
-          <Group
-            key={agent}
-            title={title}
-            count={kind === "skill" ? rows.length : null}
-            open={!collapsed.has(`${kind}:${agent}`)}
-            onToggle={() => toggle(`${kind}:${agent}`)}
-          >
-            {rows.length ? (
-              rows.map((file) => row(file, 0))
-            ) : (
-              <p
-                className="text-muted-foreground py-1 text-[12px]"
-                style={{ paddingInlineStart: 6 + 22 }}
-              >
-                No skills yet
-              </p>
-            )}
-          </Group>
-        );
-      })}
-    </nav>
-  );
+  // ⌘W closes the active tab while this page is up — the app menu leaves it
+  // unbound for exactly this.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.shiftKey ||
+        event.altKey ||
+        event.key.toLowerCase() !== "w"
+      )
+        return;
+      if (!openId || !tabs.includes(openId)) return;
+      event.preventDefault();
+      close(openId);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [openId, tabs, close]);
+
+  const openFiles = tabs
+    .map((id) => mine.find((file) => file.id === id))
+    .filter((file): file is ConfigFile => !!file);
 
   return (
-    <ResizablePanelGroup
+    <FileBrowserLayout
       id={`lanework:agent-config:${kind}`}
-      defaultLayout={defaultLayout}
-      onLayoutChanged={onLayoutChanged}
-    >
-      <ResizablePanel
-        id="tree"
-        defaultSize="300px"
-        minSize="18%"
-        maxSize="45%"
-        groupResizeBehavior="preserve-pixel-size"
-      >
-        <aside className="border-border flex h-full min-h-0 flex-col border-e">
-          <header className="window-drag-region border-border flex h-11 shrink-0 items-center gap-2 border-b px-3.5">
-            <h1 className="text-[13px] font-medium">{page.title}</h1>
-          </header>
-          <div className="min-h-0 flex-1 overflow-y-auto pt-1">
-            {error ? (
-              <p
-                role="alert"
-                className="text-destructive px-3.5 py-2 text-[13px]"
-              >
-                {error}
-              </p>
-            ) : files ? (
-              tree
-            ) : (
-              <p className="text-muted-foreground px-3.5 py-2 text-xs">
-                Reading {page.title.toLowerCase()}…
-              </p>
-            )}
-          </div>
-        </aside>
-      </ResizablePanel>
-      <ResizableHandle aria-label={`Resize ${page.title.toLowerCase()} list`} />
-      <ResizablePanel id="editor" minSize="40%">
-        {selected ? (
-          <AgentConfigPane
-            key={selected.id}
-            file={selected}
-            onSaved={() => void refresh()}
-            onDirtyChange={setDirty}
-          />
-        ) : (
-          <div className="flex h-full flex-col">
-            <div className="window-drag-region h-11 shrink-0" />
-            <Empty className="flex-1">
-              <EmptyHeader>
-                <EmptyTitle>
-                  {openId && files
-                    ? "That file is no longer there"
-                    : kind === "skill"
-                      ? "Pick a skill"
-                      : "Pick a file"}
-                </EmptyTitle>
-                <EmptyDescription>{page.empty}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          </div>
-        )}
-      </ResizablePanel>
-    </ResizablePanelGroup>
-  );
-}
-
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <span className="text-muted-foreground flex size-4 shrink-0 items-center justify-center">
-      <HugeiconsIcon
-        icon={ArrowRight01Icon}
-        className={cn("size-3 transition-transform", open && "rotate-90")}
-        strokeWidth={2}
-        aria-hidden="true"
-      />
-    </span>
-  );
-}
-
-/** An agent's root: a heading that folds what is under it. */
-function Group({
-  title,
-  count,
-  open,
-  onToggle,
-  children,
-}: {
-  title: string;
-  /** Shown at the end of the heading; null for none. */
-  count: number | null;
-  open: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col pt-2 first:pt-1">
-      <h2>
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={onToggle}
-          className="text-muted-foreground hover:text-foreground focus-visible:ring-accent-brand flex h-7 w-full items-center gap-1.5 rounded-md ps-1.5 text-[11px] font-medium tracking-wide uppercase outline-none focus-visible:ring-2"
+      title={page.title}
+      actions={
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Refresh ${page.title.toLowerCase()}`}
+          title="Refresh"
+          onClick={() => void refresh()}
         >
-          <Chevron open={open} />
-          <span className="flex-1 text-start">{title}</span>
-          {count !== null && (
-            <span className="pe-2 font-normal tracking-normal normal-case">
-              {count}
-            </span>
-          )}
-        </button>
-      </h2>
-      {open && children}
-    </div>
+          <HugeiconsIcon
+            icon={RefreshIcon}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        </Button>
+      }
+      sidebar={
+        error ? (
+          <p role="alert" className="text-destructive px-3.5 py-2 text-[13px]">
+            {error}
+          </p>
+        ) : files ? (
+          mine.length ? (
+            <FileBrowserTree
+              entries={mine.map((file) => ({
+                id: file.id,
+                path: treePath(file.path),
+              }))}
+              active={openId ?? null}
+              onOpen={open}
+              noun={kind === "skill" ? "skill" : "file"}
+            />
+          ) : (
+            <p className="text-muted-foreground px-3.5 py-3 text-xs">
+              {kind === "skill" ? "No skills yet." : "No files yet."}
+            </p>
+          )
+        ) : (
+          <p className="text-muted-foreground px-3.5 py-3 text-xs">
+            Reading {page.title.toLowerCase()}…
+          </p>
+        )
+      }
+    >
+      <EditorTabs
+        label={kind === "skill" ? "Open skills" : "Open files"}
+        tabs={openFiles.map((file) => ({
+          id: file.id,
+          label: file.label,
+          path: file.kind === "skill" ? "SKILL.md" : file.label,
+          dirty: dirty.has(file.id),
+        }))}
+        active={openId ?? null}
+        onActivate={open}
+        onClose={close}
+      />
+      {/* Every tab's pane stays mounted, so its edits outlive a switch. */}
+      {openFiles.map((file) => (
+        <div
+          key={file.id}
+          role="tabpanel"
+          aria-label={file.label}
+          hidden={file.id !== openId}
+          className="min-h-0 flex-1"
+        >
+          <AgentConfigPane
+            file={file}
+            onSaved={() => void refresh()}
+            onDirtyChange={onDirtyChange(file.id)}
+          />
+        </div>
+      ))}
+      {!openFiles.some((file) => file.id === openId) && (
+        <Empty className="flex-1">
+          <EmptyHeader>
+            <EmptyTitle>
+              {openId && files
+                ? "That file is no longer there"
+                : kind === "skill"
+                  ? "Pick a skill"
+                  : "Pick a file"}
+            </EmptyTitle>
+            <EmptyDescription>{page.empty}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
+    </FileBrowserLayout>
   );
 }

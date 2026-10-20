@@ -800,7 +800,7 @@ test.describe("in the app", () => {
       // Nothing secret anywhere on the page.
       expect(await page.content()).not.toContain(SECRET);
 
-      // D5: Lanework's checkpoint hook is marked and leads to Settings › Agents.
+      // D5: Lanework's checkpoint hook is marked and leads to Settings › Harness.
       const hooks = section.getByRole("region", { name: "Hooks" });
       await expect(
         hooks.getByText("Lanework checkpoint").first(),
@@ -817,10 +817,10 @@ test.describe("in the app", () => {
 
       await page.getByRole("button", { name: "Select Alpha" }).click();
       await hooks
-        .getByRole("button", { name: /Settings › Agents/ })
+        .getByRole("button", { name: /Settings › Harness/ })
         .first()
         .click();
-      await expect.poll(() => page.url()).toContain("/settings/agents");
+      await expect.poll(() => page.url()).toContain("/settings/harness");
       expect(errors).toEqual([]);
     } finally {
       await app.close();

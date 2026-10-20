@@ -125,7 +125,7 @@ export function TerminalPanel({
           <ul
             ref={stripRef}
             aria-label="Terminals"
-            className="flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-1"
+            className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-1"
           >
             {sessions.map((session, index) => (
               <TerminalTab

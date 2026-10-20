@@ -36,6 +36,9 @@ function sendViewCommand(command: ViewCommand): void {
  * ⚠️ Toggle Sidebar is ⌘B (FE-20/D5, as VS Code has it). Nothing in the app
  * claims it: the one editor, CodeMirror, binds no Mod-B, and a key the page
  * does handle never reaches the menu anyway.
+ *
+ * ⚠️ Settings is ⌘, — the key every Mac app's Settings… has. In the app
+ * menu on macOS, where people look for it; in File elsewhere.
  */
 export function installMenu(): void {
   const mac = process.platform === "darwin";
@@ -60,18 +63,49 @@ export function installMenu(): void {
           },
         ]
       : [];
+  const settings: MenuItemConstructorOptions = {
+    id: "open-settings",
+    label: mac ? "Settings…" : "Settings",
+    accelerator: "CommandOrControl+,",
+    click: () => sendViewCommand("open-settings"),
+  };
   const closeWindow: MenuItemConstructorOptions = {
     id: "close-window",
     label: mac ? "Close Window" : "Close",
     click: (_item, window) => window?.close(),
   };
   const template: MenuItemConstructorOptions[] = [
-    ...(mac ? [{ role: "appMenu" } as const] : []),
+    ...(mac
+      ? [
+          {
+            role: "appMenu",
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              settings,
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          } as const satisfies MenuItemConstructorOptions,
+        ]
+      : []),
     {
       label: "File",
       submenu: mac
         ? [closeWindow]
-        : [closeWindow, { type: "separator" }, { role: "quit" }],
+        : [
+            settings,
+            { type: "separator" },
+            closeWindow,
+            { type: "separator" },
+            { role: "quit" },
+          ],
     },
     { role: "editMenu" },
     {

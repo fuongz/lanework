@@ -22,7 +22,7 @@ export const channels = {
 } as const;
 
 /** What the View menu can ask of the window's layout (FE-20). */
-export type ViewCommand = "toggle-sidebar";
+export type ViewCommand = "toggle-sidebar" | "open-settings";
 
 /**
  * Which appearance the window should follow.

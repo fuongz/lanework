@@ -65,7 +65,7 @@ import {
 } from "./agent-marks";
 import { notifyAgentCompleted } from "./agent-notifications";
 import { agentKey, listAgentSessions } from "./agent-sessions";
-import { claudeAuthOf, createClaudeAuthProbe } from "./agents";
+import { claudeAuth, claudeAuthOf } from "./agents";
 import {
   backgroundRequest,
   readBackgroundTasks,
@@ -353,7 +353,6 @@ function rebind(workspace: string, written?: string): void {
 
 /** The conversations each workspace's listing last answered (FE-31). */
 const listedKeys = new Map<string, Set<string>>();
-const claudeAuth = createClaudeAuthProbe();
 let lastClaudePlan: string | null | undefined;
 let lastClaudeIdentity: string | null | undefined;
 let lastClaudeMode: string | undefined;

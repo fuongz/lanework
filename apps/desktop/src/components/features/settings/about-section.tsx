@@ -37,7 +37,7 @@ export function AboutSection() {
   return (
     <SettingsPage
       title="About"
-      description="This build of Lanework."
+      description="This version of Lanework."
       sections={[
         {
           title: "Application",

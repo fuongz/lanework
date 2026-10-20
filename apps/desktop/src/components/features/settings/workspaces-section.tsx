@@ -1,29 +1,16 @@
-import {
-  DndContext,
-  type DragEndEvent,
-  type DragOverEvent,
-  type DragStartEvent,
-  type Modifier,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import { Add01Icon, CloudUploadIcon } from "@hugeicons/core-free-icons";
+import { CloudUploadIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Workspace } from "#/../shared/workspaces";
 import { ImportLocalDialog } from "#/components/features/workspaces/import-local-dialog";
 import { RenameProjectDialog } from "#/components/features/workspaces/rename-project-dialog";
 import { SourceFoldersDialog } from "#/components/features/workspaces/source-folders-dialog";
 import {
   isMovedWorkspace,
-  LocalBadge,
   useSyncToCloud,
 } from "#/components/shared/auth/local-mode";
-import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
 import {
-  SettingsCard,
+  SETTINGS_BUTTON,
   SettingsPage,
 } from "#/components/shared/settings/settings-page";
 import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
@@ -38,11 +25,13 @@ import {
   AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
-import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { isLocalWorkspace, useSession } from "#/stores/session";
-import { moveSlug, ProjectRow, shiftFor } from "./project-row";
-import { SelectedProjectSection } from "./selected-project-section";
+import { useSettingsProject } from "#/stores/settings-project";
+import { ProjectRepoRow } from "./project-repo-row";
+import { Row, SelectedProjectSection } from "./selected-project-section";
+
+const NONE: Workspace[] = [];
 
 /**
  * The folders linked to each project on this machine, primary first.
@@ -88,7 +77,8 @@ function useFolderPaths(workspaces: Workspace[]) {
 }
 
 /**
- * Every project on the account, and the three things this app can do to one.
+ * Settings › Projects › General: the project picked in the sidebar's Projects
+ * heading, and what this app can do to it.
  *
  * ⚠️ Create, rename and delete are all on the MACHINE surface this app holds a
  * credential for — `POST`, `PATCH` and `DELETE /v1/sync/state/workspace`. The
@@ -96,7 +86,7 @@ function useFolderPaths(workspaces: Workspace[]) {
  * credential by design, so none of these three may be pointed at it.
  *
  * ⚠️ Rename moves the NAME only. No route on the service can change a slug, so
- * the key under Selected project's name is fixed for the life of the project —
+ * the key under the project's name is fixed for the life of the project —
  * which is what makes the folder link and the saved selection, both keyed by
  * slug, safe from a rename. The rename dialog says so, where the question
  * comes up (`rename-project-dialog.tsx`).
@@ -104,16 +94,14 @@ function useFolderPaths(workspaces: Workspace[]) {
  * ⚠️ Delete on this surface is not the archive the web app does. The service
  * removes the row and cascades every machine's recorded path for it, so the
  * confirmation says that rather than asking "are you sure?".
+ *
+ * ⚠️ No project list here any more: the picker in the sidebar chooses the
+ * project, and the order lives in the project switcher (FE-32).
  */
 export function WorkspacesSection() {
-  const workspaces = useBoard((state) => state.workspaces);
-  const active = useBoard((state) => state.active);
-  const ready = useBoard((state) => state.ready);
-  const hydrate = useBoard((state) => state.hydrate);
+  const selected = useSettingsProject();
   const deleteProject = useBoard((state) => state.deleteProject);
-  const reorderProjects = useBoard((state) => state.reorderProjects);
 
-  const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Workspace | null>(null);
   const [importing, setImporting] = useState<Workspace | null>(null);
   const [renaming, setRenaming] = useState<(Workspace & { id: string }) | null>(
@@ -125,7 +113,8 @@ export function WorkspacesSection() {
     (Workspace & { id: string }) | null
   >(null);
   const [failed, setFailed] = useState<string | null>(null);
-  const { paths, refresh } = useFolderPaths(workspaces);
+  const shown = selected ? [selected] : NONE;
+  const { paths, refresh } = useFolderPaths(shown);
   // FE-52: local mode keeps every project on this machine; signing in adds the
   // account's beside them (D6a), and a local one can then be moved (D7a).
   const signedIn = useSession(
@@ -134,92 +123,43 @@ export function WorkspacesSection() {
   const { sync, syncing, error: syncError } = useSyncToCloud();
   const failure = failed ?? syncError;
 
-  // FE-32: the order the switcher and ⌘1…⌘9 follow. Saved by cloud id, so a
-  // project the service sent no id for holds every row still.
-  const canMove =
-    workspaces.length > 1 && workspaces.every((entry) => entry.id !== null);
-  const reorder = (slugs: string[]) => {
-    setFailed(null);
-    void reorderProjects(slugs).then(
-      (result) => result.error && setFailed(result.error),
-    );
-  };
-  const slugs = workspaces.map((entry) => entry.slug);
-  // A small threshold, so a plain click on the grip does nothing.
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-  );
-  // Where the lifted row would land, so the rows it passes make room for it
-  // while it is still in the air. The order itself changes only at the drop.
-  const [dragging, setDragging] = useState<{
-    from: number;
-    to: number;
-    height: number;
-  } | null>(null);
-  const onDragStart = (event: DragStartEvent) => {
-    const from = slugs.indexOf(String(event.active.id));
-    setDragging({ from, to: from, height: 0 });
-  };
-  const onDragOver = (event: DragOverEvent) => {
-    const over = event.over ? slugs.indexOf(String(event.over.id)) : -1;
-    // ⚠️ The height from here, not from `onDragStart`: dnd-kit measures the
-    // lifted row only after that fires, so `rect.initial` is null there and
-    // every row would step aside by 0px.
-    const height = event.active.rect.current.initial?.height ?? 0;
-    setDragging(
-      (now) => now && { ...now, height, to: over < 0 ? now.from : over },
-    );
-  };
-  const onDragEnd = (event: DragEndEvent) => {
-    const over = event.over?.id;
-    // ⚠️ The reorder and the reset in ONE render: the rows that made room are
-    // already where the new order puts them, so their `y` returning to 0 and
-    // their layout move cancel out instead of bouncing.
-    if (over && over !== event.active.id)
-      reorder(moveSlug(slugs, String(event.active.id), String(over)));
-    setDragging(null);
-  };
-  const listRef = useRef<HTMLDivElement>(null);
-  // Up and down inside the card: a row cannot be lifted out of the list.
-  const alongList: Modifier = useCallback(({ transform, draggingNodeRect }) => {
-    const bounds = listRef.current?.getBoundingClientRect();
-    if (!bounds || !draggingNodeRect) return { ...transform, x: 0 };
-    const y = Math.min(
-      bounds.bottom - draggingNodeRect.bottom,
-      Math.max(bounds.top - draggingNodeRect.top, transform.y),
-    );
-    return { ...transform, x: 0, y };
-  }, []);
-  // ⚠️ The project this page is MANAGING, which starts as the one that is open
-  // and follows a click on a row below (FE-14). Page-local on purpose: picking
-  // a project to look after is not the same as switching to it.
-  const [picked, setPicked] = useState<string | null>(null);
-  const selected =
-    workspaces.find((workspace) => workspace.slug === picked) ??
-    workspaces.find((workspace) => workspace.slug === active?.slug) ??
-    workspaces[0] ??
-    null;
-
-  // Settings can be opened straight from a cold start, with nothing loaded.
-  useEffect(() => {
-    if (!ready) void hydrate();
-  }, [ready, hydrate]);
+  // FE-52/D7a: one click moves it to the account. Only once signed in —
+  // there is no account to move it to before — and never twice.
+  const canSync =
+    signedIn &&
+    !!selected &&
+    isLocalWorkspace(selected) &&
+    !isMovedWorkspace(selected);
 
   return (
     <>
       <SettingsPage
-        title="Projects"
+        title="General"
         description={
           signedIn
-            ? "Every project on your lanework account, and where each one lives on this machine."
-            : "Every project on this machine. Sign in to move them to a lanework account."
+            ? "The project picked at the top."
+            : "The project picked at the top."
         }
         sections={[
+          ...(failure
+            ? [
+                {
+                  title: "Problem",
+                  hideTitle: true,
+                  content: (
+                    <Alert variant="destructive">
+                      <AlertTitle>That did not work</AlertTitle>
+                      <AlertDescription>{failure}</AlertDescription>
+                    </Alert>
+                  ),
+                },
+              ]
+            : []),
           {
-            title: "Selected project",
+            title: "Project",
             hideTitle: true,
             keywords:
-              "selected project rename folders import danger remove all issues purge delete clear reset agent usage cost tokens",
+              "project rename folders repository repo github disconnect import danger remove all issues purge delete clear reset ready readiness sync cloud",
             content: (
               <SelectedProjectSection
                 // A fresh section per project, so a "Removed 12 issues" line
@@ -232,182 +172,51 @@ export function WorkspacesSection() {
                 onImport={setImporting}
                 onDelete={setConfirming}
                 onFailed={setFailed}
+                dangerRows={
+                  selected && (
+                    <ProjectRepoRow
+                      key={selected.slug}
+                      slug={selected.slug}
+                      onFailed={setFailed}
+                    />
+                  )
+                }
+                extraRows={
+                  <>
+                    {canSync && selected ? (
+                      <Row
+                        label="Sync to cloud"
+                        description="Move this project and its board to your account."
+                      >
+                        <Button
+                          size="lg"
+                          className={SETTINGS_BUTTON}
+                          variant="outline"
+                          aria-label={`Sync ${selected.name} to cloud`}
+                          disabled={syncing !== null}
+                          onClick={() => {
+                            setFailed(null);
+                            void sync(selected);
+                          }}
+                        >
+                          <HugeiconsIcon
+                            icon={CloudUploadIcon}
+                            strokeWidth={1.8}
+                            data-icon="inline-start"
+                            aria-hidden="true"
+                          />
+                          {syncing === selected.id
+                            ? "Moving…"
+                            : "Sync to cloud"}
+                        </Button>
+                      </Row>
+                    ) : null}
+                  </>
+                }
               />
             ),
           },
-          {
-            title: signedIn ? "On this account" : "On this machine",
-            keywords:
-              "workspace workspaces project projects create delete remove folder folders add new",
-            content: (
-              <div className="flex flex-col gap-3">
-                {failure && (
-                  <Alert variant="destructive">
-                    <AlertTitle>That did not work</AlertTitle>
-                    <AlertDescription>{failure}</AlertDescription>
-                  </Alert>
-                )}
-
-                <DndContext
-                  sensors={sensors}
-                  onDragStart={onDragStart}
-                  onDragOver={onDragOver}
-                  onDragEnd={onDragEnd}
-                  onDragCancel={() => setDragging(null)}
-                  modifiers={[alongList]}
-                >
-                  <SettingsCard>
-                    <div ref={listRef} className="divide-border divide-y">
-                      {!ready ? (
-                        <p className="text-muted-foreground px-4 py-3.5 text-sm">
-                          Reading your projects…
-                        </p>
-                      ) : workspaces.length === 0 ? (
-                        <p className="text-muted-foreground px-4 py-3.5 text-sm">
-                          {signedIn
-                            ? "No projects on this account yet."
-                            : "No projects on this machine yet."}
-                        </p>
-                      ) : (
-                        workspaces.map((workspace, index) => {
-                          const linked = paths[workspace.slug] ?? [];
-                          const isSelected = workspace.slug === selected?.slug;
-                          return (
-                            <ProjectRow
-                              key={workspace.slug}
-                              workspace={workspace}
-                              index={index}
-                              selected={isSelected}
-                              shift={shiftFor(index, dragging)}
-                              canMove={canMove}
-                              onMove={(delta) => {
-                                const to = slugs[index + delta];
-                                if (to)
-                                  reorder(moveSlug(slugs, workspace.slug, to));
-                              }}
-                            >
-                              {/* ⚠️ The whole left side is the SELECT control, so
-                              a row is picked the way a list item is — but it
-                              is a real button, reachable by keyboard and named
-                              for what it does. */}
-                              <button
-                                type="button"
-                                aria-label={`Select ${workspace.name}`}
-                                aria-pressed={isSelected}
-                                onClick={() => setPicked(workspace.slug)}
-                                className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1 text-left outline-none focus-visible:underline"
-                              >
-                                <span className="flex min-w-0 items-center gap-2">
-                                  <span className="truncate text-sm font-medium">
-                                    {workspace.name}
-                                  </span>
-                                  {/* FE-52/D6a: local boards sit in the same
-                                      list as the account's, marked. */}
-                                  {isLocalWorkspace(workspace) && (
-                                    <LocalBadge />
-                                  )}
-                                  {isMovedWorkspace(workspace) && (
-                                    <span className="text-muted-foreground shrink-0 text-xs">
-                                      moved to cloud
-                                    </span>
-                                  )}
-                                  {workspace.slug === active?.slug && (
-                                    <span className="text-muted-foreground shrink-0 text-xs">
-                                      open
-                                    </span>
-                                  )}
-                                </span>
-                                {/* The slug is not repeated here: it is under
-                                Selected project, and a third line made every
-                                row read as two keys and a path. */}
-                                <span
-                                  className={cn(
-                                    "text-muted-foreground truncate leading-relaxed",
-                                    // Mono only for a real path, not the sentence.
-                                    linked.length === 0
-                                      ? "text-[13px]"
-                                      : "font-mono text-xs",
-                                  )}
-                                  title={linked.join("\n")}
-                                >
-                                  {linked.length === 0
-                                    ? "No folder on this machine"
-                                    : linked.length === 1
-                                      ? linked[0]
-                                      : `${linked[0]} + ${linked.length - 1} more`}
-                                </span>
-                              </button>
-                              {/* FE-52/D7a: one click moves it to the account.
-                                  Only once signed in — there is no account to
-                                  move it to before — and never twice. */}
-                              {signedIn &&
-                                isLocalWorkspace(workspace) &&
-                                !isMovedWorkspace(workspace) && (
-                                  <Button
-                                    variant="outline"
-                                    aria-label={`Sync ${workspace.name} to cloud`}
-                                    disabled={syncing !== null}
-                                    onClick={() => {
-                                      setFailed(null);
-                                      void sync(workspace);
-                                    }}
-                                  >
-                                    <HugeiconsIcon
-                                      icon={CloudUploadIcon}
-                                      strokeWidth={1.8}
-                                      data-icon="inline-start"
-                                      aria-hidden="true"
-                                    />
-                                    {syncing === workspace.id
-                                      ? "Moving…"
-                                      : "Sync to cloud"}
-                                  </Button>
-                                )}
-                              {workspace.slug !== active?.slug && (
-                                <Button
-                                  variant="ghost"
-                                  aria-label={`Open ${workspace.name}`}
-                                  render={
-                                    <Link
-                                      to="/w/$slug/issues"
-                                      params={{ slug: workspace.slug }}
-                                    />
-                                  }
-                                >
-                                  Open
-                                </Button>
-                              )}
-                            </ProjectRow>
-                          );
-                        })
-                      )}
-                    </div>
-                  </SettingsCard>
-                </DndContext>
-
-                <div className="flex items-center gap-2">
-                  <Button onClick={() => setCreating(true)}>
-                    <HugeiconsIcon
-                      icon={Add01Icon}
-                      strokeWidth={1.8}
-                      data-icon="inline-start"
-                    />
-                    New project
-                  </Button>
-                  <Button variant="ghost" onClick={() => void hydrate()}>
-                    Refresh
-                  </Button>
-                </div>
-              </div>
-            ),
-          },
         ]}
-      />
-
-      <CreateProjectDialog
-        open={creating}
-        onOpenChange={setCreating}
-        onCreated={() => void refresh()}
       />
 
       {renaming && (

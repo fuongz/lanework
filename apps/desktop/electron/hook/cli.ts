@@ -233,7 +233,7 @@ export async function login(
   // enrolled and unused. With the app's hook installed there is nothing to do.
   if (!force && desktopHookInstalled()) {
     console.log(
-      "The Lanework desktop app already signed this machine in and runs the hook (Settings → Agents). Nothing to do.\nUse `lanework login --force` to sign in separately anyway.",
+      "The Lanework desktop app already signed this machine in and runs the hook (Settings → Harness). Nothing to do.\nUse `lanework login --force` to sign in separately anyway.",
     );
     return;
   }

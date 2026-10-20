@@ -342,6 +342,17 @@
   --diffs-font-family: var(--code-font);
 }
 
+/* A strip that scrolls sideways without a bar: editor tabs, toolbars. The
+   app's own scrollbar (below) is a classic one that takes 10px of height, and
+   under a 32px tab strip that gap reads as a broken layout. A trackpad, the
+   wheel with Shift, or a focused tab scrolling into view still move it. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @theme inline {
   --font-sans: var(--ui-font);
   --font-heading: var(--font-sans);

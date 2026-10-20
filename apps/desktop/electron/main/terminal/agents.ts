@@ -97,10 +97,24 @@ export interface ClaudeAuth {
   authMode: string | null;
   loggedIn: boolean;
   identity: string | null;
+  /**
+   * The signed-in email and organization, for Settings › Harness only
+   * (`harness/accounts.ts`). ⚠️ Never put in `ClaudeUsage`, which the footer
+   * reads: the usage path copies `plan` and `authMode` by name.
+   */
+  email: string | null;
+  org: string | null;
 }
 /** Only these public account labels escape the CLI JSON. */
 export function claudeAuthOf(value: unknown): ClaudeAuth {
-  const empty = { plan: null, authMode: null, loggedIn: false, identity: null };
+  const empty = {
+    plan: null,
+    authMode: null,
+    loggedIn: false,
+    identity: null,
+    email: null,
+    org: null,
+  };
   if (!value || typeof value !== "object") return empty;
   const v = value as Record<string, unknown>;
   const plans = ["pro", "max", "team", "enterprise", "free"];
@@ -133,7 +147,18 @@ export function claudeAuthOf(value: unknown): ClaudeAuth {
   const identity = identifiers.length
     ? createHash("sha256").update(JSON.stringify(identifiers)).digest("hex")
     : null;
-  return { plan, authMode, loggedIn: v.loggedIn === true, identity };
+  const text = (field: unknown) =>
+    typeof field === "string" && field.trim()
+      ? field.trim().slice(0, 200)
+      : null;
+  return {
+    plan,
+    authMode,
+    loggedIn: v.loggedIn === true,
+    identity,
+    email: text(v.email),
+    org: text(v.orgName),
+  };
 }
 
 export function createClaudeAuthProbe(options: AgentProbeOptions = {}) {
@@ -215,3 +240,9 @@ export function createClaudeAuthProbe(options: AgentProbeOptions = {}) {
     return running;
   };
 }
+
+/**
+ * The one `claude auth status` probe of this process: the usage footer and
+ * Settings › Harness share its cache rather than each starting a shell.
+ */
+export const claudeAuth = createClaudeAuthProbe();

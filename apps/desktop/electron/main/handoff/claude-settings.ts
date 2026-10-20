@@ -75,7 +75,7 @@ export function buildShim(options: {
   return [
     "#!/bin/sh",
     "# Lanework's checkpoint hook (FE-29). The Lanework app rewrites this file",
-    "# on every launch; edits here are lost. Settings → Agents turns it off.",
+    "# on every launch; edits here are lost. Settings → Harness turns it off.",
     "export ELECTRON_RUN_AS_NODE=1",
     `export LANEWORK_HOOK_CONFIG=${shellQuote(options.configPath)}`,
     ...(options.secretFile

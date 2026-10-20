@@ -11,6 +11,7 @@ import type {
   ReadinessFix,
   ReadinessReport,
 } from "#/../shared/readiness";
+import { SETTINGS_BUTTON } from "#/components/shared/settings/settings-page";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 
@@ -67,7 +68,7 @@ export function ReadinessList({
     void navigate({
       to:
         action === "agent-settings"
-          ? "/settings/agents"
+          ? "/settings/harness"
           : "/settings/workspaces",
     });
   }
@@ -87,7 +88,8 @@ export function ReadinessList({
           </div>
           {!check.ok && check.fix && (
             <Button
-              size="sm"
+              size="lg"
+              className={SETTINGS_BUTTON}
               variant="outline"
               aria-label={`Fix ${check.title}`}
               onClick={() => check.fix && onFix(check.fix)}
@@ -97,7 +99,8 @@ export function ReadinessList({
           )}
           {!check.ok && !check.fix && check.action && (
             <Button
-              size="sm"
+              size="lg"
+              className={SETTINGS_BUTTON}
               variant="outline"
               onClick={() => check.action && go(check.action)}
             >

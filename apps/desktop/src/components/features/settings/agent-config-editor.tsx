@@ -31,6 +31,7 @@ import {
   withClaudeDefaultMode,
   withCodexFeature,
 } from "#/../shared/agent-config-text";
+import { FileBrowserPath } from "#/components/shared/settings/file-browser";
 import { Alert, AlertDescription } from "#/components/ui/alert";
 import { Button } from "#/components/ui/button";
 import {
@@ -65,7 +66,7 @@ export function AgentConfigPane({
   file: ConfigFile;
   /** After a Save lands, so the tree shows the new size and time. */
   onSaved: () => void;
-  /** Whether there are edits not saved yet — asked before leaving the file. */
+  /** Whether there are edits not saved yet — asked before closing the file. */
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const [base, setBase] = useState<ConfigFileContent | null>(null);
@@ -148,44 +149,39 @@ export function AgentConfigPane({
       aria-label={title}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      <header className="window-drag-region border-border flex h-11 shrink-0 items-center gap-2 border-b px-4">
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <h2 className="shrink-0 text-[13px] font-medium">{title}</h2>
-          <span
-            className="text-muted-foreground truncate font-mono text-[11px]"
-            title={file.path}
-          >
-            {file.path}
-            {!file.exists && " — not created yet; Save creates it"}
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Reveal in Finder"
-            title="Reveal in Finder"
-            onClick={() => void reveal()}
-          >
-            <HugeiconsIcon icon={FolderOpenIcon} strokeWidth={1.5} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!dirty || busy}
-            onClick={() => base && setText(base.text)}
-          >
-            Revert
-          </Button>
-          <Button
-            size="sm"
-            disabled={!dirty || !!problem || busy || conflict}
-            onClick={() => void save()}
-          >
-            Save
-          </Button>
-        </div>
-      </header>
+      <FileBrowserPath
+        path={file.path}
+        note={file.exists ? undefined : "not created yet; Save creates it"}
+      >
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Reveal in Finder"
+          title="Reveal in Finder"
+          onClick={() => void reveal()}
+        >
+          <HugeiconsIcon
+            icon={FolderOpenIcon}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={!dirty || busy}
+          onClick={() => base && setText(base.text)}
+        >
+          Revert
+        </Button>
+        <Button
+          size="sm"
+          disabled={!dirty || !!problem || busy || conflict}
+          onClick={() => void save()}
+        >
+          Save
+        </Button>
+      </FileBrowserPath>
 
       {/* What sits above the text: the file's line, the hook note, the quick
           settings. Skills have none of these, and get the editor alone. */}
@@ -198,7 +194,7 @@ export function AgentConfigPane({
               <AlertDescription>
                 Lanework's checkpoint hook is in this file, and the app writes
                 it again each time it starts. To turn it off, use the switch in
-                Settings › Agents rather than deleting it here.
+                Settings › Harness rather than deleting it here.
               </AlertDescription>
             </Alert>
           )}
@@ -355,11 +351,7 @@ function ClaudeQuickSettings({
           if (next !== null) onChange(next);
         }}
       >
-        <SelectTrigger
-          size="sm"
-          aria-label="permissions.defaultMode"
-          disabled={broken}
-        >
+        <SelectTrigger aria-label="permissions.defaultMode" disabled={broken}>
           <SelectValue>
             {(value: string) => (value === NOT_SET ? "Not set" : value)}
           </SelectValue>

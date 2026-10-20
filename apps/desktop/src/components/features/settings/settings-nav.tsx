@@ -27,9 +27,9 @@ export function SettingsNav() {
       <nav aria-label="Settings sections" className="flex flex-col pt-1 pb-4">
         {groups.map((group) => (
           <div key={group.label} className="flex flex-col gap-0.5">
-            <span className="text-muted-foreground px-2 pt-4 pb-1 text-[11px] font-medium tracking-wide uppercase">
-              {group.label}
-            </span>
+            <div className="text-muted-foreground flex min-w-0 items-center gap-2 px-2 pt-4 pb-1 text-[11px] font-medium tracking-wide uppercase">
+              <span className="shrink-0">{group.label}</span>
+            </div>
             {group.items.map((item) => (
               <Link
                 key={item.label}

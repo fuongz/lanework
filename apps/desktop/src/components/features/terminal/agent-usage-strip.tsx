@@ -26,7 +26,7 @@ const CLOCK_MS = 30_000;
 /** Coming back to the window refreshes at most this often (FE-53). */
 const FOCUS_REFRESH_MS = 60_000;
 /** A window this full reads in the warning tone. */
-const NEARLY_SPENT = 90;
+export const NEARLY_SPENT = 90;
 
 /** When the window's focus last asked for a refresh — one for every strip. */
 let focusRefreshed = 0;
@@ -41,14 +41,14 @@ const ERROR_TEXT: Record<ClaudeUsageError, string> = {
 type UsageAgent = "claude" | "codex";
 
 /** One limit as the strip draws it, whichever agent it came from. */
-interface UsageWindow {
+export interface UsageWindow {
   usedPercent: number;
   /** Epoch ms; null when the source does not say. */
   resetsAt: number | null;
 }
 
 /** What the strip and its popover need, whichever agent it came from. */
-interface UsageView {
+export interface UsageView {
   agent: UsageAgent;
   /** "Claude Code", "Codex". */
   name: string;
@@ -64,7 +64,7 @@ interface UsageView {
   empty: string;
 }
 
-const clamp = (percent: number) => Math.max(0, Math.min(100, percent));
+export const clamp = (percent: number) => Math.max(0, Math.min(100, percent));
 
 const titleCase = (word: string) =>
   `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
@@ -112,7 +112,7 @@ function claudePlan(usage: ClaudeUsage): string | null {
  * Claude's usage, or null when there is nothing to say (FE-53): `unavailable`
  * alone — no Claude sign-in on this machine — keeps the strip hidden.
  */
-function claudeView(usage: ClaudeUsage | null): UsageView | null {
+export function claudeView(usage: ClaudeUsage | null): UsageView | null {
   if (
     !usage ||
     (!usage.primary &&
@@ -139,7 +139,10 @@ function claudeView(usage: ClaudeUsage | null): UsageView | null {
  * null before any turn did. A window past its reset has started over since,
  * so its number is dropped rather than shown wrong (FE-41/D3).
  */
-function codexView(quota: CodexQuota | null, now: number): UsageView | null {
+export function codexView(
+  quota: CodexQuota | null,
+  now: number,
+): UsageView | null {
   if (!quota) return null;
   const live = (window: CodexQuotaWindow | null) =>
     window && window.resetsAt > now ? window : null;
@@ -156,7 +159,7 @@ function codexView(quota: CodexQuota | null, now: number): UsageView | null {
   };
 }
 
-function barTone(used: number) {
+export function barTone(used: number) {
   return used >= NEARLY_SPENT ? "bg-tone-amber" : "bg-foreground/55";
 }
 
@@ -202,7 +205,7 @@ function useUsageAgent(workspace: string): UsageAgent | null {
 }
 
 /** Draw again every so often, so ages and countdowns move on their own. */
-function useClock() {
+export function useClock() {
   const [, redraw] = useReducer((tick: number) => tick + 1, 0);
   useEffect(() => {
     const timer = setInterval(redraw, CLOCK_MS);

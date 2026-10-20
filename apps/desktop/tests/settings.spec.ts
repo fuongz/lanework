@@ -385,9 +385,9 @@ test("Agents: the switch installs the hook and its credential, and removes only 
   const read = async () => JSON.parse(await readFile(settingsFile, "utf8"));
   try {
     await page.getByRole("link", { name: "Settings", exact: true }).click();
-    await page.getByRole("link", { name: "Agents" }).click();
+    await page.getByRole("link", { name: "Harness" }).click();
     await expect(
-      page.getByRole("heading", { name: "Agents", exact: true }),
+      page.getByRole("heading", { name: "Harness", exact: true }),
     ).toBeVisible();
 
     const main = page.getByRole("switch", {

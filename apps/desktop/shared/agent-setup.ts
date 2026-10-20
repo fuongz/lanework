@@ -121,6 +121,7 @@ export interface SetupFile {
 
 export const agentSetupChannels = {
   read: "agent-setup:read",
+  readGlobal: "agent-setup:read-global",
   open: "agent-setup:open",
   reveal: "agent-setup:reveal",
 } as const;
@@ -132,6 +133,12 @@ export function isSetupId(value: unknown): value is string {
 
 export interface DesktopAgentSetupApi {
   read: (slug: string) => Promise<AgentSetup>;
+  /**
+   * What every project gets — the `user`, `plugin` and `system` entries
+   * alone, read for no folder. `folder` is null; skills and commands in it
+   * cannot be opened (`open` takes a project).
+   */
+  readGlobal: () => Promise<AgentSetup>;
   /** A skill's `SKILL.md` or a command's file, by the id `read` gave it. */
   open: (slug: string, id: string) => Promise<SetupFile>;
   /** Show that file in Finder. */

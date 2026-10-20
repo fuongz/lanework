@@ -819,7 +819,7 @@ async function checkpointTo(
   const secret = local ? null : readSecret();
   if (!local && !secret) {
     log(
-      "no credential; turn the hook on in the Lanework app (Settings → Agents)",
+      "no credential; turn the hook on in the Lanework app (Settings → Harness)",
     );
     return;
   }

@@ -1,13 +1,12 @@
 import {
-  Brain02Icon,
-  FileEditIcon,
-  FolderLibraryIcon,
-  GithubIcon,
+  CommandLineIcon,
+  DashboardSquare02Icon,
   InformationCircleIcon,
-  LegalDocument01Icon,
+  KeyboardIcon,
   MagicWand01Icon,
+  McpServerIcon,
   Mic01Icon,
-  RoboticIcon,
+  PlugSocketIcon,
   Sun01Icon,
   UserAccountIcon,
 } from "@hugeicons/core-free-icons";
@@ -44,16 +43,20 @@ export interface SettingsGroup {
  *
  * Only sections with real content appear (FE-02 S1). A nav item that leads
  * nowhere costs the reader a click to learn nothing.
+ *
+ * ⚠️ Agents (the hook page), Memory, Instructions and Config files are left
+ * out of the nav for now, not removed: their routes still answer. What the
+ * Agents page did lives in Harness — `/settings/agents` sends you there.
  */
 export const SETTINGS_GROUPS: SettingsGroup[] = [
   {
-    label: "Personal",
+    label: "App",
     items: [
       {
         to: "/settings/appearance",
         label: "Appearance",
         icon: Sun01Icon,
-        keywords: "theme dark light system colour color mode",
+        keywords: "theme dark light system colour color mode font",
       },
       {
         to: "/settings/dictation",
@@ -63,74 +66,87 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
           "dictation voice speech microphone mic language vietnamese corrections",
       },
       {
-        to: "/settings/account",
-        label: "Account",
-        icon: UserAccountIcon,
-        keywords: "sign out signed in user machine revoke credential",
-      },
-      {
-        to: "/settings/agents",
-        label: "Agents",
-        icon: RoboticIcon,
+        to: "/settings/keybindings",
+        label: "Keybindings",
+        icon: KeyboardIcon,
         keywords:
-          "agent agents claude codex handoff checkpoint resume quota usage hook push wip",
-      },
-      {
-        to: "/settings/memory",
-        label: "Memory",
-        icon: Brain02Icon,
-        keywords:
-          "memory memories remember claude MEMORY.md project feedback reference user",
-      },
-      {
-        to: "/settings/instructions",
-        label: "Instructions",
-        icon: LegalDocument01Icon,
-        keywords:
-          "instructions claude.md agents.md import effective project rules prompt",
-      },
-      {
-        to: "/settings/config",
-        label: "Config files",
-        icon: FileEditIcon,
-        keywords:
-          "config configuration settings.json config.toml hooks.json claude.md agents.md features permissions model edit",
-      },
-      {
-        to: "/settings/skills",
-        label: "Skills",
-        icon: MagicWand01Icon,
-        keywords: "skills skill SKILL.md claude codex agents edit",
-      },
-    ],
-  },
-  {
-    label: "Workspace",
-    items: [
-      {
-        to: "/settings/workspaces",
-        label: "Projects",
-        icon: FolderLibraryIcon,
-        keywords:
-          "workspace workspaces project projects create new delete remove rename folder folders source primary",
+          "keybindings keyboard shortcuts shortcut hotkeys keys command palette",
       },
       {
         to: "/settings/git",
-        label: "GitHub",
-        icon: GithubIcon,
+        label: "Integrations",
+        icon: PlugSocketIcon,
         keywords:
-          "github git repo repository pull request pr connect disconnect token oauth review diff",
+          "integration integrations github git repo repository pull request pr connect disconnect token oauth review diff",
       },
-    ],
-  },
-  {
-    label: "App",
-    items: [
       {
         to: "/settings/about",
         label: "About",
         icon: InformationCircleIcon,
         keywords: "version platform control plane status build",
+      },
+    ],
+  },
+  {
+    label: "Agents",
+    items: [
+      {
+        to: "/settings/harness",
+        label: "Harness",
+        icon: CommandLineIcon,
+        keywords:
+          "harness cli agent agents claude code codex version update install usage limit quota handoff checkpoint resume hook push wip lanework mcp sign in",
+      },
+      {
+        to: "/settings/skills",
+        label: "Skills",
+        icon: MagicWand01Icon,
+        keywords: "skills skill SKILL.md claude codex agents edit global user",
+      },
+      {
+        to: "/settings/mcp",
+        label: "MCP",
+        icon: McpServerIcon,
+        keywords:
+          "mcp server servers global user claude.json config.toml stdio http sse",
+      },
+    ],
+  },
+  {
+    // Its pages are about ONE project, picked in each page's title bar
+    // (`SettingsProjectPicker`) and shared by all three.
+    label: "Project",
+    items: [
+      {
+        to: "/settings/workspaces",
+        label: "General",
+        icon: DashboardSquare02Icon,
+        keywords:
+          "project projects workspace general rename folder folders repository import readiness ready danger delete remove issues sync cloud",
+      },
+      {
+        to: "/settings/project-skills",
+        label: "Skills",
+        icon: MagicWand01Icon,
+        keywords: "project skills skill SKILL.md .claude .agents .codex repo",
+      },
+      {
+        to: "/settings/project-mcp",
+        label: "MCP",
+        icon: McpServerIcon,
+        keywords: "project mcp server servers .mcp.json local repo",
+      },
+    ],
+  },
+  {
+    label: "Cloud",
+    items: [
+      {
+        to: "/settings/account",
+        label: "Account",
+        icon: UserAccountIcon,
+        keywords:
+          "account sign in sign out signed in user machine revoke credential cloud",
       },
     ],
   },

@@ -2740,7 +2740,7 @@ async function waitForDeviceLogin(file, stateDir) {
 }
 async function login(api, device, force, stateDir) {
   if (!force && desktopHookInstalled()) {
-    console.log("The Lanework desktop app already signed this machine in and runs the hook (Settings → Agents). Nothing to do.\nUse `lanework login --force` to sign in separately anyway.");
+    console.log("The Lanework desktop app already signed this machine in and runs the hook (Settings → Harness). Nothing to do.\nUse `lanework login --force` to sign in separately anyway.");
     return;
   }
   if (device || headless())
@@ -3324,7 +3324,7 @@ async function work(inputFile) {
 async function checkpointTo(local, d, input, root, remote) {
   const secret = local ? null : readSecret2();
   if (!local && !secret) {
-    log("no credential; turn the hook on in the Lanework app (Settings → Agents)");
+    log("no credential; turn the hook on in the Lanework app (Settings → Harness)");
     return;
   }
   const head = tryGit(root, ["rev-parse", "HEAD"]);

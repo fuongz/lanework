@@ -6,18 +6,15 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import {
-  SettingsCard,
+  SETTINGS_BUTTON,
   SettingsPage,
-  SettingsValue,
 } from "#/components/shared/settings/settings-page";
 import { Button } from "#/components/ui/button";
-import { ipcMessage } from "#/lib/ipc-error";
-import { useBoard } from "#/stores/board";
 import { usePulls } from "#/stores/pulls";
-import { formatRepoRef, type RepoRef } from "../../../../shared/git";
 
 /**
- * The GitHub connection, and which repository each project reads.
+ * The GitHub connection. Which repository a project reads is in Projects ›
+ * General, beside the project it belongs to.
  *
  * Connecting starts here as well as on the pull-request screen — the place
  * people look first for "connect GitHub" is Settings. Both run the ONE device
@@ -34,58 +31,13 @@ export function GitSection() {
   // The device code arrives as an event; without this, Settings would start a
   // connection and never show the code to type in.
   useEffect(() => watch(), [watch]);
-  const workspaces = useBoard((state) => state.workspaces);
-  const hydrate = useBoard((state) => state.hydrate);
-  const [links, setLinks] = useState<
-    { slug: string; name: string; repo: RepoRef }[]
-  >([]);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
-
-  // Read straight from the surface rather than through the store: the store
-  // holds ONE project's repo — the open one — and this page is about all of them.
-  useEffect(() => {
-    let cancelled = false;
-    const surface = window.desktop?.git;
-    if (!surface || !workspaces.length) return;
-    void Promise.all(
-      workspaces.map(async (workspace) => {
-        const state = await surface.repo(workspace.slug).catch(() => null);
-        return state?.kind === "linked"
-          ? { slug: workspace.slug, name: workspace.name, repo: state.repo }
-          : null;
-      }),
-    ).then((rows) => {
-      if (!cancelled)
-        setLinks(rows.filter((row): row is NonNullable<typeof row> => !!row));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaces]);
-
-  async function unlink(slug: string) {
-    const surface = window.desktop?.git;
-    if (!surface) return;
-    try {
-      await surface.unlinkRepo(slug);
-      setLinks((rows) => rows.filter((row) => row.slug !== slug));
-      setError(null);
-    } catch (failure) {
-      setError(ipcMessage(failure, "Could not disconnect that repository."));
-    }
-  }
-
   return (
     <SettingsPage
-      title="GitHub"
-      description="Read pull requests from the repositories your projects are built from."
+      title="Integrations"
+      description="Services Lanework connects to."
       sections={[
         {
-          title: "Connection",
+          title: "GitHub",
           rows: [
             {
               label:
@@ -99,10 +51,10 @@ export function GitSection() {
                 : progress
                   ? "Enter this code on GitHub to finish connecting."
                   : account.kind === "connected"
-                    ? "Pull requests are read with this account. Nothing is written to your repositories unless you submit a review."
+                    ? "Reads pull requests. Writes nothing unless you submit a review."
                     : account.kind === "expired"
-                      ? "GitHub stopped accepting this connection. Reconnect to keep reading pull requests."
-                      : "Pull requests are read with your own GitHub account. Nothing is written to your repositories.",
+                      ? "Reconnect to keep reading pull requests."
+                      : "Read pull requests with your GitHub account.",
               keywords: "github connect disconnect account token oauth device",
               control:
                 account.kind !== "connected" ? (
@@ -116,11 +68,11 @@ export function GitSection() {
                   />
                 ) : (
                   <Button
-                    variant="destructive"
                     size="lg"
+                    className={`${SETTINGS_BUTTON} border-0`}
+                    variant="destructive"
                     // The tinted pill of Account → Sign out, `border-0` and all
                     // (see `account-section.tsx`).
-                    className="h-8 gap-1.5 rounded-lg border-0 pr-3 pl-2.5 text-sm"
                     onClick={() => void disconnect()}
                   >
                     <HugeiconsIcon
@@ -133,50 +85,6 @@ export function GitSection() {
                 ),
             },
           ],
-        },
-        {
-          title: "Repositories",
-          keywords: "repo repository project link unlink owner",
-          content: (
-            <SettingsCard>
-              {links.length === 0 ? (
-                <p className="text-muted-foreground px-4 py-3.5 text-[13px]">
-                  No project is connected to a repository yet. Open a project's
-                  Pull requests screen to connect one.
-                </p>
-              ) : (
-                links.map((link) => (
-                  <div
-                    key={link.slug}
-                    className="flex items-center justify-between gap-8 px-4 py-3.5"
-                  >
-                    <div className="flex min-w-0 flex-col gap-1">
-                      <span className="text-sm font-medium">{link.name}</span>
-                      <SettingsValue>{formatRepoRef(link.repo)}</SettingsValue>
-                    </div>
-                    <Button
-                      variant="destructive"
-                      size="lg"
-                      className="h-8 gap-1.5 rounded-lg border-0 pr-3 pl-2.5 text-sm"
-                      onClick={() => void unlink(link.slug)}
-                    >
-                      <HugeiconsIcon
-                        icon={Unlink02Icon}
-                        className="size-4"
-                        strokeWidth={2}
-                      />
-                      Disconnect
-                    </Button>
-                  </div>
-                ))
-              )}
-              {error && (
-                <p className="text-destructive px-4 py-3 text-[13px]">
-                  {error}
-                </p>
-              )}
-            </SettingsCard>
-          ),
         },
       ]}
     />
@@ -204,7 +112,7 @@ function ConnectControl({
     return (
       <Button
         size="lg"
-        className="h-8 gap-1.5 rounded-lg pr-3 pl-2.5 text-sm"
+        className={SETTINGS_BUTTON}
         disabled={connecting}
         onClick={() => {
           onError(null);
@@ -222,8 +130,9 @@ function ConnectControl({
         {progress.userCode}
       </code>
       <Button
+        size="lg"
+        className={SETTINGS_BUTTON}
         variant="ghost"
-        size="sm"
         onClick={() => {
           void navigator.clipboard
             .writeText(progress.userCode)
@@ -238,15 +147,21 @@ function ConnectControl({
           guard sends external origins to the OS browser, where a GitHub
           sign-in belongs. */}
       <Button
+        size="lg"
+        className={SETTINGS_BUTTON}
         variant="outline"
-        size="sm"
         render={
           <a href={progress.verificationUri} target="_blank" rel="noreferrer" />
         }
       >
         Open GitHub
       </Button>
-      <Button variant="ghost" size="sm" onClick={() => void cancelConnect()}>
+      <Button
+        size="lg"
+        className={SETTINGS_BUTTON}
+        variant="ghost"
+        onClick={() => void cancelConnect()}
+      >
         Cancel
       </Button>
     </div>

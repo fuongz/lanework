@@ -7,7 +7,7 @@ export function AppearanceSection() {
   return (
     <SettingsPage
       title="Appearance"
-      description="Choose how Lanework looks. Following the system switches with macOS."
+      description="Theme and fonts."
       sections={[
         {
           title: "Theme",
@@ -35,14 +35,13 @@ export function AppearanceSection() {
             },
             {
               label: "Content font",
-              description:
-                "Issue descriptions, comments and pull request summaries.",
+              description: "Issues, comments and pull request summaries.",
               keywords: "font typeface family weight markdown body",
               control: <FontPicker font="content" label="Content font" />,
             },
             {
               label: "Code font",
-              description: "The terminal, diffs and code blocks.",
+              description: "Terminal, diffs and code blocks.",
               keywords: "font typeface family weight monospace terminal",
               control: <FontPicker font="code" label="Code font" />,
             },

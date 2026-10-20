@@ -60,11 +60,21 @@ export function WindowTitlebarHost({
   className,
   style,
   children,
+  lead,
 }: {
   className?: string;
   style?: CSSProperties;
   /** The shell's own pieces of the bar, drawn before the slot. */
   children?: ReactNode;
+  /**
+   * Drawn at the START of the slot, before whatever the page puts there —
+   * Settings' project picker, on every settings page.
+   *
+   * ⚠️ React's own child of the slot, so it is in the DOM before any page's
+   * portal is appended after it; a portal of the shell's would land on
+   * whichever side mounted last.
+   */
+  lead?: ReactNode;
 }) {
   // React 19 runs the ref's cleanup on unmount, with the node it attached.
   const slotRef = useCallback((node: HTMLDivElement | null) => {
@@ -81,7 +91,9 @@ export function WindowTitlebarHost({
       style={style}
     >
       {children}
-      <div ref={slotRef} className="window-titlebar-slot" />
+      <div ref={slotRef} className="window-titlebar-slot">
+        {lead}
+      </div>
     </div>
   );
 }

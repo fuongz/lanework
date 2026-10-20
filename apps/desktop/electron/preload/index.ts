@@ -206,6 +206,7 @@ const conversation: DesktopConversationApi = {
 /** Whether a project's folder is ready for an agent (FE-30). A slug, never a path. */
 const harness: DesktopHarnessApi = {
   list: () => ipcRenderer.invoke(harnessChannels.list),
+  accounts: () => ipcRenderer.invoke(harnessChannels.accounts),
   check: () => ipcRenderer.invoke(harnessChannels.check),
   update: (agent) => ipcRenderer.invoke(harnessChannels.update, agent),
   dismiss: (agent, version) =>
@@ -269,6 +270,7 @@ const agentConfig: DesktopAgentConfigApi = {
 
 const agentSetup: DesktopAgentSetupApi = {
   read: (slug) => ipcRenderer.invoke(agentSetupChannels.read, slug),
+  readGlobal: () => ipcRenderer.invoke(agentSetupChannels.readGlobal),
   open: (slug, id) => ipcRenderer.invoke(agentSetupChannels.open, slug, id),
   reveal: (slug, id) => ipcRenderer.invoke(agentSetupChannels.reveal, slug, id),
 };

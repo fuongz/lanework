@@ -1,8 +1,14 @@
-import { Logout01Icon } from "@hugeicons/core-free-icons";
+import {
+  Copy01Icon,
+  Logout01Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { SignInButton } from "#/components/shared/auth/local-mode";
+import { useCopy } from "#/components/shared/common/use-copy";
 import {
+  SETTINGS_BUTTON,
   SettingsPage,
   SettingsValue,
 } from "#/components/shared/settings/settings-page";
@@ -33,6 +39,33 @@ export function AccountSection() {
   const busy = useSession((state) => state.busy);
   const signOut = useSession((state) => state.signOut);
   const [confirming, setConfirming] = useState(false);
+  const [copied, copy] = useCopy();
+
+  /**
+   * A value with a button that copies the ID behind it — the account's
+   * beside the email, the machine's beside its name. The IDs are what
+   * support asks for, and too long to be worth a row of their own.
+   */
+  const withCopy = (value: string, id: string | null | undefined, what: string) => (
+    <div className="flex items-center gap-1">
+      <SettingsValue>{value}</SettingsValue>
+      {id && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Copy ${what}`}
+          title={copied === what ? "Copied" : `Copy ${what}`}
+          onClick={() => copy(what, id)}
+        >
+          <HugeiconsIcon
+            icon={copied === what ? Tick02Icon : Copy01Icon}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        </Button>
+      )}
+    </div>
+  );
 
   const principal = session?.principal;
   const machine = principal?.kind === "machine" ? principal : null;
@@ -47,19 +80,16 @@ export function AccountSection() {
     return (
       <SettingsPage
         title="Account"
-        description="Lanework is running on this machine only. Sign in to keep your projects on a lanework account."
+        description="Not signed in. Your projects live on this machine only."
         sections={[
           {
             title: "Not signed in",
             rows: [
               {
                 label: "Sign in",
-                description:
-                  "Opens your browser to approve this machine. Projects made here stay on this machine until you sync each one to the account.",
+                description: "Approve this machine in your browser.",
                 keywords: "login sign in account local mode cloud sync",
-                control: (
-                  <SignInButton size="lg" className="h-8 px-3 text-sm" />
-                ),
+                control: <SignInButton size="lg" className={SETTINGS_BUTTON} />,
               },
             ],
           },
@@ -86,60 +116,52 @@ export function AccountSection() {
     <>
       <SettingsPage
         title="Account"
-        description="The lanework account this machine is enrolled in."
+        description="The account this machine is signed in to."
         sections={[
           {
             title: "Signed in",
             rows: [
               {
                 label: "Name",
-                description: "From your lanework account.",
                 keywords: "user owner person who",
                 control: <SettingsValue>{owner?.name ?? "—"}</SettingsValue>,
               },
               {
                 label: "Email",
-                keywords: "address user owner",
-                control: <SettingsValue>{owner?.email ?? "—"}</SettingsValue>,
-              },
-              {
-                label: "Account ID",
-                description:
-                  "Shown because everything on the account keys on it, and because an older control plane sends nothing else.",
-                keywords: "user id uuid",
-                control: (
-                  <SettingsValue>{machine?.userId ?? "—"}</SettingsValue>
+                keywords: "address user owner account id uuid copy",
+                control: withCopy(
+                  owner?.email ?? "—",
+                  machine?.userId,
+                  "account ID",
                 ),
               },
               {
                 label: "Machine name",
-                description: "What your account lists this computer as.",
-                keywords: "hostname computer",
-                control: <SettingsValue>{machine?.name ?? "—"}</SettingsValue>,
-              },
-              {
-                label: "Machine ID",
-                description:
-                  "Identifies this install. Everything on your account keys on it, never on the name.",
-                keywords: "credential identifier",
-                control: (
-                  <SettingsValue>{machine?.machineId ?? "—"}</SettingsValue>
+                description: "How your account names this computer.",
+                keywords: "hostname computer machine id identifier copy",
+                control: withCopy(
+                  machine?.name ?? "—",
+                  machine?.machineId,
+                  "machine ID",
                 ),
               },
             ],
           },
           {
-            title: "Sign out",
+            // Drawn as Projects › General draws its own: a red heading
+            // over the one irreversible thing on the page.
+            title: "Danger zone",
+            destructive: true,
             rows: [
               {
                 label: "Sign out of this machine",
-                description:
-                  "Revokes this machine on your account. Signing back in opens your browser and needs a fresh approval.",
+                description: "Removes this machine from your account.",
                 keywords: "logout revoke disconnect remove",
                 control: (
                   <Button
-                    variant="destructive"
                     size="lg"
+                    className={`${SETTINGS_BUTTON} border-0`}
+                    variant="destructive"
                     // `border-0`, not a colour override: the base button pairs
                     // `border border-transparent` with `bg-clip-padding`, so the
                     // fill stops short of the edge and the page shows through as
@@ -147,7 +169,6 @@ export function AccountSection() {
                     // Optically, not geometrically centred: the icon side takes
                     // 2px less than the text side, or the glyph reads as pushed
                     // away from the edge it sits against.
-                    className="h-8 gap-1.5 rounded-lg border-0 pr-3 pl-2.5 text-sm"
                     disabled={busy || !machine}
                     onClick={() => setConfirming(true)}
                   >

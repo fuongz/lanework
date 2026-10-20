@@ -156,8 +156,8 @@ export function buildReport(facts: ReadinessFacts): ReadinessReport {
         action: "project-settings",
       },
       folder.kind === "missing"
-        ? `The linked folder is gone: ${folder.path}. Link it again in Settings › Projects.`
-        : "No folder is linked to this project on this machine. Link one in Settings › Projects.",
+        ? `The linked folder is gone: ${folder.path}. Link it again in Settings › Project › General.`
+        : "No folder is linked to this project on this machine. Link one in Settings › Project › General.",
     ),
   );
 
@@ -238,7 +238,7 @@ export function buildReport(facts: ReadinessFacts): ReadinessReport {
           title: "Checkpoints between agents",
           action: "agent-settings",
         },
-        `${unhooked.join(" and ")} does not leave a checkpoint on the card after each turn, so another agent cannot pick the work up. Switch it on in Settings › Agents.`,
+        `${unhooked.join(" and ")} does not leave a checkpoint on the card after each turn, so another agent cannot pick the work up. Turn it on in Settings › Agents › Harness.`,
       ),
     );
 
@@ -252,7 +252,7 @@ export function buildReport(facts: ReadinessFacts): ReadinessReport {
           title: "Old .agents/reviews cards",
           action: "project-settings",
         },
-        "This folder still has cards in .agents/reviews from before they moved to the board. Import them from Settings › Projects.",
+        "This folder still has cards in .agents/reviews from before they moved to the board. Import them from Settings › Project › General.",
       ),
     );
 

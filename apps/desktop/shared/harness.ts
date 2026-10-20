@@ -80,8 +80,26 @@ export function compareVersions(a: string, b: string): number {
   return left.pre < right.pre ? -1 : 1;
 }
 
+/**
+ * Who a CLI is signed in as, for Settings › Harness: the email (drawn
+ * blurred), the organization and the plan. Null fields when it is not signed
+ * in, or does not say.
+ *
+ * ⚠️ Only these labels, read in main from what the CLI keeps — `claude auth
+ * status`, the claims of Codex's `id_token` — never a token or credential.
+ */
+export interface HarnessAccount {
+  agent: HarnessAgent;
+  signedIn: boolean;
+  email: string | null;
+  org: string | null;
+  /** `team`, `max`, `plus`… */
+  plan: string | null;
+}
+
 export const harnessChannels = {
   list: "harness:list",
+  accounts: "harness:accounts",
   check: "harness:check",
   update: "harness:update",
   dismiss: "harness:dismiss",
@@ -101,5 +119,7 @@ export interface DesktopHarnessApi {
   dismiss: (agent: HarnessAgent, version: string) => Promise<HarnessInfo[]>;
   /** Run the update command in Terminal, where its output can be read. */
   openInTerminal: (agent: HarnessAgent) => Promise<void>;
+  /** Who each CLI is signed in as (`HarnessAccount`). */
+  accounts: () => Promise<HarnessAccount[]>;
   onChanged: (listener: (list: HarnessInfo[]) => void) => () => void;
 }

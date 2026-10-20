@@ -1,5 +1,4 @@
 import {
-  Cancel01Icon,
   Copy01Icon,
   Folder01Icon,
   GitCompareIcon,
@@ -16,9 +15,10 @@ import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { useCopy } from "#/components/shared/common/use-copy";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { useDark } from "#/components/shared/diff/use-dark";
+import { EditorTabs } from "#/components/shared/editor/editor-tabs";
 import { RepoMessage } from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
-import { type FileTab, isMarkdown, useFiles } from "#/stores/files";
+import { isMarkdown, useFiles } from "#/stores/files";
 import { useWorktree } from "#/stores/worktree";
 import type {
   WorktreeFile,
@@ -69,89 +69,23 @@ export function FileTabs({ changes }: { changes: WorktreeFile[] }) {
   const close = useFiles((state) => state.close);
   const pin = useFiles((state) => state.pin);
 
-  if (!tabs.length) return null;
   return (
-    <div
-      role="tablist"
-      aria-label="Open files"
-      className="border-border bg-sidebar flex h-8 shrink-0 items-stretch overflow-x-auto border-b"
-    >
-      {tabs.map((tab) => (
-        <Tab
-          key={tab.path}
-          tab={tab}
-          on={tab.path === active}
-          status={changes.find((file) => file.path === tab.path)?.status}
-          onActivate={() => activate(tab.path)}
-          onClose={() => close(tab.path)}
-          onPin={() => pin(tab.path)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function Tab({
-  tab,
-  on,
-  status,
-  onActivate,
-  onClose,
-  onPin,
-}: {
-  tab: FileTab;
-  on: boolean;
-  status: WorktreeFileStatus | undefined;
-  onActivate: () => void;
-  onClose: () => void;
-  onPin: () => void;
-}) {
-  return (
-    <div
-      className={cn(
-        "group border-border flex max-w-56 shrink-0 items-center gap-1.5 border-r pr-1 pl-2.5 text-xs",
-        on
-          ? "bg-background text-foreground"
-          : "text-muted-foreground hover:bg-muted/50",
-      )}
-      title={tab.path}
-    >
-      <button
-        type="button"
-        role="tab"
-        aria-selected={on}
-        className="flex min-w-0 items-center gap-1.5 self-stretch outline-none"
-        onClick={onActivate}
-        onDoubleClick={onPin}
-        // A middle click closes, as in a browser and an editor.
-        onAuxClick={(event) => {
-          if (event.button === 1) onClose();
-        }}
-      >
-        <FileTypeIcon path={tab.path} className="size-3.5 shrink-0" />
-        <span
-          className={cn(
-            "truncate",
-            tab.preview && "italic",
-            status && STATUS_TONE[status],
-          )}
-        >
-          {basename(tab.path)}
-        </span>
-      </button>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        aria-label={`Close ${basename(tab.path)}`}
-        className={cn(
-          "shrink-0",
-          !on && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
-        )}
-        onClick={onClose}
-      >
-        <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} aria-hidden="true" />
-      </Button>
-    </div>
+    <EditorTabs
+      tabs={tabs.map((tab) => {
+        const status = changes.find((file) => file.path === tab.path)?.status;
+        return {
+          id: tab.path,
+          label: basename(tab.path),
+          path: tab.path,
+          preview: tab.preview,
+          labelClassName: status && STATUS_TONE[status],
+        };
+      })}
+      active={active}
+      onActivate={activate}
+      onClose={close}
+      onPin={pin}
+    />
   );
 }
 

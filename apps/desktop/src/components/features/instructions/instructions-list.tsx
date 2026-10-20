@@ -185,7 +185,7 @@ function FileRow({
   const off = node.load === "skipped" || file.missing;
   const label =
     node.scope === "nested"
-      ? node.agents.map((agent) => AGENT_LABELS[agent]).join(" · ")
+      ? node.agents.map((agent) => AGENT_LABELS[agent]).join(", ")
       : SCOPE_LABELS[node.scope];
   const expandable = node.children.length > 0;
   const open = expandable && !collapsed.has(path);
@@ -234,7 +234,7 @@ function FileRow({
       )}
       <span className="text-muted-foreground shrink-0 text-[11px]">
         {label}
-        {!file.markdown && !file.missing && ` · ${fileSize(file.size)}`}
+        {!file.markdown && !file.missing && `, ${fileSize(file.size)}`}
       </span>
     </>
   );

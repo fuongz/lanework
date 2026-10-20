@@ -13,7 +13,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { LocalModeRail } from "#/components/shared/auth/local-mode";
-import { AccountOrb } from "#/components/shared/common/account-orb";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
 import { Kbd } from "#/components/ui/kbd";
@@ -409,7 +408,11 @@ export function AppSidebar({
 
       <div className="mt-2 shrink-0 pt-2 pb-2.5">
         <LocalModeRail />
-        <Link to="/settings" className={LONE_ROW}>
+        <Link
+          to="/settings"
+          aria-keyshortcuts="Meta+Comma"
+          className={LONE_ROW}
+        >
           <HugeiconsIcon
             icon={Settings01Icon}
             className="text-muted-foreground size-4 shrink-0"
@@ -417,15 +420,8 @@ export function AppSidebar({
             aria-hidden="true"
           />
           <span className="min-w-0 truncate">Settings</span>
-          {accountSeed && (
-            // ⚠️ Hidden from the accessible name. A mark appended to "Settings"
-            // tells a screen-reader user nothing and makes the link impossible
-            // to address by the word on it.
-            <AccountOrb
-              seed={accountSeed}
-              className="ml-auto size-5 shrink-0"
-            />
-          )}
+          {/* The key the app menu's Settings… answers to (`menu.ts`). */}
+          <Kbd className="ml-auto shrink-0">⌘,</Kbd>
         </Link>
       </div>
     </aside>

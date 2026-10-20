@@ -160,6 +160,22 @@ function makeFake(): DesktopHarnessApi | null {
   };
   return {
     list: async () => list,
+    accounts: async () => [
+      {
+        agent: "claude",
+        signedIn: true,
+        email: "you@example.com",
+        org: "Example",
+        plan: "team",
+      },
+      {
+        agent: "codex",
+        signedIn: true,
+        email: "you@example.com",
+        org: "Personal",
+        plan: "plus",
+      },
+    ],
     check: async () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
       return patch("codex", { checkedAt: new Date().toISOString() });

@@ -115,29 +115,6 @@ export function applyCorrections(
 }
 
 /**
- * The rules as Settings edits them: one per line, `heard, heard → meant`
- * (`->` and `=>` work too). Lines without an arrow are skipped.
- */
-export function parseCorrections(source: string): DictationCorrection[] {
-  const rules: DictationCorrection[] = [];
-  for (const line of source.split("\n")) {
-    const match = /^(.*?)(?:→|->|=>)(.*)$/.exec(line);
-    if (!match) continue;
-    const from = (match[1] ?? "")
-      .split(",")
-      .map((word) => word.trim())
-      .filter(Boolean);
-    const to = (match[2] ?? "").trim();
-    if (from.length && to) rules.push({ from, to });
-  }
-  return rules;
-}
-
-export function formatCorrections(rules: DictationCorrection[]): string {
-  return rules.map((rule) => `${rule.from.join(", ")} → ${rule.to}`).join("\n");
-}
-
-/**
  * Words put in at a selection, spaced from those either side — monocode's
  * `insertDictation`.
  */

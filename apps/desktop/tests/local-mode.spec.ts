@@ -162,14 +162,14 @@ test("cloud-only features are hidden in local mode and come back after sign-in",
     await expect(
       page.getByRole("button", { name: "Sign in", exact: true }).last(),
     ).toBeVisible();
-    await expect(page.getByText("Machine ID")).toBeHidden();
+    await expect(page.getByText("Machine name")).toBeHidden();
     await expect(page.getByRole("button", { name: "Sign out" })).toBeHidden();
 
     // D9: the checkpoint hook writes to the local store, so its switch stays
     // in local mode; only the machine credential row is cloud-only.
-    await page.goto("app://lanework/settings/agents");
+    await page.goto("app://lanework/settings/harness");
     await expect(
-      page.getByRole("heading", { name: "Agents", exact: true }),
+      page.getByRole("heading", { name: "Harness", exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole("switch", {
@@ -193,7 +193,7 @@ test("cloud-only features are hidden in local mode and come back after sign-in",
     ).toBeVisible();
 
     await page.goto("app://lanework/settings/account");
-    await expect(page.getByText("Machine ID")).toBeVisible();
+    await expect(page.getByText("Machine name")).toBeVisible();
     await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
     await expect(page.getByText("Not signed in")).toBeHidden();
 

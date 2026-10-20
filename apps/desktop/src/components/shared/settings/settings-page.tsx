@@ -3,6 +3,13 @@ import { matches } from "#/lib/settings-catalog";
 import { cn } from "#/lib/utils";
 import { useSettingsSearch } from "#/stores/settings-search";
 
+/**
+ * Every text button on a settings row, one size: Danger zone's (pass with
+ * `size="lg"`). A destructive one adds `border-0` — see `account-section.tsx`.
+ */
+export const SETTINGS_BUTTON =
+  "h-8 gap-1.5 rounded-lg px-3 text-sm has-[>svg:first-child]:pl-2.5";
+
 export interface SettingsRowSpec {
   label: string;
   description?: string;
@@ -30,6 +37,8 @@ export interface SettingsSectionSpec {
    * project's own name and avatar).
    */
   hideTitle?: boolean;
+  /** A heading in the destructive tone — Danger zone. */
+  destructive?: boolean;
 }
 
 /**
@@ -84,6 +93,7 @@ export function SettingsPage({
               className={cn(
                 "text-[15px] font-medium",
                 section.hideTitle && "sr-only",
+                section.destructive && "text-destructive",
               )}
             >
               {section.title}

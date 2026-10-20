@@ -299,13 +299,16 @@ export function AppShell() {
     return () => watch.disconnect();
   }, []);
 
-  // View › Toggle Sidebar (⌘B), the same as the button (FE-19/D5).
+  // View › Toggle Sidebar (⌘B), the same as the button (FE-19/D5), and
+  // Settings (⌘,).
   useEffect(
     () =>
       window.desktop?.onViewCommand((command) => {
         if (command === "toggle-sidebar") toggleRail();
+        else if (command === "open-settings")
+          void navigate({ to: "/settings" });
       }),
-    [toggleRail],
+    [toggleRail, navigate],
   );
 
   // ⚠️ Driven FROM the store, never the other way round: focus mode is asked

@@ -1,5 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { AgentsSection } from "#/components/features/settings/agents-section";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+// What this page held — the hooks, the Lanework MCP entry, the versions — is
+// in Settings › Harness now, beside each CLI it is about.
 export const Route = createFileRoute("/settings/agents")({
-  component: AgentsSection,
+  beforeLoad: () => {
+    throw redirect({ to: "/settings/harness" });
+  },
 });

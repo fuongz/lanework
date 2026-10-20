@@ -8,7 +8,10 @@ import { useId, useState } from "react";
 import type { ReadinessFix } from "#/../shared/readiness";
 import type { Workspace } from "#/../shared/workspaces";
 import { ProjectTile } from "#/components/shared/common/project-tile";
-import { SettingsCard } from "#/components/shared/settings/settings-page";
+import {
+  SETTINGS_BUTTON,
+  SettingsCard,
+} from "#/components/shared/settings/settings-page";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,13 +32,11 @@ import {
 import { Input } from "#/components/ui/input";
 import { useBoard } from "#/stores/board";
 import { useReadiness, useReadinessWatch } from "#/stores/readiness";
-import { AgentSetupSection } from "./agent-setup-section";
-import { AgentUsageRow } from "./agent-usage-row";
 import { ReadinessFixDialog } from "./readiness-fix-dialog";
 import { ReadinessList } from "./readiness-list";
 
 /** One row of the section's card: what it is on the left, the action on the right. */
-function Row({
+export function Row({
   leading,
   label,
   description,
@@ -110,9 +111,9 @@ function ReadinessSection({
 /**
  * Everything that can be done to ONE project, gathered in one place (FE-14).
  *
- * ⚠️ The project is the one SELECTED on this page, which starts as the one that
- * is open. Managing a different project does not mean leaving Settings to open
- * it first — picking its row in the list below is enough.
+ * ⚠️ The project is the one picked in the Projects heading of the sidebar,
+ * which starts as the one that is open. Managing a different project does not
+ * mean leaving Settings to open it first.
  *
  * ⚠️ The two irreversible actions sit apart, under "Danger zone", and each has
  * a confirmation that says what goes and what stays. "Remove all issues" asks
@@ -127,6 +128,8 @@ export function SelectedProjectSection({
   onImport,
   onDelete,
   onFailed,
+  extraRows,
+  dangerRows,
 }: {
   workspace: Workspace | null;
   folders: string[];
@@ -135,6 +138,10 @@ export function SelectedProjectSection({
   onImport: (workspace: Workspace) => void;
   onDelete: (workspace: Workspace & { id: string }) => void;
   onFailed: (message: string | null) => void;
+  /** More rows for the project's card — Sync to cloud, for a local one. */
+  extraRows?: React.ReactNode;
+  /** More rows for Danger zone, above its own — the repository's Disconnect. */
+  dangerRows?: React.ReactNode;
 }) {
   const busy = useBoard((state) => state.busy);
   const active = useBoard((state) => state.active);
@@ -149,9 +156,9 @@ export function SelectedProjectSection({
     return (
       <Empty className="py-10">
         <EmptyHeader>
-          <EmptyTitle>No project selected</EmptyTitle>
+          <EmptyTitle>No projects yet</EmptyTitle>
           <EmptyDescription>
-            Pick one in the list below to manage it here.
+            Create one to see its settings here.
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -159,7 +166,7 @@ export function SelectedProjectSection({
 
   const id = workspace.id;
   const noId =
-    "This project has no cloud id yet, so it cannot be changed from here.";
+    "This project has no cloud ID yet, so it cannot be changed here.";
   // ⚠️ A count only when it is known: the open board's list read. For any
   // other project the dialog says "every issue" rather than a number this page
   // never read.
@@ -185,6 +192,8 @@ export function SelectedProjectSection({
           }
         >
           <Button
+            size="lg"
+            className={SETTINGS_BUTTON}
             variant="outline"
             aria-label={`Rename ${workspace.name}`}
             disabled={!id || busy === `rename:${id}`}
@@ -207,6 +216,8 @@ export function SelectedProjectSection({
           }
         >
           <Button
+            size="lg"
+            className={SETTINGS_BUTTON}
             variant="outline"
             aria-label={`Source folders for ${workspace.name}`}
             onClick={() => onFolders(workspace)}
@@ -221,12 +232,14 @@ export function SelectedProjectSection({
         </Row>
         <Row
           label="Import from local"
-          description="Bring the review cards in this project's folder onto its cloud board."
+          description="Bring the folder's review cards onto the board."
         >
           {/* ⚠️ NOT disabled without a cloud id, unlike Rename and Delete: the
               panel still reads the folder and says what is in it, which is the
               one place that answers "where did my cards go?". */}
           <Button
+            size="lg"
+            className={SETTINGS_BUTTON}
             variant="outline"
             aria-label={`Import from local into ${workspace.name}`}
             onClick={() => onImport(workspace)}
@@ -234,44 +247,31 @@ export function SelectedProjectSection({
             Import from local
           </Button>
         </Row>
-        {/* Counted again when the folder changes: it is that folder's
-            conversations (FE-38/D6). */}
-        <AgentUsageRow
-          key={folders[0] ?? ""}
-          workspace={workspace.id ?? workspace.slug}
-        >
-          {({ description, control }) => (
-            <Row label="Agent usage" description={description}>
-              {control}
-            </Row>
-          )}
-        </AgentUsageRow>
+        {extraRows}
       </SettingsCard>
 
       <ReadinessSection slug={workspace.slug} folders={folders} />
-
-      {/* FE-40/D1: right under the readiness list it explains. */}
-      <AgentSetupSection slug={workspace.slug} folders={folders} />
 
       <div className="mt-9 flex flex-col gap-3">
         <h3 className="text-destructive text-[15px] font-medium">
           Danger zone
         </h3>
         <SettingsCard>
+          {dangerRows}
           <Row
             label="Remove all issues"
             description={
               removed !== null
-                ? `Removed ${removed} ${removed === 1 ? "issue" : "issues"}. The board is empty and ready for a fresh import.`
-                : "Permanently delete every issue on this board — checklists, comments and history included. The project, its lanes, categories and members stay."
+                ? `Removed ${removed} ${removed === 1 ? "issue" : "issues"}. The board is empty.`
+                : "Delete every issue, with its comments and history. The project stays."
             }
           >
             <Button
-              variant="destructive"
               size="lg"
+              className={`${SETTINGS_BUTTON} border-0`}
+              variant="destructive"
               // The same tinted pill as Account → Sign out, and its
               // `border-0` for the same reason (see `account-section.tsx`).
-              className="h-8 gap-1.5 rounded-lg border-0 pr-3 pl-2.5 text-sm"
               aria-label={`Remove all issues in ${workspace.name}`}
               disabled={!id || working}
               title={id ? undefined : noId}
@@ -290,12 +290,12 @@ export function SelectedProjectSection({
           </Row>
           <Row
             label="Delete project"
-            description="Remove the project and its cloud board from your account."
+            description="Delete the project and its board."
           >
             <Button
-              variant="destructive"
               size="lg"
-              className="h-8 gap-1.5 rounded-lg border-0 pr-3 pl-2.5 text-sm"
+              className={`${SETTINGS_BUTTON} border-0`}
+              variant="destructive"
               aria-label={`Delete ${workspace.name}`}
               disabled={!id || busy === `delete:${workspace.slug}`}
               title={id ? undefined : noId}
