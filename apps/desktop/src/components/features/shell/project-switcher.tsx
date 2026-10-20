@@ -1,5 +1,6 @@
 import {
   Add01Icon,
+  DragDropVerticalIcon,
   Search01Icon,
   Settings01Icon,
   Sorting05Icon,
@@ -10,6 +11,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import type { TerminalSession } from "#/../shared/terminal";
 import type { Workspace } from "#/../shared/workspaces";
+import { RenameProjectDialog } from "#/components/features/workspaces/rename-project-dialog";
+import { SourceFoldersDialog } from "#/components/features/workspaces/source-folders-dialog";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
 import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
 import { ProjectTile } from "#/components/shared/common/project-tile";
@@ -18,6 +21,12 @@ import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "#/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +45,7 @@ import { NO_CHATS, useChatEngines } from "#/stores/chat-engines";
 import { useOpenProject } from "#/stores/last-route";
 import { type ProjectSort, usePreferences } from "#/stores/preferences";
 import { isLocalWorkspace } from "#/stores/session";
+import { ProjectReorderList } from "./project-reorder-list";
 
 /** The terminal key a project's agents are filed under (FE-19, FE-26). */
 const keyOf = (workspace: Workspace) => workspace.id ?? workspace.slug;
@@ -107,6 +117,16 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
+  // The Reorder entry in the sort menu turns the list into a drag-to-reorder
+  // one until Done, or until the menu closes.
+  // Opened from a row's context menu; outside the popover, like `creating`.
+  const [renaming, setRenaming] = useState<(Workspace & { id: string }) | null>(
+    null,
+  );
+  const [editing, setEditing] = useState<Workspace | null>(null);
+  const [reordering, setReordering] = useState(false);
+  const [reorderFailed, setReorderFailed] = useState<string | null>(null);
+  const reorderProjects = useBoard((state) => state.reorderProjects);
   const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const sort = usePreferences((state) => state.projectSort);
@@ -167,6 +187,16 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
     }
   }, [open, workspaces, refreshAgents, refreshChats]);
 
+  // Saved by cloud id, so a project the service sent no id for holds them all.
+  const canReorder =
+    workspaces.length > 1 && workspaces.every((entry) => entry.id !== null);
+  const reorder = (slugs: string[]) => {
+    setReorderFailed(null);
+    void reorderProjects(slugs).then(
+      (result) => result.error && setReorderFailed(result.error),
+    );
+  };
+
   const go = (slug: string) => {
     setOpen(false);
     setCreating(false);
@@ -201,6 +231,10 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           setOpen(next);
           // Each opening starts from the whole list.
           if (next) setQuery("");
+          else {
+            setReordering(false);
+            setReorderFailed(null);
+          }
         }}
       >
         <PopoverTrigger
@@ -240,12 +274,34 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           variant="menu"
           align="start"
           side={compact ? "right" : undefined}
-          initialFocus={search}
+          initialFocus={reordering ? undefined : search}
           // ⚠️ A set width: as wide as its rows, it would narrow with every
           // letter typed.
           className="w-72 p-1"
         >
-          {workspaces.length > 0 && (
+          {reordering && (
+            <div className="border-foreground/10 mb-1 flex h-8 shrink-0 items-center gap-2 border-b px-2 pb-1">
+              <span className="text-muted-foreground min-w-0 flex-1 truncate text-[12px]">
+                Drag to reorder
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setReordering(false);
+                  setReorderFailed(null);
+                }}
+                className="hover:bg-foreground/[0.05] focus-visible:bg-foreground/[0.08] -mr-1 h-6 shrink-0 rounded-md px-2 text-[12px] font-medium transition-colors duration-150 focus:outline-none"
+              >
+                Done
+              </button>
+            </div>
+          )}
+          {reordering && reorderFailed && (
+            <p className="text-destructive px-2 pb-1 text-[12px]">
+              {reorderFailed}
+            </p>
+          )}
+          {!reordering && workspaces.length > 0 && (
             <div className="border-foreground/10 mb-1 flex h-8 shrink-0 items-center gap-2 border-b px-2 pb-1">
               <HugeiconsIcon
                 icon={Search01Icon}
@@ -277,61 +333,99 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
               />
             </div>
           )}
-          <RailHover className="max-h-80 overflow-y-auto">
-            <div
-              ref={list}
-              role="listbox"
-              aria-label="Projects"
-              className="flex flex-col gap-0.5"
-              onKeyDown={(event) => {
-                // ↑ ↓ walk the rows; ↑ from the first goes back to the search.
-                if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
-                  return;
-                const rows = [
-                  ...(list.current?.querySelectorAll<HTMLButtonElement>(
-                    "[role=option]",
-                  ) ?? []),
-                ];
-                const at = rows.indexOf(
-                  document.activeElement as HTMLButtonElement,
-                );
-                if (at < 0) return;
-                event.preventDefault();
-                const next = at + (event.key === "ArrowDown" ? 1 : -1);
-                if (next < 0) search.current?.focus();
-                else rows[Math.min(next, rows.length - 1)]?.focus();
-              }}
-            >
-              {workspaces.length === 0 && (
-                <p className="text-muted-foreground px-2 py-3 text-[13px]">
-                  No projects on this account yet.
-                </p>
-              )}
-              {workspaces.length > 0 && shownWorkspaces.length === 0 && (
-                <p className="text-muted-foreground truncate px-2 py-3 text-[13px]">
-                  No project matches “{query.trim()}”.
-                </p>
-              )}
-              {shownWorkspaces.map((workspace) => (
-                <button
-                  key={workspace.slug}
-                  type="button"
-                  role="option"
-                  aria-selected={workspace.slug === active?.slug}
-                  onClick={() => go(workspace.slug)}
-                  className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
-                >
-                  <ProjectTile
-                    workspace={workspace}
-                    className="size-5 rounded-[5px] text-[10px]"
-                  />
-                  <span className="truncate">{workspace.name}</span>
-                  {isLocalWorkspace(workspace) && <LocalBadge />}
-                  <RunningAgents agents={runningIn(workspace)} />
-                </button>
-              ))}
+          {reordering ? (
+            <div className="max-h-80 overflow-y-auto">
+              <ProjectReorderList workspaces={workspaces} onReorder={reorder} />
             </div>
-          </RailHover>
+          ) : (
+            <RailHover className="max-h-80 overflow-y-auto">
+              <div
+                ref={list}
+                role="listbox"
+                aria-label="Projects"
+                className="flex flex-col gap-0.5"
+                onKeyDown={(event) => {
+                  // ↑ ↓ walk the rows; ↑ from the first goes back to the search.
+                  if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
+                    return;
+                  const rows = [
+                    ...(list.current?.querySelectorAll<HTMLButtonElement>(
+                      "[role=option]",
+                    ) ?? []),
+                  ];
+                  const at = rows.indexOf(
+                    document.activeElement as HTMLButtonElement,
+                  );
+                  if (at < 0) return;
+                  event.preventDefault();
+                  const next = at + (event.key === "ArrowDown" ? 1 : -1);
+                  if (next < 0) search.current?.focus();
+                  else rows[Math.min(next, rows.length - 1)]?.focus();
+                }}
+              >
+                {workspaces.length === 0 && (
+                  <p className="text-muted-foreground px-2 py-3 text-[13px]">
+                    No projects on this account yet.
+                  </p>
+                )}
+                {workspaces.length > 0 && shownWorkspaces.length === 0 && (
+                  <p className="text-muted-foreground truncate px-2 py-3 text-[13px]">
+                    No project matches “{query.trim()}”.
+                  </p>
+                )}
+                {shownWorkspaces.map((workspace) => (
+                  <ContextMenu key={workspace.slug}>
+                    <ContextMenuTrigger
+                      render={
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={workspace.slug === active?.slug}
+                          onClick={() => go(workspace.slug)}
+                          className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
+                        />
+                      }
+                    >
+                      <ProjectTile
+                        workspace={workspace}
+                        className="size-5 rounded-[5px] text-[10px]"
+                      />
+                      <span className="truncate">{workspace.name}</span>
+                      {isLocalWorkspace(workspace) && <LocalBadge />}
+                      <RunningAgents agents={runningIn(workspace)} />
+                    </ContextMenuTrigger>
+                    {/* The two everyday edits from Settings → Projects,
+                        without leaving the switcher. Rename is addressed by
+                        cloud id, so a project without one cannot. */}
+                    {/* ⚠️ `finalFocus={false}`: focus handed back to the row
+                        on close lit it as focused, so a second row stayed
+                        highlighted beside the one under the pointer. */}
+                    <ContextMenuContent finalFocus={false}>
+                      <ContextMenuItem
+                        disabled={workspace.id === null}
+                        onClick={() => {
+                          const id = workspace.id;
+                          if (!id) return;
+                          setOpen(false);
+                          setRenaming({ ...workspace, id });
+                        }}
+                      >
+                        Rename
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        onClick={() => {
+                          setOpen(false);
+                          setEditing(workspace);
+                        }}
+                      >
+                        Edit folders
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
+                ))}
+              </div>
+            </RailHover>
+          )}
           <RailHover className="border-foreground/10 mt-1 flex gap-0.5 border-t pt-1">
             {/* ⚠️ A row that opens a DIALOG, and the menu closes behind it. A
               project is named and pointed at its folders in one go now, and
@@ -366,6 +460,35 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
             >
               <HugeiconsIcon
                 icon={Settings01Icon}
+                className="size-4"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+            </button>
+            {/* Turns the list into a drag-to-reorder one: the order "Default"
+                  shows, edited in place — so the sort goes back to Default and
+                  the list reads the way it was just left. */}
+            <button
+              type="button"
+              aria-label="Reorder projects"
+              aria-pressed={reordering}
+              title={
+                workspaces.length > 1 && !canReorder
+                  ? "A project here has no cloud id yet, so the order cannot be saved."
+                  : "Reorder projects"
+              }
+              disabled={!canReorder}
+              onClick={() => {
+                setReorderFailed(null);
+                if (reordering) return setReordering(false);
+                setSort("default");
+                setQuery("");
+                setReordering(true);
+              }}
+              className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground aria-pressed:bg-foreground/[0.08] aria-pressed:text-foreground grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none disabled:opacity-40`}
+            >
+              <HugeiconsIcon
+                icon={DragDropVerticalIcon}
                 className="size-4"
                 strokeWidth={1.8}
                 aria-hidden="true"
@@ -419,6 +542,20 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
         onOpenChange={setCreating}
         onCreated={go}
       />
+      {renaming && (
+        <RenameProjectDialog
+          workspace={renaming}
+          open
+          onOpenChange={(next) => !next && setRenaming(null)}
+        />
+      )}
+      {editing && (
+        <SourceFoldersDialog
+          workspace={editing}
+          open
+          onOpenChange={(next) => !next && setEditing(null)}
+        />
+      )}
     </>
   );
 }
