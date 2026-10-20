@@ -24,7 +24,9 @@ asarUnpack:
 npmRebuild: false
 mac:
   icon: build/icon.icns
-  identity: null
+  # Ad hoc ("-"), not unsigned: macOS delivers no notifications from an app
+  # without a valid signature (FE-70). No Developer ID yet, so not notarized.
+  identity: "-"
   category: public.app-category.productivity
   target: dmg
   # FE-69: the dictation helper opens the microphone and runs Apple's speech

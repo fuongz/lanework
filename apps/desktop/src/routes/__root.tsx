@@ -10,6 +10,7 @@ import { type ReactNode, useEffect } from "react";
 import { AuthGate } from "#/components/features/auth/auth-gate";
 import { StartupLoading } from "#/components/shared/loading/startup-loading";
 import { useFonts } from "#/hooks/use-fonts";
+import { useNotificationRouting } from "#/hooks/use-notification-routing";
 import { useTheme } from "#/hooks/use-theme";
 import { useVibrancy } from "#/hooks/use-vibrancy";
 import { usePreferences } from "#/stores/preferences";
@@ -30,6 +31,7 @@ function RootShell() {
   useVibrancy();
   useTheme();
   useFonts();
+  useNotificationRouting();
   // Hydrated once for the whole app. It used to live in `AppShell`, which left
   // a route outside that shell reading the store's defaults rather than the
   // user's saved preference.

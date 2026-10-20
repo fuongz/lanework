@@ -2,6 +2,7 @@ import { shell } from "electron";
 import {
   type CommitDiff,
   type FileText,
+  formatRepoRef,
   type GitAccount,
   type GitAppAccess,
   gitChannels,
@@ -50,6 +51,7 @@ import {
   type GitTokenRecord,
   readPullsCache,
   readRepo,
+  readRepos,
   readToken,
   writePullsCache,
   writeRepo,
@@ -60,11 +62,12 @@ import { registerWorktree } from "./worktree-ipc";
 /**
  * How long a pull-request read stays fresh.
  *
- * ⚠️ A window, not a poll. Nothing in this app fetches pull requests on a timer:
- * moving between routes inside the window is free, and everything else — opening
- * the screen, refocusing the window, pressing refresh — is a read somebody
- * asked for. A background poll would spend an hourly budget on a screen nobody
- * is looking at.
+ * ⚠️ A window, not a poll. The screen never fetches on a timer: moving
+ * between routes inside the window is free, and everything else — opening the
+ * screen, refocusing the window, pressing refresh — is a read somebody asked
+ * for. The one timer is the new-pull-request watcher (FE-70), which reads only
+ * the open list, only while its notification is on, and leaves what it read in
+ * the cache for this screen.
  */
 const FRESH_MS = 60_000;
 
@@ -152,6 +155,40 @@ async function linkedRepo(
   const ref = await readRepo(record, slug);
   if (!ref) throw new Error("No repository is connected to this project.");
   return ref;
+}
+
+/**
+ * Every linked project's open pull requests, read fresh, for the watcher
+ * (FE-70). A project linked to a repo another one already read is skipped; a
+ * repo that cannot be read is left out, not reported.
+ *
+ * ⚠️ Answers nothing when signed out or GitHub is not connected, rather than
+ * throwing: a timer has no screen to show a refusal on.
+ */
+export async function readLinkedOpenPulls(): Promise<
+  { slug: string; view: PullsView }[]
+> {
+  const record = await authorizedRecord().catch(() => null);
+  if (!record) return [];
+  const token = await usableToken(record).catch(() => null);
+  if (!token) return [];
+  const read = new Set<string>();
+  const out: { slug: string; view: PullsView }[] = [];
+  for (const [slug, ref] of Object.entries(await readRepos(record))) {
+    const key = formatRepoRef(ref).toLowerCase();
+    if (read.has(key)) continue;
+    read.add(key);
+    try {
+      const view = await withToken(record, (live) =>
+        fetchPulls(live.token, ref, "open"),
+      );
+      await writePullsCache(record, ref, "open", view);
+      out.push({ slug, view });
+    } catch {
+      // One repo out of reach must not cost the others their notifications.
+    }
+  }
+  return out;
 }
 
 /** One in-flight device flow, so a second Connect click cannot start another. */

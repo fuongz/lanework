@@ -280,12 +280,19 @@ function watchWorkspace(workspace: string, folder: string): void {
         at: Date.now(),
       } satisfies AgentWrite);
     },
-    (agent) => {
+    (agent, id) => {
       void knownWorkspace(workspace)
-        .then(({ workspace: project }) => {
+        .then(async ({ workspace: project }) => {
+          const tabs = host
+            ? await agentTerminals(workspace).catch((): TerminalSession[] => [])
+            : [];
+          const tab = tabs.find(
+            (entry) =>
+              entry.kind === agent && !entry.exit && entry.resume === id,
+          );
           // A removed/rebound workspace must not deliver a delayed notification.
           if (watching.get(workspace)?.folder === folder)
-            notifyAgentCompleted(agent, project.name);
+            notifyAgentCompleted(agent, project, id, tab?.id ?? null);
         })
         .catch(() => {});
     },

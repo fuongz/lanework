@@ -25,6 +25,8 @@ export function brandDevBundle(electron) {
     .update(readFileSync(join(source, "Contents/Info.plist")))
     .update(readFileSync(icon))
     .update(version)
+    // Bumped when how the clone is made changes, so an old one is rebuilt.
+    .update("adhoc-signed")
     .digest("hex")
     .slice(0, 16);
   const cache = join(root, "node_modules/.lanework-dev", key);
@@ -46,6 +48,16 @@ export function brandDevBundle(electron) {
   })) {
     execFileSync("/usr/bin/plutil", ["-replace", key, "-string", value, plist]);
   }
+  // ⚠️ Editing Info.plist breaks Electron's own signature, and macOS then
+  // refuses the app's notifications outright (UNErrorDomain error 1, FE-70).
+  // Re-signed ad hoc, the bundle is whole again under its new identifier.
+  execFileSync("/usr/bin/codesign", [
+    "--force",
+    "--deep",
+    "--sign",
+    "-",
+    bundle,
+  ]);
   writeFileSync(ready, "");
   return binary;
 }

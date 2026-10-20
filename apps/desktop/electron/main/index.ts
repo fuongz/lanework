@@ -13,7 +13,7 @@ import { registerAgentSetup } from "./agent-setup";
 import { registerAuth } from "./auth";
 import { pidFileBridge, registerConversation } from "./conversation";
 import { registerDictation } from "./dictation";
-import { registerGit } from "./git";
+import { readLinkedOpenPulls, registerGit } from "./git";
 import { registerHandoff } from "./handoff";
 import { registerHarness } from "./harness";
 import { registerInstructions } from "./instructions";
@@ -21,6 +21,8 @@ import { broadcast, handle } from "./ipc";
 import { registerMemory } from "./memory";
 import { installMenu } from "./menu";
 import { installMenuBar } from "./menu-bar";
+import { registerNotifications } from "./notifications";
+import { startPullWatcher } from "./notifications/pull-watcher";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { appOrigin, isTrustedUrl } from "./security";
@@ -194,17 +196,25 @@ app
     registerAgentConfig(devUrl);
     registerHarness(devUrl);
     registerDictation(devUrl);
+    // The menu bar and a clicked notification bring the window back the same
+    // way. A window made just now has no screen to navigate yet: it opens
+    // where it always does.
+    const showWindow = (): BrowserWindow | null => {
+      const window = BrowserWindow.getAllWindows()[0];
+      if (!window) {
+        createWindow();
+        return null;
+      }
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+      return window;
+    };
+    registerNotifications(devUrl, showWindow);
+    startPullWatcher(readLinkedOpenPulls);
     installMenu();
     createWindow();
-    installMenuBar(() => {
-      const window = BrowserWindow.getAllWindows()[0];
-      if (!window) createWindow();
-      else {
-        if (window.isMinimized()) window.restore();
-        window.show();
-        window.focus();
-      }
-    });
+    installMenuBar(() => void showWindow());
     app.on("activate", () => {
       if (!BrowserWindow.getAllWindows().length) createWindow();
     });

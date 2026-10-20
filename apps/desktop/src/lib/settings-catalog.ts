@@ -6,6 +6,7 @@ import {
   MagicWand01Icon,
   McpServerIcon,
   Mic01Icon,
+  Notification01Icon,
   PlugSocketIcon,
   Sun01Icon,
   UserAccountIcon,
@@ -64,6 +65,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: Mic01Icon,
         keywords:
           "dictation voice speech microphone mic language vietnamese corrections",
+      },
+      {
+        to: "/settings/notifications",
+        label: "Notifications",
+        icon: Notification01Icon,
+        keywords:
+          "notifications notification notify push alert os agent session sessions finished done pull request pr new",
       },
       {
         to: "/settings/keybindings",

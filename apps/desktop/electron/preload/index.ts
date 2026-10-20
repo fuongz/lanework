@@ -42,6 +42,11 @@ import {
   memoryChannels,
 } from "../../shared/memory";
 import {
+  type DesktopNotificationsApi,
+  type NotificationTarget,
+  notificationChannels,
+} from "../../shared/notifications";
+import {
   type DesktopReadinessApi,
   readinessChannels,
 } from "../../shared/readiness";
@@ -132,6 +137,21 @@ const worktree: DesktopWorktreeApi = {
  * wrote down itself. `linkRepo` is the single exception and it takes the raw
  * string a human typed, which main parses before it becomes part of any URL.
  */
+/** Settings → Notifications, and where a clicked one leads (FE-70). */
+const notifications: DesktopNotificationsApi = {
+  get: () => ipcRenderer.invoke(notificationChannels.get),
+  set: (kind, delivery) =>
+    ipcRenderer.invoke(notificationChannels.set, kind, delivery),
+  test: () => ipcRenderer.invoke(notificationChannels.test),
+  reportLocation: (path) => {
+    void ipcRenderer
+      .invoke(notificationChannels.location, path)
+      .catch(() => {});
+  },
+  onOpen: (listener) =>
+    subscribe<NotificationTarget>(notificationChannels.open, listener),
+};
+
 /** Settings → Agents (FE-28): the checkpoint hook, on and off. */
 const handoff: DesktopHandoffApi = {
   status: () => ipcRenderer.invoke(handoffChannels.status),
@@ -713,6 +733,7 @@ const desktop: DesktopApi = {
   terminal: createTerminal(),
   conversation,
   dictation,
+  notifications,
   handoff,
   readiness,
   harness,

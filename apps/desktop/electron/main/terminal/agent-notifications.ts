@@ -1,44 +1,26 @@
-import { BrowserWindow, Notification } from "electron";
 import type { TerminalAgent } from "../../../shared/terminal";
+import { notify } from "../notifications";
 
-// Keep delivered notifications alive so their click listeners survive GC.
-const active = new Set<Notification>();
-
+/**
+ * An agent's run finished (FE-70). A click opens its conversation; a tab
+ * running it is where that chat sends the window anyway.
+ *
+ * `tab` is the Lanework tab running the conversation, if one is — on screen
+ * that is the same conversation, so a focused window on it is not told.
+ */
 export function notifyAgentCompleted(
   agent: TerminalAgent,
-  project: string,
+  project: { slug: string; name: string },
+  conversation: string,
+  tab: string | null,
 ): void {
-  if (!Notification.isSupported()) return;
-  try {
-    const notification = new Notification({
-      title: `${agent === "claude" ? "Claude" : "Codex"} finished`,
-      body: `Run completed in ${project}.`,
-      // One sound, owned by the OS (and subject to its notification settings).
-      silent: false,
-    });
-    active.add(notification);
-    // OSes do not always emit close; bound retained native objects.
-    if (active.size > 64) {
-      const oldest = active.values().next().value;
-      if (oldest) {
-        oldest.close();
-        active.delete(oldest);
-      }
-    }
-    const release = () => active.delete(notification);
-    notification.once("close", release);
-    notification.once("failed", release);
-    notification.once("click", () => {
-      release();
-      const window =
-        BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-      if (!window || window.isDestroyed()) return;
-      if (window.isMinimized()) window.restore();
-      window.show();
-      window.focus();
-    });
-    notification.show();
-  } catch {
-    // An unsupported/denied native notification must not break agent tracking.
-  }
+  void notify({
+    kind: "sessions",
+    title: `${agent === "claude" ? "Claude" : "Codex"} finished`,
+    body: `Run completed in ${project.name}.`,
+    target: { kind: "session", slug: project.slug, conversation },
+    onScreen: tab
+      ? [`/w/${encodeURIComponent(project.slug)}/agents/${tab}`]
+      : [],
+  });
 }
