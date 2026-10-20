@@ -21,6 +21,7 @@ import {
   buildMcpShim,
   codexState,
   installLaneworkMcp,
+  isStaleShim,
   laneworkMcpStatus,
   mcpServerPath,
   mcpShimPath,
@@ -57,6 +58,23 @@ after(() => {
 const SHIM = "/Users/me/.lanew/bin/lanework-mcp";
 
 describe("lanework MCP entry", () => {
+  test("a shim of ours is stale only in a temp home, or when it is gone", () => {
+    // This app's own shim, a test run's, one whose home is gone, and
+    // something else entirely. (One still on disk outside a temp folder — a
+    // dev build's — is not stale; a test cannot make one without a real home.)
+    assert.equal(isStaleShim(SHIM, SHIM), false);
+    assert.equal(
+      isStaleShim("/tmp/lw-verify/home/bin/lanework-mcp", SHIM),
+      true,
+    );
+    assert.equal(
+      isStaleShim("/Users/me/.gone-home/bin/lanework-mcp", SHIM),
+      true,
+    );
+    assert.equal(isStaleShim("my-own-build", SHIM), false);
+    assert.equal(isStaleShim(undefined, SHIM), false);
+  });
+
   test("Claude: our entry switches mode and every other key stays", () => {
     const before = {
       numStartups: 4,
@@ -163,6 +181,21 @@ describe("lanework MCP entry", () => {
       {
         command: "my-own-build",
       },
+    );
+
+    // A shim of ours from a test run's temp home is stale: repointed.
+    const stale = join(tmpdir(), "lw-verify", "home", "bin", "lanework-mcp");
+    writeFileSync(
+      claudeJson,
+      JSON.stringify({ mcpServers: { lanework: { command: stale } } }),
+    );
+    status = await laneworkMcpStatus("local");
+    assert.equal(status.claude.ours, true);
+    assert.equal(status.claude.mode, null);
+    await syncLaneworkMcp("local");
+    assert.equal(
+      JSON.parse(readFileSync(claudeJson, "utf8")).mcpServers.lanework.command,
+      mcpShimPath(),
     );
 
     await removeLaneworkMcp("claude-code");

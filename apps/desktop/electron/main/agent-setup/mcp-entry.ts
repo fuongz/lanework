@@ -11,8 +11,9 @@
 // ⚠️ Electron-free, so a spec can drive it against a fake home. The paths come
 // from `agentHome`, which follows `$CLAUDE_CONFIG_DIR` and `$CODEX_HOME` — the
 // variables every test launch sets — and the app home follows `LANEWORK_HOME`.
+import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { MCP_HOST, MCP_URL } from "../../../shared/agent-notes";
 import type {
@@ -120,6 +121,26 @@ function modeOf(
   return null;
 }
 
+/**
+ * A shim of this app's that can no longer be the one meant: the offline
+ * server's `<home>/bin/lanework-mcp`, but from ANOTHER app home that is a
+ * temp folder (a test or verification run's `LANEWORK_HOME`) or is gone.
+ *
+ * ⚠️ Only those two. A shim from a home that is still there — a dev build's —
+ * is that build's entry and stays the user's, or the two apps would take the
+ * entry from each other on every launch. A stale one is ours to fix: it
+ * points every Claude Code or Codex session at a board nobody uses.
+ */
+export function isStaleShim(command: unknown, shim: string): boolean {
+  if (typeof command !== "string" || command === shim) return false;
+  if (!/[/\\]bin[/\\]lanework-mcp$/.test(command)) return false;
+  const temp = [tmpdir(), "/tmp", "/private/tmp", "/var/folders"];
+  return (
+    temp.some((dir) => command.startsWith(`${dir}${sep}`)) ||
+    !existsSync(command)
+  );
+}
+
 export function claudeState(
   json: Json,
   shim = mcpShimPath(),
@@ -131,7 +152,8 @@ export function claudeState(
   const mode = modeOf(entry, shim);
   return {
     installed: true,
-    ours: mode !== null,
+    // A stale shim is ours with no mode: the sync below then rewrites it.
+    ours: mode !== null || isStaleShim(entry.command, shim),
     mode,
     transport:
       typeof entry.url === "string"
@@ -212,7 +234,7 @@ export function codexState(
   const mode = modeOf({ url, command }, shim);
   return {
     installed: true,
-    ours: mode !== null,
+    ours: mode !== null || isStaleShim(command, shim),
     mode,
     transport: url !== null ? "http" : command !== null ? "stdio" : null,
   };
@@ -364,6 +386,8 @@ export function modeFor(
  *
  * ⚠️ Never ADDS an entry and never touches a `lanework` entry that points
  * somewhere else — a self-hosted server, a dev build — which is the user's.
+ * A stale shim of ours (`isStaleShim`) is ours, with no mode, so it is
+ * rewritten to the one this app runs.
  * Signed out (anonymous, revoked) leaves everything as it is.
  */
 export async function syncLaneworkMcp(
