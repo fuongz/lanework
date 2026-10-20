@@ -12,6 +12,7 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { usePulls } from "#/stores/pulls";
+import { PullsListControls } from "./pulls-list";
 
 /** The right pane before a pull request is chosen. */
 export function PullsEmpty() {
@@ -26,6 +27,8 @@ export function PullsEmpty() {
           pull request's own there. */}
       <WindowTitlebar>
         <h1 className={WINDOW_TITLE}>Pull requests</h1>
+        <span className="ml-auto" />
+        <PullsListControls />
       </WindowTitlebar>
       <Empty className="py-16">
         <EmptyHeader>

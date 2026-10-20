@@ -32,6 +32,7 @@ import { CommitPicker } from "./commit-picker";
 import { DiffView } from "./diff-view";
 import { FilesPanel } from "./file-tree";
 import { PullSummary } from "./pull-summary";
+import { PullsListControls } from "./pulls-list";
 
 /**
  * The screen's name in the window's title bar, until a pull request has a
@@ -44,6 +45,8 @@ function PullsTitlebar() {
   return (
     <WindowTitlebar>
       <h1 className={WINDOW_TITLE}>Pull requests</h1>
+      <span className="ml-auto" />
+      <PullsListControls />
     </WindowTitlebar>
   );
 }
@@ -216,6 +219,8 @@ export function PullDetail() {
           controls — in focus mode too, with the list shut — so the row has no
           clearance of its own to work out. */}
       <WindowTitlebar>
+        {/* The list's controls first, over the list they act on. */}
+        <PullsListControls />
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <HugeiconsIcon
             icon={GitPullRequestIcon}

@@ -36,6 +36,7 @@ import { Input } from "#/components/ui/input";
 import { shortAge } from "#/lib/board-view";
 import { PULL_TABS, type PullSearch, type PullTab } from "#/lib/pull-search";
 import { cn } from "#/lib/utils";
+import { useLayout } from "#/stores/layout";
 import { usePulls } from "#/stores/pulls";
 import {
   formatRepoRef,
@@ -181,6 +182,118 @@ function Group({
 }
 
 /**
+ * The list's tabs, state filter and Refresh, for the window's title bar —
+ * the way Changes and Files put their controls there.
+ *
+ * ⚠️ Drawn by EVERY header the screen has (`PullsEmpty`, `PullDetail`): the
+ * bar holds one header, so each one carries them rather than the list.
+ * Nothing until GitHub and a repository are connected — there is no list
+ * to filter — and nothing in focus mode, with the list shut.
+ */
+export function PullsListControls() {
+  const { slug } = useParams({ from: "/_app/w/$slug/pulls" });
+  const { tab, status } = useSearch({ from: "/_app/w/$slug/pulls" });
+  const navigate = useNavigate();
+  const account = usePulls((state) => state.account);
+  const repo = usePulls((state) => state.repo);
+  const view = usePulls((state) => state.view);
+  const loading = usePulls((state) => state.loading);
+  const refresh = usePulls((state) => state.refresh);
+  const focusMode = useLayout((state) => state.focusMode);
+
+  if (account.kind !== "connected" || repo?.kind !== "linked" || focusMode)
+    return null;
+  return (
+    <div className="window-no-drag flex shrink-0 items-center gap-1">
+      <SegmentedControl
+        label="Pull requests"
+        semantics="current"
+        value={tab}
+        options={PULL_TABS.map((value) => ({
+          value,
+          label: TAB_LABEL[value],
+        }))}
+        onChange={(value) =>
+          void navigate({
+            to: "/w/$slug/pulls",
+            params: { slug },
+            search: { tab: value, status },
+            replace: true,
+          })
+        }
+      />
+
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label={`Filter by state — ${STATUS_LABEL[status]}`}
+          title={`Filter by state — ${STATUS_LABEL[status]}`}
+          className={cn(
+            "flex size-6 items-center justify-center rounded-md transition-colors",
+            // ⚠️ The control says when it is doing something. A state
+            // filter is the reason a list looks short, and this button is
+            // the first place anybody will look for why.
+            status === "open"
+              ? "hover:bg-foreground/[0.06]"
+              : "bg-accent-brand/15 text-accent-brand",
+          )}
+        >
+          <HugeiconsIcon
+            icon={FilterIcon}
+            className={cn(
+              "size-3.5",
+              status === "open" && "text-muted-foreground",
+            )}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuRadioGroup
+            value={status}
+            onValueChange={(value) =>
+              void navigate({
+                to: "/w/$slug/pulls",
+                params: { slug },
+                search: { tab, status: value as PullStatus },
+                replace: true,
+              })
+            }
+          >
+            {(["all", "open", "merged", "closed"] as const).map((value) => (
+              <DropdownMenuRadioItem key={value} value={value}>
+                {STATUS_LABEL[value]}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <button
+        type="button"
+        onClick={() => void refresh()}
+        aria-label="Refresh pull requests"
+        title={
+          view
+            ? `Updated ${new Date(view.fetchedAt).toLocaleTimeString()}`
+            : "Refresh"
+        }
+        className="hover:bg-foreground/[0.06] flex size-6 items-center justify-center rounded-md transition-colors"
+      >
+        <HugeiconsIcon
+          icon={Refresh01Icon}
+          className={cn(
+            "text-muted-foreground size-3.5",
+            loading && "animate-spin",
+          )}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      </button>
+    </div>
+  );
+}
+
+/**
  * The middle pane: which pull requests there are, and which one is open.
  *
  * ⚠️ The three TABS are filters over one read — they all answer "where do I
@@ -192,14 +305,11 @@ export function PullsList() {
   const { slug } = useParams({ from: "/_app/w/$slug/pulls" });
   const search = useSearch({ from: "/_app/w/$slug/pulls" });
   const { tab, status } = search;
-  const navigate = useNavigate();
   const account = usePulls((state) => state.account);
   const repo = usePulls((state) => state.repo);
   const view = usePulls((state) => state.view);
-  const loading = usePulls((state) => state.loading);
   const error = usePulls((state) => state.error);
   const ready = usePulls((state) => state.ready);
-  const refresh = usePulls((state) => state.refresh);
   const [query, setQuery] = useState("");
 
   // ⚠️ Ages are measured from when the list was READ. A row that says "2h" next
@@ -281,99 +391,9 @@ export function PullsList() {
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {connected ? (
         <>
-          {/* ⚠️ Under the window's title bar now (FE-58), which holds the
-              screen's name and clears the window controls: this row is the
-              list's own, with no clearance or drag region to keep. */}
-          <div className="flex h-9 shrink-0 items-center gap-1 px-2">
-            <SegmentedControl
-              label="Pull requests"
-              semantics="current"
-              value={tab}
-              options={PULL_TABS.map((value) => ({
-                value,
-                label: TAB_LABEL[value],
-              }))}
-              onChange={(value) =>
-                void navigate({
-                  to: "/w/$slug/pulls",
-                  params: { slug },
-                  search: { tab: value, status },
-                  replace: true,
-                })
-              }
-            />
-
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                aria-label={`Filter by state — ${STATUS_LABEL[status]}`}
-                title={`Filter by state — ${STATUS_LABEL[status]}`}
-                className={cn(
-                  "ml-auto flex size-6 items-center justify-center rounded-md transition-colors",
-                  // ⚠️ The control says when it is doing something. A state
-                  // filter is the reason a list looks short, and this button is
-                  // the first place anybody will look for why.
-                  status === "open"
-                    ? "hover:bg-foreground/[0.06]"
-                    : "bg-accent-brand/15 text-accent-brand",
-                )}
-              >
-                <HugeiconsIcon
-                  icon={FilterIcon}
-                  className={cn(
-                    "size-3.5",
-                    status === "open" && "text-muted-foreground",
-                  )}
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuRadioGroup
-                  value={status}
-                  onValueChange={(value) =>
-                    void navigate({
-                      to: "/w/$slug/pulls",
-                      params: { slug },
-                      search: { tab, status: value as PullStatus },
-                      replace: true,
-                    })
-                  }
-                >
-                  {(["all", "open", "merged", "closed"] as const).map(
-                    (value) => (
-                      <DropdownMenuRadioItem key={value} value={value}>
-                        {STATUS_LABEL[value]}
-                      </DropdownMenuRadioItem>
-                    ),
-                  )}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <button
-              type="button"
-              onClick={() => void refresh()}
-              aria-label="Refresh pull requests"
-              title={
-                view
-                  ? `Updated ${new Date(view.fetchedAt).toLocaleTimeString()}`
-                  : "Refresh"
-              }
-              className="hover:bg-foreground/[0.06] flex size-6 items-center justify-center rounded-md transition-colors"
-            >
-              <HugeiconsIcon
-                icon={Refresh01Icon}
-                className={cn(
-                  "text-muted-foreground size-3.5",
-                  loading && "animate-spin",
-                )}
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
-            </button>
-          </div>
-
-          <div className="px-2 pb-2">
+          {/* The tabs, the state filter and Refresh are in the window's
+              title bar — see `PullsListControls`. */}
+          <div className="px-2 pt-2 pb-2">
             <div className="relative">
               <HugeiconsIcon
                 icon={Search01Icon}
