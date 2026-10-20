@@ -1,0 +1,152 @@
+// Dictation in the composer (FE-69): one `lanework-dictation` helper per
+// dictation, its JSON lines forwarded to the renderer as events.
+//
+// ⚠️ The helper opens the microphone, not the renderer (FE-69/D8): the
+// window's permission handler keeps refusing `media`, and the microphone is
+// open only while a helper runs. One at a time — a new start cancels the old
+// one — and every helper is killed when the app quits.
+import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { release } from "node:os";
+import { join, sep } from "node:path";
+import { createInterface } from "node:readline";
+import { app } from "electron";
+import {
+  type DictationEvent,
+  dictationChannels,
+  HINT_LENGTH_MAX,
+  HINT_MAX,
+  isDictationLocale,
+} from "../../../shared/dictation";
+import { broadcast, handle } from "../ipc";
+
+/**
+ * The helper, outside the asar archive — an executable inside it cannot be
+ * spawned. `electron-builder.yml` unpacks `dist/electron/bin/**`; unpackaged
+ * (dev, tests) there is no archive and the path is left as it is.
+ */
+function helperPath(): string {
+  return join(__dirname, "..", "bin", "lanework-dictation").replace(
+    `app.asar${sep}`,
+    `app.asar.unpacked${sep}`,
+  );
+}
+
+/** macOS 26 is Darwin 25: the first with SpeechAnalyzer. */
+function supported(): boolean {
+  return (
+    process.platform === "darwin" &&
+    Number(release().split(".")[0]) >= 25 &&
+    existsSync(helperPath())
+  );
+}
+
+let running: { session: number; child: ChildProcess } | null = null;
+let sessions = 0;
+
+const send = (event: DictationEvent) =>
+  broadcast(dictationChannels.event, event);
+
+function end(session: number, command: "stop" | "cancel") {
+  if (running?.session !== session) return;
+  const { child } = running;
+  if (command === "cancel") {
+    running = null;
+    child.kill();
+    return;
+  }
+  child.stdin?.write("stop\n");
+}
+
+function start(locale: string, hints: string[]): number {
+  if (running) end(running.session, "cancel");
+  const session = ++sessions;
+  const args = ["--locale", locale];
+  for (const hint of hints) args.push("--hint", hint);
+  const child = spawn(helperPath(), args, {
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+  running = { session, child };
+  let reported = false;
+  // stdio is "pipe", so stdout is always there.
+  createInterface({ input: child.stdout as NodeJS.ReadableStream }).on(
+    "line",
+    (line) => {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        return;
+      }
+      const type = parsed.type;
+      const text = (key: string) =>
+        typeof parsed[key] === "string" ? (parsed[key] as string) : "";
+      if (type === "preparing" || type === "listening") send({ session, type });
+      else if (type === "level" && typeof parsed.value === "number")
+        send({ session, type, value: Math.min(1, Math.max(0, parsed.value)) });
+      else if (type === "text")
+        send({
+          session,
+          type,
+          final: text("final"),
+          volatile: text("volatile"),
+        });
+      else if (type === "done" || type === "error") {
+        reported = true;
+        send(
+          type === "done"
+            ? { session, type, text: text("text") }
+            : {
+                session,
+                type,
+                code: text("code") || "engine",
+                message: text("message"),
+              },
+        );
+      }
+    },
+  );
+  child.on("error", (error) => {
+    reported = true;
+    send({ session, type: "error", code: "spawn", message: error.message });
+  });
+  child.on("exit", () => {
+    const cancelled = running?.session !== session;
+    if (!cancelled) running = null;
+    // A helper that dies without a word — a crash — still ends the session.
+    if (!reported && !cancelled)
+      send({
+        session,
+        type: "error",
+        code: "exited",
+        message: "Dictation stopped unexpectedly.",
+      });
+  });
+  return session;
+}
+
+export function registerDictation(devUrl: string | undefined): void {
+  handle(dictationChannels.supported, devUrl, () => supported());
+  handle(dictationChannels.start, devUrl, ([locale, hints]) => {
+    if (!supported()) throw new Error("Dictation is not available on this Mac");
+    if (!isDictationLocale(locale))
+      throw new Error("Unknown dictation language");
+    if (!Array.isArray(hints) || hints.length > HINT_MAX)
+      throw new Error("Invalid dictation hints");
+    const words = hints.filter(
+      (hint): hint is string =>
+        typeof hint === "string" &&
+        hint.trim().length > 0 &&
+        hint.length <= HINT_LENGTH_MAX,
+    );
+    return start(locale, words);
+  });
+  for (const command of ["stop", "cancel"] as const)
+    handle(dictationChannels[command], devUrl, ([session]) => {
+      if (typeof session !== "number") throw new Error("Invalid session");
+      end(session, command);
+    });
+  app.on("will-quit", () => {
+    if (running) end(running.session, "cancel");
+  });
+}

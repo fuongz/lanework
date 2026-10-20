@@ -19,6 +19,11 @@ import {
   type DesktopConversationApi,
 } from "../../shared/conversation";
 import { channels, type DesktopApi } from "../../shared/desktop";
+import {
+  type DesktopDictationApi,
+  type DictationEvent,
+  dictationChannels,
+} from "../../shared/dictation";
 import { type DesktopGitApi, gitChannels } from "../../shared/git";
 import { type DesktopHandoffApi, handoffChannels } from "../../shared/handoff";
 import {
@@ -209,6 +214,17 @@ const harness: DesktopHarnessApi = {
     ipcRenderer.invoke(harnessChannels.openInTerminal, agent),
   onChanged: (listener) =>
     subscribe<HarnessInfo[]>(harnessChannels.changed, listener),
+};
+
+/** Dictation in the composer (FE-69): the helper's events, by session. */
+const dictation: DesktopDictationApi = {
+  supported: () => ipcRenderer.invoke(dictationChannels.supported),
+  start: (locale, hints) =>
+    ipcRenderer.invoke(dictationChannels.start, locale, hints),
+  stop: (session) => ipcRenderer.invoke(dictationChannels.stop, session),
+  cancel: (session) => ipcRenderer.invoke(dictationChannels.cancel, session),
+  onEvent: (listener) =>
+    subscribe<DictationEvent>(dictationChannels.event, listener),
 };
 
 const readiness: DesktopReadinessApi = {
@@ -694,6 +710,7 @@ const desktop: DesktopApi = {
   worktree,
   terminal: createTerminal(),
   conversation,
+  dictation,
   handoff,
   readiness,
   harness,

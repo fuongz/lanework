@@ -25,8 +25,14 @@ import {
   type Suggestion,
   type SuggestionKind,
 } from "#/../shared/conversation";
+import { insertDictation } from "#/../shared/dictation";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
 import { cn } from "#/lib/utils";
+import {
+  DictationBar,
+  DictationButton,
+  useDictation,
+} from "./composer.dictation";
 import { AttachMenu, ModelMenu, PermissionMenu } from "./composer.menus";
 import { readDraft, writeDraft } from "./draft";
 
@@ -160,6 +166,7 @@ export const Composer = forwardRef<
     index: number;
   } | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const asked = useRef(0);
   /**
@@ -197,6 +204,64 @@ export const Composer = forwardRef<
     if (!draftKey) return;
     return () => writeDraft(draftKey, latest.current);
   }, [draftKey]);
+
+  // Dictation (FE-69): the words heard go in where the caret was when the
+  // microphone opened, replacing what was selected — shown live, kept on ✓.
+  const anchor = useRef({ start: 0, end: 0 });
+  const dictation = useDictation({
+    onDone: (words) => {
+      const next = insertDictation(latest.current, words, anchor.current);
+      caret.current = next.cursor;
+      setText(next.text);
+    },
+    onError: setError,
+  });
+  const dictating = dictation.status !== "idle";
+  const startDictation = () => {
+    const node = area.current;
+    anchor.current = {
+      start: node?.selectionStart ?? text.length,
+      end: node?.selectionEnd ?? text.length,
+    };
+    setSuggest(null);
+    setError(null);
+    node?.focus();
+    void dictation.start();
+  };
+  const toggleDictation = useRef(() => {});
+  toggleDictation.current = () => {
+    if (!dictation.available) return;
+    if (dictation.status === "listening") dictation.finish();
+    else if (!dictating) startDictation();
+  };
+  // ⌘⇧M (D7): from the field, or from nowhere in particular — never while
+  // another field has the caret.
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.key.toLowerCase() !== "m" ||
+        !event.metaKey ||
+        !event.shiftKey ||
+        event.altKey ||
+        event.ctrlKey
+      )
+        return;
+      const focused = document.activeElement;
+      if (
+        focused &&
+        focused !== document.body &&
+        !root.current?.contains(focused)
+      )
+        return;
+      event.preventDefault();
+      toggleDictation.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const shown = dictating
+    ? insertDictation(text, dictation.heard, anchor.current).text
+    : text;
 
   useImperativeHandle(ref, () => ({
     insert: (value) => {
@@ -329,6 +394,18 @@ export const Composer = forwardRef<
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // While dictating the field is read-only: Esc is ✕ and Enter is ✓ (D7) —
+    // Enter never sends a message nobody has read yet.
+    if (dictating) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dictation.cancel();
+      } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+        event.preventDefault();
+        if (dictation.status === "listening") dictation.finish();
+      }
+      return;
+    }
     // ⌘U, a terminal's ^U: what is before the caret on its line goes — at a
     // line's start, the line break, so pressing again keeps going.
     if (
@@ -419,6 +496,7 @@ export const Composer = forwardRef<
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: a drop target for files; the + menu's Upload file is the keyboard's way to attach.
     <div
+      ref={root}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
@@ -524,10 +602,17 @@ export const Composer = forwardRef<
 
       <textarea
         ref={area}
-        value={text}
+        value={shown}
         rows={1}
+        readOnly={dictating}
         aria-label="Message Claude"
-        placeholder="Ask, build, / for commands, @ for references…"
+        placeholder={
+          dictation.status === "preparing"
+            ? "Downloading the speech model…"
+            : dictating
+              ? "Listening…"
+              : "Ask, build, / for commands, @ for references…"
+        }
         onChange={(event) => {
           setText(event.target.value);
           lookup(event.target.value, event.target.selectionStart);
@@ -540,7 +625,10 @@ export const Composer = forwardRef<
           event.preventDefault();
           void addFiles(files, true);
         }}
-        className="placeholder:text-muted-foreground font-content max-h-60 min-h-11 w-full resize-none bg-transparent py-2 text-[14px] leading-relaxed outline-none [field-sizing:content]"
+        className={cn(
+          "placeholder:text-muted-foreground font-content max-h-60 min-h-11 w-full resize-none bg-transparent py-2 text-[14px] leading-relaxed outline-none [field-sizing:content]",
+          dictating && "text-muted-foreground italic",
+        )}
       />
 
       {error && (
@@ -562,13 +650,31 @@ export const Composer = forwardRef<
           }}
         />
         <AttachMenu onUpload={() => picker.current?.click()} />
-        <ModelMenu settings={settings} agent={agent} onChange={onSettings} />
-        <PermissionMenu
-          permission={settings.permission}
-          onChange={(permission) => onSettings({ permission })}
-        />
+        {!dictating && (
+          <>
+            <ModelMenu
+              settings={settings}
+              agent={agent}
+              onChange={onSettings}
+            />
+            <PermissionMenu
+              permission={settings.permission}
+              onChange={(permission) => onSettings({ permission })}
+            />
+          </>
+        )}
         <span className="ml-auto" />
-        {stopping ? (
+        {dictating ? (
+          <DictationBar
+            status={dictation.status}
+            levels={dictation.levels}
+            onCancel={dictation.cancel}
+            onDone={dictation.finish}
+          />
+        ) : (
+          dictation.available && <DictationButton onStart={startDictation} />
+        )}
+        {dictating ? null : stopping ? (
           <button
             type="button"
             aria-label="Stop"

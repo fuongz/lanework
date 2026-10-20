@@ -12,6 +12,7 @@ import { registerAgentConfig } from "./agent-config";
 import { registerAgentSetup } from "./agent-setup";
 import { registerAuth } from "./auth";
 import { pidFileBridge, registerConversation } from "./conversation";
+import { registerDictation } from "./dictation";
 import { registerGit } from "./git";
 import { registerHandoff } from "./handoff";
 import { registerHarness } from "./harness";
@@ -192,6 +193,7 @@ app
     registerAgentSetup(devUrl);
     registerAgentConfig(devUrl);
     registerHarness(devUrl);
+    registerDictation(devUrl);
     installMenu();
     createWindow();
     installMenuBar(() => {

@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { buildDictation } from "./build-dictation.mjs";
 import {
   electronBuildOptions,
   stageNativeModules,
@@ -6,3 +7,4 @@ import {
 
 await build(electronBuildOptions);
 await stageNativeModules();
+await buildDictation();

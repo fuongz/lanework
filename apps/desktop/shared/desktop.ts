@@ -2,6 +2,7 @@ import type { DesktopAgentConfigApi } from "./agent-config";
 import type { DesktopAgentSetupApi } from "./agent-setup";
 import type { DesktopAuthApi, DesktopLaneworkMcpApi } from "./auth";
 import type { DesktopConversationApi } from "./conversation";
+import type { DesktopDictationApi } from "./dictation";
 import type { DesktopGitApi } from "./git";
 import type { DesktopHandoffApi } from "./handoff";
 import type { DesktopHarnessApi } from "./harness";
@@ -75,6 +76,8 @@ export interface DesktopApi {
   terminal: DesktopTerminalApi;
   /** A Claude conversation as a chat, and its composer (FE-62). */
   conversation: DesktopConversationApi;
+  /** Speech to text for the composer, on the Mac (FE-69). */
+  dictation: DesktopDictationApi;
   /** Settings → Agents: the checkpoint hook for Claude Code (FE-28). */
   handoff: DesktopHandoffApi;
   /** Whether a project's folder is ready for an agent to work its board (FE-30). */

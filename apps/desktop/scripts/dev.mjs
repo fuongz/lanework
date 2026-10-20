@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { context } from "esbuild";
 import { createServer } from "vite";
 import { brandDevBundle } from "./brand-dev-bundle.mjs";
+import { buildDictation } from "./build-dictation.mjs";
 import {
   electronBuildOptions,
   stageNativeModules,
@@ -17,6 +18,8 @@ let shuttingDown = false;
 let restarting = false;
 // node-pty is copied once; it only changes with the lockfile, not with a save.
 await stageNativeModules();
+// FE-69: rebuilt only when its Swift source changed.
+await buildDictation();
 const ctx = await context({
   ...electronBuildOptions,
   plugins: [

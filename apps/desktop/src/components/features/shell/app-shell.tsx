@@ -29,6 +29,7 @@ import { terminalShown, useTerminal } from "#/stores/terminal";
 import { AppSidebar } from "./app-sidebar";
 import { BoardNoticeIsland, useBoardNotice } from "./board-notice-island";
 import { CommandPalette } from "./command-palette";
+import { DictationIsland, useDictationUp } from "./dictation-island";
 import { HistoryButtons } from "./history-nav";
 import { McpAuthIsland, useMcpAuthRows } from "./mcp-auth-island";
 
@@ -197,6 +198,7 @@ export function AppShell() {
   }, [sidebarRef, showRail]);
   const terminalRef = usePanelRef();
   const notice = useBoardNotice();
+  const dictating = useDictationUp();
   // Whether Claude Code and Codex are signed in to the cloud Lanework MCP,
   // asked again on a timer and on focus; the island speaks when they are not.
   useMcpAuthWatch();
@@ -502,11 +504,13 @@ export function AppShell() {
           fixed at the top centre, over the title bar's edge and the page.
           ⚠️ After the nav for the same reason as the nav: their `no-drag`
           must be laid down after the title bar's drag strip, or the strip
-          eats their clicks. One spot, one island: a notice has it, then
-          sign-in, and the harness pill waits for both. */}
-      <HarnessIsland yieldTo={notice !== null || mcpAuthUp} />
-      <McpAuthIsland yieldTo={notice !== null} />
-      <BoardNoticeIsland notice={notice} />
+          eats their clicks. One spot, one island: an open microphone has
+          it (FE-69), then a notice, then sign-in, and the harness pill waits
+          for all of them. */}
+      <HarnessIsland yieldTo={dictating || notice !== null || mcpAuthUp} />
+      <McpAuthIsland yieldTo={dictating || notice !== null} />
+      <BoardNoticeIsland notice={dictating ? null : notice} />
+      <DictationIsland />
     </div>
   );
 }

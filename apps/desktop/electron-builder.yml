@@ -17,6 +17,8 @@ asarUnpack:
   - "dist/electron/hook/**"
   # FE-52: the offline MCP server, run the same way from ~/.lanew/bin/lanework-mcp.
   - "dist/electron/mcp-local/**"
+  # FE-69: the dictation helper is a native executable, spawned by path.
+  - "dist/electron/bin/**"
 # The pty binary is a prebuilt N-API module: it runs under Electron's Node as
 # is, and there is nothing here for electron-rebuild to compile.
 npmRebuild: false
@@ -25,6 +27,11 @@ mac:
   identity: null
   category: public.app-category.productivity
   target: dmg
+  # FE-69: the dictation helper opens the microphone and runs Apple's speech
+  # recognition; macOS asks in Lanework's name and needs these strings to.
+  extendInfo:
+    NSMicrophoneUsageDescription: Lanework listens while you dictate a message to Claude or Codex.
+    NSSpeechRecognitionUsageDescription: Lanework turns what you dictate into text, on this Mac.
 win:
   target: nsis
 linux:

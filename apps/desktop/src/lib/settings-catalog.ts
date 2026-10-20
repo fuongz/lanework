@@ -6,6 +6,7 @@ import {
   InformationCircleIcon,
   LegalDocument01Icon,
   MagicWand01Icon,
+  Mic01Icon,
   RoboticIcon,
   Sun01Icon,
   UserAccountIcon,
@@ -53,6 +54,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         label: "Appearance",
         icon: Sun01Icon,
         keywords: "theme dark light system colour color mode",
+      },
+      {
+        to: "/settings/dictation",
+        label: "Dictation",
+        icon: Mic01Icon,
+        keywords:
+          "dictation voice speech microphone mic language vietnamese corrections",
       },
       {
         to: "/settings/account",

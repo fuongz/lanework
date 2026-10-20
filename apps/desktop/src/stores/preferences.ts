@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { isThemeSource, type ThemeSource } from "../../shared/desktop";
+import {
+  type DictationCorrection,
+  type DictationLocale,
+  isDictationLocale,
+} from "../../shared/dictation";
 
 /** One installed font, as a picker saves it: the family and a style of it. */
 export interface FontChoice {
@@ -48,6 +53,17 @@ function readFonts(value: unknown): FontPreferences {
 export const PROJECT_SORTS = ["default", "name", "activate"] as const;
 export type ProjectSort = (typeof PROJECT_SORTS)[number];
 
+function readCorrections(value: unknown): DictationCorrection[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.filter(
+    (rule): rule is DictationCorrection =>
+      !!rule &&
+      typeof rule.to === "string" &&
+      Array.isArray(rule.from) &&
+      rule.from.every((word: unknown) => typeof word === "string"),
+  );
+}
+
 function isProjectSort(value: unknown): value is ProjectSort {
   return (
     typeof value === "string" &&
@@ -76,6 +92,16 @@ interface Preferences {
    */
   projectSort: ProjectSort;
   setProjectSort: (value: ProjectSort) => void;
+  /** The language the composer's microphone listens for (FE-69/D6). */
+  dictationLocale: DictationLocale;
+  setDictationLocale: (value: DictationLocale) => void;
+  /**
+   * The fixes applied to what was heard (FE-69/D5); null until edited in
+   * Settings, which reads as `DEFAULT_CORRECTIONS` — so a later default
+   * reaches everyone who never changed theirs.
+   */
+  dictationCorrections: DictationCorrection[] | null;
+  setDictationCorrections: (value: DictationCorrection[] | null) => void;
   /**
    * True once `persist.rehydrate()` has settled.
    *
@@ -99,6 +125,11 @@ export const usePreferences = create<Preferences>()(
       completeOnboarding: () => set({ onboarded: true }),
       projectSort: "default",
       setProjectSort: (projectSort) => set({ projectSort }),
+      dictationLocale: "vi_VN",
+      setDictationLocale: (dictationLocale) => set({ dictationLocale }),
+      dictationCorrections: null,
+      setDictationCorrections: (dictationCorrections) =>
+        set({ dictationCorrections }),
       hydrated: false,
     }),
     {
@@ -106,11 +137,20 @@ export const usePreferences = create<Preferences>()(
       version: 1,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
-      partialize: ({ theme, onboarded, fonts, projectSort }) => ({
+      partialize: ({
         theme,
         onboarded,
         fonts,
         projectSort,
+        dictationLocale,
+        dictationCorrections,
+      }) => ({
+        theme,
+        onboarded,
+        fonts,
+        projectSort,
+        dictationLocale,
+        dictationCorrections,
       }),
       onRehydrateStorage: () => () =>
         usePreferences.setState({ hydrated: true }),
@@ -129,6 +169,11 @@ export const usePreferences = create<Preferences>()(
           projectSort: isProjectSort(saved?.projectSort)
             ? saved.projectSort
             : "default",
+          // FE-69: new keys, read the same way.
+          dictationLocale: isDictationLocale(saved?.dictationLocale)
+            ? saved.dictationLocale
+            : "vi_VN",
+          dictationCorrections: readCorrections(saved?.dictationCorrections),
           // A record that predates this key belongs to someone who has already
           // used the app; only a machine with NOTHING saved is actually new.
           // Otherwise shipping the tour would replay it for every existing
