@@ -6,7 +6,7 @@ import type { Principal, RedactedSession } from "./auth";
  * nothing consults.
  */
 const ACTIONS = [
-  /** Use the app at all. The one question the UI gate and main both ask. */
+  // Use the app at all. The one question the UI gate and main both ask.
   "app:use",
   "session:read",
   "session:signIn",
@@ -15,11 +15,9 @@ const ACTIONS = [
   "machine:revokeSelf",
   "machine:enrol",
   "machine:revokeAny",
-  /**
-   * FE-52/D10: anything that only exists on the control plane — comments,
-   * presence, attachments, subscriptions, handing work between agents, sync.
-   * A `local` principal can use the app but not these.
-   */
+  // FE-52/D10: anything that only exists on the control plane — comments,
+  // presence, attachments, subscriptions, handing work between agents, sync.
+  // A `local` principal can use the app but not these.
   "cloud:use",
 ] as const;
 
@@ -81,17 +79,18 @@ export type LockState =
 /**
  * Whether this session may use the app, and what to say when it may not.
  *
- * Derived from `can(…, "app:use")` rather than from `principal.kind` directly,
- * so the gate and main cannot drift apart: there is one rule and two readers.
+ * Derived from {@link can} with `"app:use"` rather than from `principal.kind`
+ * directly, so the gate and main cannot drift apart: there is one rule and two
+ * readers.
  *
- * ⚠️ There is deliberately no "unreachable" lock. Two separate reasons:
- *   • An ENROLLED install that loses the network keeps working (O1). Locking it
- *     would trade a risk we do not carry — the data is local — for a failure we
- *     meet constantly.
- *   • An install that has NEVER enrolled cannot be `unreachable` at all: nothing
- *     probes without a credential, so its verdict is `null`. "Cannot reach the
- *     control plane" therefore reaches the user as a FAILED SIGN-IN, which is
- *     where it actually happens, not as a lock reason.
+ * NOTE: there is no "unreachable" lock, for two reasons:
+ * - An ENROLLED install that loses the network keeps working (O1). Locking it
+ *   would trade a risk we do not carry — the data is local — for a failure we
+ *   meet constantly.
+ * - An install that has NEVER enrolled cannot be `unreachable` at all: nothing
+ *   probes without a credential, so its verdict is `null`. "Cannot reach the
+ *   control plane" therefore reaches the user as a FAILED SIGN-IN, which is
+ *   where it happens, not as a lock reason.
  */
 export function lockState(session: RedactedSession): LockState {
   if (can(session.principal, "app:use")) return { locked: false };

@@ -1,9 +1,10 @@
 // Run with `bun test apps/desktop/electron/main/agent-setup`.
 //
-// FE-52/D8: the `lanework` MCP entry switches between the offline server
-// (stdio) and the cloud one (HTTP) and never touches any other server. HOME,
-// CLAUDE_CONFIG_DIR, CODEX_HOME and LANEWORK_HOME all point into a temp dir:
-// nothing here may reach the real `~/.claude.json` or `~/.codex`.
+// The `lanework` MCP entry switches between the offline server (stdio) and
+// the cloud one (HTTP), and never touches any other server (FE-52/D8).
+//
+// NOTE: HOME, CLAUDE_CONFIG_DIR, CODEX_HOME and LANEWORK_HOME all point into
+// a temp dir: nothing here may reach the real `~/.claude.json` or `~/.codex`.
 import assert from "node:assert/strict";
 import {
   mkdirSync,
@@ -60,8 +61,8 @@ const SHIM = "/Users/me/.lanew/bin/lanework-mcp";
 describe("lanework MCP entry", () => {
   test("a shim of ours is stale only in a temp home, or when it is gone", () => {
     // This app's own shim, a test run's, one whose home is gone, and
-    // something else entirely. (One still on disk outside a temp folder — a
-    // dev build's — is not stale; a test cannot make one without a real home.)
+    // something else entirely. One still on disk outside a temp folder (a dev
+    // build's) is not stale, but a test cannot make one without a real home.
     assert.equal(isStaleShim(SHIM, SHIM), false);
     assert.equal(
       isStaleShim("/tmp/lw-verify/home/bin/lanework-mcp", SHIM),

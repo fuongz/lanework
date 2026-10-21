@@ -1,9 +1,9 @@
 // The terminals themselves: real shells on real ptys, each with a headless
-// mirror of its screen (FE-19).
+// mirror of its screen.
 //
-// ⚠️ Transport-agnostic on purpose. `host.ts` wires this to Electron's message
-// ports inside the utility process, and `tests/terminal-sessions.spec.ts` drives
-// it directly under plain Node — which is why nothing here imports Electron.
+// NOTE: Transport-agnostic. `host.ts` wires this to Electron's message ports
+// inside the utility process, and `tests/terminal-sessions.spec.ts` drives it
+// directly under plain Node, which is why nothing here imports Electron.
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename } from "node:path";
@@ -27,9 +27,9 @@ import { claudeStatuslineArgs } from "./claude-statusline";
 /**
  * A CommonJS package's exports, however it was imported.
  *
- * ⚠️ Bundled by esbuild these are plain named exports; imported as ESM under
- * Node (the tests) the xterm packages' UMD builds expose only `default`, and a
- * named import of `Terminal` is `undefined`. agents-kanban hit the same wall.
+ * NOTE: Bundled by esbuild these are plain named exports. Imported as ESM
+ * under Node (the tests), the xterm packages' UMD builds expose only
+ * `default`, and a named import of `Terminal` is `undefined`.
  */
 function exportsOf<T>(module: T): T {
   return ((module as { default?: T }).default ?? module) as T;
@@ -44,17 +44,20 @@ const PROMPT_QUIET_MS = 150;
 const LAUNCH_DEADLINE_MS = 5_000;
 
 /**
- * What an agent's launch line prints just before its CLI starts (FE-26): an
- * OSC nobody answers, which xterm ignores even if one ever got through.
+ * What an agent's launch line prints just before its CLI starts (FE-26).
  *
- * ⚠️ The TYPED line is echoed as text — `\033]7771…` as backslashes and
- * digits — so only the real bytes `printf` emits can match. The echo cannot
+ * An OSC nobody answers, which xterm ignores even if one ever got through.
+ *
+ * NOTE: The TYPED line is echoed as text (`\033]7771…` as backslashes and
+ * digits), so only the real bytes `printf` emits can match. The echo cannot
  * end the curtain early.
  */
 const LAUNCH_MARK = "\x1b]7771;lanework-launched\x07";
 /**
- * Output held back while waiting for the mark, at most. A shell that prints
- * this much before its prompt is saying something worth seeing.
+ * The most output held back while waiting for the mark.
+ *
+ * A shell that prints this much before its prompt is saying something worth
+ * seeing.
  */
 const CURTAIN_MAX = 64 * 1024;
 /** If the mark never comes, the held output is shown after this long. */
@@ -76,9 +79,9 @@ export interface ShellChoice {
 /**
  * The shell a terminal runs, as a LOGIN shell (FE-19/D7).
  *
- * ⚠️ `-l` is the point. A Mac app opened from the Dock inherits launchd's PATH
- * — `/usr/bin:/bin:/usr/sbin:/sbin` — so without the user's profile `bun`,
- * `claude` and everything Homebrew installed are "command not found".
+ * NOTE: `-l` is the point. A Mac app opened from the Dock inherits launchd's
+ * PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), so without the user's profile
+ * `bun`, `claude` and everything Homebrew installed are "command not found".
  * `LANEWORK_TERMINAL_SHELL` is the tests' way to pin a plain `/bin/sh`.
  */
 export function defaultShell(
@@ -96,10 +99,11 @@ export function defaultShell(
 /**
  * The environment a shell starts with: the app's, minus the app's own.
  *
- * ⚠️ `LANEWORK_*` and `ELECTRON_*` are the APP's switches — its home folder,
- * its API, `ELECTRON_RUN_AS_NODE`. A shell that inherited them would run the
- * next `lanework` or `electron` it launched against the wrong home, or not as
- * an app at all. They are deleted, not blanked: an empty value is still set.
+ * NOTE: `LANEWORK_*` and `ELECTRON_*` are the APP's switches: its home
+ * folder, its API, `ELECTRON_RUN_AS_NODE`. A shell that inherited them would
+ * run the next `lanework` or `electron` it launched against the wrong home,
+ * or not as an app at all. They are deleted, not blanked: an empty value is
+ * still set.
  */
 export function shellEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {};
@@ -112,7 +116,7 @@ export function shellEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   out.COLORTERM = "truecolor";
   out.TERM_PROGRAM = "Lanework";
   // Dock-launched apps get no locale, and without one a shell treats every
-  // byte past ASCII — "Dự án" — as garbage.
+  // byte past ASCII ("Dự án") as garbage.
   if (!out.LANG && process.platform === "darwin") out.LANG = "en_US.UTF-8";
   return out;
 }
@@ -130,11 +134,13 @@ const MOUSE_ENCODINGS = [1006, 1016];
  * Follow which mouse ENCODING the program in `mirror` asked for, and answer
  * the sequence that asks for it again.
  *
- * ⚠️ The serialize addon restores mouse TRACKING (`?1000h`, `?1002h`) but not
- * the encoding (`?1006h`, SGR). A view drawn from a snapshot then reports the
- * wheel in the default encoding, which Claude's full-screen UI does not read:
- * typing still works, scrolling is dead. So it is followed here and appended
- * to every snapshot.
+ * NOTE: The serialize addon restores mouse TRACKING (`?1000h`, `?1002h`) but
+ * not the encoding (`?1006h`, SGR). A view drawn from a snapshot then reports
+ * the wheel in the default encoding, which Claude's full-screen UI does not
+ * read: typing still works, scrolling is dead. So it is followed here and
+ * appended to every snapshot.
+ *
+ * @returns a reader of the sequence to append; empty for the default.
  */
 function watchMouseEncoding(mirror: MirrorTerminal): () => string {
   let encoding = 0;
@@ -165,7 +171,7 @@ interface Session {
   pty: IPty | null;
   mirror: MirrorTerminal;
   serializer: Serializer;
-  /** The mouse-encoding mode a snapshot must set again; see `watchMouseEncoding`. */
+  /** The mouse encoding a snapshot must set again: {@link watchMouseEncoding}. */
   mouseEncoding: () => string;
   viewers: Map<Subscriber, Viewer>;
   /** Output read since the last flush, not yet sent to anybody. */
@@ -180,9 +186,10 @@ interface Session {
   /** When the pty last printed anything; 0 before its first output. */
   lastOutput: number;
   /**
-   * An agent tab's output before its CLI starts, held back rather than shown
-   * (FE-26): the profile's noise, the prompt, the typed line. Null once the
-   * CLI is running — or for a plain shell, which hides nothing.
+   * An agent tab's output before its CLI starts, held back rather than shown.
+   *
+   * The profile's noise, the prompt, the typed line (FE-26). Null once the
+   * CLI is running, or for a plain shell, which hides nothing.
    */
   curtain: string | null;
 }
@@ -207,12 +214,13 @@ export interface SpawnRequest {
   rows: number;
   /** A `TerminalKind`; anything else opens a plain shell. */
   kind?: unknown;
-  /** An agent conversation to continue (FE-23); ignored unless a UUID. */
+  /** An agent conversation to continue; ignored unless a UUID. */
   resume?: unknown;
   /**
-   * The card a NEW agent tab is for (FE-34): `{ boardId, card, mode }`, the
-   * board resolved by main. Ignored unless every part is shaped right, and
-   * for a shell or a resume.
+   * The card a NEW agent tab is for: `{ boardId, card, mode }`.
+   *
+   * The board is resolved by main. Ignored unless every part is shaped right,
+   * and for a shell or a resume.
    */
   card?: unknown;
 }
@@ -220,10 +228,10 @@ export interface SpawnRequest {
 /**
  * An agent's first prompt for a card it was handed (FE-34/D3).
  *
- * ⚠️ FIXED words around two ids, and the only prompt this app ever types.
+ * NOTE: FIXED words around two ids, and the only prompt this app ever types.
  * The renderer chooses the mode and names the card; it never supplies a word
  * of this. Kept free of quotes and `!`, so it reads the same to every shell
- * even before `shellQuote` wraps it.
+ * even before {@link shellQuote} wraps it.
  */
 export function cardPrompt(
   mode: CardBriefMode,
@@ -243,8 +251,9 @@ function shellQuote(value: string): string {
 }
 
 /**
- * The card brief a spawn carries, or null — checked HERE as well as in main:
- * it becomes words on a command line.
+ * The card brief a spawn carries, or null when it is not shaped right.
+ *
+ * Checked HERE as well as in main: it becomes words on a command line.
  */
 function cardOf(
   value: unknown,
@@ -256,7 +265,7 @@ function cardOf(
     : null;
 }
 
-/** What follows the CLI's name to continue a conversation (FE-23). */
+/** What follows the CLI's name to continue a conversation. */
 const RESUME_ARGS: Record<TerminalAgent, (id: string) => string> = {
   claude: (id) => `--resume ${id}`,
   codex: (id) => `resume ${id}`,
@@ -266,14 +275,19 @@ const RESUME_ARGS: Record<TerminalAgent, (id: string) => string> = {
  * What follows the CLI's name to start a NEW conversation under an id chosen
  * here, for the CLIs that take one.
  *
- * ⚠️ Without it a new tab's `resume` stays null, so nothing ties it to the
- * transcript the CLI writes once somebody types — and the rail shows the tab
- * AND that transcript as two rows for one agent. Codex has no such flag.
+ * NOTE: Without it a new tab's `resume` stays null, so nothing ties it to
+ * the transcript the CLI writes once somebody types, and the rail shows the
+ * tab AND that transcript as two rows for one agent. Codex has no such flag.
  */
 const NEW_ARGS: Partial<Record<TerminalAgent, (id: string) => string>> = {
   claude: (id) => `--session-id ${id}`,
 };
 
+/**
+ * The pty host's terminals: spawn, stream, resize, reorder and stop them.
+ *
+ * Every session lives here, so every window lists from one place.
+ */
 export function createSessions(options: SessionsOptions = {}) {
   const sessions = new Map<string, Session>();
   const listeners = new Set<(workspace: string) => void>();
@@ -288,8 +302,8 @@ export function createSessions(options: SessionsOptions = {}) {
   /**
    * Hand everything read since the last flush to whoever is watching.
    *
-   * ⚠️ Batched per event-loop turn rather than per pty read. A flood — a build
-   * log, `cat` of a big file — arrives as thousands of small reads, and one
+   * Batched per event-loop turn rather than per pty read. A flood (a build
+   * log, `cat` of a big file) arrives as thousands of small reads, and one
    * port message each is what makes a renderer fall behind a shell.
    */
   function flush(session: Session) {
@@ -304,22 +318,25 @@ export function createSessions(options: SessionsOptions = {}) {
   }
 
   /**
-   * Show what an agent tab held back, and stop holding: the mark came, the
-   * shell exited first, or it never came at all. In the last two cases the
-   * held text IS the explanation — "command not found", a profile error.
+   * Show what an agent tab held back, and stop holding.
+   *
+   * The mark came, the shell exited first, or the mark never came at all. In
+   * the last two cases the held text IS the explanation: "command not found",
+   * a profile error.
    */
   function lift(session: Session, shown: string) {
     session.curtain = null;
     if (shown) record(session, shown);
   }
 
+  /** Take in pty output: hold it behind the curtain, or mirror and queue it. */
   function record(session: Session, data: string) {
     session.lastOutput = Date.now();
     if (session.curtain !== null) {
       const held = session.curtain + data;
       const at = held.indexOf(LAUNCH_MARK);
       if (at !== -1) {
-        // ⚠️ Everything before the mark is dropped for good: it is the shell
+        // Everything before the mark is dropped for good: it is the shell
         // getting ready, not the agent. The view starts at the CLI.
         lift(session, held.slice(at + LAUNCH_MARK.length));
         return;
@@ -328,9 +345,9 @@ export function createSessions(options: SessionsOptions = {}) {
       else session.curtain = held;
       return;
     }
-    // ⚠️ The mirror sees everything, watched or not: it is what a view that
-    // comes back later is drawn from. xterm refuses writes past its pending
-    // limit, and losing the mirror is better than losing the shell.
+    // NOTE: The mirror sees everything, watched or not: it is what a view
+    // that comes back later is drawn from. xterm refuses writes past its
+    // pending limit, and losing the mirror is better than losing the shell.
     try {
       session.mirror.write(data);
     } catch {
@@ -351,7 +368,7 @@ export function createSessions(options: SessionsOptions = {}) {
   }
 
   function spawn(request: SpawnRequest): TerminalSession {
-    // ⚠️ Counted per SIDE (FE-26): shells for the panel, agents for the main
+    // Counted per SIDE (FE-26): shells for the panel, agents for the main
     // view. They are separate lists on screen, so a project full of agents
     // must not be why its panel cannot open a shell.
     const agent = isTerminalKind(request.kind) && request.kind !== "shell";
@@ -384,11 +401,12 @@ export function createSessions(options: SessionsOptions = {}) {
     });
     const serializer = new SerializeAddon();
     mirror.loadAddon(serializer);
-    // ⚠️ A kind it does not know is a plain shell, not a refusal — and never
-    // a command: the only lines an agent tab can type are the ones below.
+    // NOTE: A kind it does not know is a plain shell, not a refusal, and
+    // never a command: the only lines an agent tab can type are the ones
+    // below.
     const kind = isTerminalKind(request.kind) ? request.kind : "shell";
-    // ⚠️ Checked again here, not only in main: this line is typed into a
-    // shell, and a UUID is hex and dashes — nothing a shell reads as syntax.
+    // NOTE: Checked again here, not only in main: this line is typed into a
+    // shell, and a UUID is hex and dashes, nothing a shell reads as syntax.
     const resumed =
       kind !== "shell" && isAgentSessionId(request.resume)
         ? request.resume
@@ -437,13 +455,15 @@ export function createSessions(options: SessionsOptions = {}) {
       flushScheduled: false,
       cols,
       rows,
-      // ⚠️ `printf` of the mark FIRST, then the CLI: the output is held
-      // back until the mark, so the prompt and this very line never show.
-      // ⚠️ `exec`, so the CLI REPLACES the shell (FE-26): `/exit` or ⌃C⌃C
-      // ends the session, rather than dropping somebody at a prompt they
-      // never asked for. An agent here is not a terminal. `|| exit 127`
-      // because an INTERACTIVE shell survives a failed `exec`: a CLI that
-      // cannot start must still end the session, with its error on screen.
+      // NOTE:
+      // - `printf` of the mark FIRST, then the CLI: the output is held back
+      //   until the mark, so the prompt and this very line never show.
+      // - `exec`, so the CLI REPLACES the shell (FE-26): `/exit` or ⌃C⌃C
+      //   ends the session, rather than dropping somebody at a prompt they
+      //   never asked for. An agent here is not a terminal.
+      // - `|| exit 127` because an INTERACTIVE shell survives a failed
+      //   `exec`: a CLI that cannot start must still end the session, with
+      //   its error on screen.
       launch:
         kind === "shell"
           ? null
@@ -455,8 +475,8 @@ export function createSessions(options: SessionsOptions = {}) {
     sessions.set(session.info.id, session);
     pty.onData((data) => record(session, data));
     if (session.curtain !== null) {
-      // The mark never came — a shell that cannot run `printf`, a profile
-      // that hangs: show what there is rather than a spinner forever.
+      // The mark never came (a shell that cannot run `printf`, a profile
+      // that hangs): show what there is rather than a spinner forever.
       setTimeout(() => {
         if (session.curtain !== null) lift(session, session.curtain);
       }, CURTAIN_DEADLINE_MS).unref?.();
@@ -471,7 +491,7 @@ export function createSessions(options: SessionsOptions = {}) {
       session.info.exit = { code: exitCode, signal };
       // Exited before its CLI ever started: what it printed says why.
       if (session.curtain !== null) lift(session, session.curtain);
-      // ⚠️ Written into the MIRROR, not only sent: a view that attaches after
+      // Written into the MIRROR, not only sent: a view that attaches after
       // the exit is drawn from the snapshot, and should say so too.
       record(
         session,
@@ -513,18 +533,18 @@ export function createSessions(options: SessionsOptions = {}) {
   /**
    * Start streaming a session to `sub`: its screen as it stands, then live.
    *
-   * ⚠️ The ORDER is the whole design (agents-kanban learned it the hard way):
-   * 1. Flush — output already read goes to those already watching; for this
+   * NOTE: The ORDER is the whole design:
+   * 1. Flush: output already read goes to those already watching; for this
    *    viewer it is in the mirror, and so in the snapshot.
    * 2. Resize to the viewer's geometry BEFORE the snapshot. Serialized at
    *    another width, the replay wraps wrong and a TUI draws garbage.
    * 3. Mark the mirror's queue with an empty write. Everything written before
    *    the mark is in the snapshot; everything read after it is held for this
-   *    viewer and sent right behind the snapshot — so nothing is lost, and
+   *    viewer and sent right behind the snapshot. Nothing is lost, and
    *    nothing arrives twice.
    *
-   * ⚠️ A snapshot rather than a byte ring buffer. Replaying bytes breaks every
-   * TUI that repaints only the cells that changed — Claude, vim, htop — while
+   * A snapshot rather than a byte ring buffer. Replaying bytes breaks every
+   * TUI that repaints only the cells that changed (Claude, vim, htop), while
    * the mirror has already applied them all.
    */
   function attach(sub: Subscriber, id: string, cols: unknown, rows: unknown) {
@@ -550,12 +570,12 @@ export function createSessions(options: SessionsOptions = {}) {
       viewer.pending = null;
       if (backlog) sub.send({ t: "data", id, data: backlog });
       if (session.info.exit) sub.send({ t: "exit", id, ...session.info.exit });
-      // ⚠️ An agent's CLI is typed only NOW, with a view attached, and not at
-      // spawn. Claude and Codex ask the terminal for its colours (OSC 10/11)
-      // as they start, and only a mounted xterm can answer — unanswered,
+      // NOTE: An agent's CLI is typed only NOW, with a view attached, and not
+      // at spawn. Claude and Codex ask the terminal for its colours (OSC
+      // 10/11) as they start, and only a mounted xterm can answer. Unanswered,
       // Codex waits out the question and falls back to its light theme on a
-      // dark panel. agents-kanban hit exactly that.
-      // ⚠️ TYPED into the shell (then `exec`ed), not spawned directly: the
+      // dark panel.
+      // NOTE: TYPED into the shell (then `exec`ed), not spawned directly: the
       // user's login shell is what knows their PATH and aliases, so the CLI
       // is found wherever their own terminal would find it.
       launchAtPrompt(session);
@@ -565,12 +585,12 @@ export function createSessions(options: SessionsOptions = {}) {
   /**
    * Type an agent tab's CLI once its shell is sitting at a prompt.
    *
-   * ⚠️ Not straight away. A login shell is still reading its profile when the
-   * view attaches, and a line typed then is echoed by the terminal BEFORE the
-   * prompt and drawn again after it — every Claude tab would open on
+   * NOTE: Not straight away. A login shell is still reading its profile when
+   * the view attaches, and a line typed then is echoed by the terminal BEFORE
+   * the prompt and drawn again after it: every Claude tab would open on
    * `claude` twice. A shell at its prompt has printed and gone quiet, so the
-   * line waits for output that has rested for `PROMPT_QUIET_MS`, or for
-   * `LAUNCH_DEADLINE_MS` after the spawn if a prompt never seems to settle.
+   * line waits for output that has rested for {@link PROMPT_QUIET_MS}, or for
+   * {@link LAUNCH_DEADLINE_MS} after the spawn if a prompt never settles.
    */
   function launchAtPrompt(session: Session) {
     if (!session.launch || session.launchTimer) return;
@@ -607,13 +627,15 @@ export function createSessions(options: SessionsOptions = {}) {
   }
 
   /**
-   * Put one workspace's tabs in the order given (FE-19, tab drag).
+   * Put one workspace's tabs in the order given by a tab drag.
    *
-   * ⚠️ Kept HERE rather than in a window's memory: the host is what every view
-   * lists from, so an order stored anywhere else would be lost to a reload and
-   * disagree between two windows. Unknown ids are ignored; a session the
-   * caller did not name — spawned while the drag was in flight — goes last
+   * Kept HERE rather than in a window's memory: the host is what every view
+   * lists from, so an order stored anywhere else would be lost to a reload
+   * and disagree between two windows. Unknown ids are ignored. A session the
+   * caller did not name (spawned while the drag was in flight) goes last
    * rather than vanishing from the order.
+   *
+   * @returns false when `ids` is not an array.
    */
   function reorder(workspace: string, ids: unknown): boolean {
     if (!Array.isArray(ids)) return false;
@@ -663,11 +685,14 @@ export function createSessions(options: SessionsOptions = {}) {
   }
 
   /**
-   * Move agent tabs onto the conversation they are really on (FE-31), as
-   * main worked out from the CLIs' own files. True when any moved.
+   * Move agent tabs onto the conversation they are really on.
    *
-   * ⚠️ Checked here as well: only a live agent tab of `workspace`, and only
-   * an id shaped like one — it is what a later resume is matched against.
+   * Main works that out from the CLIs' own files.
+   *
+   * NOTE: Checked here as well: only a live agent tab of `workspace`, and
+   * only an id shaped like one. It is what a later resume is matched against.
+   *
+   * @returns whether any tab moved.
    */
   function bind(workspace: string, bindings: unknown): boolean {
     if (!Array.isArray(bindings)) return false;
@@ -691,7 +716,7 @@ export function createSessions(options: SessionsOptions = {}) {
     return moved;
   }
 
-  /** Tell `workspace`'s watchers to list again (FE-31): nothing moved here. */
+  /** Tell `workspace`'s watchers to list again, though nothing moved here. */
   function touch(workspace: string): true {
     changed(workspace);
     return true;

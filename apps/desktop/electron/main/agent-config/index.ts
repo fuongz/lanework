@@ -1,5 +1,5 @@
-// Settings → Agents → Config files (FE-47): the user's own Claude Code and
-// Codex config, read and written by id. See `files.ts` for how a write is
+// Settings → Agents → Config files: the user's own Claude Code and Codex
+// config, read and written by id. See `files.ts` for how a write is
 // kept safe, and `shared/agent-config.ts` for why the text crosses whole.
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -18,7 +18,12 @@ import {
   writeConfigFile,
 } from "./files";
 
-/** The agents' homes — the test's fake one in a dev build, as FE-40 does. */
+/**
+ * The agents' homes.
+ *
+ * A dev build takes the test's fake one (`LANEWORK_TEST_AGENT_HOME`), as the
+ * agent setup view does.
+ */
 function where() {
   return agentHome(
     (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir(),
@@ -36,6 +41,12 @@ function hashArg(value: unknown): string {
   return value;
 }
 
+/**
+ * Register the config files' IPC handlers.
+ *
+ * Each handler throws to the renderer on arguments it should never send: a
+ * wrong count, an unknown file id, or a hash this side never handed out.
+ */
 export function registerAgentConfig(devUrl?: string): void {
   handle(agentConfigChannels.list, devUrl, (args) => {
     if (args.length) throw new Error("list takes nothing");

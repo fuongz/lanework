@@ -1,24 +1,26 @@
-// New pull requests on a project's repository (FE-70): every two minutes,
-// while the notification is on, read the open list of each project's GitHub
-// repo through `gh` and notify for what was not there before. A rate limit
-// on `gh` pauses the reads for every caller; see `git/gh.ts`.
+// New pull requests on a project's repository. Every two minutes, while the
+// notification is on, read the open list of each project's GitHub repo
+// through `gh` and notify for what was not there before. A rate limit on `gh`
+// pauses the reads for every caller (see `git/gh.ts`).
 import { formatRepoRef, type PullsView } from "../../../shared/git";
 import { notificationsOn, notify } from "./index";
 
-/** FE-70/D4a. */
+/** How often the open lists are read (FE-70/D4a). */
 const INTERVAL_MS = 2 * 60_000;
 
 interface RepoWatch {
-  /** When this repo was first read: anything opened before it is old news. */
+  /** When this repo was first read. Anything opened before it is old news. */
   since: number;
   /** Ready-for-review pull requests already accounted for. */
   ready: Set<number>;
-  /** Drafts seen; one marked ready later is news then (FE-70/D3). */
+  /** Drafts seen. One marked ready later is news then (FE-70/D3). */
   drafts: Set<number>;
 }
 
 /**
- * ⚠️ In memory, on purpose. The first read of a repo in a run only takes note
+ * What each repo has shown so far, by its lower-cased repo ref.
+ *
+ * Kept in memory only. The first read of a repo in a run only takes note
  * (FE-70/D4a): what was opened while the app was closed is on the Pull
  * requests screen, and a burst of notifications at launch tells nobody
  * anything.
@@ -47,13 +49,13 @@ function check(slug: string, view: PullsView): void {
     }
     if (seen.ready.has(pull.number)) continue;
     seen.ready.add(pull.number);
-    // NOTE: the list is capped at 50, so an old pull request can enter it
+    // NOTE: The list is capped at 50, so an old pull request can enter it
     // for the first time when a newer one closes. Its age, not its absence
-    // before, is what says it is not new.
+    // before, says it is not new.
     const fresh =
       Date.parse(pull.createdAt) > seen.since || seen.drafts.has(pull.number);
     seen.drafts.delete(pull.number);
-    // FE-70/D3: what you opened yourself is not news to you.
+    // What you opened yourself is not news to you (FE-70/D3).
     if (!fresh || pull.authored) continue;
     void notify({
       kind: "pulls",
@@ -75,7 +77,7 @@ async function poll(
   polling = true;
   try {
     if (!(await notificationsOn("pulls"))) {
-      // Switched back on later, it starts from a fresh look rather than
+      // Switched back on later, it starts from a fresh look instead of
       // announcing everything opened while it was off.
       watched.clear();
       return;
@@ -89,8 +91,10 @@ async function poll(
 }
 
 /**
- * `read` answers each project repo's open pull requests, fresh. It answers
- * nothing while `gh` is rate limited, missing or signed out.
+ * Start polling for new pull requests, once per run.
+ *
+ * @param read Answers each project repo's open pull requests, fresh. It
+ *   answers nothing while `gh` is rate limited, missing or signed out.
  */
 export function startPullWatcher(
   read: () => Promise<{ slug: string; view: PullsView }[]>,

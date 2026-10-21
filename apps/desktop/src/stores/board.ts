@@ -25,11 +25,10 @@ const api = () => {
 /**
  * Request tickets, one counter per read that can be in flight twice.
  *
- * ⚠️ Without these, two overlapping reads land in whatever order the network
- * returns them, and the OLDER one wins. It is not hypothetical: press "Try
- * again" while a slow failure is still running and the failure arrives last,
- * replacing the list it just fetched with the error it started before. The
- * screen this store replaced carried the same counter for the same reason.
+ * NOTE: Without these, two overlapping reads land in whatever order the
+ * network returns them, and the older one can win. Press "Try again" while a
+ * slow failure is still running: the failure arrives last and replaces the
+ * list just fetched with the error it started before.
  */
 const ticket = { workspaces: 0, board: 0, detail: 0 };
 
@@ -37,14 +36,15 @@ const ticket = { workspaces: 0, board: 0, detail: 0 };
 let inflight: Promise<void> | null = null;
 
 /**
- * The boards this window has shown, by workspace id, most recent last (FE-15/D2).
+ * The boards this window has shown, by workspace id, most recent last.
  *
- * ⚠️ In memory only, and never trusted on its own. Coming back to a project
- * draws its last board at once and then asks the change feed what happened
- * since its cursor — one small read instead of three, and no skeleton. A
- * board-level event in that feed still re-reads everything, exactly as `poll`
- * does. The saved copy on disk (for offline) is main's, and is a different
- * thing.
+ * Kept so a project draws at once when you come back to it (FE-15/D2).
+ *
+ * NOTE: In memory only, and never trusted on its own. Coming back to a
+ * project draws its last board at once, then asks the change feed what
+ * happened since its cursor: one small read instead of three, and no
+ * skeleton. A board-level event in that feed still re-reads everything, as
+ * `poll` does. The saved copy on disk (for offline) is main's, and separate.
  */
 const boards = new Map<string, { view: BoardView; cursor: number }>();
 const MAX_BOARDS = 8;
@@ -69,36 +69,39 @@ interface BoardState {
   /**
    * A write that lost a race, kept whole.
    *
-   * ⚠️ Its own field rather than an error string. The API's 409 carries the card
-   * as it stands now, and a screen that can show both sides is the difference
-   * between "try again" and a person deciding which version is right.
+   * Its own field rather than an error string. The API's 409 carries the card
+   * as it stands now, so the screen can show both sides and let a person pick
+   * the right version, instead of just "try again".
    */
   conflict: BoardConflict | null;
   /** The key of the write in flight, so exactly one control shows as busy. */
   busy: string | null;
-  /** The change cursor, echoed from the server. Never derived. */
+  /**
+   * The change cursor, echoed from the server.
+   *
+   * Never derived.
+   */
   cursor: number;
   /**
    * The slug the account does not have, or null.
    *
-   * ⚠️ The SLUG, not a boolean. As a flag it outlived the project it was about:
-   * it is set while one URL is open and read on the next screen's first render,
-   * so opening a project that exists could still be bounced straight back to
-   * the picker by an answer about a different one. A value that names what it
-   * is about cannot be read as being about something else.
+   * NOTE: The slug, not a boolean. It is set while one URL is open and read on
+   * the next screen's first render. A flag would outlive its project: opening
+   * a project that exists could bounce back to the picker on an answer about a
+   * different one. A value that names its project cannot be misread.
    */
   notFound: string | null;
   /**
-   * True once a workspace list was actually READ, successfully, at least once.
+   * True once a workspace list was read successfully at least once.
    *
-   * ⚠️ Distinct from `ready`, which only means the first attempt SETTLED — it
-   * is true after a failure too. The difference decides whether "this project
-   * is not in the list" is a fact about the account or just a request that did
-   * not come back, and those two have to be answered differently.
+   * NOTE: Distinct from `ready`, which only means the first attempt settled,
+   * and is true after a failure too. The difference decides whether "this
+   * project is not in the list" is a fact about the account or a request that
+   * did not come back. Those two need different answers.
    */
   listLoaded: boolean;
 
-  /** The open card, WITH its checklist — a read the board list cannot give. */
+  /** The open card with its checklist, which the board list does not carry. */
   detail: BoardCard | null;
   detailLoading: boolean;
   detailError: string | null;
@@ -106,17 +109,19 @@ interface BoardState {
   /**
    * The open card's history and thread, oldest first.
    *
-   * ⚠️ Keyed by CARD ID alongside the entries, because the feed and the card are
-   * two reads that land separately: without it, opening a second card shows the
-   * first one's activity for as long as the new read takes.
+   * NOTE: Keyed by card id alongside the entries, because the feed and the
+   * card are two reads that land separately. Without it, opening a second card
+   * shows the first one's activity until the new read lands.
    */
   activity: { cardId: string; events: BoardActivity[] } | null;
   activityCursor: string | null;
   activityLoading: boolean;
 
   /**
-   * What the open board is read under — its grouping and filters (FE-17). The
-   * issues screen sets it from its URL; every other screen reads the default.
+   * What the open board is read under: its grouping and filters.
+   *
+   * The issues screen sets it from its URL; every other screen reads the
+   * default.
    */
   query: BoardQuery;
   /** The group whose next page is on its way, so one button shows busy. */
@@ -130,49 +135,65 @@ interface BoardState {
    * on screen were read under another.
    */
   setQuery: (slug: string, query: BoardQuery) => void;
-  /** The next page of one group — the "Load more" row at its end. */
+  /** Read the next page of one group: the "Load more" row at its end. */
   loadMore: (group: string) => Promise<void>;
-  /** The counts again, after something on the board changed. */
+  /** Read the counts again, after something on the board changed. */
   refreshStats: () => Promise<void>;
   /**
-   * ⚠️ Answers with the failure instead of parking it in `error`. The switcher
-   * is a popover with the field still in it, and "that key is taken" belongs
-   * beside the name that was refused — not in a banner on the page behind it.
+   * Create a project on the account and make it the active one.
+   *
+   * Answers with the failure instead of setting `error`. The switcher is a
+   * popover with the field still in it, and "that key is taken" belongs beside
+   * the refused name, not in a banner on the page behind it.
+   *
+   * @returns The new project, or the failure, ready to show.
    */
   createProject: (
     name: string,
-    /** `PickedFolder` ids, primary first. Empty when none were chosen. */
+    /**
+     * `PickedFolder` ids, primary first.
+     *
+     * Empty or missing when none were chosen.
+     */
     folders?: string[],
   ) => Promise<{ workspace: Workspace | null } | { error: string }>;
   /**
    * Rename a project on the account, by cloud workspace id.
    *
-   * ⚠️ Answers with the failure rather than parking it in `error`, for the same
-   * reason `createProject` does: the caller is a field with the refused name
-   * still in it.
+   * Answers with the failure rather than setting `error`, as `createProject`
+   * does: the caller is a field with the refused name still in it.
+   *
+   * @returns The failure, ready to show, when it did not save.
    */
   renameProject: (id: string, name: string) => Promise<{ error?: string }>;
   /**
-   * Put the account's projects in this order, by slug, first to last (FE-32).
+   * Put the account's projects in this order, by slug, first to last.
    *
-   * ⚠️ Optimistic: the list moves at once and the write follows. A failure
-   * puts back the order from before and answers with why — the caller is the
-   * list that just moved.
+   * Optimistic: the list moves at once and the write follows. A failure puts
+   * back the order from before and answers with why, to the list that just
+   * moved.
+   *
+   * @returns The failure, ready to show, when it did not save.
    */
   reorderProjects: (slugs: string[]) => Promise<{ error?: string }>;
   /**
    * Delete a project from the account.
    *
-   * ⚠️ Answers with the failure rather than parking it in `error`, for the same
-   * reason `createProject` does: the caller is a dialog, and "that did not
-   * work" belongs beside the button that was pressed.
+   * Answers with the failure rather than setting `error`, as `createProject`
+   * does: the caller is a dialog, and "that did not work" belongs beside the
+   * button that was pressed.
+   *
+   * @param id The cloud workspace id, for the service.
+   * @param slug The project's slug, for everything on this machine.
+   * @returns The failure, ready to show, when it did not delete.
    */
   deleteProject: (id: string, slug: string) => Promise<{ error?: string }>;
   /**
-   * Permanently remove every issue on a project's board (FE-14).
+   * Permanently remove every issue on a project's board.
    *
-   * Busy as `purge:<slug>`. Resolves with how many cards went, or the reason
-   * nothing did.
+   * Busy as `purge:<slug>`.
+   *
+   * @returns How many cards went, or the reason nothing did.
    */
   purgeIssues: (
     id: string,
@@ -181,10 +202,12 @@ interface BoardState {
   /**
    * Put a new card on the board.
    *
-   * ⚠️ Answers with the card the board minted rather than just succeeding. The
-   * composer navigates to the issue it just created, and the key it navigates
-   * by (`FE-06`) is the server's to mint — finding it again by title in the
-   * reloaded list would be a guess, and wrong the moment two cards share one.
+   * NOTE: Answers with the card the board minted. The composer navigates to
+   * the issue it just created, and the server mints the key it navigates by
+   * (`FE-06`). Finding it again by title in the reloaded list would be a
+   * guess, and wrong as soon as two cards share a title.
+   *
+   * @returns The new card, or the failure, ready to show.
    */
   createCard: (
     draft: BoardCardDraft,
@@ -192,9 +215,11 @@ interface BoardState {
   /**
    * Take a card off the board.
    *
-   * ⚠️ Answers with the failure rather than only parking it in `error`: the
-   * caller is a confirmation dialog, and a dialog that closed on a delete that
-   * did not happen would be the last place anyone looks for the reason.
+   * Answers with the failure as well as setting `error`. The caller is a
+   * confirmation dialog, and one that closed on a delete that did not happen
+   * would hide the reason.
+   *
+   * @returns The failure, ready to show, when it did not delete.
    */
   archiveCard: (cardId: string) => Promise<{ error?: string }>;
   move: (
@@ -219,10 +244,13 @@ interface BoardState {
     revision: number,
   ) => Promise<void>;
   /**
-   * Tick `keys` on `card` in ONE write, each with `note` under it (FE-34/D4a):
-   * the recommendations a person just approved in the hand-to-agent dialog.
-   * Answers the card as the service now has it, or null when it was refused —
-   * the reason is in `error` or `conflict`, as for any other write.
+   * Tick `keys` on `card` in one write, each with `note` under it.
+   *
+   * These are the recommendations a person just approved in the
+   * hand-to-agent dialog (FE-34/D4a).
+   *
+   * @returns The card as the service now has it, or null when it was refused.
+   * The reason is then in `error` or `conflict`, as for any other write.
    */
   approve: (
     card: BoardCard,
@@ -230,31 +258,42 @@ interface BoardState {
     note: string,
   ) => Promise<BoardCard | null>;
   /**
-   * A card with its checklist, read by id — for a lane card, whose list read
-   * carries none. Null when it cannot be read.
+   * Read a card with its checklist, by id.
+   *
+   * For a lane card, whose list read carries none.
+   *
+   * @returns Null when it cannot be read.
    */
   readCard: (cardId: string) => Promise<BoardCard | null>;
   /**
    * Checklist ticks made on the open card and not saved yet (FE-13/D7).
    *
-   * ⚠️ The DESIRED state per key, compared against the card when it is read —
-   * never a list of clicks. A tick that is flipped back, or that a poll shows
-   * someone else already made, stops being a change on its own; nothing has to
-   * prune it. And it lives beside `detail`, not inside it, so a poll that
-   * re-reads the card cannot overwrite what is being decided.
+   * NOTE: The desired state per key, compared against the card when it is
+   * read, never a list of clicks. A tick flipped back, or one a poll shows
+   * someone else already made, stops being a change by itself; nothing has to
+   * prune it. It lives beside `detail`, not inside it, so a poll that re-reads
+   * the card cannot overwrite what is being decided.
    */
   draft: { cardId: string; checked: Record<string, boolean> } | null;
   /** Tick or untick one box in the draft. */
   stageTick: (cardId: string, key: string, checked: boolean) => void;
-  /** Pick one option of a "pick ONE" group in the draft; the rest go off. */
+  /**
+   * Pick one option of a "pick ONE" group in the draft.
+   *
+   * @param group Every key of the group; all but `key` go off.
+   */
   stagePick: (cardId: string, group: string[], key: string) => void;
   discardDraft: () => void;
-  /** Send the draft, one box at a time (FE-13/D8). */
+  /** Send the draft as one checklist write. */
   saveDraft: () => Promise<void>;
   openIssue: (taskId: string) => Promise<void>;
   /** Re-read the open card by id, after a write that changed its parts. */
   refreshDetail: (cardId: string) => Promise<void>;
-  /** Read the card's activity. `more` appends the next page instead of replacing. */
+  /**
+   * Read the card's activity.
+   *
+   * @param more Append the next page instead of reading the first again.
+   */
   loadActivity: (cardId: string, more?: boolean) => Promise<void>;
   comment: (cardId: string, body: string) => Promise<{ error?: string }>;
   editComment: (
@@ -275,10 +314,10 @@ interface BoardState {
 /**
  * Re-rank one lane locally, so a dropped card sits where it was dropped.
  *
- * ⚠️ Local ranks are provisional and always replaced by the server's on the next
- * read. They are padded indices rather than an attempt at a fractional index:
- * two clients computing their own real ranks eventually pick the same one, which
- * is why `placement` exists and why nothing here is ever sent to the board.
+ * NOTE: Local ranks are provisional; the server's replace them on the next
+ * read. They are padded indices, not a fractional index: two clients that
+ * compute real ranks themselves end up picking the same one. That is why
+ * `placement` exists and why nothing here is ever sent to the board.
  */
 function reorder(
   cards: BoardCard[],
@@ -315,17 +354,21 @@ const laneOrder = (cards: BoardCard[], columnKey: string): string[] =>
     .map((card) => card.id);
 
 /**
- * True when a lane came out of `reorder` in the order it went in.
+ * Whether a lane came out of {@link reorder} in the order it went in.
  *
- * ⚠️ Compares IDS, not ranks. `reorder` rewrites the lane's ranks to padded
- * indices whatever happens, so two ranks are always different from the
- * server's and comparing them would call every drop a change.
+ * NOTE: Compares ids, not ranks. {@link reorder} always rewrites the lane's
+ * ranks to padded indices, so they never match the server's, and comparing
+ * them would call every drop a change.
  */
 const sameOrder = (before: string[], after: string[]): boolean =>
   before.length === after.length &&
   before.every((id, index) => id === after[index]);
 
-/** Bumped by every reorder, so only the newest one's answer is applied. */
+/**
+ * The request ticket for project reorders.
+ *
+ * Bumped by every reorder, so only the newest one's answer is applied.
+ */
 let reorders = 0;
 
 export const useBoard = create<BoardState>()((set, get) => ({
@@ -351,10 +394,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
   activityLoading: false,
 
   hydrate: async () => {
-    // ⚠️ Everyone waiting on the list waits on the SAME read. Two screens can
-    // ask at once — the landing page and the project layout do exactly that on
-    // a cold navigation — and two requests for one answer is two entries in
-    // main's log when the service is down, for no more information.
+    // Everyone waiting on the list waits on the same read. Two screens can
+    // ask at once (the landing page and the project layout do on a cold
+    // navigation), and two requests for one answer only double main's log
+    // when the service is down.
     if (inflight !== null) return inflight;
     const mine = ++ticket.workspaces;
     inflight = (async () => {
@@ -370,9 +413,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
         });
       } catch (error) {
         if (mine !== ticket.workspaces) return;
-        // ⚠️ `workspaces` is left alone, and `listLoaded` with it. A read that
-        // failed says nothing about the list it could not fetch, and the last
-        // one this app did read is still the best answer it has.
+        // NOTE: `workspaces` and `listLoaded` are left alone. A failed read
+        // says nothing about the list it could not fetch, and the last one
+        // read is still the best answer.
         set({
           ready: true,
           error: ipcMessage(
@@ -390,46 +433,44 @@ export const useBoard = create<BoardState>()((set, get) => ({
   },
 
   /**
-   * Open one project by SLUG, because that is what the URL carries.
+   * Open one project by its slug, which is what the URL carries.
    *
-   * ⚠️ The slug is the address a person can read and link to; every board call
-   * underneath is still keyed by the cloud workspace id. Resolving one to the
-   * other happens here, once, rather than in every screen.
+   * The slug is the address a person can read and link to; every board call
+   * underneath is keyed by the cloud workspace id. One is resolved to the
+   * other here, once, rather than in every screen.
    */
   open: async (slug) => {
-    // ⚠️ The refresh lives HERE, not in the layout that calls this. It used to
-    // be both: the layout ran `hydrate().then(() => open(slug))` and `open`
-    // ran its own `hydrate()` whenever the slug was missing — so every failed
-    // load asked twice and logged twice.
-    // ⚠️ The list is read again only when it cannot answer (FE-15/D4): never
-    // read yet, or the slug is not on it — a project made on another machine
-    // since. Re-reading it on every switch was a round trip per click for the
-    // list already on screen. "Try again" reaches `hydrate` on its own.
+    // NOTE: The list refresh lives here, not in the layout that calls this.
+    // Doing it in both asks twice and logs twice on every failed load.
+    //
+    // The list is read again only when it cannot answer (FE-15/D4): never read
+    // yet, or the slug is not on it (a project made on another machine since).
+    // Re-reading it on every switch costs a round trip per click. "Try again"
+    // reaches `hydrate` on its own.
     const known = (entry: Workspace) => entry.slug === slug;
     if (!get().listLoaded || !get().workspaces.some(known))
       await get().hydrate();
     const workspace = get().workspaces.find(known) ?? null;
     if (!workspace) {
-      // ⚠️ "Gone" is a claim about the ACCOUNT, and only a list this app has
-      // actually read can support it. Concluding it from a read that failed
-      // sent the picker a project that exists — and the picker navigates
-      // straight back to it, which is a loop: one pair of requests per lap,
-      // "Opening your project…" on screen for as long as it ran, and main's
-      // log filling with the same failure. Leave the error on screen instead.
+      // NOTE: "Gone" is a claim about the account, and only a list this app
+      // has read can support it. Concluded from a failed read, it sends the
+      // picker a project that exists, and the picker navigates straight back:
+      // a loop of requests, "Opening your project…" on screen, and main's log
+      // filling with the same failure. Leave the error on screen instead.
       if (!get().listLoaded) {
         set({ view: null, loading: false });
         return;
       }
-      // ⚠️ A flag rather than an error banner. The project in the URL is gone —
-      // usually because it was deleted on the account, sometimes because a
-      // remembered selection was cleared — and the useful answer is the picker,
-      // not a red box on a board that cannot load.
+      // A flag rather than an error banner. The project in the URL is gone
+      // (deleted on the account, or a remembered selection was cleared), and
+      // the useful answer is the picker, not a red box on a board that cannot
+      // load.
       set({ active: null, view: null, notFound: slug });
       return;
     }
     const cached = workspace.id ? boards.get(workspace.id) : undefined;
-    // ⚠️ A new ticket, so a read still in flight for the project being left
-    // cannot land on this one.
+    // NOTE: A new ticket, so a read still in flight for the project being
+    // left cannot land on this one.
     ++ticket.board;
     set({
       active: workspace,
@@ -465,9 +506,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
       if (mine !== ticket.board) return;
       set({ view, loading: false, error: null });
       // The board read hands back a head; start the change cursor there so the
-      // first poll reports what happened AFTER this read, not the whole board.
-      // ⚠️ A grouped read already carries it (FE-17), and asking the feed from
-      // zero just to learn it would scan a page of the feed for one number.
+      // first poll reports what happened after this read, not the whole board.
+      // A grouped read already carries it; asking the feed from zero would
+      // scan a page of the feed for one number.
       if (typeof view.head === "number") set({ cursor: view.head });
       else {
         const changes = await api()
@@ -488,8 +529,8 @@ export const useBoard = create<BoardState>()((set, get) => ({
   /**
    * Catch up on what changed elsewhere.
    *
-   * ⚠️ A board-level event means the LANES changed, and no amount of patching
-   * cards can express that — so it re-reads everything rather than guessing.
+   * A board-level event means the lanes changed, which patching cards cannot
+   * express, so it re-reads everything rather than guessing.
    */
   poll: async () => {
     const { active, view, cursor } = get();
@@ -497,10 +538,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const mine = ticket.board;
     try {
       const changes = await api().board.changes(active.id, cursor);
-      // ⚠️ The project may have changed while this was in flight; its cards
-      // must not be merged into the next one's board.
+      // NOTE: The project may have changed while this was in flight; its
+      // cards must not be merged into the next one's board.
       if (mine !== ticket.board || get().active?.id !== active.id) return;
-      // More than one page behind — a cached board after a long absence — is
+      // More than one page behind (a cached board after a long absence) is
       // cheaper and safer to read whole than to page through.
       if (changes.events.length || changes.hasMore) {
         await get().reload();
@@ -516,8 +557,8 @@ export const useBoard = create<BoardState>()((set, get) => ({
       for (const card of changes.cards)
         if (!view.cards.some((entry) => entry.id === card.id))
           merged.push(card);
-      // ⚠️ A tombstone leaves the board. The feed is the only place a card
-      // archived elsewhere is reported, and merging it back in drew a card
+      // NOTE: A tombstone leaves the board. The feed is the only place a card
+      // archived elsewhere is reported; merged back in, it would draw a card
       // that no longer exists until the next whole-board read.
       const next = {
         ...view,
@@ -529,7 +570,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
       await get().refreshStats();
     } catch {
       // A failed poll is not an error the user has to see: the board on screen
-      // is still the last thing the server actually said.
+      // is still the last thing the server said.
     }
   },
 
@@ -537,7 +578,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (boardQueryKey(query) === boardQueryKey(get().query)) return;
     set({ query });
     const { active, view } = get();
-    // ⚠️ Only the OPEN board is re-read, and only once it has one. On the way
+    // Only the open board is re-read, and only once it has one. On the way
     // into a project the issues screen sets its query before the layout has
     // opened anything, and `open` reads under it anyway.
     if (active?.slug === slug && view && view.query !== boardQueryKey(query))
@@ -652,7 +693,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     set({ workspaces: next });
     try {
       const snapshot = await api().reorder(ids as string[]);
-      // ⚠️ Only the LATEST move's answer lands. Two quick moves are two
+      // NOTE: Only the latest move's answer lands. Two quick moves are two
       // writes, and the first one's reply arriving last would put the list
       // back one step.
       if (mine === reorders)
@@ -669,10 +710,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
     }
   },
 
-  // ⚠️ `id` for the service, `slug` for everything on this machine — the folder
-  // link main drops, the busy key below, and the open-board check. They are two
-  // keyspaces and the service refuses the wrong one, so neither is derivable
-  // from the other here.
+  // NOTE: `id` for the service, `slug` for everything on this machine: the
+  // folder link main drops, the busy key below, and the open-board check. They
+  // are two keyspaces, the service refuses the wrong one, and neither can be
+  // derived from the other here.
   deleteProject: async (id, slug) => {
     set({ busy: `delete:${slug}`, error: null });
     try {
@@ -682,9 +723,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
         workspaces: snapshot.workspaces,
         active: snapshot.active,
         busy: null,
-        // ⚠️ The open board is dropped when it was the one deleted. Leaving the
-        // cards on screen would let somebody keep editing a project that no
-        // longer exists, and every write would fail one at a time.
+        // NOTE: The open board is dropped when it was the one deleted. Cards
+        // left on screen would invite edits to a project that no longer
+        // exists, and every write would fail one at a time.
         ...(get().active?.slug === slug ? { view: null, cursor: 0 } : {}),
       });
       return {};
@@ -701,10 +742,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
     try {
       const { deleted } = await api().board.purge(id, slug);
       set({ busy: null });
-      // ⚠️ Re-read when it was the open board, rather than emptying `view`
-      // here. The lanes, categories and counts come back from the service —
-      // an empty copy invented locally would be right about the cards and
-      // silent about everything else the read carries.
+      // Re-read when it was the open board, rather than emptying `view` here.
+      // The lanes, categories and counts come from the service; an empty
+      // local copy would be right about the cards and wrong about the rest.
       if (get().active?.id === id) await get().reload();
       return { deleted };
     } catch (error) {
@@ -726,16 +766,16 @@ export const useBoard = create<BoardState>()((set, get) => ({
         set({ error: result.message });
         return { error: result.message };
       }
-      // ⚠️ Reported as an error even though the write SUCCEEDED. The board caps
-      // tags and applies the cap silently, so this is the only moment somebody
-      // learns the fourth tag they typed is not on the card they just made.
+      // Reported as an error even though the write succeeded. The board caps
+      // tags silently, so this is the only moment somebody learns the fourth
+      // tag they typed is not on the card.
       if (result.droppedTags.length)
         set({
           error: `Tags capped at 3 — ${result.droppedTags.join(", ")} not saved.`,
         });
-      // ⚠️ The change feed, not a whole-board read (FE-17): the new card is on
-      // it, and a re-read would fold every group someone opened with "Load
-      // more" back to its first page.
+      // NOTE: The change feed, not a whole-board read: the new card is on it,
+      // and a re-read would fold every group opened with "Load more" back to
+      // its first page.
       await get().poll();
       return { card: result.card };
     } catch (error) {
@@ -756,10 +796,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
     set({ busy: cardId, error: null, conflict: null });
     try {
       await api().board.archive(workspace.id, cardId);
-      // ⚠️ The server's word, NOT a splice: the feed carries the tombstone and
+      // NOTE: The server's word, not a splice: the feed carries the tombstone,
       // `poll` takes it off the board, then the counts are asked again. A
-      // client that removed the row itself would be guessing (FE-17 made this
-      // the feed rather than a whole-board read, which reset "Load more").
+      // client that removed the row itself would be guessing. A whole-board
+      // read would reset "Load more".
       await get().poll();
       return {};
     } catch (error) {
@@ -777,10 +817,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
   /**
    * Move a card, and show it moved before the server has said so.
    *
-   * ⚠️ The ONE optimistic write in this app, and the exception is deliberate: a
-   * card that snaps back to where it was and then jumps to where it was dropped
-   * reads as broken rather than slow. Everything else here still waits for the
-   * server. A refusal restores the exact list this started from.
+   * One of the few optimistic writes here. A card that snaps back to where it
+   * was and then jumps to where it was dropped reads as broken, not slow. A
+   * refusal restores the exact list this started from.
    */
   move: async (cardId, columnKey, placement) => {
     const workspace = get().active;
@@ -791,14 +830,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!card) return;
     const destination = columnKey ?? card.columnKey;
     const cards = reorder(before, cardId, destination, placement);
-    /**
-     * ⚠️ A move that moves nothing is not a move, and must not be SENT. Lifting
-     * a card and putting it back where it was — dropping it on the boundary it
-     * already sits against, or choosing the lane it is already in — resolves to
-     * the lane exactly as it stands, and forwarding that anyway had the board
-     * stamp `updatedAt` on a card nothing happened to. Every such card then
-     * claimed to be the most recently touched work on the project.
-     */
+    // NOTE: A move that moves nothing must not be sent. Putting a card back
+    // where it was (on the boundary it already sits against, or into its own
+    // lane) leaves the lane as it stands. Sent anyway, the board stamps
+    // `updatedAt` on an untouched card, which then claims to be the most
+    // recently touched work on the project.
     if (
       destination === card.columnKey &&
       sameOrder(laneOrder(before, destination), laneOrder(cards, destination))
@@ -819,7 +855,8 @@ export const useBoard = create<BoardState>()((set, get) => ({
       );
       if (result.kind === "ok") {
         // The properties rail reads detail, independently of the board list.
-        // Refresh it after a saved move so its status and revision stay current.
+        // Refresh it after a saved move so its status and revision stay
+        // current.
         await get().refreshDetail(cardId);
         await get().poll();
         return;
@@ -856,9 +893,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
         revision,
       );
       if (result.kind === "ok") {
-        // ⚠️ The card the SERVER returned, not the patch that was sent: tags
-        // come back capped and normalized, and showing what was typed would
-        // leave the screen disagreeing with the board.
+        // NOTE: The card the server returned, not the patch that was sent:
+        // tags come back capped and normalized, and showing what was typed
+        // would leave the screen disagreeing with the board.
         set((state) => ({
           detail:
             state.detail?.id === cardId
@@ -933,8 +970,8 @@ export const useBoard = create<BoardState>()((set, get) => ({
   approve: async (card, keys, note) => {
     const workspace = get().active;
     if (!workspace?.id || !card.checklist) return null;
-    // ⚠️ The same shape `saveDraft` sends: every row back, `checked` and
-    // `note` ONLY on the boxes being approved, so every other box keeps its
+    // NOTE: The same shape `saveDraft` sends: every row back, `checked` and
+    // `note` only on the boxes being approved. Every other box keeps its
     // tick, its timestamp and a note the MCP may have written a second ago.
     const wanted = new Set(keys);
     const payload: BoardChecklistDraft[] = card.checklist.map((item) => ({
@@ -1022,16 +1059,15 @@ export const useBoard = create<BoardState>()((set, get) => ({
       return;
     }
 
-    // ⚠️ ONE request for the whole set: `PUT …/checklist` with the revision on
-    // screen as `If-Match`. It replaced a PATCH per box, which wrote one
-    // "updated the checklist" line per tick into the card's activity and could
-    // leave half a decision applied when a later box failed.
+    // One request for the whole set: `PUT …/checklist` with the revision on
+    // screen as `If-Match`. A PATCH per box writes one "updated the checklist"
+    // line per tick into the card's activity, and can leave half a decision
+    // applied when a later box fails.
     //
-    // ⚠️ Every row goes back, but `checked` ONLY on the boxes this draft
-    // changed. The service reads an absent `checked` as "keep what it says" —
-    // tick and timestamp — and an absent `note` the same way, so a box nobody
-    // touched here keeps the moment it was approved, and an edit made through
-    // the MCP a second ago to a note is not flattened.
+    // NOTE: Every row goes back, but `checked` only on the boxes this draft
+    // changed. The service reads an absent `checked` (and an absent `note`) as
+    // "keep what it says". A box nobody touched keeps the moment it was
+    // approved, and a note edited through the MCP a second ago is kept.
     const wanted = new Set(changed.map((item) => item.key));
     const payload: BoardChecklistDraft[] = items.map((item) => ({
       key: item.key,
@@ -1056,8 +1092,8 @@ export const useBoard = create<BoardState>()((set, get) => ({
         set({ detail: result.card, draft: null });
         return;
       }
-      // Refused as a whole, so nothing landed: the draft stays exactly as it
-      // was, still marked, for the person to look at against the new card.
+      // Refused as a whole, so nothing landed: the draft stays as it was,
+      // still marked, to compare against the new card.
       if (result.kind === "conflict") set({ conflict: result });
       else set({ error: result.message });
       await get().refreshDetail(detail.id);
@@ -1088,7 +1124,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
     }
   },
 
-  /** The card a URL names — `FE-06`, the way a person says it. */
+  /**
+   * Open the card a URL names.
+   *
+   * @param taskId The id a person says, such as `FE-06`.
+   */
   openIssue: async (taskId) => {
     const workspace = get().active;
     if (!workspace?.id) return;
@@ -1104,16 +1144,16 @@ export const useBoard = create<BoardState>()((set, get) => ({
         draft: null,
         detailLoading: false,
         detailError: card ? null : `No card called ${taskId}.`,
-        // ⚠️ Cleared here, not only in `closeIssue`. Opening a card straight
-        // from another one — a sub-issue link — never unmounts the page, so a
-        // stale thread would sit under the new card until its own read landed.
+        // NOTE: Cleared here, not only in `closeIssue`. Opening a card from
+        // another one (a sub-issue link) never unmounts the page, so a stale
+        // thread would sit under the new card until its own read landed.
         activity: null,
         activityCursor: null,
       });
-      // ⚠️ The thread is NOT read here (FE-15/D5). `IssueActivity` reads it
-      // when it mounts under this card, and again when the card id changes;
-      // reading it here too sent every open twice. It stays a second read, so
-      // the card draws without waiting for a history that can run for pages.
+      // The thread is not read here (FE-15/D5). `IssueActivity` reads it when
+      // it mounts under this card and when the card id changes; reading it
+      // here too sends every open twice. As a second read, it lets the card
+      // draw without waiting for a history that can run for pages.
     } catch (error) {
       if (mine !== ticket.detail) return;
       set({
@@ -1126,9 +1166,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
   /**
    * One page of the open card's activity.
    *
-   * ⚠️ Guarded by the same `ticket.detail` the card read uses, and by the card
-   * id on the way in. Two cards opened in quick succession would otherwise race,
-   * and the loser's thread would be appended to the winner's card.
+   * NOTE: Guarded by the same `ticket.detail` the card read uses, and by the
+   * card id on the way in. Otherwise two cards opened in quick succession
+   * race, and the loser's thread is appended to the winner's card.
    */
   loadActivity: async (cardId, more = false) => {
     const workspace = get().active;
@@ -1154,9 +1194,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
       }));
     } catch {
       if (mine !== ticket.detail) return;
-      // ⚠️ Silent, and the thread already on screen is kept. Activity is
-      // context around a card rather than the card itself; replacing a
-      // conversation with an error banner loses more than it explains.
+      // Silent, and the thread already on screen is kept. Activity is context
+      // around a card; replacing a conversation with an error banner loses
+      // more than it explains.
       set({ activityLoading: false });
     }
   },
@@ -1167,10 +1207,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
     set({ busy: `${cardId}:comment`, error: null });
     try {
       await api().board.comment(workspace.id, cardId, body);
-      // ⚠️ Re-read rather than appended locally. The service stamps the moment
-      // and the author, and a comment spliced in here would sit in the feed at a
-      // time this machine's clock invented — next to audit rows the server
-      // ordered against its own.
+      // Re-read rather than appended locally. The service stamps the time and
+      // the author; a comment spliced in here would carry this machine's
+      // clock, next to audit rows the server ordered by its own.
       await get().loadActivity(cardId);
       await get().refreshDetail(cardId);
       return {};
@@ -1224,11 +1263,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
   /**
    * Follow or star the open card.
    *
-   * ⚠️ These two ARE written optimistically, unlike every other write in this
-   * store. They are the caller's own state, idempotent on the service and
-   * carrying no revision, so there is no race to lose and nothing to overwrite —
-   * and a star that waits for a round trip before filling in is the one control
-   * on this page that feels broken. The server's answer still wins.
+   * Written optimistically, unlike most writes in this store. They are the
+   * caller's own state, idempotent on the service and carry no revision, so
+   * there is no race to lose and nothing to overwrite. A star that waits for a
+   * round trip before filling in feels broken. The server's answer still wins.
    */
   setSubscribed: async (cardId, subscribed) => {
     const workspace = get().active;

@@ -4,10 +4,11 @@ import { isTrustedUrl } from "./security";
 /**
  * Reject anything that is not our own top-level frame in a real window.
  *
- * Every handler goes through this. A channel is reachable by any frame the
- * renderer can create — an iframe, a detached devtools target — so identifying
- * the sender is the gate, and it is cheaper to apply once here than to remember
- * per handler.
+ * Every handler goes through this. Any frame the renderer can create (an
+ * iframe, a detached devtools target) can reach a channel, so the sender is
+ * the gate. Checking it once here is safer than remembering it per handler.
+ *
+ * @throws When the sender is not the main frame of a window on a trusted URL.
  */
 export function assertTrustedSender(
   event: IpcMainInvokeEvent,

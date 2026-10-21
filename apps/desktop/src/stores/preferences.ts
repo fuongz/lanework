@@ -7,15 +7,19 @@ import {
   isDictationLocale,
 } from "../../shared/dictation";
 
-/** One installed font, as a picker saves it: the family and a style of it. */
+/** One installed font, as a picker saves it: the family and one style. */
 export interface FontChoice {
   family: string;
-  /** The style's own name, as the font calls it — "Regular", "Medium"… */
+  /** The style's own name, as the font calls it: "Regular", "Medium"… */
   style: string;
   weight: number;
 }
 
-/** A role left `null` falls back: UI and code to the app's, content to UI's. */
+/**
+ * The font picked for each role.
+ *
+ * A role left `null` falls back: UI and code to the app's, content to UI's.
+ */
 export interface FontPreferences {
   ui: FontChoice | null;
   content: FontChoice | null;
@@ -74,21 +78,22 @@ function isProjectSort(value: unknown): value is ProjectSort {
 interface Preferences {
   theme: ThemeSource;
   setTheme: (value: ThemeSource) => void;
-  /** Per machine, like the theme (FE-21). */
+  /** The fonts picked on this machine, like the theme. */
   fonts: FontPreferences;
   setFont: (role: FontRole, value: FontChoice | null) => void;
   /**
    * Whether the first-run tour has been walked through on this machine.
    *
-   * Local, not account-wide, and deliberately: the tour runs BEFORE sign-in —
-   * there is no account to hang it off yet — and what it asks (the appearance)
-   * is a per-machine choice anyway.
+   * Local, not account-wide: the tour runs before sign-in, when there is no
+   * account yet, and what it asks (the appearance) is a per-machine choice.
    */
   onboarded: boolean;
   completeOnboarding: () => void;
   /**
-   * The project switcher's order. Kept here rather than in the switcher, so
-   * it survives a restart and the rail's two forms (FE-58) share one choice.
+   * The project switcher's order.
+   *
+   * Kept here rather than in the switcher, so it survives a restart and the
+   * rail's two forms share one choice.
    */
   projectSort: ProjectSort;
   setProjectSort: (value: ProjectSort) => void;
@@ -96,18 +101,19 @@ interface Preferences {
   dictationLocale: DictationLocale;
   setDictationLocale: (value: DictationLocale) => void;
   /**
-   * The fixes applied to what was heard (FE-69/D5); null until edited in
-   * Settings, which reads as `DEFAULT_CORRECTIONS` — so a later default
-   * reaches everyone who never changed theirs.
+   * The fixes applied to what was heard (FE-69/D5).
+   *
+   * Null until edited in Settings, and null reads as `DEFAULT_CORRECTIONS`,
+   * so a later default reaches everyone who never changed theirs.
    */
   dictationCorrections: DictationCorrection[] | null;
   setDictationCorrections: (value: DictationCorrection[] | null) => void;
   /**
    * True once `persist.rehydrate()` has settled.
    *
-   * ⚠️ Read this before branching on `onboarded`. Hydration is skipped at
-   * creation (see `skipHydration`), so for the first render every install looks
-   * brand new — without this flag a returning machine flashes the welcome step
+   * NOTE: Read this before branching on `onboarded`. Hydration is skipped at
+   * creation (see `skipHydration`), so on the first render every install looks
+   * brand new. Without this flag a returning machine flashes the welcome step
    * on its way to the sign-in screen.
    */
   hydrated: boolean;
@@ -154,30 +160,28 @@ export const usePreferences = create<Preferences>()(
       }),
       onRehydrateStorage: () => () =>
         usePreferences.setState({ hydrated: true }),
-      // ⚠️ Still version 1, and `compact` simply stops being read. A bump would
-      // discard everyone's saved theme to drop a key that is already ignored;
-      // an unknown value falls back here either way.
+      // NOTE: Stays version 1; a dropped key such as `compact` is just not
+      // read. A bump would discard everyone's saved theme, and an unknown
+      // value falls back here either way.
       merge: (persisted, current) => {
         const saved = persisted as Partial<Preferences> | null;
         return {
           ...current,
           theme: isThemeSource(saved?.theme) ? saved.theme : "system",
-          // A new key, so still version 1: a record without it reads as the
-          // defaults, and a malformed one as the defaults role by role.
+          // A record without fonts reads as the defaults, and a malformed one
+          // as the defaults role by role.
           fonts: readFonts(saved?.fonts),
-          // Also a new key: missing or unknown reads as the default order.
+          // Missing or unknown reads as the default order.
           projectSort: isProjectSort(saved?.projectSort)
             ? saved.projectSort
             : "default",
-          // FE-69: new keys, read the same way.
           dictationLocale: isDictationLocale(saved?.dictationLocale)
             ? saved.dictationLocale
             : "vi_VN",
           dictationCorrections: readCorrections(saved?.dictationCorrections),
-          // A record that predates this key belongs to someone who has already
-          // used the app; only a machine with NOTHING saved is actually new.
-          // Otherwise shipping the tour would replay it for every existing
-          // install the next time it reached the gate.
+          // A record without this key belongs to someone who has already used
+          // the app; only a machine with nothing saved is new. Otherwise the
+          // tour would replay for every install that predates it.
           onboarded: saved ? saved.onboarded !== false : false,
         };
       },

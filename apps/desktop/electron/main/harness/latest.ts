@@ -1,5 +1,5 @@
 // The newest version of an agent CLI, from wherever its install method gets
-// updates (FE-61): Homebrew for a cask or formula, npm for the rest.
+// updates: Homebrew for a cask or formula, npm for the rest.
 import type { HarnessAgent, InstallMethod } from "../../../shared/harness";
 import {
   brewNameOf,
@@ -12,7 +12,7 @@ import { afterMarker, runInLoginShell, type ShellOptions } from "./shell";
 const NPM_REGISTRY = "https://registry.npmjs.org";
 
 interface LatestOptions extends Partial<ShellOptions> {
-  /** The npm registry; a spec points it somewhere unreachable. */
+  /** The npm registry. A spec points it somewhere unreachable. */
   registry?: string;
 }
 
@@ -27,9 +27,10 @@ async function fromBrew(
   const name = brewNameOf(realPath);
   if (!name) return null;
   const cask = method === "brew-cask" ? " --cask" : "";
-  // ⚠️ `brew` through the login shell: it is on the profile's PATH only. No
-  // `brew` there → no marker → unknown, never an error. No auto-update:
-  // `outdated` reads what brew already knows, it never refreshes taps.
+  // `brew` runs through the login shell, because it is only on the profile's
+  // PATH. No `brew` there means no marker, which reads as unknown, never as an
+  // error. No auto-update: `outdated` reads what brew already knows and never
+  // refreshes taps.
   const { stdout } = await runInLoginShell(
     `command -v brew >/dev/null 2>&1 && printf '\\n%s\\n' '${BREW_MARKER}' && HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --json=v2${cask} ${name} 2>/dev/null`,
     {
@@ -68,13 +69,14 @@ async function fromNpm(
 }
 
 /**
- * The newest version this CLI's install method offers, or null when that is
- * not known — offline, no `brew`, a registry that answered nonsense, an
- * install the app cannot place. Never throws: an unknown latest only means no
- * island.
+ * The newest version this CLI's install method offers.
  *
- * ⚠️ Claude's native installer updates from the same releases npm publishes,
- * so `native` asks npm too.
+ * Never throws: an unknown latest only means no island. Claude's native
+ * installer updates from the same releases npm publishes, so `native` asks npm
+ * too.
+ *
+ * @returns Null when it is not known: offline, no `brew`, a registry that
+ *   answered nonsense, or an install the app cannot place.
  */
 export async function latestVersion(
   agent: HarnessAgent,

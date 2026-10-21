@@ -6,7 +6,12 @@ import {
 } from "../terminal";
 import { menuBarIcon } from "./icon";
 
-/** A single macOS tray, owned by main and kept alive across window closes. */
+/**
+ * Install the macOS menu-bar tray that lists running processes.
+ *
+ * One tray, owned by main and kept alive when windows close. Nothing on other
+ * platforms.
+ */
 export function installMenuBar(showWindow: () => void): void {
   if (process.platform !== "darwin") return;
   const tray = new Tray(menuBarIcon());
@@ -88,7 +93,8 @@ export function installMenuBar(showWindow: () => void): void {
       refreshing = false;
     }
   };
-  // Includes transcript/background changes in projects that have no active watcher.
+  // The poll also catches transcript and background changes in projects that
+  // have no active watcher.
   const timer = setInterval(() => void refresh(), 5_000);
   const unsubscribe = onRunningChanged(() => void refresh());
   timer.unref();

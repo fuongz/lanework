@@ -7,13 +7,12 @@ import type {
 } from "../../shared/worktree";
 
 /**
- * Repository › Files (FE-66): the working tree as a tree, and the files open
- * in tabs beside it.
+ * Repository › Files: the working tree, and the files open in tabs beside it.
  *
- * ⚠️ Read on entry, on window focus and on request — never on a timer and not
- * by a file watcher, the rule Changes follows (FE-22/D10).
+ * Read on entry, on window focus and on request. Never on a timer and never
+ * by a file watcher, the same rule as Changes (FE-22/D10).
  *
- * ⚠️ Read-only (FE-66/D1). Nothing here writes to the folder.
+ * NOTE: Read-only (FE-66/D1). Nothing here writes to the folder.
  */
 
 const api = () => {
@@ -24,8 +23,10 @@ const api = () => {
 };
 
 /**
- * One open file. A `preview` tab is the one a single click opens: the next
- * single click replaces it, the way an editor's italic tab does (FE-66/D3).
+ * One open file.
+ *
+ * A `preview` tab is the one a single click opens: the next single click
+ * replaces it, the way an editor's italic tab does (FE-66/D3).
  */
 interface FileTab {
   path: string;
@@ -33,16 +34,20 @@ interface FileTab {
 }
 
 /**
- * Tabs per project and folder, so coming back to one finds its files still
- * open. Keyed `slug#folder`: two folders' paths are never the same files.
+ * The open tabs of each project and folder, kept across a switch.
+ *
+ * Coming back to one finds its files still open. Keyed `slug#folder`: two
+ * folders' paths are never the same files.
  */
 const tabMemory = new Map<string, { tabs: FileTab[]; active: string | null }>();
 const memoryKey = (slug: string, folder: number) => `${slug}#${folder}`;
 
 /**
- * The folder Files last showed, per project, by its PATH (FE-71/D4) — an
- * index would point at a different folder once one before it is removed. A
- * path no longer linked falls back to the primary.
+ * The storage key of the folder Files last showed, per project.
+ *
+ * Saved by its path (FE-71/D4): an index would point at a different folder
+ * once one before it is removed. A path no longer linked falls back to the
+ * primary.
  */
 const FOLDER_KEY = "lanework:files-folder";
 
@@ -75,7 +80,12 @@ export function saveFolder(slug: string, path: string | null): void {
   }
 }
 
-/** A slow answer about one project must not land on another, or on a later read. */
+/**
+ * The request ticket for folder reads.
+ *
+ * A slow answer about one project must not land on another, or on a later
+ * read.
+ */
 let ticket = 0;
 
 /** Directories being read right now, so opening one twice reads it once. */
@@ -83,12 +93,13 @@ const reading = new Set<string>();
 
 interface FilesStore {
   slug: string | null;
-  /** Which linked folder is on screen, by index; 0 is the primary (FE-71). */
+  /** Which linked folder is on screen, by index; 0 is the primary. */
   folder: number;
   /**
-   * `git status` of a NON-primary folder, read here because the worktree
-   * store is the primary's — Changes and the rail read it (FE-71/D1). Null
-   * for the primary.
+   * `git status` of a non-primary folder; null for the primary.
+   *
+   * Read here because the worktree store holds the primary's, which Changes
+   * and the rail read (FE-71/D1).
    */
   folderStatus: WorktreeState | null;
   /** The top read: git's list, ignored folders unread. */
@@ -101,18 +112,28 @@ interface FilesStore {
   active: string | null;
   views: Record<string, FileView>;
   viewErrors: Record<string, string>;
-  /** Markdown files showing the rendered page rather than the source (FE-66/D9). */
+  /**
+   * Markdown files showing the rendered page rather than the source
+   * (FE-66/D9).
+   */
   rendered: Record<string, boolean>;
   quickOpen: boolean;
 
   open: (slug: string, folder?: number) => Promise<void>;
   refresh: () => Promise<void>;
   loadDir: (dir: string) => Promise<void>;
-  /** A single click: a preview tab. `pin` keeps it (a double click, Quick Open). */
+  /**
+   * Open a file in a tab.
+   *
+   * @param pin Keep the tab (a double click, Quick Open). Without it, the
+   * file opens in the preview tab, as a single click does.
+   */
   openFile: (path: string, pin?: boolean) => void;
   /**
-   * Open a repository path from ANOTHER screen — a chat badge — in a kept
-   * tab, switching to its project first. The caller then navigates to Files.
+   * Open a repository path from another screen, such as a chat badge.
+   *
+   * It opens in a kept tab, switching to its project first. The caller then
+   * navigates to Files.
    */
   reveal: (slug: string, path: string) => void;
   pin: (path: string) => void;
@@ -148,7 +169,11 @@ export const useFiles = create<FilesStore>((set, get) => {
     if (slug) tabMemory.set(memoryKey(slug, folder), { tabs, active });
   }
 
-  /** Make `slug`'s `folder` the one on screen, with the tabs it had last time. */
+  /**
+   * Put `slug`'s `folder` on screen, with the tabs it had last time.
+   *
+   * @param folder The linked folder's index; 0 is the primary.
+   */
   function switchTo(slug: string, folder: number) {
     if (get().slug === slug && get().folder === folder) return;
     remember();
@@ -207,9 +232,9 @@ export const useFiles = create<FilesStore>((set, get) => {
             return;
           }
         }
-        // ⚠️ The folders somebody opened are read again with the top, so a
+        // The folders somebody opened are read again with the top, so a
         // refresh never folds `node_modules/` shut under them. One that has
-        // gone since is simply dropped.
+        // gone since is dropped.
         const dirs = Object.keys(get().loaded);
         const [base, ...again] = await Promise.all([
           api().files(slug, folder),
@@ -234,8 +259,8 @@ export const useFiles = create<FilesStore>((set, get) => {
         });
         return;
       }
-      // What is open is read again too: coming back from an editor is exactly
-      // when a file on screen has changed underneath.
+      // Open files are read again too: coming back from an editor is when a
+      // file on screen has changed underneath.
       for (const tab of get().tabs) void readView(slug, tab.path);
     },
 
@@ -287,8 +312,8 @@ export const useFiles = create<FilesStore>((set, get) => {
 
     reveal: (slug, path) => {
       // A chat names a path in the primary's repository (`locate` reads it),
-      // so the file opens there — and the choice is cleared, or Files would
-      // switch back to the remembered folder on arrival.
+      // so the file opens there. The saved folder is cleared, or Files would
+      // switch back to it on arrival.
       saveFolder(slug, null);
       switchTo(slug, 0);
       get().openFile(path, true);
@@ -335,7 +360,7 @@ export const useFiles = create<FilesStore>((set, get) => {
   };
 });
 
-/** Markdown, as far as the rendered view is concerned. */
+/** Whether a path is Markdown, as far as the rendered view is concerned. */
 export function isMarkdown(path: string): boolean {
   return /\.(md|mdx|markdown)$/i.test(path);
 }

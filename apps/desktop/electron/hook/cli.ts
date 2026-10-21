@@ -1,18 +1,18 @@
-// `lanework` — what someone with Claude Code and no desktop app types to switch
-// the checkpoint hook on (INF-03). Shipped in the plugin's `bin/`, so it is on
-// PATH inside a Claude session: `! lanework login`.
+// `lanework`: the command that switches the checkpoint hook on for someone
+// with Claude Code and no desktop app. It ships in the plugin's `bin/`, so it
+// is on PATH inside a Claude session: `! lanework login`.
 //
 //   lanework login [--device]    sign this machine in (browser, or a code)
 //   lanework status              signed in? hook config? last checkpoint?
 //   lanework logout              revoke this machine and forget it
 //   lanework config push-wip on|off
-//   lanework mcp                 the offline board's MCP server, on stdio (FE-52)
+//   lanework mcp                 the offline board's MCP server, on stdio
 //
-// ⚠️ Sign-in reuses the control plane's `lanework login` flow (its contract is
-// `@lanework/protocol`'s `auth.ts`) and the desktop app's own client for it, so
-// the two can never disagree about PKCE, state or the callback. Never a pasted
-// registration token (INF-03/D7): a browser on this machine (loopback), or a
-// short code typed on another one (device).
+// NOTE: Sign-in reuses the control plane's `lanework login` flow (its contract
+// is `@lanework/protocol`'s `auth.ts`) and the desktop app's own client for
+// it, so the two never disagree about PKCE, state or the callback. It never
+// takes a pasted registration token (INF-03/D7): it uses a browser on this
+// machine (loopback), or a short code typed on another one (device).
 import { spawn } from "node:child_process";
 import {
   appendFileSync,
@@ -44,7 +44,11 @@ import {
   writeSecret,
 } from "./credential";
 
-/** The plugin's settings file — what `LANEWORK_HOOK_CONFIG` names for the app. */
+/**
+ * The plugin's settings file.
+ *
+ * It plays the part the file `LANEWORK_HOOK_CONFIG` names plays for the app.
+ */
 export const pluginConfigPath = () => join(configDir(), "hook.json");
 
 type PluginConfig = { pushWip?: boolean };
@@ -105,7 +109,11 @@ async function loginLoopback(api: string): Promise<MachineCredential> {
   return outcome;
 }
 
-/** How long a device code lives on the server (`CliAuthDeviceResponse.expires_in`). */
+/**
+ * How long a device code lives on the server.
+ *
+ * Matches `CliAuthDeviceResponse.expires_in`.
+ */
 const DEVICE_TTL_MS = 10 * 60 * 1000;
 
 type PendingDevice = {
@@ -116,7 +124,7 @@ type PendingDevice = {
   deadline: number;
 };
 
-/** Say what the hook will ACTUALLY do with a credential just saved. */
+/** Say what the hook will actually do with a credential just saved. */
 function outcome(): string {
   // A `--force` beside the desktop app, or a credential file named only in
   // this shell, change the answer from the plain case.
@@ -135,13 +143,13 @@ function save(api: string, issued: MachineCredential) {
 }
 
 /**
- * Start a device sign-in, print the code, and RETURN (INF-03).
+ * Start a device sign-in, print the code, and return.
  *
- * ⚠️ The wait for approval runs in a detached process, not here. Claude Code
- * shows a `!` command's output only once the command ends, so a login that
- * sat polling for the user showed its code to nobody — and past 120s it was
- * moved to the background, still waiting, code unseen. The poller carries the
- * PKCE verifier in a 0600 file it deletes on start, and gives up when the code
+ * NOTE: The wait for approval runs in a detached process, not here. Claude
+ * Code shows a `!` command's output only once the command ends, so a login
+ * that polled here would show its code to nobody, and past 120s Claude Code
+ * moves it to the background, still waiting. The poller gets the PKCE
+ * verifier in a 0600 file it deletes on start, and gives up when the code
  * expires.
  */
 async function startDeviceLogin(api: string, stateDir: string): Promise<void> {
@@ -227,9 +235,9 @@ export async function login(
   force: boolean,
   stateDir: string,
 ): Promise<void> {
-  // ⚠️ The desktop app keeps ITS credential in the same Keychain item. Signing
-  // in here would overwrite it with a second machine's, the app would write
-  // its own back on its next launch, and the one issued here would be left
+  // NOTE: The desktop app keeps its own credential in the same Keychain item.
+  // Signing in here would overwrite it with a second machine's, the app would
+  // write its own back on its next launch, and the one issued here would stay
   // enrolled and unused. With the app's hook installed there is nothing to do.
   if (!force && desktopHookInstalled()) {
     console.log(
@@ -339,8 +347,10 @@ export function config(
 }
 
 /**
- * Is the desktop app's hook installed for Claude Code (INF-03/D8)? Then the
- * plugin's own hook stands down, or every turn would be checkpointed twice.
+ * Whether the desktop app's hook is installed for Claude Code.
+ *
+ * When it is, the plugin's own hook stands down, or every turn would be
+ * checkpointed twice (INF-03/D8).
  */
 export function desktopHookInstalled(): boolean {
   const settings = join(
@@ -356,11 +366,13 @@ export function desktopHookInstalled(): boolean {
 }
 
 /**
- * `lanework mcp` (FE-52): the offline board's MCP server on stdio, for an agent
- * config that names this command instead of the app's bundle. Same server, same
- * file (`~/.lanew/data.sqlite`, or `LANEWORK_HOME`), as the app's.
+ * `lanework mcp`: the offline board's MCP server on stdio.
  *
- * ⚠️ stdout is the protocol channel while it runs: print nothing here.
+ * For an agent config that names this command instead of the app's bundle.
+ * It is the app's server, on the app's file (`~/.lanew/data.sqlite`, or
+ * `LANEWORK_HOME`).
+ *
+ * NOTE: stdout is the protocol channel while it runs: print nothing here.
  */
 export function mcp(): Promise<void> {
   return runLocalMcpServer();

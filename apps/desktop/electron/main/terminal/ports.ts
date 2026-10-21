@@ -1,5 +1,5 @@
-// The TCP ports a project's processes listen on (FE-68): the dev servers an
-// agent — or anyone — left running in it, like PortKiller but per project.
+// The TCP ports a project's processes listen on: the dev servers an agent, or
+// anyone, left running in it. Like PortKiller, but per project.
 //
 // Nothing here imports Electron: main calls it with the project's folders and
 // its terminals' pids, both resolved in main, never sent by the renderer.
@@ -38,7 +38,7 @@ const BOUNDARY = new Set([
   "screen",
 ]);
 
-/** What `lsof` printed — also when it exits 1 because it found nothing. */
+/** What `lsof` printed, also when it exits 1 because it found nothing. */
 async function lsof(args: string[]): Promise<string> {
   try {
     return (await runFile("lsof", args, { maxBuffer: 16 * 1024 * 1024 }))
@@ -107,6 +107,7 @@ async function workingFolders(pids: number[]): Promise<Map<number, string>> {
   return folders;
 }
 
+/** Whether `path` is one of `folders` or inside one. */
 function inside(path: string, folders: string[]): boolean {
   return folders.some((folder) => {
     const rel = relative(folder, path);
@@ -144,6 +145,12 @@ interface Scan {
   uid: number;
 }
 
+/**
+ * The project's listening ports, with the process table they were read from.
+ *
+ * A port counts when its process works inside one of `folders`, or runs
+ * under one of `terminals`.
+ */
 async function scan(folders: string[], terminals: number[]): Promise<Scan> {
   const uid = ownUid();
   const real = (
@@ -193,8 +200,10 @@ async function scan(folders: string[], terminals: number[]): Promise<Scan> {
 }
 
 /**
- * The TCP ports `folders`' processes listen on, and those of every process
- * under one of `terminals` (pty pids), by port. Empty off macOS and Linux.
+ * The TCP ports the project's processes listen on, sorted by port.
+ *
+ * Those of `folders`' processes, and those of every process under one of
+ * `terminals` (pty pids). Empty on Windows.
  */
 export async function listPorts(
   folders: string[],
@@ -222,20 +231,28 @@ function subtree(pid: number, procs: Proc[]): Proc[] {
   return out;
 }
 
-/** A process's program name: `node`, `zsh` — `-zsh` as a login shell too. */
+/** A process's program name: `node`, `zsh`, and `zsh` for `-zsh` too. */
 function program(args: string): string {
   return basename(args.split(/\s+/)[0] ?? "").replace(/^-/, "");
 }
 
 /**
- * Stop the process listening on a port of the project (FE-68), with what
- * launched it — `bun run dev` above `vite` — up to the nearest shell, agent,
- * terminal or the app, which are never signalled. SIGTERM first; whatever
- * still runs with the same pid and start time after `GRACE_MS` is killed.
+ * Stop the process listening on a port of the project, with what launched it.
  *
- * ⚠️ By process tree, not process group: a server an agent started without
- * job control shares the agent's group, and signalling it would stop the
- * agent too.
+ * It climbs to what launched the server (`bun run dev` above `vite`), up to
+ * the nearest shell, agent, terminal or the app, which are never signalled.
+ * SIGTERM first; whatever still runs with the same pid and start time after
+ * {@link GRACE_MS} is killed.
+ *
+ * NOTE: By process tree, not process group: a server an agent started
+ * without job control shares the agent's group, and signalling it would
+ * stop the agent too.
+ *
+ * @param start the process's start time as the listing gave it, so a pid
+ * reused since is never signalled.
+ * @returns how many processes were signalled.
+ * @throws when the arguments are malformed, on Windows, or when that pid no
+ * longer listens in this project.
  */
 export async function stopPort(
   folders: string[],

@@ -1,14 +1,14 @@
 // The files an agent conversation edited, read from its transcripts (FE-39):
 // what the agent view's Files list shows, and the marks on Changes.
 //
-// ⚠️ Only what the CLIs' own FILE TOOLS did — Claude's `Edit`, `Write`,
-// `MultiEdit` and `NotebookEdit` (and its file history, when that is on),
+// NOTE: Only what the CLIs' own FILE TOOLS did: Claude's `Edit`, `Write`,
+// `MultiEdit` and `NotebookEdit` (and its file history, when that is on), and
 // Codex's `apply_patch`. A file changed through the shell is in no
 // transcript, and the UI says so rather than let "not listed" read as "not
 // touched".
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a spec
-// can drive it under plain Node against a fake home folder.
+// Read-only, and nothing here imports Electron: main calls it, and a spec can
+// drive it under plain Node against a fake home folder.
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
@@ -33,11 +33,11 @@ import {
 } from "./agent-sessions";
 
 /**
- * The most of one transcript a scan reads (FE-39): its LAST 32 MB.
+ * The most of one transcript a scan reads: its LAST 32 MB.
  *
- * ⚠️ The end, not the start. A long conversation's newest edits are the ones
- * still uncommitted — the ones Changes marks — and a scan that stopped at the
- * first 32 MB would never see a line written after it.
+ * NOTE: The end, not the start. A long conversation's newest edits are the
+ * ones still uncommitted, the ones Changes marks, and a scan that stopped at
+ * the first 32 MB would never see a line written after it.
  */
 export const AGENT_FILES_READ_MAX = 32 * 1024 * 1024;
 
@@ -49,9 +49,12 @@ interface AgentFilesRequest {
 }
 
 /**
- * The agent view's request off the wire: ids, never a path (FE-39) — the
- * same rule as a sub-agent's (FE-35/D10). A conversation is a UUID, so it
- * can be no `..`, separator or absolute path.
+ * The agent view's request off the wire: ids, never a path.
+ *
+ * The same rule as a sub-agent's (FE-35/D10). A conversation is a UUID, so
+ * it can be no `..`, separator or absolute path.
+ *
+ * @throws when any of the three arguments is missing or invalid.
  */
 export function agentFilesRequest(args: unknown[]): AgentFilesRequest {
   if (args.length !== 3)
@@ -74,14 +77,16 @@ export function agentFilesRequest(args: unknown[]): AgentFilesRequest {
 const CLAUDE_EDITS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 /**
- * What a line must contain to be worth parsing — most of a transcript is
- * prompts, answers and tool output, and `JSON.parse` on every line of 32 MB
- * is most of the cost.
+ * What a line must contain to be worth parsing.
  *
- * ⚠️ Claude: a call to a file tool; its file history's delta; a failed result
- * (which takes the call back); a `Write` that created its file. Codex: a
- * `FileChange` item, or an `apply_patch` call — unquoted, because an older
- * CLI ran it through `shell` inside an escaped JSON string.
+ * Most of a transcript is prompts, answers and tool output, and `JSON.parse`
+ * on every line of 32 MB is most of the cost.
+ *
+ * - Claude: a call to a file tool; its file history's delta; a failed result
+ *   (which takes the call back); a `Write` that created its file.
+ * - Codex: a `FileChange` item, or an `apply_patch` call. The latter is
+ *   unquoted, because an older CLI ran it through `shell` inside an escaped
+ *   JSON string.
  */
 const NEEDLES: Record<TerminalAgent, Buffer[]> = {
   claude: [
@@ -96,11 +101,14 @@ const NEEDLES: Record<TerminalAgent, Buffer[]> = {
 /** One file's edits in one transcript. */
 interface Tally {
   /**
-   * Edits counted from each of the two places a CLI records one: Claude's
-   * tool calls and its file history; Codex's `FileChange` items and its
-   * `apply_patch` calls. The larger is the count — one edit is often in both.
+   * Edits counted from each of the two places a CLI records one.
+   *
+   * Claude's tool calls and its file history; Codex's `FileChange` items and
+   * its `apply_patch` calls. The larger is the count: one edit is often in
+   * both.
    */
   n: [number, number];
+  /** When its newest edit was written. */
   lastAt: string;
   /** Created in this transcript: still "added" after a later edit. */
   added: boolean;
@@ -110,10 +118,13 @@ interface Tally {
 
 /** What a transcript has said so far, kept to read only what it adds. */
 interface Scan {
+  /** The file's size at the last read. */
   size: number;
+  /** The file's mtime at the last read. */
   mtimeMs: number;
   /** Where the whole lines read end: the next read starts here. */
   end: number;
+  /** Only the newest {@link AGENT_FILES_READ_MAX} bytes were read. */
   partial: boolean;
   /** By absolute path. */
   tallies: Map<string, Tally>;
@@ -121,14 +132,20 @@ interface Scan {
   pending: Map<string, string>;
 }
 
-/** Calls kept for a failed result to find; a result follows its call closely. */
+/** Calls kept for a failed result to find; results follow calls closely. */
 const PENDING_MAX = 256;
 /** Transcripts kept scanned; the oldest read is dropped first. */
 const SCAN_CACHE = 256;
+/** Each transcript's scan so far, by file. */
 const scans = new Map<string, Scan>();
 /** One scan of a transcript at a time: the next waits, then reads the tail. */
 const running = new Map<string, Promise<unknown>>();
 
+/**
+ * Count one edit of `path`.
+ *
+ * @param source Which of the two records it came from (see {@link Tally}).
+ */
 function tally(
   scan: Scan,
   path: string,
@@ -149,13 +166,14 @@ function tally(
   if (op === "added") found.added = true;
 }
 
+/** A non-empty string, or null. */
 const str = (value: unknown): string | null =>
   typeof value === "string" && value ? value : null;
 
-/** One Claude line, if it records an edit. */
+/** Tally one Claude line, if it records an edit. */
 function claudeLine(line: Line, scan: Scan, folder: string, at: string): void {
   if (line.type === "file-history-delta") {
-    // ⚠️ `trackingPath` is relative to where the session STARTED, which a
+    // NOTE: `trackingPath` is relative to where the session STARTED, which a
     // `cd` does not move; `realParentDir` is the file's own folder.
     const tracking = str(line.trackingPath);
     if (!tracking) return;
@@ -210,12 +228,14 @@ function claudeLine(line: Line, scan: Scan, folder: string, at: string): void {
   if (found) found.added = true;
 }
 
+/** A file header of an `apply_patch`. */
 const PATCH_HEADER =
   /^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$/gm;
 
 /**
- * The files an `apply_patch` touches, by its `*** … File:` headers — a
- * `*** Move to:` renames the file the `Update File:` before it named.
+ * The files an `apply_patch` touches, by its `*** … File:` headers.
+ *
+ * A `*** Move to:` renames the file the `Update File:` before it named.
  */
 export function patchedFiles(
   patch: string,
@@ -264,14 +284,14 @@ function codexPatch(payload: Record<string, unknown>): string | null {
     : null;
 }
 
-/** One Codex line, if it records an edit. */
+/** Tally one Codex line, if it records an edit. */
 function codexLine(line: Line, scan: Scan, folder: string, at: string): void {
   const payload = line.payload as Record<string, unknown> | null | undefined;
   if (!payload) return;
   const where = (path: string) =>
     isAbsolute(path) ? path : resolve(folder, path);
-  // ⚠️ What was APPLIED, by absolute path — whichever way the patch was
-  // sent, a script's `tools.apply_patch(…)` included. A failed one is none.
+  // What was APPLIED, by absolute path, whichever way the patch was sent, a
+  // script's `tools.apply_patch(…)` included. A failed one is none.
   if (line.type === "event_msg" && payload.type === "item_completed") {
     const item = payload.item as Record<string, unknown> | undefined;
     if (item?.type !== "FileChange" || item.status !== "completed") return;
@@ -325,11 +345,13 @@ async function readSpan(
 }
 
 /**
- * The lines of `buffer` between `start` and `end` (a newline) that hold one
- * of `needles`, parsed, in the order they were written.
+ * The lines of `buffer` that hold one of `needles`, parsed, in the order they
+ * were written.
  *
- * ⚠️ Found by searching the BYTES for each needle, never by splitting every
- * line: a hit's line is cut out around it, and only those are decoded.
+ * They are found by searching the BYTES for each needle, never by splitting
+ * every line: a hit's line is cut out around it, and only those are decoded.
+ *
+ * @param end The offset of a newline: the end of the last whole line.
  */
 function matchingLines(
   buffer: Buffer,
@@ -362,6 +384,11 @@ function matchingLines(
   return out;
 }
 
+/**
+ * Scan `file` for edits, reading only what it added since the last scan.
+ *
+ * @throws when `file` is missing or not a file.
+ */
 async function scanOnce(
   file: string,
   agent: TerminalAgent,
@@ -372,9 +399,9 @@ async function scanOnce(
   const known = scans.get(file);
   if (known && known.size === info.size && known.mtimeMs === info.mtimeMs)
     return known;
-  // ⚠️ A transcript only ever grows: one that grew is read from where the
-  // last read's whole lines ended. One that shrank was replaced, and one
-  // that grew past a whole read is read afresh — its newest part.
+  // A transcript only ever grows: one that grew is read from where the last
+  // read's whole lines ended. One that shrank was replaced, and one that grew
+  // past a whole read is read afresh, its newest part.
   const appended =
     known &&
     info.size >= known.size &&
@@ -411,7 +438,7 @@ async function scanOnce(
           folder,
           typeof line.timestamp === "string" ? line.timestamp : fallback,
         );
-      // ⚠️ A line still being written is left for the next read.
+      // A line still being written is left for the next read.
       scan.end = from + last + 1;
     }
   }
@@ -425,9 +452,10 @@ async function scanOnce(
 }
 
 /**
- * What `file` — one of `agent`'s transcripts — has edited, by absolute path;
- * cached by (path, size, mtime), so reading it again only parses what was
- * appended since (FE-39).
+ * What `file`, one of `agent`'s transcripts, has edited, by absolute path.
+ *
+ * Cached by (path, size, mtime), so reading it again only parses what was
+ * appended since. Scans of one file run one at a time.
  */
 export async function scanTranscript(
   file: string,
@@ -480,6 +508,7 @@ interface RepoRoots {
   others: string[];
   /** When HEAD was committed, epoch ms; null with no commit or no repository. */
   headAt: number | null;
+  /** Whether the folder is in a git repository at all. */
   repo: boolean;
 }
 
@@ -504,11 +533,13 @@ async function repoRoots(folder: string): Promise<RepoRoots> {
 }
 
 /**
- * `path` from the repository's top, `/`-separated; null for one outside it
- * or inside another of its worktrees (a sub-agent's isolated checkout).
+ * `path` from the repository's top, `/`-separated.
+ *
+ * @returns null for a path outside the repository, or inside another of its
+ *   worktrees (a sub-agent's isolated checkout).
  */
 function fromTop(path: string, roots: RepoRoots): string | null {
-  // ⚠️ A CLI names files under the folder as it was started in it, git
+  // NOTE: A CLI names files under the folder as it was started in it, git
   // under its real path: `/var/…` and `/private/var/…` are the same file.
   const real =
     path === roots.folder || path.startsWith(roots.folder + sep)
@@ -530,6 +561,11 @@ interface Source {
 /** Codex rollouts' `session_meta`, by file: written once, never changed. */
 const codexMetas = new Map<string, Record<string, unknown> | null>();
 
+/**
+ * A Codex rollout's `session_meta` payload.
+ *
+ * @returns null when the rollout has none written yet.
+ */
 async function codexMeta(
   file: string,
 ): Promise<Record<string, unknown> | null> {
@@ -549,8 +585,11 @@ async function codexMeta(
 }
 
 /**
- * Claude conversation `id`'s transcript and its sub-agents' (FE-33), each
- * with its `.meta.json`'s kind for "via" (FE-39/D5).
+ * Claude conversation `id`'s transcript and its sub-agents'.
+ *
+ * Each sub-agent carries its `.meta.json`'s kind for "via" (FE-39/D5).
+ *
+ * @throws when the transcript is not one of `folder`'s.
  */
 async function claudeSources(
   home: string,
@@ -559,8 +598,8 @@ async function claudeSources(
 ): Promise<Source[]> {
   const dir = join(home, ".claude", "projects", claudeProjectDir(folder));
   const own = join(dir, `${id}.jsonl`);
-  // ⚠️ The folder name is lossy — `a_b` and `a-b` both become `a-b` — so the
-  // transcript's own `cwd` has the last word, as the listing's does.
+  // NOTE: The folder name is lossy (`a_b` and `a-b` both become `a-b`), so
+  // the transcript's own `cwd` has the last word, as the listing's does.
   const head = lines(await readRange(own, 0, 64 * 1024).catch(() => ""), {
     head: true,
   });
@@ -589,8 +628,12 @@ async function claudeSources(
 }
 
 /**
- * Codex conversation `id`'s rollout, and those of the threads it spawned
- * (FE-33) — which start after it, so only newer rollouts are opened.
+ * Codex conversation `id`'s rollout, and those of the threads it spawned.
+ *
+ * A spawned thread starts after its conversation, so only newer rollouts are
+ * opened.
+ *
+ * @throws when the rollout is not one of `folder`'s conversations.
  */
 async function codexSources(
   home: string,
@@ -625,12 +668,17 @@ async function codexSources(
 
 /**
  * The files `agent`'s conversation `id` in `folder` edited with its file
- * tools — its sub-agents' folded in, each marked "via" its kind when the
- * conversation never edited it itself (FE-39/D5) — newest edit first.
+ * tools, newest edit first.
  *
- * ⚠️ The id is checked again here, and every path is built from it inside
+ * Its sub-agents' edits are folded in, each file marked "via" the sub-agent's
+ * kind when the conversation never edited it itself (FE-39/D5).
+ *
+ * NOTE: The id is checked again here, and every path is built from it inside
  * the CLI's own folder under `home`. Paths outside the repository, and in
  * another of its worktrees, are dropped.
+ *
+ * @param known The folder's repository, when the caller has it already.
+ * @throws when the conversation is not one of `folder`'s.
  */
 export async function readAgentFiles(
   home: string,
@@ -702,13 +750,15 @@ function lastMoved(session: AgentSession): number {
 }
 
 /**
- * Which of `sessions` — `folder`'s listing — edited each file since HEAD's
- * commit (FE-39/D2, D3), keyed by its path from the repository's top.
+ * Which of `sessions` edited each file since HEAD's commit (FE-39/D2, D3),
+ * keyed by its path from the repository's top.
  *
- * ⚠️ Since the COMMIT, so a mark is uncommitted work: a conversation that
- * has not moved since is not read at all, and an edit older than the commit
- * is in it. The commit time has one-second resolution, so an edit in the
- * same second counts as committed.
+ * Since the COMMIT, so a mark is uncommitted work: a conversation that has
+ * not moved since is not read at all, and an edit older than the commit is
+ * already in it. The commit time has one-second resolution, so an edit in
+ * the same second counts as committed.
+ *
+ * @param sessions `folder`'s listing.
  */
 export async function agentFileMarks(
   home: string,

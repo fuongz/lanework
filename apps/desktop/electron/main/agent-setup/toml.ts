@@ -1,14 +1,16 @@
-// The smallest reading of TOML the agent setup needs (FE-40): table headers,
+// The smallest reading of TOML the agent setup needs: table headers,
 // `key = value` lines, dotted and quoted keys, values that run over several
-// lines, inline tables and arrays of tables — enough to find Codex's
+// lines, inline tables and arrays of tables. That is enough to find Codex's
 // `[mcp_servers.*]`, `[plugins.*]`, `[projects."<path>"]`, `[[skills.config]]`,
 // inline `[hooks]` and its top-level policies.
 //
-// ⚠️ Not a TOML parser, on purpose, and no dependency for one. A value comes
-// back RAW, and the caller turns into a value only the string or boolean it
-// asked for — `args`, `env` and `http_headers` are read past, never into.
-// Anything this cannot read is skipped rather than guessed at.
+// NOTE: Not a TOML parser, and no dependency for one. A value comes back RAW,
+// and the caller turns into a value only the string or boolean it asked for:
+// `args`, `env` and `http_headers` are read past, never into, so a secret in
+// them never leaves the file. Anything this cannot read is skipped rather
+// than guessed at.
 
+/** One `key = value` of a TOML file. */
 export interface TomlEntry {
   /** The table and the key as one path: `["mcp_servers", "x", "url"]`. */
   path: string[];
@@ -20,10 +22,12 @@ const BARE_KEY = /^[A-Za-z0-9_-]+$/;
 
 /**
  * Walk `text` outside its strings, calling `visit` with each character and
- * its index; `visit` returning true stops the walk.
+ * its index.
  *
- * ⚠️ Basic strings honour `\"`; literal strings have no escapes. A string
- * left open at the end of the text just ends the walk.
+ * Basic strings honour `\"`; literal strings have no escapes. A string left
+ * open at the end of the text ends the walk.
+ *
+ * @param visit Returns true to stop the walk.
  */
 export function outsideStrings(
   text: string,
@@ -74,7 +78,12 @@ export function splitTop(text: string, separator: string): string[] {
   return parts;
 }
 
-/** Whether a value opens more brackets than it closes, or a `"""` string. */
+/**
+ * Whether a value runs on to the next line.
+ *
+ * It does when it opens more brackets than it closes, or opens a `"""` or
+ * `'''` string it does not close.
+ */
 function unfinished(raw: string): boolean {
   for (const fence of ['"""', "'''"])
     if (raw.startsWith(fence)) return raw.split(fence).length < 3;
@@ -87,7 +96,11 @@ function unfinished(raw: string): boolean {
   return depth > 0;
 }
 
-/** A string as written, unquoted: `"a\"b"` → `a"b`, `'C:\x'` → `C:\x`. */
+/**
+ * A string value, unquoted: `"a\"b"` → `a"b`, `'C:\x'` → `C:\x`.
+ *
+ * @returns null when `raw` is not a quoted string.
+ */
 export function tomlString(raw: string): string | null {
   const text = raw.trim();
   if (text.length >= 2 && text.startsWith("'") && text.endsWith("'"))
@@ -97,19 +110,24 @@ export function tomlString(raw: string): string | null {
       const value: unknown = JSON.parse(text);
       return typeof value === "string" ? value : null;
     } catch {
-      // A TOML escape JSON does not know (`\e`, `\x1b`): as written.
+      // A TOML escape JSON does not know (`\e`, `\x1b`): keep it as written.
       return text.slice(1, -1);
     }
   }
   return null;
 }
 
+/** A boolean value; null when `raw` is not `true` or `false`. */
 export function tomlBool(raw: string): boolean | null {
   const text = raw.trim();
   return text === "true" ? true : text === "false" ? false : null;
 }
 
-/** `a."b.c".d` → `["a", "b.c", "d"]`; null for a key this cannot read. */
+/**
+ * A dotted key's parts: `a."b.c".d` → `["a", "b.c", "d"]`.
+ *
+ * @returns null for a key this cannot read.
+ */
 function tomlKey(text: string): string[] | null {
   const parts = splitTop(text, ".").map((part) => part.trim());
   const keys: string[] = [];
@@ -133,6 +151,7 @@ function equalsAt(line: string): number {
   return at;
 }
 
+/** Add `raw` at `path` to `entries`, with any inline tables it holds. */
 function push(entries: TomlEntry[], path: string[], raw: string): void {
   // An inline table: its keys are this one's children.
   if (raw.startsWith("{") && raw.endsWith("}")) {
@@ -145,8 +164,8 @@ function push(entries: TomlEntry[], path: string[], raw: string): void {
     return;
   }
   entries.push({ path, raw });
-  // An array of inline tables — `Stop = [{ hooks = [...] }]` — files each
-  // table under its index, as `[[Stop]]` would.
+  // An array of inline tables (`Stop = [{ hooks = [...] }]`) files each table
+  // under its index, as `[[Stop]]` would.
   if (raw.startsWith("[") && raw.endsWith("]"))
     splitTop(raw.slice(1, -1), ",").forEach((item, index) => {
       const value = item.trim();
@@ -155,8 +174,9 @@ function push(entries: TomlEntry[], path: string[], raw: string): void {
 }
 
 /**
- * `path` with the index of the array of tables each prefix names, if any:
- * a key under `[[a]]` lives in `a`'s LATEST table, `["a", "#1", …]`.
+ * `path` with the index of the array of tables each prefix names, if any.
+ *
+ * A key under `[[a]]` lives in `a`'s LATEST table: `["a", "#1", …]`.
  */
 function underArrays(path: string[], arrays: Map<string, number>): string[] {
   const resolved: string[] = [];
@@ -175,7 +195,7 @@ export function tomlEntries(text: string): TomlEntry[] {
   // A table this cannot name hides its keys rather than filing them under
   // the table before it.
   let table: string[] | null = [];
-  /** Each array of tables seen, by path, and the index of its latest table. */
+  // Each array of tables seen, by path, and the index of its latest table.
   const arrays = new Map<string, number>();
   for (let index = 0; index < lines.length; index++) {
     const line = stripComment(lines[index] ?? "").trim();

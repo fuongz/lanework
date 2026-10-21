@@ -62,9 +62,9 @@ function createWindow() {
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hidden",
-          // ⚠️ y 15 puts the (14pt) lights' centre on the 22pt line every
-          // header row sits on — the h-11 bars, the issues toolbar and the
-          // sidebar button beside them (FE-20) — the line Codex uses too.
+          // NOTE: y 15 puts the centre of the (14pt) lights on the 22pt line
+          // every header row sits on: the h-11 bars, the issues toolbar and
+          // the sidebar button beside them. Codex uses the same line.
           trafficLightPosition: { x: 20, y: 15 },
           vibrancy: "under-window",
           visualEffectState: "active",
@@ -81,8 +81,8 @@ function createWindow() {
     },
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    // Open GitHub — and a project's dev server on this machine (FE-68) — in
-    // the OS browser while denying every Electron popup.
+    // Open GitHub, and a project's dev server on this machine, in the OS
+    // browser. Every Electron popup is denied.
     let external = false;
     try {
       const destination = new URL(url);
@@ -96,7 +96,7 @@ function createWindow() {
             destination.hostname === "localhost" &&
             destination.port !== ""));
     } catch {
-      /* Malformed destinations stay denied. */
+      // A malformed destination stays denied.
     }
     if (external) {
       void shell.openExternal(url).catch((error: unknown) => {
@@ -120,26 +120,20 @@ function createWindow() {
 app
   .whenReady()
   .then(() => {
-    /**
-     * Everything is refused except writing text to the clipboard and listing
-     * the installed fonts.
-     *
-     * ⚠️ `clipboard-sanitized-write` is what `navigator.clipboard.writeText`
-     * asks for, and a blanket `false` here is not a no-op: it makes every Copy
-     * button in the app REJECT SILENTLY. That is how the device-code copy on
-     * the GitHub connect panel shipped doing nothing at all.
-     *
-     * ⚠️ Sanitized WRITE, and only that. It cannot read what is already on the
-     * clipboard — `clipboard-read` stays refused with the rest — so this hands
-     * out the ability to put a filename somewhere the user asked for it, and
-     * nothing else. Camera, microphone, geolocation, notifications and the
-     * clipboard's contents are all still denied.
-     *
-     * `local-fonts` is `queryLocalFonts()`, which Settings → Appearance lists
-     * the font pickers from (FE-21). It names the fonts this Mac has — nothing
-     * a page could not already probe one family at a time — and the window
-     * only ever loads the app's own origin.
-     */
+    // Everything is refused except writing text to the clipboard and listing
+    // the installed fonts.
+    //
+    // - NOTE: `clipboard-sanitized-write` is what
+    //   `navigator.clipboard.writeText` asks for. A blanket `false` here is
+    //   not a no-op: it makes every Copy button in the app reject silently.
+    // - NOTE: Sanitized write, and only that. It cannot read what is already
+    //   on the clipboard (`clipboard-read` stays refused), so it only lets the
+    //   app put text where the user asked for it. Camera, microphone,
+    //   geolocation, notifications and the clipboard's contents stay denied.
+    // - `local-fonts` is `queryLocalFonts()`, which fills the font pickers in
+    //   Settings → Appearance. It names the fonts this Mac has, which a page
+    //   could already probe one family at a time, and the window only loads
+    //   the app's own origin.
     const allowed = (permission: string) =>
       permission === "clipboard-sanitized-write" ||
       permission === "local-fonts";
@@ -158,10 +152,10 @@ app
         platform: process.platform,
       };
     });
-    // ⚠️ `nativeTheme` rather than a class the renderer sets alone. This also
-    // drives the native window chrome and the vibrancy, and it makes
-    // `prefers-color-scheme` in the renderer report the EFFECTIVE theme — so
-    // "system" needs no logic on the other side to stay in step with macOS.
+    // `nativeTheme`, not a class the renderer sets alone. It also drives the
+    // native window chrome and the vibrancy, and it makes
+    // `prefers-color-scheme` in the renderer report the effective theme. So
+    // "system" needs no logic in the renderer to follow macOS.
     handle(channels.setTheme, devUrl, (args): boolean => {
       if (args.length !== 1)
         throw new Error("This operation takes one argument");
@@ -171,7 +165,7 @@ app
       nativeTheme.themeSource = source;
       return nativeTheme.shouldUseDarkColors;
     });
-    // Covers the OS changing under us, which no renderer can see for itself.
+    // The OS can change the theme under us, which no renderer can see itself.
     nativeTheme.on("updated", () =>
       broadcast(channels.themeChanged, nativeTheme.shouldUseDarkColors),
     );
@@ -179,8 +173,8 @@ app
     registerWorkspaces(devUrl);
     registerGit(devUrl);
     registerTerminal(devUrl);
-    // A Lanework tab is found and stopped by its id (FE-62); a Claude in any
-    // other terminal app is still caught by its pid file.
+    // A Lanework tab is found and stopped by its id. A Claude in any other
+    // terminal app is caught by its pid file.
     const pids = pidFileBridge();
     registerConversation(devUrl, {
       terminalOn: async (workspace, conversation, ours) =>

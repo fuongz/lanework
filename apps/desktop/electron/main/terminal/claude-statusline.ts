@@ -4,9 +4,21 @@ import { dirname, join } from "node:path";
 import { appHomeDir } from "../paths";
 import { CLAUDE_USAGE_FILE } from "./claude-usage";
 
+/** `text` as one single-quoted shell word. */
 const quote = (text: string) => `'${text.replace(/'/g, "'\\''")}'`;
 
-/** Unknown/broken settings are left to Claude rather than silently overridden. */
+/**
+ * The ` --settings …` argument that wraps the user's status line in
+ * Lanework's usage bridge.
+ *
+ * The bridge saves the rate limits Claude passes it to
+ * {@link CLAUDE_USAGE_FILE}, then runs the user's own status line command.
+ * Unknown or broken settings, and any managed policy, are left to Claude
+ * rather than overridden.
+ *
+ * @param options Paths to use instead of the real ones (tests).
+ * @returns An empty string when the status line is left alone.
+ */
 export function claudeStatuslineArgs(
   cwd: string,
   options: {
@@ -44,7 +56,7 @@ export function claudeStatuslineArgs(
     )
       return "";
   } catch {
-    /* Missing user config is normal. */
+    // Missing user config is normal.
   }
   let root = cwd;
   while (!existsSync(join(root, ".git")) && dirname(root) !== root)

@@ -1,5 +1,6 @@
-// A second process for the WAL concurrency test: opens the same file and
-// writes `count` cards as fast as it can. Usage: <db path> <workspace id> <count> <label>
+// A second process for the WAL concurrency test: it opens the same file and
+// writes `count` cards as fast as it can.
+// Usage: <db path> <workspace id> <count> <label>
 import { openLocalStore } from "./store";
 
 const [path, workspace, count, label] = process.argv.slice(2);

@@ -3,14 +3,15 @@ import { join } from "node:path";
 import { appHomeDir } from "../paths";
 
 /**
- * FE-52/D5: whether the person chose "Skip for now" — use the app on the local
- * board, with no account.
+ * The file that records "Skip for now": use the app on the local board, with
+ * no account (FE-52/D5).
  *
- * ⚠️ A file beside `auth.json`, not a field in it. The credential file is
- * rewritten by every sign-in and deleted by every sign-out; the choice to work
- * without an account must survive both, and must never be read as a credential.
+ * Electron-free, so the e2e and unit tests can read and write it directly.
  *
- * ⚠️ Electron-free, so the e2e and unit tests can read and write it directly.
+ * NOTE: A file beside `auth.json`, not a field in it. The credential file is
+ * rewritten by every sign-in and deleted by every sign-out; the choice to
+ * work without an account must survive both, and must never be read as a
+ * credential.
  */
 function flagFile(): string {
   return join(appHomeDir(), "local-mode.json");
@@ -29,6 +30,7 @@ export async function readLocalMode(): Promise<boolean> {
   }
 }
 
+/** Record "Skip for now", or undo it by deleting the file. */
 export async function writeLocalMode(enabled: boolean): Promise<void> {
   if (!enabled) {
     await rm(flagFile(), { force: true }).catch(() => {});

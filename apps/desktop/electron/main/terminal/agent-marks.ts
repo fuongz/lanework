@@ -1,13 +1,14 @@
 // What Lanework adds to an agent conversation (FE-24, FE-25): a name of its
 // own and a pin. Kept in the app's home, never in the CLI's files.
 //
-// ⚠️ Nothing here imports Electron: main passes the file, and a spec drives it
+// Nothing here imports Electron: main passes the file, and a spec drives it
 // under plain Node against a temporary one.
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AGENT_NAME_MAX, type AgentSession } from "../../../shared/terminal";
 import { agentKey } from "./agent-sessions";
 
+/** Lanework's own additions to one conversation. */
 interface AgentMark {
   /** The name given in Lanework; absent means the CLI's own title. */
   name?: string;
@@ -15,13 +16,14 @@ interface AgentMark {
   pinnedAt?: number;
 }
 
+/** Every mark, by `agent:id`. */
 type AgentMarks = Record<string, AgentMark>;
 
 /**
  * Every mark on this machine, by `agent:id`.
  *
- * ⚠️ A file that is missing, unreadable or not ours reads as NO marks rather
- * than an error: losing a pin is a nuisance, a rail that stops listing
+ * NOTE: A file that is missing, unreadable or not ours reads as NO marks
+ * rather than an error. Losing a pin is a nuisance; a rail that stops listing
  * conversations over it is a bug.
  */
 export async function readAgentMarks(file: string): Promise<AgentMarks> {
@@ -48,7 +50,11 @@ export async function readAgentMarks(file: string): Promise<AgentMarks> {
   }
 }
 
-/** Written whole to a temp file and moved over, so a crash never halves it. */
+/**
+ * Save every mark.
+ *
+ * Written whole to a temp file and moved over, so a crash never halves it.
+ */
 async function writeAgentMarks(file: string, marks: AgentMarks): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.tmp`;
@@ -61,9 +67,12 @@ async function writeAgentMarks(file: string, marks: AgentMarks): Promise<void> {
 /**
  * A name as the rail may show it: one line, trimmed, and short.
  *
- * ⚠️ Refused rather than cleaned when it has a control character in it. A
- * line break in a name is somebody pasting the wrong thing, and quietly
- * gluing it into one line would save something they did not type.
+ * A name with a control character in it is refused rather than cleaned. A
+ * line break in a name is somebody pasting the wrong thing, and gluing it
+ * into one line would save something they did not type.
+ *
+ * @throws when `raw` is not a string, has a control character, or is too
+ *   long.
  */
 export function cleanAgentName(raw: unknown): string {
   if (typeof raw !== "string") throw new Error("A name is required");

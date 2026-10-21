@@ -1,13 +1,15 @@
 // Whether Claude Code and Codex are signed in to the cloud `lanework` MCP
 // server, and a way to sign them in from Settings → Agents.
 //
-// ⚠️ Asked of each CLI — `codex mcp list --json`, `claude mcp get lanework` —
-// never read out of their token stores. Claude Code keeps its tokens in the
-// Keychain under its own item (reading it would prompt the user), and either
-// CLI may move them in any release; the CLI is the one that knows.
+// NOTE: Each CLI is asked (`codex mcp list --json`, `claude mcp get
+// lanework`); their token stores are never read. Claude Code keeps its tokens
+// in the Keychain under its own item (reading it would prompt the user), and
+// either CLI may move them in any release: the CLI is the one that knows.
 //
-// ⚠️ Through the user's login shell (`runInLoginShell`), like the harness
-// probe: an app opened from the Dock has launchd's PATH, not the profile's.
+// NOTE: The CLIs run through the user's login shell (`runInLoginShell`), like
+// the harness probe: an app opened from the Dock has launchd's PATH, not the
+// profile's.
+//
 // Electron-free, so the parsers can be driven by a spec.
 import type { LaneworkMcpAgent, LaneworkMcpAuth } from "../../../shared/auth";
 import { afterMarker, runInLoginShell } from "../harness/shell";
@@ -18,7 +20,7 @@ const COMMAND: Record<LaneworkMcpAgent, string> = {
   codex: "codex",
 };
 
-/** `codex mcp list --json`: `auth_status` of our server. */
+/** Parse `codex mcp list --json`: the `auth_status` of our server. */
 function parseCodexAuth(output: string): LaneworkMcpAuth {
   let list: unknown;
   try {
@@ -42,9 +44,11 @@ function parseCodexAuth(output: string): LaneworkMcpAuth {
 }
 
 /**
- * `claude mcp get lanework`: its `Status:` line — `✔ Connected`,
- * `! Needs authentication`, `✗ Failed to connect`. Claude Code prints text
- * only, so any other line is "unknown", never a guess.
+ * Parse `claude mcp get lanework`: its `Status:` line.
+ *
+ * The line reads `✔ Connected`, `! Needs authentication` or
+ * `✗ Failed to connect`. Claude Code prints text only, so any other line is
+ * "unknown", never a guess.
  */
 function parseClaudeAuth(output: string): LaneworkMcpAuth {
   const line = /^\s*Status:\s*(.+)$/m.exec(output)?.[1] ?? "";
@@ -58,11 +62,13 @@ const mark = (agent: LaneworkMcpAgent, part: string) =>
   `__lanework_mcp_auth_${agent}_${part}__`;
 
 /**
- * `cli` under a pseudo-terminal, its output piped back out.
+ * The shell command that runs the CLI with `args` under a pseudo-terminal.
  *
- * ⚠️ Claude Code's `mcp login` gives up the moment its stdin is not a TTY
+ * Its output is piped back out.
+ *
+ * NOTE: Claude Code's `mcp login` gives up the moment its stdin is not a TTY
  * ("stdin isn't a terminal") instead of waiting for the browser's callback,
- * and the shell's stdin is /dev/null. `script` hands it a pty for stdin;
+ * and the shell's stdin is /dev/null. `script` hands it a pty for stdin.
  * stdout stays a pipe, so it never opens its paste-the-URL prompt and never
  * reads the EOF `script` writes into the pty. `$LANEWORK_MCP_CLI` is the
  * CLI's path: an alias from the profile does not reach `script`'s `sh`.
@@ -74,7 +80,13 @@ function underTty(args: string): string {
     : `script -qec '${inner}' /dev/null </dev/null`;
 }
 
-/** The script's own output, after the profile's, or null without the CLI. */
+/**
+ * Run the agent's CLI with `args` in the login shell.
+ *
+ * @param tty Run it under a pseudo-terminal ({@link underTty}).
+ * @returns The CLI's own output, after the profile's; null when the CLI is
+ *   not on the shell's PATH; undefined when the shell never reached it.
+ */
 async function inShell(
   agent: LaneworkMcpAgent,
   args: string,
@@ -103,8 +115,10 @@ async function inShell(
 }
 
 /**
- * Ask `agent` whether it holds a credential for our server. `no-cli` when
- * the CLI is not on the shell's PATH; `unknown` when it did not answer.
+ * Ask `agent` whether it holds a credential for our server.
+ *
+ * @returns `no-cli` when the CLI is not on the shell's PATH; `unknown` when
+ *   it did not answer, or on Windows.
  */
 export async function laneworkMcpAuth(
   agent: LaneworkMcpAgent,
@@ -124,10 +138,12 @@ export async function laneworkMcpAuth(
 const pending = new Map<LaneworkMcpAgent, Promise<LaneworkMcpAuth>>();
 
 /**
- * `<cli> mcp login lanework`: the CLI opens the browser on the server's
- * OAuth page and waits for its callback — Claude Code on a pseudo-terminal
- * (`onTty`). Five minutes to finish, then the
- * shell is killed; either way the answer is what the CLI reports after.
+ * Run `<cli> mcp login lanework`.
+ *
+ * The CLI opens the browser on the server's OAuth page and waits for its
+ * callback; Claude Code runs on a pseudo-terminal ({@link underTty}). It has
+ * five minutes to finish, then the shell is killed. Either way the answer is
+ * what the CLI reports after.
  */
 export function loginLaneworkMcp(
   agent: LaneworkMcpAgent,

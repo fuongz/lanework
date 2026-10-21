@@ -1,17 +1,16 @@
-// Settings → Agents (FE-28, FE-29): switch the checkpoint Stop hook (BE-17) on
-// and off for Claude Code and for Codex on this machine, with no terminal and
-// no token to paste.
+// Settings → Agents: switch the checkpoint Stop hook on and off for Claude
+// Code and for Codex on this machine, with no terminal and no token to paste.
 //
-// On: our entry goes into the CLI's own settings (`~/.claude/settings.json`,
-// `~/.codex/hooks.json` — user level, so every repo gets it) and this
-// machine's credential goes into the Keychain item the hook reads. Off: our
-// entry is removed, and nothing else in the file is touched.
+// - On: our entry goes into the CLI's own settings (`~/.claude/settings.json`,
+//   `~/.codex/hooks.json`; user level, so every repo gets it), and this
+//   machine's credential goes into the Keychain item the hook reads.
+// - Off: our entry is removed, and nothing else in the file is touched.
 //
-// ⚠️ Both entries run ONE script, `~/.lanew/hooks/lanework-checkpoint`
+// NOTE: Both entries run one script, `~/.lanew/hooks/lanework-checkpoint`
 // (FE-29/D3), which names this app's binary and the bundled hook. Those paths
-// move when the app is updated or dragged elsewhere, so the script is
-// rewritten on every launch (`syncHandoff`) — and the commands in the CLIs'
-// files never change, which is what keeps Codex's one-time approval valid.
+// move when the app is updated or moved, so the script is rewritten on every
+// launch (`syncHandoff`). The commands in the CLIs' files never change, and
+// that keeps Codex's one-time approval valid.
 import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -51,7 +50,7 @@ import {
   writeHookSecret,
 } from "./secret";
 
-/** Where the hook keeps its per-session state — named in the hook too. */
+/** Where the hook keeps its per-session state. The hook names it too. */
 const HOOK_STATE_DIR = join(homedir(), ".cache", "lanework", "checkpoint");
 
 const hooksDir = () => join(appHomeDir(), "hooks");
@@ -61,9 +60,10 @@ const configPath = () => join(hooksDir(), "config.json");
 /**
  * What the app remembers about the hooks, beside them.
  *
- * `pushWip` is read by the hook itself (FE-29/D3: a setting, not a flag in an
- * approved command). `installed` is what makes "another tool removed ours"
- * (FE-29/D8) knowable at all — without it, gone and never-added look alike.
+ * - `pushWip` is read by the hook itself (FE-29/D3: a setting, not a flag in
+ *   an approved command).
+ * - `installed` is what makes "another tool removed ours" (FE-29/D8)
+ *   knowable. Without it, removed and never added look alike.
  */
 type HookConfig = {
   pushWip: boolean;
@@ -94,10 +94,10 @@ const settingsPathFor = (agent: HookAgent) =>
 /**
  * The bundled hook, outside the asar archive.
  *
- * ⚠️ `ELECTRON_RUN_AS_NODE` is a plain Node, which cannot read a path inside
- * `app.asar`. `electron-builder.yml` unpacks `dist/electron/hook/**` for that,
- * and the path here points at the unpacked copy. Unpackaged (dev, tests) there
- * is no archive and the path is left as it is.
+ * NOTE: `ELECTRON_RUN_AS_NODE` is a plain Node, which cannot read a path
+ * inside `app.asar`. `electron-builder.yml` unpacks `dist/electron/hook/**`
+ * for that, and this path points at the unpacked copy. Unpackaged (dev,
+ * tests) there is no archive, and the path stays as it is.
  */
 function hookPath(): string {
   return join(__dirname, "..", "hook", "lanework-checkpoint.cjs").replace(
@@ -106,7 +106,7 @@ function hookPath(): string {
   );
 }
 
-/** Write the shim for this build of the app. Cheap, and done on every launch. */
+/** Write the shim for this build of the app. Cheap, so every launch does it. */
 async function writeShim(record: MachineRecord | null): Promise<void> {
   await mkdir(dirname(shimPath()), { recursive: true, mode: 0o700 });
   await writeFile(
@@ -196,8 +196,8 @@ async function enable(agent: HookAgent): Promise<HandoffStatus> {
   if (!secretStoreAvailable())
     throw new Error("Handing work between agents needs macOS for now.");
   const record = await readRecord();
-  // FE-52/D9: in local mode the hook needs no credential — it writes the
-  // checkpoint to the local store for a repo linked to a local board.
+  // In local mode the hook needs no credential: it writes the checkpoint to
+  // the local store for a repo linked to a local board (FE-52/D9).
   if (!record && !(await readLocalMode()))
     throw new Error("Sign in first, so the hook has a credential.");
   const path = settingsPathFor(agent);
@@ -208,9 +208,9 @@ async function enable(agent: HookAgent): Promise<HandoffStatus> {
     );
   if (record) await writeHookSecret(resolveApi(record.apiUrl), record.secret);
   await writeShim(record);
-  // ⚠️ Rewritten only when the command actually differs. For Codex a new
-  // command is a new approval, so re-enabling an entry that is already right
-  // must leave the file — and the approval — exactly as they are.
+  // NOTE: Rewritten only when the command differs. For Codex a new command
+  // needs a new approval, so re-enabling an entry that is already right must
+  // leave the file, and the approval, as they are.
   if (findHook(read.settings) !== commandFor(agent))
     await writeSettings(withHook(read.settings, commandFor(agent)), path);
   const config = await readConfig();
@@ -246,22 +246,25 @@ async function setPushWip(on: boolean): Promise<HandoffStatus> {
 }
 
 /**
- * The credential is gone from this machine (sign-out): take the hook's copy
- * with it. The hooks stay installed and say "no credential" in their log until
- * someone signs in again, when `syncHandoff` hands them the new one.
+ * Delete the hook's copy of the credential, after a sign-out.
+ *
+ * The hooks stay installed and log "no credential" until someone signs in
+ * again, when {@link syncHandoff} hands them the new one.
  */
 export async function forgetHookCredential(apiUrl: string): Promise<void> {
   await deleteHookSecret(resolveApi(apiUrl)).catch(() => undefined);
 }
 
 /**
- * Bring installed hooks up to date: the shim for this build, this machine's
- * current credential, and — once — an entry from before the shim (FE-28),
- * which named the binary directly. A no-op when both switches are off.
+ * Bring installed hooks up to date.
  *
- * ⚠️ Never RE-ADDS an entry another tool removed (FE-29/D8). A tool that owns
- * a settings file and rewrites it on its own schedule would otherwise fight
- * this app over it on every launch; Settings shows the removal instead.
+ * That means the shim for this build, this machine's current credential, and,
+ * once, an entry from before the shim, which named the binary directly. A
+ * no-op when both switches are off.
+ *
+ * NOTE: Never re-adds an entry another tool removed (FE-29/D8). A tool that
+ * owns a settings file and rewrites it on its own schedule would otherwise
+ * fight this app over it on every launch. Settings shows the removal instead.
  */
 export async function syncHandoff(): Promise<void> {
   if (!secretStoreAvailable()) return;
@@ -273,12 +276,12 @@ export async function syncHandoff(): Promise<void> {
     if (!read.ok) continue;
     const current = findHook(read.settings);
     if (current === null) continue;
-    // ⚠️ Only OUR hook is ours to touch: the one that runs this app home's
-    // shim, or a FE-28 entry from before shims existed (it named the binary
-    // directly, so it carries `ELECTRON_RUN_AS_NODE=1`). An entry running some
-    // OTHER home's shim belongs to another install of this app — a second copy,
-    // or a test run with its own LANEWORK_HOME — and repointing it at ours is
-    // how one test run once took over a user's real ~/.claude and ~/.codex.
+    // NOTE: Touch only our own hook: the one that runs this app home's shim,
+    // or an entry from before shims existed (it named the binary directly, so
+    // it carries `ELECTRON_RUN_AS_NODE=1`). An entry that runs another home's
+    // shim belongs to another install of this app: a second copy, or a test
+    // run with its own `LANEWORK_HOME`. Repointing it at ours once let a test
+    // run take over a user's real `~/.claude` and `~/.codex`.
     const mine = current === commandFor(agent);
     const legacy = current.includes("ELECTRON_RUN_AS_NODE=1");
     if (!mine && !legacy) continue;

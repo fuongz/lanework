@@ -1,9 +1,11 @@
 // A link's favicon and title, for the chat's link chips (FE-62/D4).
 //
-// ⚠️ No third-party service: main fetches the page itself — http(s) only,
-// never a loopback, private or link-local address (checked on the address
-// actually connected to, after DNS), a few redirects, small bodies, a short
-// timeout — and keeps what it found on disk per domain.
+// NOTE: No third-party service: main fetches the page itself and keeps what
+// it found on disk per domain. What it fetches is fenced in:
+// - http(s) only;
+// - never a loopback, private or link-local address, checked on the address
+//   the socket connects to, after DNS;
+// - a few redirects, small bodies, a short timeout.
 //
 // Nothing here imports Electron, so a Node test drives it with a fake fetcher.
 import { createHash } from "node:crypto";
@@ -15,16 +17,22 @@ import { isIP } from "node:net";
 import { join } from "node:path";
 import { isPreviewUrl, type LinkPreview } from "../../../shared/conversation";
 
+/** The most of a page read, in bytes: enough for its `<head>`. */
 const PAGE_MAX = 512 * 1024;
+/** The largest icon kept, in bytes. */
 const ICON_MAX = 100 * 1024;
+/** How long one request may take. */
 const TIMEOUT_MS = 5_000;
+/** The most redirects followed from one link. */
 const REDIRECTS = 3;
+/** How long a found title or icon is kept. */
 const TTL_MS = 7 * 24 * 60 * 60_000;
 /** A failed fetch is tried again after this, and never written to disk. */
 const FAILED_TTL_MS = 10 * 60_000;
 /** Titles kept per domain. */
 const TITLES_MAX = 64;
 
+/** A fetched response, as much of its body as was asked for. */
 export interface Fetched {
   status: number;
   /** Lower-case header names. */
@@ -34,11 +42,16 @@ export interface Fetched {
   url: string;
 }
 
-/** Fetch `url` with at most `max` bytes of body; rejects on anything unsafe. */
+/**
+ * Fetch `url` with at most `max` bytes of body.
+ *
+ * Rejects on anything unsafe.
+ */
 export type Fetcher = (url: string, max: number) => Promise<Fetched>;
 
 // ─── Addresses ──────────────────────────────────────────────────────────────
 
+/** Whether an IPv4 address is one {@link isPrivateAddress} refuses. */
 function v4Private(address: string): boolean {
   const [a = 0, b = 0] = address.split(".").map(Number);
   return (
@@ -54,7 +67,12 @@ function v4Private(address: string): boolean {
   );
 }
 
-/** Loopback, private, link-local, CGNAT, multicast or unspecified. */
+/**
+ * Whether an address is loopback, private, link-local, CGNAT, multicast or
+ * unspecified.
+ *
+ * Anything that is not an IP address counts as private.
+ */
 export function isPrivateAddress(address: string): boolean {
   const family = isIP(address);
   if (family === 4) return v4Private(address);
@@ -72,6 +90,10 @@ export function isPrivateAddress(address: string): boolean {
   );
 }
 
+/**
+ * Whether a URL's host is refused before any DNS: a local name, or a private
+ * address written as the host.
+ */
 function refusedHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (
@@ -87,9 +109,9 @@ function refusedHost(hostname: string): boolean {
 /**
  * `dns.lookup`, refusing an answer that is a private address.
  *
- * ⚠️ Used as the socket's own lookup, so the check is on the address the
- * request really connects to — a name that resolves to a public address for
- * a check and to 127.0.0.1 a moment later cannot slip through.
+ * NOTE: Used as the socket's own lookup, so the check is on the address the
+ * request connects to. A name that resolves to a public address for a check
+ * and to 127.0.0.1 a moment later cannot slip through.
  */
 function safeLookup(
   hostname: string,
@@ -117,6 +139,11 @@ function safeLookup(
   });
 }
 
+/**
+ * One request to `url`, without following a redirect.
+ *
+ * A body longer than `max` is cut at `max`, not refused.
+ */
 function once(url: URL, max: number): Promise<Fetched> {
   return new Promise((resolve, reject) => {
     const get = url.protocol === "https:" ? https.get : http.get;
@@ -200,6 +227,7 @@ export const netFetcher: Fetcher = async (start, max) => {
 
 // ─── Parsing ────────────────────────────────────────────────────────────────
 
+/** The named HTML entities a title is likely to carry. */
 const ENTITIES: Record<string, string> = {
   amp: "&",
   lt: "<",
@@ -215,6 +243,7 @@ const ENTITIES: Record<string, string> = {
   middot: "·",
 };
 
+/** Decode numeric entities and the named ones in {@link ENTITIES}. */
 function decodeEntities(text: string): string {
   return text.replace(
     /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
@@ -233,6 +262,7 @@ function decodeEntities(text: string): string {
   );
 }
 
+/** A tag's attributes, lower-case names to decoded values. */
 function attributes(tag: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const match of tag.matchAll(
@@ -244,7 +274,12 @@ function attributes(tag: string): Record<string, string> {
   return out;
 }
 
-/** A page's `<title>` (or its `og:title`), and its best icon link. */
+/**
+ * A page's title and its best icon link.
+ *
+ * The title is its `<title>`, else its `og:title`; the icon falls back to
+ * `/favicon.ico`.
+ */
 export function parseHead(
   html: string,
   base: string,
@@ -310,24 +345,30 @@ function iconType(body: Buffer, header: string | undefined): string | null {
 
 // ─── The cache ──────────────────────────────────────────────────────────────
 
+/** What one domain's cache file holds. */
 interface DomainEntry {
   /** When the icon was fetched. */
   at: number;
   icon: string | null;
-  /** Page titles by URL, newest last. */
+  /** Page titles by URL, in the order they were first fetched. */
   titles: Record<string, { title: string | null; at: number }>;
 }
 
 interface LinkPreviewOptions {
-  /** `userData/link-previews`. */
+  /** The cache's folder: `userData/link-previews`. */
   dir: string;
+  /** A test's fake; {@link netFetcher} by default. */
   fetcher?: Fetcher;
+  /** A test's clock; `Date.now` by default. */
   now?: () => number;
 }
 
 /**
- * Link previews with an on-disk cache per domain (7 days) and one in memory;
- * concurrent asks for one URL share one fetch.
+ * Link previews, cached on disk per domain for 7 days and in memory.
+ *
+ * Concurrent asks for one URL share one fetch.
+ *
+ * @returns The preview of a link; it throws for one that is not http(s).
  */
 export function createLinkPreviews(options: LinkPreviewOptions) {
   const fetcher = options.fetcher ?? netFetcher;

@@ -2,19 +2,18 @@
 //
 // Gathered here, in main, because every answer is on the disk or behind the
 // machine: the folder link, AGENTS.md, CLAUDE.md, `.mcp.json`,
-// `~/.claude.json`, Codex's config.toml and the checkpoint hooks. Nothing
+// `~/.claude.json`, Codex's `config.toml` and the checkpoint hooks. Nothing
 // about git: the folder's remote and the repo's board are not checked here.
 // Judging the facts is `checks.ts`, which is pure.
 //
-// ⚠️ The renderer names a project by SLUG and a fix by NAME. Every path is
+// NOTE: The renderer names a project by SLUG and a fix by NAME. Every path is
 // resolved here from the folder links this process wrote down, so no renderer
-// can point a read — let alone the one kind of write — at a file of its
-// choosing.
+// can point a read, or the one kind of write, at a file of its choosing.
 //
-// ⚠️ The ONLY writer of a user's folder in this app, and only after the diff
-// was shown and confirmed (FE-30/D5): AGENTS.md, CLAUDE.md or .mcp.json, one
-// appended block or one added key. Nothing is committed, and nothing outside
-// the folder — `~/.claude.json`, `config.toml` — is ever written.
+// NOTE: This is the ONLY writer of a user's folder in this app, and only
+// after the diff was shown and confirmed (FE-30/D5): AGENTS.md, CLAUDE.md or
+// `.mcp.json`, one appended block or one added key. Nothing is committed, and
+// nothing outside the folder (`~/.claude.json`, `config.toml`) is written.
 import { randomUUID } from "node:crypto";
 import { readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -45,17 +44,20 @@ import {
   type ReadinessFacts,
 } from "./checks";
 
+/** Whether anything is at `path`. */
 const exists = (path: string) =>
   stat(path).then(
     () => true,
     () => false,
   );
 
+/** Whether the settings file at `path` carries the checkpoint hook. */
 async function hookInstalled(path: string): Promise<boolean> {
   const read = await readSettings(path);
   return read.ok && findHook(read.settings) !== null;
 }
 
+/** Whether `folder` still has card files under `.agents/reviews/`. */
 async function hasLegacyReviews(folder: string): Promise<boolean> {
   const entries = await readdir(join(folder, ".agents", "reviews")).catch(
     () => [] as string[],
@@ -63,13 +65,23 @@ async function hasLegacyReviews(folder: string): Promise<boolean> {
   return entries.some((name) => !name.startsWith("."));
 }
 
-/** The workspace and its primary folder on this machine, or why there is none. */
+/**
+ * The workspace and its primary folder on this machine.
+ *
+ * @returns `path: null` when the workspace has no folder here.
+ */
 async function resolve(slug: string) {
   const { record, workspace } = await knownWorkspace(slug);
   const [path] = (await readFolders(record))[workspace.slug] ?? [];
   return { workspace, path: path ?? null };
 }
 
+/**
+ * Read every fact the readiness report judges.
+ *
+ * Claude's and Codex's files are read only when that CLI is used on this
+ * machine.
+ */
 async function gather(slug: string): Promise<ReadinessFacts> {
   const { workspace, path } = await resolve(slug);
   const [claudeUsed, codexUsed] = await Promise.all([
@@ -122,6 +134,11 @@ async function readinessOf(slug: string): Promise<ReadinessReport> {
   return buildReport(await gather(slug));
 }
 
+/**
+ * The absolute path of the file `fix` writes in the project's folder.
+ *
+ * @throws when the project has no folder on this machine.
+ */
 async function fixTarget(slug: string, fix: ReadinessFix): Promise<string> {
   const { path } = await resolve(slug);
   if (!path || !(await folderExists(path)))
@@ -129,6 +146,7 @@ async function fixTarget(slug: string, fix: ReadinessFix): Promise<string> {
   return join(path, FIX_FILES[fix]);
 }
 
+/** The file `fix` writes, before and after the fix. */
 async function preview(
   slug: string,
   fix: ReadinessFix,
@@ -138,6 +156,12 @@ async function preview(
   return { fix, file: FIX_FILES[fix], before, after: applyFix(fix, before) };
 }
 
+/**
+ * Write `fix` into the project's folder, atomically.
+ *
+ * @param expected The file as the preview showed it.
+ * @throws when the file changed since the preview, or cannot be written.
+ */
 async function apply(
   slug: string,
   fix: ReadinessFix,
@@ -145,7 +169,7 @@ async function apply(
 ): Promise<ReadinessReport> {
   const file = await fixTarget(slug, fix);
   const before = await readText(file);
-  // ⚠️ The file as the PREVIEW showed it, or nothing is written. An editor
+  // NOTE: The file as the PREVIEW showed it, or nothing is written. An editor
   // that saved in between would otherwise lose what it saved.
   if (before !== expected)
     throw new Error(
@@ -164,17 +188,28 @@ async function apply(
   return readinessOf(slug);
 }
 
+/**
+ * The project slug the renderer sent.
+ *
+ * @throws when `value` is not a slug.
+ */
 function slugArg(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
     throw new Error("A project is required");
   return value;
 }
 
+/**
+ * The fix the renderer named.
+ *
+ * @throws when `value` is not a known fix.
+ */
 function fixArg(value: unknown): ReadinessFix {
   if (!isReadinessFix(value)) throw new Error("Unknown fix");
   return value;
 }
 
+/** Register the readiness IPC handlers: check, preview and apply. */
 export function registerReadiness(devUrl?: string): void {
   handle(readinessChannels.check, devUrl, (args) => {
     if (args.length !== 1) throw new Error("check takes one project");

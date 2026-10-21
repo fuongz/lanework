@@ -11,6 +11,7 @@ import type { CodexGoal, CodexGoalStatus } from "#/../shared/terminal";
 import type { Fact } from "#/components/shared/agents/facts";
 import { GOAL_STATUS_LABELS, goalTokens } from "#/lib/codex-usage";
 
+/** The icon, and the tone if any, each goal status shows with. */
 const STATUS_LOOK: Record<
   CodexGoalStatus,
   { icon: IconSvgElement; className?: string }
@@ -34,7 +35,7 @@ function spent(seconds: number): string {
 /**
  * A Codex goal as facts (FE-41/D4): its objective, its status, and the
  * tokens it used against its budget — how long it ran is in that one's
- * tooltip. They join the conversation's facts row (FE-38).
+ * tooltip. They join the conversation's facts row.
  */
 export function goalFacts(goal: CodexGoal): Fact[] {
   const objective = goal.objective.replace(/\s+/g, " ");

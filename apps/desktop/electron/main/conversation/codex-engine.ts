@@ -2,23 +2,25 @@
 // `codex app-server` per conversation sent from chat, spoken to over
 // JSON-RPC (one JSON object per line, no `jsonrpc` field).
 //
-// - `initialize`, then `thread/start` (a new conversation — Codex names its
-//   id) or `thread/resume`; each turn is a `turn/start` carrying the
+// - `initialize`, then `thread/start` (a new conversation, whose id Codex
+//   names) or `thread/resume`. Each turn is a `turn/start` carrying the
 //   composer's settings, so a change between turns needs no restart.
-// - Text streams as `item/agentMessage/delta`; the rest of the turn is in
+// - Text streams as `item/agentMessage/delta`. The rest of the turn is in
 //   the rollout Codex writes as it goes, which the chat reads when the
 //   activity watcher says it moved (`codex-transcript.ts`).
-// - Codex asks before acting as SERVER requests — a command, a file change,
-//   more permissions, a question, an MCP confirmation — shown as the chat's
-//   permission and question cards and answered on stdin.
-// - A send while a turn runs goes into it with `turn/steer` (FE-67); one it
+// - Codex asks before acting as SERVER requests (a command, a file change,
+//   more permissions, a question, an MCP confirmation). They show as the
+//   chat's permission and question cards and are answered on stdin.
+// - A send while a turn runs goes into it with `turn/steer` (FE-67). One it
 //   cannot take yet waits in `held` (`./queue`) and starts after
 //   `turn/completed`. Stop is `turn/interrupt`.
 //
-// ⚠️ Nothing the page typed becomes an argument: the process is started
+// Nothing here imports Electron.
+//
+// NOTE: Nothing the page typed becomes an argument: the process is started
 // with none but `app-server`, settings are checked again against the fixed
 // lists, the id is a UUID Codex itself named, and images are files main
-// wrote. Nothing here imports Electron.
+// wrote.
 import { type ChildProcess, spawn as spawnChild } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -42,6 +44,7 @@ import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { cut, inputText } from "./transcript";
 
+/** What a {@link CodexEngine} needs from main; `spawn` is a test seam. */
 interface CodexEngineDeps {
   cli: () => Promise<ClaudeCli>;
   emit: (event: ConversationEvent) => void;
@@ -53,6 +56,7 @@ interface CodexEngineDeps {
 
 type CodexOutgoing = Outgoing;
 
+/** The file extension an attached image is written with, by media type. */
 const EXT: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -71,10 +75,11 @@ const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value : null;
 
 /**
- * The composer's permission as Codex's approval policy, reviewer and
- * sandbox — the same four as Claude's, asked the same way.
+ * The composer's permission as Codex's approval policy, reviewer and sandbox.
  *
- * ⚠️ Full access stays `on-request`, not `never`: `never` refuses an
+ * The same four permissions as Claude's, asked the same way.
+ *
+ * NOTE: Full access stays `on-request`, not `never`: `never` refuses an
  * escalation before it reaches us, and Full access answers it with yes.
  */
 function codexPolicy(permission: Permission): {
@@ -115,7 +120,11 @@ function codexPolicy(permission: Permission): {
   }
 }
 
-/** `settings`, checked: a listed Codex model and the fixed lists. */
+/**
+ * `settings`, checked: a listed Codex model and the fixed lists.
+ *
+ * @throws When anything is off the lists, or the model is not Codex's.
+ */
 function checked(value: ComposerSettings): ComposerSettings {
   const settings = checkSettings(value);
   if (!settings || agentOfModel(settings.model) !== "codex")
@@ -123,7 +132,12 @@ function checked(value: ComposerSettings): ComposerSettings {
   return settings;
 }
 
-/** The text and images, written to files, of `content`. */
+/**
+ * `content` as Codex's turn input: its text, and its images written to files.
+ *
+ * @returns The input, and the folder the images went to (null when none),
+ *   for the caller to remove once the turn ends.
+ */
 async function inputOf(
   content: readonly ContentBlock[],
 ): Promise<{ input: Json[]; dir: string | null }> {
@@ -155,8 +169,11 @@ type Waiting =
   | { kind: "elicitation"; content: Json };
 
 /**
- * An MCP server's elicitation, when it is only a confirmation — no fields,
- * or one yes/no — which Allow/Deny can answer; null for a real form.
+ * An MCP server's elicitation, when it is only a confirmation.
+ *
+ * A confirmation has no fields, or one yes/no, so Allow/Deny can answer it.
+ *
+ * @returns null for a real form.
  */
 function confirmation(params: Json): { title: string; content: Json } | null {
   const schema = record(params.requestedSchema);
@@ -187,25 +204,29 @@ function confirmation(params: Json): { title: string; content: Json } | null {
   };
 }
 
+/** A request of ours the app-server has not answered yet. */
 interface Pending {
   resolve: (value: Json) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 }
 
+/** One Codex conversation's `codex app-server`, and the turn it runs. */
 export class CodexEngine {
   child: ChildProcess | null = null;
   busy = false;
   starting = false;
   stopping = false;
   error: string | null = null;
-  /** What waits to be sent (FE-67). */
+  /** What waits to be sent. */
   held = new Held();
-  /** `drain` is running: one at a time, so the order holds. */
+  /** Whether `drain` is running: one at a time, so the order holds. */
   private pumping = false;
+  /** The permission and question cards shown now, by request id. */
   permissions = new Map<string, PermissionRequest>();
+  /** The server request behind each card, to answer it in Codex's shape. */
   waiting = new Map<string, { rpcId: number | string; waiting: Waiting }>();
-  /** Items Codex started this turn, by id — a file change's diff. */
+  /** Items Codex started this turn, by id: a file change's diff. */
   items = new Map<string, Json>();
   stderr = "";
   buffer = "";
@@ -255,6 +276,7 @@ export class CodexEngine {
     return [];
   }
 
+  /** The last state sent, so an unchanged one is not sent again. */
   told = "";
 
   emit(event: Json & { type: ConversationEvent["type"] }) {
@@ -275,6 +297,11 @@ export class CodexEngine {
     this.emit({ type: "state", engine });
   }
 
+  /**
+   * Send one message to the app-server.
+   *
+   * @throws When Codex is not running.
+   */
   write(message: Json): void {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed || !stdin.writable)
@@ -282,6 +309,11 @@ export class CodexEngine {
     stdin.write(`${JSON.stringify(message)}\n`);
   }
 
+  /**
+   * Call `method` and wait for its result.
+   *
+   * Rejects when Codex refuses, exits, or does not answer in time.
+   */
   request(method: string, params: Json): Promise<Json> {
     const id = ++this.next;
     return new Promise((resolve, reject) => {
@@ -390,6 +422,7 @@ export class CodexEngine {
     this.name(id);
   }
 
+  /** Take a chunk of stdout and handle every whole line in it. */
   read(chunk: string): void {
     this.buffer += chunk;
     for (;;) {
@@ -413,6 +446,7 @@ export class CodexEngine {
     if (this.buffer.length > 64 * 1024 * 1024) this.buffer = "";
   }
 
+  /** One message from the app-server: a response, a request or a notice. */
   handle(message: Json): void {
     const method = typeof message.method === "string" ? message.method : null;
     const id = message.id;
@@ -431,7 +465,7 @@ export class CodexEngine {
     }
     if (!method) return;
     const params = record(message.params);
-    // ⚠️ Codex's own request ids start at 0: tested for presence, not truth.
+    // NOTE: Codex's own request ids start at 0: test for presence, not truth.
     if (typeof id === "number" || typeof id === "string") {
       this.onServerRequest(id, method, params);
       return;
@@ -485,7 +519,13 @@ export class CodexEngine {
     }
   }
 
-  /** A question Codex asks before acting: a card, answered later. */
+  /**
+   * A question Codex asks before acting: a card, answered later.
+   *
+   * Full access answers a permissions request or an MCP confirmation itself.
+   * A request this cannot show is answered at once, with an empty answer or
+   * a refusal.
+   */
   onServerRequest(rpcId: number | string, method: string, params: Json): void {
     const key = `codex-${String(rpcId)}`;
     const mode = this.applied?.permission ?? "manual";
@@ -643,7 +683,7 @@ export class CodexEngine {
         return;
       }
       default:
-        // An honest refusal: an empty answer would hide what is missing.
+        // Refuse plainly: an empty answer would hide what is missing.
         try {
           this.write({
             id: rpcId,
@@ -655,6 +695,7 @@ export class CodexEngine {
     }
   }
 
+  /** Answer server request `rpcId`; a gone process is left to its exit. */
   reply(rpcId: number | string, result: Json): void {
     try {
       this.write({ id: rpcId, result });
@@ -663,6 +704,11 @@ export class CodexEngine {
     }
   }
 
+  /**
+   * Answer card `id` in the shape its request is waiting on.
+   *
+   * @throws When the request was already answered.
+   */
   answer(id: string, answer: PermissionAnswer): void {
     const entry = this.waiting.get(id);
     if (!entry) throw new Error("That request was already answered.");
@@ -710,7 +756,7 @@ export class CodexEngine {
     this.settle(id);
   }
 
-  /** A request answered — here, or by Codex itself. */
+  /** Close the card of a request answered here, or by Codex itself. */
   settle(key: string): void {
     if (!this.permissions.has(key) && !this.waiting.has(key)) return;
     this.permissions.delete(key);
@@ -718,12 +764,13 @@ export class CodexEngine {
     this.emit({ type: "permission-done", id: key });
   }
 
+  /** Close every card: the turn or the process they belonged to has ended. */
   dropPermissions(): void {
     for (const key of [...this.permissions.keys()]) this.settle(key);
     this.waiting.clear();
   }
 
-  /** What a turn leaves behind, cleared. */
+  /** Clear what a turn leaves behind, its image files included. */
   endTurn(): void {
     this.busy = false;
     this.starting = false;
@@ -734,6 +781,7 @@ export class CodexEngine {
     this.dirs = [];
   }
 
+  /** A turn ended: clear it, and let what is held go. */
   onTurnEnd(): void {
     this.dropPermissions();
     this.endTurn();
@@ -742,16 +790,16 @@ export class CodexEngine {
     this.pump();
   }
 
-  /** Send `out` — into the running turn, or as a turn — or hold it. */
+  /** Send `out` (into the running turn, or as a turn), or hold it. */
   async accept(out: Outgoing): Promise<void> {
     if (!this.busy && !this.held.length) {
       await this.deliver(out);
       return;
     }
-    // A new message picks a paused queue back up (D5).
+    // A new message picks a paused queue back up (FE-67/D5).
     this.held.paused = false;
     this.held.items.push(out);
-    // ⚠️ Pumped first: one that steers at once is never drawn as queued.
+    // Pump before emitting: one that steers at once is never drawn as queued.
     this.pump();
     this.emitState();
   }
@@ -764,6 +812,7 @@ export class CodexEngine {
     this.pump();
   }
 
+  /** Start {@link CodexEngine.drain} unless it is already running. */
   pump(): void {
     if (this.pumping) return;
     this.pumping = true;
@@ -772,7 +821,12 @@ export class CodexEngine {
     });
   }
 
-  /** What is held goes, in order, for as long as Codex can take it. */
+  /**
+   * Send what is held, in order, for as long as Codex can take it.
+   *
+   * Idle, the head starts a turn. Busy, it steers the running turn, but only
+   * once that turn is up and with the same settings; otherwise it waits.
+   */
   private async drain(): Promise<void> {
     while (!this.held.paused && this.held.length) {
       const head = this.held.items[0] as Outgoing;
@@ -808,7 +862,7 @@ export class CodexEngine {
         head.error = null;
         this.emitState();
       } catch (error) {
-        // The turn ended first: it goes as a turn of its own (D7).
+        // The turn ended first: it goes as a turn of its own (FE-67/D7).
         if (!this.busy || this.turnId !== turnId) {
           this.held.items.unshift(head);
           continue;
@@ -820,7 +874,12 @@ export class CodexEngine {
     }
   }
 
-  /** Start `out` as the next turn, the app-server first if it is not up. */
+  /**
+   * Start `out` as the next turn, the app-server first if it is not up.
+   *
+   * @throws When the settings are off the lists, or Codex fails to start or
+   *   refuses the turn.
+   */
   async deliver(out: CodexOutgoing): Promise<void> {
     const settings = checked(out.settings);
     this.busy = true;
@@ -871,8 +930,13 @@ export class CodexEngine {
     clearTimeout(killer);
   }
 
+  /**
+   * Stop the running turn with `turn/interrupt`.
+   *
+   * Ends the process when the interrupt cannot be sent or is refused.
+   */
   async stop(): Promise<void> {
-    // What waits stays, paused (D5): Resume or the next send lets it go.
+    // What waits stays, paused (FE-67/D5): Resume or the next send lets it go.
     if (this.held.length) this.held.paused = true;
     if (!this.busy || !this.child) {
       this.emitState();

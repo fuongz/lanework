@@ -1,9 +1,9 @@
 // One conversation's numbers, read for the agent view (FE-38): its model,
-// cost, tokens, context, lines changed, run time and Claude's newest recap —
-// and a project's totals of them, for Settings (FE-38/D6).
+// cost, tokens, context, lines changed, run time and Claude's newest recap.
+// Also a project's totals of them, for Settings (FE-38/D6).
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a spec
-// can drive it under plain Node against a fake home folder.
+// Read-only, and nothing here imports Electron: main calls it, and a spec can
+// drive it under plain Node against a fake home folder.
 import { open, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
@@ -26,6 +26,7 @@ import {
 
 /** How much of a transcript one step back reads. */
 const CHUNK = 64 * 1024;
+/** One day, in ms. */
 const DAY = 24 * 60 * 60_000;
 
 /** What the agent view asks for, checked. */
@@ -36,11 +37,13 @@ interface FactsRequest {
 }
 
 /**
- * The request off the wire: ids, never a path (FE-38).
+ * The request off the wire: ids, never a path.
  *
- * ⚠️ The conversation is a UUID and nothing else, as a resume id is — so it
+ * NOTE: The conversation is a UUID and nothing else, as a resume id is, so it
  * can be no `..`, separator or absolute path. The path is built from it by
- * `readAgentFacts`, inside the CLI's folder.
+ * {@link readAgentFacts}, inside the CLI's folder.
+ *
+ * @throws when any of the three arguments is missing or invalid.
  */
 export function factsRequest(args: unknown[]): FactsRequest {
   if (args.length !== 3)
@@ -59,17 +62,28 @@ export function factsRequest(args: unknown[]): FactsRequest {
   return { workspace, agent, id };
 }
 
-/** How a read back ended: told it had enough, at the file's start, or at the cap. */
+/**
+ * How a read back ended.
+ *
+ * - `enough`: the visitor said it had enough.
+ * - `start`: the read reached the file's start.
+ * - `cap`: the read stopped at its byte cap.
+ */
 type Ended = "enough" | "start" | "cap";
 
 /**
- * `file`'s lines, newest first, read back from its end `CHUNK` at a time
- * until `visit` says it has enough — at most `max` bytes of it.
+ * Visit `file`'s lines, newest first, until `visit` says it has enough.
  *
- * ⚠️ Raw bytes, so `visit` can tell a line is none of its business before
- * paying to parse it. A chunk's first line is cut, and waits for the chunk
- * before it; at the cap that cut line is dropped, never guessed at. The
- * newest line may still be being written: it fails to parse, and is skipped.
+ * The file is read back from its end {@link CHUNK} bytes at a time, at most
+ * `max` bytes of it.
+ *
+ * Lines are passed as raw bytes, so `visit` can tell a line is none of its
+ * business before paying to parse it. A chunk's first line is cut, and waits
+ * for the chunk before it; at the cap that cut line is dropped, never guessed
+ * at. The newest line may still be being written: it fails to parse, and is
+ * skipped.
+ *
+ * @param visit Returns true once it has enough.
  */
 async function readBack(
   file: string,
@@ -90,7 +104,8 @@ async function readBack(
       read += length;
       const buffer = Buffer.concat([chunk.subarray(0, bytesRead), carry]);
       let stop = buffer.length;
-      // ⚠️ Never `lastIndexOf(…, -1)`: a negative offset counts from the END.
+      // NOTE: Never `lastIndexOf(…, -1)`: a negative offset counts from the
+      // END.
       while (stop > 0) {
         const newline = buffer.lastIndexOf(0x0a, stop - 1);
         if (newline === -1) break;
@@ -108,7 +123,11 @@ async function readBack(
   }
 }
 
-/** One line, parsed; null for one cut short or not JSON. */
+/**
+ * One line, parsed.
+ *
+ * @returns null for a line cut short, or not a JSON object.
+ */
 function parse(piece: Buffer): Line | null {
   try {
     const value: unknown = JSON.parse(piece.toString("utf8"));
@@ -118,35 +137,43 @@ function parse(piece: Buffer): Line | null {
   }
 }
 
+/** A positive finite number, or 0 for anything else. */
 const count = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 
+/** A non-blank string, trimmed, or null. */
 const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value.trim() : null;
 
+/** The tokens of one answer. */
 interface Usage {
   input: number;
   cached: number;
   output: number;
 }
 
-/** Positive, or null: a 0 is "none written" here, never shown (FE-38/D1). */
+/**
+ * A positive number, or null.
+ *
+ * A 0 means "none written" here, and is never shown (FE-38/D1).
+ */
 const some = (value: number): number | null => (value > 0 ? value : null);
 
 /**
- * A Claude transcript's numbers, from its end (FE-38).
+ * A Claude transcript's numbers, read from its end.
  *
- * ⚠️ `cost-state` is Claude's own running total of the conversation — cost,
- * tokens by model, lines, durations — but it is written when Claude is left
- * or quit, NOT after every turn: a conversation running now may have none
- * yet, or one several turns old. So the answers written after the newest one
- * are added to its tokens (once each: Claude writes an answer as several
- * lines that share its `message.id`), and `stale` says the rest lag. Read
- * back no further than that `cost-state` — or, with `full`, the newest
- * recap, wherever it is.
+ * NOTE: `cost-state` is Claude's own running total of the conversation
+ * (cost, tokens by model, lines, durations). It is written when Claude is
+ * left or quit, NOT after every turn, so a conversation running now may have
+ * none yet, or one several turns old. The answers written after the newest
+ * one are added to its tokens, once each, since Claude writes an answer as
+ * several lines that share its `message.id`. `stale` says the rest lag.
  *
- * ⚠️ The context is the newest answer's own input: what that turn sent the
+ * The context is the newest answer's own input: what that turn sent the
  * model. Claude records no window size, so none is guessed (FE-38/D2).
+ *
+ * @param full Read back until the model, the context and the newest recap
+ *   are found too, not only the newest `cost-state`.
  */
 async function claudeFacts(
   file: string,
@@ -156,7 +183,7 @@ async function claudeFacts(
   let model: string | null = null;
   let context: number | null = null;
   let recap: AgentFacts["recap"] = null;
-  /** The answers newer than `cost`, by message id. */
+  // The answers newer than `cost`, by message id.
   const since = new Map<string, Usage>();
   let seen = 0;
   const ended = await readBack(file, (piece) => {
@@ -237,8 +264,8 @@ async function claudeFacts(
       total.output += count(usage?.outputTokens);
     }
     tokens = total;
-    // ⚠️ Without one, the answers are all there is — and only a read that
-    // reached the start has them all: a capped one would undercount.
+    // Without a `cost-state`, the answers are all there is, and only a read
+    // that reached the start has them all: a capped one would undercount.
   } else if (ended !== "cap") tokens = after;
   if (tokens && tokens.input + tokens.output === 0) tokens = null;
 
@@ -268,14 +295,18 @@ async function claudeFacts(
 }
 
 /**
- * A Codex rollout's numbers, from its end (FE-38): the newest `token_count`
- * — the running total for the whole thread, the newest turn's own input as
- * the context, and the window when Codex says it — and the newest
- * `turn_context`'s model and effort. Codex records no cost and no recap.
+ * A Codex rollout's numbers, read from its end.
  *
- * ⚠️ A `token_count` whose `info` is null says nothing: the one before it
- * is the newest that does. `model_context_window` may be missing — then the
- * context is a count with no percentage (FE-38/D2).
+ * - The newest `token_count`: the running total for the whole thread, the
+ *   newest turn's own input as the context, and the window when Codex says
+ *   it.
+ * - The newest `turn_context`: the model and effort.
+ *
+ * Codex records no cost and no recap.
+ *
+ * A `token_count` whose `info` is null says nothing: the one before it is the
+ * newest that does. `model_context_window` may be missing; then the context
+ * is a count with no percentage (FE-38/D2).
  */
 async function codexFacts(file: string): Promise<AgentFacts> {
   let info: Record<string, unknown> | null = null;
@@ -325,12 +356,13 @@ async function codexFacts(file: string): Promise<AgentFacts> {
 }
 
 /**
- * The folder a Claude transcript says it was written in — `undefined` when
- * its head names none.
+ * The folder a Claude transcript says it was written in.
  *
- * ⚠️ Claude's folder name is lossy (`a_b` and `a-b` are both `a-b`), so a
+ * NOTE: Claude's folder name is lossy (`a_b` and `a-b` are both `a-b`), so a
  * transcript under this folder's name may be another folder's. The listing
  * reads the same line for the same reason.
+ *
+ * @returns `undefined` when the transcript's head names none.
  */
 async function claudeCwd(file: string): Promise<unknown> {
   const head = lines(await readRange(file, 0, CHUNK), { head: true });
@@ -341,8 +373,12 @@ async function claudeCwd(file: string): Promise<unknown> {
 const codexFiles = new Map<string, string>();
 
 /**
- * The rollout of Codex conversation `id`, if it is one of `folder`'s — by
- * its file's name among the newest rollouts, then by its `session_meta`.
+ * The rollout of Codex conversation `id`, if it is one of `folder`'s.
+ *
+ * It is found by its file's name among the newest rollouts, then confirmed
+ * by its `session_meta`.
+ *
+ * @throws when no rollout of `folder` is that conversation.
  */
 async function codexConversationFile(
   home: string,
@@ -364,13 +400,15 @@ async function codexConversationFile(
 }
 
 /**
- * `agent`'s conversation `id` in `folder`, its numbers read for the agent
- * view and the rail (FE-38).
+ * The numbers of `agent`'s conversation `id` in `folder`, for the agent view
+ * and the rail.
  *
- * ⚠️ The id is checked again here, and the path built from it inside the
+ * NOTE: The id is checked again here, and the path built from it inside the
  * CLI's own folder under `home`: Claude's `projects/<folder>/<id>.jsonl`, or
  * a rollout whose own `session_meta` says it is that conversation of this
  * folder.
+ *
+ * @throws when the conversation is not one of `folder`'s.
  */
 export async function readAgentFacts(
   home: string,
@@ -396,6 +434,7 @@ export async function readAgentFacts(
   return claudeFacts(file, { full: true });
 }
 
+/** Empty totals for one CLI in one window. */
 const none = (): AgentUsageTotals => ({
   conversations: 0,
   costUSD: null,
@@ -404,17 +443,24 @@ const none = (): AgentUsageTotals => ({
 });
 
 /**
- * `folder`'s agent usage over the last 7 and 30 days (FE-38/D6), by when
- * each transcript was last written: Claude's cost estimate, both CLIs'
- * tokens, and how many conversations.
+ * `folder`'s agent usage over each window of {@link AGENT_USAGE_DAYS}
+ * (FE-38/D6).
  *
- * ⚠️ Every transcript written in the window is read — its end, as far as
- * its newest `cost-state` — so this runs only when Settings asks, never
- * with the listing. A conversation written to in the window counts WHOLE,
- * however long ago it began. A Claude conversation's own totals hold its
- * sub-agents' (FE-38/V5); a Codex thread's spawns are rollouts of their
- * own, counted for their tokens but not as conversations. One whose totals
- * a read cannot reach is left out, and counted in `skipped`.
+ * A transcript falls in a window by when it was last written. Each window
+ * holds Claude's cost estimate, both CLIs' tokens, and how many
+ * conversations.
+ *
+ * NOTE: Every transcript written in the window is read, from its end as far
+ * as its newest `cost-state`, so this runs only when Settings asks, never
+ * with the listing.
+ *
+ * - A conversation written to in the window counts WHOLE, however long ago
+ *   it began.
+ * - A Claude conversation's own totals hold its sub-agents' (FE-38/V5).
+ * - A Codex thread's spawns are rollouts of their own, counted for their
+ *   tokens but not as conversations.
+ * - A conversation whose totals a read cannot reach is left out, and counted
+ *   in `skipped`.
  */
 export async function readAgentUsage(
   home: string,

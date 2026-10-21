@@ -1,11 +1,12 @@
-// Codex's account, read from its `auth.json` — the claims of the `id_token`
-// only. Electron-free, so a test can drive it (`codex-account.test.ts`).
+// Codex's account, read from the claims of the `id_token` in its `auth.json`
+// and nothing else. Free of Electron, so a test can drive it
+// (`codex-account.test.ts`).
 import type { HarnessAccount } from "../../../shared/harness";
 
 const text = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim().slice(0, 200) : null;
 
-/** A JWT's payload, or null. The signature is not checked: it is a label. */
+/** A JWT's payload, or null. The signature is not checked: this is a label. */
 function claimsOf(token: unknown): Record<string, unknown> | null {
   if (typeof token !== "string") return null;
   const payload = token.split(".")[1];
@@ -23,8 +24,10 @@ function claimsOf(token: unknown): Record<string, unknown> | null {
 }
 
 /**
- * Codex's account from `$CODEX_HOME/auth.json`: signed in with ChatGPT when
- * it holds tokens. The organization is the default one's title; an account
+ * Codex's account from the parsed `$CODEX_HOME/auth.json`.
+ *
+ * Signed in with ChatGPT when it holds an `id_token` that decodes. The
+ * organization is the default one's title, else the first one's. An account
  * with none is Personal.
  */
 export function codexAccountOf(json: unknown): HarnessAccount {

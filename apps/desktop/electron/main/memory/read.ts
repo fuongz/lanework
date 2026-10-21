@@ -1,8 +1,8 @@
-// A project's Claude memory, read off the disk (FE-36): the folder Claude
-// keeps it in, what each file says it is, and a watch on the folder.
+// A project's Claude memory, read off the disk: the folder Claude keeps it
+// in, what each file says it is, and a watch on the folder.
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a spec
-// can drive it under plain Node against a fake home folder.
+// NOTE: Read-only, and nothing here imports Electron. Main calls it, and a
+// spec drives it under plain Node against a fake home folder.
 import { execFile } from "node:child_process";
 import { type FSWatcher, watch } from "node:fs";
 import { readdir, realpath, stat } from "node:fs/promises";
@@ -26,13 +26,13 @@ import { claudeProjectDir, readRange } from "../terminal/agent-sessions";
 
 const run = promisify(execFile);
 
-/** The most of one memory a read takes; Claude's are a few KB. */
+/** The most of one memory a read takes. Claude's are a few KB. */
 export const MEMORY_READ_MAX = 256 * 1024;
 /** The most files one listing takes. */
 const MEMORY_LIST_MAX = 500;
-/** What a listing reads of each file to find its frontmatter. */
+/** How much of each file a listing reads to find its frontmatter. */
 const HEAD = 8 * 1024;
-/** What a listing reads of the index for its titles; Claude loads 25 KB of it. */
+/** How much of the index a listing reads for titles. Claude loads 25 KB. */
 const INDEX_MAX = 64 * 1024;
 /** How long after a write the folder is reported, so a burst is one change. */
 const SETTLE_MS = 300;
@@ -40,12 +40,12 @@ const SETTLE_MS = 300;
 /**
  * The folder Claude names a project's memory by: its repository's.
  *
- * ⚠️ Claude derives it from the git repository, so every subfolder and every
- * worktree of one repo shares a single memory folder; outside a repository it
- * is the folder itself. `--git-common-dir` is the repository's own `.git`
- * from a worktree too, where `--show-toplevel` would be the worktree's.
- *
- * ⚠️ `execFile`, not `exec`, and read-only: `rev-parse` changes nothing.
+ * NOTE: Claude derives it from the git repository, so every subfolder and
+ * every worktree of one repo shares one memory folder. Outside a repository
+ * it is the folder itself. `--git-common-dir` gives the repository's own
+ * `.git` from a worktree too, where `--show-toplevel` would give the
+ * worktree's. `execFile`, not `exec`, and read-only: `rev-parse` changes
+ * nothing.
  */
 export async function memoryRoot(folder: string): Promise<string> {
   try {
@@ -56,7 +56,8 @@ export async function memoryRoot(folder: string): Promise<string> {
       maxBuffer: 64 * 1024,
     });
     const common = resolve(folder, stdout.trim());
-    // A bare repository or a submodule's: no working tree to name it by.
+    // A bare repository's or a submodule's git folder is not named `.git`:
+    // there is no working tree to name the memory by.
     if (stdout.trim() && basename(common) === ".git") return dirname(common);
   } catch {
     // Not a repository, or no git on PATH.
@@ -92,12 +93,12 @@ function unquote(value: string): string {
 }
 
 /**
- * The YAML a memory's frontmatter holds, as far as Claude writes it:
- * `key: value`, and one level under a `parent:` read as `parent.child`.
+ * The YAML a memory's frontmatter holds, as far as Claude writes it.
  *
- * ⚠️ Not a YAML parser, on purpose: anything else — a list, a block scalar,
- * deeper nesting — is skipped rather than guessed at. The Raw view still
- * shows it as written.
+ * `key: value`, and one level under a `parent:` read as `parent.child`. This
+ * is not a YAML parser: anything else (a list, a block scalar, deeper
+ * nesting) is skipped, not guessed at. The Raw view still shows it as
+ * written.
  */
 function parseFrontmatter(source: string): Record<string, string> {
   const meta: Record<string, string> = {};
@@ -115,7 +116,7 @@ function parseFrontmatter(source: string): Record<string, string> {
   return meta;
 }
 
-/** A file's frontmatter — `---` … `---` at its very top — and the rest. */
+/** A file's frontmatter (`---` … `---` at its very top), and the rest. */
 function splitFrontmatter(text: string): {
   meta: Record<string, string>;
   body: string;
@@ -154,9 +155,10 @@ function entryOf(
 }
 
 /**
- * The title `MEMORY.md` gives each memory it links to: `[Title](file.md)`,
- * the first link to a file winning. A link to anything that is not a memory
- * in the same folder names nothing.
+ * The title `MEMORY.md` gives each memory it links to.
+ *
+ * A link reads `[Title](file.md)`, and the first link to a file wins. A link
+ * to anything that is not a memory in the same folder names nothing.
  */
 function indexTitles(index: string): Map<string, string> {
   const titles = new Map<string, string>();
@@ -170,10 +172,12 @@ function indexTitles(index: string): Map<string, string> {
 }
 
 /**
- * Where `file` in `dir` really is — or a refusal.
+ * Where `file` in `dir` really is.
  *
- * ⚠️ Its REAL path must be directly inside the folder's real path: a link
+ * NOTE: Its real path must be directly inside the folder's real path. A link
  * that leads out of it, or into a folder below it, is refused.
+ *
+ * @throws When `file` is not a memory file name, or is not directly inside.
  */
 async function inside(dir: string, file: string): Promise<string> {
   if (!isMemoryFile(file)) throw new Error("That is not a memory file.");
@@ -196,11 +200,12 @@ async function inside(dir: string, file: string): Promise<string> {
 }
 
 /**
- * Every memory in `dir`, by what its frontmatter says it is — or null when
- * Claude has not made the folder.
+ * Every memory in `dir`, by what its frontmatter says it is.
  *
- * ⚠️ Only `.md` files directly in it: Claude's memory is flat, and nothing
- * else in the folder is one.
+ * Only `.md` files directly in it: Claude's memory is flat, and nothing else
+ * in the folder is a memory.
+ *
+ * @returns Null when Claude has not made the folder.
  */
 export async function listMemory(
   dir: string,
@@ -229,8 +234,8 @@ export async function listMemory(
     }),
   );
   const entries = read.filter((entry): entry is MemoryEntry => entry !== null);
-  // ⚠️ Read as the index ITSELF names them: a memory's `name` is often its
-  // slug, and the index is where Claude wrote the words a person reads.
+  // Titled as the index names them: a memory's `name` is often its slug, and
+  // the index is where Claude wrote the words a person reads.
   const index = entries.find((entry) => entry.file === MEMORY_INDEX);
   const titles = index
     ? indexTitles(
@@ -248,7 +253,11 @@ export async function listMemory(
   };
 }
 
-/** Memory `file` in `dir`, for the viewer: at most `MEMORY_READ_MAX` of it. */
+/**
+ * Memory `file` in `dir` for the viewer, at most `MEMORY_READ_MAX` of it.
+ *
+ * @throws When the file is not a memory directly in `dir`, or not a file.
+ */
 export async function readMemory(
   dir: string,
   file: string,
@@ -268,12 +277,14 @@ export async function readMemory(
 }
 
 /**
- * Call `onChange` when anything in `dir` is written (FE-36/D11), a burst of
- * writes once. Returns the stop.
+ * Call `onChange` when anything in `dir` is written (FE-36/D11).
  *
- * ⚠️ A folder Claude has not made yet is waited for in its parent — the
- * project's conversations folder — and watched from the moment it appears.
- * With no parent either, nothing is watched: the next listing starts again.
+ * A burst of writes calls it once. A folder Claude has not made yet is waited
+ * for in its parent, the project's conversations folder, and watched from the
+ * moment it appears. With no parent either, nothing is watched, and the next
+ * listing starts again.
+ *
+ * @returns A function that stops the watch.
  */
 export function watchMemory(dir: string, onChange: () => void): () => void {
   let stopped = false;
@@ -293,7 +304,8 @@ export function watchMemory(dir: string, onChange: () => void): () => void {
   const follow = (): boolean => {
     try {
       watcher = watch(dir, changed);
-      // Removed under the watch: say so, and the next listing starts again.
+      // The folder was removed under the watch: report a change, and the
+      // next listing starts again.
       watcher.on("error", () => {
         close();
         changed();

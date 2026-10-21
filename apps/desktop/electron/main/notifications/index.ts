@@ -1,7 +1,6 @@
-// OS notifications (FE-70): every one goes through `notify`, which checks
-// Settings → Notifications, skips what a focused window already shows
-// (FE-70/D2a), and on a click brings the window back at the notification's
-// target (FE-70/D5).
+// OS notifications. Every one goes through `notify`, which checks Settings →
+// Notifications, skips what a focused window already shows (FE-70/D2a), and
+// on a click brings the window back at the notification's target (FE-70/D5).
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app, BrowserWindow, Notification } from "electron";
@@ -43,7 +42,7 @@ function persist(value: NotificationSettings): Promise<void> {
       await rename(temp, file);
     })
     .catch(() => {
-      // The memory copy still answers this run.
+      // A failed write is dropped: the copy in memory still answers this run.
     });
   return writing;
 }
@@ -66,7 +65,7 @@ function targetPath(target: NotificationTarget): string {
     : `/w/${slug}/pulls/${target.number}`;
 }
 
-// Keep delivered notifications alive so their click listeners survive GC.
+/** Delivered notifications, kept alive so their click listeners survive GC. */
 const active = new Set<Notification>();
 
 let showWindow: () => BrowserWindow | null = () => null;
@@ -84,6 +83,10 @@ interface NotifyOptions {
   onScreen?: string[];
 }
 
+/**
+ * Show a notification, unless its kind is off or a focused window already
+ * shows what it is about.
+ */
 export async function notify(options: NotifyOptions): Promise<void> {
   if (!Notification.isSupported()) return;
   if (!(await notificationsOn(options.kind))) return;
@@ -98,8 +101,12 @@ export async function notify(options: NotifyOptions): Promise<void> {
 }
 
 /**
- * Put one on screen. A click brings the window back, and at `target` when
- * there is one.
+ * Put one notification on screen.
+ *
+ * A click brings the window back, at `target` when there is one.
+ *
+ * @returns False when it could not be created or shown. A refusal macOS
+ *   reports later, through `failed`, still returns true.
  */
 function deliver(
   title: string,
@@ -114,7 +121,7 @@ function deliver(
       silent: false,
     });
     active.add(notification);
-    // OSes do not always emit close; bound retained native objects.
+    // An OS does not always emit `close`, so cap the native objects kept.
     if (active.size > 64) {
       const oldest = active.values().next().value;
       if (oldest) {
@@ -127,7 +134,7 @@ function deliver(
     notification.once("failed", (_event, error) => {
       release();
       // macOS refuses an app without a valid signature, or one the user has
-      // switched off, here — never at `show()`.
+      // switched off, here, never at `show()`.
       console.error("Notification failed:", error);
     });
     notification.once("click", () => {
@@ -139,14 +146,17 @@ function deliver(
     notification.show();
     return true;
   } catch {
-    // An unsupported/denied native notification must not break its caller.
+    // An unsupported or denied native notification must not break its caller.
     return false;
   }
 }
 
 /**
- * `show` brings the app's window forward — making one if none is open — and
- * answers with it, for a click to navigate.
+ * Register the notification channels.
+ *
+ * @param show Brings the app's window forward and answers with it, for a
+ *   click to navigate. It makes a window if none is open, and then answers
+ *   null.
  */
 export function registerNotifications(
   devUrl: string | undefined,
@@ -178,8 +188,8 @@ export function registerNotifications(
     },
   );
 
-  // ⚠️ Past the settings and the focus check on purpose: it answers "can
-  // this Mac show Lanework's notifications at all", whatever the rows say.
+  // Skips the settings and the focus check: it answers "can this Mac show
+  // Lanework's notifications at all", whatever the rows say.
   handle(notificationChannels.test, devUrl, (args): boolean => {
     if (args.length) throw new Error("This operation takes no arguments");
     if (!Notification.isSupported()) return false;

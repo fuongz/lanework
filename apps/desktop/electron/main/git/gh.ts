@@ -1,14 +1,11 @@
+// Running the GitHub CLI from the main process.
+//
+// `gh` owns the GitHub login and makes every request. This app never reads
+// its token: it runs subcommands and reads what they print.
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { commandPath } from "../harness/rules";
 import { runInLoginShell } from "../harness/shell";
-
-/**
- * Running the GitHub CLI from the main process.
- *
- * `gh` owns the GitHub login and makes every request. This app never reads
- * its token: it runs subcommands and reads what they print.
- */
 
 /** What went wrong, in the terms a caller branches on. */
 export type GitHubErrorKind =
@@ -32,23 +29,29 @@ export class GitHubError extends Error {
   }
 }
 
+/** How one `gh` command runs. */
 export interface GhOptions {
   /** Where to run. Only `gh repo view` without a repo argument needs it. */
   cwd?: string;
   /** Written to stdin, for `--body-file -`. */
   input?: string;
+  /** 30 seconds by default. */
   timeoutMs?: number;
+  /** The most stdout kept, in bytes; 16 MB by default. */
   maxBuffer?: number;
 }
 
+/** The `gh` binary to run, and the PATH to run it with. */
 interface GhCommand {
   file: string;
   /** The login shell's PATH, so `gh` can find `git` the way a terminal does. */
   path: string | null;
 }
 
+/** Where `gh` was found; null until the next call looks again. */
 let located: Promise<GhCommand> | null = null;
 
+/** Markers that fence each answer in the login shell's output. */
 const MARK_PATH = "__lanework_gh_path__";
 const MARK_BIN = "__lanework_gh_bin__";
 const MARK_END = "__lanework_gh_end__";
@@ -91,6 +94,7 @@ async function locate(): Promise<GhCommand> {
   return { file: found ?? "gh", path };
 }
 
+/** The `gh` to run, looked for once and then reused. */
 function command(): Promise<GhCommand> {
   located ??= locate().catch(() => ({ file: "gh", path: null }));
   return located;
@@ -136,7 +140,7 @@ function env(path: string | null): NodeJS.ProcessEnv {
 /**
  * Until when every `gh` command is refused, in epoch ms.
  *
- * NOTE: shared by every command on purpose. The pull-request screen and the
+ * NOTE: Shared by every command. The pull-request screen and the
  * new-PR watcher spend the same hourly budget, and a watcher that kept
  * polling after a rate limit would push the reset further out.
  */
@@ -148,6 +152,7 @@ const BACKOFF_MS = 60_000;
 /** The longest a rate limit may block, whatever the reset time says. */
 const MAX_BACKOFF_MS = 60 * 60_000;
 
+/** Whether `gh`'s stderr says a rate limit was hit. */
 function rateLimited(stderr: string): boolean {
   const text = stderr.toLowerCase();
   return (
@@ -157,6 +162,7 @@ function rateLimited(stderr: string): boolean {
   );
 }
 
+/** The sentence a blocked command fails with, in minutes left. */
 function blockedMessage(): string {
   const minutes = Math.max(1, Math.ceil((blockedUntil - Date.now()) / 60_000));
   return minutes === 1
@@ -165,10 +171,12 @@ function blockedMessage(): string {
 }
 
 /**
- * When the GraphQL budget refills, or null.
+ * When the GraphQL budget refills, in epoch ms.
  *
  * Run past the block, since it is what sets the block. The `rateLimit` query
  * costs no points, so it still answers when the budget is spent.
+ *
+ * @returns null when the budget is not spent or the reset cannot be read.
  */
 async function graphqlReset(cmd: GhCommand): Promise<number | null> {
   try {
@@ -209,7 +217,7 @@ function firstLine(stderr: string): string {
 }
 
 /**
- * Turn what `gh` printed into a `GitHubError`.
+ * Turn what `gh` printed into a {@link GitHubError}.
  *
  * NOTE: matched on English text. `gh` has no machine-readable error output,
  * so a reworded message lands in `failed` with its own text, never in a
@@ -217,7 +225,7 @@ function firstLine(stderr: string): string {
  */
 function classify(stderr: string): GitHubError {
   const text = stderr.toLowerCase();
-  // NOTE: checked first. Offline, `gh auth status` can still mention
+  // NOTE: Checked first. Offline, `gh auth status` can still mention
   // `gh auth login`, and reading that as signed out sends people to log in
   // again when the fix is their connection.
   if (
@@ -292,6 +300,12 @@ function classify(stderr: string): GitHubError {
   );
 }
 
+/**
+ * Run `gh` once, with no rate-limit block.
+ *
+ * Rejects with a {@link GitHubError} for a missing binary, a too-large
+ * answer or a timeout, and otherwise with an error carrying raw `stderr`.
+ */
 function spawnGh(
   cmd: GhCommand,
   args: string[],
@@ -353,9 +367,11 @@ function spawnGh(
  *
  * - `execFile`, never a shell: every argument stays one argument, whatever
  *   characters it holds.
- * - Throws `GitHubError` and nothing else.
- * - A rate limit blocks every later call for `BACKOFF_MS`, or until the
- *   GraphQL reset time when GitHub says it.
+ * - A rate limit blocks every later call for {@link BACKOFF_MS}. A
+ *   subcommand or GraphQL call reads the GraphQL reset time and blocks until
+ *   then, at most {@link MAX_BACKOFF_MS}.
+ *
+ * @throws {@link GitHubError} and nothing else.
  */
 export async function gh(
   args: string[],
@@ -386,7 +402,11 @@ export async function gh(
   }
 }
 
-/** `gh <args>` parsed as JSON. */
+/**
+ * Run `gh <args>` and parse its stdout as JSON.
+ *
+ * @throws {@link GitHubError} when `gh` fails or prints something else.
+ */
 export async function ghJson(
   args: string[],
   options: GhOptions = {},

@@ -24,10 +24,10 @@ import {
 } from "@lanework/protocol";
 import { type LocalBoardConfig, LocalStoreError } from "./types";
 
-/**
- * Pure shaping: input validation, and rows → `@lanework/protocol` shapes.
- * Nothing here touches SQL, so every rule can be read (and tested) alone.
- */
+// Pure shaping: input validation, and rows → `@lanework/protocol` shapes.
+// Nothing here touches SQL, so every rule can be read (and tested) alone.
+// Every `check*` and `normalize*` throws a `LocalStoreError` with code
+// `invalid` on input it refuses.
 
 function invalid(message: string): never {
   throw new LocalStoreError("invalid", message);
@@ -94,7 +94,13 @@ export function isClosedColumn(config: LocalBoardConfig, key: string): boolean {
   return role === "done" || role === "archive";
 }
 
-/** Lower-cased, hyphenated, de-duplicated, then held to the board's policy. */
+/**
+ * Normalize a card's tags.
+ *
+ * Lower-cased, hyphenated, de-duplicated, then held to the board's policy.
+ *
+ * @throws {@link LocalStoreError} `invalid` when they break the policy.
+ */
 export function normalizeTags(
   config: LocalBoardConfig,
   tags: unknown,
@@ -118,7 +124,12 @@ export function normalizeTags(
 
 // ── Streams ─────────────────────────────────────────────────────────────────
 
-/** `StreamInput[]` → stored `Stream[]`, under the BE-19 rules. */
+/**
+ * Validate `StreamInput[]` into stored `Stream[]`, under the BE-19 rules.
+ *
+ * @throws {@link LocalStoreError} `invalid` on a bad stream, a shared key or
+ *   owned path, an unknown dependency, or a dependency cycle.
+ */
 export function normalizeStreams(input: unknown): Stream[] {
   if (input === undefined || input === null) return [];
   if (!Array.isArray(input)) invalid("streams must be a list");
@@ -180,7 +191,11 @@ export function normalizeStreams(input: unknown): Stream[] {
   return streams;
 }
 
-/** Who runs when: every stream whose dependencies are done, wave by wave. */
+/**
+ * Who runs when: every stream whose dependencies are done, wave by wave.
+ *
+ * @throws {@link LocalStoreError} `invalid` when the dependencies form a cycle.
+ */
 export function streamWaves(streams: Stream[]): string[][] {
   const done = new Set<string>();
   const waves: string[][] = [];
@@ -205,7 +220,11 @@ function list(paths: string[]): string {
     : "- (none)";
 }
 
-/** The brief a lead hands each sub-agent verbatim. Null for a card without streams. */
+/**
+ * Build the brief a lead hands each sub-agent verbatim.
+ *
+ * @returns Null for a card without streams.
+ */
 function buildDispatch(
   card: { taskId: string | null; title: string },
   streams: Stream[],
@@ -262,12 +281,17 @@ function buildDispatch(
 export const CHECKLIST_TEXT_MAX = 2000;
 
 /**
- * `ChecklistItemInput[]` → stored `ChecklistItem[]`.
+ * Validate `ChecklistItemInput[]` into stored `ChecklistItem[]`.
  *
- * ⚠️ A sent key is kept; a missing one is minted per section (`D1`, `V1`) and
- * skips every key the list already claims — the board's own rule (see
- * `review-import`). `checked` absent keeps what `previous` says, which is NOT
- * the same as `false`.
+ * A sent key is kept. A missing one is minted per section (`D1`, `V1`) and
+ * skips every key the list already claims: the board's own rule (see
+ * `review-import`).
+ *
+ * NOTE: `checked` absent keeps what `previous` says, which is not the same as
+ * `false`.
+ *
+ * @throws {@link LocalStoreError} `invalid` on a bad item, a shared key, or a
+ *   stream the card does not have.
  */
 export function normalizeChecklist(
   input: unknown,
@@ -340,7 +364,11 @@ export function normalizeChecklist(
   return items;
 }
 
-/** Every verify item still points at a stream the card has. */
+/**
+ * Check that every verify item still points at a stream the card has.
+ *
+ * @throws {@link LocalStoreError} `invalid` when one does not.
+ */
 export function checkChecklistStreams(
   checklist: ChecklistItem[],
   streams: Stream[],
@@ -359,7 +387,15 @@ function clip(value: unknown, max: number): string | null {
   return text ? text.slice(0, max) : null;
 }
 
-/** Lenient about length, strict about shape and the 16 KiB total — like the cloud. */
+/**
+ * Validate a checkpoint and clip its fields.
+ *
+ * Lenient about length, strict about shape and the
+ * {@link CHECKPOINT_MAX_BYTES} total, like the cloud.
+ *
+ * @throws {@link LocalStoreError} `invalid` with no summary, or over the
+ *   total.
+ */
 export function normalizeCheckpoint(
   request: CheckpointRequest,
 ): CheckpointContent {
@@ -397,12 +433,17 @@ export function normalizeCheckpoint(
   return content;
 }
 
-/** Newest first, at most `CHECKPOINTS_KEPT`. */
+/** Keep the first {@link CHECKPOINTS_KEPT} of a newest-first list. */
 export function keepCheckpoints(list: Checkpoint[]): Checkpoint[] {
   return list.slice(0, CHECKPOINTS_KEPT);
 }
 
-/** The newest, with `nextStep` carried forward from an older one when it has none. */
+/**
+ * The newest checkpoint of a newest-first list.
+ *
+ * Its `nextStep` is carried forward from an older one when it has none, and
+ * `nextStepFrom` names that one.
+ */
 export function latestCheckpoint(list: Checkpoint[]): LatestCheckpoint | null {
   const newest = list[0];
   if (!newest) return null;

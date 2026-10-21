@@ -8,12 +8,12 @@ import type {
 } from "../../shared/terminal";
 
 /**
- * The agents running for each project, shown in the MAIN view (FE-26).
+ * The agents running for each project, shown in the main view.
  *
- * ⚠️ Separate from `useTerminal` on purpose (FE-26): the panel's tabs are
- * shells, these are Claude and Codex. Both live in the one pty host — an
- * agent is still a shell with a CLI typed into it — but they are listed,
- * chosen and limited apart, so opening one never moves the other.
+ * Separate from `useTerminal` (FE-26): the panel's tabs are shells, these are
+ * Claude and Codex. Both live in the one pty host, since an agent is still a
+ * shell with a CLI typed into it. But they are listed, chosen and limited
+ * apart, so opening one never moves the other.
  */
 
 const api = () => {
@@ -24,17 +24,23 @@ const api = () => {
 };
 
 /**
- * An agent that ENDED rather than failed: `/exit`, or ⌃C twice (FE-26).
+ * Whether an agent ended rather than failed: `/exit`, or ⌃C twice.
  *
- * ⚠️ These close the session outright — it is an agent, not a terminal, and
- * nobody asked to be left looking at a finished one. Any other code is a CLI
- * that could not start or crashed, and stays on screen to say why.
+ * These close the session outright: nobody asked to be left looking at a
+ * finished agent. Any other code is a CLI that could not start or crashed,
+ * and stays on screen to say why.
+ *
+ * @param code The CLI's exit code.
  */
 function endedCleanly(code: number): boolean {
   return code === 0 || code === 130;
 }
 
-/** A list read that started before a start or a stop must not land after it. */
+/**
+ * Request tickets, by workspace.
+ *
+ * A list read that started before a start or a stop must not land after it.
+ */
 const revision = new Map<string, number>();
 const bump = (workspace: string) =>
   revision.set(workspace, (revision.get(workspace) ?? 0) + 1);
@@ -46,17 +52,23 @@ interface AgentTerminalsState {
   error: string | null;
   refresh: (workspace: string) => Promise<void>;
   /**
-   * The agent resuming `conversation`, started if it is not running (FE-23/D6:
-   * a live one is reused, an exited one is a transcript and is not).
-   * Answers its terminal, or null when it could not start.
+   * The agent resuming `conversation`, started if it is not running.
+   *
+   * A live one is reused; an exited one is a transcript and is not
+   * (FE-23/D6).
+   *
+   * @returns Its terminal, or null when it could not start.
    */
   resume: (
     workspace: string,
     conversation: AgentSession,
   ) => Promise<TerminalSession | null>;
   /**
-   * A new conversation with `agent` (FE-26/D3) — briefed on `card` when one
-   * is given (FE-34), its first prompt written by the host.
+   * Start a new conversation with `agent` (FE-26/D3).
+   *
+   * @param card When given, the host briefs the agent on it in its first
+   * prompt.
+   * @returns Its terminal, or null when it could not start.
    */
   start: (
     workspace: string,

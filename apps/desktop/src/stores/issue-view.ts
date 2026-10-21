@@ -5,15 +5,14 @@ import type { IssueView } from "#/lib/issue-search";
 /**
  * The way each project's issues were last looked at: as a list or as lanes.
  *
- * ⚠️ Remembered, not just carried in the URL (FE-13/D5). The URL is still the
- * truth while you are on the page — `?view=board` is what a link or Back
- * restores — but the rail's "Issues" row has to pick SOMETHING when there is
- * no URL yet, and a person who works from the board would otherwise be sent
- * to the list every single time they came back to it.
+ * Remembered, not just carried in the URL (FE-13/D5). The URL is the truth
+ * while you are on the page (`?view=board` is what a link or Back restores).
+ * But the rail's "Issues" row must pick a view when there is no URL yet, or
+ * someone who works from the board lands on the list every time.
  *
- * ⚠️ Keyed by slug, the same key everything else about a project hangs off
- * (`shared/workspaces.ts`): one project read as a board and another as a list
- * is the normal case, not an edge.
+ * Keyed by slug, like everything else about a project
+ * (`shared/workspaces.ts`). One project as a board and another as a list is
+ * the normal case.
  */
 interface IssueViewState {
   bySlug: Record<string, IssueView>;

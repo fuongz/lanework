@@ -1,10 +1,10 @@
-// Harness updates (FE-61): the pure rules — what a `--version` line says,
-// how a CLI was installed, and which command updates it. No Electron, no
-// child processes, so a spec drives them directly.
+// Harness updates, the pure rules: what a `--version` line says, how a CLI was
+// installed, and which command updates it. No Electron and no child
+// processes, so a spec drives them directly.
 import { posix } from "node:path";
 import type { HarnessAgent, InstallMethod } from "../../../shared/harness";
 
-/** Where `latest` comes from for a CLI installed with npm or natively. */
+/** The npm package each CLI's latest version is read from (npm or native). */
 export const NPM_PACKAGES: Record<HarnessAgent, string> = {
   claude: "@anthropic-ai/claude-code",
   codex: "@openai/codex",
@@ -13,9 +13,12 @@ export const NPM_PACKAGES: Record<HarnessAgent, string> = {
 const VERSION = /\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.]+)?/;
 
 /**
- * The version in a CLI's `--version` output: `2.1.301 (Claude Code)` and
- * `codex-cli 0.163.0` both read as their dotted number. Null when the output
- * carries none.
+ * The version in a CLI's `--version` output.
+ *
+ * `2.1.301 (Claude Code)` and `codex-cli 0.163.0` both read as their dotted
+ * number.
+ *
+ * @returns Null when the output carries none.
  */
 export function parseVersion(output: string | null | undefined): string | null {
   if (!output) return null;
@@ -26,7 +29,11 @@ export function parseVersion(output: string | null | undefined): string | null {
   return null;
 }
 
-/** A version that came from outside (a registry, brew) and may be shown. */
+/**
+ * A version from outside (a registry, brew), checked so it may be shown.
+ *
+ * @returns Null unless the value starts with a version.
+ */
 export function cleanVersion(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 64) return null;
   const match = VERSION.exec(value.trim());
@@ -36,10 +43,11 @@ export function cleanVersion(value: unknown): string | null {
 /**
  * What `command -v` printed, as a file path.
  *
- * ⚠️ Claude's own installer has put `claude` in `.zshrc` as an ALIAS, and
+ * NOTE: Claude's own installer has put `claude` in `.zshrc` as an alias.
  * `command -v` then prints the alias, not a path: `alias claude=/Users/…`
- * (zsh, bash). Its first word is the binary. A function or a builtin has no
- * file at all and reads as null.
+ * (zsh, bash). Its first word is the binary.
+ *
+ * @returns Null for a function or a builtin, which has no file.
  */
 export function commandPath(output: string, home: string): string | null {
   let value = output.trim();
@@ -65,13 +73,12 @@ const under = (path: string, dir: string) =>
   path.startsWith(dir.endsWith("/") ? dir : `${dir}/`);
 
 /**
- * How a CLI was installed, read from where its binary REALLY lives (links
- * resolved).
+ * How a CLI was installed, read from where its binary really lives.
  *
- * ⚠️ The resolved path, never the one on PATH: Homebrew links every binary
- * into `/opt/homebrew/bin` whether it came from a cask or a formula, and
- * Claude's native installer links `~/.local/bin/claude` to a versioned file.
- * Only where the link lands tells them apart.
+ * NOTE: The resolved path, never the one on PATH. Homebrew links every binary
+ * into `/opt/homebrew/bin`, from a cask or a formula alike, and Claude's
+ * native installer links `~/.local/bin/claude` to a versioned file. Only where
+ * the link lands tells them apart.
  */
 export function installMethodOf(
   agent: HarnessAgent,
@@ -79,9 +86,9 @@ export function installMethodOf(
   home: string,
 ): InstallMethod {
   if (!realPath) return "unknown";
-  // ⚠️ Before `/node_modules/`: the older "local" Claude install keeps its
-  // own node_modules under ~/.claude/local, and `claude update` — not
-  // `npm i -g` — is what updates it.
+  // NOTE: Before `/node_modules/`. The older "local" Claude install keeps its
+  // own `node_modules` under `~/.claude/local`, and `claude update` updates
+  // it, not `npm i -g`.
   if (
     agent === "claude" &&
     [".local/share/claude", ".local/bin", ".claude/local"].some((dir) =>
@@ -95,10 +102,10 @@ export function installMethodOf(
   return "unknown";
 }
 
-/** A name Homebrew could have given a cask or formula; nothing a shell reads. */
+/** A name Homebrew could give a cask or formula, and nothing a shell parses. */
 const BREW_NAME = /^[A-Za-z0-9][A-Za-z0-9@._+-]{0,99}$/;
 
-/** The cask or formula a Homebrew path belongs to: `…/Caskroom/codex/…` → `codex`. */
+/** The cask or formula a Homebrew path belongs to: `…/Caskroom/codex/…`. */
 export function brewNameOf(realPath: string | null): string | null {
   if (!realPath) return null;
   const match = /\/(?:Caskroom|Cellar)\/([^/]+)\//.exec(realPath);
@@ -107,11 +114,12 @@ export function brewNameOf(realPath: string | null): string | null {
 }
 
 /**
- * The command that updates a CLI, from how it was installed. Null when the
- * app cannot tell, and then there is no Update button.
+ * The command that updates a CLI, from how it was installed.
  *
- * ⚠️ Built here from fixed words and a validated brew name, never from
- * anything a renderer sent: this string is run in the user's shell.
+ * NOTE: Built here from fixed words and a validated brew name, never from
+ * anything the renderer sent: this string runs in the user's shell.
+ *
+ * @returns Null when the app cannot tell. Then there is no Update button.
  */
 export function updateCommandOf(
   agent: HarnessAgent,
@@ -139,9 +147,10 @@ export function updateCommandOf(
 /**
  * The newest version `brew outdated --json=v2 [--cask] <name>` reports.
  *
- * ⚠️ An EMPTY list is an answer, not a failure: brew lists only what is
+ * NOTE: An empty list is an answer, not a failure. brew lists only what is
  * outdated, so nothing listed means the installed version is the latest.
- * Output that is not that JSON reads as null (unknown).
+ *
+ * @returns Null (unknown) for output that is not that JSON.
  */
 export function parseBrewOutdated(
   output: string,
@@ -170,7 +179,7 @@ export function parseBrewOutdated(
   return cleanVersion(entry.current_version);
 }
 
-/** Terminal colours and cursor moves, which a CLI's error output is full of. */
+/** Terminal colours and cursor moves, which fill a CLI's error output. */
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);
 const ANSI = new RegExp(
@@ -179,8 +188,10 @@ const ANSI = new RegExp(
 );
 
 /**
- * Why an update failed, in a few lines: the end of its stderr — where a CLI
- * puts the reason — or of stdout when stderr is empty, or the exit status.
+ * Why an update failed, in a few lines.
+ *
+ * The end of its stderr, where a CLI puts the reason. Else the end of stdout,
+ * else the exit status.
  */
 export function failureMessage(
   stderr: string,
@@ -212,12 +223,12 @@ export function shQuote(value: string): string {
 }
 
 /**
- * The `.command` file Terminal runs for "Open in Terminal": the update
- * command, then a shell so the window stays open on its output.
+ * The `.command` file Terminal runs for "Open in Terminal".
  *
- * ⚠️ zsh or bash as the interpreter, login AND interactive, like the probe:
- * the profile is what puts `brew`, `npm` and an aliased `claude` on PATH. A
- * fish or nu user still gets zsh here — this script is POSIX syntax.
+ * It runs the update command, then a shell, so the window stays open on its
+ * output. The interpreter is zsh or bash, login and interactive, like the
+ * probe: the profile puts `brew`, `npm` and an aliased `claude` on PATH. A
+ * fish or nu user still gets zsh here, because the script is POSIX syntax.
  */
 export function terminalScript(shellFile: string, command: string): string {
   const name = posix.basename(shellFile);

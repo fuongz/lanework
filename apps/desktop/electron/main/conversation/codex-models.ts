@@ -3,8 +3,10 @@
 // server. Only `visibility: "list"` ones, in Codex's priority order; an
 // older generation than the newest is drawn under the divider.
 //
-// ⚠️ Read-only, and nothing here imports Electron. Ids are checked against
-// `CODEX_MODEL_ID` before they may become `-m`'s value.
+// Read-only, and nothing here imports Electron.
+//
+// NOTE: Ids are checked against `CODEX_MODEL_ID` before they may become
+// `-m`'s value: the cache is a file anyone could write.
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -16,7 +18,7 @@ import {
 /** The most of the cache read: it carries every model's instructions. */
 const CACHE_MAX = 8 * 1024 * 1024;
 
-/** `gpt-6.1-sol` → 6; null when the id names no generation. */
+/** A model id's generation: `gpt-6.1-sol` → 6; null when it names none. */
 function generation(id: string): number | null {
   const major = /(?:^|-)(\d+)(?:\.\d+)?(?:-|$)/.exec(id)?.[1];
   return major ? Number(major) : null;
@@ -55,7 +57,12 @@ function modelsOf(value: unknown): AgentModel[] | null {
   });
 }
 
-/** One cache read per change of the file. */
+/**
+ * The Codex model list, read from the cache once per change of the file.
+ *
+ * Falls back to {@link CODEX_MODELS} when the cache is missing, too big or
+ * unreadable.
+ */
 export function createCodexModels(home: () => string) {
   let cached: { file: string; mtime: number; models: AgentModel[] } | null =
     null;

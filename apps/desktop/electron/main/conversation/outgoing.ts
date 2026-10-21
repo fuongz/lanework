@@ -12,7 +12,9 @@ import { isAgentSessionId } from "../../../shared/terminal";
 
 /** The longest prompt main passes on, in characters. */
 const PROMPT_MAX = 256 * 1024;
+/** The most attachments one message carries. */
 const ATTACHMENTS_MAX = 20;
+/** The MIME type of each image extension sent as an image block. */
 const IMAGE_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -20,8 +22,10 @@ const IMAGE_TYPES: Record<string, string> = {
   ".gif": "image/gif",
   ".webp": "image/webp",
 };
+/** The MIME types a pasted image may have. */
 const PASTE_TYPES = new Set(Object.values(IMAGE_TYPES));
 
+/** One block of a stream-json user message's content. */
 export type ContentBlock =
   | { type: "text"; text: string }
   | {
@@ -34,7 +38,12 @@ export function isMessageId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(value);
 }
 
-/** A send request off the wire, every field checked; throws on any other. */
+/**
+ * A send request off the wire, every field checked.
+ *
+ * @throws When any field is missing, invalid or too large, or there is
+ *   nothing to send.
+ */
 export function sendRequest(value: unknown): SendRequest {
   if (!value || typeof value !== "object")
     throw new Error("A request is required");
@@ -94,6 +103,11 @@ export function sendRequest(value: unknown): SendRequest {
   };
 }
 
+/**
+ * A file's bytes, when it is a file of at most `max` bytes.
+ *
+ * @returns null for anything else.
+ */
 async function readSmall(path: string, max: number): Promise<Buffer | null> {
   const info = await stat(path).catch(() => null);
   if (!info?.isFile() || info.size > max) return null;
@@ -113,9 +127,14 @@ function mention(path: string): string {
 }
 
 /**
- * The message's content: images as base64 blocks (a path that is an image,
- * read from disk, at most `PASTE_MAX`), every other file named as `@<path>`
- * after the text, which comes first.
+ * The message's content blocks.
+ *
+ * - The text comes first, with every file that is not an image named as
+ *   `@<path>` after it.
+ * - Images follow as base64 blocks: a pasted one, or a path that is an
+ *   image, read from disk, of at most `PASTE_MAX` bytes.
+ *
+ * @throws When a pasted image is too large or an attached path is gone.
  */
 export async function contentOf(
   text: string,

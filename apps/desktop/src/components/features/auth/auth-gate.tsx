@@ -10,7 +10,7 @@ import { lockState } from "../../../../shared/policy";
 /**
  * Renders the app only for a session allowed to use it.
  *
- * ⚠️ This is a UX boundary, NOT a security one. It decides what is DRAWN; the
+ * NOTE: this is a UX boundary, NOT a security one. It decides what is DRAWN; the
  * renderer is a web origin and anything that achieves script execution there
  * gets past it. What decides what can be DONE is `can()` inside the main
  * process — every feature that touches real data must ask there, not rely on
@@ -35,7 +35,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     hydrate();
   }, [hydrate]);
 
-  // FE-52: a `local` principal ("Skip for now") is an OPEN state, decided by
+  // A `local` principal ("Skip for now") is an OPEN state, decided by
   // `lockState` like every other — there is no second rule here for it.
   const lock = session ? lockState(session) : null;
   const open = ready && hydrated && lock?.locked === false;
@@ -53,7 +53,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (open && was !== undefined) void useBoard.getState().hydrate();
   }, [kind, open]);
 
-  // ⚠️ Reaching the app counts as having been onboarded, even for a machine
+  // NOTE: reaching the app counts as having been onboarded, even for a machine
   // that never walked the flow — a credential seeded from elsewhere, or an
   // install from before this screen existed. Without it, signing out would hand
   // a long-standing user "Welcome to Lanework" as if the app had never met them.
@@ -61,7 +61,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (open && !onboarded) completeOnboarding();
   }, [open, onboarded, completeOnboarding]);
 
-  // ⚠️ Waits on the PREFERENCES read too, not just the session. `onboarded`
+  // NOTE: this waits on the PREFERENCES read too, not just the session. `onboarded`
   // reads false until `localStorage` has been rehydrated, so deciding any
   // earlier flashes the welcome screen at machines that finished with it months
   // ago. Both reads are local and settle in the same beat.
@@ -72,7 +72,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   // Which of the two locked screens this is — the first-run flow or the bare
   // gate — is `Onboarding`'s to decide, and it decides once. Choosing here
-  // would mean re-choosing on every render of a flow that changes the very
-  // flag the choice reads.
+  // would mean re-choosing on every render of a flow that changes the flag
+  // the choice reads.
   return <Onboarding lock={lock} />;
 }

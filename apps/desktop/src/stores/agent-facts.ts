@@ -3,14 +3,19 @@ import type { AgentFacts, TerminalAgent } from "../../shared/terminal";
 import { agentKey } from "./agent-sessions";
 
 /**
- * Each conversation's numbers (FE-38), as main last read them: shared by the
- * agent view, which follows its own live, and the rail, which reads one only
- * when its row is hovered (FE-38/D5).
+ * Each conversation's numbers, as main last read them.
+ *
+ * Shared by the agent view, which follows its own live, and the rail, which
+ * reads one only when its row is hovered (FE-38/D5).
  */
 interface AgentFactsState {
   /** By `agent:id`, with when they were read (epoch ms). */
   byKey: Record<string, { facts: AgentFacts; at: number }>;
-  /** Read one conversation's again. A read that fails keeps the last one. */
+  /**
+   * Read one conversation's numbers again.
+   *
+   * A read that fails keeps the last one.
+   */
   read: (
     workspace: string,
     session: { agent: TerminalAgent; id: string },
@@ -18,9 +23,11 @@ interface AgentFactsState {
 }
 
 /**
- * ⚠️ One read in flight per conversation, and at most one queued behind it:
- * a turn writes many times a second, and a read that started first must not
- * land after a later one.
+ * The conversations with a read in flight.
+ *
+ * NOTE: One read in flight per conversation, and at most one queued behind
+ * it (`again`). A turn writes many times a second, and a read that started
+ * first must not land after a later one.
  */
 const reading = new Set<string>();
 const again = new Set<string>();

@@ -1,5 +1,5 @@
 // Which version of each agent CLI this machine runs, and where its binary
-// really lives (FE-61). Asked of the user's own shell, like FE-19's probe.
+// really lives. Asked of the user's own shell, like the terminal's probe.
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import type { HarnessAgent } from "../../../shared/harness";
@@ -7,12 +7,14 @@ import { commandPath, parseVersion } from "./rules";
 import { afterMarker, runInLoginShell, type ShellOptions } from "./shell";
 
 interface ProbeResult {
-  /** The binary's real path, links resolved; null when it is not installed. */
+  /** The binary's real path, links resolved. Null when it is not installed. */
   path: string | null;
   version: string | null;
   /**
-   * Whether the shell got to the end of the script. False when it timed out
-   * or never started: then "not installed" is a guess, not an answer.
+   * Whether the shell got to the end of the script.
+   *
+   * False when it timed out or never started. Then "not installed" is a
+   * guess, not an answer.
    */
   answered: boolean;
 }
@@ -31,17 +33,14 @@ const mark = (agent: HarnessAgent, part: string) =>
 /**
  * Ask the user's shell for one CLI: `command -v`, then `--version`.
  *
- * ⚠️ A marker before each answer and one after, never "the output": the
- * profile runs first and may print — or fail on — lines of its own. Each
- * marker is printed on a line of its own, so a profile that left its last
- * line unterminated cannot glue itself to an answer.
- *
- * ⚠️ One shell PER CLI, run side by side: a `--version` that hangs costs only
- * its own answer at the timeout, not the other CLI's.
- *
- * ⚠️ 15 s, not the terminal menu's 8: right after login an interactive
- * profile has been seen to take 10 s on its first run, and nobody is waiting
- * on this answer.
+ * - NOTE: A marker before each answer and one after, never "the output". The
+ *   profile runs first and may print, or fail on, lines of its own. Each
+ *   marker is on a line of its own, so a profile that left its last line
+ *   unterminated cannot glue itself to an answer.
+ * - One shell per CLI, run side by side: a `--version` that hangs costs only
+ *   its own answer at the timeout, not the other CLI's.
+ * - 15 s, not the terminal menu's 8. Right after login an interactive profile
+ *   has taken 10 s on its first run, and nobody is waiting on this answer.
  */
 export async function probeAgent(
   agent: HarnessAgent,
@@ -75,8 +74,8 @@ export async function probeAgent(
   // No version marker: `command -v` found nothing, so it is not installed.
   if (versionPart === null) return { path: null, version: null, answered };
   const found = commandPath(cut(cut(fromPath, atVersion), atEnd), homedir());
-  // ⚠️ Resolved here, with every link followed: the install method is read
-  // from where the binary lands, not from the PATH entry that links to it.
+  // Resolved here, with every link followed: the install method is read from
+  // where the binary lands, not from the PATH entry that links to it.
   const path = found ? await realpath(found).catch(() => found) : null;
   return { path, version: parseVersion(cut(versionPart, atEnd)), answered };
 }

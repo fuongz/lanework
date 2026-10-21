@@ -1,5 +1,5 @@
-// The text of an agent config file (FE-47): whether it still parses, and the
-// one-line edits behind the quick settings (D6). Shared so main checks a write
+// The text of an agent config file: whether it still parses, and the one-line
+// edits behind the quick settings (FE-47/D6). Shared so main checks a write
 // with the same rules the editor shows as you type.
 import { parse as parseToml, TomlError } from "smol-toml";
 import type { ConfigFormat } from "./agent-config";
@@ -7,8 +7,10 @@ import type { ConfigFormat } from "./agent-config";
 // ── Syntax ─────────────────────────────────────────────────────────────────
 
 /**
- * Why `text` would not load, or null when it would. Main checks it again
- * before every write; the editor checks it as you type (D4).
+ * Why `text` would not load, or null when it would.
+ *
+ * Main checks it again before every write; the editor checks it as you type
+ * (FE-47/D4).
  */
 export function syntaxError(format: ConfigFormat, text: string): string | null {
   if (format === "markdown") return null;
@@ -36,9 +38,9 @@ const firstLine = (message: string) => message.split("\n")[0] ?? message;
 
 // ── Quick settings (FE-47/D6) ──────────────────────────────────────────────
 //
-// ⚠️ Each one changes ONE line of the text in the editor and leaves every
-// other byte — comments, order, blank lines — as it was. The result goes
-// through the same Save as a hand edit.
+// NOTE: Each one changes ONE line of the text in the editor and leaves every
+// other byte as it was: comments, order, blank lines. The result goes through
+// the same Save as a hand edit.
 
 /** Codex flags worth a switch even before the file names them. */
 export const CODEX_KNOWN_FEATURES: {
@@ -58,7 +60,9 @@ export const CODEX_KNOWN_FEATURES: {
   },
 ];
 
+/** A TOML table header, `[name]` or `[[name]]`; group 1 is the name. */
 const TABLE = /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(#.*)?$/;
+/** A `key = value` line; the groups are the prefix, the value, the comment. */
 const keyLine = (key: string) =>
   new RegExp(`^(\\s*${escapeRegex(key)}\\s*=\\s*)([^#\\n]*?)(\\s*#.*)?$`);
 const escapeRegex = (value: string) =>
@@ -87,9 +91,11 @@ export function codexFeatures(text: string): Record<string, boolean> {
 }
 
 /**
- * `text` with `[features] key = on`: the line that sets it rewritten in
- * place, else a line added at the end of `[features]`, else the table added
- * at the end of the file.
+ * `text` with `[features] key = on`.
+ *
+ * The line that sets the key is rewritten in place. Without one, a line is
+ * added at the end of `[features]`; without that table, the table is added at
+ * the end of the file.
  */
 export function withCodexFeature(text: string, key: string, on: boolean) {
   const value = on ? "true" : "false";
@@ -136,6 +142,10 @@ export const CLAUDE_DEFAULT_MODES = [
   "bypassPermissions",
 ] as const;
 
+/**
+ * The `permissions.defaultMode` Claude's settings set, or null when they set
+ * none or do not parse.
+ */
 export function claudeDefaultMode(text: string): string | null {
   try {
     const settings = JSON.parse(text) as unknown;
@@ -150,10 +160,13 @@ export function claudeDefaultMode(text: string): string | null {
 }
 
 /**
- * `text` with `permissions.defaultMode` set to `mode` — or removed, for
- * null. The `"defaultMode": "…"` line is rewritten in place when there is
- * exactly one; otherwise the file is re-serialized with two-space indents,
- * the way Claude writes it. Null when `text` is not a JSON object.
+ * `text` with `permissions.defaultMode` set to `mode`, or removed for null.
+ *
+ * The `"defaultMode": "…"` line is rewritten in place when there is exactly
+ * one. Otherwise the file is re-serialized with two-space indents, the way
+ * Claude writes it.
+ *
+ * @returns Null when `text` is not a JSON object.
  */
 export function withClaudeDefaultMode(
   text: string,

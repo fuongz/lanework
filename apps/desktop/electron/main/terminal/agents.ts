@@ -6,9 +6,11 @@ import { homedir } from "node:os";
 import { TERMINAL_AGENTS, type TerminalAgent } from "../../../shared/terminal";
 import { defaultShell, type ShellChoice, shellEnv } from "./sessions";
 
+/** How a probe asks the user's shell. */
 interface AgentProbeOptions {
-  /** Pin the shell (tests); otherwise `defaultShell()`. */
+  /** Pin the shell (tests); otherwise {@link defaultShell}. */
   shell?: ShellChoice;
+  /** The environment the shell starts from; `process.env` by default. */
   env?: NodeJS.ProcessEnv;
   /** How long a shell that never answers is waited for. */
   timeoutMs?: number;
@@ -20,23 +22,24 @@ interface AgentProbeOptions {
 const found = (agent: TerminalAgent) => `__lanework_found_${agent}__`;
 
 /**
- * Ask the user's own shell which agent CLIs it can run.
+ * Make a probe that asks the user's own shell which agent CLIs it can run.
  *
- * ⚠️ The SHELL is asked, not this process's PATH. An app opened from the Dock
- * has launchd's four-directory PATH, while the tab runs a login shell with
- * the user's whole profile — and Claude's own installer puts `claude` there
- * as an ALIAS in `.zshrc`, which no PATH lookup finds. So it is the tab's
- * shell, login AND interactive, running `command -v`: whatever it finds, a
- * tab can run.
+ * NOTE: The SHELL is asked, not this process's PATH. An app opened from the
+ * Dock has launchd's four-directory PATH, while the tab runs a login shell
+ * with the user's whole profile, and Claude's own installer puts `claude`
+ * there as an ALIAS in `.zshrc`, which no PATH lookup finds. So the tab's
+ * shell, login AND interactive, runs `command -v`: whatever it finds, a tab
+ * can run.
  *
- * ⚠️ A marker per CLI rather than the exit status or "any output": the
- * profile runs first, and a profile is free to print — or to fail on — lines
- * of its own. Its stdin is /dev/null, so a prompt in it reads nothing and
+ * A marker per CLI is used rather than the exit status or "any output": the
+ * profile runs first, and a profile is free to print, or to fail on, lines of
+ * its own. Its stdin is `/dev/null`, so a prompt in it reads nothing and
  * moves on instead of holding the probe until it times out.
  *
- * ⚠️ Cached, and asked again only after `ttlMs`: an interactive profile can
- * take a second to load, and the menu is opened far more often than a CLI is
- * installed. A probe already running is shared, not started twice.
+ * The answer is cached, and asked again only after `ttlMs`: an interactive
+ * profile can take a second to load, and the menu is opened far more often
+ * than a CLI is installed. A probe already running is shared, not started
+ * twice.
  */
 export function createAgentProbe(options: AgentProbeOptions = {}) {
   const ttlMs = options.ttlMs ?? 30_000;
@@ -92,20 +95,33 @@ export function createAgentProbe(options: AgentProbeOptions = {}) {
   };
 }
 
+/** What `claude auth status --json` says, cut to public labels. */
 interface ClaudeAuth {
+  /** The subscription, lowercased, from a fixed list. */
   plan: string | null;
+  /** How the CLI signs in, from a fixed list. */
   authMode: string | null;
   loggedIn: boolean;
+  /**
+   * A hash of the account's ids, to notice a switch between two accounts on
+   * the same plan.
+   */
   identity: string | null;
   /**
-   * The signed-in email and organization, for Settings › Harness only
-   * (`harness/accounts.ts`). ⚠️ Never put in `ClaudeUsage`, which the footer
-   * reads: the usage path copies `plan` and `authMode` by name.
+   * The signed-in email, for Settings › Harness only (`harness/accounts.ts`).
+   *
+   * NOTE: Never put in `ClaudeUsage`, which the footer reads: the usage path
+   * copies `plan` and `authMode` by name.
    */
   email: string | null;
+  /** The signed-in organization; the same rule as `email`. */
   org: string | null;
 }
-/** Only these public account labels escape the CLI JSON. */
+/**
+ * The public account labels of the CLI's JSON.
+ *
+ * Only these escape it; credential fields are never read.
+ */
 export function claudeAuthOf(value: unknown): ClaudeAuth {
   const empty = {
     plan: null,
@@ -139,8 +155,8 @@ export function claudeAuthOf(value: unknown): ClaudeAuth {
     typeof v.authMethod === "string" && modes.includes(v.authMethod)
       ? v.authMethod
       : null;
-  // An in-memory fingerprint detects same-plan account switches; never sent
-  // over IPC or stored. Credential fields are deliberately never inspected.
+  // An in-memory fingerprint detects same-plan account switches; it is never
+  // sent over IPC or stored. Credential fields are never inspected.
   const identifiers = [v.accountUuid, v.orgUuid, v.email].filter(
     (value) => typeof value === "string",
   );
@@ -161,6 +177,13 @@ export function claudeAuthOf(value: unknown): ClaudeAuth {
   };
 }
 
+/**
+ * Make a probe that runs `claude auth status --json` in the user's shell.
+ *
+ * Cached for `ttlMs` (a minute by default); a probe already running is
+ * shared. The output is cut at 64 KB, and a shell that never answers is
+ * killed with its whole process group.
+ */
 export function createClaudeAuthProbe(options: AgentProbeOptions = {}) {
   let cached: { at: number; auth: ClaudeAuth } | null = null;
   let running: Promise<ClaudeAuth> | null = null;
@@ -194,7 +217,7 @@ export function createClaudeAuthProbe(options: AgentProbeOptions = {}) {
             process.kill(-child.pid, "SIGKILL");
           else child.kill("SIGKILL");
         } catch {
-          /* Already exited. */
+          // Already exited.
         }
       };
       const settle = () => {

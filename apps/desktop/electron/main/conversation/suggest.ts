@@ -6,10 +6,15 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import type { Suggestion } from "../../../shared/conversation";
 
+/** The most suggestions one query returns. */
 const LIMIT = 50;
+/** The most files taken from git's list. */
 const FILES_MAX = 50_000;
+/** The most files a walk collects, when the folder is not a git repo. */
 const WALK_MAX = 20_000;
+/** How long a folder's file list is reused. */
 const CACHE_MS = 10_000;
+/** The longest description shown, in characters. */
 const DESCRIPTION_MAX = 160;
 
 /** Built-in commands that work in a headless session. */
@@ -49,6 +54,7 @@ function fuzzyScore(text: string, query: string): number | null {
   return 300 - gaps - hay.length / 10;
 }
 
+/** The best {@link LIMIT} matches of `query`, best first. */
 function rank(
   items: Suggestion[],
   query: string,
@@ -65,7 +71,10 @@ function rank(
     .map((entry) => entry.item);
 }
 
-/** A markdown file's frontmatter `description`, or its first line of text. */
+/**
+ * A markdown file's frontmatter `name`, and its `description` or else its
+ * first line of text.
+ */
 async function describe(
   file: string,
 ): Promise<{ name: string | null; description: string | null }> {
@@ -90,7 +99,11 @@ async function describe(
   };
 }
 
-/** `<dir>/**.md` as `/name` (a subfolder is `/folder:name`, as the CLI names it). */
+/**
+ * Every `.md` under `dir` as `/name`.
+ *
+ * A file in a subfolder is `/folder:name`, as the CLI names it.
+ */
 async function commandsIn(dir: string): Promise<Suggestion[]> {
   const out: Suggestion[] = [];
   const walk = async (at: string, prefix: string, depth: number) => {
@@ -125,6 +138,13 @@ async function skillsIn(dir: string): Promise<Suggestion[]> {
   return out;
 }
 
+/**
+ * The slash commands and skills that match `query`.
+ *
+ * The project's come first, then the user's, then the built-in ones.
+ *
+ * @param folder The workspace's folder; null leaves out the project's own.
+ */
 export async function suggestCommands(
   home: string,
   folder: string | null,
@@ -148,6 +168,11 @@ export async function suggestCommands(
   return rank(all, clean, (item) => item.value.slice(1));
 }
 
+/**
+ * The folder's tracked and untracked, non-ignored files, as git lists them.
+ *
+ * @returns null when git cannot list them: not a repo, or git failed.
+ */
 function gitFiles(folder: string): Promise<string[] | null> {
   return new Promise((resolve) => {
     execFile(
@@ -162,6 +187,10 @@ function gitFiles(folder: string): Promise<string[] | null> {
   });
 }
 
+/**
+ * The folder's files from a bounded walk, skipping build and dependency
+ * folders.
+ */
 async function walkFiles(folder: string): Promise<string[]> {
   const out: string[] = [];
   const skip = new Set([
@@ -187,9 +216,14 @@ async function walkFiles(folder: string): Promise<string[]> {
   return out;
 }
 
+/** The last file lists, by folder; at most 16 are kept. */
 const fileCache = new Map<string, { at: number; files: Promise<string[]> }>();
 
-/** The folder's files, relative to it — git's list, else a walk; cached. */
+/**
+ * The folder's files, relative to it.
+ *
+ * Git's list, else a walk; reused for {@link CACHE_MS}.
+ */
 export function workspaceFiles(folder: string): Promise<string[]> {
   const cached = fileCache.get(folder);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.files;
@@ -200,6 +234,7 @@ export function workspaceFiles(folder: string): Promise<string[]> {
   return files;
 }
 
+/** The workspace's files that match `query`, as `@path`. */
 export async function suggestFiles(
   folder: string,
   query: string,

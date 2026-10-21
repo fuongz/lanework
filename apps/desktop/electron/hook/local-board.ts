@@ -1,17 +1,17 @@
 // The checkpoint hook's offline path (FE-52/D9): a repo whose board lives in
 // the local SQLite file, not in the cloud, gets its checkpoint written there.
 //
-// ⚠️ There is no global "local mode" switch. The repo decides: its origin
-// remote maps to exactly one live local workspace that has not been moved to
-// the cloud (`cloudId` null) → local. Anything else — no file, no such board,
-// a board already on the cloud — is the cloud path, untouched.
-//
-// ⚠️ Never creates the file. A machine that never used the local board has no
-// `~/.lanew/data.sqlite`, and a hook run must not leave one behind.
-//
-// ⚠️ `node:sqlite` needs Node 22.5+. The plugin runs on the user's `node`
-// (18+), where it may be missing: opening then throws, the caller logs it and
-// falls back to the cloud path. Under the app it is always there (Node 24).
+// NOTE:
+// - There is no global "local mode" switch. The repo decides: its origin
+//   remote maps to exactly one live local workspace that has not been moved
+//   to the cloud (`cloudId` null) → local. Anything else (no file, no such
+//   board, a board already on the cloud) takes the cloud path, untouched.
+// - This never creates the file. A machine that never used the local board
+//   has no `~/.lanew/data.sqlite`, and a hook run must not leave one behind.
+// - `node:sqlite` needs Node 22.5+. The plugin runs on the user's `node`
+//   (18+), where it may be missing: opening then throws, and the caller logs
+//   it and falls back to the cloud path. Under the app it is always there
+//   (Node 24).
 import { existsSync } from "node:fs";
 import type { CheckpointRequest } from "@lanework/protocol";
 import {
@@ -25,7 +25,12 @@ export interface LocalBoard {
   workspaceId: string;
 }
 
-/** The local board `remote` belongs to, opened — or null. Close `store` when done. */
+/**
+ * Open the local board `remote` belongs to.
+ *
+ * @returns The opened board, or null when the repo takes the cloud path.
+ *   Close its `store` when done.
+ */
 export function localBoardFor(
   remote: string,
   path: string = localStorePath(),
@@ -48,7 +53,12 @@ export function localBoardFor(
   }
 }
 
-/** Writes the checkpoint on the card `taskId` names; throws `LocalStoreError` when refused. */
+/**
+ * Write the checkpoint on the card `taskId` names.
+ *
+ * @returns The new checkpoint's id.
+ * @throws `LocalStoreError` when the store refuses it.
+ */
 export function writeLocalCheckpoint(
   board: LocalBoard,
   taskId: string,

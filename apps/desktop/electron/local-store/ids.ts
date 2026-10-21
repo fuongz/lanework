@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
 
 /**
- * A UUIDv7 (RFC 9562): 48 bits of Unix milliseconds, then randomness. Sorts by
- * creation time, so a row's id doubles as a stable tiebreak.
+ * Mint a UUIDv7 (RFC 9562).
+ *
+ * 48 bits of Unix milliseconds, then randomness. It sorts by creation time,
+ * so a row's id doubles as a stable tiebreak.
  */
 export function uuidv7(now: number = Date.now()): string {
   const bytes = randomBytes(16);
@@ -24,9 +26,11 @@ export function isUuid(value: string): boolean {
 }
 
 /**
- * Lane order as fixed-width decimal strings, so `ORDER BY sort_key` is numeric
- * order. A card goes between two neighbours at their midpoint; a lane whose gap
- * has run out is renumbered by the caller (`RANK_STEP` apart).
+ * The width of a lane rank, a fixed-width decimal string.
+ *
+ * Fixed width makes `ORDER BY sort_key` numeric order. A card goes between
+ * two neighbours at their midpoint. A lane whose gap has run out is
+ * renumbered by the caller, {@link RANK_STEP} apart.
  */
 const RANK_WIDTH = 16;
 export const RANK_STEP = 1_000_000;
@@ -53,10 +57,13 @@ export function slugify(name: string): string {
 }
 
 /**
- * A git remote as `host/owner/name` — the same normal form the cloud's
- * `BoardSummary.repo` uses, so `git remote get-url origin` in any spelling
- * (https, ssh, scp-like, with or without `.git`) finds the same board.
- * Null when the value is not a remote this can read.
+ * Normalize a git remote to `host/owner/name`.
+ *
+ * It is the same normal form the cloud's `BoardSummary.repo` uses, so
+ * `git remote get-url origin` in any spelling (https, ssh, scp-like, with or
+ * without `.git`) finds the same board.
+ *
+ * @returns Null when the value is not a remote this can read.
  */
 export function normalizeRepo(remote: string): string | null {
   const value = remote.trim();
@@ -87,7 +94,11 @@ export function normalizeRepo(remote: string): string | null {
   return [host.toLowerCase(), ...parts].join("/").toLowerCase();
 }
 
-/** `{prefix}-{seq}` with `pad` → `FE-07`. The cloud's format, character for character. */
+/**
+ * Format a task id: `{prefix}-{seq}` with `pad` → `FE-07`.
+ *
+ * The cloud's format, character for character.
+ */
 export function formatTaskId(
   category: { prefix: string; format: string; pad: number },
   seq: number,

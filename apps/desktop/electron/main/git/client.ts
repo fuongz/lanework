@@ -1,3 +1,10 @@
+// Pull requests through `gh pr …`, from the main process only.
+//
+// - A subcommand wherever `gh` has one. `gh api` is used only for what no
+//   subcommand reads: one commit's diff and one file at one commit.
+// - Every argument here is validated before it is built: a repo is a parsed
+//   `RepoRef`, a number is an integer, a sha is hex. Free text (a review, a
+//   comment) goes through stdin, never argv.
 import {
   type CheckState,
   type CommitDiff,
@@ -29,34 +36,29 @@ import { GitHubError, gh, ghJson } from "./gh";
 
 export { GitHubError } from "./gh";
 
-/**
- * Pull requests through `gh pr …`, from the main process only.
- *
- * - A subcommand wherever `gh` has one. `gh api` is used only for what no
- *   subcommand reads: one commit's diff and one file at one commit.
- * - Every argument here is validated before it is built: a repo is a
- *   parsed `RepoRef`, a number is an integer, a sha is hex. Free text (a
- *   review, a comment) goes through stdin, never argv.
- */
-
+/** `value` when it is a non-empty string, else null. */
 function str(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
+/** `value` when it is a finite number, else 0. */
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+/** `value` when it is a plain object, else null. */
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
 
+/** `value` when it is an array, else an empty one. */
 function list(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+/** A repo as `gh --repo` takes it: `owner/name`. */
 function repoArg(ref: RepoRef): string {
   return formatRepoRef(ref);
 }
@@ -74,16 +76,19 @@ function avatarFor(login: string): string | null {
     : null;
 }
 
+/** An author from `gh`'s `{ login }`; null when it has no login. */
 function toAuthor(value: unknown): PullAuthor | null {
   const login = str(record(value)?.login);
   return login ? { login, avatarUrl: avatarFor(login) } : null;
 }
 
+/** A pull request's state; anything not merged or closed reads as open. */
 function toState(raw: string | null): PullState {
   const value = (raw ?? "").toLowerCase();
   return value === "merged" || value === "closed" ? value : "open";
 }
 
+/** Whether two logins or shas are both set and equal, ignoring case. */
 function same(a: string | null | undefined, b: string | null | undefined) {
   return Boolean(a && b && a.toLowerCase() === b.toLowerCase());
 }
@@ -107,6 +112,13 @@ const PULL_FIELDS = [
   "reviewRequests",
 ];
 
+/**
+ * One row of `gh pr list` or `gh pr view` as a pull request.
+ *
+ * @param viewer The signed-in login: what `authored` and `reviewRequested`
+ *   are measured against.
+ * @returns null for a row with no number.
+ */
 function toPull(
   node: Record<string, unknown>,
   viewer: string | null,
@@ -152,6 +164,12 @@ function stateArgs(status: PullStatus): string[] {
   return ["--state", status];
 }
 
+/**
+ * One page of a repo's pull requests with a status, most recently updated
+ * first.
+ *
+ * @throws {@link GitHubError} when `gh` fails.
+ */
 export async function fetchPulls(
   ref: RepoRef,
   status: PullStatus,
@@ -186,6 +204,7 @@ export async function fetchPulls(
   };
 }
 
+/** `gh`'s `changeType` words as the file statuses REST uses. */
 const CHANGE_TYPES: Record<string, PullFileStatus> = {
   ADDED: "added",
   DELETED: "removed",
@@ -224,7 +243,7 @@ const MAX_PATCH_CHARS = 1024 * 1024;
 /**
  * Split `gh pr diff` into one patch per file.
  *
- * NOTE: the patch keeps only the hunks, from the first `@@` on. That is the
+ * NOTE: The patch keeps only the hunks, from the first `@@` on. That is the
  * shape GitHub's REST `patch` field has, and what the diff viewer parses.
  * A binary file or a pure rename has no hunks, so its patch is null.
  */
@@ -280,6 +299,11 @@ interface RepoPolicy {
   methods: MergeMethod[];
 }
 
+/**
+ * Whether the viewer may merge in a repo, and by which methods.
+ *
+ * @returns null when `gh` could not read it.
+ */
 async function repoPolicy(ref: RepoRef): Promise<RepoPolicy | null> {
   const data = record(
     await ghJson([
@@ -306,12 +330,14 @@ async function repoPolicy(ref: RepoRef): Promise<RepoPolicy | null> {
   };
 }
 
+/** `gh`'s `mergeable`; null while GitHub has not worked it out. */
 function toMergeable(raw: string | null): boolean | null {
   if (raw === "MERGEABLE") return true;
   if (raw === "CONFLICTING") return false;
   return null;
 }
 
+/** What the merge button needs: mergeability, the viewer's rights, methods. */
 function mergeState(
   data: Record<string, unknown>,
   policy: RepoPolicy | null,
@@ -325,6 +351,7 @@ function mergeState(
   };
 }
 
+/** The fields `gh pr view` reads for a pull request's detail. */
 const DETAIL_FIELDS = [
   ...PULL_FIELDS,
   "body",
@@ -341,9 +368,11 @@ const DETAIL_FIELDS = [
  * Three reads at once: `gh pr view` for the facts, `gh pr diff` for the
  * hunks and `gh repo view` for merge permissions.
  *
- * NOTE: a failed diff costs the patches, not the screen. GitHub refuses
+ * NOTE: A failed diff costs the patches, not the screen. GitHub refuses
  * `pr diff` for very large pull requests, and the file list still renders
  * with every patch null.
+ *
+ * @throws {@link GitHubError} when the pull request cannot be read.
  */
 export async function fetchPull(
   ref: RepoRef,
@@ -417,6 +446,7 @@ export async function fetchPull(
 /** A menu-sized cap on the commit list. */
 const MAX_PULL_COMMITS = 250;
 
+/** Who wrote a commit: a login, else the name in the commit. */
 function commitAuthor(entry: Record<string, unknown>): string | null {
   // `authors[0]` is who wrote it. Its `login` is empty for an email GitHub
   // could not match, and the written name is then the only label there is.
@@ -429,6 +459,8 @@ function commitAuthor(entry: Record<string, unknown>): string | null {
  *
  * GitHub's order, not sorted here: sorting by date would move a rebased or
  * cherry-picked commit to a place its branch never had it.
+ *
+ * @throws {@link GitHubError} when `gh` fails.
  */
 export async function fetchPullCommits(
   ref: RepoRef,
@@ -461,6 +493,7 @@ export async function fetchPullCommits(
   return commits.slice(0, MAX_PULL_COMMITS);
 }
 
+/** The file statuses REST may answer with. */
 const FILE_STATUS = new Set<PullFileStatus>([
   "added",
   "removed",
@@ -496,6 +529,8 @@ function toRestFile(entry: unknown): PullFile | null {
  *
  * `gh api` because no `gh` subcommand reads one commit of a repo that may
  * not be cloned here.
+ *
+ * @throws {@link GitHubError} when `gh` fails or answers unreadable data.
  */
 export async function fetchCommitDiff(
   ref: RepoRef,
@@ -514,7 +549,7 @@ export async function fetchCommitDiff(
     throw new GitHubError("failed", "The GitHub CLI returned unreadable data.");
 
   const headSha = str(data.sha) ?? sha;
-  // NOTE: the FIRST parent. On a merge commit the second parent is the
+  // NOTE: The FIRST parent. On a merge commit the second parent is the
   // merged branch, and diffing against it would show that whole branch as
   // this commit's work.
   const baseSha = str(record(list(data.parents)[0])?.sha) ?? "";
@@ -534,7 +569,11 @@ export async function fetchCommitDiff(
   };
 }
 
-/** A file big enough that reading it whole is not worth it for context lines. */
+/**
+ * The largest file read whole, in bytes.
+ *
+ * A bigger file is not worth reading for context lines.
+ */
 const MAX_BLOB_BYTES = 2 * 1024 * 1024;
 
 /**
@@ -543,6 +582,9 @@ const MAX_BLOB_BYTES = 2 * 1024 * 1024;
  * Null for every reason a file cannot be read: absent on this side, too
  * large, refused. The caller is a diff already on screen, and each of those
  * only means the unchanged lines stay folded.
+ *
+ * @throws {@link GitHubError} for a failure that is not about the file, such
+ *   as being signed out.
  */
 export async function fetchFileText(
   ref: RepoRef,
@@ -569,6 +611,7 @@ export async function fetchFileText(
   }
 }
 
+/** The `gh pr review` flag for each verdict. */
 const REVIEW_FLAGS: Record<ReviewVerdict, string> = {
   APPROVE: "--approve",
   REQUEST_CHANGES: "--request-changes",
@@ -579,6 +622,9 @@ const REVIEW_FLAGS: Record<ReviewVerdict, string> = {
  * Approve, request changes, or comment on a pull request.
  *
  * PR-level only. Line comments need a position model this app does not have.
+ *
+ * @throws {@link GitHubError} when a comment or a change request is empty,
+ *   or `gh` fails.
  */
 export async function submitReview(
   ref: RepoRef,
@@ -614,6 +660,10 @@ export async function submitReview(
  * NOTE: `--match-head-commit` is what makes "merge what I reviewed" true.
  * Without it a push that landed after the screen loaded would be merged
  * unseen.
+ *
+ * @throws {@link GitHubError} when the pull request is not open, is a draft,
+ *   has a new head, conflicts, or the viewer or repo does not allow the
+ *   merge.
  */
 export async function mergePull(
   ref: RepoRef,
@@ -770,10 +820,12 @@ function toChecks(rollup: unknown): PullChecks {
  *
  * - `gh` has no timeline field, so the timeline is built from `comments`,
  *   `reviews` and `commits`, ordered by time. Label, rename and
- *   review-request events are not available, and the screen never drew
- *   them anyway.
+ *   review-request events are not available, and the screen does not draw
+ *   them.
  * - "Opened" is made from the pull request's own `createdAt`.
  * - A run of commits folds into one `N commits` entry.
+ *
+ * @throws {@link GitHubError} when the pull request cannot be read.
  */
 export async function fetchPullActivity(
   ref: RepoRef,
@@ -891,8 +943,10 @@ export async function fetchPullActivity(
 /**
  * Leave an ordinary comment on a pull request.
  *
- * NOT `submitReview`. A review carries a verdict that can block a merge;
- * a comment never does.
+ * Not {@link submitReview}: a review carries a verdict that can block a
+ * merge, and a comment never does.
+ *
+ * @throws {@link GitHubError} when the comment is empty or `gh` fails.
  */
 export async function addComment(
   ref: RepoRef,

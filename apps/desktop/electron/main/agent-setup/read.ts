@@ -1,16 +1,18 @@
-// A project's agent setup, read off the disk (FE-40): what Claude Code and
-// Codex would load in its folder — MCP servers, skills, commands, hooks,
-// permissions and plugins — gathered from every config file that says so.
+// A project's agent setup, read off the disk: what Claude Code and Codex
+// would load in its folder (MCP servers, skills, commands, hooks, permissions
+// and plugins), gathered from every config file that says so.
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a spec
+// Read-only, and nothing here imports Electron: main calls it, and a spec
 // drives it under plain Node against a fake home and repo.
 //
-// ⚠️ The secret line is drawn HERE. Config files are read whole, but only
-// the fields named below are ever copied into the result: an MCP server's
-// name, transport, and its command's file name or its URL's host; a hook's
-// event, matcher, type and command — through the checkpoint hook's
-// `redact()`. `env`, `headers`, `args`, tokens and URL query strings are
-// read past, never into, and Codex's `shell_environment_policy` not at all.
+// NOTE: The secret line is drawn HERE. Config files are read whole, but only
+// these fields are ever copied into the result:
+// - an MCP server's name, transport, and its command's file name or its URL's
+//   host;
+// - a hook's event, matcher, type and command, through the checkpoint hook's
+//   `redact()`.
+// `env`, `headers`, `args`, tokens and URL query strings are read past, never
+// into, and Codex's `shell_environment_policy` is not read at all.
 import { open, readdir, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
@@ -47,15 +49,20 @@ const strings = (value: unknown): string[] =>
 const text = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value : null;
 
-/** What a listing reads of each SKILL.md or command, for its name and line. */
+/** How much of a `SKILL.md` or command a listing reads, for name and line. */
 const HEAD = 8 * 1024;
 /** The most of one skill or command `open` reads (FE-40/D4). */
 const SETUP_FILE_MAX = 256 * 1024;
-/** `~/.claude.json` also holds Claude's caches: more room than other configs. */
+/**
+ * The size cap for `~/.claude.json`.
+ *
+ * It also holds Claude's caches, so it gets more room than other configs.
+ */
 const CLAUDE_JSON_MAX = 16 * 1024 * 1024;
 /** The most entries one folder of skills, commands or rules gives. */
 const DIR_MAX = 200;
 
+/** How scopes sort: the nearest to the folder first. */
 const SCOPE_ORDER: Record<SetupScope, number> = {
   local: 0,
   project: 1,
@@ -86,12 +93,13 @@ function hostOf(url: string): string | null {
 }
 
 /**
- * A command's program, by its file name — never its arguments.
+ * A command's program, by its file name, never its arguments.
  *
- * ⚠️ Up to the first argument that looks like a flag, a path or a quote,
+ * NOTE: Up to the first argument that looks like a flag, a path or a quote,
  * then its file name, then up to the first space: `/Applications/My
  * App.app/…/x` stays `x`, and `npx -y pkg`, `/usr/bin/node /srv/x.js` or
- * `node x.js --token=…` give `npx` and `node`.
+ * `node x.js --token=…` give `npx` and `node`. An argument can carry a
+ * secret, so none may leak through.
  */
 function programOf(command: string): string | null {
   const trimmed = command.trim();
@@ -116,7 +124,7 @@ function transportOf(
   return command ? "stdio" : url ? "http" : "unknown";
 }
 
-/** The only three things of an MCP server that leave main. */
+/** The only fields of an MCP server that leave main. */
 function serverFields(entry: {
   type?: string | null;
   command?: string | null;
@@ -143,7 +151,11 @@ const jsonServer = (entry: unknown) =>
 
 // ── Files ──────────────────────────────────────────────────────────────────
 
-/** The first `bytes` of a file, and whether there was more; null if none. */
+/**
+ * The first `bytes` of a file, and whether there was more.
+ *
+ * @returns null when the file is missing, not a file, or cannot be read.
+ */
 async function readHead(
   path: string,
   bytes: number,
@@ -186,11 +198,11 @@ function unquote(value: string): string {
 }
 
 /**
- * The top-level `key: value` pairs of a frontmatter, a block scalar
- * (`description: >`) or indented lines folded onto one line.
+ * The top-level `key: value` pairs of a frontmatter.
  *
- * ⚠️ Not a YAML parser: a name and a description are all a row shows, and
- * the file itself opens as written (D4).
+ * A block scalar (`description: >`) or indented lines are folded onto one
+ * line. Not a YAML parser: a name and a description are all a row shows, and
+ * the file itself opens as written (FE-40/D4).
  */
 export function frontmatterFields(frontmatter: string): Record<string, string> {
   const fields: Record<string, string> = {};
@@ -251,11 +263,11 @@ interface Read {
   folders: string[];
   where: AgentHome;
   setup: AgentSetup;
-  /** Every skill's and command's file, by the id handed out with it (D4). */
+  /** Every skill's and command's file, by the id handed out with it. */
   files: Map<string, string>;
 }
 
-/** Where a file is, as a person reads it: in the folder, under `~`, or as is. */
+/** A file's path as a person reads it: in the folder, under `~`, or as is. */
 function shown(read: Read, path: string): string {
   const { folder, where } = read;
   if (path === folder || path.startsWith(`${folder}${sep}`))
@@ -266,8 +278,10 @@ function shown(read: Read, path: string): string {
 }
 
 /**
- * A config file's text; null when it is not there. One that is there but
- * too big to be a config is reported, not silently skipped.
+ * A config file's text; null when it is not there.
+ *
+ * One that is there but too big to be a config is reported in `unreadable`,
+ * not silently skipped.
  */
 async function readConfig(
   read: Read,
@@ -294,7 +308,7 @@ async function readJson(
     const value: unknown = JSON.parse(raw);
     if (isObject(value)) return value;
   } catch {
-    // Reported below.
+    // Reported as unreadable below.
   }
   read.setup.unreadable.push(shown(read, path));
   return null;
@@ -362,7 +376,7 @@ function commandLine(source: string): string | null {
   return first ? shownText(first, 200) : null;
 }
 
-/** `*.md` in `dir` and one folder down — Claude's `commands/frontend/x.md`. */
+/** `*.md` in `dir` and one folder down (Claude's `commands/frontend/x.md`). */
 async function commandsIn(
   read: Read,
   dir: string,
@@ -422,8 +436,9 @@ function hookDetail(type: string, hook: Json): string | null {
 }
 
 /**
- * The hooks of one `{ <Event>: [{ matcher?, hooks: [...] }] }` map — the
- * shape Claude's settings, Codex's `hooks.json` and plugins all share.
+ * The hooks of one `{ <Event>: [{ matcher?, hooks: [...] }] }` map.
+ *
+ * Claude's settings, Codex's `hooks.json` and plugins all share that shape.
  */
 function hooksFrom(
   read: Read,
@@ -458,8 +473,8 @@ function hooksFrom(
           matcher: matcher ? shownText(matcher, 120) : null,
           type,
           detail: hookDetail(type, hook),
-          // D5: the app's hook names its script; the plugin's (INF-03) is
-          // the Stop hook of the lanework plugin.
+          // FE-40/D5: the app's hook names its script; the plugin's (INF-03)
+          // is the Stop hook of the lanework plugin.
           lanework:
             (command?.includes(HOOK_MARKER) ?? false) ||
             (base.plugin?.startsWith("lanework@") === true && event === "Stop"),
@@ -514,13 +529,18 @@ function claudePermissions(
   }
 }
 
+/** A Codex rule's `decision`, as the permission kind it reads as. */
 const DECISIONS: Record<string, SetupPermissionKind> = {
   allow: "allow",
   prompt: "ask",
   forbidden: "deny",
 };
 
-/** `["git", ["status", "diff"]]` → `git (status|diff)`. */
+/**
+ * A rule's `pattern` as one line of text.
+ *
+ * `["git", ["status", "diff"]]` reads `git (status|diff)`.
+ */
 function patternOf(raw: string): string | null {
   const value = raw.trim();
   if (!value.startsWith("[") || !value.endsWith("]")) return tomlString(value);
@@ -539,9 +559,10 @@ function patternOf(raw: string): string | null {
 
 /**
  * Codex's `prefix_rule(...)` and `network_rule(...)` calls in a `.rules`
- * file (Starlark), as a decision and what it matches.
+ * file, as a decision and what it matches.
  *
- * ⚠️ Read as text, never run. A call this cannot read is skipped.
+ * NOTE: The file is Starlark, read as text and never run. A call this cannot
+ * read is skipped.
  */
 export function codexRules(
   source: string,
@@ -620,6 +641,7 @@ type Installed = {
   version: string | null;
 };
 
+/** Which of a plugin's installs wins: the narrowest scope. */
 const INSTALL_RANK = { local: 0, project: 1, user: 2 } as const;
 
 /** Each installed plugin's install that applies to this folder, if any. */
@@ -706,7 +728,7 @@ async function pluginContents(
         ...jsonServer(entry),
       });
   };
-  // `.mcp.json` at the plugin's root — `{ mcpServers }` or the map itself —
+  // `.mcp.json` at the plugin's root (`{ mcpServers }` or the map itself),
   // and whatever its manifest names, inline or as a file.
   const mcpPath = join(root, ".mcp.json");
   const mcpFile = await readJson(read, mcpPath);
@@ -793,8 +815,8 @@ async function readClaude(read: Read): Promise<void> {
     disabled: null,
   });
 
-  // MCP: local, then project, then user — the order Claude lets one name
-  // win in, so the first of a name is the one it uses.
+  // MCP: local, then project, then user. That is the order in which Claude
+  // lets one name win, so the first of a name is the one it uses.
   const mcpJsonPath = join(folder, ".mcp.json");
   const mcpJson = await readJson(read, mcpJsonPath);
   const offIn = new Map<string, string>();
@@ -914,13 +936,15 @@ async function readClaude(read: Read): Promise<void> {
 
 // ── Codex ──────────────────────────────────────────────────────────────────
 
-/** `PreToolUse` → `pre_tool_use`, as Codex keys a hook's review. */
+/** An event as Codex keys a hook's review: `PreToolUse` → `pre_tool_use`. */
 const snake = (event: string) =>
   event.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 
 /**
- * Inline `[hooks]` of a `config.toml` as the `hooks.json` shape: only the
- * fields a row shows. `hooks.state` is Codex's review record, not a hook.
+ * A `config.toml`'s inline `[hooks]`, in the `hooks.json` shape.
+ *
+ * Only the fields a row shows. `hooks.state` is Codex's review record, not a
+ * hook.
  */
 function tomlHooks(entries: TomlEntry[]): Json {
   const hooks: Record<string, Json[]> = {};
@@ -972,7 +996,7 @@ async function readCodex(read: Read): Promise<void> {
     disabled: null,
   });
 
-  // Trust: looked up at the folder; without an entry Codex treats it as
+  // Trust is looked up at the folder. Without an entry Codex treats it as
   // untrusted, and then loads nothing from its `.codex/`.
   let trust: string | null = null;
   for (const { path, raw } of userToml)
@@ -1009,14 +1033,12 @@ async function readCodex(read: Read): Promise<void> {
       if (path[3] === "enabled") entry.enabled = tomlBool(raw);
     }
   }
-  /**
-   * Why Codex will not run the hook at `Event[group].hooks[index]` of one of
-   * `files` (the same file as each spelling of the folder names it).
-   *
-   * ⚠️ Codex runs a hook only once it was reviewed in `/hooks`, recorded as
-   * `hooks.state."<file>:<event>:<group>:<index>"`. Whether that record is
-   * still for THIS command is Codex's to say; its hash is never read.
-   */
+  // Why Codex will not run the hook at `Event[group].hooks[index]` of one of
+  // `files` (the same file, as each spelling of the folder names it).
+  //
+  // NOTE: Codex runs a hook only once it was reviewed in `/hooks`, recorded as
+  // `hooks.state."<file>:<event>:<group>:<index>"`. Whether that record is
+  // still for THIS command is Codex's to say; its hash is never read.
   const notRun =
     (files: string[]) => (event: string, group: number, index: number) =>
       hooksOff
@@ -1029,8 +1051,9 @@ async function readCodex(read: Read): Promise<void> {
   const inFolders = (...parts: string[]) =>
     folders.map((key) => join(key, ...parts));
 
-  // Per layer — the user's config, then the trusted repo's — its MCP
-  // servers, inline hooks, plugins and policies.
+  // Per layer (the trusted repo's config, then the user's): its MCP servers,
+  // inline hooks, plugins and policies. The repo's comes first, so its server
+  // wins a shared name.
   const layers = [
     {
       scope: "project" as const,
@@ -1059,7 +1082,7 @@ async function readCodex(read: Read): Promise<void> {
       const name = path[1] as string;
       const server = fields.get(name) ?? {};
       fields.set(name, server);
-      // ⚠️ Only these, and only at the server's own level: `env`, `args`,
+      // NOTE: Only these, and only at the server's own level: `env`, `args`,
       // `http_headers` and the rest are never turned into values.
       if (path.length !== 3) continue;
       const value = tomlString(raw) ?? undefined;
@@ -1225,7 +1248,11 @@ const emptySetup = (folder: string | null): AgentSetup => ({
   readAt: new Date().toISOString(),
 });
 
-/** Claude's rows before Codex's, then local → project → user → plugin. */
+/**
+ * Sort `list` in place: Claude's rows before Codex's, then by scope.
+ *
+ * Scopes go local, project, user, plugin, system ({@link SCOPE_ORDER}).
+ */
 function byOrigin<T extends { agent: SetupAgent; scope: SetupScope }>(
   list: T[],
 ): T[] {
@@ -1237,8 +1264,10 @@ function byOrigin<T extends { agent: SetupAgent; scope: SetupScope }>(
 }
 
 /**
- * Everything both CLIs would load in `folder`, and the file behind each
- * skill and command — kept in main, by the id the renderer is given (D4).
+ * Everything both CLIs would load in `folder`.
+ *
+ * Also the file behind each skill and command, kept in main by the id the
+ * renderer is given, so the renderer never names a path (FE-40/D4).
  */
 export async function readAgentSetup(
   folder: string | null,
@@ -1267,7 +1296,11 @@ export async function readAgentSetup(
   return { setup, files };
 }
 
-/** One skill or command, capped, its frontmatter apart (D4). */
+/**
+ * One skill or command, capped, its frontmatter apart (FE-40/D4).
+ *
+ * @throws When the file is no longer there.
+ */
 export async function readSetupFile(path: string): Promise<{
   frontmatter: string | null;
   body: string;

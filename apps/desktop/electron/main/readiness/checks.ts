@@ -1,6 +1,6 @@
-// The readiness rules (FE-30), with no Electron and no filesystem: what the
-// gathered facts about a folder mean, and what each fix would write. Pure on
-// purpose — tests/readiness.spec.ts calls these directly.
+// The readiness rules, with no Electron and no filesystem: what the gathered
+// facts about a folder mean, and what each fix would write. Pure, so
+// `tests/readiness.spec.ts` calls them directly.
 import { AGENT_NOTES, MCP_HOST, MCP_URL } from "../../../shared/agent-notes";
 import type {
   ReadinessCheck,
@@ -26,9 +26,10 @@ function parseObject(text: string | null): Json | null {
 /**
  * Whether a notes file tells an agent about the board.
  *
- * ⚠️ Loose on purpose. People reword the snippet, and a check that wanted it
- * verbatim would nag every repo that wrote its own. Naming the server's host
- * or the tool an agent starts with is enough to say somebody wrote it down.
+ * Loose by design. People reword the snippet, and a check that wanted it
+ * verbatim would nag every repo that wrote its own. Naming the server's host,
+ * the tool an agent starts with, or a Lanework heading is enough to say
+ * somebody wrote it down.
  */
 export function hasLaneworkNotes(text: string | null): boolean {
   if (!text) return false;
@@ -39,12 +40,12 @@ export function hasLaneworkNotes(text: string | null): boolean {
   );
 }
 
-/** `@AGENTS.md` on a line of its own — Claude Code's import. */
+/** Whether `@AGENTS.md`, Claude Code's import, is on a line of its own. */
 export function importsAgentsMd(text: string | null): boolean {
   return !!text && /^[ \t]*@(\.\/)?AGENTS\.md[ \t]*$/m.test(text);
 }
 
-/** One `mcpServers` map holds an entry that is ours: by name, or by URL. */
+/** Whether one `mcpServers` map holds our entry, by name or by URL. */
 function hasLaneworkServer(servers: unknown): boolean {
   if (!isObject(servers)) return false;
   return Object.entries(servers).some(
@@ -81,12 +82,12 @@ export function claudeHasLanework(input: {
 }
 
 /**
- * Whether Codex's `config.toml` has the lanework MCP server: a
- * `[mcp_servers.lanework]` table, or any `[mcp_servers.*]` pointing at us.
+ * Whether Codex's `config.toml` has the lanework MCP server.
  *
- * ⚠️ The same deliberately tiny reading as `handoff/codex.ts`: table headers
- * and the lines under them. Anything it cannot read counts as "not there",
- * which only ever shows an instruction that was not needed.
+ * That is a `[mcp_servers.lanework]` table, or any `[mcp_servers.*]` that
+ * points at us. The same tiny reading as `handoff/codex.ts`: table headers and
+ * the lines under them. Anything it cannot read counts as "not there", which
+ * at worst shows an instruction that was not needed.
  */
 export function codexHasLanework(toml: string | null): boolean {
   if (!toml) return false;
@@ -120,7 +121,12 @@ export interface ReadinessFacts {
         claudeMcp: boolean;
         legacyReviews: boolean;
       };
-  /** Claude Code has been run on this machine (`~/.claude` exists). */
+  /**
+   * Claude Code on this machine.
+   *
+   * `used` when it has been run here (`~/.claude` exists), `hook` when the
+   * checkpoint hook is installed for it.
+   */
   claude: { used: boolean; hook: boolean };
   codex: { used: boolean; hook: boolean; mcp: boolean };
   checkedAt: string;
@@ -176,9 +182,9 @@ export function buildReport(facts: ReadinessFacts): ReadinessReport {
           : "AGENTS.md says nothing about the Lanework board. Add the board notes so an agent knows where cards go.",
       ),
     );
-    // ⚠️ Information, not a warning. The docs say Claude Code reads only
-    // CLAUDE.md, but newer versions also read AGENTS.md — a repo without the
-    // import may be perfectly fine, and the app cannot tell which version runs.
+    // Information, not a warning. The docs say Claude Code reads only
+    // CLAUDE.md, but newer versions also read AGENTS.md. A repo without the
+    // import may be fine, and the app cannot tell which version runs.
     if (facts.claude.used)
       checks.push(
         check(
@@ -274,8 +280,10 @@ export const FIX_FILES: Record<ReadinessFix, string> = {
 /**
  * What a fix turns `before` into.
  *
- * ⚠️ Every fix APPENDS or ADDS one key; none rewrites what somebody wrote. A
- * `.mcp.json` that is not a JSON object is refused rather than replaced.
+ * NOTE: Every fix appends text or adds one key. None rewrites what somebody
+ * wrote.
+ *
+ * @throws When `.mcp.json` is not a JSON object: it is refused, not replaced.
  */
 export function applyFix(fix: ReadinessFix, before: string | null): string {
   switch (fix) {

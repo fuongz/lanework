@@ -1,6 +1,8 @@
-// Run with `bun test apps/desktop/electron/main/conversation`. The chat's
-// transcript parser (FE-62) against a fake home folder: user turns, text and
-// folded tool groups across lines, attachments, usage per turn, an open turn.
+// Run with `bun test apps/desktop/electron/main/conversation`.
+//
+// The chat's transcript parser against a fake home folder: user turns, text
+// and folded tool groups across lines, attachments, usage per turn, an open
+// turn.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +18,7 @@ const ID = "11111111-2222-4333-8444-555555555555";
 after(() => rmSync(home, { recursive: true, force: true }));
 
 let clock = Date.parse("2026-10-16T10:00:00.000Z");
+/** The next line's timestamp, `seconds` after the last one. */
 const at = (seconds = 1) => {
   clock += seconds * 1000;
   return new Date(clock).toISOString();
@@ -28,6 +31,7 @@ const base = () => ({
   gitBranch: "main",
   isSidechain: false,
 });
+/** A user line of the transcript. */
 const user = (content: unknown, extra: object = {}) => ({
   ...base(),
   type: "user",
@@ -35,12 +39,14 @@ const user = (content: unknown, extra: object = {}) => ({
   message: { role: "user", content },
   ...extra,
 });
+/** A message's `usage`, as the API writes it. */
 const usage = (input: number, output: number, read: number, create = 0) => ({
   input_tokens: input,
   output_tokens: output,
   cache_read_input_tokens: read,
   cache_creation_input_tokens: create,
 });
+/** An assistant line of the transcript, part of API message `id`. */
 const assistant = (
   id: string,
   content: unknown[],
@@ -61,6 +67,7 @@ const assistant = (
   },
 });
 
+/** Write `rows` as the conversation's transcript in the fake home folder. */
 function write(rows: object[]): void {
   const dir = join(home, ".claude", "projects", claudeProjectDir(folder));
   mkdirSync(dir, { recursive: true });

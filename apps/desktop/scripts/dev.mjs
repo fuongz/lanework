@@ -18,7 +18,7 @@ let shuttingDown = false;
 let restarting = false;
 // node-pty is copied once; it only changes with the lockfile, not with a save.
 await stageNativeModules();
-// FE-69: rebuilt only when its Swift source changed.
+// The dictation helper; rebuilt only when its Swift source changed.
 await buildDictation();
 const ctx = await context({
   ...electronBuildOptions,

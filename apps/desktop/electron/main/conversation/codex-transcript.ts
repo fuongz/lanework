@@ -1,13 +1,13 @@
 // A Codex conversation read as a chat: its rollout's lines folded into the
-// same turns a Claude transcript gives (`transcript.ts`) — the prompt, then
-// the answer's text and its tool calls, per-turn usage.
+// same turns a Claude transcript gives (`transcript.ts`). That is the prompt,
+// then the answer's text and its tool calls, with per-turn usage.
 //
 // Codex writes every finished item of a turn as an `event_msg` of type
-// `item_completed` — `UserMessage`, `AgentMessage`, `CommandExecution`,
-// `FileChange`, `McpToolCall`… — which is what is read here. Older CLIs wrote
+// `item_completed` (`UserMessage`, `AgentMessage`, `CommandExecution`,
+// `FileChange`, `McpToolCall`…), which is what is read here. Older CLIs wrote
 // `user_message` / `agent_message` events instead; those are read as text.
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a Node
+// Read-only, and nothing here imports Electron: main calls it, and a Node
 // script can drive it against a fake home folder.
 import { stat } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -46,7 +46,7 @@ const str = (value: unknown): string | null =>
 const num = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : 0;
 
-/** `file:///a/b` → `/a/b`; a plain path as it is. */
+/** A path or a file URL as a path: `file:///a/b` → `/a/b`. */
 function pathOf(value: unknown): string | null {
   const text = str(value);
   if (!text) return null;
@@ -64,7 +64,12 @@ function shown(path: string, folder: string): string {
   return rel && !rel.startsWith("..") ? rel : path;
 }
 
-/** `["/bin/zsh", "-lc", "ls"]` → `ls`; any other shape joined. */
+/**
+ * A command as one line.
+ *
+ * A shell wrapper gives its script: `["/bin/zsh", "-lc", "ls"]` → `ls`. Any
+ * other shape is joined.
+ */
 function commandLine(command: unknown): string {
   if (typeof command === "string") return command;
   if (!Array.isArray(command)) return "";
@@ -86,7 +91,7 @@ function textOf(content: unknown): string {
     .join("\n\n");
 }
 
-/** What a finished tool item reads as, or null for one with nothing to show. */
+/** A finished tool item as a call, or null for one with nothing to show. */
 function toolOf(
   item: Record<string, unknown>,
   folder: string,
@@ -173,7 +178,7 @@ function toolOf(
       };
     }
     case "Extension": {
-      // ⚠️ An image generation carries the image itself, base64, in
+      // NOTE: An image generation carries the image itself, base64, in
       // `result`: only its prompt and saved path are read.
       const prompt = str(item.revisedPrompt) ?? str(item.kind) ?? "extension";
       const saved = str(item.savedPath);
@@ -219,14 +224,16 @@ function promptOf(item: Record<string, unknown>): {
 }
 
 /**
- * The turns of a rollout's lines, in order: a user turn per prompt, and
- * everything after it — text, tool calls folded between two texts — as one
- * assistant turn. Usage is summed from its `token_count` events.
+ * The turns of a rollout's lines, in order.
+ *
+ * A user turn per prompt, and everything after it (text, tool calls folded
+ * between two texts) as one assistant turn. Usage is summed from its
+ * `token_count` events.
  */
 function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
   const turns: Turn[] = [];
-  // ⚠️ Newer CLIs write both the item and the old event for one message:
-  // the items win wherever there are any.
+  // NOTE: Newer CLIs write both the item and the old event for one message,
+  // so the items win wherever there are any.
   const items = rows.some(
     (line) =>
       line.type === "event_msg" &&
@@ -335,7 +342,7 @@ function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
         if (!building || !Object.keys(last).length) break;
         const cached = num(last.cached_input_tokens);
         usage = {
-          // ⚠️ OpenAI's `input_tokens` counts the cached ones too.
+          // NOTE: OpenAI's `input_tokens` counts the cached ones too.
           input: usage.input + Math.max(0, num(last.input_tokens) - cached),
           output: usage.output + num(last.output_tokens),
           cached: usage.cached + cached,
@@ -390,16 +397,17 @@ function codexConversationOf(
   };
 }
 
-/** Rollout paths already found, by id: the tree is only walked once each. */
+/** Rollout paths already found, by id, so the tree is walked once for each. */
 const found = new Map<string, string>();
 
 /**
- * The rollout of Codex conversation `id`, if it is `folder`'s own — its
- * `session_meta` names that folder and it is somebody's conversation, not a
- * thread Codex spawned for itself — else null.
+ * The rollout of Codex conversation `id`, if it is `folder`'s own; else null.
  *
- * ⚠️ The id passed `isAgentSessionId`, and only files under Codex's own
- * `sessions` tree are ever opened.
+ * It is when its `session_meta` names that folder and it is somebody's
+ * conversation, not a thread Codex spawned for itself.
+ *
+ * NOTE: The id must pass {@link isAgentSessionId}, and only files under
+ * Codex's own `sessions` tree are ever opened.
  */
 export async function codexRolloutPath(
   home: string,
@@ -430,9 +438,12 @@ export async function codexRolloutPath(
 }
 
 /**
- * Codex conversation `id` of `folder`, read for the chat. Past
- * `CONVERSATION_READ_MAX` only the end is read, and `truncated` says so —
- * its `session_meta` read from the head on its own.
+ * Codex conversation `id` of `folder`, read for the chat.
+ *
+ * Past {@link CONVERSATION_READ_MAX} only the end is read, and `truncated`
+ * says so; its `session_meta` is then read from the head on its own.
+ *
+ * @throws When the conversation has no transcript.
  */
 export async function readCodexConversation(
   home: string,

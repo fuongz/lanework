@@ -1,8 +1,8 @@
-// The instruction files Claude Code and Codex read for a project (FE-37),
-// found the way each CLI finds them, and a watch on where they live.
+// The instruction files Claude Code and Codex read for a project, found the
+// way each CLI finds them, and a watch on where they live.
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a spec
-// can drive it under plain Node against a fake home folder.
+// NOTE: Read-only, and nothing here imports Electron. Main calls it, and a
+// spec drives it under plain Node against a fake home folder.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
@@ -35,23 +35,26 @@ import { readRange } from "../terminal/agent-sessions";
 
 const run = promisify(execFile);
 
-/** The most of one file a read takes; instruction files are a few KB. */
+/** The most of one file a read takes. Instruction files are a few KB. */
 export const INSTRUCTION_READ_MAX = 256 * 1024;
 /** The most an Effective view gathers, every file together (FE-37/D4). */
 const EFFECTIVE_MAX = 1024 * 1024;
 /** Claude follows imports four hops deep and no further. */
 const IMPORT_HOPS = 4;
-/** What one scan for nested files takes (FE-37/D5). */
+/** The most files one scan for nested files finds (FE-37/D5). */
 const NESTED_FILES = 200;
+/** The most folders one scan for nested files enters (FE-37/D5). */
 const NESTED_DIRS = 5000;
+/** The most rule files one `.claude/rules` folder lists. */
 const RULES_MAX = 200;
 /** Codex's own default for `project_doc_max_bytes`. */
 const CODEX_DOC_MAX = 32 * 1024;
 /** How long after a write it is reported, so a burst is one change. */
 const SETTLE_MS = 300;
+/** The most folders one listing watches. */
 const WATCH_DIRS = 32;
 
-/** The folders nested scans never enter: no instructions live there. */
+/** The folders a nested scan never enters: no instructions live there. */
 const SKIPPED_DIRS = new Set(["node_modules", ".git"]);
 /** The files a scan below the project's folder looks for. */
 const NESTED_NAMES = [
@@ -74,7 +77,7 @@ export interface InstructionRoots {
   codexHome: string;
   /** Claude's `.claude.json`, where it records approving external imports. */
   claudeJson: string;
-  /** The managed policy CLAUDE.md for this OS; null where there is none. */
+  /** The managed policy CLAUDE.md for this OS. Null where there is none. */
   managed: string | null;
 }
 
@@ -97,9 +100,9 @@ export function instructionId(path: string): string {
 /** One listing, with what main alone keeps: each id's path. */
 export interface InstructionTree {
   list: InstructionList;
-  /** id → absolute path: the ONLY files a read may open. */
+  /** Id → absolute path. NOTE: These are the only files a read may open. */
   paths: Map<string, string>;
-  /** id → the most Codex reads of it, where `project_doc_max_bytes` cuts it. */
+  /** Id → the most Codex reads of it, where `project_doc_max_bytes` cuts. */
   limits: Map<string, number>;
   /** The folders a watch follows (FE-37/D7). */
   dirs: string[];
@@ -146,7 +149,7 @@ function ancestors(folder: string): string[] {
   }
 }
 
-/** The working tree's root, as Codex finds a project's: or the folder itself. */
+/** The working tree's root, as Codex finds it, or else the folder itself. */
 async function projectRoot(folder: string): Promise<string> {
   try {
     const { stdout } = await run("git", ["rev-parse", "--show-toplevel"], {
@@ -164,8 +167,10 @@ async function projectRoot(folder: string): Promise<string> {
 }
 
 /**
- * The frontmatter's `paths` — a YAML list or a comma-separated string — and
- * the rest of the file, as Claude loads a rule (FE-37).
+ * Split a rule file the way Claude loads one.
+ *
+ * `paths` is the frontmatter's `paths` key, a YAML list or a comma-separated
+ * string. `body` is the rest of the file.
  */
 export function splitRule(text: string): { paths: string[]; body: string } {
   const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(
@@ -198,7 +203,11 @@ export function splitRule(text: string): { paths: string[]; body: string } {
   };
 }
 
-/** A TOML string or array of strings, as `config.toml` writes the two keys read. */
+/**
+ * A TOML value as `config.toml` writes the keys read here.
+ *
+ * An integer, a string, or an array of strings. Null for anything else.
+ */
 function tomlValue(raw: string): string | string[] | number | null {
   const value = raw.replace(/\s+#.*$/, "").trim();
   if (/^\d+$/.test(value)) return Number(value);
@@ -211,10 +220,10 @@ function tomlValue(raw: string): string | string[] | number | null {
 }
 
 /**
- * The two keys of Codex's `config.toml` that decide what it reads: how many
- * bytes of project docs, and which names besides AGENTS.md count as one.
+ * The two keys of Codex's `config.toml` that decide what it reads.
  *
- * ⚠️ Top level only — a key after the first `[table]` belongs to the table.
+ * How many bytes of project docs, and which names besides AGENTS.md count as
+ * one. Top level only: a key after the first `[table]` belongs to the table.
  */
 export function codexDocConfig(toml: string | null): {
   maxBytes: number;
@@ -250,9 +259,10 @@ const MODES: readonly ClaudeInstructionMode[] = [
 ];
 
 /**
- * Claude's **Project instructions** setting, from the user's settings — the
- * only layer besides managed ones it is read from. The built-in plugin turned
- * off means CLAUDE.md only.
+ * Claude's **Project instructions** setting, from the user's settings.
+ *
+ * Besides managed settings, the user's are the only layer it is read from.
+ * The built-in plugin turned off means CLAUDE.md only.
  */
 function claudeMode(settings: Json | null): ClaudeInstructionMode {
   const plugins = settings?.enabledPlugins;
@@ -265,7 +275,7 @@ function claudeMode(settings: Json | null): ClaudeInstructionMode {
   return MODES.find((mode) => mode === value) ?? "claude-md-or-agents-md";
 }
 
-/** Where `@written` in `from` leads: `~/` from home, else from its own folder. */
+/** Where `@written` in `from` leads: `~/` from home, else from its folder. */
 function importTarget(home: string, from: string, written: string): string {
   if (written.startsWith("~/")) return join(home, written.slice(2));
   if (isAbsolute(written)) return resolve(written);
@@ -293,7 +303,7 @@ class Gatherer {
 
   constructor(readonly roots: InstructionRoots) {}
 
-  /** `path` as a file of the listing — registered, so a read may open it. */
+  /** `path` as a file of the listing, registered so a read may open it. */
   async file(path: string): Promise<InstructionFile> {
     const absolute = resolve(path);
     const id = instructionId(absolute);
@@ -338,12 +348,16 @@ class Gatherer {
 
 /** Claude's reading, from managed policy down to the project's own rules. */
 class ClaudeReader {
-  /** Real paths already in context: a second sighting is not read again. */
+  /** Real paths already in context. A second sighting is not read again. */
   private readonly seen = new Set<string>();
   private approval: "approved" | "declined" | "pending" = "pending";
   private excludes: string[] = [];
   mode: ClaudeInstructionMode = "claude-md-or-agents-md";
-  /** A CLAUDE.md in the folder or above: what keeps AGENTS.md out by default. */
+  /**
+   * Whether a CLAUDE.md is in the folder or above.
+   *
+   * One keeps AGENTS.md out in the default mode.
+   */
   counting = false;
 
   constructor(private readonly at: Gatherer) {}
@@ -396,7 +410,11 @@ class ClaudeReader {
     return realpath(path).catch(() => resolve(path));
   }
 
-  /** Has `path` been read already? Marks it read when it has not. */
+  /**
+   * Whether this is the first time `path` is read.
+   *
+   * Marks it read when it is.
+   */
   private async first(path: string): Promise<boolean> {
     const real = await this.real(path);
     if (this.seen.has(real)) return false;
@@ -409,8 +427,10 @@ class ClaudeReader {
   }
 
   /**
-   * What `from` imports, hop `hop` deep (FE-37). `trusted` is a chain that
-   * started in the user's own files, whose imports Claude never asks about.
+   * What `from` imports, `hop` hops deep.
+   *
+   * @param trusted Whether the chain started in the user's own files, whose
+   *   imports Claude never asks about.
    */
   async imports(
     from: string,
@@ -505,7 +525,7 @@ class ClaudeReader {
     );
   }
 
-  /** `.claude/rules/**.md` under `dir`: each at launch, or on matching files. */
+  /** Every `.md` under `dir`, each loaded at launch or on matching files. */
   private async rules(dir: string, trusted: boolean) {
     const found: string[] = [];
     const walk = async (at: string) => {
@@ -527,8 +547,8 @@ class ClaudeReader {
         nodes.push(await this.top(path, "rules", { trusted }));
         continue;
       }
-      // ⚠️ Conditional: never marked read, so a CLAUDE.md that imports the
-      // same file still loads it at launch.
+      // NOTE: A conditional rule is never marked read, so a CLAUDE.md that
+      // imports the same file still loads it at launch.
       nodes.push(
         this.excluded(file.path)
           ? node(file.id, "rules", "skipped", "Left out by claudeMdExcludes.")
@@ -574,7 +594,7 @@ class ClaudeReader {
       }
       for (const name of CLAUDE_FILES) {
         const path = join(dir, name);
-        // ~/.claude/CLAUDE.md is the user's own file, already listed.
+        // `~/.claude/CLAUDE.md` is the user's own file, already listed.
         if (resolve(path) === resolve(user) || !(await isFile(path))) continue;
         nodes.push(await this.top(path, scope));
       }
@@ -587,7 +607,7 @@ class ClaudeReader {
           nodes.push(
             await this.top(path, scope, { trusted: false, note: why }),
           );
-        // Read through an import already: listed there, not twice.
+        // Already read through an import: listed there, not twice.
         else if (!(await this.loaded(path)))
           nodes.push(
             node((await this.at.file(path)).id, scope, "skipped", instead),
@@ -598,7 +618,11 @@ class ClaudeReader {
     return nodes;
   }
 
-  /** Who reads a nested AGENTS.md: Claude, by its mode, as it opens files there. */
+  /**
+   * Whether and when Claude reads a nested AGENTS.md in `dir`, by its mode.
+   *
+   * @returns The note to show, or null when Claude does not read it.
+   */
   async nestedAgents(dir: string): Promise<string | null> {
     if (this.mode === "claude-md-and-agents-md")
       return "Claude reads it once it opens a file there, after that folder's CLAUDE.md.";
@@ -609,7 +633,11 @@ class ClaudeReader {
   }
 }
 
-/** Nothing but whitespace: Codex skips it, and it costs no budget. */
+/**
+ * Whether a file is missing or holds only whitespace (in its first 4 KB).
+ *
+ * Codex skips such a file, and it costs no budget.
+ */
 async function blank(file: InstructionFile): Promise<boolean> {
   if (file.missing || file.size === 0) return true;
   const head = await readRange(file.path, 0, Math.min(file.size, 4096)).catch(
@@ -620,7 +648,10 @@ async function blank(file: InstructionFile): Promise<boolean> {
 
 /**
  * The `trust_level` Codex's `config.toml` gives the first of `dirs` it has
- * an entry for — the folder, then the project's root — or null.
+ * an entry for.
+ *
+ * @param dirs The folder, then the project's root.
+ * @returns Null when none has an entry.
  */
 export function codexTrust(
   toml: string | null,
@@ -655,8 +686,8 @@ export function codexTrust(
  * Codex's reading: its own AGENTS.md, then one file per folder from the
  * project's root down to the folder it starts in, under one byte budget.
  *
- * ⚠️ As Codex itself picks (codex-rs `agents_md.rs`): a folder's slot goes to
- * the first of its names that EXISTS, so an empty AGENTS.override.md keeps
+ * NOTE: As Codex itself picks (codex-rs `agents_md.rs`), a folder's slot goes
+ * to the first of its names that exists. An empty AGENTS.override.md keeps
  * that folder's AGENTS.md out. The global file is never cut or counted.
  */
 async function codexList(at: Gatherer): Promise<InstructionNode[]> {
@@ -737,12 +768,12 @@ async function codexList(at: Gatherer): Promise<InstructionNode[]> {
 }
 
 /**
- * Instruction files below the folder, which load only as an agent works in
- * them (FE-37/D5) — each with who reads it and when.
+ * Instruction files below the folder, each with who reads it and when.
  *
- * ⚠️ Bounded: `node_modules`, `.git` and the worktrees under
- * `.claude/worktrees` are never entered, a linked folder is never followed,
- * and the scan stops at `NESTED_FILES` files or `NESTED_DIRS` folders.
+ * They load only as an agent works in them (FE-37/D5). The scan is bounded:
+ * `node_modules`, `.git` and the worktrees under `.claude/worktrees` are
+ * never entered, a linked folder is never followed, and the scan stops at
+ * `NESTED_FILES` files or `NESTED_DIRS` folders.
  */
 async function nestedList(
   at: Gatherer,
@@ -822,7 +853,7 @@ async function nestedList(
   return { nodes, truncated };
 }
 
-/** Everything Claude and Codex read for `roots.folder` (FE-37). */
+/** Everything Claude and Codex read for `roots.folder`. */
 export async function listInstructions(
   roots: InstructionRoots,
 ): Promise<InstructionTree> {
@@ -848,7 +879,12 @@ export async function listInstructions(
   };
 }
 
-/** Where the scope of a file makes what Claude reads differ from the file. */
+/**
+ * Whether Claude reads file `id` as a rule.
+ *
+ * A rule's frontmatter is not part of what Claude reads, so its text differs
+ * from the file.
+ */
 const ruleLike = (tree: InstructionTree, id: string): boolean => {
   const walk = (nodes: InstructionNode[]): boolean =>
     nodes.some(
@@ -859,10 +895,14 @@ const ruleLike = (tree: InstructionTree, id: string): boolean => {
 };
 
 /**
- * One file of the listing, for the viewer: at most `INSTRUCTION_READ_MAX`.
+ * One file of the listing for the viewer, at most `INSTRUCTION_READ_MAX`.
  *
- * ⚠️ Named by id, and only an id `tree` minted opens anything: the renderer
- * can never point a read at a path. Only Markdown is ever read (FE-37/D6).
+ * NOTE: Named by id, and only an id that `tree` minted opens anything, so the
+ * renderer can never point a read at a path. Only Markdown is read
+ * (FE-37/D6).
+ *
+ * @throws When the id is unknown, or the file is missing, not Markdown, or
+ *   not a file.
  */
 export async function readInstruction(
   tree: InstructionTree,
@@ -899,8 +939,9 @@ export async function readInstruction(
 }
 
 /**
- * All that `agent` reads at launch, in order, imports right after the file
- * that names them (FE-37/D4): what a conversation starts with.
+ * All that `agent` reads at launch: what a conversation starts with.
+ *
+ * In order, with imports right after the file that names them (FE-37/D4).
  */
 export async function effectiveInstructions(
   tree: InstructionTree,
@@ -937,7 +978,7 @@ export async function effectiveInstructions(
   return { agent, files: tree.list.files, sections };
 }
 
-/** The names whose writes can change a listing; everything else is noise. */
+/** Whether a write to `name` can change a listing. Anything else is noise. */
 function relevant(name: string | null): boolean {
   if (name === null) return true;
   const base = name.split(/[\\/]/).at(-1) ?? name;
@@ -953,11 +994,14 @@ function relevant(name: string | null): boolean {
 }
 
 /**
- * Call `onChange` when an instruction file in `dirs` is written (FE-37/D7),
- * a burst once. Returns the stop.
+ * Call `onChange` when an instruction file in `dirs` is written (FE-37/D7).
  *
- * ⚠️ One plain watch per folder, never recursive, and only names that can
+ * A burst of writes calls it once.
+ *
+ * NOTE: One plain watch per folder, never recursive, and only names that can
  * matter wake it: `~/.claude` is written on every prompt anyone sends.
+ *
+ * @returns A function that stops the watch.
  */
 export function watchInstructions(
   dirs: string[],

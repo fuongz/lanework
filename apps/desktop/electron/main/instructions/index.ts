@@ -1,8 +1,8 @@
-// What a project's agents are told, for the Instructions screen (FE-37).
+// What a project's agents are told, for the Instructions screen.
 //
-// ⚠️ Read-only. The renderer names a project by slug and a file by an id
-// from main's own last listing of it; the paths stay here, so no renderer can
-// point a read at a file of its choosing. There is no channel that writes.
+// NOTE: Read-only. The renderer names a project by slug and a file by an id
+// from main's own last listing. The paths stay here, so no renderer can point
+// a read at a file of its choosing. No channel writes.
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +28,7 @@ import {
   watchInstructions,
 } from "./read";
 
-/** The home `~/` means — under the test's fake home in a dev build. */
+/** The home `~/` means: the test's fake home in a dev build, else the real. */
 function home(): string {
   return (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
 }
@@ -50,8 +50,10 @@ function rootsFor(folder: string): InstructionRoots {
 }
 
 /**
- * The last listing of each project, which every read is checked against, and
- * one watch on the folders it found (FE-37/D7). Capped like Memory's.
+ * The last listing of each project, which every read is checked against.
+ *
+ * Each has one watch on the folders it found (FE-37/D7). Capped at
+ * `WATCH_LIMIT` projects, like Memory's.
  */
 const listed = new Map<
   string,
@@ -120,7 +122,11 @@ async function list(workspace: string): Promise<InstructionList> {
   return tree.list;
 }
 
-/** The listing a read is checked against: the last one, or a fresh one. */
+/**
+ * The listing a read is checked against: the last one, or a fresh one.
+ *
+ * @throws When the project has no folder on this machine.
+ */
 async function current(
   workspace: string,
 ): Promise<{ roots: InstructionRoots; tree: InstructionTree }> {
@@ -157,7 +163,7 @@ async function reveal(workspace: string, id: string): Promise<void> {
   const info = path ? await stat(path).catch(() => null) : null;
   if (!path || !info?.isFile())
     throw new Error("That file is not on this machine any more.");
-  // Selects the file in Finder; nothing is opened or written (FE-37/D8).
+  // Selects the file in Finder. Nothing is opened or written (FE-37/D8).
   shell.showItemInFolder(path);
 }
 

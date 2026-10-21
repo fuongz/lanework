@@ -10,8 +10,14 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// macOS reads native branding from the running .app, including in development.
-// Clone Electron so the installed dependency remains untouched.
+/**
+ * Clones Electron into a branded `Lanework.app` for development on macOS.
+ *
+ * macOS reads native branding from the running `.app`, in development too.
+ * A clone leaves the installed dependency untouched.
+ *
+ * @returns The clone's binary, or `electron` as is off macOS.
+ */
 export function brandDevBundle(electron) {
   if (process.platform !== "darwin") return electron;
   const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -48,9 +54,9 @@ export function brandDevBundle(electron) {
   })) {
     execFileSync("/usr/bin/plutil", ["-replace", key, "-string", value, plist]);
   }
-  // ⚠️ Editing Info.plist breaks Electron's own signature, and macOS then
-  // refuses the app's notifications outright (UNErrorDomain error 1, FE-70).
-  // Re-signed ad hoc, the bundle is whole again under its new identifier.
+  // NOTE: Editing `Info.plist` breaks Electron's own signature, and macOS then
+  // refuses the app's notifications (UNErrorDomain error 1, FE-70). An ad hoc
+  // signature makes the bundle whole again under its new identifier.
   execFileSync("/usr/bin/codesign", [
     "--force",
     "--deep",

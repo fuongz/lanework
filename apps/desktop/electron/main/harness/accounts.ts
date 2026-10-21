@@ -1,10 +1,13 @@
 // Who Claude Code and Codex are signed in as, for Settings › Harness.
 //
-// ⚠️ Labels only — email, organization, plan — read from what each CLI keeps
-// for itself, and nothing else of it. Claude's come from `claude auth status`
-// (the probe the usage footer already runs); Codex's from the CLAIMS of the
-// `id_token` in its `auth.json`, decoded, never verified and never sent
-// anywhere: the token itself, and every other field of that file, stay here.
+// NOTE: Labels only (email, organization, plan), read from what each CLI keeps
+// for itself, and nothing else of it.
+//
+// - Claude's come from `claude auth status`, the probe the usage footer
+//   already runs.
+// - Codex's come from the claims of the `id_token` in its `auth.json`:
+//   decoded, never verified, never sent anywhere. The token itself, and every
+//   other field of that file, stay here.
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +17,7 @@ import { agentHome } from "../agent-home";
 import { claudeAuth } from "../terminal/agents";
 import { codexAccountOf } from "./codex-account";
 
-/** The test's fake home in a dev build, else the real one. */
+/** The agent home: the test's fake home in a dev build, else the real one. */
 function where() {
   return agentHome(
     (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir(),

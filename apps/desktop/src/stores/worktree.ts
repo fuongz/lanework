@@ -12,12 +12,12 @@ import type {
 } from "../../shared/worktree";
 
 /**
- * The local repository's Changes and History screens (FE-22).
+ * The local repository's Changes and History screens.
  *
- * ⚠️ Refreshed on entry, on window focus, after every action and on request —
- * never on a timer and not by a file watcher (FE-22/D10). A folder somebody is
- * editing in another app changes when they come back to this one, which is
- * exactly when the focus refresh runs.
+ * Refreshed on entry, on window focus, after every action and on request.
+ * Never on a timer and never by a file watcher (FE-22/D10): a folder edited in
+ * another app changes when the person comes back to this one, which is when
+ * the focus refresh runs.
  */
 
 const api = () => {
@@ -32,9 +32,10 @@ export type DiffStyle = "split" | "unified";
 const STYLE_KEY = "lanework:diff-style";
 
 /**
- * A per-viewer convenience, so storage failing only costs the default.
+ * The diff style this viewer last picked.
  *
- * ⚠️ Unified by default (owner, 2026-09-26 — replacing FE-22/D4's Split): one
+ * A per-viewer convenience, so storage failing only costs the default.
+ * Unified by default (owner's call, 2026-09-26, over FE-22/D4's Split): one
  * column reads the way a commit is read, and Split stays one click away.
  */
 function readStyle(): DiffStyle {
@@ -48,11 +49,15 @@ function readStyle(): DiffStyle {
 /**
  * Tickets, so a slow answer about one project cannot land on another.
  *
- * ⚠️ Per read, not one for the store. A status refresh finishing late must not
- * throw away the patch that was asked for after it.
+ * NOTE: Per read, not one for the store. A status refresh finishing late must
+ * not throw away the patch that was asked for after it.
  */
 const ticket = { status: 0, patch: 0, history: 0, commit: 0, branches: 0 };
-/** The agent marks' own (FE-39/D2): a slow scan must not land on a later one. */
+/**
+ * The agent marks' own ticket.
+ *
+ * A slow scan must not land on a later one.
+ */
 let marksTicket = 0;
 
 /** What a project's screens held when another project was opened. */
@@ -62,11 +67,13 @@ type Snapshot = Pick<
 >;
 
 /**
- * The screens of the projects left most recently, so coming back to one
- * shows it at once and reads it again underneath (stale-while-revalidate).
+ * The screens of the projects left most recently.
  *
- * ⚠️ Swapped whole on a project change, never merged: a project with no
- * snapshot starts EMPTY, not with the last project's history under its name.
+ * Coming back to one shows it at once and reads it again underneath
+ * (stale-while-revalidate).
+ *
+ * NOTE: Swapped whole on a project change, never merged. A project with no
+ * snapshot starts empty, not with the last project's history under its name.
  * Capped, because a patch can be large.
  */
 const snapshots = new Map<string, Snapshot>();
@@ -83,11 +90,15 @@ interface WorktreeStore {
   error: string | null;
   /** The action running now, by name, so its button can say so. */
   busy: string | null;
-  /** Why the last ACTION failed — separate from `error`, which is a read. */
+  /** Why the last action failed; `error` is for reads. */
   actionError: string | null;
   patch: WorktreePatch | null;
   patchError: string | null;
-  /** The file the list last pointed at; `at` moves so the same file scrolls again. */
+  /**
+   * The file the list last pointed at.
+   *
+   * `at` changes so the same file scrolls into view again.
+   */
   focus: { path: string; at: number } | null;
   diffStyle: DiffStyle;
   message: string;
@@ -101,18 +112,18 @@ interface WorktreeStore {
   /**
    * The rail's branch switcher, by project.
    *
-   * ⚠️ Kept apart from `state`: the rail shows the branch on every screen, and
-   * reading it is `for-each-ref`, not a full `git status` — the status belongs
-   * to the Changes screen, which is the one that needs the files.
+   * Kept apart from `state`: the rail shows the branch on every screen, and
+   * reading it is `for-each-ref`, not a full `git status`. The status belongs
+   * to the Changes screen, which needs the files.
    */
   branches: { slug: string; list: BranchList | null } | null;
   switching: string | null;
   switchError: string | null;
   /**
-   * Which agent conversations edited each changed file since HEAD's commit
-   * (FE-39/D2, D3), by path; null until read.
+   * Which agent conversations edited each changed file, by path.
    *
-   * ⚠️ Read after every status, never awaited by it: scanning transcripts is
+   * Since HEAD's commit (FE-39/D2, D3); null until read.
+   * Read after every status, never awaited by it: scanning transcripts is
    * slower than `git status`, and the list does not wait for its marks.
    */
   agentMarks: AgentFileMarks | null;
@@ -121,10 +132,10 @@ interface WorktreeStore {
   open: (slug: string) => Promise<void>;
   refresh: () => Promise<void>;
   /**
-   * Read the status alone — no patch — for the rail's `+/−` badge.
+   * Read the status alone, without the patch, for the rail's `+/−` badge.
    *
-   * ⚠️ Yields to a full `refresh`: if one is running, or starts while this one
-   * is out, this answer is dropped rather than landing on top of a newer one.
+   * NOTE: Yields to a full `refresh`. If one is running, or starts while this
+   * one is out, this answer is dropped rather than landing on a newer one.
    */
   peek: (slug: string) => Promise<void>;
   focusFile: (path: string) => void;
@@ -135,7 +146,13 @@ interface WorktreeStore {
   unstage: (paths: string[]) => Promise<void>;
   restore: (paths: string[]) => Promise<void>;
   commitChanges: (mode: CommitMode, fallback: string) => Promise<boolean>;
-  /** Fetch, pull or push; `remote` for Fetch From and Push To. The action's name is `busy`. */
+  /**
+   * Fetch, pull or push.
+   *
+   * The action's name is `busy` while it runs.
+   *
+   * @param remote For Fetch From and Push To; the default remote otherwise.
+   */
   sync: (action: SyncAction, remote?: string) => Promise<void>;
   openHistory: (slug: string) => Promise<void>;
   moreHistory: () => Promise<void>;
@@ -146,11 +163,13 @@ interface WorktreeStore {
 
 export const useWorktree = create<WorktreeStore>((set, get) => {
   /**
-   * Make `slug` the project the screens show: keep what the one being left
-   * holds, and put back what this one held last time (or nothing).
+   * Make `slug` the project the screens show.
    *
-   * ⚠️ Every ticket moves, so an answer still out for the project being left
-   * lands nowhere — not on this one, and not in its snapshot either.
+   * Keeps what the one being left holds, and puts back what this one held
+   * last time (or nothing).
+   *
+   * NOTE: Every ticket moves, so an answer still out for the project being
+   * left lands nowhere: not on this one, and not in its snapshot.
    */
   function enter(slug: string) {
     const current = get();
@@ -215,7 +234,12 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     }
   }
 
-  /** Run one write, take the status it answers, then re-read the patch. */
+  /**
+   * Run one write, take the status it answers, then re-read the patch.
+   *
+   * @param name The action's name, shown as `busy`.
+   * @returns Whether the write landed on the project still open.
+   */
   async function act(
     name: string,
     call: (slug: string) => Promise<WorktreeState>,
@@ -237,7 +261,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
         busy: null,
         actionError: ipcMessage(error, "That did not work."),
       });
-      // The action may have half-happened — a hook that failed after staging —
+      // The action may have half-happened (a hook that failed after staging),
       // so what is on screen is re-read rather than trusted.
       void get().refresh();
       return false;
@@ -273,7 +297,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       if (!slug || state?.kind !== "ready" || !surface) return;
       const mine = ++marksTicket;
       try {
-        // ⚠️ The slug is a workspace key main accepts, as the cloud id is.
+        // Main accepts the slug as a workspace key, as it does the cloud id.
         const agentMarks = await surface.agentFilesForWorktree(slug);
         if (mine !== marksTicket) return;
         set({ agentMarks });
@@ -318,7 +342,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
           return;
         set({ state, error: null });
       } catch {
-        // The badge simply stays away; the Changes screen says why when opened.
+        // No badge; the Changes screen says why when opened.
       }
     },
 
@@ -347,9 +371,8 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     },
 
     commitChanges: async (mode, fallback) => {
-      // ⚠️ The placeholder IS the message when the box is empty (FE-22/D9) — it
-      // is what the button promised, and committing nothing would be a refusal
-      // nobody asked for.
+      // The placeholder is the message when the box is empty (FE-22/D9). It
+      // is what the button promised; refusing to commit would surprise.
       const message = get().message.trim() || fallback;
       const done = await act("commit", (slug) =>
         api().commit(slug, message, mode),
@@ -384,10 +407,10 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       try {
         const page = await api().log(slug, 0);
         if (mine !== ticket.history) return;
-        // ⚠️ A kept list that still starts with this page keeps the pages
-        // scrolled in after it — re-reading the first hundred must not cut a
-        // list somebody was deep into back to a hundred. Anything else (a new
-        // commit, a rewrite) is read from the top again.
+        // A kept list that still starts with this page keeps the pages
+        // scrolled in after it: re-reading the first hundred must not cut a
+        // long list back to a hundred. Anything else (a new commit, a rewrite)
+        // is read from the top again.
         const kept = get().history;
         const same =
           kept.length > page.commits.length &&
@@ -475,9 +498,9 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
         const state = await api().switchBranch(slug, name);
         set({ switching: null });
         await get().loadBranches(slug);
-        // ⚠️ Another branch is another working tree and another history. What
-        // the screens hold for this project is dropped and read again, not
-        // patched — a diff from the old branch under the new name would lie.
+        // NOTE: Another branch is another working tree and another history.
+        // What the screens hold for this project is dropped and read again,
+        // not patched: a diff from the old branch under the new name would lie.
         snapshots.delete(slug);
         if (get().slug === slug) {
           ticket.status++;
@@ -510,7 +533,11 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
   };
 });
 
-/** The files a list row stands for — one file, or everything under a folder. */
+/**
+ * How staged a list row is, from the files it stands for.
+ *
+ * @param files One file, or everything under a folder.
+ */
 export function stagedTally(
   files: { staged: "none" | "partial" | "full" }[],
 ): "none" | "partial" | "full" {

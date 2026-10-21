@@ -1,34 +1,35 @@
-// Claude Code Stop hook: leave a checkpoint on the lanework card this session
-// is working, so another agent (Codex, or Claude in the cloud) can resume it
-// once this one runs out of quota (BE-17).
+// The Stop hook for Claude Code and Codex: leave a checkpoint on the lanework
+// card this session is working, so another agent (Codex, or Claude in the
+// cloud) can resume it once this one runs out of quota.
 //
-// ⚠️ Installed by the DESKTOP APP (Settings → Agents, FE-28), which bundles
-// this file to `dist/electron/hook/lanework-checkpoint.cjs`, writes it into
+// NOTE: The desktop app installs it (Settings → Agents). The app bundles this
+// file to `dist/electron/hook/lanework-checkpoint.cjs`, writes it into
 // `~/.claude/settings.json` and runs it under Electron's own Node
-// (`ELECTRON_RUN_AS_NODE=1`) — the people using it have no bun. So: Node APIs
+// (`ELECTRON_RUN_AS_NODE=1`): the people using it have no bun. So: Node APIs
 // only, no top-level await, no `import.meta`. It still runs under bun for
 // development, and without the app:
 //
 //   bun apps/desktop/electron/hook/lanework-checkpoint.ts setup <lw_reg_…>
 //
 // Flags, set by whoever installs it: `--api <url>` (default
-// https://api.lanework.dev) and `--push-wip`, the opt-in (FE-28/D3) to push the
-// uncommitted tree to `refs/lanework/wip/<task-id>`.
+// https://api.lanework.dev) and `--push-wip`, the opt-in (FE-28/D3) to push
+// the uncommitted tree to `refs/lanework/wip/<task-id>`.
 //
-// FE-52/D9: a repo linked to a board on this machine's LOCAL board (the SQLite
-// file the app and the offline MCP share, never moved to the cloud) gets its
-// checkpoint written there — no credential, no network. See `local-board.ts`.
+// A repo linked to a board on this machine's local board (the SQLite file the
+// app and the offline MCP share, never moved to the cloud) gets its
+// checkpoint written there, with no credential and no network (FE-52/D9).
+// See `local-board.ts`.
 //
-// ⚠️ Costs no model quota: it reads the transcript file Claude Code already
-// wrote, and nothing here calls a model. That is the point — when the quota runs
-// out mid-task, the last completed turn is still on the card.
+// It costs no model quota: it reads the transcript file the CLI already
+// wrote, and nothing here calls a model. That is the point: when the quota
+// runs out mid-task, the last completed turn is still on the card.
 //
-// ⚠️ Never in the way. The hook proper only copies stdin to a temp file and
-// spawns a detached worker, so a slow `git push` never holds up the next
-// prompt; every failure is logged to ~/.cache/lanework/checkpoint/hook.log and
-// the exit code is always 0.
+// NOTE: It is never in the way. The hook proper only copies stdin to a temp
+// file and spawns a detached worker, so a slow `git push` never holds up the
+// next prompt. Every failure is logged to
+// ~/.cache/lanework/checkpoint/hook.log and the exit code is always 0.
 //
-// ⚠️ Redaction happens HERE, before anything leaves the machine (BE-17). The
+// NOTE: Redaction happens here, before anything leaves the machine. The
 // server caps size but cannot tell a secret from prose.
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -102,9 +103,10 @@ const API = (
   DEFAULT_API_ORIGIN
 ).replace(/\/$/, "");
 /**
- * Settings the app changes without touching the hook's command (FE-29/D3):
+ * Read the settings the app changes without touching the hook's command.
+ *
  * Codex approves a hook by the hash of its command, so a switch flipped in
- * Settings must not change the command it approved.
+ * Settings must not change the command it approved (FE-29/D3).
  */
 function hookConfig(): { pushWip?: boolean } {
   // The app's shim names its file; the plugin keeps one in ~/.config/lanework.
@@ -119,14 +121,14 @@ function hookConfig(): { pushWip?: boolean } {
   }
 }
 
-/** FE-28/D3: pushing unfinished code to the remote is opt-in. */
+/** Whether to push unfinished code to the remote: opt-in (FE-28/D3). */
 const PUSH_WIP = ARGS.flags.has("push-wip") || hookConfig().pushWip === true;
-/** Which CLI ran this turn — `claude-code` or `codex` (FE-29). */
+/** Which CLI ran this turn: `claude-code` or `codex`. */
 const AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : "claude-code";
 const AGENT_NAME = AGENT === "codex" ? "Codex" : "Claude Code";
 const STATE_DIR = join(homedir(), ".cache", "lanework", "checkpoint");
 const LOG = join(STATE_DIR, "hook.log");
-/** BE-17/D10: an unchanged turn inside this window writes nothing. */
+/** An unchanged turn inside this window writes nothing (BE-17/D10). */
 const THIN_MS = 60_000;
 const PUSH_TIMEOUT_MS = 30_000;
 const HTTP_TIMEOUT_MS = 10_000;
@@ -185,7 +187,7 @@ function writeJson(file: string, value: unknown): void {
 /**
  * Strip anything that looks like a credential.
  *
- * ⚠️ Deliberately greedy: a false positive costs a word in a summary, a false
+ * NOTE: It is greedy. A false positive costs a word in a summary, a false
  * negative puts a key on a server. Exported for the hook's own test.
  */
 export function redact(input: string): string {
@@ -280,19 +282,19 @@ function resultText(content: unknown): string {
   return "";
 }
 
-// A task id as boards mint them by default: `BE-17`, `FE-09`, `INF-01`.
+/** A task id as boards mint them by default: `BE-17`, `FE-09`, `INF-01`. */
 const TASK_ID = /\b[A-Z]{2,5}-\d{1,5}\b/g;
-// Things that look like one and are not.
+/** Prefixes that look like a {@link TASK_ID} and are not one. */
 const NOT_TASK_ID = /^(?:UTF|SHA|ISO|RFC|HTTP|TLS|CVE|MD|AES|RSA|ES|ECMA)-/;
 
 /**
- * Condense a transcript into what the next agent needs (BE-17/D11).
+ * Condense a Claude Code transcript into what the next agent needs.
  *
- * ⚠️ The card is the one this session TALKED TO the board about — the last
- * `card` a lanework tool was called with, or the task id one of them returned.
- * Only when there is none does a task id the user typed count; a stray `UTF-8`
- * then fails the server's lookup, which is a 404 and a log line, not a baton on
- * the wrong card.
+ * NOTE: The card is the one this session talked to the board about: the last
+ * `card` a lanework tool was called with, or the task id `create_review`
+ * returned (BE-17/D11). Only when there is none does a task id the user typed
+ * count. A stray `UTF-8` then fails the server's lookup, which is a 404 and a
+ * log line, not a baton on the wrong card.
  */
 export function digest(transcript: string, root: string): Digest {
   const lines: Line[] = [];
@@ -325,8 +327,8 @@ export function digest(transcript: string, root: string): Digest {
       const typed = humanText(content);
       if (typed) {
         request = typed;
-        // ⚠️ The previous turn's reply is kept until this turn writes one:
-        // a worker that runs mid-turn (or a turn that ends in tool calls)
+        // NOTE: The previous turn's reply is kept until this turn writes one.
+        // A worker that runs mid-turn (or a turn that ends in tool calls)
         // would otherwise report "no reply" and lose where the work stood.
         if (replies.length) previousReplies = replies;
         replies = [];
@@ -397,7 +399,7 @@ export function digest(transcript: string, root: string): Digest {
   };
 }
 
-// ── Codex (FE-29) ───────────────────────────────────────────────────────────
+// ── Codex ───────────────────────────────────────────────────────────────────
 
 /** A string in JS source: "…", '…' or `…`, escapes included. */
 const JS_STRING = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/
@@ -426,11 +428,11 @@ function unquote(literal: string): string {
 }
 
 /**
- * The rollout file for a Codex session when the hook was not told one.
+ * Find the rollout file for a Codex session when the hook was not told one.
  *
- * ⚠️ Newest days first, and only the last few: a session that is still
- * running wrote to one of them today or yesterday. Named
- * `rollout-<time>-<session id>.jsonl`.
+ * Rollouts are named `rollout-<time>-<session id>.jsonl`, in a folder per
+ * day. Only the newest three days are searched: a session that is still
+ * running wrote to one of them today or yesterday.
  */
 function findCodexRollout(sessionId: string | undefined): string | null {
   if (!sessionId) return null;
@@ -490,14 +492,14 @@ const texts = (content: CodexItem["content"]): string =>
     .trim();
 
 /**
- * Condense a Codex rollout the way `digest` does a Claude transcript.
+ * Condense a Codex rollout the way {@link digest} does a Claude transcript.
  *
- * ⚠️ Read from `item_completed` events — `UserMessage`, `AgentMessage`,
- * `CommandExecution` (with its exit code), `FileChange`, `McpToolCall` —
- * which Codex writes for every item whatever mode it ran tools in. Only a
- * rollout with none of them (an older Codex) falls back to reading the
- * `exec` scripts of "code mode" by pattern. The final answer comes from the
- * hook's stdin (`last_assistant_message`) when Codex sends it, which is exact.
+ * It reads `item_completed` events (`UserMessage`, `AgentMessage`,
+ * `CommandExecution` with its exit code, `FileChange`, `McpToolCall`), which
+ * Codex writes for every item whatever mode it ran tools in. Only a rollout
+ * with none of them (an older Codex) falls back to reading the `exec` scripts
+ * of "code mode" by pattern. The final answer comes from the hook's stdin
+ * (`last_assistant_message`) when Codex sends it, which is exact.
  */
 export function digestCodex(
   transcript: string,
@@ -629,7 +631,7 @@ export function digestCodex(
 
 // ── Credential and board ────────────────────────────────────────────────────
 
-/** This machine's credential, wherever this install keeps it (`credential.ts`). */
+/** This machine's credential, wherever this install keeps it. */
 const readSecret = () => readCredential(API);
 
 async function http(
@@ -675,12 +677,18 @@ async function boardFor(
 // ── Git: where the code is (BE-17/D1) ───────────────────────────────────────
 
 /**
- * Snapshot the working tree — tracked changes AND untracked files that are not
- * ignored — as a commit on no branch, and push it to `refs/lanework/wip/<id>`.
+ * Snapshot the working tree as a commit on no branch, and push it.
  *
- * ⚠️ A private index (`GIT_INDEX_FILE`), so the user's staging area is never
- * touched, and a commit no branch points at, so history is never touched
- * either. The ref is force-pushed: it is a baton, only the latest matters.
+ * The snapshot holds tracked changes and untracked files that are not
+ * ignored. It goes to `refs/lanework/wip/<id>`, force-pushed: it is a baton,
+ * only the latest matters.
+ *
+ * NOTE: It uses a private index (`GIT_INDEX_FILE`), so the user's staging
+ * area is never touched, and a commit no branch points at, so history is
+ * never touched either.
+ *
+ * @returns No ref and no sha when the tree matches `HEAD`; a sha but no ref
+ *   when the push failed.
  */
 export function snapshot(root: string, taskId: string): Wip {
   const index = join(tmpdir(), `lanework-wip-${process.pid}.index`);
@@ -729,7 +737,7 @@ type HookInput = {
   /** Codex sends null when it has no rollout file to point at. */
   transcript_path?: string | null;
   cwd?: string;
-  /** Codex only (FE-29): the turn's final answer, no transcript needed. */
+  /** Codex only: the turn's final answer, no transcript needed. */
   last_assistant_message?: string | null;
 };
 
@@ -738,10 +746,14 @@ type SessionState = {
   at: number;
   /** The working tree the last checkpoint described. */
   code: string;
-  /** The tree the remote WIP ref holds (or a clean tree), null if a push failed. */
+  /**
+   * The tree the remote WIP ref holds (or a clean tree).
+   *
+   * Null if a push failed.
+   */
   pushedCode: string | null;
   wip: Wip;
-  /** The card it went to — what Settings → Agents shows as "last checkpoint". */
+  /** The card it went to: what Settings shows as "last checkpoint". */
   taskId: string;
 };
 
@@ -794,8 +806,9 @@ async function work(inputFile: string): Promise<void> {
     return;
   }
 
-  // FE-52/D9: a repo whose board is on this machine's local board writes there
-  // and needs no credential. Any trouble opening it falls back to the cloud.
+  // A repo whose board is on this machine's local board writes there and
+  // needs no credential (FE-52/D9). Any trouble opening it falls back to the
+  // cloud.
   let local: LocalBoard | null = null;
   try {
     local = localBoardFor(remote);
@@ -824,8 +837,8 @@ async function checkpointTo(
     return;
   }
 
-  // D10: inside a minute of the last checkpoint, only a change to the code
-  // earns a new one. `code` is what the working tree looks like right now.
+  // Inside a minute of the last checkpoint, only a change to the code earns
+  // a new one (BE-17/D10). `code` is what the working tree looks like now.
   const head = tryGit(root, ["rev-parse", "HEAD"]);
   const status = tryGit(root, ["status", "--porcelain"]) ?? "";
   const diff = tryGit(root, ["diff", "HEAD"]) ?? "";
@@ -892,10 +905,10 @@ async function checkpointTo(
 // ── Setup ───────────────────────────────────────────────────────────────────
 
 /**
- * Enrol this machine for the hook and keep its credential in the Keychain.
+ * Enrol this machine for the hook and keep its credential.
  *
- * ⚠️ The secret reaches `security` on STDIN (`security -i`), never in argv,
- * where any process on the machine could read it from the process list.
+ * The credential goes wherever `credential.ts` keeps it for this install:
+ * the Keychain on macOS, a 0600 file elsewhere.
  */
 async function setup(token: string | undefined): Promise<void> {
   if (!token?.startsWith(TOKEN_PREFIXES.registration)) {
@@ -938,7 +951,7 @@ const SELF = process.argv[1] ?? "";
 async function main(): Promise<void> {
   const [mode, arg, value] = ARGS.positional;
   if (mode === "setup") return setup(arg);
-  // FE-52: `lanework mcp`, the offline board's MCP server on stdio. Before
+  // `lanework mcp`, the offline board's MCP server on stdio. It comes before
   // anything that could print: stdout is the protocol from here on.
   if (mode === "mcp") {
     try {
@@ -951,7 +964,7 @@ async function main(): Promise<void> {
     }
     return;
   }
-  // INF-03: the plugin's `lanework` command.
+  // The plugin's `lanework` command.
   try {
     if (mode === "login")
       return await login(
@@ -989,7 +1002,7 @@ async function main(): Promise<void> {
     mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
     const file = join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
     writeFileSync(file, stdin, { mode: 0o600 });
-    // ⚠️ The same flags travel to the worker, and so does the environment —
+    // NOTE: The same flags travel to the worker, and so does the environment,
     // `ELECTRON_RUN_AS_NODE` included, or the worker would start as an app.
     const flags = process.argv
       .slice(2)

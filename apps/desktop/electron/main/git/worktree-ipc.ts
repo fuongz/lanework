@@ -1,3 +1,8 @@
+// The local-repository channels.
+//
+// NOTE: Every one of them takes a SLUG and resolves the folder here, from
+// what this machine wrote down: the same rule `repoState` follows for the
+// remote. No channel accepts a directory.
 import { stat } from "node:fs/promises";
 import { shell } from "electron";
 import {
@@ -39,31 +44,29 @@ import {
 } from "./worktree";
 
 /**
- * The local-repository channels (FE-22).
- *
- * ⚠️ Every one of them takes a SLUG and resolves the folder here, from what this
- * machine wrote down — the same rule `repoState` follows for the remote. No
- * channel accepts a directory.
- */
-
-/**
  * Folder `index` of the project `slug`, as this machine linked it.
  *
- * NOTE: resolved through `knownWorkspace`, which knows local boards. A plain
- * `authorizedRecord` refuses every project in local mode, where a local board
- * files its folders under no credential.
+ * NOTE: Resolved through {@link knownWorkspace}, which knows local boards.
+ * A plain `authorizedRecord` refuses every project in local mode, where a
+ * local board files its folders under no credential.
  */
 async function folderAt(slug: string, index: number): Promise<string | null> {
   const { record, workspace } = await knownWorkspace(slug);
   return (await readFolders(record))[workspace.slug]?.[index] ?? null;
 }
 
+/**
+ * A project's slug from the renderer, checked.
+ *
+ * @throws When it is not a non-empty string of at most 200 characters.
+ */
 function slugOf(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
     throw new Error("A project is required.");
   return value;
 }
 
+/** The sync actions the renderer may ask for. */
 const SYNC_ACTIONS: SyncAction[] = [
   "fetch",
   "pull",
@@ -72,9 +75,18 @@ const SYNC_ACTIONS: SyncAction[] = [
   "force-push",
 ];
 
-/** At most this many paths in one call — a "Stage All" on a big refactor, not more. */
+/**
+ * The most paths one call takes.
+ *
+ * Enough for a "Stage All" on a big refactor, not more.
+ */
 const MAX_PATHS = 5_000;
 
+/**
+ * The paths a stage, unstage or restore acts on, checked.
+ *
+ * @throws When there are none, too many, or one is not a valid path.
+ */
 function pathsOf(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PATHS)
     throw new Error("Choose at least one file.");
@@ -85,6 +97,11 @@ function pathsOf(value: unknown): string[] {
   });
 }
 
+/**
+ * Which side of a file to read: the working tree, or a revision.
+ *
+ * @throws When it is neither.
+ */
 function sideOf(value: unknown): FileSide {
   const side = value as FileSide | null;
   if (side?.kind === "worktree") return { kind: "worktree" };
@@ -98,8 +115,12 @@ function sideOf(value: unknown): FileSide {
 }
 
 /**
- * Which of the project's linked folders, by index — primary (0) when absent
- * (FE-71/D3). Only the Files channels and `status` take one.
+ * Which of the project's linked folders a call is for, by index.
+ *
+ * The primary folder (0) when absent (FE-71/D3). Only the Files channels and
+ * `status` take one.
+ *
+ * @throws When it is not an index from 0 to 255.
  */
 function folderOf(value: unknown): number {
   if (value === undefined || value === null) return 0;
@@ -123,6 +144,11 @@ async function repo(
   return found.kind === "ready" ? { top: found.top } : { state: found };
 }
 
+/**
+ * The repository's top level.
+ *
+ * @throws When the folder has no local repository.
+ */
 async function top(slug: string, folder = 0): Promise<string> {
   const found = await repo(slug, folder);
   if ("state" in found)
@@ -130,20 +156,26 @@ async function top(slug: string, folder = 0): Promise<string> {
   return found.top;
 }
 
+/** The repository's status, or the state that says why there is none. */
 async function current(slug: string, folder = 0): Promise<WorktreeState> {
   const found = await repo(slug, folder);
   return "state" in found ? found.state : status(found.top);
 }
 
-/** A path inside the repository, as the Files screen names one (FE-66). */
+/**
+ * A path inside the repository, as the Files screen names one.
+ *
+ * @throws When it is not a non-empty string of at most 4096 characters.
+ */
 function pathOf(value: unknown): string {
   if (typeof value !== "string" || !value || value.length > 4_096)
     throw new Error("That is not a file in this repository.");
   return value;
 }
 
+/** Register the local-repository IPC handlers. */
 export function registerWorktree(devUrl?: string): void {
-  // Repository › Files (FE-66). Read-only: listing, reading, and Finder.
+  // Repository › Files. Read-only: listing, reading, and Finder.
   handle(
     worktreeChannels.files,
     devUrl,
@@ -179,11 +211,11 @@ export function registerWorktree(devUrl?: string): void {
     },
   );
 
-  // "Open in Default App" from the Files tree's menu (FE-66).
+  // "Open in Default App" from the Files tree's menu.
   //
-  // ⚠️ Opening an app, a script or an executable RUNS it, and a repository is
-  // full of files an agent wrote. Those are refused here, not only hidden in
-  // the menu — Reveal in Finder is the way to them.
+  // NOTE: Opening an app, a script or an executable RUNS it, and a repository
+  // is full of files an agent wrote. Those are refused here, not only hidden
+  // in the menu. Reveal in Finder is the way to them.
   handle(worktreeChannels.openDefault, devUrl, async (args): Promise<void> => {
     const path = pathOf(args[1]);
     const full = await locateFile(
@@ -198,8 +230,9 @@ export function registerWorktree(devUrl?: string): void {
     if (failed) throw new Error(failed);
   });
 
-  // ⚠️ Finder, never `shell.openPath`. Opening a file in its default app runs
-  // a `.command` or an `.app` — reading a repository must not execute it.
+  // NOTE: Finder, never `shell.openPath`. Opening a file in its default app
+  // runs a `.command` or an `.app`, and reading a repository must not
+  // execute it.
   handle(worktreeChannels.reveal, devUrl, async (args): Promise<void> => {
     const full = await locateFile(
       await top(slugOf(args[0]), folderOf(args[2])),
@@ -232,7 +265,7 @@ export function registerWorktree(devUrl?: string): void {
     },
   );
 
-  // ⚠️ Every write answers the NEW status. The screen redraws from what git says
+  // Every write answers the NEW status. The screen redraws from what git says
   // afterwards rather than from what it hoped the call did.
   handle(
     worktreeChannels.stage,

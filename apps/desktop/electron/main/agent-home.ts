@@ -1,8 +1,8 @@
 // Where Claude Code and Codex keep their own configuration on this machine,
-// named once for everything that reads it: readiness (FE-30) and the agent
-// setup view (FE-40).
+// named once for everything that reads it: readiness, the agent setup view,
+// the config files.
 //
-// ⚠️ Node only — no Electron — so a spec can point every path at a fake
+// NOTE: Node only, no Electron, so a spec can point every path at a fake
 // home. The dev-build test seam (`LANEWORK_TEST_AGENT_HOME`) needs
 // `app.isPackaged`, so applying it is the caller's job: pass its home in.
 import { readFile, stat } from "node:fs/promises";
@@ -10,13 +10,18 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { codexHome } from "./handoff/codex";
 
-/** Claude Code's own home: `$CLAUDE_CONFIG_DIR`, as it reads it, or `~/.claude`. */
+/**
+ * Claude Code's own home.
+ *
+ * `$CLAUDE_CONFIG_DIR`, as Claude Code reads it, or `~/.claude`.
+ */
 export const claudeDir = (home = homedir()) =>
   process.env.CLAUDE_CONFIG_DIR || join(home, ".claude");
 
 /**
- * `~/.claude.json`, where `claude mcp add` files the user and local scopes —
- * inside `$CLAUDE_CONFIG_DIR` when that is set.
+ * `~/.claude.json`, where `claude mcp add` files the user and local scopes.
+ *
+ * It is inside `$CLAUDE_CONFIG_DIR` when that is set.
  */
 export const claudeJsonPath = (home = homedir()) =>
   process.env.CLAUDE_CONFIG_DIR
@@ -44,7 +49,11 @@ export function agentHome(home = homedir()): AgentHome {
 /** Notes and configs are small; anything bigger is not one. */
 export const CONFIG_MAX_BYTES = 512 * 1024;
 
-/** A small text file, or null: missing, not a file, or too big to be one. */
+/**
+ * Read a small text file.
+ *
+ * @returns Null when it is missing, not a file, or bigger than `max` bytes.
+ */
 export async function readText(
   path: string,
   max = CONFIG_MAX_BYTES,

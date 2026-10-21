@@ -1,13 +1,13 @@
-// The config files Settings → Agents edits (FE-47): read, and written back
-// safely — refused when the file changed since it was read, or when it would
-// no longer parse; backed up, then replaced atomically.
+// The config files Settings → Agents edits: read, and written back safely. A
+// write is refused when the file changed since it was read, or when it would
+// no longer parse; otherwise the file is backed up, then replaced atomically.
 //
-// ⚠️ Node only, no Electron: main calls it, and a spec drives it under plain
-// Node against a fake home.
+// NOTE: Node only, no Electron: main calls it, and a spec drives it under
+// plain Node against a fake home.
 //
-// ⚠️ A file's path comes ONLY from `pathOf(id, where)`. The renderer names an
-// id: one of a fixed list, or a skill — whose folder name `parseSkillId` has
-// already held to a single segment with no `..` and no leading dot (D9).
+// NOTE: A file's path comes only from `pathOf(id, where)`. The renderer names
+// an id: one of a fixed list, or a skill, whose folder name `parseSkillId`
+// has already held to a single segment with no `..` and no leading dot (D9).
 import { createHash } from "node:crypto";
 import {
   copyFile,
@@ -106,7 +106,11 @@ function formatOf(id: ConfigFileId): ConfigFormat {
   return parseSkillId(id) ? "markdown" : SPECS[id as FixedConfigId].format;
 }
 
-/** Where `id` lives — the only way a path is made here. */
+/**
+ * Where `id` lives: the only way a path is made here.
+ *
+ * @throws When `id` names no config file.
+ */
 export function pathOf(id: ConfigFileId, where: AgentHome): string {
   const skill = parseSkillId(id);
   if (skill) return join(skillRoot(skill.root, where), skill.name, "SKILL.md");
@@ -116,8 +120,10 @@ export function pathOf(id: ConfigFileId, where: AgentHome): string {
 }
 
 /**
- * The file a write lands in: through a symlink to what it points at, so a
- * dotfiles link stays a link. A file not there yet is its own target.
+ * The file a write lands in.
+ *
+ * It follows a symlink to what it points at, so a dotfiles link stays a link.
+ * A file not there yet is its own target.
  */
 async function targetOf(path: string): Promise<string> {
   return realpath(path).catch(() => path);
@@ -161,8 +167,10 @@ export async function listConfigFiles(where: AgentHome): Promise<ConfigFile[]> {
 }
 
 /**
- * The user's skills under one root: each folder — or link to one — holding a
- * `SKILL.md`, by name. Hidden folders (Codex's `.system`) are not listed.
+ * The user's skills under one root, by name.
+ *
+ * A skill is each folder, or link to one, holding a `SKILL.md`. Hidden
+ * folders (Codex's `.system`) are not listed.
  */
 async function skillsIn(root: SkillRoot, where: AgentHome) {
   const folder = skillRoot(root, where);
@@ -191,7 +199,7 @@ async function skillsIn(root: SkillRoot, where: AgentHome) {
   return found;
 }
 
-/** A skill's own `description:`, on one line — or nothing. */
+/** A skill's own `description:`, on one line, or an empty string. */
 async function skillDescription(path: string): Promise<string> {
   const head = await readFile(path, "utf8")
     .then((text) => text.slice(0, 8 * 1024))
@@ -204,7 +212,11 @@ async function skillDescription(path: string): Promise<string> {
   return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
-/** The bytes on disk now, or null when there is no file. */
+/**
+ * The bytes on disk now, or null when there is no file.
+ *
+ * @throws When the path is not a file, or too big to edit here.
+ */
 async function current(path: string): Promise<Buffer | null> {
   const info = await stat(path).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
@@ -271,6 +283,16 @@ async function backUp(path: string, now: Date): Promise<string> {
 /** One write per file at a time, so two Saves cannot interleave. */
 const queues = new Map<string, Promise<unknown>>();
 
+/**
+ * Write `text` to the file `id` names, if it is still as it was read.
+ *
+ * Writes to one file run one after the other.
+ *
+ * @param baseHash The hash the file was read at; empty for a file that did
+ *   not exist.
+ * @returns `conflict` when the file changed since, `invalid` when the text
+ *   would not parse, else `ok` with the new content and the backup's path.
+ */
 export function writeConfigFile(
   id: ConfigFileId,
   text: string,

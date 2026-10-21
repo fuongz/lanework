@@ -8,15 +8,15 @@ import { dirname, join } from "node:path";
 export const electronBuildOptions = {
   entryPoints: {
     "main/index": "electron/main/index.ts",
-    // FE-19: the utility process every terminal lives in.
+    // The utility process every terminal lives in.
     "main/pty-host": "electron/main/terminal/host.ts",
     "preload/index": "electron/preload/index.ts",
-    // FE-28: the Claude Code Stop hook, run by Electron's own Node
+    // The agents' Stop hook, run by Electron's own Node
     // (`ELECTRON_RUN_AS_NODE=1`) from the command Settings → Agents installs.
     "hook/lanework-checkpoint": "electron/hook/lanework-checkpoint.ts",
-    // FE-46: process-scoped Claude statusLine wrapper, same Node as the hook.
+    // Claude's process-scoped `statusLine` wrapper, on the hook's Node.
     "statusline/claude-usage": "electron/statusline/claude-usage.ts",
-    // FE-52: the offline MCP server, same Node as the hook. Agent configs run
+    // The offline MCP server, on the same Node as the hook. Agent configs run
     // `ELECTRON_RUN_AS_NODE=1 <app> dist/electron/mcp-local/server.cjs`.
     "mcp-local/server": "electron/mcp-local/main.ts",
   },
@@ -24,7 +24,7 @@ export const electronBuildOptions = {
   platform: "node",
   format: "cjs",
   target: "node22",
-  // ⚠️ node-pty stays OUT of the bundle: its `.node` binary and
+  // NOTE: node-pty stays OUT of the bundle. Its `.node` binary and
   // `spawn-helper` are found relative to its own files, which bundling would
   // move. `stageNativeModules` puts it next to the bundle instead.
   external: ["electron", "@lydell/node-pty"],
@@ -36,17 +36,19 @@ export const electronBuildOptions = {
 const require = createRequire(import.meta.url);
 
 /**
- * Copy node-pty — the JS shim and this platform's prebuilt binary — into
- * `dist/electron/node_modules`, where `pty-host.cjs` resolves it (FE-19/D9).
+ * Copies node-pty into `dist/electron/node_modules`, where `pty-host.cjs`
+ * resolves it (FE-19/D9).
  *
- * ⚠️ Copied, dereferenced, rather than left to electron-builder. `files` is
+ * It copies the JS shim and this platform's prebuilt binary.
+ *
+ * NOTE: The copy is dereferenced and not left to electron-builder. `files` is
  * `dist/**` only, and bun's install is a store of symlinks that a packager
- * cannot be trusted to follow; what is in `dist` is what ships and what the
+ * cannot be trusted to follow. What is in `dist` is what ships and what the
  * tests boot. `asarUnpack` then keeps the binary and `spawn-helper` outside
  * the archive, where they can be loaded and executed.
  *
- * ⚠️ This platform's package only. A build for another OS or CPU is made on
- * that machine, the way the prebuilds themselves are.
+ * This platform's package only. A build for another OS or CPU is made on that
+ * machine, the way the prebuilds themselves are.
  */
 export async function stageNativeModules(outdir = "dist/electron") {
   const shim = dirname(await realpath(require.resolve("@lydell/node-pty")));

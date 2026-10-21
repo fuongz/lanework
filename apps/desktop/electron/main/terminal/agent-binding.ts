@@ -1,13 +1,14 @@
-// Which conversation each running agent tab is on NOW (FE-31) — not the one
+// Which conversation each running agent tab is on NOW (FE-31), not the one
 // it was started with.
 //
-// ⚠️ A tab's `resume` is set at spawn, and the CLI can leave it behind: a new
-// Codex tab has none (Codex takes no `--session-id`), and Claude's `/clear`
-// or `/resume` moves to another conversation inside the same process. Either
-// way the rail showed the tab AND the transcript it is really writing as two
-// rows for one agent, and a click on the second started another agent on it.
+// NOTE: A tab's `resume` is set at spawn, and the CLI can leave it behind: a
+// new Codex tab has none (Codex takes no `--session-id`), and Claude's
+// `/clear` or `/resume` moves to another conversation inside the same
+// process. Without this, the rail shows the tab AND the transcript it is
+// really writing as two rows for one agent, and a click on the second starts
+// another agent on it.
 //
-// ⚠️ Nothing here imports Electron, so a spec can drive it under plain Node
+// Nothing here imports Electron, so a spec can drive it under plain Node
 // against a fake home folder.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,25 +18,33 @@ import {
 } from "../../../shared/terminal";
 import { codexStarts } from "./agent-sessions";
 
-/** A tab whose conversation is not the one it says: its id, and the right one. */
+/** A tab whose conversation is not the one it says. */
 interface AgentBinding {
+  /** The tab's id. */
   id: string;
+  /** The conversation it is really on. */
   resume: string;
 }
 
 /**
- * How far before its tab a CLI's start may be stamped and still be that
- * tab's: clocks are read in two processes, a millisecond apart or so.
+ * How far before its tab a CLI's start may be stamped and still be that tab's.
+ *
+ * The clocks are read in two processes, a millisecond or so apart.
  */
 const SLACK_MS = 2_000;
 
 /**
- * The conversation the Claude CLI running as `pid` is on, from the file it
- * keeps for itself at `~/.claude/sessions/<pid>.json`.
+ * The conversation the Claude CLI running as `pid` is on.
  *
- * ⚠️ Not a documented interface — a better answer when it is there, never a
- * requirement: missing, unreadable, another shape, or written by an EARLIER
- * process that had the same pid, it is null and the tab keeps what it had.
+ * It reads the file the CLI keeps for itself at
+ * `~/.claude/sessions/<pid>.json`.
+ *
+ * NOTE: That file is not a documented interface. It is a better answer when
+ * it is there, never a requirement.
+ *
+ * @returns null when the file is missing, unreadable, of another shape, or
+ *   written by an EARLIER process that had the same pid. The tab then keeps
+ *   what it had.
  */
 async function claudeConversation(
   home: string,

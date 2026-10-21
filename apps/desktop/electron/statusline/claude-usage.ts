@@ -3,7 +3,13 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { claudeQuotaOf } from "../main/terminal/claude-usage";
 
-/** A process-only statusLine wrapper. Original stdin/stdout remain unchanged. */
+/**
+ * Claude Code's `statusLine` wrapper: caches the quota, then runs the user's
+ * own status line command.
+ *
+ * It writes nothing itself. The original command gets the same stdin and
+ * prints to the same stdout.
+ */
 async function main() {
   const [file, original] = process.argv.slice(2);
   if (!file) return;
@@ -24,7 +30,8 @@ async function main() {
       await rename(temporary, file);
     }
   } catch {
-    /* Bad/missing rate_limits or unavailable cache never breaks Claude. */
+    // Bad or missing `rate_limits`, or a cache it cannot write, never breaks
+    // Claude.
   }
   if (original) {
     const env = { ...process.env };

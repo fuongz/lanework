@@ -3,16 +3,16 @@ import type { SqlDatabase } from "./driver";
 /**
  * The local board's schema, one migration per `PRAGMA user_version`.
  *
- * ⚠️ Append only. A migration that shipped is never edited: a machine that
+ * NOTE: Append only. A migration that shipped is never edited: a machine that
  * already ran it will not run it again, so an edit would split the installed
  * base into two schemas that both claim the same version. Add the next one.
  *
- * ⚠️ JSON columns hold `@lanework/protocol` shapes (`ChecklistItem[]`,
- * `Stream[]`, `Checkpoint[]`), so pushing a local card to the cloud later is a
- * copy, not a translation.
+ * NOTE: JSON columns hold `@lanework/protocol` shapes (`ChecklistItem[]`,
+ * `Stream[]`, `Checkpoint[]`), so pushing a local card to the cloud later is
+ * a copy, not a translation.
  */
 const MIGRATIONS: readonly string[] = [
-  // 1 — workspace + work_item + meta (FE-52, D3).
+  // 1: workspace + work_item + meta (FE-52, D3).
   `
   CREATE TABLE workspace (
     id          TEXT PRIMARY KEY,
@@ -76,13 +76,16 @@ export function userVersion(db: SqlDatabase): number {
 }
 
 /**
- * Brings the file up to `SCHEMA_VERSION`.
+ * Bring the file up to {@link SCHEMA_VERSION}.
  *
- * ⚠️ Under `BEGIN IMMEDIATE`, re-reading the version INSIDE the lock: the app,
- * an MCP server and a hook can all open a fresh file at the same moment, and
- * the loser must find the work done rather than run `CREATE TABLE` twice.
- * Refuses a file newer than this build — downgrading the app must not quietly
- * write rows an older schema cannot describe.
+ * NOTE: It runs under `BEGIN IMMEDIATE` and re-reads the version inside the
+ * lock. The app, an MCP server and a hook can all open a fresh file at the
+ * same moment, and the loser must find the work done rather than run
+ * `CREATE TABLE` twice.
+ *
+ * @returns The version the file is at now.
+ * @throws When the file is newer than this build: downgrading the app must
+ *   not quietly write rows an older schema cannot describe.
  */
 export function migrate(db: SqlDatabase): number {
   if (userVersion(db) === SCHEMA_VERSION) return SCHEMA_VERSION;

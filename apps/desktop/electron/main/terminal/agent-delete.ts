@@ -1,9 +1,11 @@
 // Delete one agent conversation's transcript for good (FE-57).
 //
-// ⚠️ The ONE place Lanework writes into the CLIs' own folders. Every path is
-// built here from ids main has already checked against this folder's listing;
-// a page never names a file. And nothing here imports Electron: main passes
-// the home, and a spec drives it against a fake one.
+// NOTE: Apart from the archive, the one place Lanework writes into the CLIs'
+// own folders. Every path is built here from ids main has already checked
+// against this folder's listing; a page never names a file.
+//
+// Nothing here imports Electron: main passes the home, and a spec drives it
+// against a fake one.
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isAgentSessionId, type TerminalAgent } from "../../../shared/terminal";
@@ -15,9 +17,13 @@ import {
 } from "./agent-sessions";
 
 /**
- * Claude: `<id>.jsonl` and its `<id>/` folder (sub-agents, tool results).
- * Codex: the conversation's rollout, the rollouts it spawned, and its lines in
- * `session_index.jsonl` (FE-57/D3).
+ * Delete a conversation main has checked is one of `folder`'s.
+ *
+ * - Claude: `<id>.jsonl` and its `<id>/` folder (sub-agents, tool results).
+ * - Codex: the conversation's rollout, the rollouts it spawned, and its lines
+ *   in `session_index.jsonl` (FE-57/D3).
+ *
+ * @throws when `id` is not a session id, or there is no file for it.
  */
 export async function deleteAgentTranscript(
   home: string,
@@ -48,9 +54,13 @@ export async function deleteAgentTranscript(
 }
 
 /**
- * `session_index.jsonl` without `id`'s lines — written whole to a temp file
- * and moved over, so Codex never reads half of it. Every other line is kept
- * byte for byte, unparsed ones included: the file is Codex's, not ours.
+ * Remove `id`'s lines from Codex's `session_index.jsonl`.
+ *
+ * The file is written whole to a temp file and moved over, so Codex never
+ * reads half of it. Every other line is kept byte for byte, unparsed ones
+ * included: the file is Codex's, not ours.
+ *
+ * @param codex The `.codex` folder.
  */
 export async function dropCodexIndex(codex: string, id: string): Promise<void> {
   const file = join(codex, "session_index.jsonl");

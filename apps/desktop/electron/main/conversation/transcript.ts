@@ -1,9 +1,10 @@
-// A Claude conversation read as a chat (FE-62): its transcript's lines folded
-// into user turns and assistant turns — text, tool calls gathered between two
-// pieces of text, per-turn usage.
+// A Claude conversation read as a chat: its transcript's lines folded into
+// user turns and assistant turns. An assistant turn holds its text, the tool
+// calls gathered between two pieces of text, and its usage.
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a Node
-// test drives it against a fake home folder, like `subagent-transcript.ts`.
+// NOTE: Read-only, and nothing here imports Electron: main calls it, and a
+// Node test drives it against a fake home folder, like
+// `subagent-transcript.ts`.
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -35,7 +36,11 @@ import {
 } from "../terminal/agent-sessions";
 import { claudeStepSummary } from "../terminal/subagent-transcript";
 
-/** Where Claude keeps conversation `id` of `folder`. */
+/**
+ * Where Claude keeps conversation `id` of `folder`.
+ *
+ * @throws When `id` is not a conversation id.
+ */
 export function transcriptPath(
   home: string,
   folder: string,
@@ -99,6 +104,7 @@ function toolKind(tool: string): ToolKind {
   }
 }
 
+/** The tools whose input names the one file they work on. */
 const FILE_TOOLS = new Set([
   "Read",
   "Edit",
@@ -107,6 +113,7 @@ const FILE_TOOLS = new Set([
   "NotebookEdit",
 ]);
 
+/** `value` as an object to read fields from; `{}` for anything else. */
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -128,7 +135,14 @@ function resultText(content: unknown): string {
     .join("\n");
 }
 
-/** `<command-name>/x</command-name>…<command-args>y</command-args>` → `/x y`. */
+/**
+ * A slash command the CLI wrapped in tags, as the user typed it.
+ *
+ * `<command-name>/x</command-name>…<command-args>y</command-args>` reads as
+ * `/x y`.
+ *
+ * @returns null when `text` names no command.
+ */
 function slashCommand(text: string): string | null {
   const name = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)?.[1];
   if (!name) return null;
@@ -137,7 +151,12 @@ function slashCommand(text: string): string | null {
   return args?.trim() ? `${command} ${args.trim()}` : command;
 }
 
-/** What a LOCAL command — `/model`, `/cost` — answers with; never a turn. */
+/**
+ * Whether a line is what a LOCAL command, such as `/model` or `/cost`,
+ * answers with.
+ *
+ * Such a line is never a turn.
+ */
 function localOutput(line: Line): boolean {
   if (line.type !== "user") return false;
   const content = (line.message as { content?: unknown } | undefined)?.content;
@@ -154,9 +173,13 @@ function localOutput(line: Line): boolean {
   );
 }
 
-/** `[Image: source: /path/to/file.png]`, what the CLI writes for a dropped image. */
+/**
+ * What the CLI writes for a dropped image:
+ * `[Image: source: /path/to/file.png]`.
+ */
 const IMAGE_SOURCE = /^\[Image: source: (.+)\]$/;
 
+/** The MIME type of each extension a dropped file may have. */
 const MEDIA_BY_EXT: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
@@ -166,16 +189,24 @@ const MEDIA_BY_EXT: Record<string, string> = {
   pdf: "application/pdf",
 };
 
+/**
+ * A path's MIME type by its extension.
+ *
+ * `application/octet-stream` when the extension is not known.
+ */
 function mediaOfPath(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   return MEDIA_BY_EXT[ext] ?? "application/octet-stream";
 }
 
 /**
- * A message sent while a turn ran, as the user line it stands for — or
- * null. The CLI writes one it took in mid-turn as an `attachment` of type
- * `queued_command`, not as a user line (FE-67); a background task's
+ * A message sent while a turn ran, as the user line it stands for.
+ *
+ * The CLI writes one it took in mid-turn as an `attachment` of type
+ * `queued_command`, not as a user line (FE-67). A background task's
  * notification is one too, with another `commandMode`.
+ *
+ * @returns null for any other line.
  */
 function steered(line: Line): Line | null {
   if (line.type !== "attachment") return null;
@@ -194,9 +225,11 @@ function steered(line: Line): Line | null {
 }
 
 /**
- * A user line that is somebody's prompt, read as a turn — or null: a tool
- * result, an interruption, a compaction summary, a command's output or
- * caveat, anything the CLI wrapped in a tag for itself.
+ * A user line that is somebody's prompt, read as a turn.
+ *
+ * @returns null for a tool result, an interruption, a compaction summary, a
+ *   command's output or caveat, and anything the CLI wrapped in a tag for
+ *   itself.
  */
 function promptOf(
   line: Line,
@@ -266,15 +299,24 @@ function promptOf(
   return { text, attachments, command };
 }
 
+/** One API message's token counts. */
 interface Usage {
+  /** Input tokens, cache writes included. */
   input: number;
   output: number;
+  /** Input tokens read from the cache. */
   cached: number;
 }
 
+/** `value` when it is a finite number, else 0. */
 const num = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : 0;
 
+/**
+ * An API message's token counts.
+ *
+ * @returns null when the message carries no usage.
+ */
 function usageOf(message: Record<string, unknown>): Usage | null {
   const usage = record(message.usage);
   if (!Object.keys(usage).length) return null;
@@ -288,14 +330,23 @@ function usageOf(message: Record<string, unknown>): Usage | null {
 /** An assistant turn being built, with what it needs before it is whole. */
 interface Building {
   turn: AssistantTurn;
+  /** By API message id, so each message is counted once. */
   usage: Map<string, Usage>;
+  /** The first and last line's time, in epoch ms. */
   firstAt: number | null;
   lastAt: number | null;
   /** When the prompt it answers was sent. */
   promptAt: number | null;
+  /** The API message the last text block came from. */
   lastTextMessage: string | null;
 }
 
+/**
+ * A turn's usage: its messages' counts summed, with its cache hit rate and
+ * speed.
+ *
+ * @returns null when no message of the turn carried usage.
+ */
 function finishUsage(building: Building): TurnUsage | null {
   if (building.usage.size === 0) return null;
   let input = 0;
@@ -306,8 +357,8 @@ function finishUsage(building: Building): TurnUsage | null {
     output += usage.output;
     cached += usage.cached;
   }
-  // ⚠️ The CLI writes a line per finished content block: a one-block answer
-  // has one stamp, so its span is counted from the prompt instead.
+  // NOTE: The CLI writes a line per finished content block. A one-block
+  // answer has one stamp, so its span is counted from the prompt instead.
   const from =
     building.firstAt !== null && building.firstAt !== building.lastAt
       ? building.firstAt
@@ -328,13 +379,14 @@ function finishUsage(building: Building): TurnUsage | null {
   };
 }
 
+/** A line's `timestamp`, when it has one. */
 const stamp = (line: Line): string | null =>
   typeof line.timestamp === "string" ? line.timestamp : null;
 
 /**
- * The turns of a conversation's lines, in order (FE-62).
+ * The turns of a conversation's lines, in order.
  *
- * - A user turn is a prompt somebody sent (`promptOf`).
+ * - A user turn is a prompt somebody sent ({@link promptOf}).
  * - Everything between two user turns is ONE assistant turn: its text parts
  *   in order, and every run of tool calls between two texts folded into one
  *   group — across lines, each call given the result a later line brings.
@@ -376,7 +428,8 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
   };
 
   let promptAt: number | null = null;
-  /** A slash command just read: a local one's output takes it back out. */
+  // The turn of a slash command just read: a local one's output takes it
+  // back out.
   let command: number | null = null;
   for (const line of rows) {
     if (line.isSidechain) continue;
@@ -566,11 +619,15 @@ function conversationOf(
 }
 
 /**
- * Conversation `id` of `folder`, read for the chat (FE-62).
+ * Read conversation `id` of `folder` for the chat.
  *
- * ⚠️ The path is built from the folder and an id that passed
- * `isAgentSessionId`, inside Claude's own folder under `home`. Past
- * `CONVERSATION_READ_MAX` only the end is read, and `truncated` says so.
+ * NOTE: The path is built from the folder and an id that passed
+ * {@link isAgentSessionId}, inside Claude's own folder under `home`.
+ *
+ * Past {@link CONVERSATION_READ_MAX} bytes only the end is read, and
+ * `truncated` says so.
+ *
+ * @throws When the conversation has no transcript.
  */
 export async function readConversation(
   home: string,

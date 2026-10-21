@@ -1,6 +1,10 @@
 import { nativeImage } from "electron";
 
-/** The existing logo's two lanes and sparkle, without its square background. */
+/**
+ * The menu-bar template image, at 1x and 2x.
+ *
+ * The logo's two lanes and sparkle, without its square background.
+ */
 export function menuBarIcon() {
   const image = nativeImage.createEmpty();
   for (const scaleFactor of [1, 2]) {

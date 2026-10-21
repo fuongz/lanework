@@ -12,7 +12,11 @@ const MCP_AGENTS = ["claude-code", "codex"] as const;
 /** What a row shows: the CLI's answer, or that one is on its way. */
 export type McpAuthView = LaneworkMcpAuth | "checking" | "login";
 
-/** Answers that need the user: the island comes for these. */
+/**
+ * Whether an answer needs the user.
+ *
+ * The island comes up for these.
+ */
 export const needsAttention = (auth: LaneworkMcpAuth | undefined): boolean =>
   auth === "needs-login" || auth === "failed";
 
@@ -27,20 +31,25 @@ export function cloudAgents(
 }
 
 /**
- * Whether Claude Code and Codex are signed in to the cloud Lanework MCP —
- * for Settings › Agents and the sign-in island, which read the same answers.
+ * Whether Claude Code and Codex are signed in to the cloud Lanework MCP.
  *
- * ⚠️ `settled` is the last ANSWER and survives a re-check, so a check that
- * runs while the island is up does not make it blink; `view` is what a row
+ * Read by Settings › Agents and the sign-in island.
+ *
+ * NOTE: `settled` is the last answer and survives a re-check, so a check that
+ * runs while the island is up does not make it blink. `view` is what a row
  * shows right now, "checking" included.
  */
 interface McpAuthState {
   status: LaneworkMcpStatus | null;
   view: Partial<Record<LaneworkMcpAgent, McpAuthView>>;
   settled: Partial<Record<LaneworkMcpAgent, LaneworkMcpAuth>>;
-  /** When a login from this window last finished signed in. */
+  /** When a login from this window last finished signed in (epoch ms). */
   signedInAt: Partial<Record<LaneworkMcpAgent, number>>;
-  /** An answer the user waved away; the island stays off until it changes. */
+  /**
+   * An answer the user waved away.
+   *
+   * The island stays off until the answer changes.
+   */
   dismissed: Partial<Record<LaneworkMcpAgent, LaneworkMcpAuth>>;
   loadStatus: () => Promise<void>;
   setStatus: (status: LaneworkMcpStatus) => void;
@@ -113,18 +122,23 @@ export const useMcpAuth = create<McpAuthState>((set, get) => {
 
 /** How often the shell asks again while the app is open. */
 const EVERY_MS = 10 * 60_000;
-/** Coming back to the window asks again, but not more than once a minute. */
+/**
+ * The shortest gap between two checks on window focus.
+ *
+ * Coming back to the window asks again, but not more than once a minute.
+ */
 const FOCUS_GAP_MS = 60_000;
 
 /**
- * Keep the answers fresh for as long as the shell is mounted: on launch, when
- * the session or the entries change, every `EVERY_MS`, and on focus — a token
- * that expired, or a login finished in a terminal, shows up without a visit
- * to Settings.
+ * Keep the answers fresh while the shell is mounted.
  *
- * ⚠️ Codex answers from the token it holds, without reaching the server, so
- * a token the server revoked reads as signed in until Codex itself finds
- * out. Claude Code's check does reach the server.
+ * Asks on launch, when the session or the entries change, every
+ * {@link EVERY_MS}, and on focus. A token that expired, or a login finished
+ * in a terminal, shows up without a visit to Settings.
+ *
+ * NOTE: Codex answers from the token it holds, without reaching the server.
+ * A token the server revoked reads as signed in until Codex finds out.
+ * Claude Code's check does reach the server.
  */
 export function useMcpAuthWatch(): void {
   const kind = useSession((state) => state.session?.principal.kind);

@@ -7,35 +7,35 @@ import {
   scanTaskBlocks,
 } from "./review-scan";
 
-/**
- * A review file, read the way the Lanework board reads one.
- *
- * ⚠️ Ported from that board's `reviews-core` (`internal.ts`, `card-build.ts`,
- * `doc.ts`) and `local-fs/reviews.ts`. The values that MUST match, because the
- * cloud keys on them or mints from them:
- *
- *   · `path` — repo-relative (`.agents/reviews/<date>/<file>.md`). It is the
- *     import's `source.ref`, so a card imported from here and a card imported
- *     from the CLI have to be the same row, not two.
- *   · `sha` — sha1 of the file, first 12 hex, exactly as `contentSha` does it.
- *   · `column` — the front-matter `status`, falling back to `todo`, which is
- *     what `DEFAULT_BOARD_CONFIG.status` says (`from: "frontmatter"`).
- *   · `title` — the first `# ` heading with a `Review:` prefix stripped; the
- *     filename is a slug and cannot carry a Vietnamese title back.
- *
- * ⚠️ `.agents/reviews/config.json` can override the lanes and categories, and
- * this reader does NOT interpret it (see `review-import.ts`, which refuses to
- * migrate when one exists). Guessing at a config it cannot fully parse is how
- * cards would land in lanes the board does not have.
- */
+// A review file, read the way the Lanework board reads one.
+//
+// NOTE: Ported from that board's `reviews-core` (`internal.ts`,
+// `card-build.ts`, `doc.ts`) and `local-fs/reviews.ts`. These values must
+// match, because the cloud keys on them or mints from them:
+//
+// - `path`: repo-relative (`.agents/reviews/<date>/<file>.md`). It is the
+//   import's `source.ref`, so a card imported from here and the same card
+//   imported from the CLI must be one row, not two.
+// - `sha`: the sha1 of the file, first 12 hex, as `contentSha` computes it.
+// - `column`: the lane the location rule resolves. It falls back to `todo`, as
+//   `DEFAULT_BOARD_CONFIG.status` says (`from: "frontmatter"`).
+// - `title`: the first `# ` heading with a `Review:` prefix stripped. The file
+//   name is a slug and cannot carry a Vietnamese title back.
+//
+// NOTE: `.agents/reviews/config.json` can override the lanes and categories,
+// and this reader does not interpret it (`review-import.ts` refuses to migrate
+// when one exists). Guessing at a config it cannot fully parse would put cards
+// in lanes the board does not have.
 
+/** The priorities a card may declare. Anything else reads as none. */
 const PRIORITIES = new Set(["low", "medium", "high"]);
 
+/** Strip one pair of surrounding quotes from a front-matter value. */
 function unquote(value: string): string {
   return value.replace(/^['"]|['"]$/g, "");
 }
 
-/** `key: value` lines of the leading `---` block, values left as written. */
+/** Read the `key: value` lines of the leading `---` block, as written. */
 export function parseFrontmatterMap(md: string): Record<string, string> {
   const match = md.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match?.[1]) return {};
@@ -48,13 +48,13 @@ export function parseFrontmatterMap(md: string): Record<string, string> {
   return out;
 }
 
-/** A YAML-ish list: `["a", "b"]` or `a, b`. */
+/** Parse a YAML-ish list: `["a", "b"]` or `a, b`. */
 function parseList(value: string): string[] {
   try {
     const parsed = JSON.parse(value);
     if (Array.isArray(parsed)) return parsed.map(String);
   } catch {
-    /* fall through to lenient parsing */
+    // Fall through to lenient parsing.
   }
   return value
     .replace(/^\[|\]$/g, "")
@@ -64,11 +64,11 @@ function parseList(value: string): string[] {
 }
 
 /**
- * The card's real title.
+ * Read the card's real title: its first `# ` heading, minus `Review:`.
  *
- * ⚠️ `[ \t]`, not `\s`, and the prefix is stripped from the CAPTURE. With `\s*`
- * after an optional `Review:` the pattern walks past a blank line and captures
- * the first paragraph of the body as the title.
+ * NOTE: `[ \t]`, not `\s`, and the prefix is stripped from the capture. With
+ * `\s*` after an optional `Review:`, the pattern walks past a blank line and
+ * captures the first paragraph of the body as the title.
  */
 function extractReviewTitle(md: string): string | null {
   const match = md.match(/^#[ \t]+(.+)$/m);
@@ -76,11 +76,12 @@ function extractReviewTitle(md: string): string | null {
   return match[1].replace(/^Review:[ \t]*/, "").trim() || null;
 }
 
+/** The first `YYYY-MM-DD` in `value`, or null. */
 function extractDate(value: string): string | null {
   return value.match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
 }
 
-/** Leading `NN-`/`NN_` ordinal of a date-folder filename (`01-foo.md` → 1). */
+/** The leading `NN-`/`NN_` ordinal of a file name (`01-foo.md` → 1). */
 function extractOrdinal(fileName: string): number | null {
   const match = fileName.match(/^(\d+)[-_]/);
   return match ? Number(match[1]) : null;
@@ -100,10 +101,11 @@ export interface CardItem {
 }
 
 /**
- * The section headings ARE the section ids, in English whatever the card's
- * language — a board with Vietnamese titles translates them in the UI. The day
- * the file's own words decide its meaning is the day `## Ngoài phạm vi` stops
- * being findable.
+ * The `##` headings that open a checklist section, by section id.
+ *
+ * The headings are the ids, in English whatever the card's language. A board
+ * with Vietnamese titles translates them in the UI. If the file's own words
+ * decided the meaning, `## Ngoài phạm vi` would stop being findable.
  */
 const SECTION_BY_HEADING = new Map<string, "decisions" | "verify">([
   ["decisions", "decisions"],
@@ -111,11 +113,11 @@ const SECTION_BY_HEADING = new Map<string, "decisions" | "verify">([
 ]);
 
 /**
- * The checklist of a `schema:`-carrying card, by section.
+ * Read the checklist of a card that carries `schema:`, by section.
  *
- * ⚠️ Built on `scanTaskBlocks`, like the board's own `parseChecklist` — the
- * block is what says where an item ends, and a second answer to that here is
- * what once spliced a note into the middle of an item.
+ * NOTE: Built on {@link scanTaskBlocks}, like the board's own `parseChecklist`.
+ * The block says where an item ends. A second answer to that here once spliced
+ * a note into the middle of an item.
  */
 export function parseCardItems(md: string): CardItem[] {
   const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
@@ -148,10 +150,10 @@ export function parseCardItems(md: string): CardItem[] {
     }
     const block = blocks.get(line.line);
     if (line.kind !== "task" || line.quote || !block) continue;
-    // ⚠️ Items outside `## Decisions` / `## Verify` are skipped, not defaulted
-    // into decisions: the "How to review" preamble of every card is a task list
-    // about the format, and importing it would put three instructions at the top
-    // of every card's checklist.
+    // NOTE: Items outside `## Decisions` / `## Verify` are skipped, not
+    // defaulted into decisions. Every card's "How to review" preamble is a task
+    // list about the format, and importing it would put three instructions at
+    // the top of every card's checklist.
     if (!section) continue;
     if (open && line.indent <= open.indent) open = null;
 
@@ -170,8 +172,8 @@ export function parseCardItems(md: string): CardItem[] {
       id: line.id ?? "",
       section,
       text: undropped.replace(RECOMMENDED_RE, "").trim(),
-      // ⚠️ A file hand-edited to `- [x] … *(dropped)*` reads back as UNCHECKED
-      // rather than propagating the contradiction — the board's own invariant.
+      // A file hand-edited to `- [x] … *(dropped)*` reads back as unchecked,
+      // not as the contradiction. That is the board's own invariant.
       checked: line.checked && !block.dropped,
       note: note || null,
       group: open && line.indent > open.indent ? open.id : null,
@@ -184,7 +186,7 @@ export function parseCardItems(md: string): CardItem[] {
   return items;
 }
 
-/** Front-matter keys the card surfaces as fields, so they aren't repeated. */
+/** Front-matter keys the card surfaces as fields, kept out of `custom`. */
 const RESERVED = new Set([
   "schema",
   "status",
@@ -198,6 +200,7 @@ const RESERVED = new Set([
   "updated_at",
 ]);
 
+/** A review file read into the shape the cloud import takes. */
 export interface ReviewFileCard {
   /** Repo-relative, and the import's `source.ref`. */
   path: string;
@@ -213,11 +216,11 @@ export interface ReviewFileCard {
   custom: Record<string, string>;
   /** `YYYY-MM-DD` from the folder, the filename or `created_at`. */
   date: string | null;
-  /** `NN-` prefix, which is the board's within-a-day order. */
+  /** The `NN-` prefix: the board's order within a day. */
   ordinal: number | null;
-  /** File mtime, ISO. The only moment a file can actually vouch for. */
+  /** The file's mtime, ISO. The only moment a file can vouch for. */
   updatedAt: string | null;
-  /** sha1 of the file, first 12 hex — `contentSha`. */
+  /** The sha1 of the file, first 12 hex, as `contentSha` computes it. */
   sha: string;
   markdown: string;
   items: CardItem[];
@@ -225,6 +228,7 @@ export interface ReviewFileCard {
   structured: boolean;
 }
 
+/** Read one review file into a {@link ReviewFileCard}. */
 export function buildReviewFileCard(input: {
   path: string;
   fileName: string;
@@ -232,10 +236,10 @@ export function buildReviewFileCard(input: {
   /**
    * The lane `resolveCardLocation` put this file in.
    *
-   * ⚠️ Passed in rather than read from `status:` here, because the rule is not
-   * "whatever the front matter says": an unlabelled file in a date folder is a
-   * real card in the fallback lane, and one in a lane FOLDER takes its lane
-   * from the folder. One answer, in one place.
+   * NOTE: Passed in, not read from `status:` here. The rule is not "whatever
+   * the front matter says": an unlabelled file in a date folder is a real card
+   * in the fallback lane, and one in a lane folder takes its lane from the
+   * folder. One answer, in one place.
    */
   column: string;
   markdown: string;
@@ -285,12 +289,11 @@ export function buildReviewFileCard(input: {
 }
 
 /**
- * A card written before the document schema still HAS notes — `> …` lines under
- * the item — so this reads BLOCKS rather than bare task lines.
+ * Read the checklist of a card written before the document schema.
  *
- * ⚠️ Bare task lines would drop every one of those notes silently, which is the
- * loss BE-03 D2 refuses. Ids fall back to position only for a card that never
- * had them.
+ * NOTE: Such a card still has notes (`> …` lines under an item), so this reads
+ * blocks, not bare task lines. Bare task lines would drop every note, which is
+ * the loss BE-03 D2 refuses. Every item lands in `decisions`.
  */
 function legacyItems(md: string): CardItem[] {
   const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
@@ -300,14 +303,13 @@ function legacyItems(md: string): CardItem[] {
       .filter(Boolean)
       .join(" ");
     return {
-      // ⚠️ `""` for an item with no `**D2.**` handle, exactly as
-      // `parseCardItems` writes it — NOT the `D<n>` its position suggests.
-      // Inventing that number here is what refused a whole 50-record batch: a
-      // card numbers its decisions per section (`## A`, `## B`, `## D`) and
-      // leaves its "pick ONE" branches unnumbered, so the invented `D2` landed
-      // on the key the `**D2.**` further down the same card already owned.
-      // Minting a free key is `planMigration`'s job, where the whole card is
-      // in view.
+      // NOTE: `""` for an item with no `**D2.**` handle, as `parseCardItems`
+      // writes it, not the `D<n>` its position suggests. An invented number
+      // once got a whole 50-record batch refused: a card numbers its decisions
+      // per section (`## A`, `## B`, `## D`) and leaves its "pick ONE" branches
+      // unnumbered, so the invented `D2` hit the key a `**D2.**` further down
+      // the same card already owned. Minting a free key is `planMigration`'s
+      // job, where the whole card is in view.
       id: block.task.id ?? "",
       section: "decisions" as const,
       text: block.task.content.trim() || `item ${index + 1}`,

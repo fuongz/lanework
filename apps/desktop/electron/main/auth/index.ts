@@ -32,20 +32,23 @@ const DEVICE_WAIT_MS = 10 * 60 * 1000;
 /**
  * How often main re-asks the control plane whether our credential still works.
  *
- * ⚠️ This timer is what makes revocation LAND. Revoking happens on the server
- * and nothing travels down to this machine, and `currentSession()` only probes
- * when something asks it — so with no beat, a revoked install keeps showing the
- * app until the user happens to trigger a read. The reference daemon beats at
- * the same 60s, and `/v1/machines/me` doubles as its presence ping.
- *
- * `LANEWORK_HEARTBEAT_MS` tunes it. The honest motivation is testability — a
- * test has to watch a revocation land without sitting through a minute — but it
- * is a legitimate operational knob either way, and it sits beside the other
- * `LANEWORK_*` values. Floored at one second so a stray value cannot turn this
- * into a request loop against the control plane.
+ * NOTE: This timer is what makes revocation LAND. Revoking happens on the
+ * server and nothing travels down to this machine, and {@link currentSession}
+ * only probes when something asks it. With no beat, a revoked install keeps
+ * showing the app until the user happens to trigger a read. The reference
+ * daemon beats at the same 60s, and `/v1/machines/me` doubles as its presence
+ * ping.
  */
 const DEFAULT_HEARTBEAT_MS = 60_000;
 
+/**
+ * The heartbeat interval in force (ms).
+ *
+ * `LANEWORK_HEARTBEAT_MS` tunes it, so a test can watch a revocation land
+ * without sitting through a minute; it is a fair operational knob too.
+ * Floored at one second so a stray value cannot turn this into a request loop
+ * against the control plane.
+ */
 function heartbeatMs(): number {
   const raw = Number(process.env.LANEWORK_HEARTBEAT_MS);
   return Number.isFinite(raw) && raw > 0
@@ -55,17 +58,25 @@ function heartbeatMs(): number {
 
 let heartbeat: ReturnType<typeof setInterval> | null = null;
 
-/** The last session pushed to renderers, so a beat that changes nothing is silent. */
+/**
+ * The key of the last session pushed to renderers.
+ *
+ * A beat that changes nothing stays silent.
+ */
 let lastPublished: string | null = null;
 
-/** The sign-in currently running, so a second one can be refused and this one cancelled. */
+/**
+ * The sign-in running now.
+ *
+ * Kept so a second one can be refused and this one cancelled.
+ */
 let inFlight: AbortController | null = null;
 
 /**
  * The principal a record implies.
  *
- * `unreachable` deliberately stays a `machine`: being offline is not being
- * signed out, and the last known identity is what local-only work runs as.
+ * `unreachable` stays a `machine`: being offline is not being signed out, and
+ * the last known identity is what local-only work runs as.
  */
 function principalOf(
   record: MachineRecord | null,
@@ -86,14 +97,15 @@ function principalOf(
 /**
  * The session as it stands, asking the control plane when the answer is stale.
  *
- * A `userId` learned here is written back: revocation and identity both live on
- * the server, and persisting the id is what keeps the principal complete the
- * next time this app starts with no network.
+ * A `userId` or owner learned here is written back: identity lives on the
+ * server, and the local copy keeps the principal complete (and lets the
+ * account screen say something) the next time this app starts with no
+ * network.
  */
 export async function currentSession(): Promise<RedactedSession> {
   const record = await readRecord();
   const apiUrl = api.resolveApi(record?.apiUrl);
-  // FE-52/D5: no credential, and "Skip for now" was chosen — the local board.
+  // FE-52/D5: no credential and "Skip for now" chosen means the local board.
   // Nothing here probes: a local session never asks the control plane anything.
   if (!record)
     return (await readLocalMode())
@@ -101,8 +113,6 @@ export async function currentSession(): Promise<RedactedSession> {
       : anonymousSession(apiUrl);
 
   const { verdict, userId, owner } = await api.probeIfStale(record);
-  // Written back when either moved: identity lives on the server, and keeping a
-  // local copy is what lets the account screen say something offline.
   if (userId !== record.userId || owner !== record.owner)
     await writeRecord({ ...record, userId, owner });
 
@@ -118,8 +128,8 @@ export async function currentSession(): Promise<RedactedSession> {
 /**
  * The part of a session the gate reacts to.
  *
- * ⚠️ Excludes `checkedAt`, which moves on every single probe — keying on the
- * whole object would make each beat look like a change and push a pointless
+ * NOTE: Excludes `checkedAt`, which moves on every probe. Keying on the whole
+ * object would make each beat look like a change and push a pointless
  * re-render to every window once a minute.
  */
 function sessionKey(session: RedactedSession): string {
@@ -134,7 +144,7 @@ async function publish(): Promise<RedactedSession> {
   const session = await currentSession();
   lastPublished = sessionKey(session);
   broadcast(authChannels.changed, session);
-  // FE-52/D8: an agent's `lanework` MCP entry follows the mode — the offline
+  // FE-52/D8: an agent's `lanework` MCP entry follows the mode: the offline
   // server while local, the cloud one once signed in. Only an entry that is
   // already there and already ours is repointed; nothing is added here.
   void syncLaneworkMcp(session.principal.kind).catch(() => undefined);
@@ -145,12 +155,12 @@ async function publish(): Promise<RedactedSession> {
 async function beat(): Promise<void> {
   try {
     const record = await readRecord();
-    // Nothing to probe, and an anonymous session cannot change on its own —
+    // Nothing to probe, and an anonymous session cannot change on its own:
     // only a sign-in changes it, and that publishes for itself.
     if (!record) return;
 
     // Forced, not `probeIfStale`: the cache exists to absorb bursts of reads,
-    // and a beat is exactly the thing that should go and look.
+    // and a beat is the thing that should go and look.
     await api.probe(record);
 
     const session = await currentSession();
@@ -165,6 +175,7 @@ async function beat(): Promise<void> {
   }
 }
 
+/** Start the {@link beat} timer, once. */
 function startHeartbeat(): void {
   if (heartbeat) return;
   heartbeat = setInterval(() => void beat(), heartbeatMs());
@@ -176,6 +187,7 @@ function emitProgress(progress: SignInProgress): void {
   broadcast(authChannels.progress, progress);
 }
 
+/** Wait `ms`; rejects as a cancelled sign-in when `signal` aborts. */
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const id = setTimeout(resolve, ms);
@@ -202,11 +214,16 @@ async function accept(
     // Both arrive on the first probe; `accept` publishes, which triggers one.
     owner: null,
   });
-  // FE-28: a hook that was left on through a sign-out gets the new credential.
+  // A hook that was left on through a sign-out gets the new credential.
   void syncHandoff().catch(() => undefined);
   return publish();
 }
 
+/**
+ * Sign in through the browser, with a one-shot callback server on loopback.
+ *
+ * @throws When the sign-in is denied, expires, or is cancelled.
+ */
 async function signInLoopback(
   apiUrl: string,
   signal: AbortSignal,
@@ -220,8 +237,8 @@ async function signInLoopback(
     signal,
     onPort: async (port) => {
       const redirectUri = `http://127.0.0.1:${port}${CALLBACK_PATH}`;
-      // An assertion on our own port picking, before the control plane pins the
-      // redirect at creation and can no longer be corrected.
+      // Assert on our own port picking now: the control plane pins the
+      // redirect at creation, and it can no longer be corrected after that.
       if (!parseLoopbackRedirect(redirectUri))
         throw new Error(
           `Refusing to register an unsafe redirect: ${redirectUri}`,
@@ -233,7 +250,7 @@ async function signInLoopback(
         signal,
       );
       // Emitted BEFORE the browser is opened, so the URL is on screen even when
-      // `openExternal` silently does nothing — the failure mode is a window that
+      // `openExternal` silently does nothing. That failure is a window that
       // just sits there, and a visible URL turns it into a click.
       emitProgress({
         mode: "loopback",
@@ -254,6 +271,11 @@ async function signInLoopback(
   return accept(apiUrl, outcome, facts.name);
 }
 
+/**
+ * Sign in with a code the person types into a browser, polling until approved.
+ *
+ * @throws When the sign-in is denied, expires, times out, or is cancelled.
+ */
 async function signInDevice(
   apiUrl: string,
   signal: AbortSignal,
@@ -271,8 +293,8 @@ async function signInDevice(
   });
   await shell.openExternal(started.verificationUriComplete).catch(() => {});
 
-  // Polls at the interval the SERVER asks for and backs off when it says
-  // `slow_down`; ignoring that gets the poll refused rather than answered.
+  // Poll at the interval the SERVER asks for, and back off when it says
+  // `slow_down`: ignoring that gets the poll refused rather than answered.
   let interval = started.interval;
   const deadline = Date.now() + DEVICE_WAIT_MS;
   while (Date.now() < deadline) {
@@ -293,7 +315,12 @@ async function signInDevice(
   throw new Error("Timed out waiting for approval. Nothing was changed.");
 }
 
-/** Start a sign-in. Resolves with the session it produced, or throws. */
+/**
+ * Start a sign-in and resolve with the session it produced.
+ *
+ * @throws When this machine is already signed in, a sign-in is already
+ *   running, or the sign-in itself fails.
+ */
 async function signIn(mode: SignInMode = "loopback"): Promise<RedactedSession> {
   const session = await currentSession();
   if (!can(session.principal, "session:signIn"))
@@ -320,16 +347,16 @@ async function signIn(mode: SignInMode = "loopback"): Promise<RedactedSession> {
 /**
  * Sign out: revoke on the control plane, then drop the local credential.
  *
- * The revoke is best effort and the local delete happens either way — a network
- * failure must not strand someone who asked to sign out. The consequence is
- * stated plainly rather than hidden: an unreachable control plane keeps the
- * machine listed until it is revoked from a browser.
+ * The revoke is best effort and the local delete happens either way: a
+ * network failure must not strand someone who asked to sign out. The cost is
+ * that an unreachable control plane keeps the machine listed until it is
+ * revoked from a browser.
  */
 async function signOut(): Promise<RedactedSession> {
   const session = await currentSession();
   if (!can(session.principal, "session:signOut")) return session;
-  // FE-52: "signing out" of local mode is leaving it. The boards stay in the
-  // local store; choosing "Skip for now" again brings them back.
+  // "Signing out" of local mode is leaving it. The boards stay in the local
+  // store; choosing "Skip for now" again brings them back.
   if (session.principal.kind === "local") {
     await writeLocalMode(false);
     return publish();
@@ -340,20 +367,23 @@ async function signOut(): Promise<RedactedSession> {
     await api.revokeSelf(record);
 
   await clearRecord();
-  // FE-28: the Stop hook's copy of the credential goes with it.
+  // The Stop hook's copy of the credential goes with it.
   if (record) await forgetHookCredential(record.apiUrl);
   api.resetVerdict();
   return publish();
 }
 
 /**
- * FE-52/D5: "Skip for now". Remembers the choice and answers the session it
- * produces — `local` — without a single request to the control plane.
+ * "Skip for now": remember the choice and answer the `local` session it
+ * produces (FE-52/D5).
  *
- * ⚠️ A no-op while a working credential is held: signing in is what the person
- * did last, and a stray call must not quietly demote them to the local board.
- * A REVOKED credential is useless to keep, so it goes, as a sign-out would
- * take it — minus the revoke call, which would be refused anyway.
+ * Makes no request to the control plane. A REVOKED credential is useless to
+ * keep, so it goes, as a sign-out would take it, minus the revoke call, which
+ * would be refused anyway.
+ *
+ * NOTE: A no-op while a working credential is held. Signing in is what the
+ * person did last, and a stray call must not quietly demote them to the local
+ * board.
  */
 async function enterLocalMode(): Promise<RedactedSession> {
   const session = await currentSession();
@@ -374,13 +404,22 @@ function cancelSignIn(): void {
   inFlight = null;
 }
 
+/**
+ * The sign-in mode an IPC caller asked for; none means `loopback`.
+ *
+ * @throws When `value` is not a mode.
+ */
 function parseMode(value: unknown): SignInMode {
   if (value === undefined || value === "loopback") return "loopback";
   if (value === "device") return "device";
   throw new Error('mode must be "loopback" or "device"');
 }
 
-/** Wire the auth channels. Every handler validates its sender via `handle`. */
+/**
+ * Wire the auth channels and start the heartbeat.
+ *
+ * Every handler validates its sender through {@link handle}.
+ */
 export function registerAuth(devUrl?: string): void {
   handle(authChannels.session, devUrl, (args) => {
     if (args.length) throw new Error("This operation takes no arguments");

@@ -1,15 +1,16 @@
 // Which live `claude` process is on a conversation, from the file the CLI
-// keeps for itself at `~/.claude/sessions/<pid>.json` (FE-31 reads the same).
+// keeps for itself at `~/.claude/sessions/<pid>.json`.
 //
 // The single-writer rule's fallback (FE-62/D3): it sees a Claude on the
-// conversation wherever it runs — a Lanework tab, or a terminal app.
+// conversation wherever it runs, a Lanework tab or a terminal app.
 //
-// ⚠️ Not a documented interface: missing, unreadable or of another shape, a
-// file says nothing, and a pid that is not alive any more is no writer.
+// NOTE: Not a documented interface. A file that is missing, unreadable or of
+// another shape says nothing, and a pid that is no longer alive is no writer.
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isAgentSessionId } from "../../../shared/terminal";
 
+/** Whether process `pid` is alive, ours or another user's. */
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);

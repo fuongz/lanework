@@ -1,10 +1,10 @@
-// FE-69: the dictation helper, compiled from `native/dictation/main.swift`
-// into `dist/electron/bin/`, where main spawns it. Shared by `build-electron.mjs`
+// Builds the dictation helper: compiles `native/dictation/main.swift` into
+// `dist/electron/bin/`, where main spawns it. Shared by `build-electron.mjs`
 // and `dev.mjs`, like `electron-bundle.mjs`.
 //
-// ⚠️ macOS only, and skipped — with a warning, not a failure — where `swiftc`
-// is missing: the composer hides its microphone when the helper is absent, so
-// a build without it is a build without dictation, not a broken one.
+// macOS only. Where `swiftc` is missing it warns and does not fail. The
+// composer hides its microphone when the helper is absent, so such a build
+// only lacks dictation.
 import { spawnSync } from "node:child_process";
 import { mkdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const source = join(root, "native/dictation/main.swift");
 
+/** The file's modification time in ms, or `0` when it does not exist. */
 const mtime = (path) =>
   stat(path).then(
     (found) => found.mtimeMs,

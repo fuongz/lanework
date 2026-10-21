@@ -14,35 +14,38 @@ import {
 } from "./review-defaults";
 import { resolveCardLocation } from "./review-location";
 
-/**
- * Turning a repo's review files into the cloud's import records.
- *
- * ⚠️ Read-only over the source, always. Nothing here opens a file for writing:
- * the old copy stays exactly where it is so a human can compare, and re-running
- * is safe because the API keys every card on `(source_kind, source_ref)` — and
- * `source_ref` here is the same repo-relative path the CLI sends, so the two
- * paths into the cloud produce ONE card, not two.
- *
- * ⚠️ It refuses to run against a repo with `.agents/reviews/config.json`. That
- * file can rename the lanes, re-map `status`, change the task-id format and the
- * tag cap; this app reads the DEFAULTS only, so a board with a custom config
- * would have its cards filed into lanes it does not have. Refusing names the
- * CLI, which reads the config properly.
- */
+// Turns a repo's review files into the cloud's import records.
+//
+// NOTE: Read-only over the source, always. Nothing here opens a file for
+// writing: the old copy stays where it is so a human can compare. Re-running is
+// safe because the API keys every card on `(source_kind, source_ref)`, and
+// `source_ref` here is the same repo-relative path the CLI sends. Both routes
+// into the cloud produce one card, not two.
+//
+// NOTE: It refuses to run against a repo with `.agents/reviews/config.json`.
+// That file can rename the lanes, re-map `status`, and change the task-id
+// format and the tag cap. This app reads the defaults only, so a board with a
+// custom config would get its cards filed into lanes it does not have. The
+// refusal names the CLI, which reads the config.
 
 /** The `source_kind` every card from a repo's review folder carries. */
 const SOURCE_KIND = "local-review";
 
-/** How many records one request carries — the API's own cap. */
+/** How many records one request carries: the API's own cap. */
 export const IMPORT_BATCH = 50;
 
 export { DEFAULT_CATEGORIES, DEFAULT_COLUMNS } from "./review-defaults";
 
-/** Short content hash used as the card's `sha`, exactly as `contentSha` does it. */
+/**
+ * Hash a card's text into its `sha`: the first 12 hex of its sha1.
+ *
+ * It matches the board's own `contentSha`, which the cloud keys on.
+ */
 export function contentSha(text: string): string {
   return createHash("sha1").update(text).digest("hex").slice(0, 12);
 }
 
+/** One checklist row of an {@link ImportRecord}. */
 interface ImportChecklistRow {
   key: string;
   section: "decisions" | "verify";
@@ -53,6 +56,7 @@ interface ImportChecklistRow {
   group?: string | null;
 }
 
+/** One card as the cloud's import endpoint takes it. */
 interface ImportRecord {
   title: string;
   body: string;
@@ -73,6 +77,7 @@ interface ImportRecord {
   attachments: { name: string; reference: string; sourceKind: string }[];
 }
 
+/** The counts a migration preview shows before anything is sent. */
 interface MigrationInventory {
   cards: number;
   byColumn: Record<string, number>;
@@ -80,22 +85,23 @@ interface MigrationInventory {
   withTaskId: number;
   duplicateTaskIds: string[];
   /**
-   * Ticked boxes whose moment has to be INFERRED.
+   * Ticked boxes whose tick time is inferred.
    *
-   * ⚠️ Its own number because it is the one quantity here that is not a fact:
-   * markdown says `- [x]` and never when, so each of these arrives with a
-   * timestamp derived from the file's mtime or the card's day.
+   * It is its own number because it is the one quantity here that is not a
+   * fact. Markdown says `- [x]` and never when, so each of these arrives with
+   * a timestamp taken from the file's mtime or the card's day.
    */
   inferredCheckedAt: number;
-  /** Files a card links to that exist in the repo — recorded as references. */
+  /** Files a card links to that exist in the repo, recorded as references. */
   attachments: number;
-  /** "Pick ONE" groups, which the cloud stores; counted so the screen can say so. */
+  /** Items in a "pick ONE" group, which the cloud stores. */
   groups: number;
-  /** Items decided against, which travel as unchecked rows carrying the marker. */
+  /** Items decided against. */
   dropped: number;
   problems: { path: string; reason: string }[];
 }
 
+/** What a migration would send, with its inventory and any reason to refuse. */
 interface MigrationPlan {
   root: string;
   records: ImportRecord[];
@@ -126,11 +132,12 @@ interface MigrationPlan {
 const LINK = /\[[^\]]*\]\(([^)\s]+)\)/g;
 
 /**
- * The files a card refers to, as REFERENCES — nothing is read or uploaded.
+ * List the repo files a card links to, as references. Nothing is read or
+ * uploaded.
  *
  * A link to something not in the repo (an http URL, an anchor, a path that has
- * moved) is not an attachment and is left in the body text, where it still
- * reads exactly as the author wrote it.
+ * moved) is not an attachment. It stays in the body text, where it reads as
+ * the author wrote it.
  */
 async function referencedFiles(root: string, body: string): Promise<string[]> {
   const out: string[] = [];
@@ -147,7 +154,11 @@ async function referencedFiles(root: string, body: string): Promise<string[]> {
   return out;
 }
 
-/** `FE-06` under the `FE` category → 6, for the format the defaults use. */
+/**
+ * Read the sequence number out of a task id: `FE-06` under `FE` gives 6.
+ *
+ * @returns Null when the id does not match the category's format.
+ */
 export function parseTaskSeq(
   taskId: string,
   category: { prefix: string; format: string },
@@ -191,9 +202,9 @@ async function readReviewCards(root: string): Promise<{
       });
       continue;
     }
-    // ⚠️ The board's own rule for "is this a card", not a guess: a status, a
-    // lane folder, or a date folder. Skipping a file the board WOULD show is
-    // how a cutover leaves a card behind with nothing reporting the loss.
+    // NOTE: The board's own rule for "is this a card": a status, a lane
+    // folder, or a date folder. Skipping a file the board would show leaves a
+    // card behind at the cutover, with nothing reporting the loss.
     const location = resolveCardLocation(
       relative(base, file).split("/"),
       parseFrontmatterMap(markdown).status ?? null,
@@ -217,12 +228,12 @@ async function readReviewCards(root: string): Promise<{
 }
 
 /**
- * What a migration WOULD send, without sending any of it.
+ * Work out what a migration would send, without sending any of it.
  *
- * ⚠️ Records are sorted by `(column, date, ordinal)` and sent in that order
- * WITHOUT a rank: the API appends each card to the bottom of its lane, so
- * arriving in order IS the order. Computing ranks here would be a second copy
- * of the board's fractional-index code, and the two would have to agree forever.
+ * NOTE: Records are sorted by `(column, date, ordinal)` and sent in that order
+ * without a rank. The API appends each card to the bottom of its lane, so the
+ * arrival order is the order. Computing ranks here would be a second copy of
+ * the board's fractional-index code, and the two would have to agree forever.
  */
 export async function planMigration(root: string): Promise<MigrationPlan> {
   const { cards, problems } = await readReviewCards(root);
@@ -251,20 +262,20 @@ export async function planMigration(root: string): Promise<MigrationPlan> {
       ? DEFAULT_CATEGORIES.find((entry) => entry.key === card.category)
       : undefined;
 
-    // ⚠️ The source says `- [x]` and never when. The most recent moment the
-    // FILE can vouch for is its own mtime; the card's day is the fallback. The
-    // choice is recorded in `metadata.import.checkedAtSource` so a reader can
-    // see the timestamp was inferred rather than observed.
+    // The source says `- [x]` and never when. The latest moment the file can
+    // vouch for is its own mtime; the card's day is the fallback. The choice is
+    // recorded in `metadata.import.checkedAtSource`, so a reader can see the
+    // timestamp was inferred, not observed.
     const inferredAt =
       card.updatedAt ?? (card.date ? `${card.date}T00:00:00.000Z` : null);
     const checkedAtSource = card.updatedAt ? "file-mtime" : "card-date";
 
-    // ⚠️ An ordinal is minted only for an item that carries NO handle, and it
-    // skips every handle the card already claims — the same rule the board's
-    // API applies to a `null` key. Handing out the plain position instead put a
-    // second `D2` on a card whose section D already had one, and the board
-    // refuses a checklist with two items keyed alike: one such card took the
-    // other 49 records in its batch down with it.
+    // NOTE: A key is minted only for an item with no handle, and it skips
+    // every handle the card already claims. The board's API applies the same
+    // rule to a `null` key. The plain position once put a second `D2` on a card
+    // whose section D already had one. The board refuses a checklist with two
+    // items keyed alike, so that card took the other 49 records in its batch
+    // down with it.
     const taken = new Set(card.items.map((item) => item.id).filter(Boolean));
     const seen = { decisions: 0, verify: 0 };
     const mintKey = (section: "decisions" | "verify"): string => {
@@ -283,8 +294,8 @@ export async function planMigration(root: string): Promise<MigrationPlan> {
       if (item.group) groups += 1;
       if (item.dropped) dropped += 1;
       return {
-        // ⚠️ Never an empty key: the key is what a later tick is addressed by,
-        // and a row the cloud cannot address is a row nobody can check off.
+        // NOTE: Never an empty key. A later tick is addressed by the key, and
+        // a row the cloud cannot address is a row nobody can check off.
         key: item.id || mintKey(item.section),
         section: item.section,
         text: item.text,
@@ -323,7 +334,7 @@ export async function planMigration(root: string): Promise<MigrationPlan> {
       },
       restore: {
         taskId: card.taskId,
-        // ⚠️ Both or neither: an id restored without its sequence makes the
+        // NOTE: Both or neither. An id restored without its sequence makes the
         // next card minted on that board a duplicate of one that exists.
         taskSeq:
           card.taskId && category ? parseTaskSeq(card.taskId, category) : null,

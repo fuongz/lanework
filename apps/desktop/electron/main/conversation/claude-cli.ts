@@ -1,18 +1,21 @@
-// Where the user's own `claude` — or `codex` — is, for the headless engine
+// Where the user's own `claude` (or `codex`) is, for the headless engine
 // (FE-62/D1).
 //
-// ⚠️ Found the way the terminal finds agent CLIs (`terminal/agents.ts`): the
+// Found the way the terminal finds agent CLIs (`terminal/agents.ts`): the
 // user's login AND interactive shell is asked, because Claude's installer may
 // put `claude` in the profile as an alias no PATH lookup finds. The engine
-// then runs the binary directly — never through a shell, never a string the
-// page sent — with that shell's PATH, so the tools Claude runs find what a
-// tab would.
+// then runs the binary with that shell's PATH, so the tools Claude runs find
+// what a tab would.
+//
+// NOTE: The binary runs directly: never through a shell, never a string the
+// page sent.
 import { spawn } from "node:child_process";
 import { access, constants } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { defaultShell, shellEnv } from "../terminal/sessions";
 
+/** An agent CLI's binary and the environment to run it with. */
 export interface ClaudeCli {
   file: string;
   env: Record<string, string>;
@@ -21,7 +24,9 @@ export interface ClaudeCli {
 /** The CLIs the chat runs. */
 type CliName = "claude" | "codex";
 
+/** Fences the probe's answers off from whatever the shell profile prints. */
 const MARK = "__lanework_agent_cli__";
+/** How long a found CLI is trusted before the shell is asked again. */
 const TTL_MS = 5 * 60_000;
 
 async function executable(file: string): Promise<boolean> {
@@ -48,6 +53,11 @@ function cliPath(answer: string, name: CliName = "claude"): string | null {
   return isAbsolute(expanded) ? expanded : null;
 }
 
+/**
+ * Ask the user's login and interactive shell where `name` is, and its PATH.
+ *
+ * @returns Nulls on Windows, or when the shell fails or takes over 8 seconds.
+ */
 function probe(
   env: NodeJS.ProcessEnv,
   name: CliName,
@@ -102,14 +112,17 @@ const MISSING: Record<CliName, string> = {
   codex: "Codex is not installed on this Mac.",
 };
 
-/** The `claude` binary; see `createAgentCli`. */
+/** The `claude` binary; see {@link createAgentCli}. */
 export function createClaudeCli(override?: () => string | undefined) {
   return createAgentCli("claude", override);
 }
 
 /**
  * The `name` binary and the environment to run it with, cached a while.
- * `override` is the test seam (`LANEWORK_CLAUDE_BIN` in a test run).
+ *
+ * The returned function throws when the CLI is not installed.
+ *
+ * @param override The test seam (`LANEWORK_CLAUDE_BIN` in a test run).
  */
 export function createAgentCli(
   name: CliName,

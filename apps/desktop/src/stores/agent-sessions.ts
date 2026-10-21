@@ -12,29 +12,36 @@ import type {
 } from "../../shared/terminal";
 
 /**
- * The agent conversations each workspace's folder has on disk (FE-23), as the
- * rail's Agents group last read them.
+ * The agent conversations each workspace's folder has on disk.
+ *
+ * As the rail's Agents group last read them.
  */
 interface AgentSessionsState {
   byWorkspace: Record<string, AgentSession[]>;
   /**
-   * Whether each conversation's agent is working, by `agent:id`, as the
-   * watcher last reported it (FE-25) — newer than the listing's own
-   * `working` until the next listing, which clears it. A sub-agent's is
-   * under `subagentKey` (FE-33).
+   * Whether each conversation's agent is working, by `agent:id`.
+   *
+   * As the watcher last reported it: newer than the listing's own `working`
+   * until the next listing, which clears it. A sub-agent's is under
+   * {@link subagentKey}.
    */
   live: Record<string, boolean>;
   /**
-   * Whether each conversation's sub-agents are shown, by `agent:id`, as
-   * somebody last chose (FE-33/D2). Unset follows them: open while one is
+   * Whether each conversation's sub-agents are shown, by `agent:id`.
+   *
+   * As somebody last chose (FE-33/D2). Unset follows them: open while one is
    * working. Kept for the app's run, never on disk.
    */
   open: Record<string, boolean>;
   setOpen: (session: AgentSession, open: boolean) => void;
-  /** The card each is on, by `agent:id`, as `live` is to `working` (FE-27). */
+  /** The card each is on, by `agent:id`, as `live` is to `working`. */
   cards: Record<string, AgentCard | null>;
   load: (workspace: string) => Promise<void>;
-  /** Name it in Lanework; empty goes back to the CLI's title (FE-24). */
+  /**
+   * Name a conversation in Lanework.
+   *
+   * @param name Empty goes back to the CLI's title.
+   */
   rename: (
     workspace: string,
     session: AgentSession,
@@ -45,7 +52,11 @@ interface AgentSessionsState {
     session: AgentSession,
     pinned: boolean,
   ) => Promise<void>;
-  /** Delete its transcript for good (FE-57); throws what main refused. */
+  /**
+   * Delete a conversation's transcript for good.
+   *
+   * @throws What main refused, when it did.
+   */
   remove: (workspace: string, session: AgentSession) => Promise<void>;
   /**
    * Archive it in its CLI's own archive; it leaves the rail.
@@ -53,34 +64,46 @@ interface AgentSessionsState {
    * @throws what main refused, e.g. a conversation a tab is running.
    */
   archive: (workspace: string, session: AgentSession) => Promise<void>;
-  /** Start listening for transcript writes; returns the stop. */
+  /**
+   * Start listening for transcript writes.
+   *
+   * @returns The stop.
+   */
   watchActivity: () => () => void;
   /**
-   * The Codex account's usage as its newest turn on this machine reported
-   * it (FE-41/D1): the account's, so one for every project. Null until read,
-   * or when no turn ever reported one.
+   * The Codex account's usage, as its newest turn on this machine reported it.
+   *
+   * It is the account's, so one for every project (FE-41/D1). Null until
+   * read, or when no turn ever reported one.
    */
   codexQuota: CodexQuota | null;
   /**
-   * The Claude account's usage (FE-46, FE-53): from the listings' usage read
-   * and from `refreshClaudeUsage`, whichever answered last. Null until read,
-   * or when main has nothing to show at all.
+   * The Claude account's usage.
+   *
+   * From the listings' usage read or from `refreshClaudeUsage`, whichever
+   * answered last. Null until read, or when main has nothing to show.
    */
   claudeUsage: ClaudeUsage | null;
-  /** A `refreshClaudeUsage` is in flight — the strip's ⟳ spins (FE-53). */
+  /** A `refreshClaudeUsage` is in flight: the strip's ⟳ spins. */
   claudeRefreshing: boolean;
   /**
-   * Fetch Claude's usage now, past main's cache (FE-53). Concurrent calls
-   * share one request. Never throws: a refused call keeps what was shown.
+   * Fetch Claude's usage now, past main's cache.
+   *
+   * Concurrent calls share one request. Never throws: a refused call keeps
+   * what was shown.
    */
   refreshClaudeUsage: () => Promise<void>;
   /** Each workspace's Codex conversations' goals, by thread id (FE-41/D4). */
   codexGoals: Record<string, Record<string, CodexGoal>>;
-  /** Read both again, for `workspace`'s listed conversations (FE-41). */
+  /** Read the usage and goals again, for `workspace`'s conversations. */
   loadCodexUsage: (workspace: string) => Promise<void>;
 }
 
-/** A conversation's key across both CLIs: ids are only unique per agent. */
+/**
+ * A conversation's key across both CLIs.
+ *
+ * Ids are only unique per agent.
+ */
 export function agentKey(session: {
   agent: TerminalAgent;
   id: string;
@@ -88,7 +111,7 @@ export function agentKey(session: {
   return `${session.agent}:${session.id}`;
 }
 
-/** A sub-agent's key: its conversation's, then its own id (FE-33). */
+/** A sub-agent's key: its conversation's {@link agentKey}, then its own id. */
 export function subagentKey(
   session: { agent: TerminalAgent; id: string },
   subagent: { id: string },
@@ -117,13 +140,16 @@ function sameCard(
 }
 
 /**
- * The conversations of `workspace` working on `card` right now (FE-27): the
- * ones whose latest Lanework MCP call named it, on this board.
+ * The conversations of `workspace` working on `card` right now.
  *
- * ⚠️ `card` as the agent typed it may be the task id or the uuid, so both are
- * matched — and only a call that named THIS board: `FE-3` is another card on
- * every other board. Selected with `useShallow`, so a card that no agent is
- * on keeps one empty list and does not redraw.
+ * The ones whose latest Lanework MCP call named it, on this board.
+ *
+ * NOTE: The agent may have typed the task id or the uuid, so both match. Only
+ * a call that named this board counts: `FE-3` is another card on every other
+ * board. Selected with `useShallow`, so a card no agent is on keeps one empty
+ * list and does not redraw.
+ *
+ * @param workspace The cloud workspace id, which is also the board's.
  */
 export function workingOn(
   state: Pick<AgentSessionsState, "byWorkspace" | "live" | "cards">,
@@ -148,51 +174,59 @@ export function workingOn(
 }
 
 /**
- * A read that started before a later one must not land after it — the rail
- * would flip back to the older list. The same counter idea as the terminal's.
+ * Request tickets for listings, by workspace.
+ *
+ * A read that started before a later one must not land after it, or the rail
+ * would flip back to the older list. The same counter as the terminal's.
  */
 const latest = new Map<string, number>();
 
 /**
- * Unknown ids re-list at most this often: a new conversation, just begun.
+ * How often unknown ids re-list at most: a new conversation, just begun.
  *
- * ⚠️ One inside the window is put off to its end, never dropped (FE-31): a
- * second agent started within it — or a first whose transcript had no title
- * yet at the first read — was otherwise never listed until the window lost
- * and regained focus.
+ * NOTE: One inside the window is put off to its end, never dropped (FE-31).
+ * Otherwise a second agent started within it, or a first whose transcript had
+ * no title yet at the first read, is not listed until the window loses and
+ * regains focus.
  */
 const RELIST_MS = 2_000;
 const relisted = new Map<string, number>();
 const relistLater = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
- * Codex's usage is read again after its turns write at most this often
- * (FE-41): a turn opens and closes once, but a spawned thread reports every
- * settled write. One inside the window is put off to its end, as a relist is.
+ * How often the usage is read again after turns write, at most.
+ *
+ * A turn opens and closes once, but a spawned thread reports every settled
+ * write. One inside the window is put off to its end, as a relist is.
  */
 const USAGE_MS = 2_000;
 const usageRead = new Map<string, number>();
 const usageLater = new Map<string, ReturnType<typeof setTimeout>>();
-/** As `latest`, for the usage reads (FE-41). */
+/** As {@link latest}, for the usage reads. */
 const usageLatest = new Map<string, number>();
 
-/** The `refreshClaudeUsage` in flight, so a second click joins it (FE-53). */
+/** The `refreshClaudeUsage` in flight, so a second click joins it. */
 let claudeRefresh: Promise<void> | null = null;
 /**
- * Bumped by every refresh answer: a usage read that started before it is
- * older than what the refresh brought, and leaves Claude's part alone.
+ * Bumped by every refresh answer.
+ *
+ * A usage read that started before it is older than what the refresh
+ * brought, and leaves Claude's part alone.
  */
 let claudeAnswers = 0;
 
 /**
- * Whether `next` comes from an older fetch than `shown` (FE-53): `fetchedAt`
- * is when main last tried, so a usage read must not undo a newer refresh.
- * Without one, an answer counts as the oldest.
+ * Whether `next` comes from an older fetch than `shown`.
+ *
+ * `fetchedAt` is when main last tried, so a usage read must not undo a newer
+ * refresh. An answer without one counts as the oldest.
  */
 const olderAttempt = (next: ClaudeUsage | null, shown: ClaudeUsage | null) =>
   (next?.fetchedAt ?? 0) < (shown?.fetchedAt ?? 0);
 
-/** Whether two serializable answers say the same, so the rail need not redraw. */
+/**
+ * Whether two serializable answers say the same, so the rail need not redraw.
+ */
 const sameJson = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
 
@@ -294,7 +328,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   watchActivity: () => {
     const surface = window.desktop?.terminal;
     if (!surface) return () => {};
-    /** List `workspace` again — but not on every write that asks (FE-31). */
+    /** List `workspace` again, but not on every write that asks. */
     const relistSoon = (workspace: string) => {
       const relist = () => {
         relistLater.delete(workspace);
@@ -306,7 +340,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       else if (!relistLater.has(workspace))
         relistLater.set(workspace, setTimeout(relist, wait));
     };
-    /** Read Codex's usage again — but not on every write that asks (FE-41). */
+    /** Read the usage again, but not on every write that asks. */
     const usageSoon = (workspace: string) => {
       const read = () => {
         usageLater.delete(workspace);
@@ -322,8 +356,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       if (write.agent === "claude") usageSoon(write.workspace);
     });
     const stopActivity = surface.onAgentActivity((activity: AgentActivity) => {
-      // ⚠️ A Codex rollout settled a write: its turn may have reported new
-      // usage, or moved its goal on (FE-41).
+      // A settled write may carry new usage, or move a Codex goal on.
       if (activity.agent === "codex" || activity.agent === "claude")
         usageSoon(activity.workspace);
       const known = get().byWorkspace[activity.workspace] ?? [];
@@ -337,8 +370,8 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
             ? state
             : { live: { ...state.live, [key]: activity.working } },
         );
-        // ⚠️ A sub-agent the rail has not listed is one just spawned (FE-33):
-        // list again, the way a new conversation is.
+        // A sub-agent the rail has not listed was just spawned: list again,
+        // as for a new conversation.
         if (!parent?.subagents.some((entry) => entry.id === activity.subagent))
           relistSoon(activity.workspace);
         return;
@@ -353,8 +386,8 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
               cards: { ...state.cards, [key]: activity.card },
             },
       );
-      // ⚠️ A conversation the rail has not listed yet is one that just
-      // started: list again — but not on every write of it.
+      // A conversation the rail has not listed yet just started: list again,
+      // but not on every write of it.
       if (!parent) relistSoon(activity.workspace);
     });
     return () => {
@@ -371,7 +404,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     try {
       const listed = await surface.agentSessions(workspace);
       if (latest.get(workspace) !== mine) return;
-      // With every listing, changed or not: the goals are its threads' (FE-41).
+      // With every listing, changed or not: the goals are its threads'.
       void get().loadCodexUsage(workspace);
       const previous = get().byWorkspace[workspace];
       // Unchanged: keep the old array, so the rail does not redraw.
@@ -392,7 +425,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
         )
       )
         return;
-      // ⚠️ A fresh listing is the truth: what the watcher said about these
+      // NOTE: A fresh listing is the truth. What the watcher said about these
       // conversations before it is older, and is dropped.
       set((state) => {
         const live = { ...state.live };

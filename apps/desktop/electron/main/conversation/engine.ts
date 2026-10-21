@@ -1,10 +1,10 @@
 // The composer's engine (FE-62/D1): one long-lived, headless `claude` per
 // conversation sent from chat, spoken to over stream-json.
 //
-// - Each turn is one stdin line; text deltas, permission prompts and the
+// - Each turn is one stdin line. Text deltas, permission prompts and the
 //   turn's lines come back on stdout, and a `result` line ends the turn.
 // - Permission prompts are the CLI's `control_request` / `can_use_tool`,
-//   answered on stdin; Stop is a host `interrupt` control request.
+//   answered on stdin. Stop is a host `interrupt` control request.
 // - A send while a turn runs is written at once (FE-67): the CLI takes it
 //   in at the turn's next tool result, or runs it as a turn of its own after
 //   the `result`. Its replay (`isReplay`) says it was taken in. One it cannot
@@ -12,9 +12,11 @@
 // - Only one process writes a conversation at a time: a live pty running
 //   Claude on it wins, and the composer waits (`terminal`).
 //
-// ⚠️ Nothing the page typed becomes an argument: settings are checked again
-// against the fixed lists (`checkSettings`) and the id is a UUID. Nothing
-// here imports Electron, so a Node script can drive it against a real CLI.
+// Nothing here imports Electron, so a Node script can drive it against a
+// real CLI.
+//
+// NOTE: Nothing the page typed becomes an argument: settings are checked
+// again against the fixed lists (`checkSettings`) and the id is a UUID.
 import { type ChildProcess, spawn as spawnChild } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -35,6 +37,7 @@ import { CodexEngine } from "./codex-engine";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { buildTurns, inputText, type Line } from "./transcript";
 
+/** What the engines need from main; `spawn` is a test seam. */
 interface EngineDeps {
   cli: () => Promise<ClaudeCli>;
   /** The `codex` binary, for a Codex conversation. */
@@ -56,9 +59,12 @@ interface EngineDeps {
 }
 
 /**
- * The CLI's arguments for `settings` — every value from a fixed list. A
- * `fresh` conversation has no transcript yet: the CLI starts it under `id`
+ * The CLI's arguments for `settings`, every value from a fixed list.
+ *
+ * A `fresh` conversation has no transcript yet: the CLI starts it under `id`
  * (`--session-id`) instead of resuming it.
+ *
+ * @throws When the settings are off the lists or `id` is not a session id.
  */
 function engineArgs(
   id: string,
@@ -87,7 +93,7 @@ function engineArgs(
     "--permission-prompt-tool",
     "stdio",
   ];
-  // ⚠️ `fastMode` is the CLI's own settings key (its init line reports
+  // `fastMode` is the CLI's own settings key (its init line reports
   // `fast_mode_state`); an account or model without fast mode ignores it.
   if (settings.fast)
     args.push("--settings", JSON.stringify({ fastMode: true }));
@@ -121,44 +127,56 @@ function askQuestions(input: unknown): AskQuestion[] | null {
   return questions.every((q) => q.question) ? questions : null;
 }
 
-/** The CLI calls the composer's "Supervised" mode `default` in its status. */
+/**
+ * A permission mode the CLI reports, as the composer's permission.
+ *
+ * The CLI calls the composer's "Supervised" mode `default`.
+ */
 function permissionOf(mode: unknown): Permission | null {
   if (mode === "default") return "manual";
   return isPermission(mode) ? mode : null;
 }
 
+/** A control request of ours the CLI has not answered yet. */
 interface Control {
   resolve: (value: Record<string, unknown>) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 }
 
+/** One Claude conversation's headless `claude`, and the turn it runs. */
 class Engine {
   child: ChildProcess | null = null;
-  /** What the process was started with, as changed since by control requests. */
+  /** The process's settings: as started, then as control requests changed. */
   applied: ComposerSettings | null = null;
   busy = false;
   starting = false;
   stopping = false;
-  /** A restart in `deliver`: its exit is not news. */
+  /** Set while `deliver` restarts the process: that exit is not news. */
   quiet = false;
   error: string | null = null;
-  /** What waits to be written (FE-67). */
+  /** What waits to be written. */
   held = new Held();
   /**
-   * Written to the CLI and not taken in yet — no replay back. While any are,
-   * a `result` does not end the work: the CLI runs them next.
+   * Written to the CLI and not taken in yet (no replay back).
+   *
+   * While any are, a `result` does not end the work: the CLI runs them next.
    */
   inflight: Outgoing[] = [];
   /** The running turn's own message is written: others may steer it now. */
   posted = false;
   /**
-   * Stopped with messages written and not taken in: the process ends on the
-   * interrupt's `result`, before it runs them, and they wait again.
+   * Stopped with messages written and not taken in.
+   *
+   * The process then ends on the interrupt's `result`, before it runs them,
+   * and they wait again.
    */
   reclaim = false;
+  /** The permission and question cards shown now, by request id. */
   permissions = new Map<string, PermissionRequest>();
+  /** Each card's tool input, sent back with an allow. */
   inputs = new Map<string, unknown>();
+  /** Our control requests in flight, by request id. */
   controls = new Map<string, Control>();
   /** The running turn's lines, for `turn` events. */
   rows: Line[] = [];
@@ -208,7 +226,7 @@ class Engine {
     } as ConversationEvent);
   }
 
-  /** The last state told, so a repeat is not news. */
+  /** The last state sent, so an unchanged one is not sent again. */
   told = "";
 
   emitState() {
@@ -219,6 +237,11 @@ class Engine {
     this.emit({ type: "state", engine });
   }
 
+  /**
+   * Write one line to the CLI's stdin.
+   *
+   * @throws When Claude is not running.
+   */
   write(message: unknown): void {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed || !stdin.writable)
@@ -226,6 +249,11 @@ class Engine {
     stdin.write(`${JSON.stringify(message)}\n`);
   }
 
+  /**
+   * Send a host control request and wait for its answer.
+   *
+   * Rejects when the CLI refuses, stops, or does not answer in time.
+   */
   control(request: Record<string, unknown>): Promise<Record<string, unknown>> {
     const id = `lanework-${randomUUID()}`;
     return new Promise((resolve, reject) => {
@@ -244,6 +272,7 @@ class Engine {
     });
   }
 
+  /** Start the CLI with `settings`, and wire its output and exit. */
   async start(settings: ComposerSettings): Promise<void> {
     const cli = await this.deps.cli();
     const spawn = this.deps.spawn ?? spawnChild;
@@ -311,6 +340,7 @@ class Engine {
     });
   }
 
+  /** Take a chunk of stdout and handle every whole line in it. */
   read(chunk: string): void {
     this.buffer += chunk;
     for (;;) {
@@ -335,6 +365,7 @@ class Engine {
     if (this.buffer.length > 64 * 1024 * 1024) this.buffer = "";
   }
 
+  /** One line of the CLI's stream-json output. */
   handle(line: Record<string, unknown>): void {
     switch (line.type) {
       case "system": {
@@ -410,6 +441,11 @@ class Engine {
     }
   }
 
+  /**
+   * A control request from the CLI: a `can_use_tool` becomes a card.
+   *
+   * Any other kind is refused at once rather than left hanging.
+   */
   onControlRequest(line: Record<string, unknown>): void {
     const id = line.request_id;
     const request = (line.request ?? {}) as Record<string, unknown>;
@@ -459,6 +495,11 @@ class Engine {
     this.emit({ type: "permission", request: permission });
   }
 
+  /**
+   * Answer card `id` on stdin.
+   *
+   * @throws When the request was already answered.
+   */
   answer(id: string, answer: PermissionAnswer): void {
     if (!this.permissions.has(id))
       throw new Error("That request was already answered.");
@@ -467,7 +508,7 @@ class Engine {
       answer.behavior === "allow"
         ? {
             behavior: "allow",
-            // ⚠️ AskUserQuestion reads its answers off its own input.
+            // NOTE: AskUserQuestion reads its answers off its own input.
             updatedInput: answer.answers
               ? { ...((input ?? {}) as object), answers: answer.answers }
               : (input ?? {}),
@@ -500,6 +541,7 @@ class Engine {
     this.emit({ type: "permission-done", id });
   }
 
+  /** Close every card: the turn or the process they belonged to has ended. */
   dropPermissions(): void {
     for (const id of this.permissions.keys())
       this.emit({ type: "permission-done", id });
@@ -507,6 +549,11 @@ class Engine {
     this.inputs.clear();
   }
 
+  /**
+   * A `result` line: the turn ended.
+   *
+   * The work goes on while messages written to the CLI are still to run.
+   */
   onResult(): void {
     this.rows = [];
     this.dropPermissions();
@@ -536,27 +583,33 @@ class Engine {
     this.pump();
   }
 
-  /** Send `out` — into the running turn, or as a turn — or hold it. */
+  /** Send `out` (into the running turn, or as a turn), or hold it. */
   async accept(out: Outgoing): Promise<void> {
     if (!this.busy && !this.held.length) {
       await this.deliver(out);
       return;
     }
-    // A new message picks a paused queue back up (D5).
+    // A new message picks a paused queue back up (FE-67/D5).
     this.held.paused = false;
     this.held.items.push(out);
     this.pump();
     this.emitState();
   }
 
-  /** What is held goes, in order, for as long as the CLI can take it. */
+  /**
+   * Send what is held, in order, for as long as the CLI can take it.
+   *
+   * Idle, the head starts a turn. Busy, it is written into the running turn,
+   * but only once that turn's own message is and with the same settings;
+   * otherwise it waits.
+   */
   pump(): void {
     while (!this.held.paused && this.held.length) {
       const head = this.held.items[0] as Outgoing;
       if (!this.busy) {
         this.held.items.shift();
         void this.deliver(head).catch((error: Error) => {
-          // Not sent: it waits again, with why (D7).
+          // Not sent: it waits again, with why (FE-67/D7).
           this.error = error.message;
           this.held.restore([head], error.message);
           this.emitState();
@@ -580,7 +633,11 @@ class Engine {
     }
   }
 
-  /** Write `out` to the CLI, to be taken in. */
+  /**
+   * Write `out` to the CLI, to be taken in.
+   *
+   * @throws When Claude is not running.
+   */
   post(out: Outgoing): void {
     this.write({
       type: "user",
@@ -600,9 +657,13 @@ class Engine {
   }
 
   /**
-   * Write `out` as the next turn, the process first brought to its settings:
-   * model and permission by control request, effort and fast mode — which
-   * have none — by a restart on `--resume` (only ever while idle).
+   * Write `out` as the next turn, the process first brought to its settings.
+   *
+   * Model and permission change by control request. Effort and fast mode have
+   * none, so they change by a restart on `--resume`, which only ever happens
+   * between turns.
+   *
+   * @throws When the process cannot be started or written to.
    */
   async deliver(out: Outgoing): Promise<void> {
     this.busy = true;
@@ -652,7 +713,11 @@ class Engine {
     }
   }
 
-  /** End the process and wait for it (idle only). */
+  /**
+   * End the process and wait for it.
+   *
+   * Ended while busy (a restart in `deliver`), its exit is quiet.
+   */
   async halt(): Promise<void> {
     const child = this.child;
     if (!child) return;
@@ -666,16 +731,21 @@ class Engine {
     this.quiet = false;
   }
 
+  /**
+   * Stop the running turn with an `interrupt` control request.
+   *
+   * Falls back to SIGINT when the CLI does not answer it.
+   */
   async stop(): Promise<void> {
-    // What waits stays, paused (D5): Resume or the next send lets it go.
+    // What waits stays, paused (FE-67/D5): Resume or the next send lets it go.
     if (this.held.length) this.held.paused = true;
     if (!this.busy || !this.child) {
       this.emitState();
       return;
     }
     this.stopping = true;
-    // ⚠️ The CLI runs what it has not taken in yet after an interrupt, as a
-    // turn of its own: the process ends at the interrupt's `result` instead.
+    // NOTE: The CLI runs what it has not taken in yet after an interrupt, as a
+    // turn of its own, so the process ends at the interrupt's `result`.
     if (this.inflight.length) this.reclaim = true;
     this.emitState();
     try {
@@ -700,6 +770,7 @@ export function createEngines(deps: EngineDeps) {
   const keyOf = (workspace: string, conversation: string) =>
     `${workspace}\0${conversation}`;
 
+  // The engines' own process ids, so a terminal check never counts them.
   function pids(): Set<number> {
     const out = new Set<number>();
     for (const engine of engines.values())
@@ -734,8 +805,14 @@ export function createEngines(deps: EngineDeps) {
     state,
 
     /**
-     * Queue `out` behind a running turn, or write it now — through the CLI
-     * of `agent`, the conversation's own.
+     * Queue `out` behind a running turn, or write it now.
+     *
+     * It goes through the CLI of `agent`, the conversation's own. A pty
+     * already running Claude on the conversation wins, and its state is the
+     * answer.
+     *
+     * @throws When the engine must change while a turn is still running, or
+     *   the send fails.
      */
     async send(
       workspace: string,
@@ -761,7 +838,7 @@ export function createEngines(deps: EngineDeps) {
         return engine.state();
       }
       if (!engine?.child) {
-        // ⚠️ Single writer: a pty already running Claude on it wins.
+        // NOTE: Single writer: a pty already running Claude on it wins.
         const terminal = await terminalState(workspace, conversation);
         if (terminal) return terminal;
       }
@@ -782,8 +859,12 @@ export function createEngines(deps: EngineDeps) {
     },
 
     /**
-     * A NEW Codex conversation with `out` as its first turn. Codex names
-     * the id itself, on its first line: answered once it has.
+     * Start a NEW Codex conversation with `out` as its first turn.
+     *
+     * Codex names the id itself, on its first line; this answers once it
+     * has.
+     *
+     * @throws When Codex fails, or names no conversation within 30 seconds.
      */
     async startCodex(
       workspace: string,
@@ -813,8 +894,10 @@ export function createEngines(deps: EngineDeps) {
     },
 
     /**
-     * A NEW conversation under `conversation` — an id main just made — with
-     * `out` as its first turn.
+     * Start a NEW Claude conversation with `out` as its first turn.
+     *
+     * @param conversation An id main just made.
+     * @throws When that conversation exists, or the first turn fails.
      */
     async start(
       workspace: string,
@@ -835,8 +918,10 @@ export function createEngines(deps: EngineDeps) {
     },
 
     /**
-     * What an engine holds of a conversation the CLI has not written down
-     * yet (started here, first turn running), or null.
+     * What an engine holds of a conversation, or null when none runs it.
+     *
+     * For one the CLI has not written down yet (started here, first turn
+     * running).
      */
     pending(
       workspace: string,
@@ -861,6 +946,7 @@ export function createEngines(deps: EngineDeps) {
       await engines.get(keyOf(workspace, conversation))?.stop();
     },
 
+    /** Drop every queued message; returns how many went. */
     clearQueue(workspace: string, conversation: string): number {
       const engine = engines.get(keyOf(workspace, conversation));
       if (!engine) return 0;
@@ -869,7 +955,11 @@ export function createEngines(deps: EngineDeps) {
       return dropped;
     },
 
-    /** One queued message taken back out to be edited, or null: it went. */
+    /**
+     * Take one queued message back out to be edited.
+     *
+     * @returns null when it already went.
+     */
     takeQueued(
       workspace: string,
       conversation: string,
@@ -885,6 +975,11 @@ export function createEngines(deps: EngineDeps) {
       engines.get(keyOf(workspace, conversation))?.resume();
     },
 
+    /**
+     * Answer a permission or question card.
+     *
+     * @throws When the request was already answered.
+     */
     answer(
       workspace: string,
       conversation: string,
@@ -896,7 +991,11 @@ export function createEngines(deps: EngineDeps) {
       engine.answer(id, answer);
     },
 
-    /** Stop the pty running this conversation so the composer may write it. */
+    /**
+     * Stop the pty running this conversation so the composer may write it.
+     *
+     * @throws When the terminal still runs it after about three seconds.
+     */
     async takeOver(
       workspace: string,
       conversation: string,
@@ -922,7 +1021,12 @@ export function createEngines(deps: EngineDeps) {
       return now;
     },
 
-    /** Let a terminal resume it: end an idle engine's process. */
+    /**
+     * End an idle engine's process, so a terminal may resume the
+     * conversation.
+     *
+     * @throws When a turn is still running.
+     */
     async release(workspace: string, conversation: string): Promise<void> {
       const key = keyOf(workspace, conversation);
       const engine = engines.get(key);
@@ -943,8 +1047,9 @@ export function createEngines(deps: EngineDeps) {
     },
 
     /**
-     * Stop the engine outright — the rail's Stop: whatever turn runs is cut
-     * off, the queue dropped, and the process ended.
+     * Stop the engine outright: the rail's Stop.
+     *
+     * Whatever turn runs is cut off, the queue dropped, and the process ended.
      */
     async close(workspace: string, conversation: string): Promise<void> {
       const key = keyOf(workspace, conversation);
@@ -957,6 +1062,7 @@ export function createEngines(deps: EngineDeps) {
       engine.emitState();
     },
 
+    /** Signal every engine's process to end, without waiting: app quit. */
     killAll(): void {
       for (const engine of engines.values()) {
         engine.stopping = true;

@@ -1,7 +1,14 @@
 import { readFile } from "node:fs/promises";
 import type { ClaudeQuotaWindow, ClaudeUsage } from "../../../shared/terminal";
 
+/** The file in the app's home where the status line bridge saves limits. */
 export const CLAUDE_USAGE_FILE = "claude-usage.json";
+/**
+ * One rate-limit window as Claude's status line input gives it.
+ *
+ * @param minutes How long the window is.
+ * @returns null for a missing window, or one with an out-of-range value.
+ */
 function claudeWindow(
   value: unknown,
   minutes: number,
@@ -28,7 +35,13 @@ function claudeWindow(
   };
 }
 
-/** Deliberately copies no session, prompt, account, or credential fields. */
+/**
+ * The rate-limit windows of Claude's status line input.
+ *
+ * It copies no session, prompt, account, or credential fields.
+ *
+ * @returns null when the input has neither window.
+ */
 export function claudeQuotaOf(value: unknown, at = new Date().toISOString()) {
   if (!value || typeof value !== "object") return null;
   const limits = (value as Record<string, unknown>).rate_limits;
@@ -39,6 +52,12 @@ export function claudeQuotaOf(value: unknown, at = new Date().toISOString()) {
   return primary || secondary ? { primary, secondary, at } : null;
 }
 
+/**
+ * The windows the status line bridge last saved to `file`.
+ *
+ * A file that is too big, unreadable, or dated in the future reads as no
+ * windows. One older than ten minutes is `stale`.
+ */
 export async function readClaudeQuota(
   file: string,
 ): Promise<Pick<ClaudeUsage, "primary" | "secondary" | "at" | "stale">> {

@@ -5,11 +5,11 @@ import type { MemoryEntry, MemoryFile, MemoryList } from "../../shared/memory";
 import { MEMORY_INDEX } from "../../shared/memory";
 
 /**
- * What Claude remembers about the open project (FE-36), as main last listed
- * it, and the memories opened from it.
+ * What Claude remembers about the open project, as main last listed it, and
+ * the memories opened from it.
  *
- * ⚠️ One project at a time, by slug: a listing that lands after a switch is
- * dropped rather than shown on the project now open.
+ * NOTE: One project at a time, by slug. A listing that lands after a switch
+ * is dropped rather than shown on the project now open.
  */
 interface MemoryState {
   slug: string | null;
@@ -20,11 +20,19 @@ interface MemoryState {
   fileErrors: Record<string, string>;
   load: (slug: string) => Promise<void>;
   read: (slug: string, file: string) => Promise<void>;
-  /** Open the memory folder in Finder; throws what went wrong, to show. */
+  /**
+   * Open the memory folder in Finder.
+   *
+   * @throws An `Error` whose message is ready to show, when it cannot.
+   */
   reveal: (slug: string) => Promise<void>;
 }
 
-/** A listing that started before a later one must not land after it. */
+/**
+ * The request ticket for listings.
+ *
+ * A listing that started before a later one must not land after it.
+ */
 let listing = 0;
 
 export const useMemory = create<MemoryState>((set, get) => ({
@@ -81,7 +89,11 @@ export const useMemory = create<MemoryState>((set, get) => ({
   },
 }));
 
-/** The memories Claude saved, the index left out: what the rail counts. */
+/**
+ * How many memories Claude saved, {@link MEMORY_INDEX} left out.
+ *
+ * @returns 0 while the list is not read.
+ */
 export function memoryCount(list: MemoryList | null): number {
   return (
     list?.entries.filter((entry) => entry.file !== MEMORY_INDEX).length ?? 0
@@ -96,11 +108,13 @@ export function memoryEntry(
 }
 
 /**
- * List `slug`'s memory when it is opened, again on window focus, and every
- * time main says its folder was written (FE-36/D11). Never on a timer.
+ * Keep `slug`'s memory listed while the caller is mounted.
  *
- * ⚠️ Called by Settings › Memory while it is open (FE-51); the rail no longer
- * shows a count.
+ * Lists it when opened, again on window focus, and every time main says its
+ * folder was written (FE-36/D11). Never on a timer. Called by
+ * Settings › Memory while it is open.
+ *
+ * @param slug Undefined lists nothing.
  */
 export function useMemoryWatch(slug: string | undefined): void {
   const load = useMemory((state) => state.load);

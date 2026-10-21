@@ -2,10 +2,10 @@
 // (FE-52/D9): a repo whose origin maps to a local board gets its checkpoint
 // written into the SQLite file, with no credential and no network.
 //
-// Runs the hook's `worker` step — what the detached worker does after the Stop
-// hook hands it stdin — on the source under this runtime and, when
-// `bun run build` has made it, on the BUILT bundle under Electron's own Node,
-// the way Settings → Agents installs it.
+// It runs the hook's `worker` step (what the detached worker does after the
+// Stop hook hands it stdin) on the source under this runtime. When
+// `bun run build` has made it, it also runs it on the built bundle under
+// Electron's own Node, the way Settings → Agents installs it.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -51,7 +51,12 @@ function repo(name: string, remote: string): string {
   return root;
 }
 
-/** A Claude transcript in which the session talked to the board about `card`. */
+/**
+ * Write a Claude transcript in which the session talked to the board about
+ * `card`.
+ *
+ * @returns The transcript's path.
+ */
 function transcript(name: string, card: string): string {
   const file = join(dir, `${name}.jsonl`);
   const lines = [
@@ -107,7 +112,11 @@ function runners(): Runner[] {
   return list;
 }
 
-/** One worker run; returns the hook log. */
+/**
+ * Run the worker once.
+ *
+ * @returns The hook log, empty when nothing was logged.
+ */
 function work(
   runner: Runner,
   home: string,

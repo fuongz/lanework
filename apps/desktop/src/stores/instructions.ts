@@ -9,17 +9,21 @@ import type {
 } from "../../shared/instructions";
 
 /**
- * What the open project's agents are told (FE-37), as main last listed it,
- * the files opened from it and each agent's whole reading.
+ * What the open project's agents are told, as main last listed it, the files
+ * opened from it and each agent's whole reading.
  *
- * ⚠️ One project at a time, by slug: a listing that lands after a switch is
- * dropped rather than shown on the project now open.
+ * NOTE: One project at a time, by slug. A listing that lands after a switch
+ * is dropped rather than shown on the project now open.
  */
 interface InstructionsState {
   slug: string | null;
   list: InstructionList | null;
   error: string | null;
-  /** Bumped by every listing that lands: what the open views re-read on. */
+  /**
+   * Bumped by every listing that lands.
+   *
+   * The open views re-read their files when it changes.
+   */
   version: number;
   files: Record<string, InstructionContent>;
   fileErrors: Record<string, string>;
@@ -28,11 +32,19 @@ interface InstructionsState {
   load: (slug: string) => Promise<void>;
   read: (slug: string, id: string) => Promise<void>;
   readEffective: (slug: string, agent: InstructionAgent) => Promise<void>;
-  /** Show a file in Finder; throws what went wrong, to show. */
+  /**
+   * Show a file in Finder.
+   *
+   * @throws An `Error` whose message is ready to show, when it cannot.
+   */
   reveal: (slug: string, id: string) => Promise<void>;
 }
 
-/** A listing that started before a later one must not land after it. */
+/**
+ * The request ticket for listings.
+ *
+ * A listing that started before a later one must not land after it.
+ */
 let listing = 0;
 
 export const useInstructions = create<InstructionsState>((set, get) => ({
@@ -124,14 +136,17 @@ export const useInstructions = create<InstructionsState>((set, get) => ({
 }));
 
 /**
- * List `slug`'s instructions while the screen is open, again on window
- * focus, and every time main says one of their folders was written
- * (FE-37/D7). Never on a timer.
+ * Keep `slug`'s instructions listed while the screen is open.
+ *
+ * Lists them on mount, again on window focus, and every time main says one
+ * of their folders was written (FE-37/D7). Never on a timer.
+ *
+ * @param slug `""` (Settings with no project picked yet) lists nothing.
  */
 export function useInstructionsWatch(slug: string): void {
   const load = useInstructions((state) => state.load);
   useEffect(() => {
-    // "" is Settings with no project picked yet (FE-51).
+    // "" is Settings with no project picked yet.
     if (!slug) return;
     void load(slug);
     const onFocus = () => void load(slug);

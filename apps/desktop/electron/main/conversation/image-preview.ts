@@ -1,10 +1,10 @@
-// An image the chat names in inline code, read back for its lightbox
-// (FE-65). Nothing here imports Electron.
+// An image the chat names in inline code, read back for its lightbox.
+// Nothing here imports Electron.
 //
-// ⚠️ The page sends a path as Claude wrote it, so main decides what it may
+// NOTE: The page sends a path as Claude wrote it, so main decides what it may
 // read: a file inside the workspace's folder, or an image attached to this
-// conversation — after symlinks, never `..` out of either — with an image's
-// extension and at most IMAGE_MAX bytes.
+// conversation, with an image's extension and at most `IMAGE_MAX` bytes.
+// Symlinks are resolved first, and a path never `..`s out of either.
 import { readFile, realpath, stat } from "node:fs/promises";
 import {
   basename,
@@ -19,6 +19,7 @@ import type { ImagePreview } from "../../../shared/conversation";
 /** The largest image the lightbox is sent, in bytes. */
 const IMAGE_MAX = 20 * 1024 * 1024;
 
+/** The MIME type of each image extension the lightbox opens. */
 const IMAGE_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -29,6 +30,7 @@ const IMAGE_TYPES: Record<string, string> = {
   ".svg": "image/svg+xml",
 };
 
+/** What a conversation's images may be read from. */
 export interface ImageScope {
   /** The workspace's folder. */
   folder: string;
@@ -38,6 +40,7 @@ export interface ImageScope {
   files: () => Promise<string[]>;
 }
 
+/** Whether `path` is `folder` itself or anywhere under it. */
 function inside(folder: string, path: string): boolean {
   const rel = relative(folder, path);
   return (
@@ -50,12 +53,19 @@ async function isFile(path: string): Promise<boolean> {
   return (await stat(path).catch(() => null))?.isFile() ?? false;
 }
 
-/** Where `path` points, as an absolute path to try — or null. */
+/**
+ * Where `path` points, as an absolute path to try.
+ *
+ * A relative path that is not where it says falls back to the one file of
+ * that name, or the one ending in that path.
+ *
+ * @returns null when no file, or more than one, matches.
+ */
 async function locate(path: string, scope: ImageScope): Promise<string | null> {
   if (isAbsolute(path)) return path;
   const direct = resolve(scope.folder, path);
   if (inside(scope.folder, direct) && (await isFile(direct))) return direct;
-  // Not where it says: the one file of that name (or ending in that path).
+  // Not where it says: the one file of that name, or ending in that path.
   const name = basename(path);
   const tail = path.includes("/") ? `/${path}` : null;
   const found = new Set<string>();
@@ -70,8 +80,10 @@ async function locate(path: string, scope: ImageScope): Promise<string | null> {
 }
 
 /**
- * The image `path` names, as a `data:` URL — or `found: false` for one that
- * is not there, is ambiguous, is too big, or is out of scope.
+ * Read the image `path` names as a `data:` URL.
+ *
+ * @returns `found: false` for an image that is not there, is ambiguous, is
+ *   too big, or is out of scope.
  */
 export async function previewImage(
   path: string,
@@ -89,7 +101,11 @@ export async function previewImage(
   };
 }
 
-/** The real path of the image `path` names, when it is in scope; else null. */
+/**
+ * The real path of the image `path` names.
+ *
+ * @returns null when it is out of scope, not an image, or too big.
+ */
 export async function openableImage(
   path: string,
   scope: ImageScope,

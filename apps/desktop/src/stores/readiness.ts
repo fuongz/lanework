@@ -7,20 +7,20 @@ import type {
 } from "../../shared/readiness";
 
 /**
- * How long a report stands before focusing the window asks again (FE-30/D9).
+ * How long a report stands before window focus asks again (FE-30/D9).
  *
- * ⚠️ Opening or switching to a project always asks; only focus is throttled.
- * Every check reads a handful of files, and people flick between windows far
- * more often than they edit AGENTS.md.
+ * Opening or switching to a project always asks; only focus is throttled.
+ * Every check reads a handful of files, and people switch windows far more
+ * often than they edit AGENTS.md.
  */
 const FOCUS_MIN_AGE_MS = 60_000;
 
 /**
- * Whether each project's folder is ready for an agent (FE-30), as main last
- * reported it.
+ * Whether each project's folder is ready for an agent, as main last reported
+ * it.
  *
- * ⚠️ Keyed by slug, so a report that lands after a switch is filed under the
- * project it was read for and never shown on the new one.
+ * NOTE: Keyed by slug, so a report that lands after a switch is filed under
+ * the project it was read for and never shown on the new one.
  */
 interface ReadinessState {
   reports: Record<string, ReadinessReport>;
@@ -34,7 +34,12 @@ interface ReadinessState {
   ) => Promise<void>;
 }
 
-/** A read that started before a later one for the same project must not land after it. */
+/**
+ * Request tickets, by slug.
+ *
+ * A read that started before a later one for the same project must not land
+ * after it.
+ */
 const generation: Record<string, number> = {};
 const askedAt: Record<string, number> = {};
 
@@ -65,8 +70,8 @@ export const useReadiness = create<ReadinessState>((set) => ({
       });
     } catch (error) {
       if (generation[slug] !== mine) return;
-      // ⚠️ A failed check is not a failed project: the last report stays, and
-      // the error is only shown where somebody asked for the full list.
+      // A failed check is not a failed project: the last report stays, and
+      // the error shows only where somebody asked for the full list.
       set((state) => ({
         errors: {
           ...state.errors,
@@ -95,11 +100,16 @@ export const useReadiness = create<ReadinessState>((set) => ({
 }));
 
 /**
- * Check `slug` when it is shown, again whenever `key` changes, and on window
- * focus once the last check is a minute old (FE-30/D9). Never on a timer.
+ * Keep `slug`'s readiness fresh while the caller is mounted.
  *
- * ⚠️ Only Settings › Projects shows readiness now: the board never asks, so it
- * never waits for it.
+ * Checks when it is shown, again whenever `key` changes, and on window focus
+ * once the last check is a minute old (FE-30/D9). Never on a timer.
+ *
+ * Only Settings › Projects shows readiness. The board never asks, so it never
+ * waits for it.
+ *
+ * @param slug Null checks nothing.
+ * @param key Any value whose change should check again.
  */
 export function useReadinessWatch(slug: string | null, key = ""): void {
   const check = useReadiness((state) => state.check);

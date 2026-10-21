@@ -1,21 +1,23 @@
-// A project's agent setup (FE-40): every MCP server, skill, command, hook,
-// permission and plugin Claude Code and Codex would load in its folder, as
-// their config files on this machine say. Read-only — nothing here changes.
+// A project's agent setup: every MCP server, skill, command, hook, permission
+// and plugin Claude Code and Codex would load in its folder, as their config
+// files on this machine say. Read-only: nothing here changes them.
 //
-// ⚠️ Cleaned in MAIN, before it crosses. No `env`, `headers`, `args` value,
-// token or URL query string ever reaches the renderer: an MCP server is its
-// name, transport and the command's file name or the URL's host, and every
+// NOTE: Cleaned in MAIN, before it crosses. No `env`, `headers`, `args` value,
+// token or URL query string ever reaches the renderer. An MCP server is its
+// name, its transport, and the command's file name or the URL's host. Every
 // command or rule shown has been through the checkpoint hook's `redact()`.
 //
-// ⚠️ The renderer names a project by slug and a skill or command by the `id`
-// main handed out with it — never by path (FE-40/D4).
+// NOTE: The renderer names a project by slug and a skill or command by the
+// `id` main handed out with it, never by path (FE-40/D4).
 
 export type SetupAgent = "claude" | "codex";
 
 /**
- * Where an entry comes from (FE-40/D3): the user's own config, the repo's,
- * the user's config for this one folder, a plugin — or, for the skills
- * Codex ships in `$CODEX_HOME/skills/.system`, Codex itself.
+ * Where an entry comes from (FE-40/D3).
+ *
+ * The user's own config, the repo's, the user's config for this one folder, a
+ * plugin, or Codex itself for the skills it ships in
+ * `$CODEX_HOME/skills/.system`.
  */
 export type SetupScope = "user" | "project" | "local" | "plugin" | "system";
 
@@ -28,7 +30,7 @@ export interface SetupOrigin {
   source: string;
   /** The plugin that brings it, `name@marketplace`; null outside one. */
   plugin: string | null;
-  /** Why it is not in effect — drawn dimmed (FE-40/D3); null when it is. */
+  /** Why it is not in effect, drawn dimmed (FE-40/D3); null when it is. */
   disabled: string | null;
 }
 
@@ -37,7 +39,7 @@ export type SetupTransport = "stdio" | "http" | "sse" | "ws" | "unknown";
 export interface SetupMcpServer extends SetupOrigin {
   name: string;
   transport: SetupTransport;
-  /** The command's file name or the URL's host — nothing else of either. */
+  /** The command's file name or the URL's host, and nothing else of either. */
   target: string | null;
 }
 
@@ -55,11 +57,13 @@ export interface SetupHook extends SetupOrigin {
   type: string;
   /** What runs: the command or prompt, redacted, or a URL's host. */
   detail: string | null;
-  /** Lanework's own checkpoint hook (FE-28, FE-29, INF-03) — marked (D5). */
+  /** Whether it is Lanework's own checkpoint hook, marked in the view (D5). */
   lanework: boolean;
 }
 
 /**
+ * What a permission entry is.
+ *
  * - `allow` / `ask` / `deny`: a rule — Claude's `permissions`, Codex's
  *   `prefix_rule`.
  * - `mode`: Claude's `defaultMode`.
@@ -91,7 +95,7 @@ export interface SetupPlugin extends SetupOrigin {
 }
 
 export interface AgentSetup {
-  /** The folder it was read for; null — and every list empty — without one. */
+  /** The folder it was read for; null, with every list empty, without one. */
   folder: string | null;
   mcp: SetupMcpServer[];
   skills: SetupDoc[];
@@ -115,7 +119,7 @@ export interface SetupFile {
   /** Its frontmatter as written, without the `---` lines; null for none. */
   frontmatter: string | null;
   body: string;
-  /** Longer than one read takes; what is here is its start. */
+  /** Whether the file is longer than one read takes; `body` is its start. */
   truncated: boolean;
 }
 
@@ -134,13 +138,14 @@ export function isSetupId(value: unknown): value is string {
 export interface DesktopAgentSetupApi {
   read: (slug: string) => Promise<AgentSetup>;
   /**
-   * What every project gets — the `user`, `plugin` and `system` entries
-   * alone, read for no folder. `folder` is null; skills and commands in it
-   * cannot be opened (`open` takes a project).
+   * The entries every project gets: `user`, `plugin` and `system` alone.
+   *
+   * Read for no folder, so `folder` is null. Its skills and commands cannot be
+   * opened, since `open` takes a project.
    */
   readGlobal: () => Promise<AgentSetup>;
   /** A skill's `SKILL.md` or a command's file, by the id `read` gave it. */
   open: (slug: string, id: string) => Promise<SetupFile>;
-  /** Show that file in Finder. */
+  /** Shows that file in Finder. */
   reveal: (slug: string, id: string) => Promise<void>;
 }

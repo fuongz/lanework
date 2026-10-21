@@ -1,12 +1,14 @@
-// A tool's parameters, spelled once: the JSON Schema `tools/list` advertises
-// and the validator `tools/call` runs are both derived from it, so the two can
-// never disagree. Deliberately small — the board tools need strings, booleans,
-// integers, enums, string lists, string maps and lists of flat objects.
+// A tool's parameters, spelled once. The JSON Schema that `tools/list`
+// advertises and the validator that `tools/call` runs both derive from it, so
+// the two cannot disagree. It is small on purpose: the board tools need
+// strings, booleans, integers, enums, string lists, string maps and lists of
+// flat objects.
 //
-// ⚠️ Unknown arguments are DROPPED, not refused, as the cloud's zod schemas do:
-// an agent that sends a field this build does not know (say `assignees.users`)
-// must still get its card.
+// NOTE: Unknown arguments are dropped, not refused, as the cloud's zod schemas
+// do. An agent that sends a field this build does not know (say
+// `assignees.users`) must still get its card.
 
+/** One tool parameter: its type and the limits the validator enforces. */
 export type Param =
   | { type: "string"; description?: string; enum?: readonly string[] }
   | { type: "boolean"; description?: string }
@@ -33,6 +35,7 @@ export type Param =
       minItems?: number;
     };
 
+/** A tool's parameters: each one by name, and which are required. */
 export interface Shape {
   properties: Record<string, Param>;
   required?: readonly string[];
@@ -78,6 +81,7 @@ function paramSchema(param: Param): JsonSchema {
   }
 }
 
+/** Build the JSON Schema that `tools/list` advertises for a {@link Shape}. */
 export function shapeSchema(shape: Shape): JsonSchema {
   const properties: Record<string, JsonSchema> = {};
   for (const [name, param] of Object.entries(shape.properties))
@@ -90,6 +94,7 @@ export function shapeSchema(shape: Shape): JsonSchema {
   };
 }
 
+/** A tool call whose arguments do not match the tool's {@link Shape}. */
 export class InvalidParams extends Error {
   constructor(message: string) {
     super(message);
@@ -151,7 +156,14 @@ function checkParam(path: string, param: Param, value: unknown): unknown {
   }
 }
 
-/** Checks `args` against `shape`, dropping unknown keys and absent optionals. */
+/**
+ * Check `args` against `shape`, dropping unknown keys and absent optionals.
+ *
+ * @param prefix The path of the enclosing object, for error messages.
+ * @returns The arguments the shape knows, validated.
+ * @throws {@link InvalidParams} when an argument is missing or has the wrong
+ *   type.
+ */
 export function checkShape(
   shape: Shape,
   args: unknown,

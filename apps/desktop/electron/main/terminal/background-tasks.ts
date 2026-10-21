@@ -1,10 +1,11 @@
 // The tasks a Claude conversation started in the background (FE-42): a shell
-// `Bash` left running, an async agent, a `Monitor` — read from the
-// conversation's own transcript, and a shell's output read from the file the
-// CLI said it writes to.
+// `Bash` left running, an async agent, a `Monitor`. They are read from the
+// conversation's own transcript, and a shell's output from the file the CLI
+// said it writes to. A running shell or monitor can also be stopped, by its
+// process group.
 //
-// FE-43 also stops a shell's process group. Nothing here imports Electron:
-// main calls it, and specs drive it under Node with isolated task fixtures.
+// Nothing here imports Electron: main calls it, and specs drive it under
+// Node with isolated task fixtures.
 import { execFile } from "node:child_process";
 import { constants, realpathSync } from "node:fs";
 import { open, realpath, stat } from "node:fs/promises";
@@ -26,11 +27,16 @@ import { claudeProjectDir, type Line, STALE_MS, tidy } from "./agent-sessions";
 
 /** How much of a transcript one read step takes. */
 const STEP = 1024 * 1024;
-/** Transcripts whose parse is kept between listings: more than a listing reads (40). */
+/**
+ * Transcripts whose parse is kept between listings: more than one listing
+ * reads (40).
+ */
 const CACHE_MAX = 128;
 /**
- * The only lines that can start, name or end a background task: a line
- * holding none of these is never parsed — a transcript runs to tens of MB.
+ * What a line must hold to start, name or end a background task.
+ *
+ * A line holding none of these is never parsed: a transcript runs to tens of
+ * MB.
  */
 const MARKERS = [
   "backgroundTaskId",
@@ -44,10 +50,16 @@ const MARKERS = [
   "Successfully stopped task",
   "Successfully killed shell",
 ];
+/** A task's notification, as the CLI puts it in the user's turn. */
 const NOTIFICATION = /<task-notification>([\s\S]*?)<\/task-notification>/g;
+/** Where a background shell's answer says its output goes. */
 const OUTPUT_PATH = /Output is being written to: (\S+\.output)/;
+/** The exit code a notification's summary names. */
 const EXIT_CODE = /exit code (-?\d+)/i;
-/** A terminal escape: an OSC title or link, a CSI colour or move, or a lone one. */
+/**
+ * A terminal escape: an OSC title or link, a CSI colour or move, or a lone
+ * one.
+ */
 const ANSI =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: escapes are what it removes.
   /\u001b(?:\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])/g;
@@ -64,7 +76,9 @@ interface Started {
   script: string | null;
 }
 
+/** The newest a task's notifications said of it. */
 interface Notice {
+  /** How it ended; null while it has not. */
   status: BackgroundTaskStatus | null;
   exitCode: number | null;
   summary: string | null;
@@ -77,22 +91,37 @@ interface Parsed {
   mtimeMs: number;
   /** Bytes read up to the end of the last whole line. */
   offset: number;
+  /** Tool calls that may start a task, by id, until they are answered. */
   calls: Map<
     string,
     { name: string; input: Record<string, unknown>; at: string | null }
   >;
+  /** The tasks started so far, by task id. */
   started: Map<string, Started>;
+  /** What each task's notifications said, by task id. */
   notices: Map<string, Notice>;
 }
 
+/** `execFile`, awaited. */
 const runFile = promisify(execFile);
+/**
+ * The `<transcript>:<task>` this app stopped: a task it killed reports as
+ * failed, and is shown as killed.
+ */
 const stoppedTasks = new Set<string>();
 
+/** Each transcript's parse so far, oldest read first. */
 const cache = new Map<string, Parsed>();
 /** One read of a file at a time: a second waits and takes the cache. */
 const reading = new Map<string, Promise<Parsed>>();
 
-/** Where conversation `conversation` of `folder` is kept, built here, never sent. */
+/**
+ * Where conversation `conversation` of `folder` is kept.
+ *
+ * The path is built here, never sent by a page.
+ *
+ * @throws when `conversation` is not a session id.
+ */
 function claudeTranscriptPath(
   home: string,
   folder: string,
@@ -109,13 +138,22 @@ function claudeTranscriptPath(
   );
 }
 
+/**
+ * The workspace slug the renderer sent.
+ *
+ * @throws when `value` is not a slug.
+ */
 function workspaceArg(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
     throw new Error("A valid workspace is required");
   return value;
 }
 
-/** `agentBackgroundTasks`' request off the wire: ids, never a path. */
+/**
+ * `agentBackgroundTasks`' request off the wire: ids, never a path.
+ *
+ * @throws when an argument is missing or invalid.
+ */
 export function backgroundRequest(args: unknown[]): {
   workspace: string;
   conversation: string;
@@ -128,7 +166,11 @@ export function backgroundRequest(args: unknown[]): {
   return { workspace, conversation: args[1] };
 }
 
-/** `agentTaskOutput`'s request off the wire: ids, never a path. */
+/**
+ * `agentTaskOutput`'s request off the wire: ids, never a path.
+ *
+ * @throws when an argument is missing or invalid.
+ */
 export function taskOutputRequest(args: unknown[]): {
   workspace: string;
   conversation: string;
@@ -143,9 +185,11 @@ export function taskOutputRequest(args: unknown[]): {
   return { workspace, conversation: args[1], task: args[2] };
 }
 
+/** A non-blank string, as it is, or null. */
 const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value : null;
 
+/** `value` as a plain object, or null. */
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -166,6 +210,7 @@ function contentText(content: unknown): string {
     .join("\n");
 }
 
+/** `text` with the XML entities a notification escapes decoded. */
 function decode(text: string): string {
   return text
     .replace(/&lt;/g, "<")
@@ -175,6 +220,7 @@ function decode(text: string): string {
     .replace(/&amp;/g, "&");
 }
 
+/** The decoded text of the first `<name>` element in `body`, or null. */
 function tag(body: string, name: string): string | null {
   const match = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(body);
   return match ? decode(match[1].trim()) : null;
@@ -194,6 +240,7 @@ function statusOf(word: string | null): BackgroundTaskStatus | null {
   }
 }
 
+/** Fold every task notification in `text` into `parsed`. */
 function notify(parsed: Parsed, text: string, at: string | null) {
   for (const match of text.matchAll(NOTIFICATION)) {
     const body = match[1];
@@ -223,9 +270,10 @@ function notify(parsed: Parsed, text: string, at: string | null) {
 }
 
 /**
- * The task a `TaskStop` (or the older `KillShell`) answer says it stopped. The
- * CLI sends no notification for a task stopped this way: this answer is the
- * only word of its end.
+ * The task a `TaskStop` (or the older `KillShell`) answer says it stopped.
+ *
+ * The CLI sends no notification for a task stopped this way: this answer is
+ * the only word of its end.
  */
 function stoppedBy(result: Record<string, unknown>): string | null {
   const message = str(result.message);
@@ -235,6 +283,12 @@ function stoppedBy(result: Record<string, unknown>): string | null {
   return typeof id === "string" && isBackgroundTaskId(id) ? id : null;
 }
 
+/**
+ * What kind of task a tool's answer started, and its id.
+ *
+ * @param name The tool that was called, when its call was read.
+ * @returns null for an answer that started no background task.
+ */
 function kindOf(
   name: string | undefined,
   result: Record<string, unknown>,
@@ -259,6 +313,7 @@ function kindOf(
   return null;
 }
 
+/** `text`, cut to {@link BACKGROUND_COMMAND_MAX} characters. */
 function cut(text: string): string {
   return text.length > BACKGROUND_COMMAND_MAX
     ? `${text.slice(0, BACKGROUND_COMMAND_MAX - 1)}…`
@@ -324,7 +379,7 @@ function visit(parsed: Parsed, line: Line) {
       }
       const which = kindOf(call?.name, result);
       if (which) {
-        // A `ws` monitor has no command, and so no process (FE-56).
+        // A `ws` monitor has no command, and so no process.
         const command =
           which.kind === "agent" ? null : str(call?.input.command);
         const description =
@@ -357,6 +412,7 @@ function visit(parsed: Parsed, line: Line) {
   if (text.includes("<task-notification>")) notify(parsed, text, at);
 }
 
+/** An empty parse of a transcript, to be read from its start. */
 function fresh(size: number, mtimeMs: number): Parsed {
   return {
     size,
@@ -369,8 +425,12 @@ function fresh(size: number, mtimeMs: number): Parsed {
 }
 
 /**
- * `file` parsed up to its end. A transcript only grows, so a cached parse
- * reads on from where it stopped; one that shrank is read again.
+ * `file` parsed up to its end.
+ *
+ * A transcript only grows, so a cached parse reads on from where it stopped;
+ * one that shrank is read again.
+ *
+ * @throws when `file` is missing or not a file.
  */
 async function parse(file: string): Promise<Parsed> {
   const info = await stat(file);
@@ -435,6 +495,7 @@ async function parse(file: string): Promise<Parsed> {
   return parsed;
 }
 
+/** {@link parse}, one read of a file at a time. */
 function parseOnce(file: string): Promise<Parsed> {
   const prior = reading.get(file) ?? Promise.resolve(null);
   const next = prior.catch(() => null).then(() => parse(file));
@@ -446,6 +507,7 @@ function parseOnce(file: string): Promise<Parsed> {
   return next;
 }
 
+/** The tasks a parse holds, each with its status, running first. */
 function tasksOf(parsed: Parsed, transcript: string): BackgroundTask[] {
   // No word from a task whose conversation went quiet long ago: the CLI that
   // owned it is gone.
@@ -481,7 +543,7 @@ export async function readTranscriptTasks(
   return tasksOf(await parseOnce(file), file);
 }
 
-/** Conversation `conversation`'s background tasks (FE-42). */
+/** Conversation `conversation`'s background tasks, without pids. */
 export async function readBackgroundTasks(
   home: string,
   folder: string,
@@ -499,8 +561,10 @@ export function backgroundCount(tasks: BackgroundTask[]): BackgroundCount {
 }
 
 /**
- * Where Claude may keep task output: `/tmp` (where it really does on macOS),
- * the OS temp dir, and `$CLAUDE_CODE_TMPDIR` — each resolved, those that exist.
+ * Where Claude may keep task output.
+ *
+ * `/tmp` (where it really does on macOS), the OS temp dir, and
+ * `$CLAUDE_CODE_TMPDIR`: each resolved, only those that exist.
  */
 function tempRoots(): string[] {
   const roots = new Set<string>();
@@ -517,7 +581,10 @@ function tempRoots(): string[] {
 
 /**
  * Whether `resolved` is `<root>/claude-…/…/tasks/<task>.output` for one of
- * `roots` — symlinks already resolved, so none can point out of it.
+ * `roots`.
+ *
+ * @param resolved A path with its symlinks already resolved, so none can
+ *   point out of the folder.
  */
 function insideTasks(resolved: string, task: string, roots: string[]): boolean {
   return roots.some((root) => {
@@ -533,7 +600,12 @@ function insideTasks(resolved: string, task: string, roots: string[]): boolean {
   });
 }
 
-/** Terminal escapes out; of a line a progress bar redrew, its last state. */
+/**
+ * Task output as plain text.
+ *
+ * Terminal escapes are removed, and a line a progress bar redrew keeps only
+ * its last state.
+ */
 function plainOutput(text: string): string {
   return text
     .replace(ANSI, "")
@@ -546,6 +618,7 @@ function plainOutput(text: string): string {
     .join("\n");
 }
 
+/** The output of a task whose file is gone, or was never written. */
 const MISSING: BackgroundTaskOutput = {
   text: "",
   size: 0,
@@ -553,6 +626,13 @@ const MISSING: BackgroundTaskOutput = {
   missing: true,
 };
 
+/**
+ * The real path of a shell's recorded output file.
+ *
+ * @returns null when the file is gone, or was never written.
+ * @throws when the task recorded no output file, or it resolves outside the
+ *   CLI's task folder.
+ */
 async function taskOutputPath(
   started: Started,
   task: string,
@@ -589,14 +669,18 @@ async function taskOutputPath(
 /** One row of `ps`: enough to tell a task's process from any other. */
 export interface Proc {
   pid: number;
+  /** The parent's pid. */
   ppid: number;
+  /** The process group's id. */
   pgid: number;
   uid: number;
   /** `lstart` as `ps` writes it: with the pid, it tells a reused pid apart. */
   start: string;
+  /** The whole command line. */
   args: string;
 }
 
+/** One row of {@link processTable}'s `ps`. */
 const PS_ROW =
   /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s?(.*)$/;
 
@@ -624,6 +708,11 @@ export async function processTable(): Promise<Proc[]> {
   });
 }
 
+/**
+ * This process's user id.
+ *
+ * @throws on a platform without Unix process groups.
+ */
 export function ownUid(): number {
   const uid = process.getuid?.();
   if (uid === undefined)
@@ -631,7 +720,11 @@ export function ownUid(): number {
   return uid;
 }
 
-/** The groups never signalled: the app's own, and every ancestor's. */
+/**
+ * The groups never signalled: the app's own, and every ancestor's.
+ *
+ * @throws when the app's own group cannot be found.
+ */
 function guardedGroups(procs: Proc[]): Set<number> {
   const byPid = new Map(procs.map((proc) => [proc.pid, proc]));
   const own = byPid.get(process.pid)?.pgid;
@@ -650,8 +743,10 @@ function guardedGroups(procs: Proc[]): Set<number> {
 }
 
 /**
- * The same-user groups holding a shell's recorded output open, guarded ones
- * left out; null when the file is gone.
+ * The same-user groups holding a shell's recorded output open.
+ *
+ * @param guarded Groups left out, whatever they hold.
+ * @returns null when the file is gone.
  */
 async function shellGroups(
   started: Started,
@@ -693,7 +788,11 @@ function launches(args: string, conversation: string): boolean {
   );
 }
 
-/** A command line as `ps` shows it: a control character, escaped or not, is `?`. */
+/**
+ * A command line as `ps` shows it.
+ *
+ * A control character, escaped or not, is `?`.
+ */
 export function visible(text: string): string {
   return (
     text
@@ -709,10 +808,15 @@ function evalOf(script: string): string {
 }
 
 /**
- * Each running monitor's group leader (FE-56/D1): a group leader the
- * conversation's CLI started, running `eval '<its command>'`. Monitors with
- * the same command pair with such leaders by start order — only when there
- * are exactly as many; otherwise none of them gets one.
+ * Each running monitor's group leader (FE-56/D1).
+ *
+ * The leader is a group leader the conversation's CLI started, running
+ * `eval '<its command>'`. Monitors with the same command pair with such
+ * leaders by start order, but only when there are exactly as many; otherwise
+ * none of them gets one.
+ *
+ * @param taken Groups already claimed or guarded, never a monitor's.
+ * @returns The leader's pid, by task id.
  */
 function monitorLeaders(
   monitors: Started[],
@@ -754,7 +858,11 @@ function monitorLeaders(
   return leaders;
 }
 
-/** The group leading each running shell and monitor, where exactly one does. */
+/**
+ * The group leading each running shell and monitor, where exactly one does.
+ *
+ * @returns The group's id, by task id.
+ */
 async function taskLeaders(
   parsed: Parsed,
   transcript: string,
@@ -804,9 +912,11 @@ async function taskLeaders(
 }
 
 /**
- * Conversation `conversation`'s background tasks with the pid of each running
- * shell and monitor (FE-56). `ps` runs only while one is running (D5); a
- * failed read leaves every pid null.
+ * Conversation `conversation`'s background tasks, with the pid of each
+ * running shell and monitor.
+ *
+ * `ps` runs only while one is running (FE-56/D5); a failed read leaves every
+ * pid null.
  */
 export async function readBackgroundTasksWithPids(
   home: string,
@@ -837,9 +947,17 @@ export async function readBackgroundTasksWithPids(
 }
 
 /**
- * Stop a running shell (FE-43) or monitor (FE-56): only same-user process
- * groups — a shell's are those holding its recorded output; a monitor's is
- * the one leader `taskLeaders` finds for it, or it refuses.
+ * Stop a running shell or monitor.
+ *
+ * Only same-user process groups are signalled, TERM first and KILL after
+ * three seconds:
+ * - a shell's are those holding its recorded output;
+ * - a monitor's is the one leader {@link taskLeaders} finds for it, or it
+ *   refuses.
+ *
+ * @returns How many processes were signalled.
+ * @throws when the task is unknown, an agent, not running, or its process
+ *   cannot be told.
  */
 export async function stopBackgroundTask(
   home: string,
@@ -900,7 +1018,8 @@ export async function stopBackgroundTask(
     await new Promise((resolve) => setTimeout(resolve, 3000));
     const after = await processTable();
     for (const pgid of signaled) {
-      // A surviving original pid + start time: never escalate into a reused group.
+      // A surviving original pid + start time: never escalate into a reused
+      // group.
       const survives = after.some(
         (member) =>
           member.pgid === pgid &&
@@ -925,14 +1044,17 @@ export async function stopBackgroundTask(
 }
 
 /**
- * The end of background task `task`'s output (FE-42/D5): its last
- * `BACKGROUND_OUTPUT_MAX` bytes, escapes stripped. Read anew on each call —
- * the renderer polls it while the task runs.
+ * The end of background task `task`'s output (FE-42/D5).
  *
- * ⚠️ Only from the path the conversation's own transcript recorded for that
- * task, and only when it resolves inside a CLI task folder under one of
- * `roots`. Anything else throws: an unknown task, a path elsewhere, a symlink
- * out of the folder.
+ * Its last {@link BACKGROUND_OUTPUT_MAX} bytes, escapes stripped. Read anew on
+ * each call: the renderer polls it while the task runs.
+ *
+ * NOTE: Only from the path the conversation's own transcript recorded for
+ * that task, and only when it resolves inside a CLI task folder under one of
+ * `roots`.
+ *
+ * @throws for an unknown task, a path elsewhere, or a symlink out of the
+ *   folder.
  */
 export async function readTaskOutput(
   home: string,

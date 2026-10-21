@@ -1,31 +1,36 @@
-// Reading and rewriting Claude Code's user settings to add or remove OUR Stop
-// hook (FE-28), and nothing else. Codex's `hooks.json` has the same shape —
-// `{ hooks: { Stop: [{ hooks: [{ type, command }] }] } }` — so every rule here
-// serves it too (FE-29, `codex.ts`).
+// Reads and rewrites Claude Code's user settings to add or remove our Stop
+// hook, and nothing else. Codex's `hooks.json` has the same shape,
+// `{ hooks: { Stop: [{ hooks: [{ type, command }] }] } }`, so every rule here
+// serves it too (`codex.ts`).
 //
-// ⚠️ `~/.claude/settings.json` belongs to the user and to Claude Code. Every
-// rule below exists so that turning our switch on and off leaves that file
-// exactly as it was apart from our one entry:
+// NOTE: `~/.claude/settings.json` belongs to the user and to Claude Code.
+// Every rule below exists so that turning our switch on and off leaves that
+// file as it was, apart from our one entry:
 //
-//   • Our entry is recognised by the hook's filename in its command, and only
-//     that entry is ever replaced or removed — other Stop hooks, other events
-//     and every other key are passed through untouched.
-//   • A file that exists but is not a JSON object is REFUSED, not "repaired":
-//     the user may be halfway through editing it, and overwriting it would
-//     destroy their work to install ours.
-//   • The write is atomic (temp file + rename), so a crash mid-write cannot
-//     leave Claude Code with half a settings file.
+// - Our entry is recognised by the hook's filename in its command. Only that
+//   entry is replaced or removed. Other Stop hooks, other events and every
+//   other key pass through untouched.
+// - A file that exists but is not a JSON object is refused, not "repaired".
+//   The user may be halfway through editing it, and overwriting it would
+//   destroy their work.
+// - The write is atomic (temp file + rename), so a crash mid-write cannot
+//   leave Claude Code with half a settings file.
 //
 // Pure apart from `readSettings` / `writeSettings`, and free of Electron, so
-// the merge rules are tested directly (tests/handoff-settings.spec.ts).
+// the merge rules are tested directly (`tests/handoff-settings.spec.ts`).
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-/** Present in our hook's command, and in no one else's. */
+/** The text in our hook's command, and in no one else's. */
 export const HOOK_MARKER = "lanework-checkpoint";
 
-/** Claude Code's own override for `~/.claude`, which tests also use. */
+/**
+ * The path of Claude Code's user settings.
+ *
+ * `CLAUDE_CONFIG_DIR` is Claude Code's own override for `~/.claude`, which
+ * tests also use.
+ */
 export function claudeSettingsPath(): string {
   return join(
     process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"),
@@ -51,17 +56,18 @@ export function shellQuote(value: string): string {
 }
 
 /**
- * The script both CLIs' settings point at (FE-29/D3), rewritten by the app on
- * every launch.
+ * The script both CLIs' settings point at, rewritten by the app on every
+ * launch.
  *
- * ⚠️ Why a script and not the command itself: Codex runs a hook only after the
- * user approves it, and it pins that approval to the hook's COMMAND. The paths
- * that change — this app's binary, the bundled hook — live in here, so the
- * command in the settings files never changes and one approval lasts.
- *
- * ⚠️ `ELECTRON_RUN_AS_NODE=1` turns the app binary into a plain Node (FE-28/D5)
- * — the people this is for have no bun and may have no node. The hook passes
- * the variable on to the worker it detaches, or that would boot as an app.
+ * - NOTE: A script, not the command itself (FE-29/D3). Codex runs a hook only
+ *   after the user approves it, and pins that approval to the hook's command.
+ *   The paths that change (this app's binary, the bundled hook) live in the
+ *   script, so the command in the settings files never changes and one
+ *   approval lasts.
+ * - `ELECTRON_RUN_AS_NODE=1` turns the app binary into a plain Node
+ *   (FE-28/D5): the people this is for have no bun and may have no node. The
+ *   hook passes the variable on to the worker it detaches, or the worker would
+ *   boot as an app.
  */
 export function buildShim(options: {
   execPath: string;
@@ -69,7 +75,7 @@ export function buildShim(options: {
   apiUrl: string;
   configPath: string;
   secretFile?: string | null;
-  /** FE-52: pin the app home, so the hook opens the same local store the app does. */
+  /** The app home, pinned so the hook opens the app's own local store. */
   home?: string | null;
 }): string {
   return [
@@ -98,8 +104,12 @@ export function buildHookCommand(options: {
 }
 
 /**
- * Where our hook sits — `Stop[group].hooks[index]`. Codex keys the approval of
- * a hook by exactly this position (`<file>:stop:<group>:<index>`).
+ * Where our hook sits: `Stop[group].hooks[index]`.
+ *
+ * Codex keys a hook's approval by this position
+ * (`<file>:stop:<group>:<index>`).
+ *
+ * @returns Null when our hook is not there.
  */
 export function findHookPosition(
   settings: Json,
@@ -128,7 +138,7 @@ export function findHook(settings: Json): string | null {
   return null;
 }
 
-/** `settings` with every copy of our hook taken out, empty shells dropped. */
+/** `settings` with every copy of our hook removed, and empty shells dropped. */
 export function withoutHook(settings: Json): Json {
   if (!isObject(settings.hooks) || !Array.isArray(settings.hooks.Stop))
     return settings;
@@ -165,7 +175,12 @@ type SettingsRead =
   | { ok: true; settings: Json }
   | { ok: false; reason: "unreadable" };
 
-/** A missing file is empty settings; anything else must be a JSON object. */
+/**
+ * Parse a settings file's text.
+ *
+ * A missing or blank file is empty settings. Anything else must be a JSON
+ * object, or the read is `unreadable`.
+ */
 export function parseSettings(text: string | null): SettingsRead {
   if (text === null || !text.trim()) return { ok: true, settings: {} };
   try {

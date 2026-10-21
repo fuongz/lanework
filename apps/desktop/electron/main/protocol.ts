@@ -14,6 +14,13 @@ const mime: Record<string, string> = {
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
 };
+/**
+ * Serve the built renderer from `root` on the `app:` scheme.
+ *
+ * A path with no file and no extension, outside `/assets/`, gets the app
+ * shell, so the router can handle it. Every page carries a CSP that trusts
+ * only the shell's own inline scripts, by hash.
+ */
 export function registerAppProtocol(root: string) {
   protocol.handle("app", async (request) => {
     if (!isTrustedUrl(request.url))
@@ -30,8 +37,8 @@ export function registerAppProtocol(root: string) {
         file = join(root, "_shell.html");
       }
       const content = await readFile(file);
-      // Start emits inline hydration scripts in the generated shell. Trust only
-      // those exact bytes, not arbitrary inline JavaScript.
+      // TanStack Start emits inline hydration scripts in the generated shell.
+      // Trust only those exact bytes, not any inline JavaScript.
       const hashes =
         extname(file) === ".html"
           ? Array.from(

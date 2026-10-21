@@ -3,11 +3,13 @@ import type { SubagentTranscript, TerminalAgent } from "#/../shared/terminal";
 import { ipcMessage } from "#/lib/ipc-error";
 
 /**
- * One sub-agent's transcript, as main last read it (FE-35) — read again each
- * time the watcher says THAT sub-agent was written (FE-35/D11). Never on a
- * timer: a done one is never written, so it is read once.
+ * One sub-agent's transcript, as main last read it.
  *
- * ⚠️ One read in flight at a time, and at most one queued behind it: a
+ * Read again each time the watcher says THAT sub-agent was written
+ * (FE-35/D11). Never on a timer: a done one is never written, so it is read
+ * once.
+ *
+ * NOTE: one read in flight at a time, and at most one queued behind it: a
  * working sub-agent writes many times a second, and a read that started
  * first must not land after a later one.
  */

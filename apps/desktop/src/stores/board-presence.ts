@@ -6,18 +6,19 @@ import type { BoardPresence } from "../../shared/workspaces";
 /**
  * How often an open board asks who is working on it (BE-16/D2a).
  *
- * ⚠️ Every poll is a billed D1 read on the service, so it only runs while the
- * window has focus — see `usePresencePoll`.
+ * NOTE: Every poll is a billed D1 read on the service, so it runs only while
+ * the window has focus (see {@link usePresencePoll}).
  */
 const POLL_MS = 30_000;
 
 /**
- * The agents every machine has working on the open board's cards (BE-16), as
- * the service last reported them.
+ * The agents every machine has working on the open board's cards.
  *
- * ⚠️ One board at a time, keyed by its id, because the rows are only
- * meaningful for the board they were read for: switching projects must not
- * show the last one's agents on the new one's cards for a poll.
+ * As the service last reported them.
+ *
+ * NOTE: One board at a time, keyed by its id. The rows mean something only
+ * for the board they were read for: after a switch, the last board's agents
+ * must not show on the new one's cards until the next poll.
  */
 interface BoardPresenceState {
   workspaceId: string | null;
@@ -27,7 +28,11 @@ interface BoardPresenceState {
 
 const NONE: BoardPresence[] = [];
 
-/** A read that started before a later one must not land after it. */
+/**
+ * The request ticket for presence reads.
+ *
+ * A read that started before a later one must not land after it.
+ */
 let generation = 0;
 
 export const useBoardPresence = create<BoardPresenceState>((set) => ({
@@ -41,8 +46,8 @@ export const useBoardPresence = create<BoardPresenceState>((set) => ({
     try {
       rows = await surface.board.presence(workspaceId);
     } catch {
-      // ⚠️ Dropped, not kept. A spinner the service can no longer vouch for
-      // would say an agent is working long after it stopped.
+      // NOTE: Dropped, not kept. A spinner the service can no longer vouch
+      // for would say an agent is working long after it stopped.
       rows = NONE;
     }
     if (mine !== generation) return;
@@ -51,9 +56,12 @@ export const useBoardPresence = create<BoardPresenceState>((set) => ({
 }));
 
 /**
- * Keep `workspaceId`'s presence fresh while the calling screen is mounted:
- * read now, every 30s while the window has focus, and again when it regains
- * it (BE-16/D2a).
+ * Keep `workspaceId`'s presence fresh while the calling screen is mounted.
+ *
+ * Reads now, every {@link POLL_MS} while the window has focus, and again
+ * when it regains it (BE-16/D2a).
+ *
+ * @param workspaceId The cloud workspace id; null polls nothing.
  */
 export function usePresencePoll(workspaceId: string | null): void {
   const refresh = useBoardPresence((state) => state.refresh);
@@ -73,8 +81,11 @@ export function usePresencePoll(workspaceId: string | null): void {
 }
 
 /**
- * The terminal kind an OAuth client's slug names, or null for an agent this
- * app has no mark for. `claude-code` → `claude`.
+ * The terminal kind an OAuth client's slug names.
+ *
+ * @param agent The OAuth client's slug, such as `claude-code`.
+ * @returns `claude-code` → `claude`. Null for an agent this app has no mark
+ * for.
  */
 export function presenceKind(agent: string): TerminalAgent | null {
   if (agent.startsWith("claude")) return "claude";
@@ -83,14 +94,18 @@ export function presenceKind(agent: string): TerminalAgent | null {
 }
 
 /**
- * The presence rows on `card` that this machine's transcripts do not already
- * show (BE-16/D7).
+ * The presence rows on a card that this machine does not already show.
  *
- * ⚠️ A row is this machine's own when it carries this machine's id — or, over
- * OAuth, which carries none, when it is the signed-in user's. Such a row is
- * hidden only when a local session of the SAME agent is already on the card:
- * FE-27 knows that one exactly, and the service's copy would be a second,
- * vaguer mark for the same thing.
+ * This machine's transcripts already mark their own sessions (BE-16/D7).
+ * A row is this machine's own when it carries this machine's id. Over OAuth,
+ * which carries none, it is this machine's when it is the signed-in user's.
+ * Such a row is hidden only when a local session of the same agent is already
+ * on the card: the local session is exact, and the service's copy would be a
+ * second, vaguer mark for the same thing.
+ *
+ * @param workspace The cloud workspace id the rows must have been read for.
+ * @param localKinds The agents this machine's own sessions on the card run.
+ * @returns A stable empty list when there are none.
  */
 export function cloudAgentsOn(
   state: Pick<BoardPresenceState, "workspaceId" | "rows">,

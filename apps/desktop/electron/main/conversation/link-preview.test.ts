@@ -1,6 +1,7 @@
-// Run with `bun test apps/desktop/electron/main/conversation`. Link previews
-// (FE-62/D4): the second ask — in this run or the next — does not touch the
-// network, and private addresses are refused.
+// Run with `bun test apps/desktop/electron/main/conversation`.
+//
+// Link previews (FE-62/D4): the second ask, in this run or the next, does not
+// touch the network, and private addresses are refused.
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,8 +19,13 @@ import {
 const dir = mkdtempSync(join(tmpdir(), "lanework-previews-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
+/** The first bytes of a PNG: enough for the icon's type to be found. */
 const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
 
+/**
+ * A fetcher that serves one page and its 32px icon, and records each URL it
+ * was asked for.
+ */
 function fakeFetcher(): { fetcher: Fetcher; calls: string[] } {
   const calls: string[] = [];
   const fetcher: Fetcher = async (url): Promise<Fetched> => {

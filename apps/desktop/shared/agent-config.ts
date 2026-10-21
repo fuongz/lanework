@@ -1,17 +1,17 @@
-// The user's own Claude Code and Codex config files, edited in the app
-// (FE-47) — the one place to change either agent's settings.
+// The user's own Claude Code and Codex config files, edited in the app: the
+// one place to change either agent's settings.
 //
-// ⚠️ A fixed list (FE-47/D1), and the user's skills (D9). The renderer names
-// a file by its `ConfigFileId`, never by path: main resolves it from the
-// agents' homes, so no renderer can point a read or a write at a file of its
-// choosing.
+// NOTE: A fixed list (FE-47/D1), plus the user's skills (FE-47/D9). The
+// renderer names a file by its `ConfigFileId`, never by path. Main resolves it
+// from the agents' homes, so no renderer can point a read or a write at a file
+// of its choosing.
 //
-// ⚠️ Unlike the setup view (FE-40), `read` hands over the file WHOLE, secrets
-// in `env` or `headers` included — a value nobody can see cannot be edited
+// NOTE: Unlike the setup view, `read` hands over the file WHOLE, secrets in
+// `env` or `headers` included: a value nobody can see cannot be edited
 // (FE-47/D3). It crosses only when someone opens the file, and is never
 // cached, logged or sent anywhere else.
 //
-// ⚠️ No dependencies: preload imports the channels from here. What reads
+// NOTE: No dependencies: preload imports the channels from here. What reads
 // and edits the text lives in `agent-config-text.ts`.
 export const CONFIG_FILE_IDS = [
   "claude-settings",
@@ -24,9 +24,10 @@ export const CONFIG_FILE_IDS = [
 export type FixedConfigId = (typeof CONFIG_FILE_IDS)[number];
 
 /**
- * Where a user's skills live (FE-47/D9): Claude's `~/.claude/skills`, and
- * Codex's `~/.agents/skills` and — the place it used to read — its own
- * `$CODEX_HOME/skills`.
+ * Where a user's skills live (FE-47/D9).
+ *
+ * Claude's `~/.claude/skills`, Codex's `~/.agents/skills`, and Codex's own
+ * `$CODEX_HOME/skills`, which older Codex versions read.
  */
 export const SKILL_ROOTS = ["claude", "agents", "codex"] as const;
 export type SkillRoot = (typeof SKILL_ROOTS)[number];
@@ -48,6 +49,7 @@ function isSkillName(value: string): boolean {
   );
 }
 
+/** The root and folder name of a `skill:<root>:<name>` id, or null. */
 export function parseSkillId(
   value: string,
 ): { root: SkillRoot; name: string } | null {
@@ -71,9 +73,9 @@ export interface ConfigFile {
   agent: "claude" | "codex";
   /** A config file of the agent's own, or one of the user's skills (D9). */
   kind: "config" | "skill";
-  /** `settings.json`, `CLAUDE.md`, … — a skill's folder name. */
+  /** The file name (`settings.json`, `CLAUDE.md`, …) or a skill's folder. */
   label: string;
-  /** What the file is for, in a line — a skill's own `description`. */
+  /** What the file is for, in one line; a skill's own `description`. */
   description: string;
   /** Home shortened to `~`: `~/.codex/config.toml`. */
   path: string;
@@ -89,11 +91,13 @@ export interface ConfigFileContent {
   id: ConfigFileId;
   text: string;
   /**
-   * sha256 of the bytes read; `""` for a file that is not there yet. A write
-   * passes it back, and is refused when the file has changed since (D4).
+   * The sha256 of the bytes read; `""` for a file that is not there yet.
+   *
+   * A write passes it back and is refused when the file has changed since
+   * (FE-47/D4).
    */
   hash: string;
-  /** The Lanework checkpoint hook is in this file (FE-47/D7). */
+  /** Whether the Lanework checkpoint hook is in this file (FE-47/D7). */
   laneworkHook: boolean;
 }
 
@@ -111,7 +115,7 @@ export const agentConfigChannels = {
   reveal: "agent-config:reveal",
 } as const;
 
-/** The most a config file may be — the reader's own cap for configs. */
+/** The largest config file, in bytes: the reader's own cap for configs. */
 export const CONFIG_EDIT_MAX = 512 * 1024;
 
 export interface DesktopAgentConfigApi {
@@ -122,6 +126,6 @@ export interface DesktopAgentConfigApi {
     text: string,
     baseHash: string,
   ) => Promise<ConfigWriteResult>;
-  /** Show the file in Finder — its folder when it is not there yet. */
+  /** Shows the file in Finder, or its folder when it is not there yet. */
   reveal: (id: ConfigFileId) => Promise<void>;
 }

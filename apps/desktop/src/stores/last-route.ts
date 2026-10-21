@@ -3,16 +3,15 @@ import { useCallback } from "react";
 import { create } from "zustand";
 
 /**
- * Where each project was last looked at — the full href, search included.
+ * Where each project was last looked at: the full href, search included.
  *
- * ⚠️ So switching projects and back lands where you left, not on the issues
- * list: an agent's terminal, a pull request, a commit. The terminal panel
- * already keeps its own tab per project (`stores/terminal.ts`); this is the
- * route under it.
+ * Switching projects and back lands where you left (an agent's terminal, a
+ * pull request, a commit), not on the issues list. The terminal panel keeps
+ * its own tab per project (`stores/terminal.ts`); this is the route under it.
  *
- * ⚠️ NOT persisted. It is memory for this run of the window, like the
- * terminals it most often points at — a relaunch has none of them left, and an
- * href to an agent that no longer exists is not a place to reopen a project.
+ * NOTE: Not persisted. A relaunch has none of the terminals it most often
+ * points at, and an href to an agent that no longer exists is not a place to
+ * reopen a project.
  */
 interface LastRouteState {
   bySlug: Record<string, string>;
@@ -29,7 +28,11 @@ export const useLastRoute = create<LastRouteState>((set) => ({
     ),
 }));
 
-/** Open a project where it was left, or at its issues the first time. */
+/**
+ * A callback that opens a project where it was left.
+ *
+ * The first time, it opens the project's issues.
+ */
 export function useOpenProject() {
   const navigate = useNavigate();
   return useCallback(

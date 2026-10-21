@@ -2,7 +2,7 @@ import { BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { channels, type ViewCommand } from "../../shared/desktop";
 import { sendTerminalCommand } from "./terminal";
 
-/** A View command for the window in front — or the only one, when none is. */
+/** Send a View command to the focused window, or else to the first one. */
 function sendViewCommand(command: ViewCommand): void {
   const window =
     BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -12,33 +12,27 @@ function sendViewCommand(command: ViewCommand): void {
 /**
  * The application menu: Electron's default, with the terminal in View.
  *
- * ⚠️ Every default role is kept. This app shipped on Electron's built-in menu
- * until now, and the Edit roles are what make ⌘C/⌘V/⌘Z work in every field —
- * a custom menu that dropped them would break copy-paste app-wide.
- *
- * ⚠️ The terminal shortcuts are MENU accelerators (FE-19/D6), not a renderer
- * key listener, so they still work while the terminal has focus — a key the
- * page does not claim goes on to the menu, and xterm claims neither of these.
- *
- * ⚠️ ⌘` toggles on macOS because that is the key people reach for; ⌃` — what
- * VS Code and Codex use, and what FE-19/D6 picked first — stays as a hidden
- * second binding rather than being taken away. ⌘` is also macOS's "Move focus
- * to next window", which an app menu item takes over only inside this app.
- * New Terminal is ⌘T, the key the panel's + menu shows, with ⌃⇧` kept the
- * same way.
- *
- * ⚠️ No ⌘W. Electron's File menu (macOS) and Window menu (elsewhere) bind it
- * to Close Window, and this app has ONE window: the key people press to shut
- * a tab — in a terminal, in a browser — took the whole app off the screen.
- * Close Window stays in File, without a key; the window's own close button
- * is untouched.
- *
- * ⚠️ Toggle Sidebar is ⌘B (FE-20/D5, as VS Code has it). Nothing in the app
- * claims it: the one editor, CodeMirror, binds no Mod-B, and a key the page
- * does handle never reaches the menu anyway.
- *
- * ⚠️ Settings is ⌘, — the key every Mac app's Settings… has. In the app
- * menu on macOS, where people look for it; in File elsewhere.
+ * - NOTE: Every default role is kept. The Edit roles make ⌘C/⌘V/⌘Z work in
+ *   every field, so a menu that dropped them would break copy-paste across
+ *   the app.
+ * - The terminal shortcuts are menu accelerators (FE-19/D6), not a renderer
+ *   key listener, so they work while the terminal has focus. A key the page
+ *   does not claim goes on to the menu, and xterm claims neither of these.
+ * - ⌘` toggles the terminal on macOS, because that is the key people reach
+ *   for. ⌃`, which VS Code and Codex use and FE-19/D6 picked first, stays as
+ *   a hidden second binding. ⌘` is also macOS's "Move focus to next window",
+ *   which an app menu item takes over only inside this app. New Terminal is
+ *   ⌘T, the key the panel's + menu shows, with ⌃⇧` kept the same way.
+ * - NOTE: No ⌘W. Electron's File menu (macOS) and Window menu (elsewhere)
+ *   bind it to Close Window, and this app has one window: the key people
+ *   press to close a tab would take the whole app off the screen. Close
+ *   Window stays in File without a key, and the window's own close button is
+ *   untouched.
+ * - Toggle Sidebar is ⌘B (FE-20/D5, as in VS Code). Nothing in the app claims
+ *   it: CodeMirror, the one editor, binds no Mod-B, and a key the page
+ *   handles never reaches the menu anyway.
+ * - Settings is ⌘,, the key of every Mac app's Settings…. It sits in the app
+ *   menu on macOS, where people look for it, and in File elsewhere.
  */
 export function installMenu(): void {
   const mac = process.platform === "darwin";
@@ -144,7 +138,8 @@ export function installMenu(): void {
         { role: "togglefullscreen" },
       ],
     },
-    // macOS's own Window menu has no Close in it; everyone else's does.
+    // The Window role has no Close on macOS but does elsewhere, so other
+    // platforms get a Window menu of their own, without Close.
     mac
       ? { role: "windowMenu" }
       : { label: "Window", submenu: [{ role: "minimize" }, { role: "zoom" }] },

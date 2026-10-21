@@ -11,7 +11,11 @@ import type {
   WorkItemType,
 } from "@lanework/protocol";
 
-/** What a local board is configured with — `BoardConfig` minus the cloud-only parts. */
+/**
+ * What a local board is configured with.
+ *
+ * The cloud's `BoardConfig` minus the cloud-only parts.
+ */
 export interface LocalBoardConfig {
   columns: BoardColumn[];
   categories: BoardCategory[];
@@ -54,8 +58,10 @@ export interface WorkspaceUpdateInput {
 }
 
 /**
- * Restoring an id a source already handed out (`review-import`'s
- * `restore.taskId/taskSeq`). Both or neither, exactly as the cloud demands.
+ * What a card keeps from the source it is restored from.
+ *
+ * Used by `review-import` to keep an id a source already handed out
+ * (`restore.taskId/taskSeq`). Both or neither, as the cloud demands.
  */
 export interface WorkItemRestore {
   taskId?: string | null;
@@ -82,13 +88,17 @@ export interface WorkItemCreateInput {
   restore?: WorkItemRestore | null;
 }
 
-/** `CardPatchRequest`, plus a checklist replace and an optional precondition. */
+/**
+ * A card edit: the cloud's `CardPatchRequest`, plus a checklist replace.
+ *
+ * The revision precondition is in {@link WriteOptions}.
+ */
 export interface WorkItemUpdateInput {
   type?: WorkItemType;
   title?: string;
   body?: string | null;
   priority?: Priority | null;
-  /** Changing the category does NOT re-mint the task id, as on the cloud. */
+  /** Changing the category does not re-mint the task id, as on the cloud. */
   categoryKey?: string | null;
   tags?: string[];
   parentId?: string | null;

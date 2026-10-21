@@ -1,9 +1,9 @@
-// A project's Claude memory, for the Memory screen (FE-36).
+// A project's Claude memory, for the Memory screen.
 //
-// ⚠️ Read-only. The renderer names a project by slug and a memory by file
-// NAME; the folder is resolved here, from the folder links this process
-// wrote down, so no renderer can point a read at a file of its choosing.
-// There is no channel that writes.
+// NOTE: Read-only. The renderer names a project by slug and a memory by file
+// name. The folder is resolved here, from the folder links this process wrote
+// down, so no renderer can point a read at a file of its choosing. No channel
+// writes.
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -20,8 +20,10 @@ import { revealFolder } from "../workspaces/folder-chooser";
 import { listMemory, memoryDir, readMemory, watchMemory } from "./read";
 
 /**
- * Claude Code's own home, where its `projects/` are: `$CLAUDE_CONFIG_DIR`,
- * as it reads it, or `~/.claude` — under the test's fake home in a dev build.
+ * Claude Code's own home, where its `projects/` are.
+ *
+ * `$CLAUDE_CONFIG_DIR`, as Claude reads it, or `~/.claude`. In a dev build
+ * that is under the test's fake home.
  */
 function claudeHome(): string {
   if (process.env.CLAUDE_CONFIG_DIR) return process.env.CLAUDE_CONFIG_DIR;
@@ -30,7 +32,7 @@ function claudeHome(): string {
   return join(home, ".claude");
 }
 
-/** The project's folder here and its memory folder, or nulls without one. */
+/** The project's folder here and its memory folder. Nulls without a folder. */
 async function resolveDir(
   workspace: string,
 ): Promise<{ folder: string | null; dir: string | null }> {
@@ -47,8 +49,10 @@ const exists = (path: string) =>
   );
 
 /**
- * One watch per project that has been listed (FE-36/D11), restarted when its
- * folder changes or appears. Capped: the rail lists every project it shows.
+ * One watch per project that has been listed (FE-36/D11).
+ *
+ * A watch restarts when its folder changes or appears. Capped at
+ * `WATCH_LIMIT`, because the rail lists every project it shows.
  */
 const watching = new Map<
   string,

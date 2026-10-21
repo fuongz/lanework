@@ -65,7 +65,11 @@ import {
   type WriteOptions,
 } from "./types";
 
-/** `~/.lanew/data.sqlite`, following `LANEWORK_HOME` like every other app path (D1a). */
+/**
+ * The local board's file: `~/.lanew/data.sqlite`.
+ *
+ * It follows `LANEWORK_HOME` like every other app path (D1a).
+ */
 const DATA_FILE_NAME = "data.sqlite";
 
 export function localStorePath(): string {
@@ -73,9 +77,13 @@ export function localStorePath(): string {
 }
 
 export interface OpenOptions {
-  /** Default `localStorePath()`. `:memory:` works for a throwaway store. */
+  /** Default {@link localStorePath}. `:memory:` works for a throwaway store. */
   path?: string;
-  /** How long a writer waits on another's lock before `SQLITE_BUSY`. Default 5000. */
+  /**
+   * How long a writer waits on another's lock before `SQLITE_BUSY`, in ms.
+   *
+   * Default 5000.
+   */
   busyTimeoutMs?: number;
 }
 
@@ -137,13 +145,13 @@ function invalid(message: string): never {
 /**
  * One connection to the local board.
  *
- * ⚠️ Every write runs under `BEGIN IMMEDIATE`, never a deferred transaction. In
- * WAL a deferred transaction that reads and then writes cannot wait out a
- * competing writer — it fails with `SQLITE_BUSY` at once, `busy_timeout` or
- * not. Taking the write lock up front is what lets the app, an MCP server and a
- * hook write the same file at the same time.
+ * NOTE: Every write runs under `BEGIN IMMEDIATE`, never a deferred
+ * transaction. In WAL a deferred transaction that reads and then writes
+ * cannot wait out a competing writer: it fails with `SQLITE_BUSY` at once,
+ * `busy_timeout` or not. Taking the write lock up front is what lets the app,
+ * an MCP server and a hook write the same file at the same time.
  *
- * ⚠️ Every write also bumps `meta.change_seq` in the same transaction and
+ * NOTE: Every write also bumps `meta.change_seq` in the same transaction and
  * stamps it on the rows it touched. `dataVersion()` reads it back, so any
  * process can tell "something changed" with one cheap read, and
  * `listChanges(since)` can say what.
@@ -183,7 +191,12 @@ export class LocalStore {
     return Number(this.db.prepare(sql).run(...params).changes);
   }
 
-  /** Runs `fn` as one write; `this.#seq` is the change number it stamps. */
+  /**
+   * Run `fn` as one write.
+   *
+   * `this.#seq` is the change number it stamps. A write inside a write joins
+   * the outer one.
+   */
   #write<T>(fn: () => T): T {
     if (this.#depth > 0) return fn();
     this.db.exec("BEGIN IMMEDIATE");
@@ -205,8 +218,10 @@ export class LocalStore {
   }
 
   /**
-   * A number that moves on every committed write, from ANY connection or
-   * process. Poll it; when it differs from the last value, re-read.
+   * A number that moves on every committed write.
+   *
+   * It moves for a write from any connection or process. Poll it; when it
+   * differs from the last value, re-read.
    */
   dataVersion(): number {
     const row = this.#get<{ value: string }>(
@@ -230,7 +245,11 @@ export class LocalStore {
     return rows.map(toWorkspace);
   }
 
-  /** By id or slug; tombstoned workspaces are not found. */
+  /**
+   * Find a workspace by id or slug.
+   *
+   * @returns Null when there is none, or it is tombstoned.
+   */
   getWorkspace(ref: string): LocalWorkspace | null {
     const row = this.#get<WorkspaceRow>(
       "SELECT * FROM workspace WHERE (id = ? OR slug = ?) AND deleted_at IS NULL",
@@ -334,8 +353,11 @@ export class LocalStore {
   }
 
   /**
-   * Links a repo to ONE board, like the cloud: a repo another board held moves
-   * here. `null` unlinks.
+   * Link a repo to one board, like the cloud.
+   *
+   * A repo another board held moves here.
+   *
+   * @param remote Any git remote spelling; `null` unlinks.
    */
   linkRepo(ref: string, remote: string | null): LocalWorkspace {
     const repo = remote === null ? null : normalizeRepo(remote);
@@ -354,7 +376,11 @@ export class LocalStore {
     });
   }
 
-  /** The boards linked to a remote, in any spelling. Act only on exactly one. */
+  /**
+   * The boards linked to a remote, in any spelling.
+   *
+   * Act only on exactly one.
+   */
   findWorkspacesByRepo(remote: string): LocalWorkspace[] {
     const repo = normalizeRepo(remote);
     if (!repo) return [];
@@ -364,7 +390,7 @@ export class LocalStore {
     ).map(toWorkspace);
   }
 
-  /** `list_boards` / `GET /v1/boards?repo=` rows. */
+  /** The boards as `list_boards` and `GET /v1/boards?repo=` list them. */
   boardSummaries(remote?: string): BoardSummary[] {
     const list =
       remote === undefined
@@ -419,8 +445,10 @@ export class LocalStore {
   }
 
   /**
-   * The next id of a category (`FE-07`), advancing the head. Must run inside a
-   * write. Skips an id a restore already put on the board.
+   * Mint the next task id of a category (`FE-07`), advancing the head.
+   *
+   * It must run inside a write. It skips an id a restore already put on the
+   * board.
    */
   #mintTaskId(
     workspace: LocalWorkspace,
@@ -449,7 +477,11 @@ export class LocalStore {
     );
   }
 
-  /** A rank for `placement` in a lane; renumbers the lane when the gap is gone. */
+  /**
+   * A rank for `placement` in a lane.
+   *
+   * Renumbers the lane when the gap is gone.
+   */
   #rankFor(
     workspaceId: string,
     status: string,
@@ -499,8 +531,11 @@ export class LocalStore {
   }
 
   /**
-   * A card by uuid, or by task id (`FE-07`) within `workspace`. Tombstoned
-   * cards are not found unless `includeDeleted`.
+   * Find a card by uuid, or by task id (`FE-07`) within `workspace`.
+   *
+   * Tombstoned cards are not found unless `includeDeleted`.
+   *
+   * @throws {@link LocalStoreError} `not_found` when there is no such card.
    */
   #resolve(
     ref: string,
@@ -578,7 +613,9 @@ export class LocalStore {
     ).map(toCard);
   }
 
-  /** Cards changed after `since`, tombstones included — the local change feed. */
+  /**
+   * The local change feed: cards changed after `since`, tombstones included.
+   */
   listChanges(
     workspaceRef: string,
     since: number,
@@ -689,7 +726,12 @@ export class LocalStore {
       );
   }
 
-  /** Stamps a change on `id`: revision + 1, the write's change number, `updated_at`. */
+  /**
+   * Apply `sets` to card `id` as one change.
+   *
+   * It also bumps the revision, and stamps the write's change number and
+   * `updated_at`.
+   */
   #touch(id: string, sets: string[], params: SqlValue[]): CardDetail {
     this.#run(
       `UPDATE work_item SET ${[...sets, "revision = revision + 1", "change_seq = ?", "updated_at = ?"].join(", ")}
@@ -734,7 +776,8 @@ export class LocalStore {
       if (input.categoryKey !== undefined) {
         const category = checkCategory(config, input.categoryKey);
         set("category", category);
-        // A card keeps the id it was born with; one that never had one gets it now.
+        // A card keeps the id it was born with; one that never had one gets
+        // it now.
         if (category && !row.task_id) {
           const minted = this.#mintTaskId(workspace, category);
           set("task_id", minted.taskId);
@@ -792,8 +835,10 @@ export class LocalStore {
   }
 
   /**
-   * Moves a card to a lane (and/or a place in it). Landing in a `done` or
-   * `archive` lane clears its checkpoints, as on the cloud.
+   * Move a card to a lane, or to a place in it, or both.
+   *
+   * Landing in a `done` or `archive` lane clears its checkpoints, as on the
+   * cloud.
    */
   setStatus(
     ref: string,
@@ -861,7 +906,12 @@ export class LocalStore {
 
   // ── Checkpoints ───────────────────────────────────────────────────────────
 
-  /** Adds a checkpoint, keeping the newest `CHECKPOINTS_KEPT`. Refused on a closed card. */
+  /**
+   * Add a checkpoint, keeping the newest `CHECKPOINTS_KEPT`.
+   *
+   * @throws {@link LocalStoreError} `conflict` on a card in a `done` or
+   *   `archive` lane; `invalid` on a checkpoint it refuses.
+   */
   addCheckpoint(
     ref: string,
     request: CheckpointRequest,
@@ -888,7 +938,7 @@ export class LocalStore {
         checkpoint,
         ...parseJson<Checkpoint[]>(row.checkpoint, []),
       ]);
-      // ⚠️ Not `#touch`: a checkpoint is not an edit — it bumps neither the
+      // NOTE: Not `#touch`: a checkpoint is not an edit. It bumps neither the
       // revision an `If-Match` is checked against nor `updated_at`.
       this.#run(
         "UPDATE work_item SET checkpoint = ?, change_seq = ? WHERE id = ?",
@@ -926,8 +976,10 @@ function checkConfig(config: LocalBoardConfig): void {
 }
 
 /**
- * Opens the local board file, creating it and its folder when absent, in WAL
- * mode with a busy timeout, migrated to the current schema.
+ * Open the local board file.
+ *
+ * It creates the file and its folder when absent, and opens it in WAL mode
+ * with a busy timeout, migrated to the current schema.
  */
 export function openLocalStore(options: OpenOptions = {}): LocalStore {
   const path = options.path ?? localStorePath();
@@ -935,7 +987,7 @@ export function openLocalStore(options: OpenOptions = {}): LocalStore {
   const db = openDatabase(path);
   try {
     // busy_timeout first: switching to WAL itself needs a lock another
-    // process may be holding at this very moment.
+    // process may be holding at this moment.
     db.exec(
       `PRAGMA busy_timeout = ${Math.max(0, options.busyTimeoutMs ?? 5000)}`,
     );

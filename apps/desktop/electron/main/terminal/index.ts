@@ -1,5 +1,5 @@
-// The main process's side of the terminal (FE-19): starting the pty host,
-// answering the panel's requests, and handing windows a port to it.
+// The main process's side of the terminal: starting the pty host, answering
+// the panel's requests, and handing windows a port to it.
 import { execFile } from "node:child_process";
 import { type FSWatcher, watch } from "node:fs";
 import { homedir } from "node:os";
@@ -114,8 +114,8 @@ const waiting = new Map<
 /**
  * The pty host, started on first use.
  *
- * ⚠️ Lazily. Most sessions of this app never open a terminal, and a utility
- * process holding a native module is memory nobody asked for until then.
+ * Lazy because most sessions of this app never open a terminal, and a
+ * utility process holding a native module costs memory nobody asked for.
  */
 function ensureHost(): UtilityProcess {
   if (host) return host;
@@ -189,9 +189,11 @@ function key(value: unknown, what: string): string {
 /**
  * The card a new agent tab is for, with the board it is on (FE-34/D3).
  *
- * ⚠️ The board is the WORKSPACE's own id, looked up here — never one the
+ * NOTE: The board is the WORKSPACE's own id, looked up here, never one the
  * renderer names. A page can only start an agent on the board of the project
  * it is already allowed to open a terminal for.
+ *
+ * @throws when the card is malformed or the project has no board.
  */
 async function cardFor(
   workspace: string,
@@ -207,20 +209,21 @@ async function cardFor(
 /**
  * Where Claude and Codex keep their conversations: the user's home.
  *
- * ⚠️ A test seam guarded the way `LANEWORK_TEST_USER_DATA` is: a spec points
- * it at fixtures instead of reading the developer's own history.
+ * NOTE: A test seam, guarded the way `LANEWORK_TEST_USER_DATA` is: a spec
+ * points it at fixtures instead of reading the developer's own history.
  */
 function agentHome(): string {
   return (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
 }
 
 /**
- * Where Codex keeps its rollouts and its databases (FE-41): `$CODEX_HOME`,
- * and `$CODEX_SQLITE_HOME` before it for the databases — the order Codex
- * itself reads them in.
+ * Where Codex keeps its rollouts and its databases.
  *
- * ⚠️ Both inside the test home when `agentHome()`'s seam is set: a spec's
- * fake goals sit beside its fake rollouts, and every launch points
+ * `$CODEX_HOME`, and `$CODEX_SQLITE_HOME` before it for the databases: the
+ * order Codex itself reads them in.
+ *
+ * Both sit inside the test home when the seam of {@link agentHome} is set:
+ * a spec's fake goals sit beside its fake rollouts, and every launch points
  * `CODEX_HOME` at a profile folder for the hook (FE-29).
  */
 function codexDirs(): CodexDirs {
@@ -268,7 +271,7 @@ async function runCodex(args: string[]): Promise<void> {
   });
 }
 
-/** Lanework's names and pins for agent conversations (FE-24, FE-25). */
+/** The file of Lanework's names and pins for agent conversations. */
 function agentMarksFile(): string {
   return join(appHomeDir(), "agent-sessions.json");
 }
@@ -277,10 +280,10 @@ function agentMarksFile(): string {
  * One transcript watcher per workspace that has been listed, restarted when
  * its folder changes (FE-25/D3).
  *
- * ⚠️ Started by the LISTING, not by a subscribe call: the rail lists a
- * project as soon as it shows it, which is exactly when its rows need to be
- * able to spin. Capped, because every project somebody has ever looked at in
- * this run would otherwise keep a watcher.
+ * Started by the LISTING, not by a subscribe call: the rail lists a project
+ * as soon as it shows it, which is when its rows need to be able to spin.
+ * Capped at {@link WATCH_LIMIT}, because every project somebody has looked
+ * at in this run would otherwise keep a watcher.
  */
 const watching = new Map<string, { folder: string; stop: () => void }>();
 const WATCH_LIMIT = 8;
@@ -310,13 +313,13 @@ function watchWorkspace(workspace: string, folder: string): void {
         subagent,
         at: Date.now(),
       }),
-    // ⚠️ EVERY write, not only a turn that changed state: a new Codex's
+    // NOTE: EVERY write, not only a turn that changed state: a new Codex's
     // first rollout can be caught before its `session_meta` is whole, and
     // the next writes of that turn are no news (FE-31/D5).
     (agent, id) => {
       rebind(workspace, agentKey({ agent, id }));
-      // And for a view showing its numbers, which move on every write of a
-      // turn — most of which change no state (FE-38).
+      // Also for a view showing its numbers, which move on every write of a
+      // turn, most of which change no state.
       broadcast(terminalChannels.agentWritten, {
         workspace,
         agent,
@@ -334,7 +337,8 @@ function watchWorkspace(workspace: string, folder: string): void {
             (entry) =>
               entry.kind === agent && !entry.exit && entry.resume === id,
           );
-          // A removed/rebound workspace must not deliver a delayed notification.
+          // A workspace removed or rebound since must not deliver a late
+          // notification.
           if (watching.get(workspace)?.folder === folder)
             notifyAgentCompleted(agent, project, id, tab?.id ?? null);
         })
@@ -358,14 +362,17 @@ async function agentSessionsOf(workspace: string): Promise<AgentSession[]> {
   return applyAgentMarks(listed, marks);
 }
 
-/**
- * Re-check which conversation `workspace`'s agent tabs are on (FE-31/D5);
- * the host tells every window if one moved.
- *
- * ⚠️ One at a time per workspace, and at most one more queued behind it: a
- * turn writes its transcript many times a second.
- */
+/** Per workspace with a re-check in flight: the keys written meanwhile. */
 const rebinding = new Map<string, Set<string>>();
+/**
+ * Re-check which conversation `workspace`'s agent tabs are on (FE-31/D5).
+ *
+ * The host tells every window if one moved. One run at a time per
+ * workspace, and at most one more queued behind it: a turn writes its
+ * transcript many times a second.
+ *
+ * @param written the agent key of the transcript just written, if any.
+ */
 function rebind(workspace: string, written?: string): void {
   if (!host) return;
   const queued = rebinding.get(workspace);
@@ -379,11 +386,11 @@ function rebind(workspace: string, written?: string): void {
   rebinding.set(workspace, new Set());
   void agentTerminals(workspace)
     .then((terminals) => {
-      // ⚠️ A tab on a conversation the rail has not been shown, whose
+      // NOTE: A tab on a conversation the rail has not been shown, whose
       // transcript was just written: list again. A new Codex's first write
-      // is its `session_meta`, before the prompt that titles it — and the
-      // rest of that turn is no news to the activity watcher, so without
-      // this its row stayed "New Codex session" until something else moved.
+      // is its `session_meta`, before the prompt that titles it, and the
+      // rest of that turn is no news to the activity watcher. Without this
+      // its row stays "New Codex session" until something else moves.
       const shown = listedKeys.get(workspace);
       const untitled = terminals.some((entry) => {
         if (entry.kind === "shell" || entry.exit || entry.resume === null)
@@ -402,14 +409,19 @@ function rebind(workspace: string, written?: string): void {
     });
 }
 
-/** The conversations each workspace's listing last answered (FE-31). */
+/** The conversations each workspace's listing last answered, as keys. */
 const listedKeys = new Map<string, Set<string>>();
 let lastClaudePlan: string | null | undefined;
 let lastClaudeIdentity: string | null | undefined;
 let lastClaudeMode: string | undefined;
 let claudeAccountChangedAt = 0;
 let quotaWatch: FSWatcher | null = null;
-/** Tells every listed workspace to ask `codexUsage` again (FE-46, FE-53). */
+/**
+ * Tell every listed workspace to ask `codexUsage` again.
+ *
+ * Sent as an `agentWritten` on one of its Claude conversations, or on a
+ * placeholder id when it has none.
+ */
 function notifyClaudeUsage(): void {
   for (const [workspace, keys] of listedKeys) {
     const id = [...keys].find((key) => key.startsWith("claude:"))?.slice(7);
@@ -434,16 +446,18 @@ function watchClaudeQuota(): void {
     });
     quotaWatch.unref();
   } catch {
-    /* A later read retries once the application home exists. */
+    // A later read retries once the application home exists.
   }
 }
 
 /**
- * Where main reads Claude's OAuth usage from (FE-53). ⚠️ A test seam guarded
- * the way `LANEWORK_TEST_USER_DATA` is: under test, the credential comes only
- * from `LANEWORK_TEST_CLAUDE_CREDENTIALS` and goes only to a loopback
- * `LANEWORK_TEST_CLAUDE_OAUTH_URL` — never the Keychain or Anthropic, so a
- * spec can neither prompt for nor spend the developer's own login.
+ * Where main reads Claude's OAuth usage from.
+ *
+ * NOTE: A test seam, guarded the way `LANEWORK_TEST_USER_DATA` is. Under
+ * test, the credential comes only from `LANEWORK_TEST_CLAUDE_CREDENTIALS`
+ * and goes only to a loopback `LANEWORK_TEST_CLAUDE_OAUTH_URL`, never the
+ * Keychain or Anthropic, so a spec can neither prompt for nor spend the
+ * developer's own login.
  */
 function claudeOAuthOptions(): ClaudeOAuthOptions {
   if (app.isPackaged || !process.env.LANEWORK_TEST_USER_DATA) return {};
@@ -463,7 +477,7 @@ function claudeOAuth() {
 }
 const CLAUDE_USAGE_POLL_MS = 5 * 60_000;
 let claudeUsageTimer: NodeJS.Timeout | null = null;
-/** Fetches without a renderer asking; tells the renderers when it changed. */
+/** Fetch without a renderer asking; tell the renderers when it changed. */
 function pollClaudeOAuth(force = false): void {
   const before = claudeOAuth().current();
   void claudeOAuth()
@@ -474,7 +488,12 @@ function pollClaudeOAuth(force = false): void {
     })
     .catch(() => undefined);
 }
-/** On launch, then every five minutes (FE-53); the cache sets the floor. */
+/**
+ * Poll Claude's OAuth usage on launch, then every five minutes.
+ *
+ * The cache sets the floor, so a poll never fetches more often than it
+ * allows.
+ */
 function startClaudeUsagePoll(): void {
   if (claudeUsageTimer) return;
   pollClaudeOAuth();
@@ -483,10 +502,13 @@ function startClaudeUsagePoll(): void {
 }
 
 /**
- * Claude's limits for the footer (FE-46, FE-53): the OAuth endpoint's answer
- * or the last statusline report, whichever is newer. Each is shown only for
- * the account that produced it; a failed fetch keeps the last good windows
- * and says why in `error`.
+ * Claude's limits for the footer.
+ *
+ * The OAuth endpoint's answer or the last statusline report, whichever is
+ * newer. Each is shown only for the account that produced it. A failed
+ * fetch keeps the last good windows and says why in `error`.
+ *
+ * @param force fetch even when the cached answer is fresh.
  */
 async function claudeUsageNow(force: boolean): Promise<ClaudeUsage> {
   watchClaudeQuota();
@@ -563,13 +585,15 @@ async function claudeUsageNow(force: boolean): Promise<ClaudeUsage> {
   };
 }
 
-/**
- * Claude's own record of which conversation each of its processes is on
- * (FE-31): `/resume` moves a tab by changing only that, writing nothing to
- * any transcript. Watched once the host runs, for every listed workspace.
- */
 let movesWatch: FSWatcher | null = null;
 let movesTimer: NodeJS.Timeout | null = null;
+/**
+ * Watch Claude's own record of which conversation each of its processes is
+ * on, and re-check every listed workspace when it changes.
+ *
+ * `/resume` moves a tab by changing only that record, writing nothing to
+ * any transcript. Started once the host runs.
+ */
 function watchMoves(): void {
   if (movesWatch) return;
   try {
@@ -589,20 +613,20 @@ function watchMoves(): void {
   }
 }
 
-/**
- * `workspace`'s tabs, each agent one on the conversation it is on NOW
- * (FE-31): a tab that moved is moved in the host too, which tells every
- * window — so the rail regroups without polling (FE-31/D5).
- *
- * ⚠️ Best effort: a folder that cannot be read keeps what the host had.
- */
-/** The pty pids of `workspace`'s open terminals; none before any was started. */
+/** The pty pids of `workspace`'s open terminals; none before any started. */
 async function liveTerminalPids(workspace: string): Promise<number[]> {
   if (!host) return [];
   const listed = await request<TerminalSession[]>({ t: "list", workspace });
   return listed.filter((entry) => !entry.exit).map((entry) => entry.pid);
 }
 
+/**
+ * `workspace`'s tabs, each agent tab on the conversation it is on NOW.
+ *
+ * A tab that moved is moved in the host too, which tells every window, so
+ * the rail regroups without polling (FE-31/D5). Best effort: a folder that
+ * cannot be read keeps what the host had.
+ */
 async function agentTerminals(workspace: string): Promise<TerminalSession[]> {
   const listed = await request<TerminalSession[]>({ t: "list", workspace });
   if (!listed.some((entry) => entry.kind !== "shell" && !entry.exit))
@@ -624,9 +648,11 @@ async function agentTerminals(workspace: string): Promise<TerminalSession[]> {
 /**
  * The conversation a rename or pin names, checked against the listing.
  *
- * ⚠️ The same rule a resume follows: an id this workspace's own listing does
- * not have is refused, so nothing can be written about a conversation the
- * rail was never shown.
+ * NOTE: The same rule a resume follows: an id this workspace's own listing
+ * does not have is refused, so nothing can be written about a conversation
+ * the rail was never shown.
+ *
+ * @throws when the arguments are malformed or the id is not listed here.
  */
 async function markable(args: unknown[]): Promise<{
   workspace: string;
@@ -708,7 +734,13 @@ interface RunningProject {
   items: { label: string; href: string; shellId?: string }[];
 }
 
-/** Native menu snapshot across every account project, without starting the pty host. */
+/**
+ * What runs in every project of the account, for the native menu.
+ *
+ * Reads the host only when it already runs: it never starts the pty host.
+ *
+ * @throws when the session changed while the projects were read.
+ */
 export async function runningProjects(): Promise<RunningProject[]> {
   const account = await authorizedRecord();
   const workspaces = await menuBarWorkspaces();
@@ -859,8 +891,11 @@ async function liveTerminalsText(): Promise<string> {
 /**
  * Quitting with shells still running asks first (FE-19/D8).
  *
- * ⚠️ Skipped only in an unpackaged app booted by the test suite, which cannot
- * answer a native dialog — and whose quit would otherwise wait on it forever.
+ * NOTE: Skipped only in an unpackaged app booted by the test suite, which
+ * cannot answer a native dialog, and whose quit would otherwise wait on it
+ * forever.
+ *
+ * @returns whether to go on quitting; every terminal is killed when true.
  */
 async function confirmQuit(): Promise<boolean> {
   const live = await request<number>({ t: "count" }, 2_000).catch(() => 0);
@@ -909,10 +944,11 @@ export async function killTerminal(id: string): Promise<void> {
   if (host) await request({ t: "kill", id });
 }
 
+/** Register the terminal's IPC handlers and the prompt before quitting. */
 export function registerTerminal(devUrl?: string): void {
-  // Claude's limits are known before the footer first asks (FE-53).
+  // So Claude's limits are known before the footer first asks.
   startClaudeUsagePoll();
-  // ⚠️ Not `handle()`: the port goes back to THIS sender, so the handler
+  // NOTE: Not `handle()`: the port goes back to THIS sender, so the handler
   // needs the event. The sender check is the same one `handle()` applies.
   ipcMain.handle(terminalChannels.connect, (event) => {
     assertTrustedSender(event, devUrl);
@@ -941,13 +977,13 @@ export function registerTerminal(devUrl?: string): void {
       const workspace = key(args[0], "workspace");
       const cols = clampGeometry(args[1], 80);
       const rows = clampGeometry(args[2], 24);
-      // ⚠️ One of three names, checked here: what an agent tab types is
+      // NOTE: One of three names, checked here: what an agent tab types is
       // decided by the host from the name, never sent (FE-19/D8).
       const kind = args[3] ?? "shell";
       if (!isTerminalKind(kind)) throw new Error("Unknown kind of terminal");
-      // ⚠️ A resume id is one this folder's listing has, for that agent —
+      // NOTE: A resume id is one this folder's listing has, for that agent,
       // not merely one shaped right (FE-23). The host checks the shape again.
-      // `null` is "none", sent only to put a card behind it (FE-34).
+      // `null` is "none", sent only to put a card behind it.
       const resume = args[4] ?? undefined;
       if (resume !== undefined) {
         if (kind === "shell" || !isAgentSessionId(resume))
@@ -982,9 +1018,8 @@ export function registerTerminal(devUrl?: string): void {
       return request<TerminalAgent[]>({ t: "agents" });
     },
   );
-  // ⚠️ Read in MAIN, not the pty host: listing files starts no process, and
-  // the rail asks for this on every project — most of which never open a
-  // terminal.
+  // Read in MAIN, not the pty host: listing files starts no process, and the
+  // rail asks for this on every project, most of which never open a terminal.
   handle(
     terminalChannels.agentSessions,
     devUrl,
@@ -1003,7 +1038,7 @@ export function registerTerminal(devUrl?: string): void {
       const name = cleanAgentName(args[3]);
       await updateAgentMark(agentMarksFile(), mark, (current) => ({
         ...current,
-        // Empty is "back to the CLI's own title" (FE-24).
+        // Empty is "back to the CLI's own title".
         name: name || undefined,
       }));
       return agentSessionsOf(workspace);
@@ -1024,9 +1059,9 @@ export function registerTerminal(devUrl?: string): void {
       return agentSessionsOf(workspace);
     },
   );
-  // ⚠️ Deletes the CLI's own files for good (FE-57). The id must be one this
-  // project lists (`markable`), and a conversation a tab of ours is running
-  // is refused: the CLI would only write it again.
+  // NOTE: Deletes the CLI's own files for good (FE-57). The id must be one
+  // this project lists (`markable`), and a conversation a tab of ours is
+  // running is refused: the CLI would only write it again.
   handle(
     terminalChannels.agentSessionDelete,
     devUrl,
@@ -1114,9 +1149,9 @@ export function registerTerminal(devUrl?: string): void {
       return archivedOf(workspace);
     },
   );
-  // ⚠️ By ids alone (FE-35/D10): `subagentRequest` refuses any of another
+  // NOTE: By ids alone (FE-35/D10): `subagentRequest` refuses any of another
   // shape, and the path is built from them inside the CLI's folder for this
-  // workspace's own folder — a page cannot name a file to read.
+  // workspace's own folder. A page cannot name a file to read.
   handle(
     terminalChannels.agentSubagent,
     devUrl,
@@ -1127,9 +1162,9 @@ export function registerTerminal(devUrl?: string): void {
       return readSubagentTranscript(agentHome(), folder, which);
     },
   );
-  // ⚠️ By ids alone, as a sub-agent is (FE-42): the transcript's path is
+  // NOTE: By ids alone, as a sub-agent is (FE-42): the transcript's path is
   // built inside Claude's folder, and an output's path is the one that
-  // transcript recorded — read only inside the CLI's task folder.
+  // transcript recorded, read only inside the CLI's task folder.
   handle(
     terminalChannels.agentBackgroundTasks,
     devUrl,
@@ -1160,7 +1195,7 @@ export function registerTerminal(devUrl?: string): void {
       return stopBackgroundTask(agentHome(), folder, conversation, task);
     },
   );
-  // ⚠️ By workspace alone (FE-68): the folders and the terminals whose
+  // NOTE: By workspace alone (FE-68): the folders and the terminals whose
   // processes count are main's to resolve; Stop names a pid, and main checks
   // it still listens in this project before anything is signalled.
   handle(
@@ -1190,9 +1225,9 @@ export function registerTerminal(devUrl?: string): void {
       );
     },
   );
-  // ⚠️ By workspace alone (FE-41): the goals are those of the Codex
+  // NOTE: By workspace alone (FE-41): the goals are those of the Codex
   // conversations its own listing last answered, and the quota is the
-  // account's — a page names no file and no thread.
+  // account's. A page names no file and no thread.
   handle(
     terminalChannels.codexUsage,
     devUrl,
@@ -1212,8 +1247,8 @@ export function registerTerminal(devUrl?: string): void {
       return { ...usage, claude };
     },
   );
-  // ⚠️ No arguments, and only the safe `ClaudeUsage` comes back (FE-53): the
-  // credential is read and used inside main, never sent to a renderer.
+  // NOTE: No arguments, and only the safe `ClaudeUsage` comes back (FE-53):
+  // the credential is read and used inside main, never sent to a renderer.
   handle(
     terminalChannels.refreshClaudeUsage,
     devUrl,
@@ -1222,7 +1257,7 @@ export function registerTerminal(devUrl?: string): void {
       return claudeUsageNow(true);
     },
   );
-  // ⚠️ By ids alone, as a sub-agent is read (FE-38): `factsRequest` refuses
+  // NOTE: By ids alone, as a sub-agent is read (FE-38): `factsRequest` refuses
   // any other shape, and the path is built inside the CLI's folder for this
   // workspace's own folder. Never part of the listing: the rail would pay
   // for every row's numbers to show none of them.
@@ -1248,7 +1283,7 @@ export function registerTerminal(devUrl?: string): void {
       return readAgentUsage(agentHome(), folder);
     },
   );
-  // ⚠️ By ids alone, as a sub-agent is (FE-39): `agentFilesRequest` refuses
+  // NOTE: By ids alone, as a sub-agent is (FE-39): `agentFilesRequest` refuses
   // any other shape, and every transcript's path is built inside the CLI's
   // folder for this workspace's own folder.
   handle(
@@ -1311,11 +1346,11 @@ export function registerTerminal(devUrl?: string): void {
   app.on("will-quit", () => {
     host?.kill();
   });
-  // ⚠️ The dev launcher restarts the app with SIGTERM on every main-process
-  // save, and WAITS for it to exit. Asked "a terminal is still running?",
-  // that exit never came: the old build kept running, unseen, and a change
-  // looked like it had done nothing. A signal is not a person quitting — in
-  // an unpackaged run it stops without asking.
+  // NOTE: The dev launcher restarts the app with SIGTERM on every
+  // main-process save, and WAITS for it to exit. Behind the "a terminal is
+  // still running" prompt that exit never comes: the old build keeps
+  // running, unseen, and a change looks like it did nothing. A signal is not
+  // a person quitting, so an unpackaged run stops without asking.
   if (!app.isPackaged)
     process.once("SIGTERM", () => {
       quitting = true;

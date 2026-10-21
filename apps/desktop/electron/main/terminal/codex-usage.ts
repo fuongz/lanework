@@ -1,10 +1,12 @@
 // What Codex keeps on disk about the account and its goals (FE-41): the usage
 // windows its newest turn reported, and the goal each conversation was given.
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a spec
-// can drive it under plain Node against a fake Codex home. The goals database
-// is Codex's — opened read-only, never written, and a file that cannot be
-// read the way this expects is no goals rather than an error.
+// Read-only, and nothing here imports Electron: main calls it, and a spec can
+// drive it under plain Node against a fake Codex home.
+//
+// NOTE: The goals database is Codex's. It is opened read-only, never written,
+// and a file that cannot be read the way this expects is no goals rather
+// than an error.
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -33,7 +35,7 @@ const OBJECTIVE_MAX = 2000;
 /** `goals_<n>.sqlite`: Codex numbers the file by its schema (`_1` today). */
 const GOALS_FILE = /^goals_(\d{1,6})\.sqlite$/;
 
-/** Where Codex keeps what this reads (FE-41). */
+/** Where Codex keeps what this reads. */
 export interface CodexDirs {
   /** `$CODEX_HOME` or `~/.codex`: its rollouts are under `sessions/`. */
   home: string;
@@ -41,6 +43,11 @@ export interface CodexDirs {
   sqlite: string;
 }
 
+/**
+ * One usage window of a `token_count`'s `rate_limits`.
+ *
+ * @returns null for a window missing a field this needs.
+ */
 function windowOf(value: unknown): CodexQuotaWindow | null {
   if (!value || typeof value !== "object") return null;
   const {
@@ -54,18 +61,20 @@ function windowOf(value: unknown): CodexQuotaWindow | null {
   return {
     usedPercent: Math.min(100, Math.max(0, used)),
     windowMinutes: minutes,
-    // ⚠️ Unix SECONDS in the rollout.
+    // NOTE: Unix SECONDS in the rollout.
     resetsAt: resets * 1000,
   };
 }
 
 /**
- * The usage the newest `token_count` in `tail` reported (FE-41/D1), or null;
- * `at` stands in for a line with no `timestamp`.
+ * The usage the newest `token_count` in `tail` reported (FE-41/D1).
  *
- * ⚠️ Walked back past a report that says nothing: `rate_limits` is null on
- * some, and a `premium` one rides along now and then with neither window —
- * taking either would blank the bar until the next turn.
+ * NOTE: The walk back skips a report that says nothing: `rate_limits` is null
+ * on some, and a `premium` one rides along now and then with neither window.
+ * Taking either would blank the bar until the next turn.
+ *
+ * @param at Stands in for a line with no `timestamp`.
+ * @returns null when no report in `tail` has a window.
  */
 function codexQuotaOf(tail: Line[], at: string): CodexQuota | null {
   for (let index = tail.length - 1; index >= 0; index--) {
@@ -99,10 +108,12 @@ function codexQuotaOf(tail: Line[], at: string): CodexQuota | null {
  * The account's usage as the newest Codex turn on this machine reported it
  * (FE-41/D1): the last `token_count` of the rollout written last.
  *
- * ⚠️ Written last, not started last: a conversation resumed today was begun
- * days ago, and its rollout sorts with that day. Only the newest-started few
- * are weighed — a long-idle one resumed is missed, and the tooltip's "as of"
- * says how old the numbers are.
+ * NOTE: Written last, not started last: a conversation resumed today was
+ * begun days ago, and its rollout sorts with that day. Only the
+ * newest-started few are weighed, so a long-idle one resumed is missed; the
+ * tooltip's "as of" says how old the numbers are.
+ *
+ * @param home The Codex home.
  */
 export async function readCodexQuota(home: string): Promise<CodexQuota | null> {
   const files = (await codexRollouts(join(home, "sessions"))).slice(
@@ -138,7 +149,7 @@ export async function readCodexQuota(home: string): Promise<CodexQuota | null> {
   return null;
 }
 
-/** Codex's goals database in `sqlite`: the highest-numbered `goals_*.sqlite`. */
+/** Codex's goals database in `sqlite`: the highest-numbered `goals_*`. */
 async function codexGoalsFile(sqlite: string): Promise<string | null> {
   let best: { n: number; name: string } | null = null;
   for (const name of await readdir(sqlite).catch(() => [] as string[])) {
@@ -148,6 +159,7 @@ async function codexGoalsFile(sqlite: string): Promise<string | null> {
   return best ? join(sqlite, best.name) : null;
 }
 
+/** A finite, non-negative number, or null. */
 const count = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
@@ -177,12 +189,14 @@ function goalOf(row: Record<string, unknown>): [string, CodexGoal] | null {
 /**
  * The goals Codex keeps for the threads `ids` (FE-41/D4), by thread id.
  *
- * ⚠️ Read-only, and empty — never thrown — for a database that is missing,
- * locked, not a database, or of a schema this does not know: the schema is
- * Codex's own and has changed before. Only ids `isAgentSessionId` accepts
- * reach the query, and as bound values, never as SQL.
+ * Read-only. The answer is empty, never thrown, for a database that is
+ * missing, locked, not a database, or of a schema this does not know: the
+ * schema is Codex's own and has changed before.
  *
- * ⚠️ `node:sqlite` is loaded HERE, not at the top: a runtime without it
+ * NOTE: Only ids {@link isAgentSessionId} accepts reach the query, and as
+ * bound values, never as SQL.
+ *
+ * NOTE: `node:sqlite` is loaded HERE, not at the top: a runtime without it
  * costs the goals, not main's start.
  */
 export async function readCodexGoals(
@@ -223,7 +237,7 @@ export async function readCodexGoals(
   }
 }
 
-/** The account's usage and `ids`' goals, read side by side (FE-41). */
+/** The account's usage and `ids`' goals, read side by side. */
 export async function readCodexUsage(
   dirs: CodexDirs,
   ids: readonly string[],

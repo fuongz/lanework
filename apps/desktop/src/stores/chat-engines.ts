@@ -1,24 +1,33 @@
 import { create } from "zustand";
 
 /**
- * The Claude conversations each project runs from the chat (FE-62): their
- * engine process is alive, the chat's equivalent of a live agent tab — so the
- * rail lists them under Running, with Stop, as it does a terminal's.
+ * The Claude conversations each project runs from the chat.
  *
- * ⚠️ Read again on every engine `state` event of that project, never on a
- * timer: a process starts or ends only with one of those.
+ * Their engine process is alive, like a live agent tab, so the rail lists
+ * them under Running, with Stop, as it does a terminal's.
+ *
+ * Read again on every engine `state` event of that project, never on a timer:
+ * a process starts or ends only with one of those.
  */
 
 const NONE: string[] = [];
 
-/** A list read that started first must not land after a later one. */
+/**
+ * Request tickets, by workspace.
+ *
+ * A list read that started first must not land after a later one.
+ */
 const tickets = new Map<string, number>();
 
 interface ChatEnginesState {
   /** Each workspace's conversation ids with a live engine. */
   alive: Record<string, string[]>;
   refresh: (workspace: string) => Promise<void>;
-  /** Follow engine events; answers the unsubscribe. */
+  /**
+   * Follow engine events.
+   *
+   * @returns The unsubscribe.
+   */
   watch: () => () => void;
 }
 

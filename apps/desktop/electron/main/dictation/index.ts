@@ -1,10 +1,10 @@
-// Dictation in the composer (FE-69): one `lanework-dictation` helper per
-// dictation, its JSON lines forwarded to the renderer as events.
+// Dictation in the composer: one `lanework-dictation` helper per dictation,
+// its JSON lines forwarded to the renderer as events.
 //
-// ⚠️ The helper opens the microphone, not the renderer (FE-69/D8): the
+// NOTE: The helper opens the microphone, not the renderer (FE-69/D8). The
 // window's permission handler keeps refusing `media`, and the microphone is
-// open only while a helper runs. One at a time — a new start cancels the old
-// one — and every helper is killed when the app quits.
+// open only while a helper runs. One runs at a time: a new start cancels the
+// old one, and the app's quit kills it.
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { release } from "node:os";
@@ -21,9 +21,11 @@ import {
 import { broadcast, handle } from "../ipc";
 
 /**
- * The helper, outside the asar archive — an executable inside it cannot be
- * spawned. `electron-builder.yml` unpacks `dist/electron/bin/**`; unpackaged
- * (dev, tests) there is no archive and the path is left as it is.
+ * The helper's path, outside the asar archive.
+ *
+ * An executable inside the archive cannot be spawned, so
+ * `electron-builder.yml` unpacks `dist/electron/bin/**`. Unpackaged (dev,
+ * tests) there is no archive and the path is left as it is.
  */
 function helperPath(): string {
   return join(__dirname, "..", "bin", "lanework-dictation").replace(
@@ -32,7 +34,11 @@ function helperPath(): string {
   );
 }
 
-/** macOS 26 is Darwin 25: the first with SpeechAnalyzer. */
+/**
+ * Whether this Mac can dictate: macOS 26 or later, with the helper there.
+ *
+ * macOS 26 is Darwin 25, the first with SpeechAnalyzer.
+ */
 function supported(): boolean {
   return (
     process.platform === "darwin" &&
@@ -41,12 +47,20 @@ function supported(): boolean {
   );
 }
 
+/** The one helper running, and the session it serves. */
 let running: { session: number; child: ChildProcess } | null = null;
+/** The last session number handed out. */
 let sessions = 0;
 
+/** Send a dictation event to every window. */
 const send = (event: DictationEvent) =>
   broadcast(dictationChannels.event, event);
 
+/**
+ * End a dictation, when `session` is still the running one.
+ *
+ * `stop` asks the helper to finish and report its text; `cancel` kills it.
+ */
 function end(session: number, command: "stop" | "cancel") {
   if (running?.session !== session) return;
   const { child } = running;
@@ -58,6 +72,12 @@ function end(session: number, command: "stop" | "cancel") {
   child.stdin?.write("stop\n");
 }
 
+/**
+ * Start a helper for a new dictation, cancelling any running one.
+ *
+ * @param hints Words the recognizer should expect.
+ * @returns The new session's number, which every event carries.
+ */
 function start(locale: string, hints: string[]): number {
   if (running) end(running.session, "cancel");
   const session = ++sessions;
@@ -113,7 +133,7 @@ function start(locale: string, hints: string[]): number {
   child.on("exit", () => {
     const cancelled = running?.session !== session;
     if (!cancelled) running = null;
-    // A helper that dies without a word — a crash — still ends the session.
+    // A helper that dies without a word, a crash, still ends the session.
     if (!reported && !cancelled)
       send({
         session,
@@ -125,6 +145,7 @@ function start(locale: string, hints: string[]): number {
   return session;
 }
 
+/** Register dictation's IPC handlers. */
 export function registerDictation(devUrl: string | undefined): void {
   handle(dictationChannels.supported, devUrl, () => supported());
   handle(dictationChannels.start, devUrl, ([locale, hints]) => {

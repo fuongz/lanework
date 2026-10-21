@@ -38,6 +38,7 @@ import { GitHubError, gh, ghBlocked, ghJson, relocateGh } from "./gh";
 import { removeLegacyStore } from "./store";
 import { registerWorktree } from "./worktree-ipc";
 
+/** `execFile` as a promise, for `git` itself. */
 const run = promisify(execFile);
 
 /**
@@ -52,18 +53,25 @@ const FRESH_MS = 60_000;
 /** How long a folder's detected repo is reused by reads other than `repo`. */
 const DETECT_MS = 5 * 60_000;
 
-/** Lists by `owner/repo:status`. In memory only; nothing about GitHub is stored. */
+/**
+ * Pull-request lists by `owner/repo:status`.
+ *
+ * In memory only: nothing about GitHub is stored.
+ */
 const pullsCache = new Map<string, PullsView>();
 
+/** A list's key in {@link pullsCache}. */
 function pullsKey(ref: RepoRef, status: PullStatus): string {
   return `${formatRepoRef(ref).toLowerCase()}:${status}`;
 }
 
+/** Whether a list was read less than {@link FRESH_MS} ago. */
 function fresh(view: PullsView): boolean {
   const at = Date.parse(view.fetchedAt);
   return Number.isFinite(at) && Date.now() - at < FRESH_MS;
 }
 
+/** The last account answer; null until `gh` is first asked. */
 let account: GitAccount | null = null;
 
 /** Remember `next`, and tell every window when it differs from before. */
@@ -117,6 +125,11 @@ async function readAccount(): Promise<GitAccount> {
   };
 }
 
+/**
+ * The account, asked of `gh` only when none is known yet.
+ *
+ * @param force Look for `gh` again and ask afresh: the "check again" button.
+ */
 async function currentAccount(force: boolean): Promise<GitAccount> {
   if (account && !force) return account;
   if (force) relocateGh();
@@ -147,17 +160,23 @@ async function withGh<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
+/** A folder's GitHub repo, and the repo it is a fork of. */
 interface Detected {
   repo: RepoRef;
   parent: RepoRef | null;
 }
 
-/** By folder path. `null` means "looked, not a GitHub checkout". */
+/**
+ * Each folder's detected repo, by folder path.
+ *
+ * A `null` value means "looked, not a GitHub checkout".
+ */
 const detected = new Map<string, { at: number; value: Detected | null }>();
 
 /** The session's fork/parent choice, by project slug. */
 const sides = new Map<string, RepoSide>();
 
+/** The folder's `origin` URL; null when there is none to read. */
 async function originUrl(folder: string): Promise<string | null> {
   try {
     const { stdout } = await run("git", ["remote", "get-url", "origin"], {
@@ -181,6 +200,11 @@ function remoteHost(url: string): string | null {
   return scp ? scp[1].toLowerCase() : null;
 }
 
+/**
+ * A repo from `gh`'s JSON: `nameWithOwner`, or `owner.login` and `name`.
+ *
+ * @returns null when neither is there or the name is not a valid repo.
+ */
 function refFrom(value: unknown): RepoRef | null {
   if (!value || typeof value !== "object") return null;
   const data = value as Record<string, unknown>;
@@ -202,7 +226,11 @@ function refFrom(value: unknown): RepoRef | null {
  * - An `origin` on a host that is not github.com may be an SSH alias for
  *   it, so `gh repo view` in the folder gets a say. It resolves aliases
  *   from the SSH config.
- * - `parseRepoRef` checks the shape of every name before it reaches `gh`.
+ * - {@link parseRepoRef} checks the shape of every name before it reaches
+ *   `gh`.
+ *
+ * @returns `sure: false` when `gh` could not be asked, so the answer is a
+ *   guess that must not be cached.
  */
 async function detect(
   folder: string,
@@ -223,7 +251,7 @@ async function detect(
   const data = await ghJson(args, { cwd: folder, timeoutMs: 15_000 }).catch(
     () => null,
   );
-  // NOTE: a failed `gh` call (offline, rate limit) is a guess, not an answer:
+  // NOTE: A failed `gh` call (offline, rate limit) is a guess, not an answer:
   // the parent is unknown. It must not be cached, or the fork switch stays
   // hidden for the whole cache window.
   if (!data)
@@ -243,6 +271,11 @@ async function detect(
   return { value: { repo, parent }, sure: true };
 }
 
+/**
+ * A folder's repo through the cache, reused for {@link DETECT_MS}.
+ *
+ * @param force Detect again, whatever the cache holds.
+ */
 async function detectCached(
   folder: string,
   force: boolean,
@@ -257,14 +290,19 @@ async function detectCached(
 /**
  * The project's primary folder, local board or cloud project alike.
  *
- * NOTE: resolved through `projectFolders`, not `authorizedRecord`. A local
- * board files its folders under no credential, so asking for one here would
- * refuse every project in local mode.
+ * NOTE: Resolved through {@link projectFolders}, not `authorizedRecord`. A
+ * local board files its folders under no credential, so asking for one here
+ * would refuse every project in local mode.
  */
 async function folderOf(slug: string): Promise<string | null> {
   return (await projectFolders(slug))[0] ?? null;
 }
 
+/**
+ * What the pull-request screen knows of a project's repo.
+ *
+ * @param force Detect the folder's repo again.
+ */
 async function repoState(slug: string, force: boolean): Promise<RepoState> {
   const folder = await folderOf(slug);
   if (!folder) return { kind: "no-folder" };
@@ -279,6 +317,11 @@ async function repoState(slug: string, force: boolean): Promise<RepoState> {
   };
 }
 
+/**
+ * The repo a project's reads go to: its own, or its fork parent when chosen.
+ *
+ * @throws When the project has no folder or the folder is not a GitHub repo.
+ */
 async function repoFor(slug: string): Promise<RepoRef> {
   const state = await repoState(slug, false);
   if (state.kind === "no-folder")
@@ -292,7 +335,7 @@ async function repoFor(slug: string): Promise<RepoRef> {
 /**
  * A list read through the cache.
  *
- * NOTE: a failed read answers the last good copy marked `stale`. An empty
+ * NOTE: A failed read answers the last good copy marked `stale`. An empty
  * list would say "no pull requests", which is a different fact from "could
  * not ask GitHub".
  */
@@ -352,6 +395,11 @@ export async function readLinkedOpenPulls(): Promise<
   return out;
 }
 
+/**
+ * A non-empty string from the renderer, checked.
+ *
+ * @throws When it is missing, blank, or longer than `max`.
+ */
 function text(value: unknown, max: number): string {
   if (typeof value !== "string" || !value.trim())
     throw new Error("That value is required.");
@@ -359,6 +407,11 @@ function text(value: unknown, max: number): string {
   return value;
 }
 
+/**
+ * A pull request's number from the renderer, checked.
+ *
+ * @throws When it is not a positive integer.
+ */
 function positive(value: unknown): number {
   if (
     typeof value !== "number" ||
@@ -370,6 +423,11 @@ function positive(value: unknown): number {
   return value;
 }
 
+/**
+ * The merges in flight, by `owner/repo/number`.
+ *
+ * A second click while one runs is refused, not sent to GitHub twice.
+ */
 const pendingMerges = new Set<string>();
 
 /**
@@ -380,17 +438,20 @@ const pendingMerges = new Set<string>();
  */
 const COMMIT_SHA = /^[0-9a-f]{7,64}$/i;
 
+/** The review verdicts the renderer may send. */
 const VERDICTS = new Set<ReviewVerdict>([
   "APPROVE",
   "REQUEST_CHANGES",
   "COMMENT",
 ]);
 
+/** The repo sides the renderer may pick. */
 const SIDES = new Set<RepoSide>(["self", "parent"]);
 
+/** Register the pull-request and worktree IPC handlers. */
 export function registerGit(devUrl?: string): void {
   registerWorktree(devUrl);
-  // The OAuth token, repo links and list caches lived here before `gh`.
+  // Delete what the app stored about GitHub before `gh` made its requests.
   void removeLegacyStore();
 
   handle(gitChannels.account, devUrl, async (): Promise<GitAccount> => {

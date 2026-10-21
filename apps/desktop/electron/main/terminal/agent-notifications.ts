@@ -2,11 +2,13 @@ import type { TerminalAgent } from "../../../shared/terminal";
 import { notify } from "../notifications";
 
 /**
- * An agent's run finished (FE-70). A click opens its conversation; a tab
- * running it is where that chat sends the window anyway.
+ * Tell the user an agent's run finished.
  *
- * `tab` is the Lanework tab running the conversation, if one is — on screen
- * that is the same conversation, so a focused window on it is not told.
+ * A click opens its conversation; a tab running it is where that chat sends
+ * the window anyway.
+ *
+ * @param tab The Lanework tab running the conversation, if one is. On screen
+ *   it is the same conversation, so a focused window on it is not told.
  */
 export function notifyAgentCompleted(
   agent: TerminalAgent,

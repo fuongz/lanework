@@ -7,12 +7,14 @@ import type {
 } from "../../shared/harness";
 
 /**
- * Which version of each agent CLI this machine runs, whether a newer one is
- * out, and an update in flight (FE-61), as main last reported it.
+ * The agent CLIs' versions and updates, as main last reported them.
  *
- * ⚠️ Main owns every one of these facts, the update command included. The
- * renderer names an AGENT and never a command; whatever it gets back — from a
- * call or from `onChanged` — replaces the whole list.
+ * Which version of each CLI this machine runs, whether a newer one is out,
+ * and an update in flight.
+ *
+ * NOTE: Main owns every one of these facts, the update command included. The
+ * renderer names an agent, never a command. Whatever it gets back, from a
+ * call or from `onChanged`, replaces the whole list.
  */
 interface HarnessState {
   list: HarnessInfo[];
@@ -27,7 +29,11 @@ interface HarnessState {
   openInTerminal: (agent: HarnessAgent) => Promise<void>;
 }
 
-/** A list that was asked for before a later one must not land after it. */
+/**
+ * The request ticket for lists.
+ *
+ * A list that was asked for before a later one must not land after it.
+ */
 let generation = 0;
 
 function message(error: unknown, fallback: string): string {
@@ -49,7 +55,7 @@ export const useHarness = create<HarnessState>((set) => {
       set({ list, loaded: true, error: null });
     } catch (error) {
       if (generation !== mine) return;
-      // ⚠️ A failed call keeps the last list: an island that vanished because
+      // A failed call keeps the last list. An island that vanished because
       // one check timed out would hide an update that is still out there.
       set({ error: message(error, fallback) });
     }
@@ -82,9 +88,10 @@ export const useHarness = create<HarnessState>((set) => {
 });
 
 /**
- * Read the list once and follow every change main pushes, for as long as the
- * caller is mounted. The island and Settings › Agents both call it; the
- * second subscription only costs a listener.
+ * Read the list once and follow every change main pushes, while mounted.
+ *
+ * The island and Settings › Agents both call it; the second subscription
+ * only costs a listener.
  */
 export function useHarnessWatch(): void {
   const load = useHarness((state) => state.load);
@@ -101,15 +108,19 @@ export function useHarnessWatch(): void {
   }, [load]);
 }
 
-// ---------------------------------------------------------------------------
-// ⚠️ DEV-ONLY FAKE (FE-61, stream W2). Remove once main's handlers are in and
-// the e2e fake CLI (`LANEWORK_CODEX_BIN`) covers the island.
-//
-// `localStorage['lanework.harness.fake']` in a dev build serves a made-up list
-// instead of main's: Codex 0.162.1 → 0.163.0 (brew-cask). The value's words
-// change it: `claude` adds a pending Claude Code too, `fail` makes Update
-// fail. Update takes 2s. A production build never reads the key.
-// ---------------------------------------------------------------------------
+/**
+ * A dev-only fake of main's harness surface.
+ *
+ * Remove once the e2e fake CLI (`LANEWORK_CODEX_BIN`) covers the island.
+ *
+ * In a dev build, `localStorage['lanework.harness.fake']` serves a made-up
+ * list instead of main's: Codex 0.162.1 → 0.163.0 (brew-cask). Words in the
+ * value change it:
+ * - `claude` adds a pending Claude Code too;
+ * - `fail` makes Update fail.
+ *
+ * Update takes 2s. A production build never reads the key.
+ */
 let fake: DesktopHarnessApi | null | undefined;
 
 function harnessSurface(): DesktopHarnessApi | undefined {

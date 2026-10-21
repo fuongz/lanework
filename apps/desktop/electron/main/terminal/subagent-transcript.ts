@@ -1,9 +1,9 @@
-// One sub-agent's transcript, read for the viewer (FE-35): what it was asked,
-// the tools it called and what it reported back — a Claude sub-agent, or a
-// thread a Codex conversation spawned.
+// One sub-agent's transcript, read for the viewer: what it was asked, the
+// tools it called and what it reported back. A Claude sub-agent, or a thread
+// a Codex conversation spawned.
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a spec
-// can drive it under plain Node against a fake home folder.
+// NOTE: Read-only, and nothing here imports Electron: main calls it, and a
+// spec can drive it under plain Node against a fake home folder.
 import { stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative } from "node:path";
 import {
@@ -32,6 +32,7 @@ import {
 const SUBAGENT_READ_MAX = 8 * 1024 * 1024;
 /** Of a transcript longer than that: its end, for the report and the state. */
 const TAIL = 1024 * 1024;
+/** The most of a Claude sub-agent's `.meta.json` one read takes. */
 const META_MAX = 64 * 1024;
 
 /** What the viewer asks for, checked. */
@@ -45,10 +46,13 @@ interface SubagentRequest {
 /**
  * The viewer's request off the wire: ids, never a path (FE-35/D10).
  *
- * ⚠️ Each one of the shape its CLI writes and nothing else — a conversation
- * is a UUID, a Claude sub-agent the `<id>` of its file's name, a Codex thread
- * a UUID — so none can be `..`, a separator or an absolute path. The path
- * is built from them by `readSubagentTranscript`, inside the CLI's folder.
+ * NOTE: Each one of the shape its CLI writes and nothing else (a
+ * conversation is a UUID, a Claude sub-agent the `<id>` of its file's name,
+ * a Codex thread a UUID), so none can be `..`, a separator or an absolute
+ * path. The path is built from them by {@link readSubagentTranscript},
+ * inside the CLI's folder.
+ *
+ * @throws when any argument is missing or not of its shape.
  */
 export function subagentRequest(args: unknown[]): SubagentRequest {
   if (args.length !== 4)
@@ -73,9 +77,14 @@ export function subagentRequest(args: unknown[]): SubagentRequest {
 }
 
 /**
- * A transcript's lines, at most `SUBAGENT_READ_MAX` of it: the whole of one
- * that fits; of one that does not, its start and its last `TAIL` — where
- * the report and the state are — with what lies between left out.
+ * A transcript's lines, at most {@link SUBAGENT_READ_MAX} of it.
+ *
+ * The whole of one that fits. Of one that does not, its start and its last
+ * {@link TAIL} (where the report and the state are), with what lies between
+ * left out.
+ *
+ * @returns `fresh` when the file was written within {@link STALE_MS}.
+ * @throws when `file` is missing or not a file.
  */
 async function readTranscript(
   file: string,
@@ -98,6 +107,7 @@ async function readTranscript(
   return { rows: [...head, ...tail], truncated: true, fresh };
 }
 
+/** `value` when it is a string with something on it; otherwise null. */
 const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value : null;
 
@@ -132,7 +142,11 @@ function shown(path: unknown, folder: string): string {
     : path;
 }
 
-/** The first string an input holds — what a tool not known here was called on. */
+/**
+ * The first string an input holds, in one line.
+ *
+ * What a tool not known here was called on.
+ */
 function anyString(input: Record<string, unknown>): string {
   for (const value of Object.values(input))
     if (typeof value === "string" && value.trim()) return firstLine(value);
@@ -140,8 +154,10 @@ function anyString(input: Record<string, unknown>): string {
 }
 
 /**
- * What a Claude tool call was made on, in one line (FE-35/D3): the path for
- * a file tool, the pattern for a search, the first line of a command.
+ * What a Claude tool call was made on, in one line (FE-35/D3).
+ *
+ * The path for a file tool, the pattern for a search, the first line of a
+ * command.
  */
 export function claudeStepSummary(
   tool: string,
@@ -213,7 +229,7 @@ function claudeText(content: unknown): string | null {
 /**
  * What a sub-agent was told, out of the turn that told it.
  *
- * ⚠️ A fork's is wrapped: Claude puts its own rules for a fork in front of
+ * A fork's is wrapped: Claude puts its own rules for a fork in front of
  * the directive (`<fork-boilerplate>…</fork-boilerplate>`, then `Your
  * directive:`). The directive is what it was asked.
  */
@@ -237,14 +253,14 @@ interface ClaudeMeta {
 /**
  * A Claude sub-agent's transcript, from its lines and its `.meta.json`.
  *
- * ⚠️ A FORK's transcript opens with a `fork-context-ref` — the parent's
- * history it inherited is NOT copied in — followed by the parent's own call
+ * NOTE: A FORK's transcript opens with a `fork-context-ref` (the parent's
+ * history it inherited is NOT copied in), followed by the parent's own call
  * that spawned it. Neither is the fork's: its prompt is the first user turn
  * after the ref, and its steps start after that turn.
  *
- * ⚠️ Its report is what it handed back through `SubagentHandback` when it
- * did; otherwise its last answer — the text after the last thing it was
- * told or shown — once it is done.
+ * Its report is what it handed back through {@link HANDBACK} when it did.
+ * Otherwise, once it is done, its last answer: the text after the last
+ * thing it was told or shown.
  */
 function claudeSubagentTranscript(
   rows: Line[],
@@ -275,7 +291,7 @@ function claudeSubagentTranscript(
   const failed = new Set<string>();
   let handback: string | null = null;
   let model: string | null = null;
-  /** Where the newest thing it was told or shown is: its answer is after. */
+  // Where the newest thing it was told or shown is: its answer is after.
   let lastTold = -1;
   for (const [index, line] of own.entries()) {
     const content = (line.message as { content?: unknown } | undefined)
@@ -442,8 +458,8 @@ function codexText(content: unknown, kind: string): string | null {
  * What a Codex thread was told: the readable payload of the task its
  * spawner sent it, or the first thing typed into it.
  *
- * ⚠️ Often none: Codex sends a spawned thread its task ENCRYPTED, in its own
- * rollout and in its spawner's — then the viewer says so, rather than show
+ * Often none: Codex sends a spawned thread its task ENCRYPTED, in its own
+ * rollout and in its spawner's. The viewer then says so, rather than show
  * the envelope.
  */
 function codexTold(rows: Line[]): string | null {
@@ -472,8 +488,9 @@ function codexTold(rows: Line[]): string | null {
 }
 
 /**
- * A thread a Codex conversation spawned, from its rollout's lines (FE-35/D7):
- * its tool calls are `function_call` and `custom_tool_call` items, each
+ * A thread a Codex conversation spawned, from its rollout's lines (FE-35/D7).
+ *
+ * Its tool calls are `function_call` and `custom_tool_call` items, each
  * answered by an output with the same `call_id`.
  */
 function codexSubagentTranscript(
@@ -561,15 +578,20 @@ function codexSubagentTranscript(
 }
 
 /**
- * Codex rollouts found by thread, kept for the viewer's next read — a
- * working thread is read again on its every write (FE-35/D11).
+ * Codex rollouts found by thread, kept for the viewer's next read.
+ *
+ * A working thread is read again on its every write (FE-35/D11).
  */
 const codexFiles = new Map<string, string>();
 
 /**
  * The rollout of Codex thread `sub`, if it is one `conversation` spawned in
- * `folder` — by its file's name among the newest rollouts, then by its
+ * `folder`.
+ *
+ * Found by its file's name among the newest rollouts, then checked by its
  * `session_meta`.
+ *
+ * @throws when no such rollout is that conversation's thread.
  */
 async function codexSubagentFile(
   home: string,
@@ -599,12 +621,15 @@ async function codexSubagentFile(
 
 /**
  * Sub-agent `sub` of `agent`'s conversation `conversation` in `folder`, read
- * for the viewer (FE-35).
+ * for the viewer.
  *
- * ⚠️ The ids are checked again here, and the path is built from them inside
- * the CLI's own folder under `home`: Claude's
+ * NOTE: The ids are checked again here, and the path is built from them
+ * inside the CLI's own folder under `home`: Claude's
  * `projects/<folder>/<conversation>/subagents/agent-<sub>.jsonl`, or a
  * rollout whose own `session_meta` says it is that conversation's thread.
+ *
+ * @throws when an id is malformed or the sub-agent is not that
+ * conversation's.
  */
 export async function readSubagentTranscript(
   home: string,

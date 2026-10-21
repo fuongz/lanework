@@ -1,8 +1,13 @@
-// What a conversation's engine holds back (FE-67). A message sent while a
-// turn runs goes into that turn at once (it steers it); one the CLI cannot
-// take in yet waits here, in order — the queue is paused, the turn is not
-// ready, or it asks for other settings than the running turn's — and goes
-// as soon as it can. Nothing here imports Electron.
+// What a conversation's engine holds back (FE-67).
+//
+// A message sent while a turn runs goes into that turn at once: it steers it.
+// One the CLI cannot take in yet waits here, in order, and goes as soon as it
+// can. It waits when:
+// - the queue is paused;
+// - the turn is not ready;
+// - it asks for other settings than the running turn's.
+//
+// Nothing here imports Electron.
 import { basename, extname } from "node:path";
 import type {
   ComposerSettings,
@@ -25,8 +30,10 @@ export interface Outgoing {
   error?: string | null;
 }
 
+/** The extensions of an attached path the queue shows as an image. */
 const IMAGE = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
+/** A held message as the page shows it in the queue. */
 function shown(out: Outgoing): QueuedMessage {
   return {
     id: out.id,
@@ -44,8 +51,12 @@ function shown(out: Outgoing): QueuedMessage {
 }
 
 /**
- * Mid-turn, a message goes in only on the settings the turn runs with: a
+ * Whether a message may go into a turn that runs on settings `a`.
+ *
+ * Mid-turn, a message goes in only on the settings the turn runs with. A
  * model, effort, speed or permission of its own waits for a turn of its own.
+ *
+ * @param a The running turn's settings; null when no turn runs.
  */
 export function sameSettings(
   a: ComposerSettings | null,
@@ -69,7 +80,11 @@ export class Held {
     return this.items.length;
   }
 
-  /** Out of the queue, by id — taken back to edit, or dropped. */
+  /**
+   * Take a message out of the queue by id, to edit or to drop.
+   *
+   * @returns null when no held message has that id.
+   */
   remove(id: string): Outgoing | null {
     const at = this.items.findIndex((item) => item.id === id);
     if (at < 0) return null;
@@ -78,6 +93,11 @@ export class Held {
     return item ?? null;
   }
 
+  /**
+   * Drop every held message.
+   *
+   * @returns How many were dropped.
+   */
   clear(): number {
     const dropped = this.items.length;
     this.items = [];
@@ -85,7 +105,13 @@ export class Held {
     return dropped;
   }
 
-  /** Back in front, in order — they were sent before what waits. */
+  /**
+   * Put messages back in front, in order, and pause the queue.
+   *
+   * They go in front because they were sent before what waits.
+   *
+   * @param error Why they did not go, shown on each.
+   */
   restore(items: Outgoing[], error: string | null = null): void {
     if (!items.length) return;
     for (const item of items) item.error = error;
@@ -93,6 +119,7 @@ export class Held {
     this.paused = true;
   }
 
+  /** The queue as the page shows it; empty when nothing is held. */
   state(): EngineQueue {
     return this.items.length
       ? { queue: this.items.map(shown), paused: this.paused }

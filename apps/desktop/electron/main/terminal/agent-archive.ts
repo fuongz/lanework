@@ -7,9 +7,10 @@
 // `~/.claude/projects/` into `~/.claude/archived_sessions/`, where
 // `claude --resume` never looks, and back.
 //
-// NOTE: Every path is built here from ids main has already checked against this
-// folder's listing (or its archived one); a page never names a file. And
-// nothing here imports Electron: main passes the home and the Codex runner.
+// NOTE: Every path is built here from ids main has already checked against
+// this folder's listing (or its archived one); a page never names a file.
+//
+// Nothing here imports Electron: main passes the home and the Codex runner.
 import { createReadStream } from "node:fs";
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -36,10 +37,13 @@ import {
 /** Runs `codex <args>`; throws what Codex said when it fails. */
 export type CodexRunner = (args: string[]) => Promise<void>;
 
+/** Claude's folder of `folder`'s live conversations. */
 const claudeLive = (home: string, folder: string) =>
   join(home, ".claude", "projects", claudeProjectDir(folder));
+/** Where Lanework moves `folder`'s archived Claude conversations. */
 const claudeArchive = (home: string, folder: string) =>
   join(home, ".claude", "archived_sessions", claudeProjectDir(folder));
+/** Codex's own archive, one flat folder for every project. */
 const codexArchive = (home: string) =>
   join(home, ".codex", "archived_sessions");
 
@@ -51,9 +55,12 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /**
- * Move `<id>.jsonl` and its `<id>/` folder from one Claude folder to
- * another. Refused when the other side already has the transcript: two
- * copies of one conversation would leave nobody sure which is the real one.
+ * Move `<id>.jsonl` and its `<id>/` folder from one Claude folder to another.
+ *
+ * Refused when the other side already has the transcript: two copies of one
+ * conversation would leave nobody sure which is the real one.
+ *
+ * @throws when `from` has no transcript, or `to` already has one.
  */
 async function moveClaude(from: string, to: string, id: string) {
   const file = join(from, `${id}.jsonl`);
@@ -68,7 +75,12 @@ async function moveClaude(from: string, to: string, id: string) {
   await rename(file, join(to, `${id}.jsonl`));
 }
 
-/** Archive a conversation main has checked is one of `folder`'s. */
+/**
+ * Archive a conversation main has checked is one of `folder`'s.
+ *
+ * @throws when `id` is not a session id, or the move or `codex archive`
+ *   fails.
+ */
 export async function archiveAgentTranscript(
   home: string,
   folder: string,
@@ -87,7 +99,12 @@ export async function archiveAgentTranscript(
   await codex(["archive", id]);
 }
 
-/** Bring back a conversation main has checked is in `folder`'s archive. */
+/**
+ * Bring back a conversation main has checked is in `folder`'s archive.
+ *
+ * @throws when `id` is not a session id, or the move or `codex unarchive`
+ *   fails.
+ */
 export async function unarchiveAgentTranscript(
   home: string,
   folder: string,
@@ -107,8 +124,10 @@ export async function unarchiveAgentTranscript(
 }
 
 /**
- * The first `META_CHUNK` of a rollout as text. Codex compresses the ones it
- * has archived a while (`.jsonl.zst`): those are inflated only that far.
+ * The first {@link META_CHUNK} bytes of a rollout as text.
+ *
+ * Codex compresses the ones it has archived a while (`.jsonl.zst`): those
+ * are inflated only that far.
  */
 async function rolloutHead(file: string): Promise<string> {
   if (!file.endsWith(".zst")) return readRange(file, 0, META_CHUNK);
@@ -134,6 +153,7 @@ async function rolloutHead(file: string): Promise<string> {
   });
 }
 
+/** One rollout in Codex's archive that belongs to the folder. */
 interface CodexArchived {
   file: string;
   id: string;
@@ -237,8 +257,12 @@ export async function listArchivedAgentSessions(
 }
 
 /**
- * Delete an archived conversation for good: the same files FE-57's Delete
- * removes, from the archive instead.
+ * Delete an archived conversation for good.
+ *
+ * It removes the same files as deleting a live conversation, from the
+ * archive instead. A Codex conversation takes its spawned threads with it.
+ *
+ * @throws when `id` is not a session id, or the archive has no file for it.
  */
 export async function deleteArchivedTranscript(
   home: string,

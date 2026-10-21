@@ -4,7 +4,11 @@ import { safeStorage } from "electron";
 import type { AccountOwner } from "../../../shared/auth";
 import { appHomeDir } from "../paths";
 
-/** This install's control-plane identity. `secret` is never logged or returned. */
+/**
+ * This install's control-plane identity.
+ *
+ * NOTE: `secret` is never logged or returned.
+ */
 export interface MachineRecord {
   machineId: string;
   secret: string;
@@ -12,11 +16,19 @@ export interface MachineRecord {
   name: string;
   /** Learned from `/v1/machines/me`; kept so the principal survives offline. */
   userId: string | null;
-  /** Same source, same reason — a settings screen should not go blank offline. */
+  /**
+   * Learned from `/v1/machines/me`, like `userId`.
+   *
+   * Kept so a settings screen does not go blank offline.
+   */
   owner: AccountOwner | null;
 }
 
-/** On-disk shape. The secret is encrypted whenever the OS will do it for us. */
+/**
+ * The record's shape in `auth.json`.
+ *
+ * The secret is encrypted whenever the OS will do it for us.
+ */
 type Stored = {
   v: 1;
   machineId: string;
@@ -33,9 +45,9 @@ function credentialFile(): string {
 /**
  * The stored credential, or `null` when this install has never signed in.
  *
- * Anything unreadable — missing, malformed, undecryptable — reads as `null`. A
- * credential we cannot use is indistinguishable from one we do not have, and
- * treating the two alike keeps every caller on one path.
+ * Anything unreadable (missing, malformed, undecryptable) reads as `null`. A
+ * credential we cannot use is no better than one we do not have, and treating
+ * the two alike keeps every caller on one path.
  */
 export async function readRecord(): Promise<MachineRecord | null> {
   const raw = await readFile(credentialFile(), "utf8").catch(() => null);
@@ -80,6 +92,8 @@ export async function readRecord(): Promise<MachineRecord | null> {
  * `chmod` runs after the write, not only as `writeFile`'s `mode`: that mode
  * applies on CREATE, so a file that already exists with looser permissions
  * would silently keep them.
+ *
+ * @returns The path of the credential file.
  */
 export async function writeRecord(record: MachineRecord): Promise<string> {
   const home = appHomeDir();
@@ -110,7 +124,11 @@ export async function writeRecord(record: MachineRecord): Promise<string> {
   return file;
 }
 
-/** Forget this machine locally. Revoking it on the server is a separate step. */
+/**
+ * Forget this machine locally.
+ *
+ * Revoking it on the server is a separate step.
+ */
 export async function clearRecord(): Promise<void> {
   await rm(credentialFile(), { force: true }).catch(() => {});
 }

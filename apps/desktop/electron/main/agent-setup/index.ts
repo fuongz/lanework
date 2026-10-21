@@ -1,13 +1,13 @@
-// A project's agent setup, for Settings → Projects (FE-40).
+// A project's agent setup, for Settings → Projects.
 //
-// ⚠️ Read-only. The renderer names a project by slug and a skill or command
-// by the id `read` handed out with it; the folder is resolved here, from the
-// folder links this process wrote down, and the file from a fresh read of
-// that folder's setup — so no renderer can point a read, or Finder, at a
-// file of its choosing. There is no channel that writes a project's files.
+// NOTE: Read-only. The renderer names a project by slug, and a skill or
+// command by the id `read` handed out with it. The folder is resolved here,
+// from the folder links this process wrote down, and the file from a fresh
+// read of that folder's setup. So no renderer can point a read, or Finder, at
+// a file of its choosing. There is no channel that writes a project's files.
 //
-// FE-52/D8 adds the one write: the `lanework` MCP entry in the agents' USER
-// config (`mcp-entry.ts`), and only that entry.
+// The one write is the `lanework` MCP entry in the agents' user config
+// (`mcp-entry.ts`), and only that entry (FE-52/D8).
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -43,9 +43,10 @@ import {
 import { readAgentSetup, readSetupFile } from "./read";
 
 /**
- * Where Claude and Codex keep their config: `$CLAUDE_CONFIG_DIR` and
- * `$CODEX_HOME` as they read them, else the home folder — the test's fake
- * one in a dev build.
+ * Where Claude and Codex keep their config.
+ *
+ * `$CLAUDE_CONFIG_DIR` and `$CODEX_HOME` as they read them, else the home
+ * folder: the test's fake one in a dev build.
  */
 function where() {
   return agentHome(
@@ -61,13 +62,17 @@ async function read(slug: string): Promise<AgentSetup> {
 const GLOBAL_SCOPES = new Set<SetupScope>(["user", "plugin", "system"]);
 
 /**
- * What every project gets (Settings › MCP): the user's own config, the
- * plugins installed for the user, and Codex's system skills — no folder's.
+ * Read what every project gets (Settings › MCP).
  *
- * ⚠️ Read against a folder that is not there: `readAgentSetup` reads the
- * user's files whatever the folder, and finds nothing of a project's in one
- * that does not exist. The scope filter is what makes it global, though —
+ * The user's own config, the plugins installed for the user, and Codex's
+ * system skills: no folder's.
+ *
+ * NOTE: It reads against a folder that is not there. `readAgentSetup` reads
+ * the user's files whatever the folder, and finds nothing of a project's in
+ * one that does not exist. The scope filter is still what makes it global:
  * it drops anything keyed to that path (a `local` entry, a project plugin).
+ *
+ * @throws When the made-up folder happens to exist.
  */
 async function readGlobal(): Promise<AgentSetup> {
   const nowhere = join(
@@ -94,7 +99,11 @@ async function readGlobal(): Promise<AgentSetup> {
   };
 }
 
-/** The skill or command `id` names, as this folder's setup reads NOW. */
+/**
+ * The skill or command `id` names, as this folder's setup reads now.
+ *
+ * @throws When the project has no folder here, or the file is gone.
+ */
 async function fileOf(slug: string, id: string) {
   const folder = await terminalFolder(slug);
   if (!folder) throw new Error("This project has no folder on this machine.");
@@ -139,7 +148,7 @@ function idArg(value: unknown): string {
   return value;
 }
 
-/** FE-52/D8: the `lanework` MCP entry, against what the session wants. */
+/** The `lanework` MCP entry, against what the session wants (FE-52/D8). */
 async function mcpStatus(): Promise<LaneworkMcpStatus> {
   const session = await currentSession();
   return laneworkMcpStatus(modeFor(session.principal.kind));

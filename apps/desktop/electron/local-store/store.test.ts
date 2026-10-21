@@ -1,6 +1,7 @@
 // Run with `bun test apps/desktop/electron/local-store`. Written against
 // `node:test`/`node:assert` (which Bun implements) so the desktop typecheck
-// needs no Bun types; under Bun the store runs on `bun:sqlite` (see driver.ts).
+// needs no Bun types. Under Bun the store runs on `bun:sqlite` (see
+// `driver.ts`).
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -116,7 +117,7 @@ describe("workspaces", () => {
         [a.id],
       );
 
-    // A repo links to ONE board: linking it elsewhere moves it.
+    // A repo links to one board: linking it elsewhere moves it.
     store.linkRepo(b.id, "https://github.com/fuongz/lanework");
     assert.equal(store.getWorkspace(a.id)?.repo, null);
     assert.deepEqual(
@@ -446,7 +447,7 @@ describe("task ids", () => {
       infrastructure: 1,
     });
 
-    // A restore BELOW the head keeps the head where it is.
+    // A restore below the head keeps the head where it is.
     store.createWorkItem(ws, {
       title: "older",
       categoryKey: "frontend",
@@ -475,7 +476,8 @@ describe("task ids", () => {
       "invalid",
     );
 
-    // A card with no category gets its id when it gets one; a recategorized card keeps its id.
+    // A card with no category gets its id when it gets one; a recategorized
+    // card keeps its id.
     const bare = store.createWorkItem(ws, { title: "bare" });
     assert.equal(
       store.updateWorkItem(bare.id, { categoryKey: "documentation" }).taskId,

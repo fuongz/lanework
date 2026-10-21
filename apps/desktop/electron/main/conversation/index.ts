@@ -1,10 +1,12 @@
-// The main process's side of the conversation view (FE-62): a Claude
-// conversation read as a chat, and the composer's headless engine.
+// The main process's side of the conversation view: an agent conversation
+// read as a chat, and the composer's headless engine.
 //
-// ⚠️ As with the terminal, the page names a WORKSPACE and a conversation id,
-// never a folder or a command: the folder is the one main wrote down for the
-// workspace (`terminalFolder`), the id a UUID whose transcript is in Claude's
-// folder for it, and settings come from the fixed lists.
+// NOTE: As with the terminal, the page names a WORKSPACE and a conversation
+// id, never a folder or a command:
+// - the folder is the one main wrote down for the workspace
+//   (`terminalFolder`);
+// - the id is a UUID whose transcript is in the CLI's folder for it;
+// - settings come from the fixed lists.
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -50,9 +52,10 @@ import { suggestCommands, suggestFiles, workspaceFiles } from "./suggest";
 import { readConversation, transcriptPath } from "./transcript";
 
 /**
- * How the composer finds and stops a pty running Claude on a conversation
- * (FE-62/D3). The terminal's own list is the exact answer; until it is
- * wired in, Claude's pid files are (`live-claude.ts`).
+ * How the composer finds and stops a pty running Claude on a conversation.
+ *
+ * The terminal's own list is the exact answer; Claude's pid files
+ * (`live-claude.ts`) catch a Claude in any other terminal app (FE-62/D3).
  */
 interface TerminalBridge {
   terminalOn: (
@@ -71,7 +74,10 @@ function agentHome(): string {
   return (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
 }
 
-/** Any live Claude on the conversation, by pid — `pid:<n>` as its id. */
+/**
+ * A {@link TerminalBridge} that finds any live Claude on the conversation by
+ * its pid file, with `pid:<n>` as its id.
+ */
 export function pidFileBridge(): TerminalBridge {
   return {
     async terminalOn(_workspace, conversation, ours) {
@@ -91,12 +97,23 @@ export function pidFileBridge(): TerminalBridge {
   };
 }
 
+/**
+ * A short non-empty string the page sent, checked.
+ *
+ * @param what Names the value in the error.
+ * @throws When `value` is not a non-empty string of at most 200 characters.
+ */
 function key(value: unknown, what: string): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
     throw new Error(`A valid ${what} is required`);
   return value;
 }
 
+/**
+ * A conversation's address from an IPC call's first two arguments.
+ *
+ * @throws When either is missing or invalid.
+ */
 function conversationOf(args: unknown[]): {
   workspace: string;
   conversation: string;
@@ -109,7 +126,11 @@ function conversationOf(args: unknown[]): {
   return { workspace, conversation: args[1] };
 }
 
-/** A queued message's address: its conversation, and its own id. */
+/**
+ * A queued message's address: its conversation, and its own id.
+ *
+ * @throws When the call does not have exactly those three arguments.
+ */
 function queuedOf(args: unknown[]): {
   workspace: string;
   conversation: string;
@@ -133,6 +154,11 @@ async function outgoingOf(request: SendRequest): Promise<Outgoing> {
   };
 }
 
+/**
+ * The folder main wrote down for `workspace`.
+ *
+ * @throws When the workspace has no folder on this machine.
+ */
 async function folderOf(workspace: string): Promise<string> {
   const folder = await terminalFolder(workspace);
   if (!folder) throw new Error("This project has no folder here.");
@@ -140,9 +166,12 @@ async function folderOf(workspace: string): Promise<string> {
 }
 
 /**
- * Whose transcript conversation `id` of `folder` is: Claude's when its file
- * is in Claude's folder for it, Codex's when a rollout of that folder has
- * the id; null when neither CLI has written it down.
+ * Which CLI wrote conversation `id` of `folder`.
+ *
+ * Claude's when its file is in Claude's folder for it, Codex's when a
+ * rollout of that folder has the id.
+ *
+ * @returns null when neither CLI has written it down.
  */
 async function agentOf(
   folder: string,
@@ -163,9 +192,13 @@ async function readAny(folder: string, id: string): Promise<Conversation> {
 }
 
 /**
- * What a chat badge's image may be read from (FE-65): the workspace's folder
- * and the images attached to the conversation — read from its transcript
- * here, never taken from the page.
+ * The path a chat badge names, and what its image may be read from.
+ *
+ * The scope is the workspace's folder and the images attached to the
+ * conversation. They are read from its transcript here, never taken from
+ * the page.
+ *
+ * @throws When the arguments are not a conversation and a valid path.
  */
 async function imageScope(args: unknown[]): Promise<{
   path: string;
@@ -195,6 +228,11 @@ async function imageScope(args: unknown[]): Promise<{
   };
 }
 
+/**
+ * A permission answer the page sent, checked.
+ *
+ * @throws When it is neither a valid allow nor a valid deny.
+ */
 function permissionAnswer(value: unknown): PermissionAnswer {
   const v = (value ?? {}) as Record<string, unknown>;
   if (v.behavior === "allow") {
@@ -231,6 +269,12 @@ function permissionAnswer(value: unknown): PermissionAnswer {
   throw new Error("Allow or deny");
 }
 
+/**
+ * Register the conversation view's IPC handlers.
+ *
+ * @param bridge How a pty running Claude on a conversation is found and
+ *   stopped; by default, by Claude's pid files only.
+ */
 export function registerConversation(
   devUrl?: string,
   bridge: TerminalBridge = pidFileBridge(),
@@ -243,7 +287,7 @@ export function registerConversation(
   });
   const testing =
     !app.isPackaged && Boolean(process.env.LANEWORK_TEST_USER_DATA);
-  // ⚠️ Read before any settings are checked: a Codex model is only known
+  // NOTE: Read before any settings are checked. A Codex model is only known
   // once its list is, and a stored one not on the fallback would be dropped.
   const readCodexModels = createCodexModels(agentHome);
   const codexModels = async (): Promise<AgentModel[]> => {
@@ -265,10 +309,8 @@ export function registerConversation(
     remember: (id, settings) => void store.remember(id, settings),
   });
 
-  /**
-   * Conversations last answered `terminal`: when a tab stops, the composer
-   * hears it may write again, without polling.
-   */
+  // The conversations whose engine last answered `terminal`: when a tab
+  // stops, the composer hears it may write again, without polling.
   const paused = new Map<string, { workspace: string; conversation: string }>();
   const noted = async (
     workspace: string,
@@ -334,8 +376,8 @@ export function registerConversation(
       // A model Codex listed since the last read is known now.
       await codexModels();
       if (args.length !== 1) throw new Error("A request is required");
-      // ⚠️ The id is main's own, never the page's: a new one cannot name a
-      // conversation that already exists.
+      // NOTE: The id is main's own, never the page's, so a new one cannot
+      // name a conversation that already exists.
       const conversation = randomUUID();
       const request = sendRequest({
         ...((args[0] ?? {}) as object),
@@ -366,8 +408,8 @@ export function registerConversation(
       if (args.length !== 1) throw new Error("A request is required");
       const request = sendRequest(args[0]);
       const folder = await folderOf(request.workspace);
-      // ⚠️ Only a conversation this folder has: its transcript is where the
-      // CLI keeps this folder's, under the id it was asked for.
+      // NOTE: Only a conversation this folder has: its transcript is where
+      // the CLI keeps this folder's, under the id it was asked for.
       const agent =
         (await agentOf(folder, request.conversation)) ??
         engines.pending(request.workspace, request.conversation)?.agent;

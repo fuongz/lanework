@@ -9,10 +9,9 @@ import type { Workspace } from "../../shared/workspaces";
 /**
  * The renderer's view of who is signed in.
  *
- * ⚠️ Deliberately NOT persisted, unlike `preferences.ts`. The session is a fact
- * owned by the main process; writing it to `localStorage` would create a second
- * copy that can be stale, and one a devtools console can edit. Every value here
- * arrives from main and nothing here is authoritative.
+ * NOTE: Not persisted, unlike `preferences.ts`. Main owns the session. A copy
+ * in `localStorage` could go stale, and a devtools console could edit it.
+ * Every value here comes from main, and nothing here is authoritative.
  */
 interface SessionState {
   /** True once the first read has settled, successfully or not. */
@@ -28,14 +27,15 @@ interface SessionState {
   /**
    * Revoke this machine and drop the credential.
    *
-   * Not merely "log out": main calls `DELETE /v1/machines/me` first, so coming
-   * back needs a browser and a fresh approval. Callers are expected to confirm
-   * before reaching here.
+   * Not just "log out": main calls `DELETE /v1/machines/me` first, so coming
+   * back needs a browser and a fresh approval. Callers confirm before calling.
    */
   signOut: () => Promise<void>;
   /**
-   * FE-52/D5: "Skip for now". Main remembers the choice and answers a session
-   * whose principal is `local`, which the gate opens on. Signing in later, from
+   * "Skip for now": use the app without an account (FE-52/D5).
+   *
+   * Main remembers the choice and answers a session whose principal is
+   * `local`, which the gate opens on. Signing in later, from
    * Settings → Account or the rail, turns it into `machine`.
    */
   enterLocalMode: () => Promise<void>;
@@ -44,9 +44,11 @@ interface SessionState {
 /**
  * Unwrap what Electron does to a main-process throw.
  *
- * `ipcRenderer.invoke` rejects with `Error invoking remote method 'auth:sign-in':
- * Error: <the real message>`. Main writes messages meant to be read by a person,
- * and that prefix is the one part of them nobody should ever see.
+ * `ipcRenderer.invoke` rejects with
+ * `Error invoking remote method 'auth:sign-in': Error: <the real message>`.
+ * Main writes its messages for a person to read; the prefix is noise.
+ *
+ * @returns The message main wrote.
  */
 function message(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
@@ -56,7 +58,11 @@ function message(error: unknown): string {
   );
 }
 
-/** Subscribing twice would double every update, so hydration happens once. */
+/**
+ * Whether `hydrate` has run.
+ *
+ * Subscribing twice would double every update, so hydration happens once.
+ */
 let hydrated = false;
 
 export const useSession = create<SessionState>()((set) => ({
@@ -77,9 +83,9 @@ export const useSession = create<SessionState>()((set) => ({
       });
       return;
     }
-    // Subscribed BEFORE the first read, so a change that lands between the two
-    // is not missed. Main pushes on sign-in, sign-out and every heartbeat that
-    // finds something different — which is how a server-side revoke arrives.
+    // NOTE: Subscribe before the first read, so a change that lands between
+    // the two is not missed. Main pushes on sign-in, sign-out and every
+    // heartbeat that finds a change; that is how a server-side revoke arrives.
     auth.onSessionChange((session) => set({ session, ready: true }));
     void auth
       .getSession()
@@ -111,9 +117,8 @@ export const useSession = create<SessionState>()((set) => ({
   enterLocalMode: async () => {
     const auth = window.desktop?.auth;
     if (!auth) return;
-    // ⚠️ Not `busy`: that flag is what turns the gate into "Waiting for your
-    // browser", and nothing here waits on one. A local write in main, answered
-    // in a beat.
+    // Not `busy`: that flag turns the gate into "Waiting for your browser",
+    // and nothing here waits on one. This is a quick local write in main.
     set({ error: null });
     try {
       set({ session: await auth.enterLocalMode() });
@@ -139,16 +144,16 @@ export const useSession = create<SessionState>()((set) => ({
 /**
  * What the app can offer right now that only the cloud can back (FE-52/D10).
  *
- * Two scopes, and they are separate on purpose:
- *   • APP-WIDE — `machines`, `handoff` — follow the PRINCIPAL. A `local`
- *     install has no machine, no account and no credential for the checkpoint
- *     hook, whatever board is open.
- *   • PER BOARD — presence, subscribers, assignees other than yourself,
- *     comments, attachments — follow the WORKSPACE as well. A signed-in machine
- *     still has local boards (D6a), and those have none of it.
+ * Two separate scopes:
+ * - App-wide (`machines`, `handoff`) follow the principal. A `local` install
+ *   has no machine, no account and no credential for the checkpoint hook,
+ *   whatever board is open.
+ * - Per board (presence, subscribers, assignees other than yourself,
+ *   comments, attachments) follow the workspace as well. A signed-in machine
+ *   still has local boards (D6a), and those have none of it.
  *
- * ⚠️ Pure, like `policy.ts`, so a screen hides what main would refuse anyway.
- * It decides what is DRAWN, not what is allowed: main routes a local board to
+ * Pure, like `policy.ts`, so a screen hides what main would refuse anyway.
+ * It decides what is drawn, not what is allowed: main routes a local board to
  * the SQLite store, which has none of these surfaces.
  */
 interface CloudFeatures {
@@ -156,17 +161,21 @@ interface CloudFeatures {
   signedIn: boolean;
   /** Settings → Account's machine rows and sign-out, the account orb. */
   machines: boolean;
-  /** The checkpoint hook and resume (Settings → Agents, a card's checkpoint). */
+  /** Checkpoint hook and resume (Settings → Agents, a card's checkpoint). */
   handoff: boolean;
   presence: boolean;
   subscribers: boolean;
-  /** Assigning anyone other than yourself; assigning yourself stays. */
+  /**
+   * Assigning anyone other than yourself.
+   *
+   * Assigning yourself is always offered.
+   */
   assignOthers: boolean;
   comments: boolean;
   attachments: boolean;
 }
 
-/** A board that lives in the SQLite store on this machine (FE-52). */
+/** A board that lives in the SQLite store on this machine. */
 export function isLocalWorkspace(
   workspace: Pick<Workspace, "origin"> | null | undefined,
 ): boolean {
@@ -192,10 +201,10 @@ function cloudFeatures(
 }
 
 /**
- * `cloudFeatures` for the session on screen and, when given, one board.
+ * {@link cloudFeatures} for the session on screen and, when given, one board.
  *
- * ⚠️ Selects the principal's KIND (a string), never the computed object: a new
- * object on every read is a new value to zustand and would re-render forever.
+ * NOTE: Selects the principal's kind (a string), never the computed object. A
+ * new object on every read is a new value to zustand and re-renders forever.
  */
 export function useCloudFeatures(
   workspace?: Pick<Workspace, "origin"> | null,
@@ -204,7 +213,7 @@ export function useCloudFeatures(
   return cloudFeatures(kind ? { kind } : null, workspace);
 }
 
-/** True while the person chose "Skip for now" and has not signed in since. */
+/** Whether the person chose "Skip for now" and has not signed in since. */
 export function useIsLocalMode(): boolean {
   return useSession((state) => state.session?.principal.kind === "local");
 }

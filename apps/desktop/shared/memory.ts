@@ -1,5 +1,5 @@
-// What Claude Code remembers about a project (FE-36): the notes it saved for
-// itself in `~/.claude/projects/<repo>/memory/`, shown read-only.
+// What Claude Code remembers about a project: the notes it saved for itself
+// in `~/.claude/projects/<repo>/memory/`, shown read-only.
 
 /** The kinds of memory Claude files, and "other" for anything it did not. */
 export type MemoryType =
@@ -9,7 +9,7 @@ export type MemoryType =
   | "reference"
   | "other";
 
-/** In the order the list groups them. */
+/** Every memory type, in the order the list groups them. */
 export const MEMORY_TYPES: readonly MemoryType[] = [
   "user",
   "feedback",
@@ -18,6 +18,7 @@ export const MEMORY_TYPES: readonly MemoryType[] = [
   "other",
 ];
 
+/** The memory type a frontmatter `type` names; `"other"` when it names none. */
 export function memoryType(value: string | undefined): MemoryType {
   const type = value?.trim().toLowerCase() as MemoryType | undefined;
   return type && MEMORY_TYPES.includes(type) ? type : "other";
@@ -29,8 +30,8 @@ export const MEMORY_INDEX = "MEMORY.md";
 /**
  * A memory's file name — the only thing the renderer may name one by.
  *
- * ⚠️ No separator, no leading dot and nothing but `.md`, so it can never be
- * `..`, a path or another kind of file. Main builds the path from it, inside
+ * NOTE: no separator, no leading dot and nothing but `.md`, so it can never
+ * be `..`, a path or another kind of file. Main builds the path from it, inside
  * the project's memory folder, and checks where that path really leads.
  */
 const MEMORY_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/;
@@ -50,7 +51,7 @@ export interface MemoryEntry {
   name: string;
   /**
    * The words `MEMORY.md` links to it with, `[Title](file.md)`, when the
-   * index has it: what a person reads it by (FE-36).
+   * index has it: what a person reads it by.
    */
   title: string | null;
   description: string | null;
@@ -102,8 +103,10 @@ export interface MemoryChange {
 }
 
 /**
- * ⚠️ Read-only: nothing here writes a memory. Every call names a project and,
- * at most, a file NAME; main resolves the folder from its own folder links.
+ * NOTE: read-only. Nothing here writes a memory.
+ *
+ * Every call names a project and, at most, a file NAME; main resolves the
+ * folder from its own folder links.
  */
 export interface DesktopMemoryApi {
   /** The project's memories — and, from then on, `onChange` for it. */

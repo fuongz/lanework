@@ -1,9 +1,10 @@
-// Whether a project's folder is ready for an agent to work its board (FE-30):
+// Whether a project's folder is ready for an agent to work its board:
 // checked in the background each time a project is opened or switched to.
 
 /** How much a failed check matters. */
 export type ReadinessLevel = "blocker" | "warning" | "info";
 
+/** One check of the report. */
 export type ReadinessId =
   | "folder"
   | "agents-md"
@@ -16,9 +17,9 @@ export type ReadinessId =
 /**
  * A file the app offers to change in the project's folder (FE-30/D5).
  *
- * ⚠️ Only these three, only in the folder, and only after the diff was shown.
- * `~/.claude.json` and Codex's `config.toml` are the user's own and get an
- * instruction instead.
+ * NOTE: only these three, only in the folder, and only after the diff was
+ * shown. `~/.claude.json` and Codex's `config.toml` are the user's own and get
+ * an instruction instead.
  */
 export type ReadinessFix = "agents-md" | "claude-md" | "mcp-json";
 
@@ -48,7 +49,7 @@ export interface ReadinessCheck {
 
 export interface ReadinessReport {
   slug: string;
-  /** The primary folder that was checked, for display; null when there is none. */
+  /** The primary folder that was checked, for display; null when none. */
   folder: string | null;
   checkedAt: string;
   /**
@@ -78,8 +79,10 @@ export interface DesktopReadinessApi {
   check: (slug: string) => Promise<ReadinessReport>;
   preview: (slug: string, fix: ReadinessFix) => Promise<ReadinessPreview>;
   /**
-   * Write the previewed change. `before` is the file as the preview showed
-   * it: if the file has changed since, nothing is written and this throws.
+   * Write the previewed change.
+   *
+   * @param before The file as the preview showed it.
+   * @throws When the file has changed since the preview; nothing is written.
    */
   apply: (
     slug: string,

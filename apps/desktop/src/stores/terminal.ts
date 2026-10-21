@@ -15,29 +15,28 @@ const api = () => {
 };
 
 /**
- * Per-workspace revision of the tab list (FE-19).
+ * Per-workspace revision of the tab list.
  *
- * ⚠️ A list read that started before an open or a close must not land after
- * it — it would bring back the tab that was just closed, or drop the one just
- * opened. agents-kanban shipped exactly that race; a counter bumped by every
- * local change, and checked when the read returns, is what fixed it there.
+ * NOTE: A list read that started before an open or a close must not land
+ * after it. It would bring back the tab just closed, or drop the one just
+ * opened. Every local change bumps the counter; a read checks it on return.
  */
 const revision = new Map<string, number>();
 const bump = (workspace: string) =>
   revision.set(workspace, (revision.get(workspace) ?? 0) + 1);
 
-/** The panel's height, as a percentage of the content column. */
+/** The storage key of the panel's height (percent of the content column). */
 const HEIGHT_KEY = "lanework:terminal-height";
 const DEFAULT_TERMINAL_HEIGHT = 40;
 
 /**
  * The height the panel opens at: the last one somebody dragged it to.
  *
- * ⚠️ Kept HERE, not in the panel group's saved layout. Hiding the panel
- * collapses it to nothing, that collapsed layout is what got saved, and a
- * panel that starts collapsed has no size to expand back to — so it opened at
- * its 96px minimum every time (FE-19). The height is only ever written while
- * the panel is showing.
+ * NOTE: Kept here, not in the panel group's saved layout. Hiding the panel
+ * collapses it, the saved layout would then be the collapsed one, and a panel
+ * that starts collapsed has no size to expand back to: it would open at its
+ * 96px minimum every time (FE-19). The height is written only while the panel
+ * is showing.
  */
 function readHeight(): number {
   try {
@@ -49,24 +48,30 @@ function readHeight(): number {
   return DEFAULT_TERMINAL_HEIGHT;
 }
 
-/** Whether the panel is on screen, rather than the bar that stands in for it. */
+/**
+ * Whether the panel is on screen, rather than the bar that stands in for it.
+ *
+ * @param workspace Null is never shown.
+ */
 export function terminalShown(
   state: Pick<TerminalState, "open" | "sessions" | "spawning">,
   workspace: string | null,
 ): boolean {
   if (!workspace || !state.open[workspace]) return false;
-  // ⚠️ No empty panel: a project with no terminal shows the bar, and the
-  // panel comes up with the first one — which opening it starts.
+  // No empty panel: a project with no terminal shows the bar. The panel comes
+  // up with the first terminal, which opening it starts.
   return (state.sessions[workspace]?.length ?? 0) > 0 || state.spawning;
 }
 
 interface TerminalState {
   /**
-   * Whether each workspace's panel was asked for. Hiding it stops nothing; on
-   * screen it is `terminalShown()`, which also needs a terminal to show.
+   * Whether each workspace's panel was asked for.
    *
-   * ⚠️ Per workspace, not one flag: a panel opened in one project must not
-   * come up in the next one you switch to, where nobody opened it.
+   * Hiding it stops nothing. Whether it is on screen is
+   * {@link terminalShown}, which also needs a terminal to show.
+   *
+   * Per workspace, not one flag: a panel opened in one project must not come
+   * up in the next one you switch to.
    */
   open: Record<string, boolean | undefined>;
   /** The height the panel opens at, in percent of the content column. */
@@ -91,15 +96,17 @@ interface TerminalState {
   ) => Promise<void>;
   close: (workspace: string, id: string) => Promise<void>;
   select: (workspace: string, id: string) => void;
-  /** A tab dropped on another: it takes that tab's place (drag, at drop). */
+  /** Move a tab dropped on another into that tab's place (drag, at drop). */
   reorderTab: (workspace: string, dragId: string, overId: string) => void;
-  /** The keyboard path for the same move: one place left or right. */
+  /** Move a tab one place left or right: the keyboard path for a drag. */
   moveTab: (workspace: string, id: string, delta: -1 | 1) => void;
-  /** The session's shell exited; keep its tab, mark it. */
+  /** Mark a session whose shell exited, keeping its tab. */
   markExited: (workspace: string, id: string, code: number) => void;
   /**
-   * View › Toggle Terminal: hide the panel, or show it — with a terminal
-   * started when the project has none, so the shortcut always ends at a prompt.
+   * View › Toggle Terminal: hide the panel, or show it.
+   *
+   * Showing it starts a terminal when the project has none, so the shortcut
+   * always ends at a prompt.
    */
   toggle: (workspace: string | null) => Promise<void>;
   /** View › New Terminal: show the panel and start one. */
@@ -107,8 +114,10 @@ interface TerminalState {
 }
 
 /**
- * A start that failed and left nothing to show: back to the bar, which says
- * why, rather than a panel held open around no terminal.
+ * Close the panel after a start that failed and left nothing to show.
+ *
+ * Back to the bar, which says why, rather than a panel held open around no
+ * terminal.
  */
 function settle(workspace: string) {
   if (!(useTerminal.getState().sessions[workspace]?.length ?? 0))
@@ -120,9 +129,8 @@ function settle(workspace: string) {
 /**
  * Show a new tab order at once, then tell the host, which keeps it.
  *
- * ⚠️ The active tab is left alone. Dragging a tab says where it should SIT,
- * not which shell you want to type into — agents-kanban's strip keeps the same
- * contract.
+ * The active tab is left alone. Dragging a tab says where it should sit, not
+ * which shell you want to type into.
  */
 function applyOrder(workspace: string, ids: string[]) {
   bump(workspace);
@@ -187,9 +195,9 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
   refresh: async (workspace) => {
     const mine = revision.get(workspace) ?? 0;
     try {
-      // ⚠️ Shells only (FE-26/D6). The host runs agents too, but they are the
-      // main view's, listed by `useAgentTerminals` — a Claude started from
-      // the rail never turns up as a tab down here.
+      // NOTE: Shells only (FE-26/D6). The host runs agents too, but they
+      // belong to the main view and `useAgentTerminals` lists them. A Claude
+      // started from the rail must never turn up as a tab here.
       const listed = (await api().list(workspace)).filter(
         (session) => session.kind === "shell",
       );
@@ -313,8 +321,8 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     })),
 
   toggle: async (workspace) => {
-    // ⚠️ What is on SCREEN decides, not the flag: a panel asked for whose
-    // project has no terminal shows as the bar, and the key has to open it.
+    // NOTE: What is on screen decides, not the flag. A panel asked for whose
+    // project has no terminal shows as the bar, and the key must open it.
     if (!workspace) return;
     if (terminalShown(get(), workspace)) {
       get().setOpen(workspace, false);

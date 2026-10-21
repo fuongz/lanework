@@ -1,9 +1,10 @@
-// The local board (FE-52): one SQLite file, `~/.lanew/data.sqlite`, that the
-// main process, the offline MCP server and the checkpoint hook all open.
+// The local board: one SQLite file, `~/.lanew/data.sqlite`, that the main
+// process, the offline MCP server and the checkpoint hook all open.
 //
-// ⚠️ No Electron here, ever — the MCP and hook entries import this module and
-// run under plain Node. `../main/paths` and `../main/workspaces/review-defaults`
-// are the only app files it reads, and both are Electron-free.
+// NOTE: No Electron here, ever: the MCP and hook entries import this module
+// and run under plain Node. `../main/paths` and
+// `../main/workspaces/review-defaults` are the only app files it reads, and
+// both are Electron-free.
 
 export { openDatabase } from "./driver";
 export { normalizeRepo } from "./ids";

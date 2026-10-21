@@ -1,33 +1,32 @@
 import { DEFAULT_COLUMNS } from "./review-defaults";
 
-/**
- * Which lane a review file belongs to — and whether it is a card at all.
- *
- * ⚠️ Ported from the board's `reviews-core/card-location.ts`, and the rule is
- * WIDER than it looks: in front-matter mode a file counts as a card if it
- * declares a status, OR sits in a lane folder, OR lives in a date folder. A
- * `README.md` inside `.agents/reviews/2026-09-08/` is therefore a card — filed
- * under the fallback lane — and the board really does show it.
- *
- * ⚠️ Matching that exactly is not pedantry. A reader that skipped such a file
- * would leave it behind at the cutover: the board would have shown it before,
- * the cloud would not have it after, and nothing would report a loss. Two
- * readers in this app (the folder summary and the migration) go through here so
- * they cannot disagree with each other either.
- */
+// Which lane a review file belongs to, and whether it is a card at all.
+//
+// NOTE: Ported from the board's `reviews-core/card-location.ts`. The rule is
+// wider than it looks: in front-matter mode a file is a card if it declares a
+// status, OR sits in a lane folder, OR lives in a date folder. So a `README.md`
+// inside `.agents/reviews/2026-09-08/` is a card, filed under the fallback
+// lane, and the board shows it.
+//
+// The match must be exact. A reader that skipped such a file would leave it
+// behind at the cutover: the board showed it before, the cloud would not have
+// it after, and nothing would report the loss. The folder summary and the
+// migration both go through here, so they cannot disagree either.
 
 /** A `YYYY-MM-DD` path segment used as a date subfolder. */
 const DATE_DIR = /^\d{4}-\d{2}-\d{2}$/;
 
-/** The lane carrying the `start` role, which is where an unlabelled card lands. */
+/** The lane with the `start` role, where an unlabelled card lands. */
 const FALLBACK =
   DEFAULT_COLUMNS.find((column) => column.role === "start")?.key ?? "todo";
 
 /**
- * A raw `status:` value resolved to one of this board's lane keys.
+ * Resolve a raw `status:` value to one of this board's lane keys.
  *
- * Tried in order — key, then name — which is what keeps it deterministic when a
- * lane's NAME is another lane's key. Null when unrecognised.
+ * It tries keys first, then names. That order keeps the answer deterministic
+ * when one lane's name is another lane's key.
+ *
+ * @returns Null when the value matches no lane.
  */
 export function canonicalStatus(raw: string): string | null {
   const value = raw.replace(/['"]/g, "").trim().toLowerCase();
@@ -43,11 +42,13 @@ export function canonicalStatus(raw: string): string | null {
 }
 
 /**
- * Resolve a file's lane, filename and folder-date from its path under
- * `.agents/reviews/`, or null when it does not belong to the board.
+ * Resolve a file's lane, file name and folder date from its path under
+ * `.agents/reviews/`.
  *
- * `segments` is the path relative to the review root, split on "/" — e.g.
- * `["2026-09-08", "01-foo.md"]` or `["done", "2026-09-08", "01-foo.md"]`.
+ * @param segments The path relative to the review root, split on `/`, e.g.
+ *   `["2026-09-08", "01-foo.md"]` or `["done", "2026-09-08", "01-foo.md"]`.
+ * @param status The file's raw `status:` value, or null when it has none.
+ * @returns Null when the file does not belong to the board.
  */
 export function resolveCardLocation(
   segments: string[],

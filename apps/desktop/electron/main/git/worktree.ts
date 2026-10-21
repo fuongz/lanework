@@ -22,46 +22,49 @@ import {
 } from "../../../shared/worktree";
 
 /**
- * The project's local repository, driven through the `git` CLI (FE-22).
+ * The project's local repository, driven through the `git` CLI.
  *
- * ⚠️ THE ONE MODULE IN THIS APP THAT WRITES TO A USER'S FOLDER. Everything else
- * that reads a project folder — `remote.ts`, `local-folder.ts` — is read-only by
- * rule, and stays that way. Staging, committing and throwing a change away were
- * approved on FE-22 (D1), and they live HERE so that the rule has exactly one
- * exception with one address. A write anywhere else is still a bug.
+ * NOTE: This is the one module in the app that writes to a user's folder.
+ * Everything else that reads a project folder (`remote.ts`, `local-folder.ts`)
+ * is read-only by rule. Staging, committing and discarding a change were
+ * approved on FE-22 (D1), and they live here so the rule has one exception in
+ * one place. A write anywhere else is a bug.
  *
- * ⚠️ `execFile`, never `exec`: no shell, so a path with a space, a quote or a
- * `;` in it is an argument rather than syntax. Every path a command receives
- * comes after `--`, so one that starts with a dash is a file, not a flag.
- *
- * ⚠️ Paths are checked against a FRESH status before anything acts on them
- * (`changed`). The renderer can only name a file that git itself just called
- * changed, which is what keeps `restore` — the one call that deletes — from
- * being a way to delete anything else in the folder.
+ * - `execFile`, never `exec`: there is no shell, so a path with a space, a
+ *   quote or a `;` is an argument, not syntax. Every path comes after `--`, so
+ *   one that starts with a dash is a file, not a flag.
+ * - Paths are checked against a fresh status before anything acts on them
+ *   (`changed`). The renderer can only name a file git just called changed.
+ *   That keeps `restore`, the one call that deletes, from deleting anything
+ *   else in the folder.
  */
 
 /** The empty tree, for diffing a repository that has no commit yet. */
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
-/** A commit id as a renderer may name one. Hex, and nothing else. */
+/** A commit id as the renderer may name one: hex and nothing else. */
 const SHA = /^[0-9a-f]{7,64}$/i;
 
-/** Untracked files read to count and show them. Beyond this they are listed only. */
+/**
+ * How many untracked files are read to count and show their lines.
+ *
+ * Past this they are only listed.
+ */
 const MAX_UNTRACKED_READS = 200;
 
-/** One file read in full for the viewer. A diff is not a place for more. */
+/** The largest file read in full for the viewer. A diff needs no more. */
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
-/** How much output one `git` call may produce before it is a refusal. */
+/** The most output one `git` call may produce before it fails. */
 const MAX_OUTPUT = 32 * 1024 * 1024;
 
 /**
  * Flags every call carries.
  *
- * ⚠️ `core.quotepath=false` so a non-ASCII filename comes back as itself rather
- * than as octal escapes — which would not match the path on disk, nor the path
- * in the patch. `color.ui=never` and `--no-pager` because nobody reads this
- * output but a parser.
+ * - `core.quotepath=false` returns a non-ASCII filename as itself. Octal
+ *   escapes would match neither the path on disk nor the path in the patch.
+ * - `color.ui=never` and `--no-pager`, because only a parser reads this
+ *   output.
  */
 const BASE = [
   "-c",
@@ -103,9 +106,9 @@ function run(
           return reject(new GitMissingError("git is not installed."));
         if (code !== null && ok.includes(code))
           return resolve({ stdout, code });
-        // ⚠️ git's own words, trimmed to what fits a toast. "Author identity
-        // unknown" or a pre-commit hook's output is the whole explanation; a
-        // generic "commit failed" would send somebody to a terminal to find it.
+        // git's own words, trimmed to fit a toast. "Author identity unknown"
+        // or a pre-commit hook's output is the whole explanation. A generic
+        // "commit failed" would send the user to a terminal to find it.
         const said = (stderr || stdout || error.message).trim();
         reject(new Error(said.split("\n").slice(-6).join("\n").slice(0, 800)));
       },
@@ -118,11 +121,11 @@ async function out(cwd: string, args: string[]): Promise<string> {
 }
 
 /**
- * Where the repository is, or which of the ways to have none this is.
+ * Where the repository is, or why there is none.
  *
- * ⚠️ The TOP LEVEL, not the linked folder. A project linked to a subfolder of a
- * repository still has the whole repository's index, and a status read from a
- * subfolder would print paths no `git add` from the top could find.
+ * NOTE: This answers the top level, not the linked folder. A project linked to
+ * a subfolder still has the whole repository's index. A status read from the
+ * subfolder would print paths that no `git add` from the top could find.
  */
 export async function locate(
   folder: string | null,
@@ -171,11 +174,11 @@ function statusOf(x: string, y: string): WorktreeFileStatus {
 }
 
 /**
- * `git status --porcelain=v2 -z`, read.
+ * Parse `git status --porcelain=v2 -z`.
  *
- * ⚠️ v2 and `-z` because both are the forms git promises not to change, and
- * because NUL is the one byte a path cannot contain. Splitting v1 output on
- * spaces breaks on the first filename with one.
+ * v2 and `-z` are the forms git promises not to change, and NUL is the one
+ * byte a path cannot contain. Splitting v1 output on spaces breaks on the
+ * first filename with a space.
  */
 function parseStatus(raw: string): {
   branch: BranchState;
@@ -208,8 +211,8 @@ function parseStatus(raw: string): {
     } else if (line.startsWith("2 ")) {
       const parts = line.split(" ");
       const xy = parts[1] ?? "..";
-      // ⚠️ The ORIGINAL path is the next NUL-separated token, not part of this
-      // one — which is why this loop indexes rather than maps.
+      // NOTE: The original path is the next NUL-separated token, not part of
+      // this one. That is why this loop indexes instead of mapping.
       const previous = tokens[++i] ?? null;
       entries.push({
         path: parts.slice(9).join(" "),
@@ -236,7 +239,11 @@ function parseStatus(raw: string): {
   return { branch, entries };
 }
 
-/** `--numstat -z`: `add\tdel\tpath\0`, or `add\tdel\t\0old\0new\0` on a rename. */
+/**
+ * Parse `--numstat -z` into counts by path.
+ *
+ * Each record is `add\tdel\tpath\0`, or `add\tdel\t\0old\0new\0` on a rename.
+ */
 function parseNumstat(
   raw: string,
 ): Map<string, { additions: number; deletions: number; binary: boolean }> {
@@ -267,8 +274,8 @@ function parseNumstat(
 /**
  * A path the repository names, resolved on disk and proven to be inside it.
  *
- * ⚠️ `realpath` on the PARENT, so a symlinked directory that points out of the
- * repository is caught — and the file itself is not followed, because deleting
+ * NOTE: `realpath` runs on the parent. That catches a symlinked directory that
+ * points out of the repository, and does not follow the file itself: deleting
  * an untracked symlink must delete the link, never what it points at.
  */
 async function inside(top: string, path: string): Promise<string> {
@@ -396,9 +403,9 @@ export async function status(top: string): Promise<WorktreeState> {
  * Every change as one patch: tracked against HEAD, then each untracked file
  * against nothing.
  *
- * ⚠️ Against HEAD, so staged and unstaged read as one change. That is what the
- * list beside it shows — one row per file — and the checkbox, not the diff, is
- * where the split between index and working tree is visible.
+ * Against HEAD, so staged and unstaged read as one change. The list beside it
+ * shows one row per file too. The checkbox, not the diff, shows the split
+ * between index and working tree.
  */
 export async function patch(top: string): Promise<WorktreePatch> {
   const { entries, head } = await readEntries(top);
@@ -415,8 +422,8 @@ export async function patch(top: string): Promise<WorktreePatch> {
     );
   const untracked = entries.filter((entry) => entry.status === "untracked");
   for (const entry of untracked.slice(0, MAX_UNTRACKED_READS)) {
-    // ⚠️ Exit 1 is the ANSWER here — `--no-index` reports "these differ" the
-    // way `diff(1)` does — so it is accepted rather than thrown.
+    // NOTE: Exit 1 is the answer here, not a failure. `--no-index` reports
+    // "these differ" the way `diff(1)` does.
     const { stdout } = await run(
       top,
       ["diff", "--no-index", "--no-ext-diff", "--", "/dev/null", entry.path],
@@ -431,10 +438,12 @@ export async function patch(top: string): Promise<WorktreePatch> {
 }
 
 /**
- * The files a renderer named, checked against what git says changed NOW.
+ * The files the renderer named, checked against what git says changed now.
  *
- * ⚠️ Answers the entries, not the paths, so the caller acts on git's own record
- * — its status, its rename source — rather than on anything the renderer sent.
+ * NOTE: This answers git's entries, not the paths. The caller acts on git's
+ * own record (its status, its rename source), never on what the renderer sent.
+ *
+ * @throws When a named path has no change.
  */
 async function changed(top: string, paths: string[]) {
   const { entries, head } = await readEntries(top);
@@ -460,7 +469,7 @@ function withSources(entries: RawEntry[]): string[] {
 export async function stage(top: string, paths: string[]): Promise<void> {
   const { picked } = await changed(top, paths);
   if (!picked.length) return;
-  // `-A` so a deleted file is staged as a deletion rather than refused.
+  // `-A` stages a deleted file as a deletion instead of refusing it.
   await out(top, ["add", "-A", "--", ...withSources(picked)]);
 }
 
@@ -468,8 +477,8 @@ export async function unstage(top: string, paths: string[]): Promise<void> {
   const { picked, head } = await changed(top, paths);
   if (!picked.length) return;
   const targets = withSources(picked);
-  // ⚠️ No HEAD, no `restore --staged`: there is nothing to restore the index
-  // FROM in a repository with no commit, so the file leaves the index instead.
+  // A repository with no commit has nothing to restore the index from, so
+  // `restore --staged` fails. The file leaves the index instead.
   if (head) await out(top, ["restore", "--staged", "--", ...targets]);
   else await out(top, ["rm", "--cached", "-r", "-q", "--", ...targets]);
 }
@@ -477,10 +486,12 @@ export async function unstage(top: string, paths: string[]): Promise<void> {
 /**
  * Throw changes away, in the index and on disk.
  *
- * ⚠️ Three kinds of file, three different undos. A file HEAD knows is put back
- * as HEAD has it. A file HEAD does not know — new in the index, or untracked —
- * has no earlier version to go back to, so undoing it means DELETING it; the
- * confirmation the renderer shows says exactly that (FE-22/D8).
+ * NOTE: Each kind of file has its own undo.
+ *
+ * - A file HEAD knows is put back as HEAD has it.
+ * - A file HEAD does not know (new in the index, or untracked) has no earlier
+ *   version, so undoing it deletes it. The renderer's confirmation says so
+ *   (FE-22/D8).
  */
 export async function restore(top: string, paths: string[]): Promise<void> {
   const { picked, head } = await changed(top, paths);
@@ -518,12 +529,12 @@ export async function commit(
   message: string,
   mode: CommitMode,
 ): Promise<void> {
-  // ⚠️ `-m` as ONE argument, not a temp file or stdin: execFile hands it to git
-  // untouched, newlines included, and nothing is left on disk afterwards.
+  // `-m` as one argument, not a temp file or stdin: execFile hands it to git
+  // untouched, newlines included, and nothing is left on disk.
   //
-  // ⚠️ A long timeout. A pre-commit hook — a formatter, a type check — runs
-  // inside this call, and killing it at fifteen seconds would leave a commit
-  // half-made by a hook that did not get to finish.
+  // NOTE: A long timeout. A pre-commit hook (a formatter, a type check) runs
+  // inside this call. Killing it at fifteen seconds would leave a commit
+  // half-made by a hook that did not finish.
   await run(
     top,
     ["commit", ...(mode === "tracked" ? ["-a"] : []), "-m", message],
@@ -534,10 +545,10 @@ export async function commit(
 /**
  * The environment every call that talks to a remote runs in.
  *
- * ⚠️ Never a prompt. There is no terminal behind this process, so a git that
- * asked for a password — or ssh asking to trust a host — would wait for an
- * answer until the timeout. Failing says what is wrong instead. `GIT_EDITOR`
- * for the same reason: a pull that merges must not open an editor nobody sees.
+ * NOTE: Never a prompt. No terminal is behind this process, so git asking for
+ * a password, or ssh asking to trust a host, would wait until the timeout.
+ * Failing says what is wrong instead. `GIT_EDITOR` is set for the same reason:
+ * a pull that merges must not open an editor nobody sees.
  */
 function networkEnv(): NodeJS.ProcessEnv {
   return {
@@ -556,17 +567,20 @@ async function remotes(top: string): Promise<string[]> {
 }
 
 /**
- * Fetch, pull or push (the Changes screen's sync button).
+ * Fetch, pull or push, for the Changes screen's sync button.
  *
- * ⚠️ A remote the renderer names is checked against a FRESH `git remote`, so it
- * can only ever be one of this repository's remotes — never a URL, a path, or
- * a string that starts with a dash.
+ * - NOTE: A remote the renderer names is checked against a fresh
+ *   `git remote`. It can only be one of this repository's remotes, never a
+ *   URL, a path, or a string that starts with a dash.
+ * - A branch with no upstream is pushed with `-u` to the named remote (or
+ *   `origin`, or the only one there is). Its first push also sets where later
+ *   pulls and pushes go. With an upstream, a plain push follows the user's own
+ *   `push.default`.
+ * - Pull passes `--no-rebase` or `--rebase` explicitly. The menu names which
+ *   one it is, and `pull.rebase` must not turn it into the other.
  *
- * ⚠️ A branch with no upstream is pushed with `-u` to the named remote (or
- * `origin`, or the only one there is), so its first push also sets where later
- * pulls and pushes go. With an upstream, a plain push follows the user's own
- * `push.default`. Pull says `--no-rebase` or `--rebase` out loud, because the
- * menu names which one it is and `pull.rebase` must not make it the other.
+ * @throws When there is no remote, the remote is unknown, a push has no
+ *   branch checked out, or git fails.
  */
 export async function sync(
   top: string,
@@ -587,8 +601,9 @@ export async function sync(
     return;
   }
 
-  // ⚠️ A long timeout for the rest: a pull runs merge hooks, a push runs the
-  // pre-push hook, and killing either halfway leaves the branch in between.
+  // NOTE: A long timeout for the rest. A pull runs merge hooks, a push runs
+  // the pre-push hook, and killing either halfway leaves the branch between
+  // states.
   if (action === "pull" || action === "pull-rebase") {
     await run(
       top,
@@ -625,19 +640,18 @@ export async function sync(
   await run(top, args, { timeout: 180_000, env });
 }
 
-/** The most unpushed commits `log` looks for; past it, rows go unmarked. */
+/** The most unpushed commits {@link log} marks. Past it, rows go unmarked. */
 const MAX_UNPUSHED = 5_000;
 
 /**
  * Commits on HEAD that no remote-tracking branch has.
  *
- * ⚠️ `--not --remotes`, not `@{u}..HEAD`: a branch pushed without `-u` has no
- * upstream, and every one of its commits would then read as unpushed. And not
- * the branch's `ahead` count either — with a merge in the way, the unpushed
- * commits are not the first N rows of the log.
- *
- * ⚠️ Empty when the repository has no remote: with nowhere to push, "not
- * pushed" would mark every commit and say nothing.
+ * - `--not --remotes`, not `@{u}..HEAD`: a branch pushed without `-u` has no
+ *   upstream, and every one of its commits would read as unpushed.
+ * - Not the branch's `ahead` count either: with a merge in the way, the
+ *   unpushed commits are not the first N rows of the log.
+ * - Empty when the repository has no remote. With nowhere to push, "not
+ *   pushed" would mark every commit and say nothing.
  */
 async function unpushed(top: string): Promise<Set<string>> {
   if (!(await remotes(top)).length) return new Set();
@@ -652,8 +666,9 @@ async function unpushed(top: string): Promise<Set<string>> {
 }
 
 /**
- * How many commits `unpushed` would mark, for the rail's History badge — the
- * same rule, so the badge and the ↑ marks never disagree.
+ * How many commits {@link unpushed} would mark, for the rail's History badge.
+ *
+ * It uses the same rule, so the badge and the ↑ marks never disagree.
  */
 async function unpushedCount(top: string, names: string[]): Promise<number> {
   if (!names.length) return 0;
@@ -696,9 +711,9 @@ export async function show(top: string, sha: string): Promise<CommitChange> {
   const raw = await out(top, ["log", "-1", LOG_FORMAT, sha]);
   const summary = toCommit(raw.split("\x1e")[0]?.replace(/^\n/, "") ?? "");
   if (!summary) throw new Error("That commit is not in this repository.");
-  // ⚠️ Against the FIRST parent. A merge shown against all of its parents is a
-  // combined diff, which is a format the viewer cannot draw; against its first
-  // parent it is "what this merge brought in", which is the question.
+  // Against the first parent. A merge against all its parents is a combined
+  // diff, which the viewer cannot draw. Against its first parent it is "what
+  // this merge brought in", which is the question.
   const text = await out(top, [
     "show",
     "--format=",
@@ -720,8 +735,12 @@ export async function show(top: string, sha: string): Promise<CommitChange> {
 /**
  * One side of one file, for expanding the lines a diff leaves out.
  *
- * ⚠️ A revision is `HEAD`, a sha, or a sha's first parent (`<sha>^`) — the
- * shapes the viewer needs, and none that `git show` could read as an option.
+ * NOTE: A revision is `HEAD`, a sha, or a sha's first parent (`<sha>^`). Those
+ * are the shapes the viewer needs, and none of them can read as an option to
+ * `git show`.
+ *
+ * @returns Null when the file is not on that side, is binary, or is too big.
+ * @throws When the revision or the path is not valid.
  */
 export async function fileText(
   top: string,
@@ -743,10 +762,10 @@ export async function fileText(
   return stdout;
 }
 
-/** Paths one Files read hands the tree (FE-66). Past this the listing stops short. */
+/** The most paths one Files read hands the tree. Past it the listing stops. */
 const MAX_LISTED = 50_000;
 
-/** Images the Files screen draws (FE-66), by extension. */
+/** The images the Files screen draws, by extension. */
 const IMAGE_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -762,7 +781,7 @@ const IMAGE_TYPES: Record<string, string> = {
 /** The largest image the Files screen is sent — the chat's lightbox limit. */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
-/** Entries one directory read hands the tree. A folder of more is cut short. */
+/** The most entries one directory read hands the tree. More are cut off. */
 const MAX_DIR_ENTRIES = 5_000;
 
 function splitZ(stdout: string): string[] {
@@ -770,12 +789,15 @@ function splitZ(stdout: string): string[] {
 }
 
 /**
- * A path of the working tree, resolved ALL the way through (FE-66).
+ * A path of the working tree, resolved all the way through.
  *
- * ⚠️ Stricter than `inside`, which resolves only the parent: the Files screen
- * opens whatever the folder holds, symlinks included, and a link pointing out
- * of the repository must not become a way to read or list what it points at.
- * Null when the path is not there.
+ * NOTE: Stricter than {@link inside}, which resolves only the parent. The
+ * Files screen opens whatever the folder holds, symlinks included. A link that
+ * points out of the repository must not become a way to read or list what it
+ * points at.
+ *
+ * @returns Null when the path is not there.
+ * @throws When the path resolves outside the repository.
  */
 async function resolved(top: string, path: string): Promise<string | null> {
   if (!path || isAbsolute(path) || path.split(/[\\/]/).includes(".."))
@@ -790,13 +812,13 @@ async function resolved(top: string, path: string): Promise<string | null> {
 }
 
 /**
- * The working tree for Repository › Files (FE-66): tracked and untracked
- * files, plus what git ignores — folders of it unread.
+ * The working tree for Repository › Files.
  *
- * ⚠️ git's list, not a walk. `ls-files` already knows `.gitignore`, never
- * lists `.git`, and answers a big repository in one call; the ignored part
- * comes back as its topmost folders (`--directory`), so `node_modules/` is one
- * row until somebody opens it (`listDir`).
+ * Tracked and untracked files, plus what git ignores, with ignored folders
+ * left unread. It is git's list, not a walk: `ls-files` already knows
+ * `.gitignore`, never lists `.git`, and answers a big repository in one call.
+ * The ignored part comes back as its topmost folders (`--directory`), so
+ * `node_modules/` is one row until the user opens it ({@link listDir}).
  */
 export async function listFiles(top: string): Promise<FileListing> {
   const [kept, deleted, ignoredRaw] = await Promise.all([
@@ -811,16 +833,16 @@ export async function listFiles(top: string): Promise<FileListing> {
       "--directory",
     ]),
   ]);
-  // A tracked file deleted from the folder is still in the index; it is a
-  // change (Changes shows it), not a file there is anything to open.
+  // A tracked file deleted from the folder is still in the index. It is a
+  // change (Changes shows it), not a file to open.
   const gone = new Set(splitZ(deleted));
   const ignored = splitZ(ignoredRaw);
   const seen = new Set<string>();
   const paths: string[] = [];
-  // Ignored first: a handful of rows, and the cap below must not be what
-  // decides whether `node_modules/` appears at all.
+  // Ignored first: they are a handful of rows, and the cap below must not
+  // decide whether `node_modules/` appears at all.
   for (const path of [...ignored, ...splitZ(kept)]) {
-    // ⚠️ Deduplicated: `--cached` prints a conflicted file once per stage.
+    // `--cached` prints a conflicted file once per stage.
     if (seen.has(path) || gone.has(path)) continue;
     seen.add(path);
     paths.push(path);
@@ -843,8 +865,8 @@ export async function listDir(top: string, dir: string): Promise<FileListing> {
     return { root: top, paths: [], lazy: [], ignored: [], truncated: false };
   const entries = await readdir(full, { withFileTypes: true });
   const shown = entries.slice(0, MAX_DIR_ENTRIES);
-  // ⚠️ A symlink is drawn as what it points at. bun's `node_modules` is mostly
-  // links into its store, and a package shown as a file could not be opened.
+  // A symlink is drawn as what it points at. bun's `node_modules` is mostly
+  // links into its store, and a package drawn as a file could not be opened.
   const folders = await Promise.all(
     shown.map(async (entry) =>
       entry.isSymbolicLink()
@@ -879,8 +901,8 @@ export async function viewFile(top: string, path: string): Promise<FileView> {
   try {
     const info = await handle.stat();
     if (!info.isFile()) return { kind: "missing" };
-    // ⚠️ By the name it resolves to, not the one asked for: a link called
-    // `x.png` pointing at a text file is read as text.
+    // By the name it resolves to, not the one asked for: a link called
+    // `x.png` that points at a text file is read as text.
     const type = IMAGE_TYPES[extname(full).toLowerCase()];
     if (type) {
       if (info.size > MAX_IMAGE_BYTES)
@@ -906,12 +928,15 @@ export async function viewFile(top: string, path: string): Promise<FileView> {
 }
 
 /**
- * The repository path of the one file `path` means (FE-66) — how the chat
- * names files: relative to the project's folder (which may be a subfolder of
- * the repository), relative to the repository, absolute, or just a name.
+ * The repository path of the one file `path` means.
  *
- * ⚠️ A bare name or a partial path is looked up in git's list, and only ONE
- * match counts: two `index.ts` are a question, not an answer.
+ * `path` is written the way the chat names files: relative to the project's
+ * folder (which may be a subfolder of the repository), relative to the
+ * repository, absolute, or a bare name. A bare name or a partial path is
+ * looked up in git's list, and only one match counts: two `index.ts` are a
+ * question, not an answer.
+ *
+ * @returns Null when no file, or more than one, matches.
  */
 export async function locateInRepo(
   top: string,
@@ -954,9 +979,8 @@ export async function locateFile(
 /**
  * Local and remote branches, newest commit first.
  *
- * ⚠️ `for-each-ref`, not `branch -a`: its output is a format this code chose,
- * not one meant for a person to read, so there is no `* ` marker or `->` arrow
- * to strip off.
+ * `for-each-ref`, not `branch -a`: its output is a format this code chose, not
+ * one meant for a person, so there is no `* ` marker or `->` arrow to strip.
  */
 export async function branches(top: string): Promise<BranchList> {
   const [refs, head] = await Promise.all([
@@ -987,15 +1011,18 @@ export async function branches(top: string): Promise<BranchList> {
 }
 
 /**
- * Switch to a branch the list above just named.
+ * Switch to a branch that {@link branches} just named.
  *
- * ⚠️ Checked against a FRESH list, so the renderer can only name a branch that
- * exists — never a sha, a path, or a string that starts with a dash. A remote
- * branch is switched to with `--track`, which creates the local branch that
- * follows it; the remote-tracking ref itself is never checked out detached.
+ * - NOTE: The name is checked against a fresh list, so the renderer can only
+ *   name a branch that exists, never a sha, a path, or a string that starts
+ *   with a dash.
+ * - A remote branch is switched to with `--track`, which creates the local
+ *   branch that follows it. The remote-tracking ref is never checked out
+ *   detached.
+ * - No `--force`, no `--discard-changes`. Uncommitted work that the other
+ *   branch would overwrite makes git refuse, and that is the right outcome.
  *
- * ⚠️ No `--force`, no `--discard-changes`. Uncommitted work that the other
- * branch would overwrite makes git refuse, and that is the right outcome.
+ * @throws When the name is not a branch, or git refuses the switch.
  */
 export async function switchBranch(top: string, name: string): Promise<void> {
   const list = await branches(top);
@@ -1011,12 +1038,12 @@ export async function switchBranch(top: string, name: string): Promise<void> {
 }
 
 /**
- * When HEAD was committed, epoch ms (null with no commit yet), and the
- * repository's other worktrees — what the agent marks on Changes are
- * reckoned against (FE-39/D3).
+ * When HEAD was committed, and the repository's other worktrees.
  *
- * ⚠️ The COMMITTER's time, not the author's: an amend or a rebase rewrites
- * HEAD now, and what it took in is committed now.
+ * The agent marks on Changes are reckoned against these (FE-39/D3). `headAt`
+ * is epoch ms, or null with no commit yet. It is the committer's time, not the
+ * author's: an amend or a rebase rewrites HEAD now, and what it took in is
+ * committed now.
  */
 export async function repoFacts(
   top: string,

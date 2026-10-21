@@ -1,16 +1,15 @@
 // Where the checkpoint hook keeps this machine's credential, for every way it
-// is installed: the desktop app (FE-28), the Claude Code plugin (INF-03), or by
-// hand.
+// is installed: the desktop app, the Claude Code plugin, or by hand.
 //
-//   • macOS: the Keychain item `dev.lanework.checkpoint-hook`, account = the
-//     API URL. The desktop app writes the same item, so the app and the plugin
-//     share one credential on one machine.
-//   • Linux (INF-03/D5): `$XDG_CONFIG_HOME/lanework/credential`, mode 0600.
-//   • `LANEWORK_HOOK_SECRET_FILE` overrides both — tests, and machines with no
-//     Keychain.
+// - macOS: the Keychain item `dev.lanework.checkpoint-hook`, account = the
+//   API URL. The desktop app writes the same item, so the app and the plugin
+//   share one credential on one machine.
+// - Linux (INF-03/D5): `$XDG_CONFIG_HOME/lanework/credential`, mode 0600.
+// - `LANEWORK_HOOK_SECRET_FILE` overrides both: for tests, and for machines
+//   with no Keychain.
 //
-// ⚠️ The secret reaches `security` on STDIN (`security -i`), never in argv,
-// where every process on the machine can read it from the process list.
+// NOTE: The secret reaches `security` on stdin (`security -i`), never in
+// argv, where every process on the machine can read it from the process list.
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,

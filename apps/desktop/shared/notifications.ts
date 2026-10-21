@@ -1,4 +1,4 @@
-// OS notifications (FE-70): an agent run finishing, a new pull request on a
+// OS notifications: an agent run finishing, a new pull request on a
 // linked repository — each switched on or off from Settings → Notifications.
 
 /** What can notify. One row each in Settings → Notifications. */
@@ -59,9 +59,12 @@ export type NotificationTarget =
 export const notificationChannels = {
   get: "notifications:get",
   set: "notifications:set",
-  /** Show one now, whatever the settings say (FE-70). */
+  /** Show one now, whatever the settings say. */
   test: "notifications:test",
-  /** Renderer → main: the path on screen, for FE-70/D2a. */
+  /**
+   * Renderer → main: the path on screen, so main skips a notification about
+   * it (FE-70/D2a).
+   */
   location: "notifications:location",
   /** Main → renderer: a notification was clicked, go to its target. */
   open: "notifications:open",

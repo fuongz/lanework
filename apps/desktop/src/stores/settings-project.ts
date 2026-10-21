@@ -4,11 +4,13 @@ import type { Workspace } from "#/../shared/workspaces";
 import { useBoard } from "#/stores/board";
 
 /**
- * The project Settings › Projects is about: picked in the group's heading and
- * shared by General, Skills and MCP, so moving between them keeps it.
+ * The project Settings › Projects is about.
  *
- * ⚠️ Settings-local on purpose. Picking a project to look after here is not
- * switching to it — the app's own open project stays where it was.
+ * Picked in the group's heading and shared by General, Skills and MCP, so
+ * moving between them keeps it.
+ *
+ * Local to Settings. Picking a project here does not switch to it: the app's
+ * open project stays where it was.
  */
 export const useSettingsProjectPick = create<{
   picked: string | null;
@@ -19,8 +21,12 @@ export const useSettingsProjectPick = create<{
 }));
 
 /**
- * The picked project, else the one open in the app, else the first — or null
- * when there are none (or they are still being read).
+ * The project Settings › Projects shows.
+ *
+ * Reads the workspace list from {@link useBoard} on a cold start.
+ *
+ * @returns The picked project, else the one open in the app, else the
+ * first. Null when there are none, or they are still being read.
  */
 export function useSettingsProject(): Workspace | null {
   const picked = useSettingsProjectPick((state) => state.picked);

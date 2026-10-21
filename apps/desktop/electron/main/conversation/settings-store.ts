@@ -13,12 +13,19 @@ import { isAgentSessionId } from "../../../shared/terminal";
 /** Conversations remembered, at most; the oldest go first. */
 const KEEP = 500;
 
+/** What the settings file holds. */
 interface Stored {
   last: ComposerSettings | null;
-  /** By conversation id, oldest first. */
+  /** By conversation id, least recently used first. */
   conversations: Record<string, ComposerSettings>;
 }
 
+/**
+ * The composer settings remembered per conversation, kept in `file`.
+ *
+ * Writes are queued one after another; a failed write leaves the memory
+ * copy answering this run.
+ */
 export function createSettingsStore(file: string) {
   let cache: Stored | null = null;
   let writing: Promise<void> = Promise.resolve();

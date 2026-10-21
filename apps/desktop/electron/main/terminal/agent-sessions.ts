@@ -1,8 +1,8 @@
 // The Claude and Codex conversations a project's folder has on disk (FE-23):
 // what the rail's Agents group lists, and the only ids a tab may resume.
 //
-// ⚠️ Read-only, and nothing here imports Electron: main calls it, and a spec
-// can drive it under plain Node against a fake home folder.
+// Read-only, and nothing here imports Electron: main calls it, and a spec can
+// drive it under plain Node against a fake home folder.
 import { open, readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
@@ -18,22 +18,27 @@ import { backgroundCount, readTranscriptTasks } from "./background-tasks";
 const CHUNK = 64 * 1024;
 /**
  * How far into a transcript its first prompt is looked for when the head
- * holds none: a prompt with an image pasted in is one line of base64 — 400KB
- * for one screenshot — and is cut by any head.
+ * holds none.
+ *
+ * A prompt with an image pasted in is one line of base64, 400KB for one
+ * screenshot, and is cut by any head.
  */
 const PROMPT_SCAN = 16 * 1024 * 1024;
 /** A Codex `session_meta` line carries the whole system prompt. */
 export const META_CHUNK = 256 * 1024;
 /** Codex keeps every folder's rollouts in one tree; stop looking after this. */
 const CODEX_SCAN = 400;
+/** The longest title a rail row shows, in characters. */
 const TITLE_MAX = 120;
 /** A conversation's newest sub-agents read, at most (FE-33/D4). */
 const SUBAGENT_LIMIT = 20;
 /** Claude's name for a sub-agent's transcript, beside its `.meta.json`. */
 export const CLAUDE_SUBAGENT_FILE = /^agent-([A-Za-z0-9_-]{1,64})\.jsonl$/;
 
+/** One parsed line of a transcript. */
 export type Line = Record<string, unknown>;
 
+/** Up to `length` bytes of `file` from byte `start`, as text. */
 export async function readRange(
   file: string,
   start: number,
@@ -50,9 +55,12 @@ export async function readRange(
 }
 
 /**
- * The whole lines of a chunk, parsed. A chunk cut mid-line loses that line —
- * the first one of a tail, the last one of a head — and a line that is not
- * JSON is skipped, never thrown on.
+ * The whole lines of a chunk, parsed.
+ *
+ * A chunk cut mid-line loses that line: the first one of a tail, the last one
+ * of a head. A line that is not JSON is skipped, never thrown on.
+ *
+ * @param head The chunk is a file's start, not its end.
  */
 export function lines(text: string, { head }: { head: boolean }): Line[] {
   const parts = text.split("\n");
@@ -78,9 +86,12 @@ export function tidy(text: string): string {
 }
 
 /**
- * A prompt somebody typed, as opposed to what a CLI puts in the user's turn
- * for itself — command caveats, hook output, injected context — which is all
- * wrapped in a tag.
+ * A prompt somebody typed, tidied for a title.
+ *
+ * What a CLI puts in the user's turn for itself (command caveats, hook
+ * output, injected context) is all wrapped in a tag, and is not one.
+ *
+ * @returns null for anything but a typed prompt.
  */
 function typed(text: unknown): string | null {
   if (typeof text !== "string") return null;
@@ -99,6 +110,7 @@ export function claudeProjectDir(cwd: string): string {
   return cwd.replace(/[^A-Za-z0-9]/g, "-");
 }
 
+/** The prompt a Claude line holds, if it is one somebody typed. */
 function claudePrompt(line: Line): string | null {
   if (line.type !== "user" || line.isMeta || line.isSidechain) return null;
   const content = (line.message as { content?: unknown } | undefined)?.content;
@@ -112,13 +124,14 @@ function claudePrompt(line: Line): string | null {
 /**
  * Whether a Claude turn is open: a prompt sent, not yet answered (FE-25).
  *
- * ⚠️ Read from the conversation's own STATE, not from the file being
- * written. Opening or resuming a conversation writes bookkeeping — `mode`,
- * `permission-mode`, `cost-state`, `last-prompt`, a title — and a spinner on
+ * NOTE: Read from the conversation's own STATE, not from the file being
+ * written. Opening or resuming a conversation writes bookkeeping (`mode`,
+ * `permission-mode`, `cost-state`, `last-prompt`, a title), and a spinner on
  * those is a spinner on nothing. Walking back from the end past that, the
- * first line that says where the turn is decides: the turn's closing
- * `system` line (or an interruption) means idle; a prompt, a tool result or
- * an unfinished assistant message means it is thinking or working.
+ * first line that says where the turn is decides:
+ * - the turn's closing `system` line, or an interruption, means idle;
+ * - a prompt, a tool result or an unfinished assistant message means it is
+ *   thinking or working.
  */
 export function claudeWorking(tail: Line[]): boolean {
   for (let at = tail.length - 1; at >= 0; at--) {
@@ -154,9 +167,9 @@ export function claudeWorking(tail: Line[]): boolean {
             : "";
       if (typeof text === "string" && text.startsWith("[Request interrupted"))
         return false;
-      // ⚠️ A local command — `/model`, `/clear`, `!ls` — is written as a user
-      // line wrapped in a tag, and never reaches the model: not a turn. The
-      // same tell `typed()` uses for a title.
+      // NOTE: A local command (`/model`, `/clear`, `!ls`) is written as a
+      // user line wrapped in a tag, and never reaches the model: not a turn.
+      // The same tell `typed()` uses for a title.
       if (typeof text === "string" && text.trimStart().startsWith("<"))
         continue;
       return true;
@@ -166,13 +179,13 @@ export function claudeWorking(tail: Line[]): boolean {
 }
 
 /**
- * Whether a Claude sub-agent is still going (FE-33): its newest word is not
- * a finished answer.
+ * Whether a Claude sub-agent is still going: its newest word is not a
+ * finished answer.
  *
- * ⚠️ Not `claudeWorking`: every line of a sub-agent is a sidechain, and its
- * run ends AT the answer — no closing `system` line follows it. Two ends:
- * an `end_turn` answer, or (newer CLIs) the result of the tool it hands its
- * report back with, which says `toolEndsTurn`.
+ * NOTE: Not {@link claudeWorking}: every line of a sub-agent is a sidechain,
+ * and its run ends AT the answer, with no closing `system` line after it. It
+ * has two ends: an `end_turn` answer, or (newer CLIs) the result of the tool
+ * it hands its report back with, which says `toolEndsTurn`.
  */
 export function claudeSubagentWorking(tail: Line[]): boolean {
   for (let at = tail.length - 1; at >= 0; at--) {
@@ -207,7 +220,7 @@ export function codexWorking(tail: Line[]): boolean {
   return false;
 }
 
-/** A user line that is a local command — `/model`, `!ls` — not a prompt. */
+/** Whether a user line is a local command (`/model`, `!ls`), not a prompt. */
 function localCommand(line: Line): boolean {
   const content = (line.message as { content?: unknown } | undefined)?.content;
   const text =
@@ -222,12 +235,13 @@ function localCommand(line: Line): boolean {
 }
 
 /**
- * When the conversation last MOVED: its newest prompt, answer or closed
- * turn — ISO, or null when the lines read have none.
+ * When the conversation last MOVED: its newest prompt, answer or closed turn.
  *
- * ⚠️ Not the file's mtime. Opening or resuming a conversation appends
+ * NOTE: Not the file's mtime. Opening or resuming a conversation appends
  * bookkeeping, and a row that jumped to "now" and to the top every time it
  * was merely looked at would say something false about it.
+ *
+ * @returns An ISO time, or null when the lines read have none.
  */
 export function lastActivity(
   tail: Line[],
@@ -260,12 +274,18 @@ export function lastActivity(
 }
 
 /**
- * A turn left open this long is not being worked on — a CLI killed mid-task
- * never writes its end. Long enough for a slow tool run or a long think.
+ * How long a turn may stay open and still be worked on.
+ *
+ * A CLI killed mid-task never writes its end. This is long enough for a slow
+ * tool run or a long think.
  */
 export const STALE_MS = 10 * 60_000;
 
-/** A real turn end, rather than an interruption, missing file or stale run. */
+/**
+ * Whether the newest turn of `file` really ended.
+ *
+ * @returns false for an interruption, a missing file or a stale run.
+ */
 export async function transcriptCompleted(
   file: string,
   agent: "claude" | "codex",
@@ -313,8 +333,10 @@ export async function transcriptCompleted(
 }
 
 /**
- * Whether the agent behind `file` is working now, from its transcript's end
- * — a conversation's, or one of its sub-agents' (FE-33).
+ * Whether the agent behind `file` is working now, from its transcript's end.
+ *
+ * @param subagent `file` is one of a conversation's sub-agents, not the
+ *   conversation.
  */
 export async function transcriptWorking(
   file: string,
@@ -336,14 +358,16 @@ export async function transcriptWorking(
 }
 
 /**
- * How far back a transcript is read for the card its agent is on (FE-27): a
- * card is named at a turn's start, and a long turn writes a lot after it.
+ * How far back a transcript is read for the card its agent is on.
+ *
+ * A card is named at a turn's start, and a long turn writes a lot after it.
  */
 const CARD_SCAN = 4 * 1024 * 1024;
 
 /** `mcp__<server>__<tool>`, the name both CLIs give an MCP tool. */
 const MCP_TOOL = /^mcp__(.+)__[a-z_]+$/i;
 
+/** The card a Lanework MCP call's arguments name, if `server` is Lanework. */
 function cardOf(server: unknown, args: unknown): AgentCard | null {
   if (typeof server !== "string" || !/lanework/i.test(server)) return null;
   const { board_id: boardId, card } = (args ?? {}) as {
@@ -359,13 +383,15 @@ function cardOf(server: unknown, args: unknown): AgentCard | null {
 }
 
 /**
- * The card a transcript line's Lanework MCP call names, if it is one that
- * names a card — `get_review`, `set_status`, `toggle_item` and the like
- * (FE-27/D1). A call without a `card` (`list_boards`, `board_summary`) is
- * none.
+ * The card a transcript line's Lanework MCP call names.
  *
- * ⚠️ Matched on the MCP SERVER's name, not on one spelling of it: however it
- * was added — `lanework`, `claude_ai_Lanework` — it is the Lanework server.
+ * Only a call that names a card counts: `get_review`, `set_status`,
+ * `toggle_item` and the like (FE-27/D1). A call without a `card`
+ * (`list_boards`, `board_summary`) is none.
+ *
+ * The server is matched on its name containing "lanework", not on one
+ * spelling of it: however it was added (`lanework`, `claude_ai_Lanework`), it
+ * is the Lanework server.
  */
 export function laneworkCard(line: Line): AgentCard | null {
   // Claude: an assistant message's `tool_use` parts.
@@ -413,13 +439,17 @@ export function laneworkCard(line: Line): AgentCard | null {
 }
 
 /**
- * The last card named in `file` between byte `start` and `end`, and where
- * the whole lines read end — the next read's `start` (FE-27).
+ * The last card named in `file` between byte `start` and `end`.
  *
- * ⚠️ Only a line the newline after it has closed is read: a line being
- * written is left for the next read, which starts where this one's whole
- * lines ended. `aligned` says `start` is such a place; otherwise the first,
- * cut line is skipped. Only lines that mention Lanework are parsed.
+ * Only a line the newline after it has closed is read: a line being written
+ * is left for the next read, which starts where this one's whole lines
+ * ended. Only lines that mention Lanework are parsed. At most
+ * {@link CARD_SCAN} bytes before `end` are read.
+ *
+ * @param aligned `start` is the start of a line; otherwise the first, cut
+ *   line is skipped.
+ * @returns The card, and where the whole lines read end: the next read's
+ *   `start`.
  */
 export async function lastCardIn(
   file: string,
@@ -467,13 +497,14 @@ async function transcriptCard(
 }
 
 /**
- * The sub-agents Claude conversation `id` spawned (FE-33), newest first:
- * `<id>/subagents/agent-<sub>.jsonl` beside its transcript, each with a
- * `.meta.json` saying what it was asked to do.
+ * The sub-agents Claude conversation `id` spawned, newest first.
  *
- * ⚠️ Only a recent one's end is read, for whether it is still going; the
- * rest are done. Nested sub-agents are written to the same folder, so they
- * come out flat (FE-33/D6).
+ * Each is `<id>/subagents/agent-<sub>.jsonl` beside its transcript, with a
+ * `.meta.json` saying what it was asked to do. Only a recent one's end is
+ * read, for whether it is still going; the rest are done. Nested sub-agents
+ * are written to the same folder, so they come out flat (FE-33/D6).
+ *
+ * @param dir Claude's folder for the project.
  */
 async function claudeSubagents(
   dir: string,
@@ -540,12 +571,11 @@ async function claudeSubagents(
 }
 
 /**
- * The transcript's `cwd` and first prompt, read line by line from the start
- * until both are found — for a head that held neither.
+ * The transcript's `cwd` and first prompt, read line by line from the start.
  *
- * ⚠️ Only for a transcript whose head had no title: the read goes as far as
- * the first prompt's line ends, up to `PROMPT_SCAN`, and an image pasted into
- * that prompt makes it hundreds of KB.
+ * Only for a transcript whose head had no title: the read goes as far as the
+ * first prompt's line ends, up to {@link PROMPT_SCAN}, and an image pasted
+ * into that prompt makes it hundreds of KB.
  */
 async function claudeOpening(
   file: string,
@@ -580,6 +610,12 @@ async function claudeOpening(
   return { cwd, prompt: null };
 }
 
+/**
+ * One Claude transcript as a rail row.
+ *
+ * @returns null for another folder's transcript, or one nothing was ever
+ *   asked in.
+ */
 export async function claudeSession(
   file: string,
   id: string,
@@ -587,8 +623,8 @@ export async function claudeSession(
 ): Promise<AgentSession | null> {
   const info = await stat(file);
   const head = lines(await readRange(file, 0, CHUNK), { head: true });
-  // ⚠️ The folder name is lossy — `a_b` and `a-b` both become `a-b` — so the
-  // transcript's own `cwd` has the last word.
+  // NOTE: The folder name is lossy (`a_b` and `a-b` both become `a-b`), so
+  // the transcript's own `cwd` has the last word.
   let cwd = head.find((line) => typeof line.cwd === "string")?.cwd;
   if (cwd !== undefined && cwd !== folder) return null;
   const tail =
@@ -602,8 +638,8 @@ export async function claudeSession(
       (line) => line.type === "ai-title" && typeof line.aiTitle === "string",
     )?.aiTitle as string | undefined;
   let prompt = head.map(claudePrompt).find(Boolean) ?? null;
-  // ⚠️ A first prompt longer than the head — an image pasted into it — left
-  // the conversation without a title, and so off the rail altogether.
+  // A first prompt longer than the head, such as one with an image pasted
+  // in, would leave the conversation without a title, and so off the rail.
   if (!named && !prompt) {
     const opening = await claudeOpening(file);
     prompt = opening.prompt;
@@ -630,13 +666,18 @@ export async function claudeSession(
     // Read only for a working one: an idle agent is on no card (FE-27/D1).
     card: working ? await transcriptCard(file, info.size) : null,
     subagents: await claudeSubagents(dirname(file), id),
-    // Read on from where the last listing stopped (FE-42): cheap after once.
+    // Read on from where the last listing stopped: cheap after the first.
     background: backgroundCount(
       await readTranscriptTasks(file).catch(() => []),
     ),
   };
 }
 
+/**
+ * `folder`'s newest Claude conversations, and every kept one.
+ *
+ * @param keep The `agent:id`s listed however old they are.
+ */
 async function claudeSessions(
   home: string,
   folder: string,
@@ -659,7 +700,7 @@ async function claudeSessions(
   const valid = files
     .filter((entry) => entry !== null && isAgentSessionId(entry.id))
     .sort((a, b) => (b?.at ?? 0) - (a?.at ?? 0));
-  // A few spare, for the ones that turn out empty or another folder's — and
+  // A few spare, for the ones that turn out empty or another folder's, and
   // every KEPT one wherever it falls: a pinned conversation stays on the rail
   // however old it gets (FE-25/D1).
   const head = valid.slice(0, limit * 2);
@@ -692,7 +733,12 @@ export async function codexNames(home: string): Promise<Map<string, string>> {
   return names;
 }
 
-/** Newest first: `sessions/YYYY/MM/DD/rollout-….jsonl`, each level sorted. */
+/**
+ * The newest Codex rollouts under `root`, newest first.
+ *
+ * The tree is `sessions/YYYY/MM/DD/rollout-….jsonl`, each level sorted. At
+ * most {@link CODEX_SCAN} are listed.
+ */
 export async function codexRollouts(root: string): Promise<string[]> {
   const out: string[] = [];
   const down = async (dir: string, depth: number): Promise<void> => {
@@ -711,9 +757,11 @@ export async function codexRollouts(root: string): Promise<string[]> {
 }
 
 /**
- * The first thing somebody typed into a rollout. Older CLIs log it as an
- * `event_msg`; newer ones only as the user's `response_item`, whose first
- * turn is the AGENTS.md Codex injected — skipped like any tagged context.
+ * The prompt a Codex rollout line holds, if somebody typed it.
+ *
+ * Older CLIs log it as an `event_msg`; newer ones only as the user's
+ * `response_item`, whose first turn is the AGENTS.md Codex injected. That
+ * turn is skipped like any tagged context.
  */
 export function codexPrompt(line: Line): string | null {
   const payload = line.payload as {
@@ -740,7 +788,7 @@ export function codexPrompt(line: Line): string | null {
   return null;
 }
 
-/** What a Codex rollout is, by its `session_meta` (FE-33). */
+/** What a Codex rollout is, by its `session_meta`. */
 type CodexRole =
   | { kind: "conversation" }
   | {
@@ -752,20 +800,24 @@ type CodexRole =
     }
   | { kind: "helper" };
 
+/** A non-blank string, trimmed, or null. */
 const text = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value.trim() : null;
 
 /**
- * Somebody's conversation; a thread a conversation spawned, and the
- * conversation at its root; or Codex's own helper — the `guardian` that
- * assesses approvals, a review — which is neither and is never listed
- * (FE-33/D1).
+ * What a Codex rollout is, from its `session_meta` payload.
  *
- * ⚠️ All three have the folder's `cwd`. Without this, every approval Codex
- * had assessed was a row of its own on the rail.
+ * - `conversation`: somebody's conversation.
+ * - `spawned`: a thread a conversation spawned, with the conversation at its
+ *   root.
+ * - `helper`: Codex's own helper (the `guardian` that assesses approvals, a
+ *   review), which is neither and is never listed (FE-33/D1).
  *
- * ⚠️ The root is `session_id` — a spawned thread's own spawns name the same
- * one — so nesting flattens to the conversation (FE-33/D6).
+ * NOTE: All three have the folder's `cwd`. Without this, every approval Codex
+ * assessed would be a row of its own on the rail.
+ *
+ * The root is `session_id`, which a spawned thread's own spawns name too, so
+ * nesting flattens to the conversation (FE-33/D6).
  */
 export function codexRole(meta: Record<string, unknown>): CodexRole {
   const source = meta.source;
@@ -789,6 +841,12 @@ export function codexRole(meta: Record<string, unknown>): CodexRole {
   };
 }
 
+/**
+ * `folder`'s newest Codex conversations, and every kept one, each with the
+ * threads it spawned.
+ *
+ * @param keep The `agent:id`s listed however old they are.
+ */
 async function codexSessions(
   home: string,
   folder: string,
@@ -798,12 +856,10 @@ async function codexSessions(
   const files = await codexRollouts(join(home, ".codex", "sessions"));
   const names = await codexNames(home);
   const out: AgentSession[] = [];
-  /**
-   * The threads each conversation spawned, by its id (FE-33). A spawned
-   * thread starts after its conversation, so newest-first meets it first.
-   */
+  // The threads each conversation spawned, by its id. A spawned thread
+  // starts after its conversation, so newest-first meets it first.
   const spawned = new Map<string, AgentSubagent[]>();
-  // ⚠️ Only Codex's own kept ids: waiting on a Claude one here would read
+  // NOTE: Only Codex's own kept ids: waiting on a Claude one here would read
   // every rollout on the machine looking for it.
   const wanted = [...keep].filter((key) => key.startsWith("codex:"));
   const found = new Set<string>();
@@ -830,8 +886,8 @@ async function codexSessions(
           : start === 0
             ? head
             : lines(await readRange(file, start, CHUNK), { head: false });
-        // ⚠️ What it was told is sealed in its spawner's call; the task
-        // name it was spawned under is what is left to call it by.
+        // What it was told is sealed in its spawner's call; the task name it
+        // was spawned under is what is left to call it by.
         const task = role.task ?? head.map(codexPrompt).find(Boolean) ?? null;
         siblings.push({
           id: meta.id,
@@ -880,12 +936,13 @@ async function codexSessions(
 }
 
 /**
- * Both CLIs' conversations for `folder`, newest first: at most
- * `AGENT_SESSION_LIMIT`, plus every `agent:id` in `keep` that still exists — the
+ * Both CLIs' conversations for `folder`, newest first.
+ *
+ * At most `limit`, plus every `agent:id` in `keep` that still exists: the
  * pinned ones, which stay however old they are (FE-25/D1).
  *
- * ⚠️ Nothing read here reaches a command line but an id that passed
- * `isAgentSessionId`; titles are text for the rail and nothing else.
+ * NOTE: Nothing read here reaches a command line but an id that passed
+ * {@link isAgentSessionId}; titles are text for the rail and nothing else.
  */
 export async function listAgentSessions(
   home: string,
@@ -910,13 +967,16 @@ export async function listAgentSessions(
 }
 
 /**
- * `folder`'s newest Codex conversations and when each one's CLI STARTED
- * (FE-31), among the newest `scan` rollouts on the machine written since
- * `since`.
+ * `folder`'s newest Codex conversations, and when each one's CLI STARTED.
  *
- * ⚠️ The start is `session_meta`'s own `timestamp`, not the file's: Codex
+ * Only the newest `scan` rollouts on the machine written since `since` are
+ * read.
+ *
+ * NOTE: The start is `session_meta`'s own `timestamp`, not the file's. Codex
  * writes a rollout only once somebody types, but stamps it with the moment
- * the thread began — which is what ties it to the tab that launched it.
+ * the thread began, which is what ties it to the tab that launched it.
+ *
+ * @param since Epoch ms.
  */
 export async function codexStarts(
   home: string,
@@ -931,16 +991,16 @@ export async function codexStarts(
   const out: { id: string; startedAt: number }[] = [];
   for (const file of files) {
     try {
-      // ⚠️ Not written since `since`: no tab asking could be its — and not
-      // worth opening, as this runs on every write of a turn.
+      // Not written since `since`: no tab asking could be its, and not worth
+      // opening, as this runs on every write of a turn.
       if ((await stat(file)).mtimeMs < since) continue;
       const head = lines(await readRange(file, 0, META_CHUNK), { head: true });
       const meta = head.find((line) => line.type === "session_meta")?.payload as
         | { id?: unknown; cwd?: unknown; timestamp?: unknown }
         | undefined;
       if (meta?.cwd !== folder || !isAgentSessionId(meta.id)) continue;
-      // ⚠️ A thread Codex started for itself starts after the tab too, and
-      // is never the conversation a tab is on (FE-33).
+      // NOTE: A thread Codex started for itself starts after the tab too, and
+      // is never the conversation a tab is on.
       if (codexRole(meta).kind !== "conversation") continue;
       const startedAt =
         typeof meta.timestamp === "string" ? Date.parse(meta.timestamp) : NaN;
@@ -953,14 +1013,17 @@ export async function codexStarts(
 }
 
 /**
- * Which conversation a Codex rollout is, if it is `folder`'s — read from its
- * `session_meta`, once, by the activity watcher (FE-25).
+ * Which conversation a Codex rollout is, if it is `folder`'s.
  *
- * Answers its id, and for a thread a conversation spawned that
- * conversation's as `parent` (FE-33); `false` for a rollout that belongs
- * elsewhere or is Codex's own helper (an answer to keep); `null` when it
- * cannot be told yet — no `session_meta` written, or the file mid-creation —
- * which is worth asking again.
+ * Read from its `session_meta`, once per rollout, by the activity watcher.
+ *
+ * @returns
+ * - Its id, and for a thread a conversation spawned that conversation's as
+ *   `parent`.
+ * - `false` for a rollout that belongs elsewhere or is Codex's own helper:
+ *   an answer to keep.
+ * - `null` when it cannot be told yet (no `session_meta` written, or the
+ *   file mid-creation), which is worth asking again.
  */
 export async function codexRolloutOf(
   file: string,

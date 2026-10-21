@@ -1,10 +1,12 @@
 // Claude's own usage endpoint, read with the CLI's OAuth credential (FE-53).
-// ⚠️ Read-only: the credential belongs to Claude Code, which rotates its
-// refresh token. Refreshing or writing it here could race a live CLI and leave
-// one of them with a spent refresh token, forcing a new sign-in. An expired
-// access token is reported as `expired`, never renewed.
-// ⚠️ The token stays in this module: it is never logged, never cached beyond
-// the one request, and only the windows below leave it.
+//
+// NOTE: Read-only. The credential belongs to Claude Code, which rotates its
+// refresh token. Refreshing or writing it here could race a live CLI and
+// leave one of them with a spent refresh token, forcing a new sign-in. An
+// expired access token is reported as `expired`, never renewed.
+//
+// NOTE: The token stays in this module: it is never logged, never cached
+// beyond the one request, and only the windows below leave it.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -16,14 +18,19 @@ import type {
 } from "../../../shared/terminal";
 
 const CLAUDE_OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+/** The `anthropic-beta` header the endpoint asks for. */
 const OAUTH_BETA = "oauth-2025-04-20";
 const USER_AGENT = "claude-code/2.1.0";
 const HTTP_TIMEOUT_MS = 10_000;
 const KEYCHAIN_TIMEOUT_MS = 5_000;
+/** Claude Code's Keychain service for the default config dir. */
 const KEYCHAIN_SERVICE = "Claude Code-credentials";
+/** The Keychain account Claude Code uses when `$USER` is unusable. */
 const KEYCHAIN_FALLBACK_USER = "claude-code-user";
+/** The most of a credential or an answer that is read, in bytes. */
 const BODY_LIMIT = 64 * 1024;
 
+/** The CLI's OAuth access token, and when it expires. */
 export interface ClaudeCredential {
   token: string;
   /** Epoch ms; null when the credential does not say. */
@@ -42,6 +49,7 @@ interface ClaudeOAuthSnapshot {
   error: ClaudeUsageError | null;
 }
 
+/** One fetch's answer: the two windows, or why there are none. */
 type FetchResult =
   | {
       ok: true;
@@ -59,6 +67,13 @@ export function claudeKeychainService(configDir?: string | null): string {
   return `${KEYCHAIN_SERVICE}-${digest.slice(0, 8)}`;
 }
 
+/**
+ * The access token and expiry in a stored credential's JSON.
+ *
+ * Both the nested `claudeAiOauth` shape and a flat one are read.
+ *
+ * @returns null when `raw` is not JSON, or holds no token.
+ */
 export function claudeCredentialOf(raw: string): ClaudeCredential | null {
   let value: unknown;
   try {
@@ -88,7 +103,11 @@ export function claudeCredentialOf(raw: string): ClaudeCredential | null {
   };
 }
 
-/** An unknown expiry counts as usable: the request then answers 401 if not. */
+/**
+ * Whether the access token has expired.
+ *
+ * An unknown expiry counts as usable: the request then answers 401 if not.
+ */
 function claudeTokenExpired(
   credential: ClaudeCredential,
   now = Date.now(),
@@ -96,11 +115,17 @@ function claudeTokenExpired(
   return credential.expiresAt !== null && now >= credential.expiresAt;
 }
 
+/** The Keychain account for this user, or the fallback one. */
 function keychainUser(): string {
   const user = process.env.USER ?? process.env.USERNAME ?? "";
   return /^[A-Za-z0-9._-]+$/.test(user) ? user : KEYCHAIN_FALLBACK_USER;
 }
 
+/**
+ * Run `/usr/bin/security` with `args`.
+ *
+ * @returns Its trimmed output, or null when it fails or prints nothing.
+ */
 function security(args: string[]): Promise<string | null> {
   return new Promise((done) => {
     try {
@@ -125,9 +150,13 @@ function security(args: string[]): Promise<string | null> {
 }
 
 /**
- * The CLI's credential, as Claude Code stores it: the macOS Keychain first
- * (no account, then `$USER`, then Claude's fallback account), else
- * `<config>/.credentials.json`. `CLAUDE_CONFIG_DIR` selects both.
+ * The CLI's credential, read where Claude Code stores it.
+ *
+ * The macOS Keychain first (no account, then `$USER`, then Claude's fallback
+ * account), else `<config>/.credentials.json`. `CLAUDE_CONFIG_DIR` selects
+ * both.
+ *
+ * @returns null when no credential is found.
  */
 export async function readClaudeCredential(
   options: {
@@ -161,6 +190,11 @@ export async function readClaudeCredential(
   );
 }
 
+/**
+ * The credential in a `.credentials.json` file.
+ *
+ * @returns null when the file is missing, too big, or holds none.
+ */
 export async function readClaudeCredentialFile(
   file: string,
 ): Promise<ClaudeCredential | null> {
@@ -172,6 +206,11 @@ export async function readClaudeCredentialFile(
   }
 }
 
+/**
+ * A window's reset time, in epoch ms.
+ *
+ * It may come as epoch seconds, epoch ms, or an ISO time.
+ */
 function resetAt(value: unknown): number | null {
   const ms = (n: number) =>
     !Number.isFinite(n) || n <= 0 ? null : n > 10_000_000_000 ? n : n * 1000;
@@ -183,6 +222,12 @@ function resetAt(value: unknown): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+/**
+ * One quota window of the answer.
+ *
+ * @param minutes How long the window is.
+ * @returns null when the answer gives no usage for it.
+ */
 function oauthWindow(
   value: unknown,
   minutes: number,
@@ -200,7 +245,13 @@ function oauthWindow(
   };
 }
 
-/** Whitelists the two windows; every other field of the answer is dropped. */
+/**
+ * The five-hour and seven-day windows of the endpoint's answer.
+ *
+ * Every other field of the answer is dropped.
+ *
+ * @returns null when the answer has neither.
+ */
 export function claudeOAuthUsageOf(body: unknown): {
   primary: ClaudeQuotaWindow | null;
   secondary: ClaudeQuotaWindow | null;
@@ -212,11 +263,14 @@ export function claudeOAuthUsageOf(body: unknown): {
   return primary || secondary ? { primary, secondary } : null;
 }
 
+/** What a fetch of the endpoint may be given instead of the real thing. */
 export interface ClaudeOAuthOptions {
+  /** The credential source; {@link readClaudeCredential} by default. */
   readCredential?: () => Promise<ClaudeCredential | null>;
   fetch?: typeof fetch;
   url?: string;
   now?: () => number;
+  /** How long a request may take before it counts as failed. */
   timeoutMs?: number;
   /** The shortest gap between automatic fetches (launch, poll, timer). */
   minIntervalMs?: number;
@@ -224,6 +278,11 @@ export interface ClaudeOAuthOptions {
   forceIntervalMs?: number;
 }
 
+/**
+ * Fetch the account's quota windows once.
+ *
+ * An expired token is never sent, and never renewed.
+ */
 export async function fetchClaudeOAuthUsage(
   options: ClaudeOAuthOptions = {},
 ): Promise<FetchResult> {
@@ -281,10 +340,14 @@ export async function fetchClaudeOAuthUsage(
 }
 
 /**
- * One account-wide cache of the endpoint's answer. Automatic reads fetch at
- * most once a `minIntervalMs`; an explicit refresh bypasses that but is still
- * debounced by `forceIntervalMs`. Concurrent reads share one request. A failed
- * fetch keeps the last good windows and only records why it failed.
+ * One account-wide cache of the endpoint's answer.
+ *
+ * - Automatic reads fetch at most once a `minIntervalMs`.
+ * - An explicit refresh bypasses that, but is still debounced by
+ *   `forceIntervalMs`.
+ * - Concurrent reads share one request.
+ * - A failed fetch keeps the last good windows and only records why it
+ *   failed.
  */
 export function createClaudeOAuthUsage(options: ClaudeOAuthOptions = {}) {
   const now = options.now ?? Date.now;

@@ -1,10 +1,9 @@
 // Fork a Claude conversation into a new one (FE-62/D7).
 //
-// ⚠️ The CLI's `--fork-session` only forks while it SENDS a prompt; a fork
-// from the chat's menu sends nothing. So the transcript is copied to a new
-// UUID beside it with every line's `sessionId` rewritten — what the CLI's
-// own fork writes — and a title saying it is a fork. Nothing here imports
-// Electron.
+// The CLI's `--fork-session` only forks while it SENDS a prompt; a fork from
+// the chat's menu sends nothing. So the transcript is copied to a new UUID
+// beside it with every line's `sessionId` rewritten (what the CLI's own fork
+// writes), plus a title saying it is a fork. Nothing here imports Electron.
 import { randomUUID } from "node:crypto";
 import { stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -14,6 +13,11 @@ import { transcriptPath } from "./transcript";
 /** The largest transcript forked. */
 const FORK_MAX = 256 * 1024 * 1024;
 
+/**
+ * The first prompt the person typed, as a title.
+ *
+ * A text that starts with `<` is a command or a system note, not a prompt.
+ */
 function firstPrompt(rows: Line[]): string | null {
   for (const line of rows) {
     if (line.type !== "user" || line.isMeta || line.isSidechain) continue;
@@ -33,6 +37,12 @@ function firstPrompt(rows: Line[]): string | null {
   return null;
 }
 
+/**
+ * Copy conversation `id` of `folder` to a new one.
+ *
+ * @returns The new conversation's id.
+ * @throws When the conversation has no transcript or is too long to fork.
+ */
 export async function forkConversation(
   home: string,
   folder: string,

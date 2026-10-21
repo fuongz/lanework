@@ -1,9 +1,9 @@
-// Harness updates (FE-61): which version of Claude Code and Codex this
-// machine runs, whether a newer one is out, and updating it from the app.
+// Harness updates: which version of Claude Code and Codex this machine runs,
+// whether a newer one is out, and updating it from the app.
 //
-// ⚠️ The renderer names an AGENT, never a command. Every command run here is
-// chosen by `rules.ts` from where the binary really lives, so no window can
-// make this process run a command line of its own.
+// NOTE: The renderer names an agent, never a command. `rules.ts` chooses every
+// command run here from where the binary really lives, so no window can make
+// this process run a command line of its own.
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -37,13 +37,19 @@ const UPDATE_TIMEOUT_MS = 10 * 60 * 1000;
 const UPDATE_MARKER = "__lanework_harness_update__";
 
 /**
- * ⚠️ Test switches, honoured only in a test run (only a spec sets
- * `LANEWORK_TEST_USER_DATA`), like the terminal host's:
- * `LANEWORK_<AGENT>_BIN` is the CLI (a stand-in answering `--version` and
- * `update`; without one the agent reads as not installed),
- * `LANEWORK_HARNESS_METHOD_<AGENT>` how it was "installed" (default
- * `native`), `LANEWORK_HARNESS_LATEST_<AGENT>` the latest version. Nothing
- * goes to the network or to brew in a test run, and Terminal is never opened.
+ * Whether this is a test run, where the test switches below apply.
+ *
+ * Only a spec sets `LANEWORK_TEST_USER_DATA`, as for the terminal host. The
+ * switches:
+ *
+ * - `LANEWORK_<AGENT>_BIN`: the CLI, a stand-in that answers `--version` and
+ *   `update`. Without one the agent reads as not installed.
+ * - `LANEWORK_HARNESS_METHOD_<AGENT>`: how it was "installed" (default
+ *   `native`).
+ * - `LANEWORK_HARNESS_LATEST_<AGENT>`: the latest version.
+ *
+ * Nothing goes to the network or to brew in a test run, and Terminal is never
+ * opened.
  */
 const testing = () =>
   !app.isPackaged && Boolean(process.env.LANEWORK_TEST_USER_DATA);
@@ -96,8 +102,10 @@ function changed(): HarnessInfo[] {
 // ── Dismissed versions ────────────────────────────────────────────────────
 
 /**
- * ⚠️ One exact version per agent (FE-61/D9): closing the island on 2.1.302
- * hides 2.1.302 only, and 2.1.303 brings it back.
+ * The file that keeps each agent's dismissed version.
+ *
+ * One exact version per agent (FE-61/D9): closing the island on 2.1.302 hides
+ * 2.1.302 only, and 2.1.303 brings it back.
  */
 const dismissedFile = () => join(app.getPath("userData"), "harness.json");
 
@@ -109,7 +117,7 @@ async function loadDismissed(): Promise<void> {
     for (const [agent, entry] of entries)
       entry.dismissed = cleanVersion(raw.dismissed?.[agent]);
   } catch {
-    /* None yet, or unreadable: nothing is dismissed. */
+    // None yet, or unreadable: nothing is dismissed.
   }
 }
 
@@ -125,7 +133,7 @@ async function saveDismissed(): Promise<void> {
 
 // ── Checking ──────────────────────────────────────────────────────────────
 
-/** The shell word that runs this CLI, or null when a test says there is none. */
+/** The shell word that runs this CLI, or null when a test says it has none. */
 function commandFor(agent: HarnessAgent): string | null {
   if (!testing()) return agent;
   const bin = testEnv(agent, "BIN");
@@ -138,8 +146,8 @@ async function probeOne(agent: HarnessAgent): Promise<void> {
   const found = command
     ? await probeAgent(agent, { command })
     : { path: null, version: null, answered: true };
-  // ⚠️ A shell that timed out has not said the CLI is gone: what the last
-  // probe found stands until one answers.
+  // A shell that timed out has not said the CLI is gone. What the last probe
+  // found stands until one answers.
   if (!found.answered && entry.path !== null) return;
   entry.path = found.path;
   entry.version = found.version;
@@ -180,7 +188,11 @@ async function checkOne(agent: HarnessAgent): Promise<void> {
 
 let checking: Promise<HarnessInfo[]> | null = null;
 
-/** Probe every CLI and ask for its latest; a check already running is shared. */
+/**
+ * Probe every CLI and look up its latest version.
+ *
+ * A check already running is shared.
+ */
 function check(): Promise<HarnessInfo[]> {
   checking ??= Promise.all(TERMINAL_AGENTS.map(checkOne))
     .then(changed)
@@ -195,8 +207,10 @@ function check(): Promise<HarnessInfo[]> {
 /**
  * Run the update command hidden in the user's login shell.
  *
- * ⚠️ One at a time per agent: a second click while it runs is a no-op, not a
- * second `brew upgrade` racing the first over the same Caskroom.
+ * NOTE: One at a time per agent. A second click while it runs is a no-op, not
+ * a second `brew upgrade` racing the first over the same Caskroom.
+ *
+ * @throws When the app cannot tell how to update this CLI.
  */
 function update(agent: HarnessAgent): HarnessInfo[] {
   const entry = entries.get(agent) as Entry;
@@ -205,8 +219,8 @@ function update(agent: HarnessAgent): HarnessInfo[] {
   if (!command) throw new Error("The app cannot tell how to update this CLI.");
   entry.update = { state: "updating" };
   void (async () => {
-    // The marker on stderr too: what the profile printed there is not the
-    // update's failure.
+    // A marker on stderr too: what the profile printed there before it is
+    // not the update's failure.
     const result = await runInLoginShell(
       `printf '\\n%s\\n' '${UPDATE_MARKER}' >&2; ${command}`,
       { timeoutMs: UPDATE_TIMEOUT_MS },
@@ -231,11 +245,15 @@ function update(agent: HarnessAgent): HarnessInfo[] {
 /**
  * Run the update command in Terminal, where its output can be read.
  *
- * ⚠️ A `.command` file Terminal opens, not the app's own terminal tabs —
- * those belong to a workspace, and the app never types a command into one —
- * and not AppleScript, which would ask for Automation permission. The file
- * holds only the command `rules.ts` chose, and only this user can read or
- * run it.
+ * A `.command` file that Terminal opens. Not the app's own terminal tabs:
+ * those belong to a workspace, and the app never types a command into one.
+ * Not AppleScript either, which would ask for Automation permission.
+ *
+ * NOTE: The file holds only the command `rules.ts` chose, and only this user
+ * can read or run it.
+ *
+ * @throws When the app cannot tell how to update this CLI, or Terminal does
+ *   not open.
  */
 async function openInTerminal(agent: HarnessAgent): Promise<void> {
   const command = (entries.get(agent) as Entry).updateCommand;
@@ -246,8 +264,8 @@ async function openInTerminal(agent: HarnessAgent): Promise<void> {
   await writeFile(file, terminalScript(defaultShell().file, command), {
     mode: 0o700,
   });
-  // ⚠️ `mode` applies only when the file is created; an older one keeps
-  // whatever it had.
+  // NOTE: `mode` applies only when the file is created. An older file keeps
+  // whatever mode it had.
   await chmod(file, 0o700);
   if (testing()) return;
   const error = await shell.openPath(file);
@@ -300,7 +318,7 @@ export function registerHarness(devUrl?: string): void {
     await ready;
     return openInTerminal(agentArg(args[0]));
   });
-  // On launch, then every 6 hours; the island's own check is on demand.
+  // On launch, then every 6 hours. The island's own check is on demand.
   void ready.then(check).catch(() => {});
   setInterval(() => void check().catch(() => {}), CHECK_EVERY_MS).unref();
 }

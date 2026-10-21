@@ -24,8 +24,8 @@ import type { MachineRecord } from "./store";
  *
  * Overridable because local development needs to point at a stub or a
  * `wrangler dev`, and because self-hosting the control plane is a legitimate
- * thing to want. Precedence: an explicit origin (a record's own) >
- * `LANEWORK_API_URL` > this.
+ * thing to want. Precedence: an explicit origin (a record's own), then
+ * `LANEWORK_API_URL`, then this ({@link resolveApi}).
  */
 const DEFAULT_API = DEFAULT_API_ORIGIN;
 
@@ -37,7 +37,11 @@ export function resolveApi(apiUrl?: string | null): string {
   );
 }
 
-/** What this machine tells the control plane about itself. Display data only. */
+/**
+ * What this machine tells the control plane about itself.
+ *
+ * Display data only.
+ */
 export function machineFacts(name?: string): MachineFacts & {
   hostname: string;
   os: string;
@@ -90,12 +94,20 @@ function refused(api: string, status: number, detail: string): Error {
 }
 
 /**
- * A response body as it arrives: the protocol's field names, every value still
- * unchecked. The server is on the other side of a network, so nothing it sends
- * is trusted until `str` or `externalUrlOn` has looked at it.
+ * A response body as it arrives: the protocol's field names, every value
+ * still unchecked.
+ *
+ * The server is on the other side of a network, so nothing it sends is
+ * trusted until {@link str} or {@link externalUrlOn} has looked at it.
  */
 type Unchecked<T> = { [K in keyof T]?: unknown } & Record<string, unknown>;
 
+/**
+ * POST `body` as JSON to `api` + `path`.
+ *
+ * @throws The caller's abort as is; any other network failure as an
+ *   {@link UnreachableError}. An HTTP error status does not throw.
+ */
 async function postJson<Res>(
   api: string,
   path: string,
@@ -109,7 +121,7 @@ async function postJson<Res>(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       // BOTH, not either: a caller's signal carries cancellation, and the
-      // timeout is what keeps a hung connection from waiting out the sign-in's
+      // timeout keeps a hung connection from waiting out the sign-in's
       // ten-minute window instead of failing in fifteen seconds.
       signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
@@ -127,19 +139,26 @@ async function postJson<Res>(
   };
 }
 
+/** `value` when it is a non-empty string of at most `max` chars, else null. */
 function str(value: unknown, max = 2048): string | null {
   return typeof value === "string" && value && value.length <= max
     ? value
     : null;
 }
 
+/** A loopback login the control plane has registered. */
 interface LoopbackStart {
   id: string;
-  /** Already checked to be on `api`'s own origin — safe for `openExternal`. */
+  /** Checked to be on `api`'s own origin, so safe for `openExternal`. */
   authorizeUrl: string;
 }
 
-/** Register a loopback login attempt and return where to send the browser. */
+/**
+ * Register a loopback login attempt and return where to send the browser.
+ *
+ * @throws When the control plane refuses, or answers with a login it does not
+ *   describe.
+ */
 export async function startLoopback(
   api: string,
   input: {
@@ -174,6 +193,7 @@ export async function startLoopback(
   return { id, authorizeUrl };
 }
 
+/** A device login the control plane has registered. */
 interface DeviceStart {
   id: string;
   deviceCode: string;
@@ -183,7 +203,12 @@ interface DeviceStart {
   interval: number;
 }
 
-/** Register a device login attempt and return the code a human retypes. */
+/**
+ * Register a device login attempt and return the code a human retypes.
+ *
+ * @throws When the control plane refuses, or answers with a login it does not
+ *   describe.
+ */
 export async function startDevice(
   api: string,
   input: { challenge: string; facts: ReturnType<typeof machineFacts> },
@@ -214,9 +239,9 @@ export async function startDevice(
     throw new Error(
       `${api} returned a device login it did not describe (missing code, or a verification URL off its own origin).`,
     );
-  // Resolved after the guard so it inherits the checked `verificationUri` as its
-  // fallback: a complete URL off the API's own origin must not become the link
-  // we open, it must fall back to the one we already validated.
+  // Resolved after the guard so it can fall back to the checked
+  // `verificationUri`: a complete URL off the API's own origin must never
+  // become the link we open.
   const complete =
     externalUrlOn(data.verification_uri_complete, api) ?? verificationUri;
   const interval = Number(data.interval);
@@ -230,7 +255,11 @@ export async function startDevice(
   };
 }
 
-/** The device flow's "not yet" answers, distinguished so polling can react. */
+/**
+ * What a token exchange answered.
+ *
+ * The device flow's "not yet" answers are told apart so polling can react.
+ */
 type PollOutcome =
   | { state: "pending" }
   | { state: "slow_down" }
@@ -243,6 +272,9 @@ type PollOutcome =
  *
  * Unauthenticated by design: possession of the code plus the PKCE verifier IS
  * the authentication, and that pair only ever exists in this process.
+ *
+ * @throws When the control plane rejects the exchange for any reason other
+ *   than the device flow's "not yet" answers.
  */
 export async function redeem(
   api: string,
@@ -278,8 +310,8 @@ export async function redeem(
       return { state: "expired" };
   }
 
-  // 401 is the control plane's ONE generic answer for wrong / unapproved /
-  // spent / expired / bad verifier. It is expanded here, on the side where the
+  // 401 is the control plane's ONE generic answer for a wrong, unapproved,
+  // spent or expired code or a bad verifier. It is spelled out here, where the
   // person who just clicked sign-in knows which of them applies to them.
   if (status === 401)
     throw new Error(
@@ -290,7 +322,9 @@ export async function redeem(
 
 // ── What the control plane currently thinks of us ────────────────────────────
 
+/** The last answer {@link probe} got, or null before the first. */
 let verdict: Verdict | null = null;
+/** When {@link verdict} was learned (epoch ms); 0 before the first. */
 let verdictAt = 0;
 
 /**
@@ -302,6 +336,7 @@ let verdictAt = 0;
  */
 const VERDICT_FRESH_MS = 15_000;
 
+/** The last verdict and when it was learned, without asking again. */
 export function cachedVerdict(): {
   verdict: Verdict | null;
   checkedAt: number;
@@ -309,24 +344,17 @@ export function cachedVerdict(): {
   return { verdict, checkedAt: verdictAt };
 }
 
-/** Forget the verdict — what changing WHICH machine we are has to do. */
+/**
+ * Forget the verdict.
+ *
+ * Changing WHICH machine we are has to: the old verdict was about another
+ * credential.
+ */
 export function resetVerdict(): void {
   verdict = null;
   verdictAt = 0;
 }
 
-/**
- * Ask whether our credential still works, and learn our own `userId`.
- *
- * `/v1/machines/me` rather than a dedicated verify route: it is the one route a
- * machine may call holding nothing but its own credential, and the control
- * plane answers 401 for revoked and unknown alike — precisely the question
- * "does the other side still accept this?".
- *
- * ⚠️ Revocation happens on the SERVER and nothing travels back down to this
- * machine, so a status read that only looks at the file answers "signed in"
- * forever. This is the only thing that can say otherwise.
- */
 /** The owner block from `/v1/machines/me`, or null when it did not say. */
 function ownerOf(value: unknown): AccountOwner | null {
   if (!value || typeof value !== "object") return null;
@@ -336,11 +364,23 @@ function ownerOf(value: unknown): AccountOwner | null {
     email: str(raw.email, 320),
     image: str(raw.image, 2048),
   };
-  // All three absent is the same as no owner at all — better to fall back to
+  // All three absent is the same as no owner at all: better to fall back to
   // whatever was stored than to overwrite it with a row of nulls.
   return owner.name || owner.email || owner.image ? owner : null;
 }
 
+/**
+ * Ask whether our credential still works, and learn our own `userId`.
+ *
+ * `/v1/machines/me` rather than a dedicated verify route: it is the one route
+ * a machine may call holding nothing but its own credential, and the control
+ * plane answers 401 for revoked and unknown alike. That is the question "does
+ * the other side still accept this?".
+ *
+ * NOTE: Revocation happens on the SERVER and nothing travels back down to
+ * this machine, so a status read that only looks at the file answers "signed
+ * in" forever. This is the only thing that can say otherwise.
+ */
 export async function probe(record: MachineRecord): Promise<{
   verdict: Verdict;
   userId: string | null;
@@ -363,9 +403,9 @@ export async function probe(record: MachineRecord): Promise<{
         .json()
         .catch(() => ({}))) as Unchecked<MachineMeResponse>;
       userId = str(data.userId, 64) ?? userId;
-      // ⚠️ Kept when the response omits it, rather than cleared. A control
-      // plane older than this field is a working control plane, and blanking a
-      // name we already had would make the account screen worse on upgrade.
+      // Kept when the response omits it, rather than cleared. A control plane
+      // older than this field is a working control plane, and blanking a name
+      // we already had would make the account screen worse on upgrade.
       owner = ownerOf(data.user) ?? owner;
     }
     verdictAt = Date.now();
@@ -377,7 +417,7 @@ export async function probe(record: MachineRecord): Promise<{
   }
 }
 
-/** `probe`, but only when the cached answer has gone stale. */
+/** {@link probe}, but only when the cached answer has gone stale. */
 export async function probeIfStale(record: MachineRecord): Promise<{
   verdict: Verdict | null;
   userId: string | null;
@@ -389,12 +429,14 @@ export async function probeIfStale(record: MachineRecord): Promise<{
 }
 
 /**
- * Revoke this machine on the control plane — what sign-out calls first.
+ * Revoke this machine on the control plane; sign-out calls this first.
  *
- * A narrow, deliberate exception to "a machine may not do a human's job": it
- * can only ever REMOVE the caller's own access, so a thief who uses it has
- * disarmed themselves. Best effort — a failure here must not strand a user who
- * asked to sign out, so the local credential is dropped either way.
+ * A narrow exception to "a machine may not do a human's job": it can only
+ * ever REMOVE the caller's own access, so a thief who uses it has disarmed
+ * themselves. Best effort: a failure here must not strand a user who asked to
+ * sign out, so the local credential is dropped either way.
+ *
+ * @returns Whether the control plane confirmed the revoke.
  */
 export async function revokeSelf(record: MachineRecord): Promise<boolean> {
   const api = resolveApi(record.apiUrl);
