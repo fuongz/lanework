@@ -99,16 +99,20 @@ const auth: DesktopAuthApi = {
  * before it acts.
  */
 const worktree: DesktopWorktreeApi = {
-  files: (slug) => ipcRenderer.invoke(worktreeChannels.files, slug),
-  dir: (slug, path) => ipcRenderer.invoke(worktreeChannels.dir, slug, path),
-  view: (slug, path) => ipcRenderer.invoke(worktreeChannels.view, slug, path),
-  reveal: (slug, path) =>
-    ipcRenderer.invoke(worktreeChannels.reveal, slug, path),
+  files: (slug, folder) =>
+    ipcRenderer.invoke(worktreeChannels.files, slug, folder),
+  dir: (slug, path, folder) =>
+    ipcRenderer.invoke(worktreeChannels.dir, slug, path, folder),
+  view: (slug, path, folder) =>
+    ipcRenderer.invoke(worktreeChannels.view, slug, path, folder),
+  reveal: (slug, path, folder) =>
+    ipcRenderer.invoke(worktreeChannels.reveal, slug, path, folder),
   locate: (slug, path) =>
     ipcRenderer.invoke(worktreeChannels.locate, slug, path),
-  openDefault: (slug, path) =>
-    ipcRenderer.invoke(worktreeChannels.openDefault, slug, path),
-  status: (slug) => ipcRenderer.invoke(worktreeChannels.status, slug),
+  openDefault: (slug, path, folder) =>
+    ipcRenderer.invoke(worktreeChannels.openDefault, slug, path, folder),
+  status: (slug, folder) =>
+    ipcRenderer.invoke(worktreeChannels.status, slug, folder),
   patch: (slug) => ipcRenderer.invoke(worktreeChannels.patch, slug),
   fileText: (slug, path, side) =>
     ipcRenderer.invoke(worktreeChannels.fileText, slug, path, side),

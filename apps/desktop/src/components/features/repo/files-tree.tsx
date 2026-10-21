@@ -1,4 +1,4 @@
-import { Search01Icon } from "@hugeicons/core-free-icons";
+import { RefreshIcon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type {
   FileTreeDirectoryHandle,
@@ -19,6 +19,7 @@ import {
   treeHostStyle,
 } from "#/components/shared/diff/tree-style";
 import { useDark } from "#/components/shared/diff/use-dark";
+import { Button } from "#/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -110,10 +111,15 @@ export function FilesTree({
   base,
   loaded,
   changes,
+  onRefresh,
+  refreshing,
 }: {
   base: FileListing;
   loaded: Record<string, FileListing>;
   changes: WorktreeFile[];
+  /** Read the tree again — the same read as the title bar's Refresh. */
+  onRefresh: () => void;
+  refreshing: boolean;
 }) {
   const dark = useDark();
   const [query, setQuery] = useState("");
@@ -303,7 +309,7 @@ export function FilesTree({
 
   return (
     <>
-      <div className="shrink-0 px-2 pt-2 pb-1.5">
+      <div className="flex shrink-0 items-center gap-1 px-2 pt-2 pb-1.5">
         <InputGroup>
           <InputGroupAddon>
             <HugeiconsIcon
@@ -321,6 +327,22 @@ export function FilesTree({
             className="text-xs"
           />
         </InputGroup>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh files"
+          title="Refresh"
+          disabled={refreshing}
+          onClick={onRefresh}
+          className="text-muted-foreground shrink-0"
+        >
+          <HugeiconsIcon
+            icon={RefreshIcon}
+            strokeWidth={1.8}
+            aria-hidden="true"
+            className={refreshing ? "animate-spin" : undefined}
+          />
+        </Button>
       </div>
       {base.truncated && (
         <p className="text-muted-foreground shrink-0 px-3 pb-1.5 text-xs">
@@ -379,6 +401,7 @@ export function FilesTree({
  */
 function RowMenu({ path, root }: { path: string; root: string }) {
   const slug = useFiles((state) => state.slug);
+  const folder = useFiles((state) => state.folder);
   const relative = path.replace(/\/+$/, "");
   const absolute = `${root.replace(/\/+$/, "")}/${relative}`;
   const surface = window.desktop?.worktree;
@@ -393,7 +416,7 @@ function RowMenu({ path, root }: { path: string; root: string }) {
       <ContextMenuItem
         disabled={!surface || !slug}
         onClick={() =>
-          slug && surface && run(() => surface.reveal(slug, relative))
+          slug && surface && run(() => surface.reveal(slug, relative, folder))
         }
       >
         Reveal in Finder
@@ -402,7 +425,9 @@ function RowMenu({ path, root }: { path: string; root: string }) {
         // Opening an app or a script runs it — main refuses those too.
         disabled={!surface || !slug || LAUNCHABLE.test(path)}
         onClick={() =>
-          slug && surface && run(() => surface.openDefault(slug, relative))
+          slug &&
+          surface &&
+          run(() => surface.openDefault(slug, relative, folder))
         }
       >
         Open in Default App

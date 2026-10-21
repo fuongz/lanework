@@ -1,7 +1,7 @@
 import { RefreshIcon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useParams } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -15,10 +15,12 @@ import {
   ResizablePanelGroup,
   usePersistedLayout,
 } from "#/components/ui/resizable";
-import { useFiles } from "#/stores/files";
+import { savedFolder, saveFolder, useFiles } from "#/stores/files";
 import { useWorktree } from "#/stores/worktree";
+import type { PickedFolder } from "../../../../shared/workspaces";
 import { FileTabs, FileView } from "./file-view";
 import { FilesTree } from "./files-tree";
+import { FolderSwitcher } from "./folder-switcher";
 import { QuickOpen } from "./quick-open";
 
 /**
@@ -35,8 +37,9 @@ export function FilesLayout() {
   const { slug } = useParams({ from: "/_app/w/$slug/files" });
   const openWorktree = useWorktree((state) => state.open);
   const refreshWorktree = useWorktree((state) => state.refresh);
-  const state = useWorktree((state) => state.state);
+  const primaryState = useWorktree((state) => state.state);
   const worktreeError = useWorktree((state) => state.error);
+  const folderStatus = useFiles((state) => state.folderStatus);
   const open = useFiles((state) => state.open);
   const refresh = useFiles((state) => state.refresh);
   const base = useFiles((state) => state.base);
@@ -52,24 +55,61 @@ export function FilesLayout() {
     ["tree", "file"],
   );
 
-  const ready = state?.kind === "ready";
+  // The project's linked folders, primary first (FE-71). Null until read: the
+  // remembered folder is only known once the list is, and opening the primary
+  // first would flash its tree before switching.
+  const [folders, setFolders] = useState<PickedFolder[] | null>(null);
+  const [chosen, setChosen] = useState<string | null>(() => savedFolder(slug));
+  const readFolders = useCallback(async () => {
+    const api = window.desktop?.workspaces.folder;
+    const list = api ? await api.list(slug).catch(() => []) : [];
+    setFolders(list);
+  }, [slug]);
+
+  useEffect(() => {
+    setFolders(null);
+    setChosen(savedFolder(slug));
+    void readFolders();
+  }, [slug, readFolders]);
+
+  // A remembered folder that is no longer linked falls back to the primary,
+  // and is forgotten (FE-71/D4).
+  const found =
+    folders && chosen ? folders.findIndex((f) => f.path === chosen) : -1;
+  const folder = found > 0 ? found : 0;
+  useEffect(() => {
+    if (folders && chosen && found <= 0) saveFolder(slug, null);
+  }, [folders, chosen, found, slug]);
+
+  const pick = (index: number) => {
+    const path = index > 0 ? (folders?.[index]?.path ?? null) : null;
+    setChosen(path);
+    saveFolder(slug, path);
+  };
+
+  // ⚠️ The primary's status is the worktree store's — Changes and the rail
+  // read it too; another folder's is read by the Files store (FE-71/D1).
+  const state = folder > 0 ? folderStatus : primaryState;
+  const primaryReady = primaryState?.kind === "ready";
 
   useEffect(() => {
     void openWorktree(slug);
   }, [openWorktree, slug]);
 
   useEffect(() => {
-    if (ready) void open(slug);
-  }, [open, slug, ready]);
+    if (folders === null) return;
+    if (folder > 0 || primaryReady) void open(slug, folder);
+  }, [open, slug, folder, folders, primaryReady]);
 
   useEffect(() => {
     const onFocus = () => {
       void refreshWorktree();
       void refresh();
+      void readFolders();
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [refresh, refreshWorktree]);
+  }, [refresh, refreshWorktree, readFolders]);
 
   // ⌘P finds a file; ⌘W closes the open one (FE-66/D3, D8). The menu leaves
   // ⌘W unbound on purpose (`menu.ts`), so it reaches the page.
@@ -89,6 +129,12 @@ export function FilesLayout() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [active, close, setQuickOpen]);
+
+  const refreshAll = () => {
+    void refreshWorktree();
+    void refresh();
+    void readFolders();
+  };
 
   // ⚠️ Drawn in every state (FE-58), so the screen keeps its name while the
   // repository is read, and when it is not one.
@@ -116,10 +162,7 @@ export function FilesLayout() {
         aria-label="Refresh files"
         title="Refresh"
         disabled={loading}
-        onClick={() => {
-          void refreshWorktree();
-          void refresh();
-        }}
+        onClick={refreshAll}
       >
         <HugeiconsIcon
           icon={RefreshIcon}
@@ -131,14 +174,24 @@ export function FilesLayout() {
     </WindowTitlebar>
   );
 
+  const switcher =
+    folders && folders.length > 1 ? (
+      <FolderSwitcher folders={folders} index={folder} onChange={pick} />
+    ) : null;
+  // ⚠️ Drawn above every state that is not the tree, too: a picked folder
+  // that is not a repository must still offer the way back to another.
+  const lone = switcher && <div className="w-72 shrink-0">{switcher}</div>;
+  const readError = folder > 0 ? error : worktreeError;
+
   if (!state)
     return (
       <>
         {title}
-        {worktreeError ? (
+        {lone}
+        {readError ? (
           <RepoMessage
             title="The repository could not be read"
-            description={worktreeError}
+            description={readError}
           />
         ) : (
           <p className="text-muted-foreground p-4 text-xs">
@@ -151,6 +204,7 @@ export function FilesLayout() {
     return (
       <>
         {title}
+        {lone}
         <RepoEmpty state={state} />
       </>
     );
@@ -158,6 +212,7 @@ export function FilesLayout() {
     return (
       <>
         {title}
+        {lone}
         {error ? (
           <RepoMessage
             title="The folder could not be read"
@@ -190,13 +245,16 @@ export function FilesLayout() {
             aria-label="Files"
             className="bg-sidebar flex h-full min-h-0 flex-col"
           >
-            {/* ⚠️ Keyed by project: the model's expansion and selection are
-                about one repository's paths, never another's. */}
+            {switcher}
+            {/* ⚠️ Keyed by project and folder: the model's expansion and
+                selection are about one repository's paths, never another's. */}
             <FilesTree
-              key={slug}
+              key={`${slug}#${folder}`}
               base={base}
               loaded={loaded}
               changes={state.files}
+              onRefresh={refreshAll}
+              refreshing={loading}
             />
           </aside>
         </ResizablePanel>
@@ -204,7 +262,11 @@ export function FilesLayout() {
         <ResizablePanel id="file" minSize="40%">
           <div className="flex h-full min-h-0 flex-col">
             <FileTabs changes={state.files} />
-            <FileView slug={slug} changes={state.files} />
+            <FileView
+              slug={slug}
+              changes={state.files}
+              changesLink={folder === 0}
+            />
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>

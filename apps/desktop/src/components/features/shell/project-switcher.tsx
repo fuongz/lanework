@@ -1,6 +1,6 @@
 import {
   Add01Icon,
-  DragDropVerticalIcon,
+  ListOrderedIcon,
   Search01Icon,
   Settings01Icon,
   Sorting05Icon,
@@ -488,7 +488,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
               className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground aria-pressed:bg-foreground/[0.08] aria-pressed:text-foreground grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none disabled:opacity-40`}
             >
               <HugeiconsIcon
-                icon={DragDropVerticalIcon}
+                icon={ListOrderedIcon}
                 className="size-4"
                 strokeWidth={1.8}
                 aria-hidden="true"

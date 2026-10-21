@@ -94,11 +94,14 @@ function FileHeader({
   path,
   status,
   markdown,
+  changesLink,
 }: {
   slug: string;
   path: string;
   status: WorktreeFileStatus | undefined;
   markdown: boolean;
+  /** False for a non-primary folder: Changes shows the primary's (FE-71/D1). */
+  changesLink: boolean;
 }) {
   const navigate = useNavigate();
   const focusFile = useWorktree((state) => state.focusFile);
@@ -153,7 +156,7 @@ function FileHeader({
           onChange={() => toggleRendered(path)}
         />
       )}
-      {status && (
+      {status && changesLink && (
         // The file's change, on the screen that shows changes (FE-66/D7).
         <Button
           variant="ghost"
@@ -291,9 +294,11 @@ function ImageBody({
 export function FileView({
   slug,
   changes,
+  changesLink = true,
 }: {
   slug: string;
   changes: WorktreeFile[];
+  changesLink?: boolean;
 }) {
   const active = useFiles((state) => state.active);
   const view = useFiles((state) => (active ? state.views[active] : undefined));
@@ -362,6 +367,7 @@ export function FileView({
         path={active}
         status={status}
         markdown={markdown && view?.kind === "text"}
+        changesLink={changesLink}
       />
       {body}
     </div>

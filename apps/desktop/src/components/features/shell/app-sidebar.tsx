@@ -4,17 +4,22 @@ import {
   GitCompareIcon,
   GitPullRequestIcon,
   ListViewIcon,
-  PencilEdit02Icon,
   Search01Icon,
   Settings01Icon,
   SquareArrowUp02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { LocalModeRail } from "#/components/shared/auth/local-mode";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "#/components/ui/context-menu";
 import { Kbd } from "#/components/ui/kbd";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { cn } from "#/lib/utils";
@@ -58,6 +63,30 @@ function SectionLabel({
     >
       {children}
     </span>
+  );
+}
+
+/**
+ * A rail row with Refresh on right click — reads the row's source again
+ * without opening its screen. The wrapper is `contents`, so the row stays the
+ * nav's own child for layout and for `RailHover`.
+ */
+function RefreshMenu({
+  children,
+  onRefresh,
+}: {
+  children: ReactNode;
+  onRefresh: () => void;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={<div className="contents" />}>
+        {children}
+      </ContextMenuTrigger>
+      <ContextMenuContent finalFocus={false}>
+        <ContextMenuItem onClick={onRefresh}>Refresh</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -121,6 +150,20 @@ export function AppSidebar({
   );
   const navigate = useNavigate();
   const peek = useWorktree((state) => state.peek);
+  const openChanges = useWorktree((state) => state.open);
+  const openHistory = useWorktree((state) => state.openHistory);
+  // History's badge is `git status`'s, so its refresh reads both.
+  const refreshHistory = (slug: string) => {
+    void openHistory(slug);
+    void peek(slug);
+  };
+  // ⚠️ Against the list on screen when it is this project's — its filter
+  // included — otherwise the rail's own default, open pull requests.
+  const refreshPulls = (slug: string) => {
+    const pullsState = usePulls.getState();
+    if (pullsState.slug === slug) void pullsState.refresh();
+    else void pullsState.open(slug, "open");
+  };
 
   // ⚠️ Read with the board, not when Changes is opened: the badge is the reason
   // to open Changes, so it cannot wait for it. `git status` only — the patch
@@ -199,50 +242,27 @@ export function AppSidebar({
         <ProjectSwitcher />
       </div>
 
-      {/* ⚠️ Composing sits ABOVE navigating, and the two share one row. The
-          rail's first control is the one thing a person came to do; search has
-          the whole palette behind it and a shortcut people already know, so it
-          gives up its label rather than its place. */}
-      <div className="mt-1 mb-1 flex shrink-0 items-center gap-1.5">
-        <button
-          type="button"
-          disabled={!slug}
-          title={
-            slug ? undefined : "Open a project before writing an issue for it."
-          }
-          onClick={() =>
-            slug &&
-            void navigate({ to: "/w/$slug/issues/new", params: { slug } })
-          }
-          // ⚠️ A size container, so the ⌘N hint can step aside before the label
-          // has to: at the rail's narrowest there is room for "New issue" or
-          // for the hint, and the words are the one worth keeping.
-          className="hover:bg-foreground/[0.06] bg-foreground/[0.035] @container flex h-[30px] min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors duration-150 disabled:opacity-50"
-        >
-          <HugeiconsIcon
-            icon={PencilEdit02Icon}
-            className="text-muted-foreground size-4 shrink-0"
-            strokeWidth={1.5}
-            aria-hidden="true"
-          />
-          <span className="min-w-0 truncate">New issue</span>
-          <Kbd className="ml-auto hidden shrink-0 @[8.5rem]:inline-flex">
-            ⌘N
-          </Kbd>
-        </button>
+      {/* Search sits where composing used to: the palette behind it reaches
+          New issue too, and ⌘N still opens it straight. */}
+      <div className="mt-1 mb-1 shrink-0">
         <button
           type="button"
           onClick={open}
-          aria-label="Search"
           title="Search — ⌘K"
-          className="hover:bg-foreground/[0.06] bg-foreground/[0.035] flex size-[30px] shrink-0 items-center justify-center rounded-md transition-colors duration-150"
+          // ⚠️ A size container, so the ⌘K hint steps aside before the label
+          // has to at the rail's narrowest.
+          className="hover:bg-foreground/[0.06] bg-foreground/[0.035] text-muted-foreground @container flex h-[30px] w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors duration-150"
         >
           <HugeiconsIcon
             icon={Search01Icon}
-            className="text-muted-foreground size-4"
+            className="size-4 shrink-0"
             strokeWidth={1.5}
             aria-hidden="true"
           />
+          <span className="min-w-0 truncate">Search</span>
+          <Kbd className="ml-auto hidden shrink-0 @[8.5rem]:inline-flex">
+            ⌘K
+          </Kbd>
         </button>
       </div>
 
@@ -251,7 +271,7 @@ export function AppSidebar({
           ⚠️ Pulled into the rail's right padding, so the scrollbar sits on the
           window's edge rather than 10px in from it. The gutter is kept STABLE:
           the 10px bar (app.css) then always takes exactly the padding it
-          replaces, and the rows line up with New issue and Settings whether
+          replaces, and the rows line up with Search and Settings whether
           the list overflows or not. */}
       <RailHover className="-mr-2.5 min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
         {slug && (
@@ -312,85 +332,91 @@ export function AppSidebar({
               />
               <span className="min-w-0 truncate">Files</span>
             </Link>
-            <Link
-              to="/w/$slug/changes"
-              params={{ slug }}
-              className={ROW}
-              activeProps={ACTIVE}
-            >
-              <HugeiconsIcon
-                icon={GitCompareIcon}
-                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              />
-              <span className="min-w-0 truncate">Changes</span>
-              {(added > 0 || removed > 0) && (
-                <span className="ml-auto shrink-0 text-xs tabular-nums">
-                  {added > 0 && (
-                    <span className="text-emerald-600 dark:text-emerald-400">
-                      +{added}
-                    </span>
-                  )}
-                  {added > 0 && removed > 0 && " "}
-                  {removed > 0 && (
-                    <span className="text-rose-600 dark:text-rose-400">
-                      −{removed}
-                    </span>
-                  )}
-                </span>
-              )}
-            </Link>
-            <Link
-              to="/w/$slug/history"
-              params={{ slug }}
-              className={ROW}
-              activeProps={ACTIVE}
-            >
-              <HugeiconsIcon
-                icon={Clock01Icon}
-                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              />
-              <span className="min-w-0 truncate">History</span>
-              {unpushed > 0 && (
-                <span
-                  role="img"
-                  aria-label={unpushedLabel}
-                  title={unpushedLabel}
-                  className="ml-auto flex shrink-0 items-center gap-1 text-xs text-blue-600 tabular-nums dark:text-blue-400"
-                >
-                  <HugeiconsIcon
-                    icon={SquareArrowUp02Icon}
-                    className="size-3.5"
-                    strokeWidth={1.8}
-                    aria-hidden="true"
-                  />
-                  {unpushed > 1 && <span aria-hidden="true">{unpushed}</span>}
-                </span>
-              )}
-            </Link>
-            <Link
-              to="/w/$slug/pulls"
-              params={{ slug }}
-              search={{ tab: "all", status: "open" }}
-              className={ROW}
-              activeProps={ACTIVE}
-            >
-              <HugeiconsIcon
-                icon={GitPullRequestIcon}
-                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              />
-              <span className="min-w-0 truncate">Pull requests</span>
-              {pulls && (
-                <span className="text-muted-foreground ml-auto shrink-0 text-xs tabular-nums">
-                  {pulls.pulls.length}
-                </span>
-              )}
-            </Link>
+            <RefreshMenu onRefresh={() => void openChanges(slug)}>
+              <Link
+                to="/w/$slug/changes"
+                params={{ slug }}
+                className={ROW}
+                activeProps={ACTIVE}
+              >
+                <HugeiconsIcon
+                  icon={GitCompareIcon}
+                  className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 truncate">Changes</span>
+                {(added > 0 || removed > 0) && (
+                  <span className="ml-auto shrink-0 text-xs tabular-nums">
+                    {added > 0 && (
+                      <span className="text-emerald-600 dark:text-emerald-400">
+                        +{added}
+                      </span>
+                    )}
+                    {added > 0 && removed > 0 && " "}
+                    {removed > 0 && (
+                      <span className="text-rose-600 dark:text-rose-400">
+                        −{removed}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </Link>
+            </RefreshMenu>
+            <RefreshMenu onRefresh={() => refreshHistory(slug)}>
+              <Link
+                to="/w/$slug/history"
+                params={{ slug }}
+                className={ROW}
+                activeProps={ACTIVE}
+              >
+                <HugeiconsIcon
+                  icon={Clock01Icon}
+                  className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 truncate">History</span>
+                {unpushed > 0 && (
+                  <span
+                    role="img"
+                    aria-label={unpushedLabel}
+                    title={unpushedLabel}
+                    className="ml-auto flex shrink-0 items-center gap-1 text-xs text-blue-600 tabular-nums dark:text-blue-400"
+                  >
+                    <HugeiconsIcon
+                      icon={SquareArrowUp02Icon}
+                      className="size-3.5"
+                      strokeWidth={1.8}
+                      aria-hidden="true"
+                    />
+                    {unpushed > 1 && <span aria-hidden="true">{unpushed}</span>}
+                  </span>
+                )}
+              </Link>
+            </RefreshMenu>
+            <RefreshMenu onRefresh={() => refreshPulls(slug)}>
+              <Link
+                to="/w/$slug/pulls"
+                params={{ slug }}
+                search={{ tab: "all", status: "open" }}
+                className={ROW}
+                activeProps={ACTIVE}
+              >
+                <HugeiconsIcon
+                  icon={GitPullRequestIcon}
+                  className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 truncate">Pull requests</span>
+                {pulls && (
+                  <span className="text-muted-foreground ml-auto shrink-0 text-xs tabular-nums">
+                    {pulls.pulls.length}
+                  </span>
+                )}
+              </Link>
+            </RefreshMenu>
           </nav>
         )}
         {workspaceKey && slug && (

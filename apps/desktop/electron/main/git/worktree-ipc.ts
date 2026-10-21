@@ -85,25 +85,42 @@ function sideOf(value: unknown): FileSide {
   throw new Error("That is not a side of a file.");
 }
 
+/**
+ * Which of the project's linked folders, by index — primary (0) when absent
+ * (FE-71/D3). Only the Files channels and `status` take one.
+ */
+function folderOf(value: unknown): number {
+  if (value === undefined || value === null) return 0;
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > 255
+  )
+    throw new Error("That is not one of this project's folders.");
+  return value;
+}
+
 /** The repository's top level, or the state that says why there is none. */
 async function repo(
   slug: string,
+  folder = 0,
 ): Promise<{ top: string } | { state: WorktreeState }> {
   const record = await authorizedRecord();
-  const primary = (await readFolders(record))[slug]?.[0] ?? null;
-  const found = await locate(primary);
+  const path = (await readFolders(record))[slug]?.[folder] ?? null;
+  const found = await locate(path);
   return found.kind === "ready" ? { top: found.top } : { state: found };
 }
 
-async function top(slug: string): Promise<string> {
-  const found = await repo(slug);
+async function top(slug: string, folder = 0): Promise<string> {
+  const found = await repo(slug, folder);
   if ("state" in found)
     throw new Error("This project has no local repository to read.");
   return found.top;
 }
 
-async function current(slug: string): Promise<WorktreeState> {
-  const found = await repo(slug);
+async function current(slug: string, folder = 0): Promise<WorktreeState> {
+  const found = await repo(slug, folder);
   return "state" in found ? found.state : status(found.top);
 }
 
@@ -119,21 +136,22 @@ export function registerWorktree(devUrl?: string): void {
   handle(
     worktreeChannels.files,
     devUrl,
-    async (args): Promise<FileListing> => listFiles(await top(slugOf(args[0]))),
+    async (args): Promise<FileListing> =>
+      listFiles(await top(slugOf(args[0]), folderOf(args[1]))),
   );
 
   handle(
     worktreeChannels.dir,
     devUrl,
     async (args): Promise<FileListing> =>
-      listDir(await top(slugOf(args[0])), pathOf(args[1])),
+      listDir(await top(slugOf(args[0]), folderOf(args[2])), pathOf(args[1])),
   );
 
   handle(
     worktreeChannels.view,
     devUrl,
     async (args): Promise<FileView> =>
-      viewFile(await top(slugOf(args[0])), pathOf(args[1])),
+      viewFile(await top(slugOf(args[0]), folderOf(args[2])), pathOf(args[1])),
   );
 
   // A file the chat names, as the Files screen can open it.
@@ -158,7 +176,10 @@ export function registerWorktree(devUrl?: string): void {
   // the menu — Reveal in Finder is the way to them.
   handle(worktreeChannels.openDefault, devUrl, async (args): Promise<void> => {
     const path = pathOf(args[1]);
-    const full = await locateFile(await top(slugOf(args[0])), path);
+    const full = await locateFile(
+      await top(slugOf(args[0]), folderOf(args[2])),
+      path,
+    );
     if (!full) throw new Error("That file is not there any more.");
     const info = await stat(full);
     if (LAUNCHABLE.test(full) || (info.isFile() && (info.mode & 0o111) !== 0))
@@ -170,7 +191,10 @@ export function registerWorktree(devUrl?: string): void {
   // ⚠️ Finder, never `shell.openPath`. Opening a file in its default app runs
   // a `.command` or an `.app` — reading a repository must not execute it.
   handle(worktreeChannels.reveal, devUrl, async (args): Promise<void> => {
-    const full = await locateFile(await top(slugOf(args[0])), pathOf(args[1]));
+    const full = await locateFile(
+      await top(slugOf(args[0]), folderOf(args[2])),
+      pathOf(args[1]),
+    );
     if (!full) throw new Error("That file is not there any more.");
     shell.showItemInFolder(full);
   });
@@ -178,7 +202,8 @@ export function registerWorktree(devUrl?: string): void {
   handle(
     worktreeChannels.status,
     devUrl,
-    async (args): Promise<WorktreeState> => current(slugOf(args[0])),
+    async (args): Promise<WorktreeState> =>
+      current(slugOf(args[0]), folderOf(args[1])),
   );
 
   handle(

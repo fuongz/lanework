@@ -3,6 +3,7 @@ import {
   ArrowRight01Icon,
   PinIcon,
   PinOffIcon,
+  Search01Icon,
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
@@ -64,6 +65,7 @@ import {
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { NO_CHATS, useChatEngines } from "#/stores/chat-engines";
 import { useTerminal } from "#/stores/terminal";
+import { AgentSessionSearch } from "./agent-session-search";
 import { CodexGoalBadge } from "./codex-goal-badge";
 import { RenameAgentDialog } from "./rename-agent-dialog";
 
@@ -334,6 +336,7 @@ export function AgentSessionsNav({
   const openSubagents = useAgentSessions((state) => state.open);
   const setOpenSubagents = useAgentSessions((state) => state.setOpen);
   const [expanded, setExpanded] = useState(false);
+  const [searching, setSearching] = useState(false);
   /** Conversations whose sub-agents are all shown, past the fold (FE-33/D4). */
   const [allSubagents, setAllSubagents] = useState<ReadonlySet<string>>(
     new Set(),
@@ -917,27 +920,45 @@ export function AgentSessionsNav({
             <span className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
               Agents
             </span>
-            {/* A new conversation opens as a chat (FE-62): its model picks
+            <span className="flex items-center gap-0.5">
+              {/* Every conversation by title, past the fold — Claude Code's
+                and Codex's in one list. */}
+              <button
+                type="button"
+                aria-label="Search conversations"
+                title="Search conversations"
+                disabled={sessions.length === 0}
+                onClick={() => setSearching(true)}
+                className="hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+              >
+                <HugeiconsIcon
+                  icon={Search01Icon}
+                  className="size-3.5"
+                  strokeWidth={2}
+                />
+              </button>
+              {/* A new conversation opens as a chat (FE-62): its model picks
                 the CLI, Claude Code or Codex, and its composer starts it. */}
-            <button
-              type="button"
-              aria-label="New conversation"
-              title="New conversation"
-              disabled={!hasFolder}
-              onClick={() =>
-                void navigate({
-                  to: "/w/$slug/agents/chat/new",
-                  params: { slug },
-                })
-              }
-              className="hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
-            >
-              <HugeiconsIcon
-                icon={Add01Icon}
-                className="size-3.5"
-                strokeWidth={2}
-              />
-            </button>
+              <button
+                type="button"
+                aria-label="New conversation"
+                title="New conversation"
+                disabled={!hasFolder}
+                onClick={() =>
+                  void navigate({
+                    to: "/w/$slug/agents/chat/new",
+                    params: { slug },
+                  })
+                }
+                className="hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+              >
+                <HugeiconsIcon
+                  icon={Add01Icon}
+                  className="size-3.5"
+                  strokeWidth={2}
+                />
+              </button>
+            </span>
           </div>
           {shown.map((session) => sessionRow(session))}
           {rest.length > FOLDED && (
@@ -952,6 +973,12 @@ export function AgentSessionsNav({
           )}
         </nav>
       )}
+      <AgentSessionSearch
+        open={searching}
+        onOpenChange={setSearching}
+        sessions={sessions}
+        onPick={openSession}
+      />
       <AlertDialog
         open={confirming !== null}
         onOpenChange={(open) => !open && setConfirming(null)}

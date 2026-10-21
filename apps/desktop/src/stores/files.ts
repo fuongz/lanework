@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
-import type { FileListing, FileView } from "../../shared/worktree";
+import type {
+  FileListing,
+  FileView,
+  WorktreeState,
+} from "../../shared/worktree";
 
 /**
  * Repository › Files (FE-66): the working tree as a tree, and the files open
@@ -28,8 +32,48 @@ export interface FileTab {
   preview: boolean;
 }
 
-/** Tabs per project, so coming back to one finds its files still open. */
+/**
+ * Tabs per project and folder, so coming back to one finds its files still
+ * open. Keyed `slug#folder`: two folders' paths are never the same files.
+ */
 const tabMemory = new Map<string, { tabs: FileTab[]; active: string | null }>();
+const memoryKey = (slug: string, folder: number) => `${slug}#${folder}`;
+
+/**
+ * The folder Files last showed, per project, by its PATH (FE-71/D4) — an
+ * index would point at a different folder once one before it is removed. A
+ * path no longer linked falls back to the primary.
+ */
+const FOLDER_KEY = "lanework:files-folder";
+
+function readSavedFolders(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(FOLDER_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, string>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export function savedFolder(slug: string): string | null {
+  const path = readSavedFolders()[slug];
+  return typeof path === "string" ? path : null;
+}
+
+export function saveFolder(slug: string, path: string | null): void {
+  try {
+    const { [slug]: _, ...rest } = readSavedFolders();
+    localStorage.setItem(
+      FOLDER_KEY,
+      JSON.stringify(path ? { ...rest, [slug]: path } : rest),
+    );
+  } catch {
+    // Remembering is a convenience; the switch already happened.
+  }
+}
 
 /** A slow answer about one project must not land on another, or on a later read. */
 let ticket = 0;
@@ -39,6 +83,14 @@ const reading = new Set<string>();
 
 interface FilesStore {
   slug: string | null;
+  /** Which linked folder is on screen, by index; 0 is the primary (FE-71). */
+  folder: number;
+  /**
+   * `git status` of a NON-primary folder, read here because the worktree
+   * store is the primary's — Changes and the rail read it (FE-71/D1). Null
+   * for the primary.
+   */
+  folderStatus: WorktreeState | null;
   /** The top read: git's list, ignored folders unread. */
   base: FileListing | null;
   /** Directories read since, by their path (`node_modules/`). */
@@ -53,7 +105,7 @@ interface FilesStore {
   rendered: Record<string, boolean>;
   quickOpen: boolean;
 
-  open: (slug: string) => Promise<void>;
+  open: (slug: string, folder?: number) => Promise<void>;
   refresh: () => Promise<void>;
   loadDir: (dir: string) => Promise<void>;
   /** A single click: a preview tab. `pin` keeps it (a double click, Quick Open). */
@@ -72,15 +124,16 @@ interface FilesStore {
 
 export const useFiles = create<FilesStore>((set, get) => {
   async function readView(slug: string, path: string): Promise<void> {
+    const folder = get().folder;
     try {
-      const view = await api().view(slug, path);
-      if (get().slug !== slug) return;
+      const view = await api().view(slug, path, folder);
+      if (get().slug !== slug || get().folder !== folder) return;
       set((state) => {
         const { [path]: _, ...viewErrors } = state.viewErrors;
         return { views: { ...state.views, [path]: view }, viewErrors };
       });
     } catch (error) {
-      if (get().slug !== slug) return;
+      if (get().slug !== slug || get().folder !== folder) return;
       set((state) => ({
         viewErrors: {
           ...state.viewErrors,
@@ -91,18 +144,20 @@ export const useFiles = create<FilesStore>((set, get) => {
   }
 
   function remember() {
-    const { slug, tabs, active } = get();
-    if (slug) tabMemory.set(slug, { tabs, active });
+    const { slug, folder, tabs, active } = get();
+    if (slug) tabMemory.set(memoryKey(slug, folder), { tabs, active });
   }
 
-  /** Make `slug` the project on screen, with the tabs it had last time. */
-  function switchTo(slug: string) {
-    if (get().slug === slug) return;
+  /** Make `slug`'s `folder` the one on screen, with the tabs it had last time. */
+  function switchTo(slug: string, folder: number) {
+    if (get().slug === slug && get().folder === folder) return;
     remember();
-    const kept = tabMemory.get(slug);
+    const kept = tabMemory.get(memoryKey(slug, folder));
     reading.clear();
     set({
       slug,
+      folder,
+      folderStatus: null,
       base: null,
       loaded: {},
       error: null,
@@ -117,6 +172,8 @@ export const useFiles = create<FilesStore>((set, get) => {
 
   return {
     slug: null,
+    folder: 0,
+    folderStatus: null,
     base: null,
     loaded: {},
     loading: false,
@@ -128,26 +185,37 @@ export const useFiles = create<FilesStore>((set, get) => {
     rendered: {},
     quickOpen: false,
 
-    open: async (slug) => {
-      switchTo(slug);
+    open: async (slug, folder = 0) => {
+      switchTo(slug, folder);
       await get().refresh();
     },
 
     refresh: async () => {
-      const slug = get().slug;
+      const { slug, folder } = get();
       if (!slug) return;
       const mine = ++ticket;
       set({ loading: true });
       try {
+        // A non-primary folder answers for itself whether it is a repository
+        // at all; the primary's answer is the worktree store's.
+        if (folder > 0) {
+          const folderStatus = await api().status(slug, folder);
+          if (mine !== ticket || get().slug !== slug) return;
+          set({ folderStatus });
+          if (folderStatus.kind !== "ready") {
+            set({ base: null, loaded: {}, loading: false, error: null });
+            return;
+          }
+        }
         // ⚠️ The folders somebody opened are read again with the top, so a
         // refresh never folds `node_modules/` shut under them. One that has
         // gone since is simply dropped.
         const dirs = Object.keys(get().loaded);
         const [base, ...again] = await Promise.all([
-          api().files(slug),
+          api().files(slug, folder),
           ...dirs.map((dir) =>
             api()
-              .dir(slug, dir)
+              .dir(slug, dir, folder)
               .catch(() => null),
           ),
         ]);
@@ -172,12 +240,12 @@ export const useFiles = create<FilesStore>((set, get) => {
     },
 
     loadDir: async (dir) => {
-      const slug = get().slug;
+      const { slug, folder } = get();
       if (!slug || get().loaded[dir] || reading.has(dir)) return;
       reading.add(dir);
       try {
-        const listing = await api().dir(slug, dir);
-        if (get().slug !== slug) return;
+        const listing = await api().dir(slug, dir, folder);
+        if (get().slug !== slug || get().folder !== folder) return;
         set((state) => ({ loaded: { ...state.loaded, [dir]: listing } }));
       } catch {
         // A folder that vanished or points out of the repository stays empty;
@@ -218,7 +286,11 @@ export const useFiles = create<FilesStore>((set, get) => {
     },
 
     reveal: (slug, path) => {
-      switchTo(slug);
+      // A chat names a path in the primary's repository (`locate` reads it),
+      // so the file opens there — and the choice is cleared, or Files would
+      // switch back to the remembered folder on arrival.
+      saveFolder(slug, null);
+      switchTo(slug, 0);
       get().openFile(path, true);
     },
 

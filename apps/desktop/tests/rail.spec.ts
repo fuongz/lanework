@@ -339,12 +339,14 @@ test("at its narrowest the rail keeps every label on one line, and a ghost butto
     expect(await width(page)).toBeGreaterThan(175);
 
     // One line each: a row keeps its 30px however little room its label has.
-    const newIssue = page.getByRole("button", { name: /^New issue/ });
-    expect((await newIssue.boundingBox())?.height ?? 99).toBeLessThan(32);
-    const label = newIssue.getByText("New issue", { exact: true });
+    const search = page
+      .getByTestId("sidebar")
+      .getByRole("button", { name: /^Search/ });
+    expect((await search.boundingBox())?.height ?? 99).toBeLessThan(32);
+    const label = search.getByText("Search", { exact: true });
     expect((await label.boundingBox())?.height ?? 99).toBeLessThan(20);
-    // ⌘N steps aside so the words can stay.
-    await expect(newIssue.locator("kbd")).toBeHidden();
+    // ⌘K steps aside so the word can stay.
+    await expect(search.locator("kbd")).toBeHidden();
     for (const name of ["Issues", "Pull requests", "Settings"]) {
       const row = page.getByRole("link", { name: new RegExp(`^${name}`) });
       expect((await row.boundingBox())?.height ?? 99, name).toBeLessThan(32);

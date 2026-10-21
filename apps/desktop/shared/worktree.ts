@@ -227,14 +227,20 @@ export const worktreeChannels = {
  * files — from being a way to delete anything else.
  */
 export interface DesktopWorktreeApi {
-  /** The working tree for Repository › Files (FE-66), ignored folders unread. */
-  files: (slug: string) => Promise<FileListing>;
+  /**
+   * The working tree for Repository › Files (FE-66), ignored folders unread.
+   *
+   * ⚠️ `folder` on the Files channels is the INDEX of one of the project's
+   * linked folders, primary = 0 and the default (FE-71/D3) — never a path.
+   * Main looks the folder up in what this machine wrote down.
+   */
+  files: (slug: string, folder?: number) => Promise<FileListing>;
   /** One directory's own entries; every subdirectory comes back `lazy`. */
-  dir: (slug: string, path: string) => Promise<FileListing>;
+  dir: (slug: string, path: string, folder?: number) => Promise<FileListing>;
   /** One file of the working tree, or why it cannot be shown. */
-  view: (slug: string, path: string) => Promise<FileView>;
+  view: (slug: string, path: string, folder?: number) => Promise<FileView>;
   /** Show one file of the working tree in Finder / Explorer. */
-  reveal: (slug: string, path: string) => Promise<void>;
+  reveal: (slug: string, path: string, folder?: number) => Promise<void>;
   /**
    * A path as somebody wrote it — relative to the project's folder, to the
    * repository, absolute, or a bare name — as the repository path of the one
@@ -245,8 +251,8 @@ export interface DesktopWorktreeApi {
    * Open a file or folder of the working tree in its default app. Refused for
    * anything that would RUN — an app, a script, an executable.
    */
-  openDefault: (slug: string, path: string) => Promise<void>;
-  status: (slug: string) => Promise<WorktreeState>;
+  openDefault: (slug: string, path: string, folder?: number) => Promise<void>;
+  status: (slug: string, folder?: number) => Promise<WorktreeState>;
   patch: (slug: string) => Promise<WorktreePatch>;
   /** One side of one file in full, or null when that side does not exist. */
   fileText: (
