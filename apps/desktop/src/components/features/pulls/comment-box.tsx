@@ -22,7 +22,7 @@ export function CommentBox({ number }: { number: number }) {
   const busy = usePulls((state) => state.commentBusy);
   const postComment = usePulls((state) => state.postComment);
   const account = usePulls((state) => state.account);
-  const login = account.kind === "connected" ? account.login : null;
+  const login = account.kind === "ok" ? account.login : null;
 
   const ready = body.trim() !== "" && !busy;
 

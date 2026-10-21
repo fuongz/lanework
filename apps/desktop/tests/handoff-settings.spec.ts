@@ -265,7 +265,7 @@ test("Codex: a rollout becomes the card, request, files and commands", () => {
         content: [
           {
             type: "text",
-            text: "resume FE-29, token sk-ant-api03-" + "x".repeat(40),
+            text: `resume FE-29, token sk-ant-api03-${"x".repeat(40)}`,
           },
         ],
       },

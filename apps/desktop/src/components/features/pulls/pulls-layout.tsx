@@ -1,6 +1,7 @@
 import { Outlet, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { usePanelRef } from "react-resizable-panels";
+import { PullsList } from "#/components/shared/pulls/pulls-list";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -9,7 +10,6 @@ import {
 } from "#/components/ui/resizable";
 import { useLayout } from "#/stores/layout";
 import { usePulls } from "#/stores/pulls";
-import { PullsList } from "./pulls-list";
 
 /**
  * The pull-request screen: a list that stays, and one pull request beside it.

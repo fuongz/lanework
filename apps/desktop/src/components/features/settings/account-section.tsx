@@ -46,7 +46,11 @@ export function AccountSection() {
    * beside the email, the machine's beside its name. The IDs are what
    * support asks for, and too long to be worth a row of their own.
    */
-  const withCopy = (value: string, id: string | null | undefined, what: string) => (
+  const withCopy = (
+    value: string,
+    id: string | null | undefined,
+    what: string,
+  ) => (
     <div className="flex items-center gap-1">
       <SettingsValue>{value}</SettingsValue>
       {id && (

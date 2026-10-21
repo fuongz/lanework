@@ -4,6 +4,7 @@ import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
+import { PullsListControls } from "#/components/shared/pulls/pulls-list";
 import {
   Empty,
   EmptyDescription,
@@ -11,14 +12,13 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
-import { usePulls } from "#/stores/pulls";
-import { PullsListControls } from "./pulls-list";
+import { canReadPulls, usePulls } from "#/stores/pulls";
 
 /** The right pane before a pull request is chosen. */
 export function PullsEmpty() {
   const account = usePulls((state) => state.account);
   const repo = usePulls((state) => state.repo);
-  const connected = account.kind === "connected" && repo?.kind === "linked";
+  const connected = canReadPulls(account, repo);
 
   return (
     <div className="flex min-w-0 flex-1 items-center justify-center">
@@ -36,12 +36,12 @@ export function PullsEmpty() {
             <HugeiconsIcon icon={GitPullRequestIcon} strokeWidth={1.8} />
           </EmptyMedia>
           <EmptyTitle>
-            {connected ? "No pull request open" : "Not connected yet"}
+            {connected ? "No pull request open" : "Not set up yet"}
           </EmptyTitle>
           <EmptyDescription>
             {connected
               ? "Pick one from the list to read its diff."
-              : "Connect GitHub and a repository to see pull requests here."}
+              : "Pull requests show here once the GitHub CLI can read this project's repo."}
           </EmptyDescription>
         </EmptyHeader>
       </Empty>

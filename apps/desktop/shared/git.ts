@@ -1,5 +1,5 @@
 /**
- * Connecting a project to a git host, and reading its pull requests.
+ * Reading a project's pull requests through the GitHub CLI (`gh`).
  *
  * ⚠️ GitHub, and it says so. The names here are host-neutral (`RepoRef`,
  * `PullRequest`) so a second host would not force the renderer to be rewritten,
@@ -7,6 +7,11 @@
  * exactly one implementation is wrong in some way nobody can see until the
  * second one arrives. The board already speaks GitHub — `BoardAssignees.users`
  * is a GitHub login — so this is the host that matches the data we hold.
+ *
+ * ⚠️ This app holds NO GitHub credential and stores NOTHING about GitHub (FE-73).
+ * `gh` owns the login; main runs it. The repo is read from the project's linked
+ * folder every time it is asked for, and the fork/parent choice lives only in
+ * the running session.
  */
 
 /**
@@ -30,19 +35,21 @@ export function formatRepoRef(ref: RepoRef): string {
 /**
  * GitHub's own rule for what an owner and a repo may be called, mirrored.
  *
- * ⚠️ Strict on purpose. This is the ONE value that crosses from the renderer
- * into a URL the main process fetches, so it is validated where it arrives
- * rather than trusted — see `DesktopGitApi`. Anything with a slash, a dot
- * segment or a scheme in it is not a repo name and must not become a path.
+ * ⚠️ Strict on purpose. The value comes from a folder's `origin` remote — text
+ * on disk this app did not write — and ends up in arguments handed to `gh`, so
+ * it is validated where it is read rather than trusted. Anything with a slash,
+ * a dot segment or a scheme in it is not a repo name and must not become one.
  */
 const REPO_REF = /^([A-Za-z0-9][\w.-]*)\/([\w.-]+)$/;
 
 /**
  * `owner/repo` as a `RepoRef`, or null.
  *
- * Accepts what a person is likely to paste — a full GitHub URL, a `.git` suffix,
- * an `scp`-style remote — because the alternative is a user who can see their
- * repo on screen being told the name is invalid.
+ * Accepts every shape a GitHub remote takes — a full URL, a `.git` suffix, an
+ * `scp`-style remote.
+ *
+ * ⚠️ It does not check the HOST: `https://gitlab.com/x` parses as `gitlab.com/x`.
+ * A caller reading a remote must confirm it points at github.com first.
  */
 export function parseRepoRef(raw: string): RepoRef | null {
   let value = raw.trim();
@@ -67,106 +74,65 @@ export function parseRepoRef(raw: string): RepoRef | null {
 }
 
 /**
- * Who this machine is connected to GitHub as.
+ * What the GitHub CLI says about this machine.
  *
- * ⚠️ There is no field for the token, for the same reason `RedactedSession` has
- * none: this object crosses into a web origin, and a token readable by anything
- * that achieves script execution in the renderer is a token that has leaked.
- * The renderer gets to know THAT it is connected and AS WHOM, never the secret.
+ * - `missing`: `gh` is not installed (or not on the PATH main can see).
+ * - `logged-out`: `gh` is there, but `gh auth status` has no usable login.
+ * - `unreachable`: `gh` is there, but GitHub did not answer (offline, DNS,
+ *   timeout). The next step is the network, not `gh auth login`.
+ * - `ok`: signed in to github.com as `login`.
+ *
+ * ⚠️ There is no field for the token, and main never reads it: `gh` makes every
+ * request itself. This object crosses into a web origin, and a token readable
+ * by anything that achieves script execution in the renderer is a token that
+ * has leaked. The renderer gets to know THAT `gh` works and AS WHOM.
  */
 export type GitAccount =
-  | { kind: "none" }
-  | {
-      kind: "connected";
-      login: string;
-      name: string | null;
-      avatarUrl: string | null;
-    }
-  /**
-   * We hold a token GitHub no longer accepts — expired, revoked, or the app's
-   * access was removed. Distinct from `none` because there is something on disk
-   * to clean up, and because "reconnect" and "connect" are different sentences.
-   */
-  | { kind: "expired"; login: string | null };
+  | { kind: "missing" }
+  | { kind: "logged-out" }
+  | { kind: "unreachable" }
+  | { kind: "ok"; login: string; avatarUrl: string | null };
 
 /**
- * Whether a project has a repo, and what to offer when it does not.
+ * Which of the two repos a fork-checkout reads pull requests from.
  *
- * ⚠️ `suggestion` is read from the linked folder's `origin` remote and is an
- * OFFER, never a link. A project that silently attached itself to whatever
- * remote a folder happened to have is one that will eventually show somebody
- * another team's pull requests.
+ * `self` is the folder's own `origin`; `parent` is the repo it was forked from.
+ */
+export type RepoSide = "self" | "parent";
+
+/**
+ * The repo a project reads pull requests from, detected from its linked folder.
+ *
+ * - `no-folder`: the project has no local folder on this machine.
+ * - `not-github`: the folder is not a git checkout with a GitHub `origin`.
+ * - `detected`: `repo` is the folder's `origin`; `parent` is what GitHub says it
+ *   was forked from, or null; `selected` is the side reads go to.
+ *
+ * ⚠️ Detected, never stored. Nothing about this is written to disk: the folder
+ * is the source of truth, and a choice of `parent` lasts as long as the session
+ * (`selectRepo`). See `selectedRepo` for the one repo reads actually use.
  */
 export type RepoState =
-  | { kind: "none"; suggestion: RepoRef | null }
-  | { kind: "linked"; repo: RepoRef };
+  | { kind: "no-folder" }
+  | { kind: "not-github" }
+  | {
+      kind: "detected";
+      repo: RepoRef;
+      parent: RepoRef | null;
+      selected: RepoSide;
+    };
 
 /**
- * One repository the connected account can reach, for the picker.
+ * The repo reads go to, or null when there is none.
  *
- * ⚠️ Deliberately thin. This list exists to be SEARCHED and clicked, so it
- * carries what a person picks by — the name, whether it is private, when it
- * last moved — and nothing that would make it worth caching or keeping in step
- * with anything.
+ * ⚠️ `parent` falls back to `repo` when there is no parent, so a stale choice
+ * can never resolve to nothing.
  */
-export interface RepoOption {
-  owner: string;
-  repo: string;
-  /** `owner/repo`, precomputed because every row and every filter wants it. */
-  fullName: string;
-  private: boolean;
-  /** Last push, so the list can lead with what somebody is actually working on. */
-  pushedAt: string | null;
-}
-
-/**
- * What the account can see, and whether that is all of it.
- *
- * ⚠️ `capped` is reported rather than swallowed, the same rule
- * `LocalFolderSummary` follows. This list stops at `MAX_REPO_OPTIONS`, and a
- * picker that silently ended early would make somebody conclude their repo is
- * not there — when it is, just past the cut.
- */
-export interface RepoOptions {
-  repos: RepoOption[];
-  capped: boolean;
-}
-
-/**
- * How many repositories the picker loads.
- *
- * ⚠️ A cap, not a guess at how many exist. These arrive 100 per request, and an
- * account in a large organization can reach thousands; three round trips is
- * what a picker is worth. Typing the name still works past the cap.
- */
-export const MAX_REPO_OPTIONS = 300;
-
-/**
- * One place this GitHub App is installed, as the account sees it.
- *
- * ⚠️ `id` is what travels back to main to open a configuration page, never a
- * URL. A channel that opened a URL the renderer named would open anything; main
- * builds the address itself from an id it has just verified belongs to this
- * account — the same rule the folder chooser follows for paths.
- */
-export interface GitInstallation {
-  id: number;
-  /** The user or organisation the app is installed on. */
-  account: string;
-}
-
-/**
- * Where this app's access comes from, so the screen can offer to widen it.
- *
- * ⚠️ There is deliberately NO "can this be configured" flag. There was one, and
- * it hid the button in the exact case that needed it: a classic OAuth App's
- * token is refused by `GET /user/installations`, so "we could not list
- * installations" was being read as "there is nothing to configure" — when the
- * real answer for that app is a different GitHub page, not no page. An empty
- * list here means "ask GitHub a different way", never "give up".
- */
-export interface GitAppAccess {
-  installations: GitInstallation[];
+export function selectedRepo(state: RepoState | null): RepoRef | null {
+  if (state?.kind !== "detected") return null;
+  return state.selected === "parent" && state.parent
+    ? state.parent
+    : state.repo;
 }
 
 /**
@@ -470,17 +436,10 @@ export interface PullActivity {
 
 export const gitChannels = {
   account: "git:account",
-  connect: "git:connect",
-  connectProgress: "git:connect:progress",
-  connectCancel: "git:connect:cancel",
-  disconnect: "git:disconnect",
+  check: "git:account:check",
   accountChanged: "git:account:changed",
   repo: "git:repo",
-  repoOptions: "git:repo:options",
-  appAccess: "git:app:access",
-  openAppConfig: "git:app:configure",
-  linkRepo: "git:repo:link",
-  unlinkRepo: "git:repo:unlink",
+  selectRepo: "git:repo:select",
   pulls: "git:pulls",
   pull: "git:pull",
   commits: "git:pull:commits",
@@ -493,82 +452,36 @@ export const gitChannels = {
 } as const;
 
 /**
- * What a device-flow connection reports while a human is off approving it.
- *
- * ⚠️ The same shape `SignInProgress` uses for the control plane's device mode,
- * because it is the same flow: a code to read out and a URL to open. Stated
- * again here rather than imported so the two can diverge without one of them
- * silently changing the other's screen.
- */
-export interface GitConnectProgress {
-  userCode: string;
-  verificationUri: string;
-  /** Poll interval GitHub asked for, in seconds. Honour it or it answers 429. */
-  interval: number;
-  expiresIn: number;
-}
-
-/**
  * The pull-request surface.
  *
  * ⚠️ Every read is keyed by `slug` — the project — and never by a repo the
- * renderer names. The one call that takes `owner/repo` is `linkRepo`, where a
- * human just typed it; it is validated there and written down, and every read
- * afterwards resolves the repo from the slug in main. This is the same rule
+ * renderer names. Main resolves the repo from the project's linked folder (and
+ * the session's `selectRepo` choice) on every call. This is the same rule
  * `DesktopFolderApi` states for paths, for the same reason: a channel that
  * fetches whatever the renderer names is a channel that fetches anything.
  */
 export interface DesktopGitApi {
-  /** Who we are connected as. Answers `{ kind: "none" }` when nobody. */
+  /** What `gh` last reported. Cheap: answers the cached status when it has one. */
   account: () => Promise<GitAccount>;
   /**
-   * Start the GitHub device flow and resolve when it finishes.
+   * Run `gh` again and answer what it says now.
    *
-   * ⚠️ Resolves on the ACCOUNT, not on the token. The code a human has to type
-   * arrives separately on `onConnectProgress`, because it exists before this
-   * promise settles and the screen has to show it for minutes.
+   * ⚠️ The app never logs in for anybody — `gh auth login` is run by the person
+   * in a terminal. This is the "I did it, look again" button, and it also fires
+   * `onAccountChange` when the answer moved.
    */
-  connect: () => Promise<GitAccount>;
-  cancelConnect: () => Promise<void>;
-  /** Forget the token on this machine. Repo links survive; they are not secret. */
-  disconnect: () => Promise<GitAccount>;
-  onConnectProgress: (
-    listener: (progress: GitConnectProgress) => void,
-  ) => () => void;
+  check: () => Promise<GitAccount>;
   onAccountChange: (listener: (account: GitAccount) => void) => () => void;
+  /** The repo detected from this project's folder, with the session's choice. */
   repo: (slug: string) => Promise<RepoState>;
   /**
-   * Every repository this connection can reach, newest push first.
+   * Read pull requests from the folder's own repo or from its fork parent.
    *
-   * ⚠️ Not keyed by project, unlike everything else here: it is a property of
-   * the ACCOUNT, and the screen that asks for it is the one deciding which
-   * project becomes which repo. Loaded on demand — nothing reads this until a
-   * person opens the picker.
+   * ⚠️ For this session only — nothing is written down. Choosing `parent` on a
+   * repo with no parent answers `self`. Answers the state, so a caller never
+   * has to guess what took effect.
    */
-  repoOptions: () => Promise<RepoOptions>;
-  /** Where this app is installed, so the screen can offer to widen its access. */
-  appAccess: () => Promise<GitAppAccess>;
-  /**
-   * Open GitHub's own page for choosing which repositories this app may see.
-   *
-   * ⚠️ Takes an installation ID or null, NOT a URL. Main resolves it against the
-   * installations this account actually has and builds the address itself;
-   * `null` means "the page for adding a new one".
-   *
-   * ⚠️ Opens the OS browser rather than a window inside this app. The person is
-   * already signed in there, and a GitHub session living inside an Electron
-   * window is a credential this app would then be holding on their behalf.
-   */
-  openAppConfig: (installationId: number | null) => Promise<void>;
-  /**
-   * Point a project at a repo. ONE repo per project.
-   *
-   * ⚠️ Takes the raw string a human typed, not a `RepoRef`: parsing it in main
-   * is what makes main the only place that decides what a repo name may be.
-   * Answers the state, so a caller never has to guess what was stored.
-   */
-  linkRepo: (slug: string, raw: string) => Promise<RepoState>;
-  unlinkRepo: (slug: string) => Promise<RepoState>;
+  selectRepo: (slug: string, side: RepoSide) => Promise<RepoState>;
   /**
    * This project's open pull requests.
    *

@@ -133,14 +133,6 @@ const worktree: DesktopWorktreeApi = {
     ipcRenderer.invoke(worktreeChannels.switchBranch, slug, name),
 };
 
-/**
- * The GitHub surface.
- *
- * ⚠️ Nothing here can return the token, and nothing here takes a repository to
- * fetch from. Every read names a PROJECT; main resolves that to the repo it
- * wrote down itself. `linkRepo` is the single exception and it takes the raw
- * string a human typed, which main parses before it becomes part of any URL.
- */
 /** Settings → Notifications, and where a clicked one leads (FE-70). */
 const notifications: DesktopNotificationsApi = {
   get: () => ipcRenderer.invoke(notificationChannels.get),
@@ -307,23 +299,20 @@ const laneworkMcp: DesktopLaneworkMcpApi = {
   login: (agent) => ipcRenderer.invoke(laneworkMcpChannels.login, agent),
 };
 
+/**
+ * The GitHub surface, run through `gh` in main.
+ *
+ * Nothing here takes a repository. Every read names a PROJECT, and main
+ * finds the repo from that project's folder.
+ */
 const git: DesktopGitApi = {
   account: () => ipcRenderer.invoke(gitChannels.account),
-  connect: () => ipcRenderer.invoke(gitChannels.connect),
-  cancelConnect: () => ipcRenderer.invoke(gitChannels.connectCancel),
-  disconnect: () => ipcRenderer.invoke(gitChannels.disconnect),
-  onConnectProgress: (listener) =>
-    subscribe(gitChannels.connectProgress, listener),
+  check: () => ipcRenderer.invoke(gitChannels.check),
   onAccountChange: (listener) =>
     subscribe(gitChannels.accountChanged, listener),
   repo: (slug) => ipcRenderer.invoke(gitChannels.repo, slug),
-  repoOptions: () => ipcRenderer.invoke(gitChannels.repoOptions),
-  appAccess: () => ipcRenderer.invoke(gitChannels.appAccess),
-  // ⚠️ An installation id or null — never a URL. See `DesktopGitApi`.
-  openAppConfig: (installationId) =>
-    ipcRenderer.invoke(gitChannels.openAppConfig, installationId),
-  linkRepo: (slug, raw) => ipcRenderer.invoke(gitChannels.linkRepo, slug, raw),
-  unlinkRepo: (slug) => ipcRenderer.invoke(gitChannels.unlinkRepo, slug),
+  selectRepo: (slug, side) =>
+    ipcRenderer.invoke(gitChannels.selectRepo, slug, side),
   // ⚠️ `refresh` is passed through as a boolean rather than omitted: the
   // handler validates on argument COUNT, the same rule `board.move` follows.
   pulls: (slug, status, refresh) =>

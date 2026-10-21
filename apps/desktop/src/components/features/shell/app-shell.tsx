@@ -9,13 +9,13 @@ import {
   useState,
 } from "react";
 import { usePanelRef } from "react-resizable-panels";
-import { AgentUsageStrip } from "#/components/features/terminal/agent-usage-strip";
 import { PortsStrip } from "#/components/features/terminal/ports-strip";
 import { TerminalMinibar } from "#/components/features/terminal/terminal-minibar";
 import { TerminalPanel } from "#/components/features/terminal/terminal-panel";
 import { useTerminalSessions } from "#/components/features/terminal/use-terminal-sessions";
 import { HarnessIsland } from "#/components/shared/agents/harness-island";
 import { WindowTitlebarHost } from "#/components/shared/navigation/window-titlebar";
+import { AgentUsageStrip } from "#/components/shared/terminal/agent-usage-strip";
 import {
   ResizableHandle,
   ResizablePanel,

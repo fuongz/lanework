@@ -9,12 +9,10 @@ import { appHomeDir } from "../paths";
 /**
  * Include the origin so identical IDs on another control plane cannot share state.
  *
- * ⚠️ Exported so state OUTSIDE this folder is filed under the same key — the
- * GitHub connection in `../git/store.ts` is per Lanework account for the same
- * reason a folder link is. A second copy of this function would eventually
- * disagree, and then one account would be reading another's rows.
+ * NOTE: Anything else filed per Lanework account must reuse this function. A
+ * second copy would drift, and one account would read another's rows.
  */
-export function accountKey(record: MachineRecord): string {
+function accountKey(record: MachineRecord): string {
   return createHash("sha256")
     .update(
       JSON.stringify([

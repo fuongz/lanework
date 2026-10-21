@@ -42,7 +42,7 @@ import {
 } from "#/components/ui/dropdown-menu";
 import { Switch } from "#/components/ui/switch";
 import { cn } from "#/lib/utils";
-import { useModels } from "./use-models";
+import { useModels } from "./composer.models";
 
 /** A pill in the composer's bottom row (ảnh 7). */
 const PILL =

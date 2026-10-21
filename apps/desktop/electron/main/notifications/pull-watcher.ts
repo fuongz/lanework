@@ -1,6 +1,7 @@
-// New pull requests on a linked repository (FE-70): every two minutes, while
-// the notification is on, read each linked repo's open list and notify for
-// what was not there before.
+// New pull requests on a project's repository (FE-70): every two minutes,
+// while the notification is on, read the open list of each project's GitHub
+// repo through `gh` and notify for what was not there before. A rate limit
+// on `gh` pauses the reads for every caller; see `git/gh.ts`.
 import { formatRepoRef, type PullsView } from "../../../shared/git";
 import { notificationsOn, notify } from "./index";
 
@@ -46,9 +47,9 @@ function check(slug: string, view: PullsView): void {
     }
     if (seen.ready.has(pull.number)) continue;
     seen.ready.add(pull.number);
-    // ⚠️ The list is the 50 most recently UPDATED: an old pull request that
-    // was past the cut and gets a push shows up here for the first time. Its
-    // age, not its absence, is what says it is not new.
+    // NOTE: the list is capped at 50, so an old pull request can enter it
+    // for the first time when a newer one closes. Its age, not its absence
+    // before, is what says it is not new.
     const fresh =
       Date.parse(pull.createdAt) > seen.since || seen.drafts.has(pull.number);
     seen.drafts.delete(pull.number);
@@ -87,7 +88,10 @@ async function poll(
   }
 }
 
-/** `read` answers every linked repo's open pull requests, fresh. */
+/**
+ * `read` answers each project repo's open pull requests, fresh. It answers
+ * nothing while `gh` is rate limited, missing or signed out.
+ */
 export function startPullWatcher(
   read: () => Promise<{ slug: string; view: PullsView }[]>,
 ): void {

@@ -3,8 +3,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useState } from "react";
 import type { Workspace } from "#/../shared/workspaces";
 import { ImportLocalDialog } from "#/components/features/workspaces/import-local-dialog";
-import { RenameProjectDialog } from "#/components/features/workspaces/rename-project-dialog";
-import { SourceFoldersDialog } from "#/components/features/workspaces/source-folders-dialog";
 import {
   isMovedWorkspace,
   useSyncToCloud,
@@ -13,6 +11,8 @@ import {
   SETTINGS_BUTTON,
   SettingsPage,
 } from "#/components/shared/settings/settings-page";
+import { RenameProjectDialog } from "#/components/shared/workspaces/rename-project-dialog";
+import { SourceFoldersDialog } from "#/components/shared/workspaces/source-folders-dialog";
 import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert";
 import {
   AlertDialog,
@@ -28,7 +28,6 @@ import { Button } from "#/components/ui/button";
 import { useBoard } from "#/stores/board";
 import { isLocalWorkspace, useSession } from "#/stores/session";
 import { useSettingsProject } from "#/stores/settings-project";
-import { ProjectRepoRow } from "./project-repo-row";
 import { Row, SelectedProjectSection } from "./selected-project-section";
 
 const NONE: Workspace[] = [];
@@ -159,7 +158,7 @@ export function WorkspacesSection() {
             title: "Project",
             hideTitle: true,
             keywords:
-              "project rename folders repository repo github disconnect import danger remove all issues purge delete clear reset ready readiness sync cloud",
+              "project rename folders import danger remove all issues purge delete clear reset ready readiness sync cloud",
             content: (
               <SelectedProjectSection
                 // A fresh section per project, so a "Removed 12 issues" line
@@ -172,46 +171,33 @@ export function WorkspacesSection() {
                 onImport={setImporting}
                 onDelete={setConfirming}
                 onFailed={setFailed}
-                dangerRows={
-                  selected && (
-                    <ProjectRepoRow
-                      key={selected.slug}
-                      slug={selected.slug}
-                      onFailed={setFailed}
-                    />
-                  )
-                }
                 extraRows={
-                  <>
-                    {canSync && selected ? (
-                      <Row
-                        label="Sync to cloud"
-                        description="Move this project and its board to your account."
+                  canSync && selected ? (
+                    <Row
+                      label="Sync to cloud"
+                      description="Move this project and its board to your account."
+                    >
+                      <Button
+                        size="lg"
+                        className={SETTINGS_BUTTON}
+                        variant="outline"
+                        aria-label={`Sync ${selected.name} to cloud`}
+                        disabled={syncing !== null}
+                        onClick={() => {
+                          setFailed(null);
+                          void sync(selected);
+                        }}
                       >
-                        <Button
-                          size="lg"
-                          className={SETTINGS_BUTTON}
-                          variant="outline"
-                          aria-label={`Sync ${selected.name} to cloud`}
-                          disabled={syncing !== null}
-                          onClick={() => {
-                            setFailed(null);
-                            void sync(selected);
-                          }}
-                        >
-                          <HugeiconsIcon
-                            icon={CloudUploadIcon}
-                            strokeWidth={1.8}
-                            data-icon="inline-start"
-                            aria-hidden="true"
-                          />
-                          {syncing === selected.id
-                            ? "Moving…"
-                            : "Sync to cloud"}
-                        </Button>
-                      </Row>
-                    ) : null}
-                  </>
+                        <HugeiconsIcon
+                          icon={CloudUploadIcon}
+                          strokeWidth={1.8}
+                          data-icon="inline-start"
+                          aria-hidden="true"
+                        />
+                        {syncing === selected.id ? "Moving…" : "Sync to cloud"}
+                      </Button>
+                    </Row>
+                  ) : null
                 }
               />
             ),

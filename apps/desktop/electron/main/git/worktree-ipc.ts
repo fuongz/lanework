@@ -15,7 +15,7 @@ import {
   worktreeChannels,
 } from "../../../shared/worktree";
 import { handle } from "../ipc";
-import { authorizedRecord } from "../workspaces";
+import { knownWorkspace } from "../workspaces";
 import { readFolders } from "../workspaces/store";
 import {
   branches,
@@ -45,6 +45,18 @@ import {
  * machine wrote down — the same rule `repoState` follows for the remote. No
  * channel accepts a directory.
  */
+
+/**
+ * Folder `index` of the project `slug`, as this machine linked it.
+ *
+ * NOTE: resolved through `knownWorkspace`, which knows local boards. A plain
+ * `authorizedRecord` refuses every project in local mode, where a local board
+ * files its folders under no credential.
+ */
+async function folderAt(slug: string, index: number): Promise<string | null> {
+  const { record, workspace } = await knownWorkspace(slug);
+  return (await readFolders(record))[workspace.slug]?.[index] ?? null;
+}
 
 function slugOf(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
@@ -106,8 +118,7 @@ async function repo(
   slug: string,
   folder = 0,
 ): Promise<{ top: string } | { state: WorktreeState }> {
-  const record = await authorizedRecord();
-  const path = (await readFolders(record))[slug]?.[folder] ?? null;
+  const path = await folderAt(slug, folder);
   const found = await locate(path);
   return found.kind === "ready" ? { top: found.top } : { state: found };
 }
@@ -161,8 +172,7 @@ export function registerWorktree(devUrl?: string): void {
     async (args): Promise<string | null> => {
       const slug = slugOf(args[0]);
       const path = pathOf(args[1]);
-      const record = await authorizedRecord();
-      const primary = (await readFolders(record))[slug]?.[0] ?? null;
+      const primary = await folderAt(slug, 0);
       const found = await locate(primary);
       if (found.kind !== "ready" || !primary) return null;
       return locateInRepo(found.top, primary, path);

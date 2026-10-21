@@ -16,6 +16,7 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { ConnectPanel } from "#/components/features/pulls/connect-panel";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { UserAvatar } from "#/components/shared/common/user-avatar";
 import {
@@ -37,13 +38,13 @@ import { shortAge } from "#/lib/board-view";
 import { PULL_TABS, type PullSearch, type PullTab } from "#/lib/pull-search";
 import { cn } from "#/lib/utils";
 import { useLayout } from "#/stores/layout";
-import { usePulls } from "#/stores/pulls";
+import { canReadPulls, usePulls } from "#/stores/pulls";
 import {
   formatRepoRef,
   type PullRequest,
   type PullStatus,
+  type RepoSide,
 } from "../../../../shared/git";
-import { ConnectPanel } from "./connect-panel";
 
 /**
  * ⚠️ Real words, not `text-transform: capitalize` over the raw values. CSS
@@ -187,8 +188,8 @@ function Group({
  *
  * ⚠️ Drawn by EVERY header the screen has (`PullsEmpty`, `PullDetail`): the
  * bar holds one header, so each one carries them rather than the list.
- * Nothing until GitHub and a repository are connected — there is no list
- * to filter — and nothing in focus mode, with the list shut.
+ * Nothing until `gh` is signed in and the folder is a GitHub repo — there is
+ * no list to filter — and nothing in focus mode, with the list shut.
  */
 export function PullsListControls() {
   const { slug } = useParams({ from: "/_app/w/$slug/pulls" });
@@ -201,8 +202,7 @@ export function PullsListControls() {
   const refresh = usePulls((state) => state.refresh);
   const focusMode = useLayout((state) => state.focusMode);
 
-  if (account.kind !== "connected" || repo?.kind !== "linked" || focusMode)
-    return null;
+  if (!canReadPulls(account, repo) || focusMode) return null;
   return (
     <div className="window-no-drag flex shrink-0 items-center gap-1">
       <SegmentedControl
@@ -294,6 +294,43 @@ export function PullsListControls() {
 }
 
 /**
+ * On a fork checkout, which repo the list reads: the fork or its parent.
+ *
+ * The choice lasts for the session and is never saved (FE-73). Switching
+ * leaves any open pull request, because its number belongs to the other repo.
+ */
+function ForkSwitch() {
+  const { slug } = useParams({ from: "/_app/w/$slug/pulls" });
+  const { tab, status } = useSearch({ from: "/_app/w/$slug/pulls" });
+  const navigate = useNavigate();
+  const repo = usePulls((state) => state.repo);
+  const selectRepo = usePulls((state) => state.selectRepo);
+
+  if (repo?.kind !== "detected" || !repo.parent) return null;
+  return (
+    <div className="px-2 pt-2">
+      <SegmentedControl
+        label="Read pull requests from"
+        value={repo.selected}
+        options={[
+          { value: "self" as RepoSide, label: formatRepoRef(repo.repo) },
+          { value: "parent" as RepoSide, label: formatRepoRef(repo.parent) },
+        ]}
+        onChange={(side) => {
+          void navigate({
+            to: "/w/$slug/pulls",
+            params: { slug },
+            search: { tab, status },
+            replace: true,
+          });
+          void selectRepo(side);
+        }}
+      />
+    </div>
+  );
+}
+
+/**
  * The middle pane: which pull requests there are, and which one is open.
  *
  * ⚠️ The three TABS are filters over one read — they all answer "where do I
@@ -348,7 +385,7 @@ export function PullsList() {
     ];
   }, [query, tab, view?.pulls]);
 
-  const connected = account.kind === "connected" && repo?.kind === "linked";
+  const connected = canReadPulls(account, repo);
   const empty = groups.every((group) => group.pulls.length === 0);
 
   /**
@@ -393,6 +430,7 @@ export function PullsList() {
         <>
           {/* The tabs, the state filter and Refresh are in the window's
               title bar — see `PullsListControls`. */}
+          <ForkSwitch />
           <div className="px-2 pt-2 pb-2">
             <div className="relative">
               <HugeiconsIcon

@@ -17,6 +17,18 @@ import {
   type SettingsSectionSpec,
   SettingsValue,
 } from "#/components/shared/settings/settings-page";
+import {
+  barTone,
+  clamp,
+  claudeView,
+  codexView,
+  NEARLY_SPENT,
+  resetDuration,
+  type UsageView,
+  type UsageWindow,
+  updatedText,
+  useClock,
+} from "#/components/shared/terminal/agent-usage-strip";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { Button } from "#/components/ui/button";
 import { Switch } from "#/components/ui/switch";
@@ -51,18 +63,6 @@ import {
   type HarnessInfo,
   type InstallMethod,
 } from "../../../../shared/harness";
-import {
-  barTone,
-  clamp,
-  claudeView,
-  codexView,
-  NEARLY_SPENT,
-  resetDuration,
-  type UsageView,
-  type UsageWindow,
-  updatedText,
-  useClock,
-} from "../terminal/agent-usage-strip";
 
 const NAMES: Record<HookAgent, string> = {
   "claude-code": "Claude Code",

@@ -15,6 +15,7 @@ import {
   FileBrowserTree,
   treePath,
 } from "#/components/shared/settings/file-browser";
+import { useAgentSetup } from "#/components/shared/settings/use-agent-setup";
 import { Alert, AlertDescription } from "#/components/ui/alert";
 import { Button } from "#/components/ui/button";
 import {
@@ -25,7 +26,6 @@ import {
 } from "#/components/ui/empty";
 import { ipcMessage } from "#/lib/ipc-error";
 import { useSettingsProject } from "#/stores/settings-project";
-import { useAgentSetup } from "./use-agent-setup";
 
 /**
  * One open skill, read-only: its frontmatter as written, then its body as

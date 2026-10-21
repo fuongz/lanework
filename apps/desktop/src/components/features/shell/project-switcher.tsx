@@ -11,8 +11,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import type { TerminalSession } from "#/../shared/terminal";
 import type { Workspace } from "#/../shared/workspaces";
-import { RenameProjectDialog } from "#/components/features/workspaces/rename-project-dialog";
-import { SourceFoldersDialog } from "#/components/features/workspaces/source-folders-dialog";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
 import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
 import { ProjectTile } from "#/components/shared/common/project-tile";
@@ -21,6 +19,8 @@ import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
+import { RenameProjectDialog } from "#/components/shared/workspaces/rename-project-dialog";
+import { SourceFoldersDialog } from "#/components/shared/workspaces/source-folders-dialog";
 import {
   ContextMenu,
   ContextMenuContent,

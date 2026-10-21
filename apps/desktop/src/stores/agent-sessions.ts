@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { forgetDraft } from "#/components/shared/conversation/draft";
+import { forgetDraft } from "#/lib/conversation-draft";
 import type {
   AgentActivity,
   AgentCard,

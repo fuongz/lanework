@@ -16,6 +16,7 @@ import {
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
 import { MergeControl } from "#/components/shared/pulls/merge-control";
+import { PullsListControls } from "#/components/shared/pulls/pulls-list";
 import { Button } from "#/components/ui/button";
 import {
   ResizableHandle,
@@ -32,7 +33,6 @@ import { CommitPicker } from "./commit-picker";
 import { DiffView } from "./diff-view";
 import { FilesPanel } from "./file-tree";
 import { PullSummary } from "./pull-summary";
-import { PullsListControls } from "./pulls-list";
 
 /**
  * The screen's name in the window's title bar, until a pull request has a
@@ -152,12 +152,21 @@ export function PullDetail() {
   const commitDiff = usePulls((state) => state.commitDiff);
   const commitDiffError = usePulls((state) => state.commitDiffError);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the reset runs when the pull request changes.
   useEffect(() => {
     setBody("");
     setReviewError(null);
     setComposing(false);
-    if (slug && Number.isInteger(parsed) && parsed > 0) void openPull(parsed);
-  }, [openPull, parsed, slug]);
+  }, [parsed, slug]);
+
+  // NOTE: waits for the store to be on this project. `openPull` reads the
+  // store's slug, which the list layout sets after this pane mounts on a
+  // direct link; calling it earlier does nothing and leaves the pane blank.
+  const storeSlug = usePulls((state) => state.slug);
+  useEffect(() => {
+    if (slug && storeSlug === slug && Number.isInteger(parsed) && parsed > 0)
+      void openPull(parsed);
+  }, [openPull, parsed, slug, storeSlug]);
 
   /**
    * Whether the tree is on screen right now.

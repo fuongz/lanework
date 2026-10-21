@@ -27,6 +27,7 @@ import {
 } from "#/../shared/conversation";
 import { insertDictation } from "#/../shared/dictation";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
+import { readDraft, writeDraft } from "#/lib/conversation-draft";
 import { cn } from "#/lib/utils";
 import {
   DictationBar,
@@ -34,7 +35,6 @@ import {
   useDictation,
 } from "./composer.dictation";
 import { AttachMenu, ModelMenu, PermissionMenu } from "./composer.menus";
-import { readDraft, writeDraft } from "./draft";
 
 export interface ComposerHandle {
   /** Put `text` in the composer — a reply's quote — and focus it. */

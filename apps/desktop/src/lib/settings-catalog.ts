@@ -8,7 +8,6 @@ import {
   McpServerIcon,
   Mic01Icon,
   Notification01Icon,
-  PlugSocketIcon,
   Sun01Icon,
   UserAccountIcon,
 } from "@hugeicons/core-free-icons";
@@ -82,13 +81,6 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
           "keybindings keyboard shortcuts shortcut hotkeys keys command palette",
       },
       {
-        to: "/settings/git",
-        label: "Integrations",
-        icon: PlugSocketIcon,
-        keywords:
-          "integration integrations github git repo repository pull request pr connect disconnect token oauth review diff",
-      },
-      {
         to: "/settings/about",
         label: "About",
         icon: InformationCircleIcon,
@@ -131,7 +123,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         label: "General",
         icon: DashboardSquare02Icon,
         keywords:
-          "project projects workspace general rename folder folders repository import readiness ready danger delete remove issues sync cloud",
+          "project projects workspace general rename folder folders import readiness ready danger delete remove issues sync cloud",
       },
       {
         to: "/settings/project-skills",

@@ -3,8 +3,6 @@ import { ipcMessage } from "#/lib/ipc-error";
 import type {
   CommitDiff,
   GitAccount,
-  GitAppAccess,
-  GitConnectProgress,
   MergeMethod,
   PullActivity,
   PullCommit,
@@ -12,18 +10,35 @@ import type {
   PullFile,
   PullStatus,
   PullsView,
-  RepoOption,
+  RepoSide,
   RepoState,
   ReviewVerdict,
 } from "../../shared/git";
 
 /**
- * What the diff and the file tree are BOTH looking at.
+ * Whether there is a list to read.
  *
- * ⚠️ One function, called from both, rather than each deciding for itself. The
- * tree is a separate panel now — it does not descend from the diff — and two
- * independent answers to "which files are on screen" is a tree listing the
- * pull request while the diff shows one commit.
+ * True when `gh` is signed in and the project's folder is a GitHub checkout.
+ * One answer for every screen that asks, so the list, its controls and the
+ * empty pane cannot disagree about whether the setup panel is showing.
+ */
+export function canReadPulls(
+  account: GitAccount,
+  repo: RepoState | null,
+): boolean {
+  return account.kind === "ok" && repo?.kind === "detected";
+}
+
+/**
+ * What the diff and the file tree are both looking at.
+ *
+ * NOTE: One function, called from both, rather than each deciding. The tree
+ * is a separate panel, not a child of the diff. Two independent answers to
+ * "which files are on screen" give a tree listing the pull request while the
+ * diff shows one commit.
+ *
+ * @param commit The sha the diff shows, or null for the whole pull request.
+ * @returns Null while the read it needs has not landed.
  */
 export function diffSource(
   commit: string | null,
@@ -57,22 +72,26 @@ const api = () => {
 /**
  * Request tickets, one per read that can be in flight twice.
  *
- * ⚠️ The same counter `stores/board.ts` carries, for the same reason: two
+ * NOTE: The same counter as `stores/board.ts`, for the same reason. Two
  * overlapping reads land in whatever order the network returns them, and
- * without a ticket the OLDER one wins. Pressing refresh while a slow failure is
- * still running is exactly how that happens.
+ * without a ticket the older one can win. Pressing refresh while a slow
+ * failure is still running does it.
  */
 const ticket = { pulls: 0, detail: 0, commitDiff: 0, activity: 0 };
 
 interface PullsState {
-  /** The project these fields describe. Everything below resets when it changes. */
+  /**
+   * The project these fields describe.
+   *
+   * Everything below resets when it changes.
+   */
   slug: string | null;
   /**
    * The state being listed.
    *
-   * ⚠️ Held here as well as in the URL because `refresh` has to know what to ask
-   * for again — a refresh that re-read "open" while the screen said "merged"
-   * would replace the list with somebody else's answer.
+   * NOTE: Held here as well as in the URL because `refresh` must know what to
+   * ask for again. A refresh that re-read "open" while the screen said
+   * "merged" would replace the list with the wrong answer.
    */
   status: PullStatus;
   /** True once the connection state has been read at least once. */
@@ -84,23 +103,8 @@ interface PullsState {
   loading: boolean;
   error: string | null;
 
-  /** A device flow is running; `progress` is what the user has to act on. */
-  connecting: boolean;
-  progress: GitConnectProgress | null;
-
-  /**
-   * The repositories this account can reach, for the picker.
-   *
-   * ⚠️ `null` means "nobody has asked yet", which is not the same as "none" —
-   * the picker has to be able to say "loading" on first open rather than
-   * "you have no repositories".
-   */
-  repoOptions: RepoOption[] | null;
-  repoOptionsLoading: boolean;
-  repoOptionsCapped: boolean;
-  repoOptionsError: string | null;
-  /** Where this app is installed, for the "cannot find it" way out. Null until asked. */
-  appAccess: GitAppAccess | null;
+  /** Whether `check` is asking `gh` again. */
+  checking: boolean;
 
   detail: PullDetail | null;
   detailLoading: boolean;
@@ -114,11 +118,10 @@ interface PullsState {
   mergePull: (number: number, headSha: string) => Promise<{ error?: string }>;
 
   /**
-   * The open pull request's commits. `null` until the menu is first opened.
+   * The open pull request's commits; `null` until the menu is first opened.
    *
-   * ⚠️ "Nobody has asked yet" and "there are none" have to stay different, the
-   * same distinction `repoOptions` draws — the menu says "Loading…" for the
-   * first and nothing at all for the second.
+   * "Nobody has asked yet" and "there are none" stay different: the menu says
+   * "Loading…" for the first and nothing for the second.
    */
   commits: PullCommit[] | null;
   commitsLoading: boolean;
@@ -126,9 +129,9 @@ interface PullsState {
   /**
    * Which commit the diff is showing, or `null` for the whole pull request.
    *
-   * ⚠️ The DEFAULT is the whole pull request, and it stays that way across a
-   * refresh. A review is of the change as a whole; one commit is a lens you
-   * pick up and put down.
+   * The default is the whole pull request, and it stays so across a refresh.
+   * A review is of the change as a whole; one commit is a lens you pick up
+   * and put down.
    */
   commit: string | null;
   commitDiff: CommitDiff | null;
@@ -137,10 +140,10 @@ interface PullsState {
   /**
    * The open pull request's timeline and CI.
    *
-   * ⚠️ Null until the SUMMARY is opened, and it carries its own `number` so a
-   * stale read cannot be drawn under a different pull request. This is the one
-   * read on this screen that most sessions never make — the screen lands on the
-   * diff — so attaching it to the detail read would charge every open for it.
+   * NOTE: Null until the Summary is opened. It carries its own `number` so a
+   * stale read cannot be drawn under a different pull request. Most sessions
+   * never make this read (the screen lands on the diff), so it is not part of
+   * the detail read, which every open pays for.
    */
   activity: PullActivity | null;
   activityLoading: boolean;
@@ -152,61 +155,67 @@ interface PullsState {
   /**
    * The file the tree last asked the diff to show.
    *
-   * ⚠️ Carries `at` as well as the path, because picking the SAME file twice
-   * has to scroll twice. A bare path would be an unchanged value the second
-   * time, and the effect watching it would not run.
+   * NOTE: Carries `at` as well as the path, because picking the same file
+   * twice must scroll twice. A bare path would be an unchanged value the
+   * second time, and the effect watching it would not run.
    */
   focus: { path: string; at: number } | null;
 
   /** Read the account and this project's repo, then its pull requests. */
   open: (slug: string, status: PullStatus) => Promise<void>;
   refresh: () => Promise<void>;
-  connect: () => Promise<{ error?: string }>;
-  cancelConnect: () => Promise<void>;
-  disconnect: () => Promise<void>;
   /**
-   * Point this project at a repo.
+   * Ask `gh` again, then re-read this project.
    *
-   * ⚠️ Answers with the failure instead of parking it in `error`: the caller is
-   * a dialog with the refused name still in the field, and "that is not a
-   * repository" belongs beside it rather than in a banner on the page behind.
+   * The app never signs anybody in. This backs the "Check again" button
+   * after somebody installs `gh` or runs `gh auth login` in a terminal.
    */
-  link: (raw: string) => Promise<{ error?: string }>;
-  /** Load the repository picker's list. Safe to call again; it re-reads. */
-  loadRepoOptions: () => Promise<void>;
+  check: () => Promise<void>;
   /**
-   * Send the user to GitHub to change which repositories this app may see, then
-   * re-read the list when they come back.
+   * Read a fork's own repo or its parent, for this session only.
    *
-   * ⚠️ Takes an installation id, never a URL — main builds the address. Null
-   * means the page for installing it somewhere new.
+   * The list and the open pull request are dropped first: they belong to the
+   * other repo, and a number on screen would name a different pull request.
    */
-  openAppConfig: (installationId: number | null) => Promise<void>;
-  unlink: () => Promise<void>;
+  selectRepo: (side: RepoSide) => Promise<void>;
   openPull: (number: number) => Promise<void>;
-  /** Read the open pull request's commits. Safe to call again; it re-reads. */
+  /**
+   * Read the open pull request's commits.
+   *
+   * Safe to call again; it re-reads.
+   */
   loadCommits: (number: number) => Promise<void>;
-  /** Show one commit's diff, or the whole pull request with `null`. */
+  /**
+   * Show one commit's diff, or the whole pull request.
+   *
+   * @param sha Null for the whole pull request.
+   */
   selectCommit: (sha: string | null) => Promise<void>;
   /**
    * Read the open pull request's timeline and checks.
    *
-   * ⚠️ Safe to call on every render of the summary: a read already answered for
-   * this pull request is skipped unless `refresh` says otherwise. The tab is
-   * mounted and unmounted every time somebody switches back and forth, and a
-   * request per switch is a request per switch.
+   * Safe to call on every render of the summary: a read already answered for
+   * this pull request is skipped unless `refresh` is set. The tab mounts and
+   * unmounts on every switch, and each switch would otherwise cost a request.
+   *
+   * @param refresh Read again even when this pull request's answer is in.
    */
   loadActivity: (number: number, refresh?: boolean) => Promise<void>;
-  /** Leave an ordinary comment. Re-reads the timeline on success. */
+  /**
+   * Leave an ordinary comment.
+   *
+   * Re-reads the timeline on success.
+   *
+   * @returns The failure, ready to show, when it did not post.
+   */
   postComment: (number: number, body: string) => Promise<{ error?: string }>;
   toggleFiles: () => void;
   /**
    * Say outright whether the files panel is open.
    *
-   * ⚠️ Beside `toggleFiles` rather than instead of it. Dragging the panel's
-   * handle onto the edge reports a STATE, and feeding that through a toggle
-   * inverts whatever the store happened to hold — which is how a panel and
-   * its button end up disagreeing about which one is right.
+   * NOTE: Beside `toggleFiles`, not instead of it. Dragging the panel's handle
+   * onto the edge reports a state. Feeding that through a toggle inverts
+   * whatever the store held, and the panel and its button then disagree.
    */
   setFilesOpen: (open: boolean) => void;
   focusFile: (path: string) => void;
@@ -216,7 +225,11 @@ interface PullsState {
     body: string,
   ) => Promise<{ error?: string }>;
   dismiss: () => void;
-  /** Listen for account changes and device-flow progress. Returns an unsubscribe. */
+  /**
+   * Listen for account changes.
+   *
+   * @returns The unsubscribe.
+   */
   watch: () => () => void;
 }
 
@@ -224,18 +237,12 @@ export const usePulls = create<PullsState>((set, get) => ({
   slug: null,
   status: "open",
   ready: false,
-  account: { kind: "none" },
+  account: { kind: "logged-out" },
   repo: null,
   view: null,
   loading: false,
   error: null,
-  connecting: false,
-  progress: null,
-  repoOptions: null,
-  repoOptionsLoading: false,
-  repoOptionsCapped: false,
-  repoOptionsError: null,
-  appAccess: null,
+  checking: false,
   detail: null,
   detailLoading: false,
   detailError: null,
@@ -260,11 +267,10 @@ export const usePulls = create<PullsState>((set, get) => ({
   open: async (slug, status) => {
     const state = get();
     const changed = state.slug !== slug || state.status !== status;
-    // ⚠️ Everything about the previous read is dropped on the way in — for a
-    // changed STATE as much as a changed project. A list left on screen while
-    // another one loads is one somebody will read under the heading now above
-    // it, and "merged" showing open work is the whole failure this view exists
-    // to avoid.
+    // NOTE: Everything about the previous read is dropped on the way in, for
+    // a changed state as much as a changed project. A list left on screen
+    // while another loads gets read under the new heading: "merged" showing
+    // open work.
     if (changed)
       set({
         slug,
@@ -286,7 +292,7 @@ export const usePulls = create<PullsState>((set, get) => ({
       if (mine !== ticket.pulls) return;
       set({ account, repo, ready: true });
 
-      if (account.kind !== "connected" || repo.kind !== "linked") {
+      if (!canReadPulls(account, repo)) {
         set({ loading: false, view: null });
         return;
       }
@@ -305,8 +311,7 @@ export const usePulls = create<PullsState>((set, get) => ({
 
   refresh: async () => {
     const { slug, status, account, repo } = get();
-    if (!slug || account.kind !== "connected" || repo?.kind !== "linked")
-      return;
+    if (!slug || !canReadPulls(account, repo)) return;
     const mine = ++ticket.pulls;
     set({ loading: true });
     try {
@@ -322,90 +327,35 @@ export const usePulls = create<PullsState>((set, get) => ({
     }
   },
 
-  connect: async () => {
-    if (get().connecting) return {};
-    set({ connecting: true, progress: null });
+  check: async () => {
+    if (get().checking) return;
+    set({ checking: true });
     try {
-      const account = await api().connect();
-      set({ account, connecting: false, progress: null });
+      const account = await api().check();
+      set({ account });
       const { slug, status } = get();
+      // The folder is read again too: "Check again" is also the way out of
+      // "this folder is not a GitHub repo" after somebody adds a remote.
       if (slug) await get().open(slug, status);
-      return {};
     } catch (error) {
-      set({ connecting: false, progress: null });
-      return { error: ipcMessage(error, "Could not connect to GitHub.") };
+      set({ error: ipcMessage(error, "Could not run the GitHub CLI.") });
+    } finally {
+      set({ checking: false });
     }
   },
 
-  cancelConnect: async () => {
-    await api()
-      .cancelConnect()
-      .catch(() => {});
-    set({ connecting: false, progress: null });
-  },
-
-  disconnect: async () => {
-    const account = await api().disconnect();
-    set({ account, view: null, detail: null });
-  },
-
-  link: async (raw) => {
-    const { slug } = get();
-    if (!slug) return { error: "Open a project first." };
-    try {
-      const repo = await api().linkRepo(slug, raw);
-      set({ repo });
-      await get().open(slug, get().status);
-      return {};
-    } catch (error) {
-      return { error: ipcMessage(error, "Could not connect that repository.") };
-    }
-  },
-
-  loadRepoOptions: async () => {
-    if (get().repoOptionsLoading) return;
-    set({ repoOptionsLoading: true, repoOptionsError: null });
-    try {
-      const [options, access] = await Promise.all([
-        api().repoOptions(),
-        // ⚠️ Read together with the list, because the screen needs both at the
-        // same moment: an empty list is only half an answer without "and here
-        // is how to widen it".
-        api()
-          .appAccess()
-          .catch(() => null),
-      ]);
-      set({
-        repoOptions: options.repos,
-        repoOptionsCapped: options.capped,
-        repoOptionsLoading: false,
-        appAccess: access,
-      });
-    } catch (error) {
-      set({
-        repoOptionsLoading: false,
-        // ⚠️ The list fails on its own rather than into `error`. The panel it
-        // belongs to still works — a repository can be typed — and a banner
-        // over the whole screen would suggest otherwise.
-        repoOptionsError: ipcMessage(
-          error,
-          "Could not load your repositories.",
-        ),
-      });
-    }
-  },
-
-  openAppConfig: async (installationId) => {
-    await api()
-      .openAppConfig(installationId)
-      .catch(() => {});
-  },
-
-  unlink: async () => {
-    const { slug } = get();
+  selectRepo: async (side) => {
+    const { slug, status } = get();
     if (!slug) return;
-    const repo = await api().unlinkRepo(slug);
-    set({ repo, view: null, detail: null });
+    set({ view: null, detail: null, detailError: null, activity: null });
+    try {
+      const repo = await api().selectRepo(slug, side);
+      set({ repo });
+    } catch (error) {
+      set({ error: ipcMessage(error, "Could not switch the repository.") });
+      return;
+    }
+    await get().open(slug, status);
   },
 
   openPull: async (number) => {
@@ -417,10 +367,10 @@ export const usePulls = create<PullsState>((set, get) => ({
     try {
       const detail = await api().pull(slug, number);
       if (mine !== ticket.detail) return;
-      // ⚠️ Everything about the LAST pull request goes with it. A commit list
-      // and a selected sha belong to one pull request, and leaving them in
-      // place would show the previous one's commits in this one's menu — and,
-      // worse, keep the diff pinned to a commit that is not in it.
+      // NOTE: Everything about the last pull request goes with it. A commit
+      // list and a selected sha belong to one pull request. Left in place,
+      // they show the previous one's commits in this one's menu, and keep the
+      // diff pinned to a commit that is not in it.
       set({
         detail,
         detailLoading: false,
@@ -451,7 +401,7 @@ export const usePulls = create<PullsState>((set, get) => ({
     } catch (error) {
       set({
         commitsLoading: false,
-        // ⚠️ `commits` is left alone. A failed re-read of a list already on
+        // `commits` is left alone. A failed re-read of a list already on
         // screen must not empty the menu somebody has open.
         commitsError: ipcMessage(error, "Could not load the commits."),
       });
@@ -461,8 +411,8 @@ export const usePulls = create<PullsState>((set, get) => ({
   selectCommit: async (sha) => {
     const { slug } = get();
     if (!slug) return;
-    // ⚠️ The ticket moves even for the whole-pull-request case, so a commit
-    // read that is still in flight cannot land afterwards and put the screen
+    // NOTE: The ticket moves even for the whole-pull-request case, so a
+    // commit read still in flight cannot land afterwards and put the screen
     // back on a commit the user just left.
     const mine = ++ticket.commitDiff;
     if (sha === null) {
@@ -521,10 +471,9 @@ export const usePulls = create<PullsState>((set, get) => ({
     set({ commentBusy: true });
     try {
       await api().comment(slug, number, body);
-      // ⚠️ Re-read rather than append. Writing the comment into the timeline
-      // here would mean inventing its id, its timestamp and its author — three
-      // things that would each be wrong in their own way, on a row that then
-      // looks exactly like one the server sent.
+      // Re-read rather than append. Appending here would mean inventing the
+      // comment's id, timestamp and author, on a row that then looks like one
+      // the server sent.
       await get().loadActivity(number, true);
       set({ commentBusy: false });
       return {};
@@ -643,16 +592,10 @@ export const usePulls = create<PullsState>((set, get) => ({
   watch: () => {
     const offAccount = api().onAccountChange((account) => {
       set({ account });
-      // A credential that just died takes the list with it: what is on screen
+      // A login that just ended takes the list with it: what is on screen
       // was read with it, and leaving it there implies it is still current.
-      if (account.kind !== "connected") set({ view: null, detail: null });
+      if (account.kind !== "ok") set({ view: null, detail: null });
     });
-    const offProgress = api().onConnectProgress((progress) =>
-      set({ progress }),
-    );
-    return () => {
-      offAccount();
-      offProgress();
-    };
+    return offAccount;
   },
 }));

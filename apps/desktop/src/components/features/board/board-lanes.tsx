@@ -316,68 +316,66 @@ export function BoardLanes() {
   };
 
   return (
-    <>
-      <Settled.Provider value={settled}>
-        <DndContext
-          sensors={sensors}
-          collisionDetection={collisionDetection}
-          onDragStart={onDragStart}
-          onDragMove={onDragMove}
-          onDragEnd={onDragEnd}
-          onDragCancel={onDragCancel}
-        >
-          <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
-            {!view && loading && <BoardLanesSkeleton />}
-            <div className="flex h-full min-w-max gap-3 px-6 py-4">
-              {(view?.columns ?? []).map((column) => (
-                <Lane
-                  key={column.key}
-                  column={column}
-                  cards={lanes.get(column.key) ?? EMPTY_CARDS}
-                  // ⚠️ The SERVICE's count (FE-17): a lane holds one page of
-                  // its cards, and counting those would say "20" for 226.
-                  count={
-                    view?.stats?.byColumn[column.key] ??
-                    (lanes.get(column.key) ?? EMPTY_CARDS).length
-                  }
-                  slug={slug}
-                  now={now}
-                  columns={view?.columns ?? EMPTY_COLUMNS}
-                  categories={view?.categories ?? EMPTY_CATEGORIES}
-                  stale={view?.stale ?? false}
-                  busy={busy}
-                  held={held?.id ?? null}
-                  target={target?.columnKey === column.key ? target : null}
-                  progress={progress}
-                />
-              ))}
-            </div>
+    <Settled.Provider value={settled}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={collisionDetection}
+        onDragStart={onDragStart}
+        onDragMove={onDragMove}
+        onDragEnd={onDragEnd}
+        onDragCancel={onDragCancel}
+      >
+        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
+          {!view && loading && <BoardLanesSkeleton />}
+          <div className="flex h-full min-w-max gap-3 px-6 py-4">
+            {(view?.columns ?? []).map((column) => (
+              <Lane
+                key={column.key}
+                column={column}
+                cards={lanes.get(column.key) ?? EMPTY_CARDS}
+                // ⚠️ The SERVICE's count (FE-17): a lane holds one page of
+                // its cards, and counting those would say "20" for 226.
+                count={
+                  view?.stats?.byColumn[column.key] ??
+                  (lanes.get(column.key) ?? EMPTY_CARDS).length
+                }
+                slug={slug}
+                now={now}
+                columns={view?.columns ?? EMPTY_COLUMNS}
+                categories={view?.categories ?? EMPTY_CATEGORIES}
+                stale={view?.stale ?? false}
+                busy={busy}
+                held={held?.id ?? null}
+                target={target?.columnKey === column.key ? target : null}
+                progress={progress}
+              />
+            ))}
           </div>
-          <DragOverlay dropAnimation={DROP_ANIMATION}>
-            {held ? (
-              // The pickup: the card lifts off the lane with a spring rather than
-              // snapping to a tilt. A touch of bounce belongs here — this is a
-              // physical gesture the person is driving, not a state change.
-              <motion.div
-                initial={{ transform: "scale(1) rotate(0deg)" }}
-                animate={{ transform: "scale(1.03) rotate(1.5deg)" }}
-                transition={{ type: "spring", duration: 0.35, bounce: 0.25 }}
-                style={{ width: heldWidth ?? undefined }}
-                className="bg-card shadow-card cursor-grabbing rounded-lg p-2.5 shadow-2xl shadow-black/15"
-              >
-                <CardFace
-                  card={held}
-                  now={now}
-                  columns={view?.columns ?? EMPTY_COLUMNS}
-                  categories={view?.categories ?? EMPTY_CATEGORIES}
-                  subs={progress.get(held.id) ?? null}
-                />
-              </motion.div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-      </Settled.Provider>
-    </>
+        </div>
+        <DragOverlay dropAnimation={DROP_ANIMATION}>
+          {held ? (
+            // The pickup: the card lifts off the lane with a spring rather than
+            // snapping to a tilt. A touch of bounce belongs here — this is a
+            // physical gesture the person is driving, not a state change.
+            <motion.div
+              initial={{ transform: "scale(1) rotate(0deg)" }}
+              animate={{ transform: "scale(1.03) rotate(1.5deg)" }}
+              transition={{ type: "spring", duration: 0.35, bounce: 0.25 }}
+              style={{ width: heldWidth ?? undefined }}
+              className="bg-card shadow-card cursor-grabbing rounded-lg p-2.5 shadow-2xl shadow-black/15"
+            >
+              <CardFace
+                card={held}
+                now={now}
+                columns={view?.columns ?? EMPTY_COLUMNS}
+                categories={view?.categories ?? EMPTY_CATEGORIES}
+                subs={progress.get(held.id) ?? null}
+              />
+            </motion.div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    </Settled.Provider>
   );
 }
 
