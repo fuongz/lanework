@@ -91,7 +91,8 @@ function useNow(ticking: boolean): number {
  *
  * Running shells and monitors can be stopped after confirmation (FE-43,
  * FE-56); the header shows the pid of a running one's group. The header link
- * resumes its parent conversation.
+ * opens its parent conversation as the rail's row does: the tab running it,
+ * or else its chat.
  */
 export function ShellTaskView() {
   const { slug, conversation, task } = useParams({ from: ROUTE });
@@ -125,7 +126,7 @@ function ShellTaskPage({
         )
       : undefined,
   );
-  const resume = useAgentTerminals((state) => state.resume);
+  const liveTab = useAgentTerminals((state) => state.liveTab);
   const stopping = useStopBackgroundTask(workspace, conversation);
   const { tasks, error } = useBackgroundTasks(
     workspace,
@@ -159,11 +160,16 @@ function ShellTaskPage({
 
   const openParent = () => {
     if (!workspace || !parent) return;
-    void resume(workspace, parent).then((next) => {
-      if (next)
+    void liveTab(workspace, parent).then((tab) => {
+      if (tab)
         void navigate({
           to: "/w/$slug/agents/$terminalId",
-          params: { slug, terminalId: next.id },
+          params: { slug, terminalId: tab.id },
+        });
+      else
+        void navigate({
+          to: "/w/$slug/agents/chat/$conversation",
+          params: { slug, conversation: parent.id },
         });
     });
   };

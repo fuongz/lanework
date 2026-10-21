@@ -52,6 +52,10 @@ const MARKERS = [
 ];
 /** A task's notification, as the CLI puts it in the user's turn. */
 const NOTIFICATION = /<task-notification>([\s\S]*?)<\/task-notification>/g;
+/** Each task a notification names. */
+const TASK_ID = /<task-id>([\s\S]*?)<\/task-id>/g;
+/** The event a Monitor sends when its timeout ends it. */
+const MONITOR_EXPIRED = /^\[Monitor expired\b/;
 /** Where a background shell's answer says its output goes. */
 const OUTPUT_PATH = /Output is being written to: (\S+\.output)/;
 /** The exit code a notification's summary names. */
@@ -244,28 +248,40 @@ function statusOf(word: string | null): BackgroundTaskStatus | null {
 function notify(parsed: Parsed, text: string, at: string | null) {
   for (const match of text.matchAll(NOTIFICATION)) {
     const body = match[1];
-    const id = tag(body, "task-id");
-    if (!id || !isBackgroundTaskId(id)) continue;
+    // ⚠️ A resumed session's orphan notice names every task the last one
+    // left unfinished, each in its own `<task-id>`, plus a scan marker that
+    // is no task id.
+    const ids = [...body.matchAll(TASK_ID)]
+      .map((found) => decode(found[1].trim()))
+      .filter(isBackgroundTaskId);
+    if (ids.length === 0) continue;
     const summary = tag(body, "summary");
-    const status = statusOf(tag(body, "status"));
-    const prior = parsed.notices.get(id);
-    // A Monitor's event has no status: news, never an end.
-    if (!status) {
+    const event = tag(body, "event");
+    // A Monitor's event has no status: news, but its expiry is its end.
+    const status =
+      statusOf(tag(body, "status")) ??
+      (event && MONITOR_EXPIRED.test(event) ? "completed" : null);
+    for (const id of ids) {
+      const prior = parsed.notices.get(id);
+      if (!status) {
+        parsed.notices.set(id, {
+          status: prior?.status ?? null,
+          exitCode: prior?.exitCode ?? null,
+          summary: summary ?? prior?.summary ?? null,
+          at: prior?.at ?? null,
+        });
+        continue;
+      }
+      // An orphan notice after an end already read changes nothing.
+      if (status === "lost" && prior?.status) continue;
+      const code = summary ? EXIT_CODE.exec(summary) : null;
       parsed.notices.set(id, {
-        status: prior?.status ?? null,
-        exitCode: prior?.exitCode ?? null,
-        summary: summary ?? prior?.summary ?? null,
-        at: prior?.at ?? null,
+        status,
+        exitCode: code ? Number(code[1]) : null,
+        summary,
+        at,
       });
-      continue;
     }
-    const code = summary ? EXIT_CODE.exec(summary) : null;
-    parsed.notices.set(id, {
-      status,
-      exitCode: code ? Number(code[1]) : null,
-      summary,
-      at,
-    });
   }
 }
 

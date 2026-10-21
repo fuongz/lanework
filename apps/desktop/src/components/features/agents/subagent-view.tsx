@@ -189,7 +189,8 @@ function Steps({ transcript }: { transcript: SubagentTranscript }) {
  *
  * ⚠️ Nothing here resumes or stops it — a sub-agent has nothing of its own
  * to resume (FE-33). The way back to the agent is its conversation, which
- * the header's link resumes as the rail's row does (FE-35/D9).
+ * the header's link opens as the rail's row does (FE-35/D9): the tab running
+ * it, or else its chat.
  */
 export function SubagentView() {
   const { slug, conversation, sub } = useParams({ from: ROUTE });
@@ -234,7 +235,7 @@ function SubagentPage({
         )
       : undefined,
   );
-  const resume = useAgentTerminals((state) => state.resume);
+  const liveTab = useAgentTerminals((state) => state.liveTab);
   const [promptOpen, setPromptOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(true);
 
@@ -245,11 +246,16 @@ function SubagentPage({
 
   const openParent = () => {
     if (!workspace || !parent) return;
-    void resume(workspace, parent).then((next) => {
-      if (next)
+    void liveTab(workspace, parent).then((tab) => {
+      if (tab)
         void navigate({
           to: "/w/$slug/agents/$terminalId",
-          params: { slug, terminalId: next.id },
+          params: { slug, terminalId: tab.id },
+        });
+      else
+        void navigate({
+          to: "/w/$slug/agents/chat/$conversation",
+          params: { slug, conversation: parent.id },
         });
     });
   };

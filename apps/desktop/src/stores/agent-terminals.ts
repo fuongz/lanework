@@ -64,6 +64,15 @@ interface AgentTerminalsState {
     conversation: AgentSession,
   ) => Promise<TerminalSession | null>;
   /**
+   * The live tab running `conversation`, read fresh; never starts one.
+   *
+   * @returns Its terminal, or null when no tab runs it.
+   */
+  liveTab: (
+    workspace: string,
+    conversation: AgentSession,
+  ) => Promise<TerminalSession | null>;
+  /**
    * Start a new conversation with `agent` (FE-26/D3).
    *
    * @param card When given, the host briefs the agent on it in its first
@@ -152,12 +161,20 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
       }
     },
 
-    resume: async (workspace, conversation) => {
+    resume: async (workspace, conversation) =>
+      (await get().liveTab(workspace, conversation)) ??
+      spawn(workspace, conversation.agent, conversation.id),
+
+    liveTab: async (workspace, conversation) => {
       await get().refresh(workspace);
-      const live = (get().sessions[workspace] ?? []).find(
-        (entry) => entry.resume === conversation.id && !entry.exit,
+      return (
+        (get().sessions[workspace] ?? []).find(
+          (entry) =>
+            entry.resume === conversation.id &&
+            entry.kind === conversation.agent &&
+            !entry.exit,
+        ) ?? null
       );
-      return live ?? spawn(workspace, conversation.agent, conversation.id);
     },
 
     start: (workspace, agent, card) => spawn(workspace, agent, undefined, card),
