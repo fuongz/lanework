@@ -19,9 +19,8 @@ export const isGroupBy = (value: unknown): value is GroupBy =>
 /**
  * A filter, as it survives in the URL.
  *
- * ⚠️ One value per axis, not a set. A multi-select filter needs a way to say
- * "category is frontend OR backend" in a query string and a way to edit it in
- * the UI, and neither is worth building before somebody has asked for it.
+ * ⚠️ One value per axis, except status: that one is a comma-separated set of
+ * lane keys (FE-75), and `"none"` lets nothing through.
  */
 interface IssueFilters {
   status?: string;
@@ -37,6 +36,58 @@ interface IssueGroup {
   /** Lane role when grouping by status — `done` and `archive` start collapsed. */
   role: string | null;
   cards: BoardCard[];
+}
+
+/**
+ * The order the status filter lists lanes in: the work being done first, then
+ * what is next, then the rest (FE-75).
+ */
+const ROLE_ORDER = ["active", "start", "intake", "done", "archive"];
+
+const roleRank = (role: string | null) => {
+  const at = ROLE_ORDER.indexOf(role ?? "");
+  return at === -1 ? ROLE_ORDER.length : at;
+};
+
+/** Lanes in the status filter's order, ties kept in board order. */
+export function byStatusOrder<T extends { role: string | null }>(
+  columns: readonly T[],
+): T[] {
+  return columns
+    .map((column, index) => ({ column, index }))
+    .sort(
+      (left, right) =>
+        roleRank(left.column.role) - roleRank(right.column.role) ||
+        left.index - right.index,
+    )
+    .map((entry) => entry.column);
+}
+
+/**
+ * The lanes the list shows when the URL names none: everything not finished
+ * (FE-75). Backlog, To-Do and In Progress on a default board.
+ */
+export function defaultStatusKeys(
+  columns: readonly { key: string; role: string | null }[],
+): string[] {
+  return columns
+    .filter((column) => column.role !== "done" && column.role !== "archive")
+    .map((column) => column.key);
+}
+
+/**
+ * The URL's status filter, as the lane keys it lets through.
+ *
+ * `undefined` is the default set; `"none"` is every box unticked.
+ */
+export function statusKeys(
+  columns: readonly { key: string; role: string | null }[],
+  status: string | undefined,
+): string[] {
+  if (status === undefined) return defaultStatusKeys(columns);
+  if (status === "none") return [];
+  const known = new Set(columns.map((column) => column.key));
+  return status.split(",").filter((key) => known.has(key));
 }
 
 export const PRIORITY_GROUPS = [
@@ -56,7 +107,7 @@ export function filterCards(
 ): BoardCard[] {
   return cards.filter(
     (card) =>
-      (!filters.status || card.columnKey === filters.status) &&
+      (!filters.status || filters.status.split(",").includes(card.columnKey)) &&
       (!filters.category || card.categoryKey === filters.category) &&
       (!filters.priority ||
         (filters.priority === "none"

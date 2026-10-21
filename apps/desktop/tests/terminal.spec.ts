@@ -2751,9 +2751,9 @@ test("folded, the window gets a title bar and the rail shows each agent as an ic
     );
     await rail.getByRole("link", { name: "History", exact: true }).click();
     await below(page.getByPlaceholder(/Search commits/));
-    await rail
-      .getByRole("link", { name: "Pull requests", exact: true })
-      .click();
+    // Pull requests are a tab of Issues now (FE-75).
+    await rail.getByRole("link", { name: "Issues", exact: true }).click();
+    await page.getByRole("button", { name: "Pull requests" }).click();
     await below(page.getByRole("heading", { level: 2 }).first());
     await page.screenshot({
       path: "../../.agents/artifacts/test-results/mini-agents.png",

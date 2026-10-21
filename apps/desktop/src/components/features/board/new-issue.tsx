@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import type { BoardCard } from "#/../shared/workspaces";
 import {
@@ -29,6 +29,7 @@ import {
 import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
 import { categoryOf, columnOf } from "#/lib/board-view";
+import { parseIssueSearch } from "#/lib/issue-search";
 import { useBoard } from "#/stores/board";
 
 /**
@@ -47,14 +48,20 @@ import { useBoard } from "#/stores/board";
  */
 export function NewIssue() {
   const { slug } = useParams({ from: "/_app/w/$slug/issues/new" });
+  const prefill = useSearch({ from: "/_app/w/$slug/issues/new" });
+  // Only the list's own filters, so leaving keeps the list as it was and
+  // drops the prefill.
+  const filters = parseIssueSearch(useSearch({ from: "/_app/w/$slug/issues" }));
   const navigate = useNavigate();
   const view = useBoard((state) => state.view);
   const active = useBoard((state) => state.active);
   const busy = useBoard((state) => state.busy);
   const createCard = useBoard((state) => state.createCard);
 
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
+  // Seeded once from the URL, for "Create card from issue" on a GitHub issue
+  // (FE-75). Later changes to the URL do not overwrite what was typed.
+  const [title, setTitle] = useState(() => (prefill.title ?? "").slice(0, 200));
+  const [body, setBody] = useState(prefill.body ?? "");
   // ⚠️ Seeded from the board's own first lane rather than left empty. The
   // service defaults to it when `columnKey` is absent, so showing anything else
   // — or nothing — would be this page disagreeing with what it is about to do.
@@ -72,7 +79,7 @@ export function NewIssue() {
   const ready = title.trim().length > 0 && !stale && !saving;
 
   const leave = () =>
-    void navigate({ to: "/w/$slug/issues", params: { slug }, search: {} });
+    void navigate({ to: "/w/$slug/issues", params: { slug }, search: filters });
 
   const save = async () => {
     if (!ready) return;
@@ -100,8 +107,9 @@ export function NewIssue() {
         ? {
             to: "/w/$slug/issues/$taskId",
             params: { slug, taskId: result.card.taskId },
+            search: filters,
           }
-        : { to: "/w/$slug/issues", params: { slug }, search: {} },
+        : { to: "/w/$slug/issues", params: { slug }, search: filters },
     );
   };
 

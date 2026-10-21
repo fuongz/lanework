@@ -35,6 +35,7 @@ export function SegmentedControl<T extends string>({
   label,
   semantics = "pressed",
   className,
+  layoutId,
 }: {
   options: readonly SegmentOption<T>[];
   value: T;
@@ -43,6 +44,12 @@ export function SegmentedControl<T extends string>({
   label: string;
   semantics?: "pressed" | "tabs" | "current";
   className?: string;
+  /**
+   * The pill's shared id, for a switch drawn by two screens in turn (FE-75's
+   * Issues and Pull requests): the same id on both lets the pill glide from
+   * one screen's copy to the next instead of appearing in place.
+   */
+  layoutId?: string;
 }) {
   const pill = useId();
   // ⚠️ Spread, so each role arrives with the ARIA attributes it supports and
@@ -83,7 +90,7 @@ export function SegmentedControl<T extends string>({
           >
             {on && (
               <motion.span
-                layoutId={pill}
+                layoutId={layoutId ?? pill}
                 aria-hidden="true"
                 className="bg-background dark:bg-foreground/15 absolute inset-0 rounded-full shadow-sm"
                 transition={{ type: "spring", duration: 0.35, bounce: 0.18 }}

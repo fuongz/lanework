@@ -495,7 +495,7 @@ async function open(
 }
 
 async function gotoPulls(page: Page): Promise<void> {
-  await page.goto(`app://lanework/w/${SLUG}/pulls`);
+  await page.goto(`app://lanework/w/${SLUG}/issues/pulls`);
 }
 
 test("lists pull requests, grouped by what they need from you", async () => {
@@ -1367,7 +1367,7 @@ test("the switch between tabs keeps the list's own filters", async () => {
     // The detail route inherits `tab` and `status` from the list route. A
     // tab switch that wrote a bare `{view}` would drop them, and the list
     // beside the diff would reset to every open pull request.
-    await page.goto(`app://lanework/w/${SLUG}/pulls?tab=all&status=all`);
+    await page.goto(`app://lanework/w/${SLUG}/issues/pulls?tab=all&status=all`);
     await page.getByText("chore(deps): bump @types/node").click();
     await expect(page.getByText("package.json").first()).toBeVisible({
       timeout: 15_000,
@@ -1601,7 +1601,7 @@ test("a merged pull request offers no verdict, but still takes a comment", async
   try {
     // `status=all` so the merged one is in the list at all: the state
     // filter is sent to GitHub, not applied here.
-    await page.goto(`app://lanework/w/${SLUG}/pulls?tab=all&status=all`);
+    await page.goto(`app://lanework/w/${SLUG}/issues/pulls?tab=all&status=all`);
     await page.getByText("chore(deps): bump @types/node").first().click();
     await expect(page.getByText("package.json").first()).toBeVisible({
       timeout: 15_000,

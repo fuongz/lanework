@@ -1,4 +1,8 @@
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
+import {
+  RouteError,
+  RouteNotFound,
+} from "#/components/features/shell/route-error";
 import { routeTree } from "./routeTree.gen";
 
 export function getRouter() {
@@ -12,7 +16,8 @@ export function getRouter() {
     // `router.invalidate()` to force a refresh.
     defaultStaleTime: Infinity,
     scrollRestoration: true,
-    defaultNotFoundComponent: () => <div className="p-8">Not found.</div>,
+    defaultErrorComponent: RouteError,
+    defaultNotFoundComponent: RouteNotFound,
   });
 }
 

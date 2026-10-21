@@ -2,7 +2,6 @@ import {
   Clock01Icon,
   FolderFileStorageIcon,
   GitCompareIcon,
-  GitPullRequestIcon,
   ListViewIcon,
   Search01Icon,
   Settings01Icon,
@@ -25,8 +24,6 @@ import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { useCommandPalette } from "#/stores/command-palette";
-import { useIssueView } from "#/stores/issue-view";
-import { usePulls } from "#/stores/pulls";
 import { useSession } from "#/stores/session";
 import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
@@ -106,14 +103,8 @@ export function AppSidebar({
   // the URL is the only thing that is already true at that moment.
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
-  const view = useBoard((state) => state.view);
-  const lastView = useIssueView((state) =>
-    slug ? state.bySlug[slug] : undefined,
-  );
+  const _view = useBoard((state) => state.view);
   const open = useCommandPalette((state) => state.open);
-  // Null until the pull-request screen has been opened once — a rail entry
-  // that fetched to draw its own badge would read GitHub on every start.
-  const pulls = usePulls((state) => state.view);
   const session = useSession((state) => state.session);
   // ⚠️ Two selectors returning numbers, not one returning `{ additions,
   // deletions }`: a fresh object on every read is a new value to zustand, and
@@ -156,13 +147,6 @@ export function AppSidebar({
   const refreshHistory = (slug: string) => {
     void openHistory(slug);
     void peek(slug);
-  };
-  // ⚠️ Against the list on screen when it is this project's — its filter
-  // included — otherwise the rail's own default, open pull requests.
-  const refreshPulls = (slug: string) => {
-    const pullsState = usePulls.getState();
-    if (pullsState.slug === slug) void pullsState.refresh();
-    else void pullsState.open(slug, "open");
   };
 
   // ⚠️ Read with the board, not when Changes is opened: the badge is the reason
@@ -280,14 +264,15 @@ export function AppSidebar({
             <Link
               to="/w/$slug/issues"
               params={{ slug }}
-              // ⚠️ The filters are cleared on the way in. "Issues" has to mean
-              // every issue; a rail entry that silently kept the last category
-              // filter would show a board that is missing work with no visible
-              // reason why. The VIEW is kept (FE-12/D5): list or lanes is how
-              // you read, not what you are looking for.
-              search={lastView === "board" ? { view: "board" } : {}}
+              // NOTE: The filters are cleared on the way in. "Issues" has to
+              // mean every issue; a rail entry that silently kept the last
+              // category filter would show a board that is missing work with
+              // no visible reason why.
+              search={{}}
               className={ROW}
-              activeOptions={{ exact: true, includeSearch: false }}
+              // Active on an open issue too, and on the Pull requests tab
+              // (`/issues/pulls`, FE-75): both open under this path.
+              activeOptions={{ includeSearch: false }}
               activeProps={ACTIVE}
             >
               <HugeiconsIcon
@@ -297,16 +282,11 @@ export function AppSidebar({
                 aria-hidden="true"
               />
               <span className="min-w-0 truncate">Issues</span>
-              {view && (
-                <span className="text-muted-foreground ml-auto shrink-0 text-xs tabular-nums">
-                  {view.total ?? view.cards.length}
-                </span>
-              )}
             </Link>
           </nav>
         )}
-        {/* The repository, not the board: its working tree, its history and its
-            pull requests (FE-21). */}
+        {/* The repository, not the board: its working tree and its history
+            (FE-21). Pull requests moved under Issues as a tab (FE-75). */}
         {slug && (
           <nav aria-label="Repository" className="flex flex-col gap-0.5">
             {/* ⚠️ The ROW takes the label's vertical padding, so the label and
@@ -391,28 +371,6 @@ export function AppSidebar({
                       aria-hidden="true"
                     />
                     {unpushed > 1 && <span aria-hidden="true">{unpushed}</span>}
-                  </span>
-                )}
-              </Link>
-            </RefreshMenu>
-            <RefreshMenu onRefresh={() => refreshPulls(slug)}>
-              <Link
-                to="/w/$slug/pulls"
-                params={{ slug }}
-                search={{ tab: "all", status: "open" }}
-                className={ROW}
-                activeProps={ACTIVE}
-              >
-                <HugeiconsIcon
-                  icon={GitPullRequestIcon}
-                  className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
-                  strokeWidth={1.5}
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 truncate">Pull requests</span>
-                {pulls && (
-                  <span className="text-muted-foreground ml-auto shrink-0 text-xs tabular-nums">
-                    {pulls.pulls.length}
                   </span>
                 )}
               </Link>

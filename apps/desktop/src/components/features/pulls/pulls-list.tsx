@@ -4,11 +4,14 @@ import {
   GitPullRequestClosedIcon,
   GitPullRequestDraftIcon,
   GitPullRequestIcon,
+  ListViewIcon,
+  PencilEdit02Icon,
   Refresh01Icon,
-  Search01Icon,
+  UserIcon,
+  ViewIcon,
   WifiDisconnected01Icon,
 } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
   Link,
   useNavigate,
@@ -16,17 +19,14 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { ConnectPanel } from "#/components/features/pulls/connect-panel";
+import {
+  FilterMenu,
+  type MenuField,
+} from "#/components/shared/common/filter-menu";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { UserAvatar } from "#/components/shared/common/user-avatar";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "#/components/ui/dropdown-menu";
+import { SourceHeader } from "#/components/shared/navigation/source-tabs";
 import {
   Empty,
   EmptyDescription,
@@ -34,15 +34,10 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "#/components/ui/input-group";
+import { ScrollArea } from "#/components/ui/scroll-area";
 import { shortAge } from "#/lib/board-view";
 import { PULL_TABS, type PullSearch, type PullTab } from "#/lib/pull-search";
 import { cn } from "#/lib/utils";
-import { useLayout } from "#/stores/layout";
 import { canReadPulls, usePulls } from "#/stores/pulls";
 import {
   formatRepoRef,
@@ -50,6 +45,7 @@ import {
   type PullStatus,
   type RepoSide,
 } from "../../../../shared/git";
+import { ConnectPanel } from "./connect-panel";
 
 /**
  * ⚠️ Real words, not `text-transform: capitalize` over the raw values. CSS
@@ -92,6 +88,53 @@ function stateIcon(pull: PullRequest) {
   };
 }
 
+/** What the pull request list can be filtered on (FE-75). */
+const PULL_FILTERS = [
+  {
+    key: "tab",
+    label: "Show",
+    icon: UserIcon,
+    options: PULL_TABS.map((value) => ({ value, label: TAB_LABEL[value] })),
+  },
+  {
+    key: "status",
+    label: "State",
+    icon: GitPullRequestIcon,
+    options: (["open", "merged", "closed", "all"] as const).map((value) => ({
+      value,
+      label: STATUS_LABEL[value],
+    })),
+  },
+] satisfies MenuField[];
+
+const FILTER_GLYPH: Record<string, { icon: IconSvgElement; tone: string }> = {
+  all: { icon: ListViewIcon, tone: "text-muted-foreground" },
+  reviewing: { icon: ViewIcon, tone: "text-muted-foreground" },
+  authored: { icon: PencilEdit02Icon, tone: "text-muted-foreground" },
+  open: {
+    icon: GitPullRequestIcon,
+    tone: "text-emerald-600 dark:text-emerald-400",
+  },
+  merged: { icon: GitMergeIcon, tone: "text-violet-600 dark:text-violet-400" },
+  closed: {
+    icon: GitPullRequestClosedIcon,
+    tone: "text-rose-600 dark:text-rose-400",
+  },
+};
+
+/** The icon a filter value carries, in the colour its state has on a row. */
+function PullFilterGlyph({ value }: { value: string }) {
+  const glyph = FILTER_GLYPH[value] ?? FILTER_GLYPH.all;
+  return (
+    <HugeiconsIcon
+      icon={glyph.icon}
+      className={cn("size-3.5 shrink-0", glyph.tone)}
+      strokeWidth={1.6}
+      aria-hidden="true"
+    />
+  );
+}
+
 function Row({
   pull,
   slug,
@@ -108,7 +151,7 @@ function Row({
   return (
     <li>
       <Link
-        to="/w/$slug/pulls/$number"
+        to="/w/$slug/issues/pulls/$number"
         params={{ slug, number: String(pull.number) }}
         search={search}
         className="hover:bg-foreground/[0.03] focus-visible:ring-accent-brand flex flex-col gap-1 px-4 py-2 outline-none focus-visible:ring-2 focus-visible:-ring-offset-1"
@@ -188,90 +231,50 @@ function Group({
 }
 
 /**
- * The list's tabs, state filter and Refresh, for the window's title bar —
- * the way Changes and Files put their controls there.
+ * The list's filter and Refresh, beside its search box (FE-75).
  *
- * ⚠️ Drawn by EVERY header the screen has (`PullsEmpty`, `PullDetail`): the
- * bar holds one header, so each one carries them rather than the list.
- * Nothing until `gh` is signed in and the folder is a GitHub repo — there is
- * no list to filter — and nothing in focus mode, with the list shut.
+ * NOTE: The issue list's Filter menu (`FilterMenu`), with two fields: Show
+ * (All, Reviewing, Authored) and State. Show used to be a row of tabs in the
+ * window's title bar; with Issues and Pull requests as tabs above the list, a
+ * second row of tabs read as a third level of navigation.
+ *
+ * Nothing until `gh` is signed in and the folder is a GitHub repo: there is
+ * no list to filter.
  */
-export function PullsListControls() {
-  const { slug } = useParams({ from: "/_app/w/$slug/pulls" });
-  const { tab, status } = useSearch({ from: "/_app/w/$slug/pulls" });
+function PullsListControls() {
+  const { slug } = useParams({ from: "/_app/w/$slug/issues_/pulls" });
+  const { tab, status } = useSearch({ from: "/_app/w/$slug/issues_/pulls" });
   const navigate = useNavigate();
   const account = usePulls((state) => state.account);
   const repo = usePulls((state) => state.repo);
   const view = usePulls((state) => state.view);
   const loading = usePulls((state) => state.loading);
   const refresh = usePulls((state) => state.refresh);
-  const focusMode = useLayout((state) => state.focusMode);
 
-  if (!canReadPulls(account, repo) || focusMode) return null;
+  if (!canReadPulls(account, repo)) return null;
   return (
-    <div className="window-no-drag flex shrink-0 items-center gap-1">
-      <SegmentedControl
-        label="Pull requests"
-        semantics="current"
-        value={tab}
-        options={PULL_TABS.map((value) => ({
-          value,
-          label: TAB_LABEL[value],
-        }))}
-        onChange={(value) =>
+    <>
+      {/* NOTE: Keyed on the applied filters, as the issue list's is: picking
+          a value navigates, and a remount is the one close a re-render
+          cannot race. */}
+      <FilterMenu
+        key={`${tab}:${status}`}
+        fields={PULL_FILTERS}
+        selected={(key) => (key === "tab" ? tab : status)}
+        glyph={(_, option) => <PullFilterGlyph value={option.value} />}
+        active={(tab !== "all" ? 1 : 0) + (status !== "open" ? 1 : 0)}
+        onPick={(key, value) =>
           void navigate({
-            to: "/w/$slug/pulls",
+            to: "/w/$slug/issues/pulls",
             params: { slug },
-            search: { tab: value, status },
+            search:
+              key === "tab"
+                ? { tab: (value ?? "all") as PullTab, status }
+                : { tab, status: (value ?? "open") as PullStatus },
             replace: true,
           })
         }
       />
-
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          aria-label={`Filter by state — ${STATUS_LABEL[status]}`}
-          title={`Filter by state — ${STATUS_LABEL[status]}`}
-          className={cn(
-            "flex size-6 items-center justify-center rounded-md transition-colors",
-            // ⚠️ The control says when it is doing something. A state
-            // filter is the reason a list looks short, and this button is
-            // the first place anybody will look for why.
-            status === "open"
-              ? "hover:bg-foreground/[0.06]"
-              : "bg-accent-brand/15 text-accent-brand",
-          )}
-        >
-          <HugeiconsIcon
-            icon={FilterIcon}
-            className={cn(
-              "size-3.5",
-              status === "open" && "text-muted-foreground",
-            )}
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-40">
-          <DropdownMenuRadioGroup
-            value={status}
-            onValueChange={(value) =>
-              void navigate({
-                to: "/w/$slug/pulls",
-                params: { slug },
-                search: { tab, status: value as PullStatus },
-                replace: true,
-              })
-            }
-          >
-            {(["all", "open", "merged", "closed"] as const).map((value) => (
-              <DropdownMenuRadioItem key={value} value={value}>
-                {STATUS_LABEL[value]}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
 
       <button
         type="button"
@@ -282,7 +285,7 @@ export function PullsListControls() {
             ? `Updated ${new Date(view.fetchedAt).toLocaleTimeString()}`
             : "Refresh"
         }
-        className="hover:bg-foreground/[0.06] flex size-6 items-center justify-center rounded-md transition-colors"
+        className="hover:bg-foreground/[0.06] flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
       >
         <HugeiconsIcon
           icon={Refresh01Icon}
@@ -294,7 +297,7 @@ export function PullsListControls() {
           aria-hidden="true"
         />
       </button>
-    </div>
+    </>
   );
 }
 
@@ -305,8 +308,8 @@ export function PullsListControls() {
  * leaves any open pull request, because its number belongs to the other repo.
  */
 function ForkSwitch() {
-  const { slug } = useParams({ from: "/_app/w/$slug/pulls" });
-  const { tab, status } = useSearch({ from: "/_app/w/$slug/pulls" });
+  const { slug } = useParams({ from: "/_app/w/$slug/issues_/pulls" });
+  const { tab, status } = useSearch({ from: "/_app/w/$slug/issues_/pulls" });
   const navigate = useNavigate();
   const repo = usePulls((state) => state.repo);
   const selectRepo = usePulls((state) => state.selectRepo);
@@ -323,7 +326,7 @@ function ForkSwitch() {
         ]}
         onChange={(side) => {
           void navigate({
-            to: "/w/$slug/pulls",
+            to: "/w/$slug/issues/pulls",
             params: { slug },
             search: { tab, status },
             replace: true,
@@ -344,8 +347,8 @@ function ForkSwitch() {
  * open list to be filtered out of, so that one is sent to GitHub.
  */
 export function PullsList() {
-  const { slug } = useParams({ from: "/_app/w/$slug/pulls" });
-  const search = useSearch({ from: "/_app/w/$slug/pulls" });
+  const { slug } = useParams({ from: "/_app/w/$slug/issues_/pulls" });
+  const search = useSearch({ from: "/_app/w/$slug/issues_/pulls" });
   const { tab, status } = search;
   const account = usePulls((state) => state.account);
   const repo = usePulls((state) => state.repo);
@@ -431,30 +434,19 @@ export function PullsList() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <SourceHeader
+        slug={slug}
+        value="pulls"
+        search={
+          connected
+            ? { query, onQuery: setQuery, label: "Search pull requests" }
+            : undefined
+        }
+        actions={<PullsListControls />}
+      />
       {connected ? (
         <>
-          {/* The tabs, the state filter and Refresh are in the window's
-              title bar — see `PullsListControls`. */}
           <ForkSwitch />
-          <div className="flex shrink-0 items-center px-2 pt-2 pb-1.5">
-            <InputGroup>
-              <InputGroupAddon>
-                <HugeiconsIcon
-                  icon={Search01Icon}
-                  className="size-3.5"
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                />
-              </InputGroupAddon>
-              <InputGroupInput
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search pull requests…"
-                aria-label="Search pull requests"
-                className="text-xs"
-              />
-            </InputGroup>
-          </div>
 
           {/* ⚠️ Says which copy this is. "No open pull requests" and "I could
               not reach GitHub" are different facts that draw identically. */}
@@ -473,7 +465,7 @@ export function PullsList() {
             </div>
           )}
 
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <ScrollArea className="flex-1">
             {error && (
               <p className="text-destructive px-4 py-3 text-xs/relaxed">
                 {error}
@@ -510,7 +502,7 @@ export function PullsList() {
                 search={search}
               />
             ))}
-          </div>
+          </ScrollArea>
         </>
       ) : ready ? (
         <ConnectPanel />

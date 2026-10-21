@@ -5,7 +5,12 @@ import {
   UserAccountIcon,
 } from "@hugeicons/core-free-icons";
 import type { BoardView } from "#/../shared/workspaces";
-import { PRIORITY_GROUPS, tagVocabulary } from "#/lib/board-view";
+import {
+  byStatusOrder,
+  PRIORITY_GROUPS,
+  statusKeys,
+  tagVocabulary,
+} from "#/lib/board-view";
 import type { IssueSearch } from "#/lib/issue-search";
 
 /** The four axes a board can be filtered on, and what each one offers. */
@@ -25,6 +30,8 @@ export interface FilterField {
   label: string;
   icon: typeof Tag01Icon;
   options: FilterOption[];
+  /** Several values at once (status, FE-75). */
+  multiple?: boolean;
 }
 
 /**
@@ -42,7 +49,9 @@ export function filterFields(
       key: "status",
       label: "Status",
       icon: Loading03Icon,
-      options: view.columns.map((column) => ({
+      multiple: true,
+      // In Progress, To-Do, Backlog, then what is finished (FE-75).
+      options: byStatusOrder(view.columns).map((column) => ({
         value: column.key,
         label: column.name,
         tone: column.tone,
@@ -90,6 +99,31 @@ export function activeFilters(
   return fields.flatMap((field) => {
     const value = search[field.key];
     if (!value) return [];
+    // The status set is one chip naming every lane in it. No `status` in the
+    // URL is the default set, which is no filter to show.
+    if (field.multiple) {
+      const lanes = new Set(
+        statusKeys(
+          field.options.map((option) => ({ key: option.value, role: null })),
+          value,
+        ),
+      );
+      const picked = field.options.filter((option) => lanes.has(option.value));
+      return [
+        {
+          field,
+          option: {
+            value,
+            label: picked.length
+              ? picked.map((option) => option.label).join(", ")
+              : "None",
+            ...(picked.length === 1
+              ? { tone: picked[0].tone, lane: picked[0].lane }
+              : {}),
+          },
+        },
+      ];
+    }
     const option = field.options.find((entry) => entry.value === value) ?? {
       value,
       // ⚠️ A value the board no longer offers still gets a chip. A filter that

@@ -5,6 +5,8 @@ import {
   type FileText,
   formatRepoRef,
   type GitAccount,
+  type GitHubIssueDetail,
+  type GitHubIssuesView,
   gitChannels,
   MERGE_METHODS,
   type MergeMethod,
@@ -27,6 +29,8 @@ import {
   addComment,
   fetchCommitDiff,
   fetchFileText,
+  fetchIssue,
+  fetchIssues,
   fetchPull,
   fetchPullActivity,
   fetchPullCommits,
@@ -65,8 +69,17 @@ function pullsKey(ref: RepoRef, status: PullStatus): string {
   return `${formatRepoRef(ref).toLowerCase()}:${status}`;
 }
 
+/**
+ * Open-issue lists by `owner/repo`, lower-cased.
+ *
+ * In memory only, like {@link pullsCache}, and fresh for the same
+ * {@link FRESH_MS}. ⚠️ No timer ever fills it: an issue list is read when the
+ * screen asks, and the new-PR watcher's budget is not spent on it.
+ */
+const issuesCache = new Map<string, GitHubIssuesView>();
+
 /** Whether a list was read less than {@link FRESH_MS} ago. */
-function fresh(view: PullsView): boolean {
+function fresh(view: { fetchedAt: string }): boolean {
   const at = Date.parse(view.fetchedAt);
   return Number.isFinite(at) && Date.now() - at < FRESH_MS;
 }
@@ -320,12 +333,16 @@ async function repoState(slug: string, force: boolean): Promise<RepoState> {
 /**
  * The repo a project's reads go to: its own, or its fork parent when chosen.
  *
+ * @param what What the screen asking shows, for the no-folder sentence.
  * @throws When the project has no folder or the folder is not a GitHub repo.
  */
-async function repoFor(slug: string): Promise<RepoRef> {
+async function repoFor(
+  slug: string,
+  what: "pull requests" | "issues" = "pull requests",
+): Promise<RepoRef> {
   const state = await repoState(slug, false);
   if (state.kind === "no-folder")
-    throw new Error("Link a folder to this project to see its pull requests.");
+    throw new Error(`Link a folder to this project to see its ${what}.`);
   const ref = selectedRepo(state);
   if (!ref)
     throw new Error("This project's folder is not a GitHub repository.");
@@ -352,6 +369,33 @@ async function readPulls(
       fetchPulls(ref, status, await viewer()),
     );
     pullsCache.set(key, view);
+    return view;
+  } catch (error) {
+    if (cached) return { ...cached, stale: true };
+    throw error;
+  }
+}
+
+/**
+ * A repo's open issues through the cache.
+ *
+ * - ⚠️ A failed read answers the last good copy marked `stale`, as
+ *   {@link readPulls} does: "could not ask GitHub" is not "no issues".
+ * - ⚠️ While a rate limit blocks `gh`, a cached copy is answered stale without
+ *   trying, even on `refresh`. `gh()` would refuse anyway; asking it first
+ *   only turns a list on screen into an error.
+ */
+async function readIssues(
+  ref: RepoRef,
+  refresh: boolean,
+): Promise<GitHubIssuesView> {
+  const key = formatRepoRef(ref).toLowerCase();
+  const cached = issuesCache.get(key);
+  if (!refresh && cached && fresh(cached)) return cached;
+  if (cached && ghBlocked()) return { ...cached, stale: true };
+  try {
+    const view = await withGh(() => fetchIssues(ref));
+    issuesCache.set(key, view);
     return view;
   } catch (error) {
     if (cached) return { ...cached, stale: true };
@@ -448,7 +492,7 @@ const VERDICTS = new Set<ReviewVerdict>([
 /** The repo sides the renderer may pick. */
 const SIDES = new Set<RepoSide>(["self", "parent"]);
 
-/** Register the pull-request and worktree IPC handlers. */
+/** Register the pull-request, issue and worktree IPC handlers. */
 export function registerGit(devUrl?: string): void {
   registerWorktree(devUrl);
   // Delete what the app stored about GitHub before `gh` made its requests.
@@ -590,4 +634,30 @@ export function registerGit(devUrl?: string): void {
     const ref = await repoFor(slug);
     await withGh(() => addComment(ref, number, body));
   });
+
+  // FE-75: the issue list's GitHub group. The repo is the one the pull
+  // request screen reads, fork side included, so both screens agree.
+  handle(
+    gitChannels.issues,
+    devUrl,
+    async (args): Promise<GitHubIssuesView> => {
+      if (args.length !== 2) throw new Error("A project is required.");
+      const slug = text(args[0], 200);
+      const refresh = args[1] === true;
+      const ref = await repoFor(slug, "issues");
+      return readIssues(ref, refresh);
+    },
+  );
+
+  handle(
+    gitChannels.issue,
+    devUrl,
+    async (args): Promise<GitHubIssueDetail> => {
+      if (args.length !== 2) throw new Error("An issue is required.");
+      const slug = text(args[0], 200);
+      const number = positive(args[1]);
+      const ref = await repoFor(slug, "issues");
+      return withGh(() => fetchIssue(ref, number));
+    },
+  );
 }

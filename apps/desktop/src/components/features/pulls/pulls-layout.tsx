@@ -1,7 +1,6 @@
 import { Outlet, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { usePanelRef } from "react-resizable-panels";
-import { PullsList } from "#/components/shared/pulls/pulls-list";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -10,6 +9,7 @@ import {
 } from "#/components/ui/resizable";
 import { useLayout } from "#/stores/layout";
 import { usePulls } from "#/stores/pulls";
+import { PullsList } from "./pulls-list";
 
 /**
  * The pull-request screen: a list that stays, and one pull request beside it.
@@ -20,11 +20,11 @@ import { usePulls } from "#/stores/pulls";
  * open window, forever, against an hourly budget.
  */
 export function PullsLayout() {
-  const { slug } = useParams({ from: "/_app/w/$slug/pulls" });
+  const { slug } = useParams({ from: "/_app/w/$slug/issues_/pulls" });
   // ⚠️ The state filter is read from the URL and passed INTO the read, not
   // applied to what came back: a merged pull request is not in the open list to
   // be filtered out of.
-  const { status } = useSearch({ from: "/_app/w/$slug/pulls" });
+  const { status } = useSearch({ from: "/_app/w/$slug/issues_/pulls" });
   const open = usePulls((state) => state.open);
   const refresh = usePulls((state) => state.refresh);
   const watch = usePulls((state) => state.watch);
@@ -32,8 +32,11 @@ export function PullsLayout() {
   const exitFocusMode = useLayout((state) => state.exitFocusMode);
   const listRef = usePanelRef();
 
+  // NOTE: The issue list's layout, not one of its own. Issues and Pull
+  // requests are two tabs over one list column (FE-75), so the column keeps
+  // its width when the tab changes.
   const { defaultLayout, onLayoutChanged } = usePersistedLayout(
-    "lanework:pulls",
+    "lanework:issues",
     ["list", "detail"],
   );
 
@@ -64,15 +67,15 @@ export function PullsLayout() {
 
   return (
     <ResizablePanelGroup
-      id="lanework:pulls"
+      id="lanework:issues"
       defaultLayout={defaultLayout}
       onLayoutChanged={onLayoutChanged}
     >
       <ResizablePanel
         id="list"
         panelRef={listRef}
-        defaultSize="280px"
-        minSize="15%"
+        defaultSize="340px"
+        minSize="18%"
         maxSize="45%"
         collapsible
         collapsedSize="0px"

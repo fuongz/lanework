@@ -1,15 +1,7 @@
 import { type GroupBy, isGroupBy } from "./board-view";
 
-/** How a project's issues are drawn: rows, or lanes (FE-13/D4). */
-export type IssueView = "list" | "board";
-
 /** The view state a URL carries. Every field optional; every field a plain string. */
 export interface IssueSearch {
-  /**
-   * Absent means the list. Only `"board"` is ever written, so the list's URL
-   * stays the bare one every older link already points at.
-   */
-  view?: "board";
   group?: GroupBy;
   status?: string;
   category?: string;
@@ -27,15 +19,18 @@ const PRIORITIES = ["high", "medium", "low", "none"];
 /**
  * Read a URL's view state, forgivingly.
  *
- * ⚠️ Unknown values are DROPPED rather than rejected. A validator that throws
- * turns a stale bookmark — or a link from a build that had one more filter —
- * into a router error page, and there is nothing the reader can do about it.
- * Falling back to the default view shows them their board.
+ * NOTE: Unknown values are DROPPED rather than rejected. A validator that
+ * throws turns a stale bookmark — or a link from a build that had one more
+ * filter, such as `?view=board` — into a router error page, and there is
+ * nothing the reader can do about it. Falling back to the default view shows
+ * them their board.
+ *
+ * It also takes any search object, so a page whose own URL carries more (New
+ * issue's prefill) can hand back just the list's part of it.
  */
 export function parseIssueSearch(raw: Record<string, unknown>): IssueSearch {
   const priority = text(raw.priority);
   return {
-    view: raw.view === "board" ? "board" : undefined,
     group: isGroupBy(raw.group) ? raw.group : undefined,
     status: text(raw.status),
     category: text(raw.category),

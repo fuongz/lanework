@@ -1,12 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
-import {
-  PullDetail,
-  parsePullDetailSearch,
-} from "#/components/features/pulls/pull-detail";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 export const Route = createFileRoute("/_app/w/$slug/pulls/$number")({
-  // ⚠️ The tab lives in the URL for the same reason the list's does: a link
-  // somebody sends carries what they were looking at, and Back undoes the
-  // switch rather than leaving the pull request entirely.
-  validateSearch: parsePullDetailSearch,
-  component: PullDetail,
+  // ⚠️ Kept as a redirect, not deleted (FE-75): one pull request at its old
+  // address lands on the same pull request at its new one.
+  beforeLoad: ({ params, search }) => {
+    throw redirect({
+      to: "/w/$slug/issues/pulls/$number",
+      params,
+      // The list's tab and state, from the old parent route's search.
+      search,
+      replace: true,
+    });
+  },
 });

@@ -3,12 +3,13 @@ import { Skeleton } from "#/components/ui/skeleton";
 /**
  * Loading states shaped like the thing that is coming.
  *
- * ⚠️ Sized to the real rows — 32px in the list, three lanes on the board — so
- * the first paint does not jump. A spinner in the middle of an empty pane says
- * "something is happening"; this says what, and it costs the same.
+ * NOTE: Sized to the real rows — the issue list's two-line rows under a 32px
+ * group header — so the first paint does not jump. A spinner in the middle of
+ * an empty pane says "something is happening"; this says what, and it costs
+ * the same.
  *
- * ⚠️ Each carries a `role="status"` with a real label, because a screen reader
- * gets nothing at all from a grid of grey rectangles.
+ * NOTE: Each carries a `role="status"` with a real label, because a screen
+ * reader gets nothing at all from a grid of grey rectangles.
  */
 export function IssuesListSkeleton() {
   return (
@@ -19,49 +20,21 @@ export function IssuesListSkeleton() {
     >
       {[0, 1].map((group) => (
         <div key={group}>
-          <div className="flex h-9 items-center gap-2 px-6">
+          <div className="flex h-8 items-center gap-2 px-3">
             <Skeleton className="size-3.5 rounded-full" />
             <Skeleton className="h-3 w-24" />
           </div>
           {[0, 1, 2].map((row) => (
-            <div key={row} className="flex h-8 items-center gap-2.5 px-6">
-              <Skeleton className="size-3.5 shrink-0 rounded-full" />
-              <Skeleton className="h-3 w-12 shrink-0" />
+            <div key={row} className="flex flex-col gap-1.5 px-5 py-2.5">
+              <div className="flex h-4 items-center gap-1.5">
+                <Skeleton className="size-3.5 shrink-0 rounded-full" />
+                <Skeleton className="h-2.5 w-20" />
+                <Skeleton className="ml-auto h-2.5 w-12" />
+              </div>
               <Skeleton
-                className="h-3"
-                style={{ width: `${34 - row * 6 + group * 8}%` }}
+                className="h-3.5"
+                style={{ width: `${74 - row * 8 + group * 6}%` }}
               />
-              <Skeleton className="ml-auto h-3 w-8 shrink-0" />
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export function BoardLanesSkeleton() {
-  return (
-    <div
-      role="status"
-      aria-label="Loading this board"
-      className="flex min-w-max gap-3 px-6 py-4"
-    >
-      {[0, 1, 2].map((lane) => (
-        <div key={lane} className="flex w-72 shrink-0 flex-col gap-1.5">
-          <div className="mb-0.5 flex h-7 items-center gap-2 px-1">
-            <Skeleton className="size-3.5 rounded-full" />
-            <Skeleton className="h-3 w-20" />
-          </div>
-          {Array.from({ length: 3 - lane }, (_, card) => (
-            <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: a placeholder has no identity — the index is all it is.
-              key={card}
-              className="shadow-card bg-card flex flex-col gap-2 rounded-lg p-2.5"
-            >
-              <Skeleton className="h-2.5 w-10" />
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-2/3" />
             </div>
           ))}
         </div>

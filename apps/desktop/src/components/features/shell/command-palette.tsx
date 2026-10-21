@@ -119,17 +119,6 @@ export function CommandPalette() {
             }),
         },
         {
-          id: "nav:board",
-          label: "Go to board",
-          icon: Grid2X2Icon,
-          run: () =>
-            void navigate({
-              to: "/w/$slug/issues",
-              params: { slug },
-              search: { view: "board" },
-            }),
-        },
-        {
           id: "card:new",
           label: "New issue",
           hint: "⌘N",

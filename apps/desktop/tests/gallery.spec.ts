@@ -416,10 +416,6 @@ test("ui gallery", async () => {
       await page.getByRole("button", { name: "Remove Status filter" }).click();
       await page.waitForTimeout(400);
 
-      await page.getByRole("button", { name: "Board", exact: true }).click();
-      await page.waitForTimeout(700);
-      await capture(page, "board lanes");
-
       await page.getByRole("link", { name: /^Issues/ }).click();
       await page.waitForTimeout(500);
       await page.keyboard.press("ControlOrMeta+k");
@@ -504,9 +500,6 @@ test("ui gallery", async () => {
         .click();
       await page.waitForTimeout(1000);
       await capture(page, "issues empty");
-      await page.getByRole("button", { name: "Board", exact: true }).click();
-      await page.waitForTimeout(600);
-      await capture(page, "board empty");
       await page.getByRole("button", { name: /^Switch project/ }).click();
       await page.waitForTimeout(400);
       await capture(page, "project switcher");

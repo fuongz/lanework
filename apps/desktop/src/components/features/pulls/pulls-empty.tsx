@@ -4,7 +4,6 @@ import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
-import { PullsListControls } from "#/components/shared/pulls/pulls-list";
 import {
   Empty,
   EmptyDescription,
@@ -28,8 +27,6 @@ export function PullsEmpty() {
           pull request's own there. */}
       <WindowTitlebar>
         <h1 className={WINDOW_TITLE}>Pull requests</h1>
-        <span className="ml-auto" />
-        <PullsListControls />
       </WindowTitlebar>
       {/* ⚠️ Nothing until the GitHub check answers: the list beside it shows
           the skeleton, and "Not set up yet" there would be a guess. */}

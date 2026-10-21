@@ -62,7 +62,7 @@ function targetPath(target: NotificationTarget): string {
   const slug = encodeURIComponent(target.slug);
   return target.kind === "session"
     ? `/w/${slug}/agents/chat/${encodeURIComponent(target.conversation)}`
-    : `/w/${slug}/pulls/${target.number}`;
+    : `/w/${slug}/issues/pulls/${target.number}`;
 }
 
 /** Delivered notifications, kept alive so their click listeners survive GC. */

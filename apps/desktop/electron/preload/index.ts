@@ -332,6 +332,9 @@ const git: DesktopGitApi = {
     ipcRenderer.invoke(gitChannels.activity, slug, number),
   comment: (slug, number, body) =>
     ipcRenderer.invoke(gitChannels.comment, slug, number, body),
+  issues: (slug, refresh) =>
+    ipcRenderer.invoke(gitChannels.issues, slug, refresh === true),
+  issue: (slug, number) => ipcRenderer.invoke(gitChannels.issue, slug, number),
 };
 
 /**

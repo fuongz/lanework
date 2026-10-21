@@ -20,7 +20,6 @@ import {
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
 import { MergeControl } from "#/components/shared/pulls/merge-control";
-import { PullsListControls } from "#/components/shared/pulls/pulls-list";
 import { Button } from "#/components/ui/button";
 import {
   ResizableHandle,
@@ -49,8 +48,6 @@ function PullsTitlebar() {
   return (
     <WindowTitlebar>
       <h1 className={WINDOW_TITLE}>Pull requests</h1>
-      <span className="ml-auto" />
-      <PullsListControls />
     </WindowTitlebar>
   );
 }
@@ -118,11 +115,13 @@ function Verdict({
  * app does not have yet, so the screen does not pretend to offer them.
  */
 export function PullDetail() {
-  const { slug, number } = useParams({ from: "/_app/w/$slug/pulls/$number" });
-  const navigate = useNavigate({ from: "/w/$slug/pulls/$number" });
+  const { slug, number } = useParams({
+    from: "/_app/w/$slug/issues_/pulls/$number",
+  });
+  const navigate = useNavigate({ from: "/w/$slug/issues/pulls/$number" });
   // Absent means `code`; see `parsePullDetailSearch`.
   const view: PullView =
-    useSearch({ from: "/_app/w/$slug/pulls/$number" }).view ?? "code";
+    useSearch({ from: "/_app/w/$slug/issues_/pulls/$number" }).view ?? "code";
   const focusMode = useLayout((state) => state.focusMode);
   const toggleFocusMode = useLayout((state) => state.toggleFocusMode);
   const parsed = Number(number);
@@ -232,8 +231,6 @@ export function PullDetail() {
           controls — in focus mode too, with the list shut — so the row has no
           clearance of its own to work out. */}
       <WindowTitlebar>
-        {/* The list's controls first, over the list they act on. */}
-        <PullsListControls />
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <HugeiconsIcon
             icon={GitPullRequestIcon}

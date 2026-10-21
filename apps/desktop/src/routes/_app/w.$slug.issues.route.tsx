@@ -1,23 +1,10 @@
-import { createFileRoute, Outlet } from "@tanstack/react-router";
-import { useBoard } from "#/stores/board";
-import { usePresencePoll } from "#/stores/board-presence";
-import { useCloudFeatures } from "#/stores/session";
-
+import { createFileRoute } from "@tanstack/react-router";
+import { IssuesLayout } from "#/components/features/board/issues-layout";
+import { parseIssueSearch } from "#/lib/issue-search";
 export const Route = createFileRoute("/_app/w/$slug/issues")({
+  // The list's grouping and filters live in the URL, so a link carries them
+  // and Back undoes them. On the LAYOUT, not the index: the list stays on
+  // screen beside every issue, so every child route reads the same filters.
+  validateSearch: parseIssueSearch,
   component: IssuesLayout,
 });
-
-/**
- * Every view of the issues — list, lanes, one issue — and, while any of them
- * is open, who is working on the board from other machines (BE-16/D2a).
- */
-function IssuesLayout() {
-  const { slug } = Route.useParams();
-  const workspace = useBoard(
-    (state) => state.workspaces.find((entry) => entry.slug === slug) ?? null,
-  );
-  // FE-52/D10: nobody else is on a local board, so there is nothing to poll.
-  const { presence } = useCloudFeatures(workspace);
-  usePresencePoll(presence ? (workspace?.id ?? null) : null);
-  return <Outlet />;
-}

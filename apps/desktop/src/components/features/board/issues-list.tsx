@@ -1,22 +1,26 @@
 import {
   Add01Icon,
-  ArrowDown01Icon,
-  ArrowRight01Icon,
+  CheckListIcon,
   FilterIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link, useParams, useSearch } from "@tanstack/react-router";
-import { useState } from "react";
-import { CardAgentsMark } from "#/components/shared/board/card-agents";
 import {
-  CategoryDot,
-  ChecklistProgress,
-  Fraction,
-  PriorityIcon,
-  StatusIcon,
-} from "#/components/shared/board/glyphs";
+  Link,
+  useNavigate,
+  useParams,
+  useSearch,
+} from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { GitHubIssue } from "#/../shared/git";
+import {
+  type BoardCard,
+  type BoardView,
+  matchesSearch,
+} from "#/../shared/workspaces";
+import { CardAgentsMark } from "#/components/shared/board/card-agents";
+import { PriorityIcon, StatusIcon } from "#/components/shared/board/glyphs";
 import { IssueMenu } from "#/components/shared/board/issue-menu";
-import { LoadMore } from "#/components/shared/board/load-more";
+import { RowBadge } from "#/components/shared/board/row-badge";
 import { IssuesListSkeleton } from "#/components/shared/board/skeletons";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import {
@@ -26,177 +30,443 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
+import { ScrollArea } from "#/components/ui/scroll-area";
 import {
-  categoryOf,
+  checklistProgress,
   columnOf,
   groupIssues,
-  shortAge,
-  subIssueProgress,
+  relativeTime,
+  statusKeys,
 } from "#/lib/board-view";
+import { type IssueSearch, parseIssueSearch } from "#/lib/issue-search";
 import { useBoard } from "#/stores/board";
+import { listOf, useGitHubIssues } from "#/stores/github-issues";
+import {
+  GitHubIssueRow,
+  GitHubIssuesProblemState,
+  GitHubIssuesSkeleton,
+} from "../github-issues/github-issue-row";
+import { LoadMore } from "./load-more";
+import { ViewToolbar } from "./view-toolbar";
 
+/** One row j/k can land on: a card by its task id, or a GitHub issue. */
+type Entry = { kind: "card"; taskId: string } | { kind: "gh"; number: number };
+
+/**
+ * What the board is read grouped by.
+ *
+ * NOTE: The list is not grouped (FE-75), but the service still reads one page
+ * per status (FE-17), so that is the grouping it is asked for.
+ */
+const GROUP_BY = "status";
+
+/** One row of the list, with the time it is sorted by. */
+type Row =
+  | { kind: "card"; card: BoardCard; at: number }
+  | { kind: "gh"; issue: GitHubIssue; at: number };
+
+/** An ISO time as a number to sort by; 0 for one that is missing. */
+const stamp = (iso: string | null | undefined) => {
+  const at = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isFinite(at) ? at : 0;
+};
+
+const entryKey = (entry: Entry) =>
+  entry.kind === "card" ? `card:${entry.taskId}` : `gh:${entry.number}`;
+
+/**
+ * Whether a key press belongs to something else on screen.
+ *
+ * j and k are letters, so a field or an editor gets them first. A menu, a
+ * listbox or a dialog gets the arrows.
+ */
+function ownedElsewhere(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return (
+    target.closest(
+      'input, textarea, select, [contenteditable=""], [contenteditable="true"], .cm-editor, [role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]',
+    ) !== null
+  );
+}
+
+/** One card as a two-line row: where it stands, then what it is. */
+function CardRow({
+  card,
+  view,
+  slug,
+  search,
+  now,
+}: {
+  card: BoardCard;
+  view: BoardView;
+  slug: string;
+  search: IssueSearch;
+  now: number;
+}) {
+  const column = columnOf(view.columns, card.columnKey);
+  // How far through its checklist the card is: only while it is being
+  // worked on, and only when it has a checklist (FE-75). Before work starts
+  // it is 0% and after it ends 100%, which the status already says.
+  const progress = checklistProgress(card);
+  const done =
+    column?.role === "active" && progress && progress.total > 0
+      ? Math.round((progress.done / progress.total) * 100)
+      : null;
+  return (
+    // NOTE: The menu RENDERS the `li` rather than wrapping it: a `ul` whose
+    // children are divs reports the wrong number of items to a screen reader.
+    <IssueMenu card={card} render={<li />}>
+      <Link
+        to="/w/$slug/issues/$taskId"
+        params={{ slug, taskId: card.taskId ?? card.id }}
+        // The list's filters ride along, so opening a card keeps the list.
+        search={search}
+        disabled={!card.taskId}
+        activeOptions={{ includeSearch: false }}
+        activeProps={{ className: "bg-foreground/[0.06]" }}
+        className={`${RAIL_ROW} group focus-visible:ring-accent-brand relative flex flex-col gap-1 rounded-lg px-3 py-2.5 outline-none focus-visible:ring-2 aria-disabled:cursor-default`}
+      >
+        {/* NOTE: Two lines, the shape every row in this list shares: where
+            it stands, then what it is. A card in progress adds a third. */}
+        <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+          <PriorityIcon priority={card.priority} />
+          <RowBadge className="max-w-[60%]">
+            {/* While an agent works on the card, its presence takes the
+                status icon's place. */}
+            <CardAgentsMark card={card}>
+              <StatusIcon column={column} />
+            </CardAgentsMark>
+            <span className="truncate">{column?.name ?? "Issue"}</span>
+          </RowBadge>
+          {card.taskId && <RowBadge>{card.taskId}</RowBadge>}
+          <span className="ml-auto shrink-0 pl-2 tabular-nums">
+            {relativeTime(card.updatedAt ?? card.createdAt, now)}
+          </span>
+        </span>
+        <span className="truncate text-[13px] group-data-[status=active]:font-medium">
+          {card.title}
+        </span>
+        {done !== null && (
+          // A third line only while the card is being worked on: how far
+          // through its checklist it is, as one small badge.
+          <span className="flex">
+            <RowBadge>
+              <span
+                className="flex items-center gap-1 tabular-nums"
+                title={`${progress?.done} of ${progress?.total} checked`}
+              >
+                <HugeiconsIcon
+                  icon={CheckListIcon}
+                  className="size-3"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+                {done}%
+              </span>
+            </RowBadge>
+          </span>
+        )}
+      </Link>
+    </IssueMenu>
+  );
+}
+
+/**
+ * The issue list: the board's cards by group, then the repo's GitHub issues.
+ *
+ * - The board's filters (status, category, priority, tag) cut the cards
+ *   only. A GitHub issue has none of those fields (FE-75/D5a).
+ * - The search box cuts both.
+ * - j/k and ↑/↓ move the selection down the rows as drawn: cards, then
+ *   GitHub issues, skipping folded groups (FE-75/D8).
+ */
 export function IssuesList() {
-  const { slug } = useParams({ from: "/_app/w/$slug/issues/" });
-  const search = useSearch({ from: "/_app/w/$slug/issues/" });
+  const { slug } = useParams({ from: "/_app/w/$slug/issues" });
+  // NOTE: Parsed again, not used as read. A match's search also carries the
+  // raw keys of the page beside the list (New issue's prefill, an old
+  // `?view=board`), and the list's links would carry them along.
+  const raw = useSearch({ from: "/_app/w/$slug/issues" });
+  const search = useMemo(() => parseIssueSearch(raw), [raw]);
+  const selected = useParams({ strict: false }) as {
+    taskId?: string;
+    number?: string;
+  };
+  const navigate = useNavigate();
   const view = useBoard((state) => state.view);
   const loading = useBoard((state) => state.loading);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  // ⚠️ Ages are measured from when the board was READ, not from now. A row that
-  // says "2h" next to a badge that says the copy is from this morning would be
-  // two clocks disagreeing on the same screen.
-  const now = view ? new Date(view.fetchedAt).getTime() : Date.now();
+  const setQuery = useBoard((state) => state.setQuery);
+  const github = useGitHubIssues((state) => listOf(state, slug));
+  const [query, setText] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const groupBy = search.group ?? "status";
-  const groups = view ? groupIssues(view, groupBy, search) : [];
-  // ⚠️ The SERVICE's counts when it sent them (FE-17): a group holds one page
-  // of its cards, and the header counting those would say "20" for 226.
-  const counts =
-    groupBy === "status"
-      ? view?.stats?.byColumn
-      : groupBy === "priority"
-        ? view?.stats?.byPriority
-        : view?.stats?.byCategory;
+  // NOTE: The URL IS the board's query (FE-17): the service reads one page
+  // per group, under these filters, so changing either is a new read — not a
+  // new filter over the cards already here.
+  // NOTE: Status is NOT sent: the board is read one page per status anyway,
+  // and the status filter is a set of lanes (FE-75), so it picks among the
+  // groups that came back rather than asking the service for one.
+  const { category, priority, tag } = search;
+  useEffect(
+    () =>
+      setQuery(slug, {
+        groupBy: GROUP_BY,
+        filters: { category, priority, tag },
+      }),
+    [setQuery, slug, category, priority, tag],
+  );
+
+  const onSearch = (next: IssueSearch) =>
+    void navigate({
+      to: ".",
+      search: next,
+      replace: true,
+    });
+
+  // NOTE: Ages are measured from when each list was READ, not from now. A row
+  // that says "2h" next to a badge saying the copy is from this morning would
+  // be two clocks disagreeing on one screen.
+  const now = view ? new Date(view.fetchedAt).getTime() : Date.now();
+  const githubNow = github.view
+    ? new Date(github.view.fetchedAt).getTime()
+    : Date.now();
+
+  const needle = query.trim();
+  const groups = useMemo(() => {
+    if (!view) return [];
+    const lanes = statusKeys(view.columns, search.status);
+    return groupIssues(view, GROUP_BY, {
+      ...search,
+      status: lanes.length ? lanes.join(",") : "none",
+    }).map((group) => ({
+      ...group,
+      cards: needle
+        ? group.cards.filter((card) => matchesSearch(card, needle))
+        : group.cards,
+    }));
+  }, [view, search, needle]);
+  const issues = useMemo(() => {
+    const all = github.view?.issues ?? [];
+    return needle
+      ? all.filter((issue) =>
+          matchesSearch(
+            { title: issue.title, taskId: String(issue.number) },
+            needle,
+          ),
+        )
+      : all;
+  }, [github.view, needle]);
+
+  // NOTE: The SERVICE's counts when it sent them (FE-17): a group holds one
+  // page of its cards, and the header counting those would say "20" for 226.
+  // A search is the exception — it only sees the cards that are here.
+  const counts = needle ? undefined : view?.stats?.byColumn;
   // "No cards yet" is about the BOARD, not the page of it on screen.
-  const empty = view ? (view.total ?? view.cards.length) === 0 : false;
+  const emptyBoard = view ? (view.total ?? view.cards.length) === 0 : false;
+
+  // NOTE: One list, newest activity first, cards and GitHub issues mixed:
+  // the row's first line already says which is which, so a header per group
+  // would only push the work further down.
+  const rows = useMemo(() => {
+    const out: Row[] = [];
+    const seen = new Set<string>();
+    for (const group of groups)
+      for (const card of group.cards) {
+        if (seen.has(card.id)) continue;
+        seen.add(card.id);
+        out.push({
+          kind: "card",
+          card,
+          at: stamp(card.updatedAt ?? card.createdAt),
+        });
+      }
+    for (const issue of issues)
+      out.push({ kind: "gh", issue, at: stamp(issue.updatedAt) });
+    return out.sort((left, right) => right.at - left.at);
+  }, [groups, issues]);
+
+  const entries: Entry[] = [];
+  for (const row of rows) {
+    if (row.kind === "gh")
+      entries.push({ kind: "gh", number: row.issue.number });
+    else if (row.card.taskId)
+      entries.push({ kind: "card", taskId: row.card.taskId });
+  }
+
+  // The groups the service has more of, read together by one Load more.
+  const more = groups.filter(
+    (group) =>
+      view?.groups?.[group.key]?.cursor &&
+      statusKeys(view.columns, search.status).includes(group.key),
+  );
+  const left = more.reduce(
+    (sum, group) =>
+      sum + Math.max((counts?.[group.key] ?? 0) - group.cards.length, 0),
+    0,
+  );
+
+  const current: string | null = selected.taskId
+    ? `card:${selected.taskId}`
+    : selected.number
+      ? `gh:${selected.number}`
+      : null;
+
+  const go = (entry: Entry) =>
+    void navigate(
+      entry.kind === "card"
+        ? {
+            to: "/w/$slug/issues/$taskId",
+            params: { slug, taskId: entry.taskId },
+            search,
+          }
+        : {
+            to: "/w/$slug/issues/gh/$number",
+            params: { slug, number: String(entry.number) },
+            search,
+          },
+    );
+
+  // j/k anywhere a letter is not being typed; the arrows only while the list
+  // or nothing has focus, so they still scroll the issue being read.
+  const keys = useRef({ entries, current, go });
+  keys.current = { entries, current, go };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const down = event.key === "j" || event.key === "ArrowDown";
+      const up = event.key === "k" || event.key === "ArrowUp";
+      if (!down && !up) return;
+      if (ownedElsewhere(event.target)) return;
+      if (event.key.startsWith("Arrow")) {
+        const focus = document.activeElement;
+        const inList = scrollRef.current?.contains(focus) ?? false;
+        if (!inList && focus && focus !== document.body) return;
+      }
+      const { entries, current, go } = keys.current;
+      if (!entries.length) return;
+      const at = entries.findIndex((entry) => entryKey(entry) === current);
+      const next =
+        at === -1
+          ? down
+            ? 0
+            : entries.length - 1
+          : Math.min(entries.length - 1, Math.max(0, at + (down ? 1 : -1)));
+      if (next === at) return;
+      event.preventDefault();
+      go(entries[next]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // The selected row is kept in view as j/k walk past the edge. `nearest`
+  // leaves the scroll alone whenever the row is already on screen.
+  useEffect(() => {
+    if (!current) return;
+    const row = scrollRef.current?.querySelector("[aria-current]");
+    row?.scrollIntoView({ block: "nearest" });
+  }, [current]);
+
+  const nothing = view && rows.length === 0 && !github.loading;
 
   return (
-    <RailHover
-      className="min-h-0 flex-1 overflow-y-auto"
-      backgroundClassName="rounded-none bg-foreground/[0.03]"
-    >
-      {!view && loading && <IssuesListSkeleton />}
-      {view && groups.every((group) => group.cards.length === 0) && (
-        <Empty className="py-16">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <HugeiconsIcon
-                icon={empty ? Add01Icon : FilterIcon}
-                strokeWidth={1.8}
-              />
-            </EmptyMedia>
-            {/* ⚠️ An empty BOARD and an empty RESULT are different situations
-                  with different ways out: one wants a card, the other wants the
-                  filter loosened. One sentence for both would be advice that is
-                  wrong half the time. */}
-            <EmptyTitle>{empty ? "No cards yet" : "No matches"}</EmptyTitle>
-            <EmptyDescription>
-              {/* The quick-add field that "above" pointed at is gone; New
-                    issue is the way in now. */}
-              {empty ? "Create one with New issue (⌘N)." : "Try fewer filters."}
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      )}
-      {groups.map((group) => {
-        const count = counts?.[group.key] ?? group.cards.length;
-        // Finished work starts folded away: it is the largest lane on any
-        // board that has been running a while, and the least often read.
-        const shut =
-          collapsed[group.key] ??
-          (group.role === "done" || group.role === "archive");
-        if (!group.cards.length) return null;
-        return (
-          <section key={group.key}>
-            <button
-              type="button"
-              aria-expanded={!shut}
-              onClick={() =>
-                setCollapsed((state) => ({ ...state, [group.key]: !shut }))
-              }
-              className="bg-background/95 hover:bg-foreground/[0.03] sticky top-0 z-10 flex h-9 w-full items-center gap-2 pr-6 pl-3 text-left backdrop-blur"
-            >
-              <HugeiconsIcon
-                icon={shut ? ArrowRight01Icon : ArrowDown01Icon}
-                className="text-muted-foreground size-3.5"
-                strokeWidth={2}
-                aria-hidden="true"
-              />
-              {search.group === undefined || search.group === "status" ? (
-                <StatusIcon column={columnOf(view?.columns ?? [], group.key)} />
-              ) : null}
-              <span className="text-[13px] font-medium">{group.name}</span>
-              <span className="text-muted-foreground text-xs tabular-nums">
-                {count}
-              </span>
-            </button>
-            {!shut && (
-              <ul>
-                {group.cards.map((card) => {
-                  const subs = view
-                    ? subIssueProgress(view.cards, card.id, view.columns)
-                    : null;
-                  return (
-                    // ⚠️ The menu RENDERS the `li` rather than wrapping it: a
-                    // `ul` whose children are divs is a list that reports the
-                    // wrong number of items to a screen reader.
-                    <IssueMenu key={card.id} card={card} render={<li />}>
-                      <Link
-                        to="/w/$slug/issues/$taskId"
-                        params={{ slug, taskId: card.taskId ?? card.id }}
-                        disabled={!card.taskId}
-                        className={`${RAIL_ROW} relative focus-visible:ring-accent-brand flex h-8 items-center gap-2.5 px-6 text-[13px] outline-none focus-visible:ring-2 focus-visible:-ring-offset-1 aria-disabled:cursor-default`}
-                      >
-                        <CardAgentsMark card={card}>
-                          <StatusIcon
-                            column={columnOf(
-                              view?.columns ?? [],
-                              card.columnKey,
-                            )}
-                          />
-                        </CardAgentsMark>
-                        {card.taskId && (
-                          <span className="text-muted-foreground w-14 shrink-0 font-mono text-xs">
-                            {card.taskId}
-                          </span>
-                        )}
-                        <span className="truncate">{card.title}</span>
-                        <span className="ml-auto flex shrink-0 items-center gap-2.5">
-                          {card.tags.slice(0, 2).map((tag) => (
-                            <span
-                              key={tag}
-                              className="bg-foreground/[0.05] text-muted-foreground rounded px-1.5 py-0.5 text-[11px]"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                          {card.categoryKey && (
-                            <CategoryDot
-                              category={categoryOf(
-                                view?.categories ?? [],
-                                card.categoryKey,
-                              )}
-                            />
-                          )}
-                          {subs && (
-                            <Fraction
-                              done={subs.done}
-                              total={subs.total}
-                              title={`${subs.done} of ${subs.total} sub-issues done`}
-                            />
-                          )}
-                          <ChecklistProgress card={card} />
-                          <PriorityIcon priority={card.priority} />
-                          <span className="text-muted-foreground w-7 text-right text-xs tabular-nums">
-                            {shortAge(card.updatedAt ?? card.createdAt, now)}
-                          </span>
-                        </span>
-                      </Link>
-                    </IssueMenu>
-                  );
-                })}
-                <li className="px-3 empty:hidden">
-                  <LoadMore
-                    group={group.key}
-                    loaded={group.cards.length}
-                    count={count}
-                    label={group.name}
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <ViewToolbar
+        slug={slug}
+        search={search}
+        onSearch={onSearch}
+        query={query}
+        onQuery={setText}
+      />
+      {/* The scroller is this area, not the list: the list stays mounted
+          while issues open beside it, so its scroll survives every switch.
+          Its bar floats over the rows, so the rows keep their width. */}
+      <ScrollArea viewportRef={scrollRef} className="flex-1">
+        <RailHover backgroundClassName="rounded-lg bg-foreground/[0.03]">
+          {!view && loading && <IssuesListSkeleton />}
+          {nothing && (
+            <Empty className="py-10">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <HugeiconsIcon
+                    icon={emptyBoard ? Add01Icon : FilterIcon}
+                    strokeWidth={1.8}
                   />
-                </li>
-              </ul>
+                </EmptyMedia>
+                {/* NOTE: An empty BOARD and an empty RESULT are different
+                  situations with different ways out: one wants a card, the
+                  other wants the filter loosened. */}
+                <EmptyTitle>
+                  {emptyBoard ? "No cards yet" : "No matches"}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {emptyBoard
+                    ? "Create one with New issue (⌘N)."
+                    : needle
+                      ? `No card matches “${needle}”.`
+                      : "Try fewer filters."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )}
+          {rows.length > 0 && (
+            <ul className="flex flex-col gap-0.5 px-2">
+              {rows.map((row) =>
+                row.kind === "card" && view ? (
+                  <CardRow
+                    key={`card:${row.card.id}`}
+                    card={row.card}
+                    view={view}
+                    slug={slug}
+                    search={search}
+                    now={now}
+                  />
+                ) : row.kind === "gh" ? (
+                  <GitHubIssueRow
+                    key={`gh:${row.issue.number}`}
+                    issue={row.issue}
+                    now={githubNow}
+                    selected={current === `gh:${row.issue.number}`}
+                    onSelect={() =>
+                      go({ kind: "gh", number: row.issue.number })
+                    }
+                  />
+                ) : null,
+              )}
+            </ul>
+          )}
+          {/* A search only looks through what is already read, so it does
+              not offer to read more. */}
+          {!needle && more.length > 0 && (
+            <div className="px-2 py-1">
+              <LoadMore groups={more.map((group) => group.key)} left={left} />
+            </div>
+          )}
+          {!github.view && github.loading && <GitHubIssuesSkeleton rows={2} />}
+          {/* NOTE: A project with no folder or no GitHub remote has no GitHub
+              issues to read, and saying so on every open would be noise. */}
+          {!github.view &&
+            !github.loading &&
+            github.problem &&
+            github.problem.kind !== "no-folder" &&
+            github.problem.kind !== "not-github" && (
+              <GitHubIssuesProblemState
+                slug={slug}
+                problem={github.problem}
+                className="py-6"
+              />
             )}
-          </section>
-        );
-      })}
-    </RailHover>
+          {github.view && github.problem && (
+            // A failed re-read over a list already here: said, not drawn over
+            // the issues somebody is reading.
+            <p className="text-destructive px-4 py-1.5 text-xs/relaxed">
+              {github.problem.kind === "failed"
+                ? github.problem.message
+                : "Could not refresh GitHub issues."}
+            </p>
+          )}
+        </RailHover>
+      </ScrollArea>
+    </div>
   );
 }

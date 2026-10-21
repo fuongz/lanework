@@ -27,7 +27,7 @@ export function useNotificationRouting(): void {
           });
         else
           void navigate({
-            to: "/w/$slug/pulls/$number",
+            to: "/w/$slug/issues/pulls/$number",
             params: { slug: target.slug, number: String(target.number) },
             search: { tab: "all", status: "open" },
           });

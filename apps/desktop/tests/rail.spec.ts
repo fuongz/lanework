@@ -347,14 +347,14 @@ test("at its narrowest the rail keeps every label on one line, and a ghost butto
     expect((await label.boundingBox())?.height ?? 99).toBeLessThan(20);
     // ⌘K steps aside so the word can stay.
     await expect(search.locator("kbd")).toBeHidden();
-    for (const name of ["Issues", "Pull requests", "Settings"]) {
+    for (const name of ["Issues", "Settings"]) {
       const row = page.getByRole("link", { name: new RegExp(`^${name}`) });
       expect((await row.boundingBox())?.height ?? 99, name).toBeLessThan(32);
     }
 
     // Ghost is ghost: nothing is drawn round Load more (FE-19). An unlayered
     // default border colour used to outrank `border-transparent`.
-    const more = page.getByRole("button", { name: /^Load more in/ }).first();
+    const more = page.getByRole("button", { name: /^Load more/ }).first();
     await expect(more).toBeVisible();
     expect(
       await more.evaluate((el) => getComputedStyle(el).borderTopColor),
@@ -595,15 +595,12 @@ test("folded, the rail keeps every destination as an icon — named, lit when op
       "Issues",
       "Changes",
       "History",
-      "Pull requests",
       "Settings",
     ];
     const ys: number[] = [];
     for (const name of names) {
       const slot = rail.getByRole(
-        /^(Issues|Changes|History|Pull requests|Settings)$/.test(name)
-          ? "link"
-          : "button",
+        /^(Issues|Changes|History|Settings)$/.test(name) ? "link" : "button",
         { name, exact: true },
       );
       await expect(slot).toBeVisible();

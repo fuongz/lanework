@@ -96,8 +96,8 @@ function agentLabel(agent: string): string {
 }
 
 /**
- * "Claude · working: Fix the login test" for this machine's agent, "Claude ·
- * Decio · 2 minutes ago" for one the service saw (BE-16/D6a).
+ * "Claude working: Fix the login test" for this machine's agent, "Claude on
+ * Decio, 2 minutes ago" for one the service saw (BE-16/D6a).
  */
 function describe(agent: CardAgent, now: number): string {
   if (agent.from === "local")

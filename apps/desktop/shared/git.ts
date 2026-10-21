@@ -434,6 +434,70 @@ export interface PullActivity {
   fetchedAt: string;
 }
 
+/**
+ * How many open issues one read brings back (FE-75/D7).
+ *
+ * ⚠️ The most recently UPDATED fifty, not the newest. The issue list puts these
+ * under the board's own cards, and what somebody scans that group for is
+ * "what is moving", which an issue opened last year and argued over today is.
+ */
+export const MAX_ISSUES = 50;
+
+export interface IssueLabel {
+  name: string;
+  /** Six hex digits without the `#`, as GitHub stores it. */
+  color: string;
+}
+
+/** A GitHub issue, trimmed to what the issue list draws. */
+export interface GitHubIssue {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed";
+  author: PullAuthor | null;
+  labels: IssueLabel[];
+  assignees: PullAuthor[];
+  /** How many comments it has, so a row can say so without reading them. */
+  comments: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A repo's open issues as of one read.
+ *
+ * ⚠️ Carries `fetchedAt` + `stale` for the same reason `PullsView` does.
+ */
+export interface GitHubIssuesView {
+  repo: RepoRef;
+  issues: GitHubIssue[];
+  fetchedAt: string;
+  stale: boolean;
+}
+
+export interface GitHubIssueComment {
+  id: string;
+  author: PullAuthor | null;
+  body: string;
+  createdAt: string;
+  url: string;
+}
+
+/**
+ * One issue with what its page shows: the body and the comments under it.
+ *
+ * ⚠️ Read-only (FE-75/D6a). Nothing on this screen writes to GitHub; the one
+ * action it carries out is making a CARD from the issue, and that is the
+ * board's write, not GitHub's.
+ */
+export interface GitHubIssueDetail {
+  repo: RepoRef;
+  issue: GitHubIssue;
+  body: string;
+  comments: GitHubIssueComment[];
+}
+
 export const gitChannels = {
   account: "git:account",
   check: "git:account:check",
@@ -449,6 +513,8 @@ export const gitChannels = {
   merge: "git:pull:merge",
   activity: "git:pull:activity",
   comment: "git:pull:comment",
+  issues: "git:issues",
+  issue: "git:issue",
 } as const;
 
 /**
@@ -568,4 +634,11 @@ export interface DesktopGitApi {
    * "changes requested" is how somebody blocks a pull request by accident.
    */
   comment: (slug: string, number: number, body: string) => Promise<void>;
+  /**
+   * This project's open issues, the `MAX_ISSUES` most recently updated.
+   *
+   * `refresh: true` skips the cached copy, as it does for `pulls`.
+   */
+  issues: (slug: string, refresh?: boolean) => Promise<GitHubIssuesView>;
+  issue: (slug: string, number: number) => Promise<GitHubIssueDetail>;
 }

@@ -774,19 +774,18 @@ test("opening a workspace shows its cloud board, and a tick carries the revision
     await expect(leave).toBeVisible();
     await leave.getByRole("button", { name: "Discard" }).click();
 
-    // Back on the board, a move is one request and the card changes lane.
+    // A move is one request, and the card's row in the list says where it
+    // went. There are no lanes any more (FE-75): the card's Status moves it.
     // ⚠️ The card's breadcrumb names the PROJECT, not "Issues" — it reads
     // "Cloud project › FE-01", the way the design draws it. The sidebar's own
     // Issues link carries a count in its accessible name, so it is not an exact
     // match for "Issues" either.
-    await page.getByRole("button", { name: "Board", exact: true }).click();
-    await page
-      .getByRole("combobox", { name: /^Move Cache the composer input/ })
-      .click();
+    await page.getByRole("link", { name: /Cache the composer input/ }).click();
+    await page.getByRole("combobox", { name: "Status" }).click();
     await page.getByRole("option", { name: "In Progress" }).click();
     await expect(
-      page.getByLabel("In Progress column").getByText(/Cache the composer/),
-    ).toBeVisible();
+      page.getByRole("link", { name: /Cache the composer input/ }),
+    ).toContainText("In Progress");
 
     // ⚠️ And when the board cannot be reached, the app shows its saved copy WITH
     // a label rather than an empty board — the failure that invites somebody to
@@ -1608,9 +1607,7 @@ test("the description is a markdown editor: lists continue, ⌘↵ saves, Escape
 
     // No category, so the card has no key to be opened by — the list is where
     // it is reachable, and that is where the composer sends it.
-    await expect(
-      page.getByRole("heading", { name: "All issues" }),
-    ).toBeVisible();
+    await expect(page.getByText("No issue selected")).toBeVisible();
     await expect(
       page.getByRole("listitem").filter({ hasText: "Saved by ⌘↵" }),
     ).toBeVisible();
@@ -1721,23 +1718,6 @@ test("a card is deleted from its context menu, in the list and on the board", as
     await expect(row).toHaveCount(0);
     expect(plane.calls).toContain(
       "DELETE /v1/boards/ws-cloud-project/items/card-0",
-    );
-
-    // ⚠️ And again on the lanes, where the same menu has to survive a card that
-    // is also a drag handle and a drop target. A wrapper element around it would
-    // break dnd-kit's measuring; the menu renders the card's own `li` instead.
-    await page.getByRole("button", { name: "Board", exact: true }).click();
-    const card = page
-      .getByRole("listitem")
-      .filter({ hasText: "Card number 2" });
-    await expect(card).toBeVisible();
-    await card.click({ button: "right" });
-    await page.getByRole("menuitem", { name: /^Delete/ }).click();
-    await page.getByRole("button", { name: "Delete card" }).click();
-
-    await expect(card).toHaveCount(0);
-    expect(plane.calls).toContain(
-      "DELETE /v1/boards/ws-cloud-project/items/card-1",
     );
 
     // Cancel leaves the card where it is — the gesture is one right click away
@@ -1879,10 +1859,10 @@ test("a long board is readable: groups fold, filters cut, and ⌘K jumps by key"
   }
 });
 
-test("dragging a card reorders its lane, and the order outlives a reload", async () => {
+test("issues read as list and detail: j/k move, Properties folds away, /board lands on the list", async () => {
   const plane = await startStubPlane({ workspaces });
   plane.setBoard("ws-cloud-project", bigBoard(6));
-  const profile = await mkdtemp(join(tmpdir(), "lanew-dnd-"));
+  const profile = await mkdtemp(join(tmpdir(), "lanew-list-detail-"));
   const home = join(profile, "home");
   await seedCredential(home, plane.origin);
   const app = await electron.launch({
@@ -1894,78 +1874,49 @@ test("dragging a card reorders its lane, and the order outlives a reload", async
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await switchTo(page, "Cloud project");
-    await page.getByRole("button", { name: "Board", exact: true }).click();
 
-    const lane = page.getByLabel("To-Do column").getByRole("listitem");
-    const titles = () => lane.allInnerTexts();
-    // ⚠️ Wait for the lane to be FULLY drawn before measuring it. Grabbing a
-    // bounding box while the board is still loading gives coordinates for a
-    // card that is about to move, and the drop then lands nowhere — the failure
-    // looks like broken drag-and-drop rather than a race in the test.
-    await expect(lane).toHaveCount(2);
-    expect((await titles()).join("|")).toMatch(
-      /Card number 1[\s\S]*Card number 4/,
-    );
+    // Nothing chosen yet: the detail pane is the app's empty state, not a
+    // summary of the board (FE-75/D2).
+    await expect(page.getByText("No issue selected")).toBeVisible();
+    await expect(page.getByText("Card number 1")).toBeVisible();
 
-    // ⚠️ The drop lands ABOVE the first card, so this is a reorder inside one
-    // lane — the case `rank` exists for and the one a `columnKey`-only move
-    // could never express.
-    // ⚠️ A REAL pointer gesture, which is the whole reason the board is on
-    // dnd-kit rather than HTML5 drag-and-drop. Chromium only turns a mouse
-    // gesture into `dragstart` through its own drag interception, which
-    // Playwright cannot drive inside an Electron window — so this used to be
-    // three dispatched events with a hand-made `DataTransfer`, testing the
-    // handlers while the gesture that reaches them went untested. A pointer
-    // sensor listens to the events Playwright can actually send.
-    const from = await lane.nth(1).boundingBox();
-    const to = await lane.nth(0).boundingBox();
-    if (!from || !to) throw new Error("the lane's cards are not on screen");
-    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-    await page.mouse.down();
-    // ⚠️ Two moves, and the first one only has to clear the 6px the sensor
-    // waits for. A single jump to the destination is one event that both starts
-    // the drag and ends it, and dnd-kit resolves the target from the move AFTER
-    // activation — so the drop would land on nothing.
-    await page.mouse.move(
-      from.x + from.width / 2,
-      from.y + from.height / 2 + 12,
-    );
-    // Above the first card's midpoint, so the drop lands BEFORE it.
-    await page.mouse.move(to.x + to.width / 2, to.y + 3, { steps: 8 });
-    await page.mouse.up();
-    await expect
-      .poll(async () => (await titles())[0])
-      .toContain("Card number 4");
+    // j and k walk the rows as drawn — To-Do, then In Progress; Done starts
+    // folded and is skipped (FE-75/D8). The list stays beside the card.
+    await page.keyboard.press("j");
+    await expect(page).toHaveURL(/\/issues\/FE-01/);
+    await expect(page.getByLabel("Card title")).toHaveValue("Card number 1");
+    await page.keyboard.press("j");
+    await expect(page).toHaveURL(/\/issues\/BE-04/);
+    await page.keyboard.press("j");
+    await expect(page).toHaveURL(/\/issues\/BE-02/);
+    await page.keyboard.press("k");
+    await expect(page).toHaveURL(/\/issues\/BE-04/);
+    await expect(page.getByText("Card number 1")).toBeVisible();
 
-    // ⚠️ Read back from the SERVER, not from the screen it was dropped on. The
-    // position is optimistic while the request is in flight; what this proves
-    // is that the board agreed.
+    // Properties is a panel that folds away, and stays folded (FE-75/D3, D9).
+    const properties = page.getByRole("complementary", {
+      name: "Card properties",
+    });
+    await expect(properties).toBeVisible();
+    await page.getByRole("button", { name: "Properties", exact: true }).click();
+    await expect(properties).toHaveCount(0);
     await page.reload();
-    // ⚠️ No click: the lanes are a VIEW of the issues now (FE-13/D4), and the
-    // URL carries it, so a reload comes back to the board by itself.
-    await expect(lane).toHaveCount(2);
-    await expect
-      .poll(async () => (await titles())[0])
-      .toContain("Card number 4");
+    await expect(page.getByLabel("Card title")).toHaveValue("Card number 4");
+    await expect(properties).toHaveCount(0);
+    await page.getByRole("button", { name: "Properties", exact: true }).click();
+    await expect(properties).toBeVisible();
 
-    // ⚠️ The rail's "Issues" reopens the view last used for THIS project
-    // (FE-13/D5): someone who works from the lanes is not sent to the list
-    // every time they come back.
-    await page.getByRole("button", { name: "List", exact: true }).click();
-    await expect(page.getByLabel("To-Do column")).toHaveCount(0);
-    await page.getByRole("button", { name: "Board", exact: true }).click();
-    await page.getByRole("link", { name: /^Issues/ }).click();
-    await expect(lane).toHaveCount(2);
-    await expect(
-      page.getByRole("button", { name: "Board", exact: true }),
-    ).toHaveAttribute("aria-pressed", "true");
-
-    // The old /board path still lands on the lanes, filters kept, rather than
-    // on a "not found" — links and ⌘K history from older builds name it.
+    // The old /board path still lands on the issues, filters kept, rather than
+    // on a "not found" — links and ⌘K history from older builds name it. There
+    // is no board view to reopen any more (FE-75).
     await page.goto("app://lanework/w/cloud-project/board?priority=high");
     await expect(page).toHaveURL(/\/w\/cloud-project\/issues\?/);
-    expect(new URL(page.url()).searchParams.get("view")).toBe("board");
+    expect(new URL(page.url()).searchParams.get("view")).toBeNull();
     expect(new URL(page.url()).searchParams.get("priority")).toBe("high");
+    await expect(page.getByText("No issue selected")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Board", exact: true }),
+    ).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally {
     await app.close();
@@ -2913,8 +2864,8 @@ test("a project URL whose list will not load asks once and stays put", async () 
 });
 
 /**
- * Watch for the thing that reads as "loading again": a skeleton, or a lane
- * card mounting at `opacity: 0` because it is about to fade in (FE-15).
+ * Watch for the thing that reads as "loading again": a skeleton, or a card
+ * mounting at `opacity: 0` because it is about to fade in (FE-15).
  */
 async function watchForReload(page: Page): Promise<void> {
   // ⚠️ A string, not a function: this project's test tsconfig has no DOM lib,
@@ -3001,7 +2952,7 @@ test("coming back to a project draws its board at once and reads only what chang
   }
 });
 
-test("a card opens with one activity read, and the lanes do not fade in again on the way back", async () => {
+test("a card opens with one activity read, and the list does not load again on the way back", async () => {
   const plane = await startStubPlane({ workspaces });
   plane.setBoard("ws-cloud-project", bigBoard(3));
   const profile = await mkdtemp(join(tmpdir(), "lanew-board-back-"));
@@ -3014,8 +2965,9 @@ test("a card opens with one activity read, and the lanes do not fade in again on
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Cloud project");
-    await page.getByRole("button", { name: "Board", exact: true }).click();
-    await expect(page.locator("li.shadow-card")).toHaveCount(3);
+    // Done starts folded, so two of the three cards are rows.
+    const rows = page.getByRole("link", { name: /Card number/ });
+    await expect(rows).toHaveCount(2);
 
     const mark = plane.calls.length;
     await page.getByText("Card number 1").click();
@@ -3034,7 +2986,8 @@ test("a card opens with one activity read, and the lanes do not fade in again on
 
     await watchForReload(page);
     await page.goBack();
-    await expect(page.locator("li.shadow-card")).toHaveCount(3);
+    await expect(page.getByText("No issue selected")).toBeVisible();
+    await expect(rows).toHaveCount(2);
     expect(await sawReload(page)).toEqual({ skeleton: false, fade: false });
     // Nothing was read to draw it: the board was already in memory.
     expect(
@@ -3063,14 +3016,20 @@ test("a big board opens one group at a time, counted by the service", async () =
     const page = await app.firstWindow();
     const mark = plane.calls.length;
     await switchTo(page, "Cloud project");
-    await page.getByRole("button", { name: "Board", exact: true }).click();
-    const lane = (name: string) =>
-      page.getByRole("region", { name: `${name} column` });
-    await expect(lane("To-Do").locator("li.shadow-card")).toHaveCount(50);
-    await expect(lane("In Progress").locator("li.shadow-card")).toHaveCount(20);
-    await expect(lane("Done").locator("li.shadow-card")).toHaveCount(20);
+    const header = (name: string) =>
+      page.getByRole("button", { name: new RegExp(`^${name}`) });
+    const group = (name: string) =>
+      page
+        .locator("section")
+        .filter({ has: header(name) })
+        .getByRole("link", { name: /Card number/ });
+    await expect(group("To-Do")).toHaveCount(50);
+    await expect(group("In Progress")).toHaveCount(20);
+    // Done starts folded; opening it draws the page it was read with.
+    await header("Done").click();
+    await expect(group("Done")).toHaveCount(20);
     // The counts are the service's, not the page on screen.
-    await expect(lane("Done").locator("header")).toContainText("100");
+    await expect(header("Done")).toContainText("100");
     await expect(page.getByRole("link", { name: /^Issues/ })).toContainText(
       "300",
     );
@@ -3086,12 +3045,10 @@ test("a big board opens one group at a time, counted by the service", async () =
       plane.calls.slice(mark).some((call) => call.includes("/stats")),
     ).toBe(true);
 
-    await page
-      .getByRole("button", { name: "Load more in In Progress" })
-      .click();
-    await expect(lane("In Progress").locator("li.shadow-card")).toHaveCount(40);
+    await page.getByRole("button", { name: /^Load more/ }).click();
+    await expect(group("In Progress")).toHaveCount(40);
     await expect(
-      page.getByRole("button", { name: "Load more in In Progress" }),
+      page.getByRole("button", { name: /^Load more/ }),
     ).toContainText("60 left");
     expect(
       plane.calls.some((call) =>
@@ -3121,23 +3078,20 @@ test("a filter is the service's, and ⌘K opens a card that is not loaded", asyn
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Cloud project");
-    await page.getByRole("button", { name: "Board", exact: true }).click();
     await expect(
       page.getByText("Card number 1", { exact: true }),
     ).toBeVisible();
     await expect(page.getByText("Card number 299")).toHaveCount(0);
 
     const mark = plane.calls.length;
-    await page.goto(
-      "app://lanework/w/cloud-project/issues?view=board&tag=needle",
-    );
+    await page.goto("app://lanework/w/cloud-project/issues?tag=needle");
     await expect(page.getByText("Card number 299")).toBeVisible();
     expect(
       plane.calls.slice(mark).some((call) => /items\?.*tag=needle/.test(call)),
     ).toBe(true);
 
     // ⌘K on a key no loaded card has: the card page asks the service.
-    await page.goto("app://lanework/w/cloud-project/issues?view=board");
+    await page.goto("app://lanework/w/cloud-project/issues");
     await expect(
       page.getByText("Card number 1", { exact: true }),
     ).toBeVisible();
@@ -3171,11 +3125,15 @@ test("a service without stats still gets the whole board", async () => {
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Cloud project");
-    await page.getByRole("button", { name: "Board", exact: true }).click();
-    const lane = (name: string) =>
-      page.getByRole("region", { name: `${name} column` });
+    const done = page.getByRole("button", { name: /^Done/ });
+    await done.click();
     // Every card, as before FE-17, and no "Load more" to press.
-    await expect(lane("Done").locator("li.shadow-card")).toHaveCount(50);
+    await expect(
+      page
+        .locator("section")
+        .filter({ has: done })
+        .getByRole("link", { name: /Card number/ }),
+    ).toHaveCount(50);
     await expect(page.getByRole("button", { name: /^Load more/ })).toHaveCount(
       0,
     );

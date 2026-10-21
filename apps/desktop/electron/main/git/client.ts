@@ -1,4 +1,5 @@
-// Pull requests through `gh pr …`, from the main process only.
+// Pull requests through `gh pr …` and issues through `gh issue …`, from the
+// main process only.
 //
 // - A subcommand wherever `gh` has one. `gh api` is used only for what no
 //   subcommand reads: one commit's diff and one file at one commit.
@@ -10,6 +11,12 @@ import {
   type CommitDiff,
   type FileText,
   formatRepoRef,
+  type GitHubIssue,
+  type GitHubIssueComment,
+  type GitHubIssueDetail,
+  type GitHubIssuesView,
+  type IssueLabel,
+  MAX_ISSUES,
   MAX_PULL_CHECKS,
   MAX_PULL_FILES,
   MAX_TIMELINE_ITEMS,
@@ -968,4 +975,163 @@ export async function addComment(
     ],
     { input: text },
   );
+}
+
+/** The fields one row of the issue list draws. Shared by `list` and `view`. */
+const ISSUE_FIELDS = [
+  "number",
+  "title",
+  "url",
+  "state",
+  "author",
+  "labels",
+  "assignees",
+  "comments",
+  "createdAt",
+  "updatedAt",
+];
+
+/** A label from `gh`'s `{ name, color }`; null when it has no name. */
+function toLabel(value: unknown): IssueLabel | null {
+  const row = record(value);
+  const name = str(row?.name);
+  if (!name) return null;
+  const color = str(row?.color)?.replace(/^#/, "") ?? "";
+  // ⚠️ The renderer puts this in a style. Anything but six hex digits is grey.
+  return { name, color: /^[0-9a-f]{6}$/i.test(color) ? color : "808080" };
+}
+
+/**
+ * One row of `gh issue list` or `gh issue view` as an issue.
+ *
+ * `comments` is a count after the list's `--jq`, and the comments themselves
+ * from `gh issue view`; both are read.
+ *
+ * @returns null for a row with no number.
+ */
+function toIssue(node: Record<string, unknown>): GitHubIssue | null {
+  if (typeof node.number !== "number") return null;
+  const assignees: GitHubIssue["assignees"] = [];
+  for (const entry of list(node.assignees)) {
+    const who = toAuthor(entry);
+    if (who) assignees.push(who);
+  }
+  const labels: IssueLabel[] = [];
+  for (const entry of list(node.labels)) {
+    const label = toLabel(entry);
+    if (label) labels.push(label);
+  }
+  return {
+    number: node.number,
+    title: str(node.title) ?? "(untitled)",
+    url: str(node.url) ?? "",
+    state: str(node.state)?.toLowerCase() === "closed" ? "closed" : "open",
+    author: toAuthor(node.author),
+    labels,
+    assignees,
+    comments: Array.isArray(node.comments)
+      ? node.comments.length
+      : num(node.comments),
+    createdAt: str(node.createdAt) ?? "",
+    updatedAt: str(node.updatedAt) ?? "",
+  };
+}
+
+/**
+ * A repo's open issues, the {@link MAX_ISSUES} most recently updated first.
+ *
+ * - ⚠️ `--search "sort:updated-desc"`, not only a sort here. `gh issue list`
+ *   answers the newest-CREATED fifty, and sorting those would leave out an
+ *   old issue that is being argued over today, the one this list is for.
+ * - ⚠️ `--jq` turns `comments` into a count inside `gh`. The field is the
+ *   comments themselves, up to a hundred per issue with their bodies, and
+ *   fifty of those is megabytes of text for one number per row. The count
+ *   stops at 100 for the same reason.
+ * - Pull requests never appear: `gh issue list` leaves them out.
+ *
+ * @throws {@link GitHubError} when `gh` fails, including for a repo with
+ *   issues turned off, which `gh` refuses in its own words.
+ */
+export async function fetchIssues(ref: RepoRef): Promise<GitHubIssuesView> {
+  const rows = await ghJson(
+    [
+      "issue",
+      "list",
+      "--repo",
+      repoArg(ref),
+      "--state",
+      "open",
+      "--search",
+      "sort:updated-desc",
+      "--limit",
+      String(MAX_ISSUES),
+      "--json",
+      ISSUE_FIELDS.join(","),
+      "--jq",
+      "map(.comments |= length)",
+    ],
+    { maxBuffer: 64 * 1024 * 1024 },
+  );
+  const issues: GitHubIssue[] = [];
+  for (const entry of list(rows)) {
+    const node = record(entry);
+    const issue = node ? toIssue(node) : null;
+    if (issue) issues.push(issue);
+  }
+  // The search index can trail an edit by a moment. Sorted again so the order
+  // on screen agrees with the times it shows.
+  issues.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return {
+    repo: ref,
+    issues: issues.slice(0, MAX_ISSUES),
+    fetchedAt: new Date().toISOString(),
+    stale: false,
+  };
+}
+
+/**
+ * One issue with its body and comments, oldest comment first.
+ *
+ * Read-only (FE-75/D6a): nothing next to this read writes to GitHub.
+ *
+ * @throws {@link GitHubError} when the issue cannot be read.
+ */
+export async function fetchIssue(
+  ref: RepoRef,
+  number: number,
+): Promise<GitHubIssueDetail> {
+  const data = record(
+    await ghJson(
+      [
+        "issue",
+        "view",
+        String(number),
+        "--repo",
+        repoArg(ref),
+        "--json",
+        [...ISSUE_FIELDS, "body"].join(","),
+      ],
+      { maxBuffer: 64 * 1024 * 1024 },
+    ),
+  );
+  const issue = data ? toIssue(data) : null;
+  if (!data || !issue)
+    throw new GitHubError("failed", "The GitHub CLI returned unreadable data.");
+
+  const comments: GitHubIssueComment[] = [];
+  for (const entry of list(data.comments)) {
+    const row = record(entry);
+    const id = str(row?.id);
+    if (!row || !id) continue;
+    comments.push({
+      id,
+      author: toAuthor(row.author),
+      body: str(row.body) ?? "",
+      createdAt: str(row.createdAt) ?? "",
+      url: str(row.url) ?? "",
+    });
+  }
+  // Stable sort: equal times keep GitHub's own order.
+  comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return { repo: ref, issue, body: str(data.body) ?? "", comments };
 }

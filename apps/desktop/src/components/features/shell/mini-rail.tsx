@@ -1,7 +1,6 @@
 import {
   Clock01Icon,
   GitCompareIcon,
-  GitPullRequestIcon,
   ListViewIcon,
   PencilEdit02Icon,
   Search01Icon,
@@ -19,7 +18,6 @@ import {
   TooltipTrigger,
 } from "#/components/ui/tooltip";
 import { useCommandPalette } from "#/stores/command-palette";
-import { useIssueView } from "#/stores/issue-view";
 
 /** One square slot of the mini rail; the open page gets the pill. */
 const SLOT =
@@ -94,9 +92,6 @@ export function MiniRail({
 }) {
   const navigate = useNavigate();
   const open = useCommandPalette((state) => state.open);
-  const lastView = useIssueView((state) =>
-    slug ? state.bySlug[slug] : undefined,
-  );
   return (
     <TooltipProvider delay={300}>
       <aside
@@ -166,10 +161,10 @@ export function MiniRail({
                   <Link
                     to="/w/$slug/issues"
                     params={{ slug }}
-                    search={lastView === "board" ? { view: "board" } : {}}
+                    search={{}}
                     aria-label="Issues"
                     className={SLOT}
-                    activeOptions={{ exact: true, includeSearch: false }}
+                    activeOptions={{ includeSearch: false }}
                     activeProps={ACTIVE}
                   />
                 }
@@ -202,20 +197,6 @@ export function MiniRail({
                     to="/w/$slug/history"
                     params={{ slug }}
                     aria-label="History"
-                    className={SLOT}
-                    activeProps={ACTIVE}
-                  />
-                }
-              />
-              <Slot
-                label="Pull requests"
-                icon={GitPullRequestIcon}
-                render={
-                  <Link
-                    to="/w/$slug/pulls"
-                    params={{ slug }}
-                    search={{ tab: "all", status: "open" }}
-                    aria-label="Pull requests"
                     className={SLOT}
                     activeProps={ACTIVE}
                   />

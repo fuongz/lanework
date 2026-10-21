@@ -1,16 +1,18 @@
 import {
   ArrowDown01Icon,
+  ArrowExpand01Icon,
   ArrowRight01Icon,
   Attachment01Icon,
   File01Icon,
   GitBranchIcon,
   Link01Icon,
   MoreHorizontalIcon,
+  SidebarRight01Icon,
   StarIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link, useBlocker, useParams } from "@tanstack/react-router";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Link, useBlocker, useParams, useSearch } from "@tanstack/react-router";
+import { useEffect, useId, useMemo, useState } from "react";
 import type {
   BoardAttachment,
   BoardCard,
@@ -87,9 +89,12 @@ import {
   subIssueProgress,
   subIssues,
 } from "#/lib/board-view";
+import { parseIssueSearch } from "#/lib/issue-search";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { presenceKind } from "#/stores/board-presence";
+import { useIssueView } from "#/stores/issue-view";
+import { useLayout } from "#/stores/layout";
 import { useCloudFeatures } from "#/stores/session";
 import { IssueActivity } from "./issue-activity";
 import { IssueCheckpoint } from "./issue-checkpoint";
@@ -103,6 +108,9 @@ export function IssueDetail() {
   const loading = useBoard((state) => state.detailLoading);
   const error = useBoard((state) => state.detailError);
   const active = useBoard((state) => state.active);
+  // Just the list's filters: the URL can carry keys of other pages too.
+  const filters = parseIssueSearch(useSearch({ from: "/_app/w/$slug/issues" }));
+  const propertiesOpen = useIssueView((state) => state.propertiesOpen);
 
   // ⚠️ Keyed on the workspace too. Opening `FE-06` in one project and then the
   // same id in another would otherwise reuse the first project's card while the
@@ -137,7 +145,7 @@ export function IssueDetail() {
           <Link
             to="/w/$slug/issues"
             params={{ slug }}
-            search={{}}
+            search={filters}
             className="hover:bg-foreground/[0.05] -ml-2 flex h-7 min-w-0 items-center rounded-md px-2 transition-colors"
           >
             <span className={WINDOW_TITLE}>{active?.name ?? "Issues"}</span>
@@ -147,7 +155,10 @@ export function IssueDetail() {
             {taskId}
           </span>
           {card && <CardAgentsLine card={card} />}
-          {card && <HeaderActions card={card} />}
+          <div className="ml-auto flex items-center gap-1">
+            {card && <HeaderActions card={card} />}
+            <PaneToggles />
+          </div>
         </WindowTitlebar>
         <AlertDialog
           open={blocker.status === "blocked"}
@@ -176,7 +187,9 @@ export function IssueDetail() {
           </AlertDialogContent>
         </AlertDialog>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Keyed on the card: the pane stays mounted while j/k move through
+            the list, and the next card must open at its top. */}
+        <div key={taskId} className="min-h-0 flex-1 overflow-y-auto">
           {loading && !card && <IssueDetailSkeleton />}
           {error && !card && (
             <ErrorState
@@ -189,28 +202,83 @@ export function IssueDetail() {
         </div>
       </section>
 
-      {/* ⚠️ The rail's frame is drawn before the card arrives, not with it. It
-          is 288px of the window; mounting it on load would shove a body that
-          had already been laid out and read. */}
-      <aside
-        aria-label="Card properties"
-        className="border-border flex w-72 shrink-0 flex-col border-l"
-      >
-        {/* The rail's own header band. ⚠️ It stays in the card when the
+      {/* NOTE: The rail's frame is drawn before the card arrives, not with
+          it. It is 288px of the pane; mounting it on load would shove a body
+          that had already been laid out and read. It is a panel somebody can
+          put away (FE-75/D3), and the choice is remembered app-wide. */}
+      {propertiesOpen && (
+        <aside
+          id={PROPERTIES_ID}
+          aria-label="Card properties"
+          className="border-border flex w-72 shrink-0 flex-col border-l"
+        >
+          {/* The rail's own header band. ⚠️ It stays in the card when the
             breadcrumb moves to the window's title bar (FE-58): its id and
             actions belong to this rail, not to the page. Not a drag region
             any more either — it no longer sits at the window's top edge. */}
-        <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b px-4">
-          <span className="text-muted-foreground font-mono text-xs">
-            {card?.taskId ?? taskId}
-          </span>
-          {card && <RailActions card={card} />}
-        </header>
-        <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
-          {card ? <Fields card={card} /> : !error && <PropertiesSkeleton />}
-        </div>
-      </aside>
+          <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b px-4">
+            <span className="text-muted-foreground font-mono text-xs">
+              {card?.taskId ?? taskId}
+            </span>
+            {card && <RailActions card={card} />}
+          </header>
+          <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
+            {card ? <Fields card={card} /> : !error && <PropertiesSkeleton />}
+          </div>
+        </aside>
+      )}
     </div>
+  );
+}
+
+/** The Properties panel's id, which its toggle names in `aria-controls`. */
+const PROPERTIES_ID = "issue-properties";
+
+/**
+ * The header's two layout buttons: Properties, and focus.
+ *
+ * - Properties shows or hides the card's properties panel (FE-75/D3).
+ * - Focus hides the rail and the issue list, as it does for a pull request.
+ */
+function PaneToggles() {
+  const propertiesOpen = useIssueView((state) => state.propertiesOpen);
+  const toggleProperties = useIssueView((state) => state.toggleProperties);
+  const focusMode = useLayout((state) => state.focusMode);
+  const toggleFocusMode = useLayout((state) => state.toggleFocusMode);
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn("size-7", propertiesOpen && "bg-foreground/[0.07]")}
+        aria-pressed={propertiesOpen}
+        aria-controls={propertiesOpen ? PROPERTIES_ID : undefined}
+        aria-label="Properties"
+        title={propertiesOpen ? "Hide properties" : "Show properties"}
+        onClick={toggleProperties}
+      >
+        <HugeiconsIcon
+          icon={SidebarRight01Icon}
+          className="text-muted-foreground size-4"
+          strokeWidth={1.8}
+        />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn("size-7", focusMode && "bg-foreground/[0.07]")}
+        aria-pressed={focusMode}
+        aria-label={focusMode ? "Show the other panels" : "Focus the issue"}
+        title={focusMode ? "Show the other panels" : "Focus the issue"}
+        onClick={toggleFocusMode}
+      >
+        <HugeiconsIcon
+          icon={ArrowExpand01Icon}
+          className="text-muted-foreground size-4"
+          strokeWidth={1.8}
+        />
+      </Button>
+    </>
   );
 }
 
@@ -295,7 +363,7 @@ function HeaderActions({ card }: { card: BoardCard }) {
       {/* ⚠️ Only while there IS something to save (FE-13/D7). A Save button
           that is always there, greyed out, reads as "this page has unsaved
           state somewhere" — the one thing it must never say when it is false. */}
-      <div className="ml-auto flex items-center gap-1">
+      <div className="flex items-center gap-1">
         <AssignAgentButton card={card} unsaved={changes > 0} />
         {changes > 0 && (
           <>
@@ -430,22 +498,6 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
 
   const parent = view?.cards.find((entry) => entry.id === card.parentId);
 
-  // Whether the title has scrolled up to the pane's top and is sitting there.
-  // A marker where the title starts in the page: once it is out of view, the
-  // title is stuck. The marker sits ABOVE the title, so the title growing or
-  // shrinking cannot move it and flip the answer back.
-  const titleMark = useRef<HTMLDivElement>(null);
-  const [stuck, setStuck] = useState(false);
-  useEffect(() => {
-    const mark = titleMark.current;
-    if (!mark) return;
-    const watch = new IntersectionObserver(([entry]) =>
-      setStuck(entry ? !entry.isIntersecting : false),
-    );
-    watch.observe(mark);
-    return () => watch.disconnect();
-  }, []);
-
   return (
     <article className="flex min-w-0 flex-1 flex-col gap-5 px-6 py-6">
       {parent && (
@@ -461,18 +513,16 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
           <span className="truncate">{parent.title}</span>
         </Link>
       )}
-      {/* `-mb-5` cancels the article's gap: the marker takes no room. */}
-      <div ref={titleMark} aria-hidden="true" className="-mb-5 h-0" />
       {/* ⚠️ Stuck to the top of the pane once the page scrolls — right under
           the window's title bar since the breadcrumb moved there (FE-58): the
-          title stays in view, smaller, over frosted glass — the page showing
-          through, blurred, as the app's popovers do. It is its own row rather
-          than part of the title bar, so the bar keeps one height on every
-          screen. */}
-      <div
-        data-stuck={stuck || undefined}
-        className="bg-background/70 sticky top-0 z-10 -mx-6 px-6 py-1.5 backdrop-blur-xl backdrop-saturate-150"
-      >
+          title stays in view over frosted glass — the page showing through,
+          blurred, as the app's popovers do. It is its own row rather than part
+          of the title bar, so the bar keeps one height on every screen.
+
+          NOTE: One size, scrolled or not (FE-75). It used to start large and
+          shrink once it stuck, which moved the page under the pointer at the
+          moment it started to scroll. */}
+      <div className="bg-background/70 sticky top-0 z-10 -mx-6 px-6 py-1.5 backdrop-blur-xl backdrop-saturate-150">
         <Input
           aria-label="Card title"
           value={title}
@@ -483,8 +533,7 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
           // does not cancel — so in dark mode this field kept a filled box that
           // light mode never showed.
           className={cn(
-            "h-auto rounded-md border-0 bg-transparent px-1.5 font-semibold tracking-tight shadow-none transition-[color,background-color,font-size] duration-150 focus-visible:border-0 focus-visible:bg-foreground/[0.04] focus-visible:ring-0 dark:bg-transparent dark:focus-visible:bg-foreground/[0.06]",
-            stuck ? "text-[15px] md:text-[15px]" : "text-xl md:text-xl",
+            "h-auto rounded-md border-0 bg-transparent px-1.5 text-[15px] font-semibold tracking-tight shadow-none transition-[color,background-color] duration-150 focus-visible:border-0 focus-visible:bg-foreground/[0.04] focus-visible:ring-0 md:text-[15px] dark:bg-transparent dark:focus-visible:bg-foreground/[0.06]",
           )}
           onChange={(event) => setTitle(event.target.value)}
           onBlur={() => {
