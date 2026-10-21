@@ -1,8 +1,8 @@
 import {
   ArrowUpRight01Icon,
+  Cancel01Icon,
   PlugSocketIcon,
   Refresh01Icon,
-  StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -17,6 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
+import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
   Popover,
@@ -32,10 +33,9 @@ const POLL_MS = 3000;
 /** What a confirmation is for: one port's process, or every one listed. */
 type Confirm = { kind: "one"; port: ListeningPort } | { kind: "all" };
 
-/** `:5173`, or `3 ports`. */
-function triggerText(ports: ListeningPort[]): string {
-  const distinct = new Set(ports.map((row) => row.port));
-  return distinct.size === 1 ? `:${ports[0].port}` : `${distinct.size} ports`;
+/** How many distinct ports are listening — one process may hold several rows. */
+function portCount(ports: ListeningPort[]): number {
+  return new Set(ports.map((row) => row.port)).size;
 }
 
 /** How long `port`'s process has run: `4m`, `2h 5m`, `3d 6h`. */
@@ -154,16 +154,15 @@ export function PortsStrip({ workspace }: { workspace: string }) {
           title="Ports this project listens on"
           className="text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground aria-expanded:bg-foreground/[0.04] aria-expanded:text-foreground flex h-6 min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xs whitespace-nowrap tabular-nums transition-colors"
         >
-          <span
-            className="bg-tone-emerald size-1.5 shrink-0 rounded-full"
-            aria-hidden="true"
-          />
           <HugeiconsIcon
             icon={PlugSocketIcon}
             className="size-3 shrink-0"
             strokeWidth={2}
           />
-          <span>{triggerText(ports)}</span>
+          <span>Ports</span>
+          <Badge variant="secondary" className="h-4 min-w-4 px-1 tabular-nums">
+            {portCount(ports)}
+          </Badge>
         </PopoverTrigger>
         <PopoverContent
           side="top"
@@ -196,66 +195,68 @@ export function PortsStrip({ workspace }: { workspace: string }) {
               />
             </Button>
           </div>
-          <ul className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+          <ul className="-mx-1 flex max-h-72 flex-col overflow-y-auto">
             {ports.map((row) => (
               <li
                 key={`${row.pid}:${row.port}`}
                 data-testid="port-row"
-                className="bg-muted/50 ring-foreground/[0.06] flex items-center gap-2.5 rounded-lg px-2.5 py-2 ring-1 ring-inset"
+                title={[
+                  row.command || row.name,
+                  uptime(row, now) && `up ${uptime(row, now)}`,
+                  row.via === "terminal" ? "from a terminal" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                className="group/port hover:bg-foreground/[0.04] focus-within:bg-foreground/[0.04] flex h-8 items-center gap-2.5 rounded-md px-2 transition-colors"
               >
-                <span className="w-12 shrink-0 font-mono text-[13px] font-medium tabular-nums">
+                <span
+                  className="bg-tone-emerald size-1.5 shrink-0 rounded-full"
+                  aria-hidden="true"
+                />
+                <span className="w-16 shrink-0 font-mono text-[13px] font-medium tabular-nums">
                   :{row.port}
                 </span>
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span
-                    className="truncate text-[12px] leading-4"
-                    title={row.command}
+                <span className="min-w-0 flex-1 truncate text-[12px]">
+                  {row.name}
+                </span>
+                <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+                  PID {row.pid}
+                </span>
+                <div className="flex shrink-0 items-center opacity-0 transition-opacity group-focus-within/port:opacity-100 group-hover/port:opacity-100">
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-muted-foreground"
+                    aria-label={`Open localhost:${row.port}`}
+                    title={`Open http://localhost:${row.port}`}
+                    // Main opens a localhost URL in the OS browser (FE-68).
+                    onClick={() =>
+                      window.open(`http://localhost:${row.port}`, "_blank")
+                    }
                   >
-                    {row.command || row.name}
-                  </span>
-                  <span className="text-muted-foreground truncate text-[10px] leading-4 tabular-nums">
-                    {[
-                      row.name,
-                      `pid ${row.pid}`,
-                      uptime(row, now),
-                      row.via === "terminal" ? "from a terminal" : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
+                    <HugeiconsIcon
+                      icon={ArrowUpRight01Icon}
+                      className="size-3.5"
+                      strokeWidth={2}
+                    />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`Stop :${row.port}`}
+                    title={`Stop :${row.port}`}
+                    disabled={stopping}
+                    onClick={() => setConfirming({ kind: "one", port: row })}
+                  >
+                    <span className="bg-destructive flex size-4 items-center justify-center rounded-full text-white">
+                      <HugeiconsIcon
+                        icon={Cancel01Icon}
+                        className="size-2.5"
+                        strokeWidth={3}
+                      />
+                    </span>
+                  </Button>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="text-muted-foreground"
-                  aria-label={`Open localhost:${row.port}`}
-                  title={`Open http://localhost:${row.port}`}
-                  // Main opens a localhost URL in the OS browser (FE-68).
-                  onClick={() =>
-                    window.open(`http://localhost:${row.port}`, "_blank")
-                  }
-                >
-                  <HugeiconsIcon
-                    icon={ArrowUpRight01Icon}
-                    className="size-3.5"
-                    strokeWidth={2}
-                  />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="text-muted-foreground hover:text-destructive"
-                  aria-label={`Stop :${row.port}`}
-                  title={`Stop :${row.port}`}
-                  disabled={stopping}
-                  onClick={() => setConfirming({ kind: "one", port: row })}
-                >
-                  <HugeiconsIcon
-                    icon={StopIcon}
-                    className="size-3.5"
-                    strokeWidth={2}
-                  />
-                </Button>
               </li>
             ))}
           </ul>

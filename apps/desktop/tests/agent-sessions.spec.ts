@@ -1804,6 +1804,7 @@ async function bootOnAgentHome(
     loggedIn: boolean;
   },
   launchClaudeStatusLine = false,
+  extraEnv: Record<string, string> = {},
 ) {
   const profile = await mkdtemp(join(tmpdir(), "lanew-codex-usage-"));
   const home = join(profile, "home");
@@ -1886,6 +1887,7 @@ process.stdin.resume();
       ...(claudeAuth
         ? { LANEWORK_TEST_CLAUDE_AUTH: JSON.stringify(claudeAuth) }
         : {}),
+      ...extraEnv,
     },
   });
   return { app, profile };
@@ -2161,14 +2163,14 @@ test("FE-41: the terminal bar shows Codex's usage until each window resets, and 
     await quota.click();
     const details = page.getByTestId("codex-quota-details");
     await expect(details).toBeVisible();
-    await expect(details).toContainText("Codex usage");
-    await expect(page.getByTestId("codex-usage-plan")).toHaveText("Plus plan");
+    await expect(details).toContainText("Codex");
+    await expect(page.getByTestId("codex-usage-plan")).toHaveText("Plus");
     await expect(
       details.getByRole("region", { name: "5-hour limit" }),
-    ).toContainText("6% used");
+    ).toContainText("6%");
     await expect(
       details.getByRole("region", { name: "Weekly limit" }),
-    ).toContainText("1% used");
+    ).toContainText("1%");
     await page.screenshot({
       path: "../../.agents/artifacts/2026-10-12-codex-usage-strip.png",
     });
@@ -2215,7 +2217,7 @@ test("FE-41: the terminal bar shows Codex's usage until each window resets, and 
     ).toContainText("No usage data yet");
     await expect(
       details.getByRole("region", { name: "Weekly limit" }),
-    ).toContainText("2% used");
+    ).toContainText("2%");
     await page.keyboard.press("Escape");
     await expect(details).not.toBeVisible();
 
@@ -2279,6 +2281,92 @@ function gitRepo(folder: string, committedAt: string) {
   git("commit", "-q", "--allow-empty", "-m", "init");
   return git;
 }
+
+test("FE-74: Codex's banked usage limit resets, asked of its app-server, spent only after Confirm", async () => {
+  test.skip(process.platform === "win32", "This drives a POSIX shell.");
+  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  const board = {
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    cards: [],
+  };
+  plane.setBoard("ws-alpha", board);
+  plane.setBoard("ws-beta", board);
+  const seconds = (ms: number) => Math.floor(ms / 1000);
+  // What `account/rateLimits/read` answers, as Codex 0.163 does.
+  const limits = {
+    rateLimitsByLimitId: {
+      codex: {
+        primary: {
+          usedPercent: 3,
+          windowDurationMins: 300,
+          resetsAt: seconds(Date.now() + 4 * HOUR),
+        },
+        secondary: {
+          usedPercent: 15,
+          windowDurationMins: 10080,
+          resetsAt: seconds(Date.now() + 100 * HOUR),
+        },
+        planType: "plus",
+      },
+    },
+    rateLimitResetCredits: {
+      availableCount: 2,
+      credits: [1, 2].map((n) => ({
+        id: `credit-${n}`,
+        resetType: "codexRateLimits",
+        status: "available",
+        grantedAt: seconds(Date.now() - 24 * HOUR),
+        expiresAt: seconds(Date.now() + n * 9 * 24 * HOUR),
+        title: "Full reset (Weekly + 5 hr)",
+        description: "You've been granted one free rate limit reset.",
+      })),
+    },
+    accountId: "account-never-shown",
+  };
+  const { app, profile } = await bootOnAgentHome(
+    plane.origin,
+    seedAgentHome,
+    undefined,
+    false,
+    {
+      LANEWORK_TEST_CODEX_RATE_LIMITS: JSON.stringify(limits),
+      LANEWORK_TEST_CODEX_RESET_OUTCOME: "reset",
+    },
+  );
+  try {
+    const page = await app.firstWindow();
+    await openProject(page, "Alpha");
+    await startAgent(page, "Codex");
+    const quota = page.getByTestId("codex-quota");
+    await expect(quota).toHaveAccessibleName(
+      "Codex usage: 5h 3% used, weekly 15% used",
+    );
+    await quota.click();
+    const resets = page.getByTestId("codex-usage-resets");
+    await expect(resets).toContainText("Usage limit resets");
+    await expect(resets).toContainText("2 available");
+    await expect(resets.getByText("Full reset (Weekly + 5 hr)")).toHaveCount(2);
+    await expect(resets).toContainText("Expires ");
+    await expect(page.getByTestId("codex-quota-details")).not.toContainText(
+      "account-never-shown",
+    );
+    // Use reset asks first; Cancel spends nothing.
+    const use = resets.getByRole("button", { name: "Use reset" });
+    await use.first().click();
+    await expect(resets).toContainText("Spend this reset now?");
+    await resets.getByRole("button", { name: "Cancel" }).click();
+    await expect(resets).not.toContainText("Spend this reset now?");
+    await use.first().click();
+    await resets.getByRole("button", { name: "Confirm" }).click();
+    await expect(resets.getByRole("status")).toHaveText(
+      "Codex usage was reset.",
+    );
+  } finally {
+    await app.close();
+    await plane.close();
+    await removeProfile(profile);
+  }
+});
 
 test("FE-39: a Claude conversation's files — file history or its tools alone, sub-agents folded in, nothing outside the repo", async () => {
   const home = await tempDir("lanew-agent-home-");
@@ -2951,11 +3039,7 @@ test("FE-53/FE-54: the terminal bar shows the usage of the agent on screen — C
     await expect(strip).toHaveAccessibleName(
       "Claude usage: 5h 11% used, weekly 23% used",
     );
-    await expect(strip).toContainText(/11% 2h \d+m/);
-    await expect(strip).toContainText(/23% 4d [34]h/);
-    await expect(
-      page.getByTestId("claude-quota-bar").locator("span"),
-    ).toHaveAttribute("style", /width: 11%/);
+    await expect(strip).toHaveText(/^11%resets (\S+ )?at \d{1,2}:\d{2}/);
     // In the terminal bar, not in the rail's footer beside Codex.
     await expect(page.getByTestId("claude-quota")).toHaveCount(1);
     await expect(page.locator("aside").getByTestId("claude-quota")).toHaveCount(
@@ -2965,22 +3049,20 @@ test("FE-53/FE-54: the terminal bar shows the usage of the agent on screen — C
     await strip.click();
     const details = page.getByTestId("claude-quota-details");
     await expect(details).toBeVisible();
-    await expect(details).toContainText("Claude Code usage");
+    await expect(details).toContainText("Claude Code");
     await expect(page.getByTestId("claude-usage-updated")).toHaveText(
       "Updated just now",
     );
-    await expect(page.getByTestId("claude-usage-plan")).toHaveText("Max plan");
+    await expect(page.getByTestId("claude-usage-plan")).toHaveText("Max");
     const fiveHour = details.getByRole("region", { name: "5-hour limit" });
-    await expect(fiveHour).toContainText("11% used");
-    await expect(fiveHour).toContainText("89% remaining");
+    await expect(fiveHour).toContainText("11%");
     await expect(fiveHour).toContainText(/Resets in 2h \d+m/);
     await expect(fiveHour.getByRole("progressbar")).toHaveAttribute(
       "aria-valuenow",
       "11",
     );
     const weekly = details.getByRole("region", { name: "Weekly limit" });
-    await expect(weekly).toContainText("23% used");
-    await expect(weekly).toContainText("77% remaining");
+    await expect(weekly).toContainText("23%");
     await expect(weekly).toContainText(/Resets in 4d [34]h/);
     await page.keyboard.press("Escape");
     await expect(details).not.toBeVisible();
@@ -3111,6 +3193,8 @@ test("FE-53: refresh asks main through IPC, spins while it waits, and an error k
     await page.keyboard.press("Escape");
 
     await stubClaudeRefresh(app);
+    // ⟳ is in the popover, beside the header.
+    await strip.click();
     const refresh = page.getByRole("button", { name: "Refresh Claude usage" });
     await refresh.click();
     await expect.poll(() => claudeRefreshCalls(app)).toBe(1);
@@ -3135,24 +3219,22 @@ test("FE-53: refresh asks main through IPC, spins while it waits, and an error k
     await answerClaudeRefresh(app, snapshot);
     await expect(refresh).toBeEnabled();
     await expect(refresh.locator("svg")).not.toHaveClass(/animate-spin/);
-    await expect(strip).toHaveText("3% now·0% 4d 6h");
-    await strip.click();
-    await expect(page.getByTestId("claude-usage-plan")).toHaveText("Team plan");
+    await expect(page.getByTestId("claude-usage-plan")).toHaveText("Team");
     await expect(page.getByTestId("claude-usage-updated")).toHaveText(
       "Updated just now",
     );
     const fiveHour = details.getByRole("region", { name: "5-hour limit" });
-    await expect(fiveHour).toContainText("3% used");
-    await expect(fiveHour).toContainText("97% remaining");
+    await expect(fiveHour).toContainText("3%");
     await expect(fiveHour).toContainText("Resets now");
     const weekly = details.getByRole("region", { name: "Weekly limit" });
-    await expect(weekly).toContainText("0% used");
-    await expect(weekly).toContainText("100% remaining");
+    await expect(weekly).toContainText("0%");
     await expect(weekly).toContainText("Resets in 4d 6h");
     await expect(page.getByTestId("claude-usage-error")).toHaveCount(0);
     await page.keyboard.press("Escape");
+    await expect(strip).toHaveText("3%resets now");
 
     // A failed refresh: main answers the last snapshot with `error`.
+    await strip.click();
     await refresh.click();
     await expect.poll(() => claudeRefreshCalls(app)).toBe(2);
     await answerClaudeRefresh(app, {
@@ -3165,17 +3247,15 @@ test("FE-53: refresh asks main through IPC, spins while it waits, and an error k
     await expect(strip).toHaveAccessibleName(
       "Claude usage: 5h 3% used, weekly 0% used",
     );
-    await strip.click();
     await expect(page.getByTestId("claude-usage-updated")).toHaveText(
       "Updated 5h ago · last known",
     );
     await expect(page.getByTestId("claude-usage-error")).toHaveText(
       "Your Claude sign-in has expired. Sign in to Claude again. Showing the last known usage.",
     );
-    await expect(fiveHour).toContainText("3% used");
+    await expect(fiveHour).toContainText("3%");
 
     // Nothing at all to show: the strip goes.
-    await page.keyboard.press("Escape");
     await refresh.click();
     await expect.poll(() => claudeRefreshCalls(app)).toBe(3);
     await answerClaudeRefresh(app, null);
@@ -3233,7 +3313,7 @@ test("FE-46: new and resumed Claude launches install the default statusLine brid
       page
         .getByTestId("claude-quota-details")
         .getByRole("region", { name: "5-hour limit" }),
-    ).toContainText("31% used");
+    ).toContainText("31%");
   } finally {
     await app.close();
     await plane.close();

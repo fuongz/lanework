@@ -549,13 +549,40 @@ export interface CodexQuotaWindow {
   resetsAt: number;
 }
 
+/** One banked "usage limit reset" Codex granted the account (FE-74). */
+export interface CodexResetCredit {
+  /** Codex's id for it: what spending it names. */
+  id: string;
+  status: "available" | "redeeming" | "redeemed" | "unknown";
+  /** "Full reset (Weekly + 5 hr)". */
+  title: string | null;
+  description: string | null;
+  /** Epoch ms; null when Codex does not say. */
+  grantedAt: number | null;
+  expiresAt: number | null;
+}
+
+/** The account's banked resets (FE-74). */
+export interface CodexResetCredits {
+  /** How many can be spent; may exceed `credits` when Codex lists fewer. */
+  availableCount: number;
+  credits: CodexResetCredit[];
+}
+
+/** What spending a banked reset did, in Codex's own words (FE-74). */
+export type CodexResetOutcome =
+  | "reset"
+  | "nothingToReset"
+  | "noCredit"
+  | "alreadyRedeemed";
+
 /**
- * The Codex account's usage, as the newest Codex turn on this machine
- * reported it (FE-41/D1).
+ * The Codex account's usage (FE-41/D1, FE-74).
  *
- * ⚠️ The ACCOUNT's, not a project's, and only as fresh as that turn: read
- * from a rollout's last `token_count`, never asked of OpenAI. A window past
- * its `resetsAt` says nothing any more (FE-41/D3).
+ * ⚠️ The ACCOUNT's, not a project's. Asked of `codex app-server` when it
+ * answers (`source: "app-server"`), else as the newest Codex turn on this
+ * machine reported it in a rollout's last `token_count`, only as fresh as
+ * that turn. A window past its `resetsAt` says nothing any more (FE-41/D3).
  */
 export interface CodexQuota {
   /** The short window — 5 hours today. */
@@ -564,8 +591,12 @@ export interface CodexQuota {
   secondary: CodexQuotaWindow | null;
   /** The plan as Codex names it — `plus`, `pro` — or null. */
   plan: string | null;
-  /** When the turn that reported it was, ISO. */
+  /** When the turn that reported it was, or when Codex was asked; ISO. */
   at: string;
+  /** The banked resets; only the app-server says (FE-74). */
+  resetCredits?: CodexResetCredits | null;
+  /** Where the windows came from; absent means a rollout. */
+  source?: "app-server" | "rollout";
 }
 
 /** A goal's state, as Codex's own `thread_goals` table allows (FE-41). */
@@ -754,6 +785,10 @@ export const terminalChannels = {
   codexUsage: "terminal:codex-usage",
   /** Fetch Claude account usage now, past the cache (FE-53). */
   refreshClaudeUsage: "terminal:refresh-claude-usage",
+  /** Ask Codex for the account's limits and resets now (FE-74). */
+  refreshCodexUsage: "terminal:refresh-codex-usage",
+  /** Spend one of Codex's banked resets (FE-74). */
+  consumeCodexReset: "terminal:consume-codex-reset",
   /** Main → renderer: a View-menu command. */
   command: "terminal:command",
 } as const;
@@ -953,6 +988,18 @@ export interface DesktopTerminalApi {
    * known values with `error` set.
    */
   refreshClaudeUsage: () => Promise<ClaudeUsage | null>;
+  /**
+   * Ask `codex app-server` for the account's limits and banked resets (FE-74)
+   * — the popover's opening and its ⟳. `force` asks even when the last
+   * answer is under a minute old. Resolves once asked; read the result with
+   * `codexUsage`.
+   */
+  refreshCodexUsage: (force: boolean) => Promise<void>;
+  /**
+   * Spend the banked reset `creditId` (FE-74). ⚠️ Not undoable: only on the
+   * user's confirmed click. Rejects with Codex's message when it fails.
+   */
+  consumeCodexReset: (creditId: string) => Promise<CodexResetOutcome>;
   /**
    * One conversation's numbers (FE-38). By ids only, as `agentSubagent`:
    * main builds the path inside the CLI's own folder for `workspace`.

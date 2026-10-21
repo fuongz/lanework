@@ -25,6 +25,8 @@ import {
   type BackgroundTaskOutput,
   type CardBrief,
   type ClaudeUsage,
+  type CodexQuota,
+  type CodexResetOutcome,
   type CodexUsage,
   clampGeometry,
   isAgentSessionId,
@@ -89,6 +91,11 @@ import {
   readClaudeCredentialFile,
 } from "./claude-oauth-usage";
 import { CLAUDE_USAGE_FILE, readClaudeQuota } from "./claude-usage";
+import {
+  codexQuotaOfAppServer,
+  consumeCodexResetCredit,
+  readCodexAppServerQuota,
+} from "./codex-app-server";
 import { type CodexDirs, readCodexUsage } from "./codex-usage";
 import { listPorts, stopPort } from "./ports";
 import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
@@ -269,6 +276,88 @@ async function runCodex(args: string[]): Promise<void> {
       },
     );
   });
+}
+
+// ── Codex limits and banked resets (FE-74) ────────────────────────────────
+
+/** Ask `codex app-server` again in the background after this long. */
+const CODEX_SERVER_TTL_MS = 5 * 60_000;
+/** The popover opening asks again only past this. */
+const CODEX_SERVER_FRESH_MS = 60_000;
+
+/** The last `codex app-server` answer, and when it was asked (epoch ms). */
+let codexServer: { quota: CodexQuota | null; at: number } | null = null;
+let codexServerReading: Promise<void> | null = null;
+
+/** A test run's stand-ins for Codex, never Codex itself: it is a real account. */
+function codexServerSeam(): { limits?: string; outcome?: string } | null {
+  if (app.isPackaged || !process.env.LANEWORK_TEST_USER_DATA) return null;
+  return {
+    limits: process.env.LANEWORK_TEST_CODEX_RATE_LIMITS,
+    outcome: process.env.LANEWORK_TEST_CODEX_RESET_OUTCOME,
+  };
+}
+
+/** The `codex` to run, against the Codex home the rail lists. */
+async function codexServerCli() {
+  const cli = await codexCli();
+  return { file: cli.file, env: { ...cli.env, CODEX_HOME: codexDirs().home } };
+}
+
+/**
+ * Ask Codex for the account's limits and resets, then tell the pages.
+ *
+ * A read already running is shared. A failed one keeps the last answer and
+ * waits the TTL before trying again: a Codex without the method, or signed
+ * out, is not asked on every listing.
+ */
+function readCodexServer(): Promise<void> {
+  codexServerReading ??= (async () => {
+    const seam = codexServerSeam();
+    try {
+      const quota = seam
+        ? seam.limits
+          ? codexQuotaOfAppServer(
+              JSON.parse(seam.limits),
+              new Date().toISOString(),
+            )
+          : null
+        : await readCodexAppServerQuota(await codexServerCli());
+      codexServer = { quota, at: Date.now() };
+    } catch {
+      codexServer = { quota: codexServer?.quota ?? null, at: Date.now() };
+    }
+    notifyClaudeUsage();
+  })().finally(() => {
+    codexServerReading = null;
+  });
+  return codexServerReading;
+}
+
+/** Ask Codex again when its last answer is older than `maxAge`. */
+function refreshCodexServer(maxAge: number): Promise<void> {
+  if (codexServer && Date.now() - codexServer.at < maxAge)
+    return Promise.resolve();
+  return readCodexServer();
+}
+
+/**
+ * The quota to show: Codex's own answer, unless a turn reported newer
+ * windows since. The banked resets only Codex's answer has.
+ */
+function codexQuotaNow(rollout: CodexQuota | null): CodexQuota | null {
+  const server = codexServer?.quota ?? null;
+  if (!server) return rollout;
+  const windows = Boolean(server.primary || server.secondary);
+  if (windows && (!rollout || Date.parse(server.at) >= Date.parse(rollout.at)))
+    return server;
+  if (!rollout) return server;
+  return {
+    ...rollout,
+    plan: rollout.plan ?? server.plan,
+    resetCredits: server.resetCredits ?? null,
+    source: "rollout",
+  };
 }
 
 /** The file of Lanework's names and pins for agent conversations. */
@@ -1244,7 +1333,40 @@ export function registerTerminal(devUrl?: string): void {
         readCodexUsage(codexDirs(), ids),
         claudeUsageNow(false),
       ]);
-      return { ...usage, claude };
+      // In the background: the listing never waits on Codex starting.
+      void refreshCodexServer(CODEX_SERVER_TTL_MS);
+      return { ...usage, quota: codexQuotaNow(usage.quota), claude };
+    },
+  );
+  // NOTE: A boolean alone (FE-74). The answer is read with `codexUsage`.
+  handle(
+    terminalChannels.refreshCodexUsage,
+    devUrl,
+    async (args): Promise<void> => {
+      if (args.length !== 1 || typeof args[0] !== "boolean")
+        throw new Error("A boolean is required");
+      await (args[0]
+        ? readCodexServer()
+        : refreshCodexServer(CODEX_SERVER_FRESH_MS));
+    },
+  );
+  // NOTE: Spends a banked reset (FE-74): not undoable, and only ever the id
+  // of one Codex listed. The page asks after the user confirms.
+  handle(
+    terminalChannels.consumeCodexReset,
+    devUrl,
+    async (args): Promise<CodexResetOutcome> => {
+      if (args.length !== 1) throw new Error("A reset id is required");
+      const id = args[0];
+      const listed = codexServer?.quota?.resetCredits?.credits ?? [];
+      if (typeof id !== "string" || !listed.some((credit) => credit.id === id))
+        throw new Error("That reset is not one Codex listed.");
+      const seam = codexServerSeam();
+      const outcome = seam
+        ? ((seam.outcome as CodexResetOutcome | undefined) ?? "reset")
+        : await consumeCodexResetCredit(await codexServerCli(), id);
+      await readCodexServer();
+      return outcome;
     },
   );
   // NOTE: No arguments, and only the safe `ClaudeUsage` comes back (FE-53):

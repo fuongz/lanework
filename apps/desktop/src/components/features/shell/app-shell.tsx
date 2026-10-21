@@ -446,12 +446,7 @@ export function AppShell() {
                   {terminalShowing && workspaceKey && (
                     <TerminalPanel
                       workspace={workspaceKey}
-                      usage={
-                        <>
-                          <PortsStrip workspace={workspaceKey} />
-                          <AgentUsageStrip workspace={workspaceKey} />
-                        </>
-                      }
+                      usage={<BarStrips workspace={workspaceKey} />}
                     />
                   )}
                 </ResizablePanel>
@@ -460,12 +455,7 @@ export function AppShell() {
             {!terminalShowing && workspaceKey && (
               <TerminalMinibar
                 workspace={workspaceKey}
-                usage={
-                  <>
-                    <PortsStrip workspace={workspaceKey} />
-                    <AgentUsageStrip workspace={workspaceKey} />
-                  </>
-                }
+                usage={<BarStrips workspace={workspaceKey} />}
               />
             )}
           </div>
@@ -514,6 +504,23 @@ export function AppShell() {
       <McpAuthIsland yieldTo={dictating || notice !== null} />
       <BoardNoticeIsland notice={dictating ? null : notice} />
       <DictationIsland />
+    </div>
+  );
+}
+
+/**
+ * The terminal bar's right end: listening ports, then the agent's usage,
+ * apart and with a hairline between them.
+ *
+ * ⚠️ The line is drawn by the SECOND item that is there, not placed between
+ * them: either strip draws nothing when it has nothing to say, and a line
+ * beside one strip alone would divide nothing.
+ */
+function BarStrips({ workspace }: { workspace: string }) {
+  return (
+    <div className="flex items-center gap-3 [&>*+*]:relative [&>*+*]:before:absolute [&>*+*]:before:top-1/2 [&>*+*]:before:-left-1.5 [&>*+*]:before:h-3.5 [&>*+*]:before:w-px [&>*+*]:before:-translate-y-1/2 [&>*+*]:before:bg-border">
+      <PortsStrip workspace={workspace} />
+      <AgentUsageStrip workspace={workspace} />
     </div>
   );
 }

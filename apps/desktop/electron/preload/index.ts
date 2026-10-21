@@ -513,6 +513,10 @@ function createTerminal(): DesktopTerminalApi {
       ipcRenderer.invoke(terminalChannels.codexUsage, workspace),
     refreshClaudeUsage: () =>
       ipcRenderer.invoke(terminalChannels.refreshClaudeUsage),
+    refreshCodexUsage: (force) =>
+      ipcRenderer.invoke(terminalChannels.refreshCodexUsage, force),
+    consumeCodexReset: (creditId) =>
+      ipcRenderer.invoke(terminalChannels.consumeCodexReset, creditId),
     agentFacts: (workspace, agent, id) =>
       ipcRenderer.invoke(terminalChannels.agentFacts, workspace, agent, id),
     agentUsage: (workspace) =>

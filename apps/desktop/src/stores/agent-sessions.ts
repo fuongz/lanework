@@ -8,6 +8,7 @@ import type {
   ClaudeUsage,
   CodexGoal,
   CodexQuota,
+  CodexResetOutcome,
   TerminalAgent,
 } from "../../shared/terminal";
 
@@ -97,6 +98,21 @@ interface AgentSessionsState {
   codexGoals: Record<string, Record<string, CodexGoal>>;
   /** Read the usage and goals again, for `workspace`'s conversations. */
   loadCodexUsage: (workspace: string) => Promise<void>;
+  /**
+   * Ask Codex itself for the account's limits and banked resets, then read
+   * them (FE-74). `force` asks even when the last answer is under a minute
+   * old — ⟳; the popover opening does not. Never throws.
+   */
+  refreshCodexUsage: (workspace: string, force: boolean) => Promise<void>;
+  /**
+   * Spend the banked reset `creditId`, then read the usage again (FE-74).
+   * ⚠️ Not undoable: only on the user's confirmed click. Rejects with
+   * Codex's message when it fails.
+   */
+  consumeCodexReset: (
+    workspace: string,
+    creditId: string,
+  ) => Promise<CodexResetOutcome>;
 }
 
 /**
@@ -481,6 +497,28 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     } catch {
       // Main answers empty rather than failing; a refused call keeps what
       // the rail showed.
+    }
+  },
+
+  refreshCodexUsage: async (workspace, force) => {
+    const surface = window.desktop?.terminal;
+    if (!surface?.refreshCodexUsage) return;
+    try {
+      await surface.refreshCodexUsage(force);
+    } catch {
+      // Codex not there, or signed out: what the rollouts said stands.
+    }
+    await get().loadCodexUsage(workspace);
+  },
+
+  consumeCodexReset: async (workspace, creditId) => {
+    const surface = window.desktop?.terminal;
+    if (!surface?.consumeCodexReset)
+      throw new Error("Codex resets are not available here.");
+    try {
+      return await surface.consumeCodexReset(creditId);
+    } finally {
+      await get().loadCodexUsage(workspace);
     }
   },
 }));

@@ -1,5 +1,4 @@
 import {
-  Clock01Icon,
   Copy01Icon,
   Loading03Icon,
   Tick02Icon,
@@ -7,6 +6,10 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import {
+  HarnessAccountRow,
+  useHarnessAccounts,
+} from "#/components/shared/agents/harness-account";
 import { HARNESS_NAMES } from "#/components/shared/agents/harness-island";
 import { useCopy } from "#/components/shared/common/use-copy";
 import { TextSkeleton } from "#/components/shared/loading/skeletons";
@@ -19,14 +22,10 @@ import {
   SettingsValue,
 } from "#/components/shared/settings/settings-page";
 import {
-  barTone,
-  clamp,
   claudeView,
   codexView,
-  NEARLY_SPENT,
-  resetDuration,
+  UsageBar,
   type UsageView,
-  type UsageWindow,
   updatedText,
   useClock,
 } from "#/components/shared/terminal/agent-usage-strip";
@@ -36,7 +35,6 @@ import { Switch } from "#/components/ui/switch";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { relativeTime } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
-import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
@@ -120,39 +118,8 @@ const rowWords = (rows: SettingsRowSpec[]) =>
  * ⚠️ The cards are `content` sections, so search cannot narrow them row by
  * row: a card matches on every word of its rows (`rowWords`) and shows whole.
  */
-/**
- * Who each CLI is signed in as (`HarnessAccount`), read on opening the page
- * and again on coming back to the window — signing in happens in a terminal.
- */
-function useAccounts(): Partial<Record<HarnessAgent, HarnessAccount>> {
-  const [accounts, setAccounts] = useState<
-    Partial<Record<HarnessAgent, HarnessAccount>>
-  >({});
-  useEffect(() => {
-    const surface = window.desktop?.harness;
-    if (!surface?.accounts) return;
-    let live = true;
-    const read = () =>
-      void surface.accounts().then(
-        (list) =>
-          live &&
-          setAccounts(
-            Object.fromEntries(list.map((account) => [account.agent, account])),
-          ),
-        () => undefined,
-      );
-    read();
-    window.addEventListener("focus", read);
-    return () => {
-      live = false;
-      window.removeEventListener("focus", read);
-    };
-  }, []);
-  return accounts;
-}
-
 export function HarnessSection() {
-  const accounts = useAccounts();
+  const accounts = useHarnessAccounts();
   const [status, setStatus] = useState<HandoffStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -726,34 +693,6 @@ export function HarnessSection() {
   );
 }
 
-const titleCase = (word: string) =>
-  `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
-
-/**
- * An email drawn blurred, the way a screenshot-safe settings page shows one:
- * hover or focus it to read it, click to keep it shown.
- *
- * ⚠️ The blur is for the screen, not for safety — the text is in the DOM and
- * a screen reader reads it. That is the point: it is the user's own email.
- */
-function BlurredEmail({ email }: { email: string }) {
-  const [shown, setShown] = useState(false);
-  return (
-    <button
-      type="button"
-      aria-pressed={shown}
-      title={shown ? "Hide email" : "Show email"}
-      onClick={() => setShown((value) => !value)}
-      className={cn(
-        "min-w-0 truncate rounded-sm text-left transition-[filter] duration-150 outline-none select-none hover:blur-none focus-visible:blur-none",
-        !shown && "blur-[5px]",
-      )}
-    >
-      {email}
-    </button>
-  );
-}
-
 /**
  * One CLI's card, as a provider list draws one: its mark, name and how many
  * accounts it has, its version on the right; then the account — its
@@ -854,36 +793,11 @@ function HarnessCard({
       {installed && signedIn && account && (
         // One row, aligned with the card's other rows: the account and its
         // organization on the left, its state on the right.
-        <div className="flex items-center justify-between gap-6 px-4 py-3.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="shrink-0 text-sm font-medium">
-              Default account
-            </span>
-            {account.org && (
-              <span
-                data-testid={`harness-org-${kind}`}
-                className="bg-muted text-muted-foreground truncate rounded-md px-1.5 py-0.5 text-[11px] leading-4"
-              >
-                {account.org}
-              </span>
-            )}
-          </div>
-          <div className="text-muted-foreground flex min-w-0 items-center gap-2.5 text-[13px]">
-            <span className="flex shrink-0 items-center gap-1.5">
-              <span
-                className="bg-tone-emerald size-1.5 rounded-full"
-                aria-hidden="true"
-              />
-              Ready
-            </span>
-            {account.plan && (
-              <span data-testid={`harness-plan-${kind}`} className="shrink-0">
-                {titleCase(account.plan)}
-              </span>
-            )}
-            {account.email && <BlurredEmail email={account.email} />}
-          </div>
-        </div>
+        <HarnessAccountRow
+          kind={kind}
+          account={account}
+          className="px-4 py-3.5"
+        />
       )}
       {usage && <UsageRow view={usage} now={now} />}
       {rows.map((row) => (
@@ -933,6 +847,7 @@ function UsageRow({ view, now }: { view: UsageView; now: number }) {
               key={label}
               name={view.name}
               label={label}
+              region={label === "5h" ? "5-hour limit" : "Weekly limit"}
               window={window}
               now={now}
             />
@@ -949,72 +864,6 @@ function UsageRow({ view, now }: { view: UsageView; now: number }) {
           `${updatedText(view.at, now)}${view.stale ? " (last known)" : ""}`
         )}
       </p>
-    </div>
-  );
-}
-
-function UsageBar({
-  name,
-  label,
-  window,
-  now,
-}: {
-  name: string;
-  label: string;
-  window: UsageWindow;
-  now: number;
-}) {
-  const used = clamp(window.usedPercent);
-  const reset =
-    window.resetsAt === null ? null : resetDuration(window.resetsAt - now);
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-3 text-[13px]">
-        <span
-          className="text-muted-foreground flex min-w-0 items-center gap-2 tabular-nums"
-          title={
-            window.resetsAt === null
-              ? undefined
-              : `Resets ${new Date(window.resetsAt).toLocaleString()}`
-          }
-        >
-          <span className="text-foreground/80 shrink-0">{label}</span>
-          {reset !== null && (
-            <span className="flex min-w-0 items-center gap-1">
-              <HugeiconsIcon
-                icon={Clock01Icon}
-                className="size-3 shrink-0"
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
-              <span className="truncate">
-                {reset === "now" ? "Resets now" : `Resets in ${reset}`}
-              </span>
-            </span>
-          )}
-        </span>
-        <span
-          className={cn(
-            "shrink-0 font-medium tabular-nums",
-            used >= NEARLY_SPENT && "text-tone-amber",
-          )}
-        >
-          {Math.round(used)}%
-        </span>
-      </div>
-      <div
-        className="bg-foreground/10 h-1 overflow-hidden rounded-full"
-        role="progressbar"
-        aria-label={`${name} ${label.toLowerCase()} usage limit used`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(used)}
-      >
-        <span
-          className={cn("block h-full rounded-full", barTone(used))}
-          style={{ width: `${used}%` }}
-        />
-      </div>
     </div>
   );
 }
