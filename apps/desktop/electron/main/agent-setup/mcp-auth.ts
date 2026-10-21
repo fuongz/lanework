@@ -57,19 +57,45 @@ export function parseClaudeAuth(output: string): LaneworkMcpAuth {
 const mark = (agent: LaneworkMcpAgent, part: string) =>
   `__lanework_mcp_auth_${agent}_${part}__`;
 
+/**
+ * `cli` under a pseudo-terminal, its output piped back out.
+ *
+ * ⚠️ Claude Code's `mcp login` gives up the moment its stdin is not a TTY
+ * ("stdin isn't a terminal") instead of waiting for the browser's callback,
+ * and the shell's stdin is /dev/null. `script` hands it a pty for stdin;
+ * stdout stays a pipe, so it never opens its paste-the-URL prompt and never
+ * reads the EOF `script` writes into the pty. `$LANEWORK_MCP_CLI` is the
+ * CLI's path: an alias from the profile does not reach `script`'s `sh`.
+ */
+function underTty(args: string): string {
+  const inner = `"$LANEWORK_MCP_CLI" ${args} 2>&1 | cat`;
+  return process.platform === "darwin"
+    ? `script -q /dev/null sh -c '${inner}' </dev/null`
+    : `script -qec '${inner}' /dev/null </dev/null`;
+}
+
 /** The script's own output, after the profile's, or null without the CLI. */
 async function inShell(
   agent: LaneworkMcpAgent,
   args: string,
   timeoutMs: number,
+  tty = false,
 ): Promise<string | null | undefined> {
   const command = COMMAND[agent];
   const [missing, start] = [mark(agent, "missing"), mark(agent, "start")];
   const line = (marker: string) => `printf '\\n%s\\n' '${marker}'`;
+  const run = tty
+    ? [
+        `LANEWORK_MCP_CLI=$(command -v ${command})`,
+        `case "$LANEWORK_MCP_CLI" in /*) ;; *) LANEWORK_MCP_CLI=${command} ;; esac`,
+        "export LANEWORK_MCP_CLI",
+        underTty(args),
+      ].join("; ")
+    : `${command} ${args} </dev/null 2>&1`;
   const script = [
     `if ! command -v ${command} >/dev/null 2>&1; then ${line(missing)}; exit 0; fi`,
     line(start),
-    `${command} ${args} </dev/null 2>&1`,
+    run,
   ].join("; ");
   const { stdout } = await runInLoginShell(script, { timeoutMs });
   if (afterMarker(stdout, missing) !== null) return null;
@@ -99,7 +125,8 @@ const pending = new Map<LaneworkMcpAgent, Promise<LaneworkMcpAuth>>();
 
 /**
  * `<cli> mcp login lanework`: the CLI opens the browser on the server's
- * OAuth page and waits for its callback. Five minutes to finish, then the
+ * OAuth page and waits for its callback — Claude Code on a pseudo-terminal
+ * (`onTty`). Five minutes to finish, then the
  * shell is killed; either way the answer is what the CLI reports after.
  */
 export function loginLaneworkMcp(
@@ -109,7 +136,12 @@ export function loginLaneworkMcp(
   if (running) return running;
   const login = (async () => {
     if (process.platform === "win32") return "unknown" as const;
-    const output = await inShell(agent, `mcp login ${MCP_NAME}`, 300_000);
+    const output = await inShell(
+      agent,
+      `mcp login ${MCP_NAME}`,
+      300_000,
+      agent === "claude-code",
+    );
     if (output === null) return "no-cli" as const;
     return laneworkMcpAuth(agent);
   })().finally(() => pending.delete(agent));
