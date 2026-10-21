@@ -580,7 +580,7 @@ async function claudeOpening(
   return { cwd, prompt: null };
 }
 
-async function claudeSession(
+export async function claudeSession(
   file: string,
   id: string,
   folder: string,
@@ -680,7 +680,7 @@ async function claudeSessions(
 }
 
 /** `thread_name` by id from Codex's index; the last entry for an id wins. */
-async function codexNames(home: string): Promise<Map<string, string>> {
+export async function codexNames(home: string): Promise<Map<string, string>> {
   const names = new Map<string, string>();
   const text = await readFile(
     join(home, ".codex", "session_index.jsonl"),
@@ -715,7 +715,7 @@ export async function codexRollouts(root: string): Promise<string[]> {
  * `event_msg`; newer ones only as the user's `response_item`, whose first
  * turn is the AGENTS.md Codex injected — skipped like any tagged context.
  */
-function codexPrompt(line: Line): string | null {
+export function codexPrompt(line: Line): string | null {
   const payload = line.payload as {
     type?: string;
     role?: string;

@@ -1,4 +1,5 @@
 import {
+  Archive02Icon,
   CommandLineIcon,
   DashboardSquare02Icon,
   InformationCircleIcon,
@@ -143,6 +144,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         label: "MCP",
         icon: McpServerIcon,
         keywords: "project mcp server servers .mcp.json local repo",
+      },
+      {
+        to: "/settings/project-archived",
+        label: "Archived",
+        icon: Archive02Icon,
+        keywords:
+          "project archived archive unarchive agents conversations sessions claude codex",
       },
     ],
   },

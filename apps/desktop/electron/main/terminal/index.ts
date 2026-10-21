@@ -1,5 +1,6 @@
 // The main process's side of the terminal (FE-19): starting the pty host,
 // answering the panel's requests, and handing windows a port to it.
+import { execFile } from "node:child_process";
 import { type FSWatcher, watch } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +20,7 @@ import {
   type AgentSession,
   type AgentUsage,
   type AgentWrite,
+  type ArchivedAgentSession,
   type BackgroundTask,
   type BackgroundTaskOutput,
   type CardBrief,
@@ -37,6 +39,7 @@ import {
   type TerminalSession,
   terminalChannels,
 } from "../../../shared/terminal";
+import { createAgentCli } from "../conversation/claude-cli";
 import { codexHome } from "../handoff/codex";
 import { assertTrustedSender, broadcast, handle } from "../ipc";
 import { appHomeDir } from "../paths";
@@ -48,6 +51,12 @@ import {
   terminalFolder,
 } from "../workspaces";
 import { watchAgentActivity } from "./agent-activity";
+import {
+  archiveAgentTranscript,
+  deleteArchivedTranscript,
+  listArchivedAgentSessions,
+  unarchiveAgentTranscript,
+} from "./agent-archive";
 import { agentBindings } from "./agent-binding";
 import { deleteAgentTranscript } from "./agent-delete";
 import { factsRequest, readAgentFacts, readAgentUsage } from "./agent-facts";
@@ -222,6 +231,41 @@ function codexDirs(): CodexDirs {
   }
   const home = codexHome();
   return { home, sqlite: process.env.CODEX_SQLITE_HOME || home };
+}
+
+/** The user's `codex`, for its own archive. */
+const codexCli = createAgentCli("codex", () =>
+  !app.isPackaged && process.env.LANEWORK_TEST_USER_DATA
+    ? process.env.LANEWORK_CODEX_BIN
+    : undefined,
+);
+
+/**
+ * Run `codex <args>` against the Codex home the rail lists.
+ *
+ * NOTE: `execFile`, no shell: the only arguments are a subcommand and an id
+ * that passed {@link isAgentSessionId}.
+ *
+ * @throws the last line Codex printed, when it fails.
+ */
+async function runCodex(args: string[]): Promise<void> {
+  const cli = await codexCli();
+  await new Promise<void>((resolve, reject) => {
+    execFile(
+      cli.file,
+      args,
+      {
+        cwd: homedir(),
+        env: { ...cli.env, CODEX_HOME: codexDirs().home },
+        timeout: 30_000,
+      },
+      (error, stdout, stderr) => {
+        if (!error) return resolve();
+        const said = `${stderr}\n${stdout}`.trim().split("\n").pop()?.trim();
+        reject(new Error(said || `codex ${args[0]} failed.`));
+      },
+    );
+  });
 }
 
 /** Lanework's names and pins for agent conversations (FE-24, FE-25). */
@@ -601,6 +645,51 @@ async function markable(args: unknown[]): Promise<{
   return { workspace, key: agentKey({ agent, id }) };
 }
 
+/** The workspace's archived conversations, with Lanework's names. */
+async function archivedOf(workspace: string): Promise<ArchivedAgentSession[]> {
+  const folder = await terminalFolder(workspace);
+  if (!folder) return [];
+  const [archived, marks] = await Promise.all([
+    listArchivedAgentSessions(agentHome(), folder),
+    readAgentMarks(agentMarksFile()),
+  ]);
+  return archived.map((entry) => ({
+    ...entry,
+    title: marks[agentKey(entry)]?.name ?? entry.title,
+  }));
+}
+
+/**
+ * The archived conversation an unarchive or a delete names.
+ *
+ * Checked against the workspace's archived list: {@link markable}'s rule, for
+ * the archive.
+ *
+ * @throws when the arguments are malformed or the id is not archived here.
+ */
+async function archivedOne(args: unknown[]): Promise<{
+  workspace: string;
+  folder: string;
+  agent: TerminalAgent;
+  id: string;
+}> {
+  if (args.length !== 3)
+    throw new Error("A workspace and a conversation are required");
+  const workspace = key(args[0], "workspace");
+  const agent = args[1];
+  const id = args[2];
+  if (agent !== "claude" && agent !== "codex")
+    throw new Error("A valid agent is required");
+  if (!isAgentSessionId(id))
+    throw new Error("A valid conversation is required");
+  const folder = await terminalFolder(workspace);
+  if (!folder) throw new Error("This project has no folder here.");
+  const archived = await listArchivedAgentSessions(agentHome(), folder);
+  if (!archived.some((entry) => entry.agent === agent && entry.id === id))
+    throw new Error("That conversation is not in this project's archive");
+  return { workspace, folder, agent, id };
+}
+
 /** Tell the focused window the View menu asked for something. */
 export function sendTerminalCommand(command: TerminalCommand): void {
   const window =
@@ -961,6 +1050,68 @@ export function registerTerminal(devUrl?: string): void {
       await deleteAgentTranscript(agentHome(), folder, agent, id);
       await updateAgentMark(agentMarksFile(), mark, () => ({}));
       return agentSessionsOf(workspace);
+    },
+  );
+  // NOTE: Into the CLI's own archive. `markable` first, and refused while a
+  // tab of ours runs it (FE-72/D5), as Delete is. The pin goes (FE-72/D3);
+  // the name stays, for the archived list and for when it comes back.
+  handle(
+    terminalChannels.agentSessionArchive,
+    devUrl,
+    async (args): Promise<AgentSession[]> => {
+      if (args.length !== 3)
+        throw new Error("A workspace and a conversation are required");
+      const { workspace, key: mark } = await markable(args);
+      const agent = args[1] as TerminalAgent;
+      const id = args[2] as string;
+      const terminals = host
+        ? await request<TerminalSession[]>({ t: "list", workspace })
+        : [];
+      if (
+        terminals.some(
+          (entry) => entry.resume === id && entry.kind === agent && !entry.exit,
+        )
+      )
+        throw new Error("Stop this conversation before archiving it.");
+      const folder = await terminalFolder(workspace);
+      if (!folder) throw new Error("This project has no folder here.");
+      await archiveAgentTranscript(agentHome(), folder, agent, id, runCodex);
+      await updateAgentMark(agentMarksFile(), mark, (current) => ({
+        ...current,
+        pinnedAt: undefined,
+      }));
+      return agentSessionsOf(workspace);
+    },
+  );
+  handle(
+    terminalChannels.agentArchivedSessions,
+    devUrl,
+    async (args): Promise<ArchivedAgentSession[]> => {
+      if (args.length !== 1) throw new Error("A workspace is required");
+      return archivedOf(key(args[0], "workspace"));
+    },
+  );
+  handle(
+    terminalChannels.agentSessionUnarchive,
+    devUrl,
+    async (args): Promise<ArchivedAgentSession[]> => {
+      const { workspace, folder, agent, id } = await archivedOne(args);
+      await unarchiveAgentTranscript(agentHome(), folder, agent, id, runCodex);
+      return archivedOf(workspace);
+    },
+  );
+  handle(
+    terminalChannels.agentArchivedDelete,
+    devUrl,
+    async (args): Promise<ArchivedAgentSession[]> => {
+      const { workspace, folder, agent, id } = await archivedOne(args);
+      await deleteArchivedTranscript(agentHome(), folder, agent, id);
+      await updateAgentMark(
+        agentMarksFile(),
+        agentKey({ agent, id }),
+        () => ({}),
+      );
+      return archivedOf(workspace);
     },
   );
   // ⚠️ By ids alone (FE-35/D10): `subagentRequest` refuses any of another

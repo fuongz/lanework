@@ -149,6 +149,21 @@ export interface AgentSession {
   background: BackgroundCount;
 }
 
+/**
+ * A conversation archived in its CLI's own archive.
+ *
+ * Codex's `archived_sessions/`, or the folder Lanework moves Claude's to.
+ * Listed in Settings → Project → Archived, never on the rail (FE-72/D2).
+ */
+export interface ArchivedAgentSession {
+  id: string;
+  agent: TerminalAgent;
+  /** The name given in Lanework, else the CLI's title or first prompt. */
+  title: string;
+  /** When it was last written to, ISO. */
+  updatedAt: string;
+}
+
 /** A conversation's background tasks, counted for the rail (FE-42). */
 export interface BackgroundCount {
   running: number;
@@ -703,6 +718,14 @@ export const terminalChannels = {
   agentSessionPin: "terminal:agent-sessions:pin",
   /** Delete a conversation's transcript for good (FE-57). */
   agentSessionDelete: "terminal:agent-sessions:delete",
+  /** Archive a conversation in its CLI's own archive. */
+  agentSessionArchive: "terminal:agent-sessions:archive",
+  /** The conversations archived for a workspace's folder. */
+  agentArchivedSessions: "terminal:agent-sessions:archived",
+  /** Bring an archived conversation back. */
+  agentSessionUnarchive: "terminal:agent-sessions:unarchive",
+  /** Delete an archived conversation for good. */
+  agentArchivedDelete: "terminal:agent-sessions:archived-delete",
   /** One sub-agent's transcript, for the viewer (FE-35). */
   agentSubagent: "terminal:agent-subagent",
   /** A Claude conversation's background tasks (FE-42). */
@@ -823,6 +846,31 @@ export interface DesktopTerminalApi {
     agent: TerminalAgent,
     id: string,
   ) => Promise<AgentSession[]>;
+  /**
+   * Archive a conversation the CLI's own way.
+   *
+   * `codex archive`, or Claude's transcript moved out of its projects folder.
+   * Refused for one a tab is running (FE-72/D5). Answers the new listing.
+   */
+  archiveAgentSession: (
+    workspace: string,
+    agent: TerminalAgent,
+    id: string,
+  ) => Promise<AgentSession[]>;
+  /** The conversations archived for `workspace`'s folder, newest first. */
+  archivedAgentSessions: (workspace: string) => Promise<ArchivedAgentSession[]>;
+  /** Bring one back; answers the new archived list. */
+  unarchiveAgentSession: (
+    workspace: string,
+    agent: TerminalAgent,
+    id: string,
+  ) => Promise<ArchivedAgentSession[]>;
+  /** Delete an archived one for good; answers the new archived list. */
+  deleteArchivedAgentSession: (
+    workspace: string,
+    agent: TerminalAgent,
+    id: string,
+  ) => Promise<ArchivedAgentSession[]>;
   /**
    * One of a conversation's sub-agents, read for the viewer (FE-35). By ids
    * only: main builds the path inside the CLI's own folder for `workspace`,

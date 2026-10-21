@@ -333,6 +333,7 @@ export function AgentSessionsNav({
   const watchActivity = useAgentSessions((state) => state.watchActivity);
   const pin = useAgentSessions((state) => state.pin);
   const remove = useAgentSessions((state) => state.remove);
+  const archive = useAgentSessions((state) => state.archive);
   const openSubagents = useAgentSessions((state) => state.open);
   const setOpenSubagents = useAgentSessions((state) => state.setOpen);
   const [expanded, setExpanded] = useState(false);
@@ -342,6 +343,8 @@ export function AgentSessionsNav({
     new Set(),
   );
   const [renaming, setRenaming] = useState<AgentSession | null>(null);
+  /** Why an Archive was refused; it has no dialog of its own to show it in. */
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   /** The conversation whose transcript is about to go for good (FE-57). */
   const [deleting, setDeleting] = useState<{
     session: AgentSession;
@@ -744,6 +747,27 @@ export function AgentSessionsNav({
               >
                 {isPinned ? "Unpin" : "Pin"}
               </ContextMenuItem>
+              {/* Off while a tab runs it (FE-72/D5), as Delete is. */}
+              <ContextMenuItem
+                disabled={Boolean(onStop)}
+                onClick={() =>
+                  archive(workspace, session).then(
+                    () => {
+                      if (viewing === session.id)
+                        void navigate({
+                          to: "/w/$slug/issues",
+                          params: { slug },
+                        });
+                    },
+                    (error: unknown) =>
+                      setArchiveError(
+                        ipcMessage(error, "Could not archive it."),
+                      ),
+                  )
+                }
+              >
+                Archive
+              </ContextMenuItem>
               {onStop && <StopItem onStop={onStop} />}
               <ContextMenuSeparator />
               {/* ⚠️ Off while a tab runs it (FE-57/D4): the CLI would only
@@ -1064,6 +1088,20 @@ export function AgentSessionsNav({
             >
               {deleting?.busy ? "Deleting…" : "Delete"}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={archiveError !== null}
+        onOpenChange={(open) => !open && setArchiveError(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Could not archive it</AlertDialogTitle>
+            <AlertDialogDescription>{archiveError}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>OK</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

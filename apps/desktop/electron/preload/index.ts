@@ -460,6 +460,29 @@ function createTerminal(): DesktopTerminalApi {
         agent,
         id,
       ),
+    archiveAgentSession: (workspace, agent, id) =>
+      ipcRenderer.invoke(
+        terminalChannels.agentSessionArchive,
+        workspace,
+        agent,
+        id,
+      ),
+    archivedAgentSessions: (workspace) =>
+      ipcRenderer.invoke(terminalChannels.agentArchivedSessions, workspace),
+    unarchiveAgentSession: (workspace, agent, id) =>
+      ipcRenderer.invoke(
+        terminalChannels.agentSessionUnarchive,
+        workspace,
+        agent,
+        id,
+      ),
+    deleteArchivedAgentSession: (workspace, agent, id) =>
+      ipcRenderer.invoke(
+        terminalChannels.agentArchivedDelete,
+        workspace,
+        agent,
+        id,
+      ),
     agentSubagent: (workspace, agent, conversation, sub) =>
       ipcRenderer.invoke(
         terminalChannels.agentSubagent,

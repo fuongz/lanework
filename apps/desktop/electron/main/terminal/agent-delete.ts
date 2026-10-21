@@ -52,7 +52,7 @@ export async function deleteAgentTranscript(
  * and moved over, so Codex never reads half of it. Every other line is kept
  * byte for byte, unparsed ones included: the file is Codex's, not ours.
  */
-async function dropCodexIndex(codex: string, id: string): Promise<void> {
+export async function dropCodexIndex(codex: string, id: string): Promise<void> {
   const file = join(codex, "session_index.jsonl");
   const text = await readFile(file, "utf8").catch(() => null);
   if (text === null) return;
