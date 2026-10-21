@@ -31,7 +31,7 @@ import { DictationWaveform } from "./dictation-waveform";
 // level with ✕ and ✓ while listening.
 
 /** How many meter readings the waveform draws, newest on the right. */
-export const LEVELS = 28;
+const LEVELS = 28;
 
 let supported: Promise<boolean> | null = null;
 

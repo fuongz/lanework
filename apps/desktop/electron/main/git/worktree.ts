@@ -71,7 +71,7 @@ const BASE = [
   "--no-pager",
 ];
 
-export class GitMissingError extends Error {}
+class GitMissingError extends Error {}
 
 interface RunResult {
   stdout: string;
@@ -548,7 +548,7 @@ function networkEnv(): NodeJS.ProcessEnv {
   };
 }
 
-export async function remotes(top: string): Promise<string[]> {
+async function remotes(top: string): Promise<string[]> {
   return (await out(top, ["remote"]))
     .split("\n")
     .map((name) => name.trim())

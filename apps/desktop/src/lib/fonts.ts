@@ -48,7 +48,7 @@ const WEIGHT_WORDS: Array<[RegExp, number]> = [
 ];
 
 /** The weight a style name stands for; anything unrecognised is 400. */
-export function weightOf(style: string): number {
+function weightOf(style: string): number {
   for (const [pattern, weight] of WEIGHT_WORDS)
     if (pattern.test(style)) return weight;
   return 400;
@@ -61,7 +61,7 @@ export function weightOf(style: string): number {
  * no use for one. Two styles landing on the same weight keep the first — a
  * family with both "Regular" and "Book" shows one 400.
  */
-export function groupFonts(fonts: LocalFontData[]): FontCatalog {
+function groupFonts(fonts: LocalFontData[]): FontCatalog {
   const families = new Map<string, Map<number, string>>();
   for (const { family, style } of fonts) {
     // Dot-prefixed families are macOS's private system faces (".SF NS…");

@@ -10,7 +10,7 @@
  * VS Code's Dark+ and Light+ terminal palettes, which exist for that reason.
  */
 
-export interface TerminalColors {
+interface TerminalColors {
   background: string;
   foreground: string;
   cursor: string;
@@ -84,7 +84,7 @@ const LIGHT_ANSI: Ansi = {
 let scratch: CanvasRenderingContext2D | null = null;
 
 /** Any CSS colour as `#rrggbb`, or `fallback` when it cannot be read. */
-export function cssColorToHex(value: string, fallback: string): string {
+function cssColorToHex(value: string, fallback: string): string {
   if (!value) return fallback;
   if (!scratch) {
     const canvas = document.createElement("canvas");

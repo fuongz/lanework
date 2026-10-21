@@ -30,7 +30,7 @@ const api = () => {
  * nobody asked to be left looking at a finished one. Any other code is a CLI
  * that could not start or crashed, and stays on screen to say why.
  */
-export function endedCleanly(code: number): boolean {
+function endedCleanly(code: number): boolean {
   return code === 0 || code === 130;
 }
 

@@ -19,9 +19,9 @@
  */
 
 /** What a scanned line turned out to be. */
-export type ScanKind = "task" | "bullet" | "heading" | "text";
+type ScanKind = "task" | "bullet" | "heading" | "text";
 
-export interface ScanLine {
+interface ScanLine {
   /** 1-based line number in the text handed to the scanner. */
   line: number;
   kind: ScanKind;
@@ -153,7 +153,7 @@ export function scanLines(md: string): ScanLine[] {
   return out;
 }
 
-export interface TaskBlock {
+interface TaskBlock {
   task: ScanLine;
   /** Wrapped continuation lines of the item's own text, in order. */
   body: ScanLine[];

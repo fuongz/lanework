@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import type { ClaudeQuotaWindow, ClaudeUsage } from "../../../shared/terminal";
 
 export const CLAUDE_USAGE_FILE = "claude-usage.json";
-export function claudeWindow(
+function claudeWindow(
   value: unknown,
   minutes: number,
 ): ClaudeQuotaWindow | null {

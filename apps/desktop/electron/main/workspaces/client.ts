@@ -1667,7 +1667,7 @@ export async function sealBoardMigration(
 }
 
 /** What `GET /icon` answered (BE-18). */
-export type IconAnswer =
+type IconAnswer =
   | { kind: "same" }
   | { kind: "new"; key: string; type: string; bytes: Buffer }
   | { kind: "none" };

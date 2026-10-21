@@ -19,7 +19,7 @@ const COMMAND: Record<LaneworkMcpAgent, string> = {
 };
 
 /** `codex mcp list --json`: `auth_status` of our server. */
-export function parseCodexAuth(output: string): LaneworkMcpAuth {
+function parseCodexAuth(output: string): LaneworkMcpAuth {
   let list: unknown;
   try {
     list = JSON.parse(output.trim());
@@ -46,7 +46,7 @@ export function parseCodexAuth(output: string): LaneworkMcpAuth {
  * `! Needs authentication`, `✗ Failed to connect`. Claude Code prints text
  * only, so any other line is "unknown", never a guess.
  */
-export function parseClaudeAuth(output: string): LaneworkMcpAuth {
+function parseClaudeAuth(output: string): LaneworkMcpAuth {
   const line = /^\s*Status:\s*(.+)$/m.exec(output)?.[1] ?? "";
   if (/needs authentication/i.test(line)) return "needs-login";
   if (/failed to connect/i.test(line)) return "failed";

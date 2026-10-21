@@ -294,9 +294,7 @@ async function signInDevice(
 }
 
 /** Start a sign-in. Resolves with the session it produced, or throws. */
-export async function signIn(
-  mode: SignInMode = "loopback",
-): Promise<RedactedSession> {
+async function signIn(mode: SignInMode = "loopback"): Promise<RedactedSession> {
   const session = await currentSession();
   if (!can(session.principal, "session:signIn"))
     throw new Error(
@@ -327,7 +325,7 @@ export async function signIn(
  * stated plainly rather than hidden: an unreachable control plane keeps the
  * machine listed until it is revoked from a browser.
  */
-export async function signOut(): Promise<RedactedSession> {
+async function signOut(): Promise<RedactedSession> {
   const session = await currentSession();
   if (!can(session.principal, "session:signOut")) return session;
   // FE-52: "signing out" of local mode is leaving it. The boards stay in the
@@ -357,7 +355,7 @@ export async function signOut(): Promise<RedactedSession> {
  * A REVOKED credential is useless to keep, so it goes, as a sign-out would
  * take it — minus the revoke call, which would be refused anyway.
  */
-export async function enterLocalMode(): Promise<RedactedSession> {
+async function enterLocalMode(): Promise<RedactedSession> {
   const session = await currentSession();
   if (session.principal.kind === "machine") return session;
   if (session.principal.kind === "revoked") {
@@ -371,7 +369,7 @@ export async function enterLocalMode(): Promise<RedactedSession> {
 }
 
 /** Abort an in-flight sign-in. A no-op when none is running. */
-export function cancelSignIn(): void {
+function cancelSignIn(): void {
   inFlight?.abort();
   inFlight = null;
 }

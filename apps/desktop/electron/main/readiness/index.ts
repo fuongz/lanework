@@ -118,7 +118,7 @@ async function gather(slug: string): Promise<ReadinessFacts> {
   };
 }
 
-export async function readinessOf(slug: string): Promise<ReadinessReport> {
+async function readinessOf(slug: string): Promise<ReadinessReport> {
   return buildReport(await gather(slug));
 }
 

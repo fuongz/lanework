@@ -30,7 +30,7 @@ import { useDark } from "./use-dark";
  * virtualizes, so a forty-file change renders what is on screen, not all of it.
  */
 
-export interface FileCounts {
+interface FileCounts {
   additions: number;
   deletions: number;
 }

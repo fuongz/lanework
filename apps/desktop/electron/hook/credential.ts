@@ -22,7 +22,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
+const KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
 
 /** `$XDG_CONFIG_HOME/lanework`, or `~/.config/lanework`. */
 export function configDir(): string {

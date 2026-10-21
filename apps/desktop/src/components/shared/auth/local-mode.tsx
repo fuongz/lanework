@@ -79,7 +79,7 @@ export function useSyncToCloud() {
 }
 
 /** Where a moved board lives now, if this machine can see it. */
-export function useMovedTarget(
+function useMovedTarget(
   workspace: Pick<Workspace, "movedTo"> | null | undefined,
 ): Workspace | null {
   return useBoard(

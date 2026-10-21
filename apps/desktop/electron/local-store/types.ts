@@ -122,11 +122,7 @@ export interface CheckpointWriter {
   machineId?: string | null;
 }
 
-export type LocalStoreErrorCode =
-  | "not_found"
-  | "invalid"
-  | "conflict"
-  | "closed";
+type LocalStoreErrorCode = "not_found" | "invalid" | "conflict" | "closed";
 
 export class LocalStoreError extends Error {
   readonly code: LocalStoreErrorCode;

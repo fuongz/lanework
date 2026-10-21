@@ -19,7 +19,7 @@ export interface ClaudeCli {
 }
 
 /** The CLIs the chat runs. */
-export type CliName = "claude" | "codex";
+type CliName = "claude" | "codex";
 
 const MARK = "__lanework_agent_cli__";
 const TTL_MS = 5 * 60_000;
@@ -34,10 +34,7 @@ async function executable(file: string): Promise<boolean> {
 }
 
 /** `command -v <name>`'s answer: a path, or an alias whose target is one. */
-export function cliPath(
-  answer: string,
-  name: CliName = "claude",
-): string | null {
+function cliPath(answer: string, name: CliName = "claude"): string | null {
   const line = answer.trim().split("\n").pop()?.trim() ?? "";
   if (isAbsolute(line)) return line;
   const alias = new RegExp(`^(?:alias\\s+)?${name}=(['"]?)(.+?)\\1$`)

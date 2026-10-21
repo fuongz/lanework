@@ -67,7 +67,7 @@ function windowOf(value: unknown): CodexQuotaWindow | null {
  * some, and a `premium` one rides along now and then with neither window —
  * taking either would blank the bar until the next turn.
  */
-export function codexQuotaOf(tail: Line[], at: string): CodexQuota | null {
+function codexQuotaOf(tail: Line[], at: string): CodexQuota | null {
   for (let index = tail.length - 1; index >= 0; index--) {
     const line = tail[index] as Line;
     if (line.type !== "event_msg") continue;
@@ -139,7 +139,7 @@ export async function readCodexQuota(home: string): Promise<CodexQuota | null> {
 }
 
 /** Codex's goals database in `sqlite`: the highest-numbered `goals_*.sqlite`. */
-export async function codexGoalsFile(sqlite: string): Promise<string | null> {
+async function codexGoalsFile(sqlite: string): Promise<string | null> {
   let best: { n: number; name: string } | null = null;
   for (const name of await readdir(sqlite).catch(() => [] as string[])) {
     const n = Number(GOALS_FILE.exec(name)?.[1]);

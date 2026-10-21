@@ -59,8 +59,8 @@ function PullsTitlebar() {
  * the short one, and `view` in a link means "they deliberately went to the
  * summary" rather than "a default got written down".
  */
-export type PullView = "summary" | "code";
-export interface PullDetailSearch {
+type PullView = "summary" | "code";
+interface PullDetailSearch {
   view?: PullView;
 }
 

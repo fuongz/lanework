@@ -374,7 +374,7 @@ export interface BoardCard {
   dispatch?: BoardDispatch | null;
 }
 
-export const STREAM_ROLES = ["research", "implement", "test"] as const;
+const STREAM_ROLES = ["research", "implement", "test"] as const;
 export type StreamRole = (typeof STREAM_ROLES)[number];
 
 /**
@@ -711,7 +711,7 @@ export interface BoardCardDraft {
  * (FE-18): lower case, diacritics dropped, split on anything that is not a
  * letter or a digit. "Dự án FE-1" is `["du", "an", "fe", "1"]`.
  */
-export function searchTokens(raw: string): string[] {
+function searchTokens(raw: string): string[] {
   return raw
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")

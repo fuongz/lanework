@@ -37,7 +37,7 @@ type CardRef = { id: string; taskId: string | null };
  * One agent on a card: this machine's, known from its transcript (FE-27), or
  * one the service saw calling about it from anywhere (BE-16).
  */
-export type CardAgent =
+type CardAgent =
   | { from: "local"; session: AgentSession }
   | { from: "cloud"; row: BoardPresence; name: string };
 

@@ -29,7 +29,7 @@ const run = promisify(execFile);
 /** The most of one memory a read takes; Claude's are a few KB. */
 export const MEMORY_READ_MAX = 256 * 1024;
 /** The most files one listing takes. */
-export const MEMORY_LIST_MAX = 500;
+const MEMORY_LIST_MAX = 500;
 /** What a listing reads of each file to find its frontmatter. */
 const HEAD = 8 * 1024;
 /** What a listing reads of the index for its titles; Claude loads 25 KB of it. */
@@ -99,7 +99,7 @@ function unquote(value: string): string {
  * deeper nesting — is skipped rather than guessed at. The Raw view still
  * shows it as written.
  */
-export function parseFrontmatter(source: string): Record<string, string> {
+function parseFrontmatter(source: string): Record<string, string> {
   const meta: Record<string, string> = {};
   let parent: string | null = null;
   for (const line of source.split(/\r?\n/)) {
@@ -116,7 +116,7 @@ export function parseFrontmatter(source: string): Record<string, string> {
 }
 
 /** A file's frontmatter — `---` … `---` at its very top — and the rest. */
-export function splitFrontmatter(text: string): {
+function splitFrontmatter(text: string): {
   meta: Record<string, string>;
   body: string;
 } {
@@ -158,7 +158,7 @@ function entryOf(
  * the first link to a file winning. A link to anything that is not a memory
  * in the same folder names nothing.
  */
-export function indexTitles(index: string): Map<string, string> {
+function indexTitles(index: string): Map<string, string> {
   const titles = new Map<string, string>();
   for (const match of index.matchAll(/\[([^\]\n]+)\]\(([^)\s]+)\)/g)) {
     const title = match[1]?.trim();

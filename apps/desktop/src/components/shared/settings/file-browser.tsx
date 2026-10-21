@@ -46,7 +46,7 @@ import { cn } from "#/lib/utils";
  */
 
 /** One file in the tree: its id for the page, and where it sits. */
-export interface BrowserEntry {
+interface BrowserEntry {
   id: string;
   /** Slash-separated, no leading `/`: `.claude/skills/review/SKILL.md`. */
   path: string;

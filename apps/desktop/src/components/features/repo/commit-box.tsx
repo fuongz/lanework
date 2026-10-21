@@ -46,7 +46,7 @@ import type {
  * takes every change git already follows — never an untracked file, which
  * somebody has to decide to add.
  */
-export function commitPlan(files: WorktreeFile[]): {
+function commitPlan(files: WorktreeFile[]): {
   mode: CommitMode;
   scope: WorktreeFile[];
   placeholder: string;

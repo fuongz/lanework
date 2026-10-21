@@ -59,7 +59,7 @@ export async function notificationsOn(
 let location: string | null = null;
 
 /** The path a target opens, as the renderer's router spells it. */
-export function targetPath(target: NotificationTarget): string {
+function targetPath(target: NotificationTarget): string {
   const slug = encodeURIComponent(target.slug);
   return target.kind === "session"
     ? `/w/${slug}/agents/chat/${encodeURIComponent(target.conversation)}`
@@ -71,7 +71,7 @@ const active = new Set<Notification>();
 
 let showWindow: () => BrowserWindow | null = () => null;
 
-export interface NotifyOptions {
+interface NotifyOptions {
   kind: NotificationKind;
   title: string;
   body: string;

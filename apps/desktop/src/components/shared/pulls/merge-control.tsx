@@ -48,7 +48,7 @@ const methods = {
   },
 };
 
-export function mergeDisabledReason(detail: PullDetail): string | null {
+function mergeDisabledReason(detail: PullDetail): string | null {
   if (detail.pull.state !== "open")
     return "This pull request is already closed.";
   if (detail.pull.draft)

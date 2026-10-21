@@ -66,8 +66,8 @@ type RunningAgent = Pick<TerminalSession, "id" | "kind">;
 /**
  * The agents running in a project on this machine, as overlapping marks.
  *
- * ⚠️ Capped at three with the rest counted, like `AvatarStack`: a project with
- * five agents going says five, not three and silence.
+ * ⚠️ Capped at three with the rest counted: a project with five agents
+ * going says five, not three and silence.
  */
 function RunningAgents({ agents }: { agents: RunningAgent[] }) {
   if (agents.length === 0) return null;

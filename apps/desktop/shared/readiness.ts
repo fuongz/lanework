@@ -22,7 +22,7 @@ export type ReadinessId =
  */
 export type ReadinessFix = "agents-md" | "claude-md" | "mcp-json";
 
-export const READINESS_FIXES: readonly ReadinessFix[] = [
+const READINESS_FIXES: readonly ReadinessFix[] = [
   "agents-md",
   "claude-md",
   "mcp-json",
@@ -86,19 +86,4 @@ export interface DesktopReadinessApi {
     fix: ReadinessFix,
     before: string | null,
   ) => Promise<ReadinessReport>;
-}
-
-/** The count the indicator shows: failed checks that are not just information. */
-export function readinessProblems(report: ReadinessReport | null): {
-  blockers: number;
-  warnings: number;
-} {
-  let blockers = 0;
-  let warnings = 0;
-  for (const check of report?.checks ?? []) {
-    if (check.ok) continue;
-    if (check.level === "blocker") blockers++;
-    else if (check.level === "warning") warnings++;
-  }
-  return { blockers, warnings };
 }

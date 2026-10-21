@@ -22,7 +22,7 @@ import { cn } from "#/lib/utils";
  * which is why callers keep it in a bar that survives the switch — and
  * `MotionConfig reducedMotion="user"` at the root turns the glide into a jump.
  */
-export interface SegmentOption<T extends string> {
+interface SegmentOption<T extends string> {
   value: T;
   label: string;
   icon?: IconSvgElement;

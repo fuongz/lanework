@@ -151,7 +151,7 @@ export const useSession = create<SessionState>()((set) => ({
  * It decides what is DRAWN, not what is allowed: main routes a local board to
  * the SQLite store, which has none of these surfaces.
  */
-export interface CloudFeatures {
+interface CloudFeatures {
   /** Signed in with a machine credential. */
   signedIn: boolean;
   /** Settings → Account's machine rows and sign-out, the account orb. */
@@ -173,7 +173,7 @@ export function isLocalWorkspace(
   return workspace?.origin === "local";
 }
 
-export function cloudFeatures(
+function cloudFeatures(
   principal: Pick<Principal, "kind"> | null | undefined,
   workspace?: Pick<Workspace, "origin"> | null,
 ): CloudFeatures {

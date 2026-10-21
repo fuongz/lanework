@@ -84,7 +84,7 @@ export function buildMcpShim(options: {
   ].join("\n");
 }
 
-export async function writeMcpShim(
+async function writeMcpShim(
   execPath: string = process.execPath,
 ): Promise<string> {
   const path = mcpShimPath();
@@ -104,7 +104,7 @@ export async function writeMcpShim(
 
 // ── Claude Code: `~/.claude.json` `mcpServers.lanework` ──────────────────────
 
-export function claudeEntry(mode: LaneworkMcpMode, shim = mcpShimPath()) {
+function claudeEntry(mode: LaneworkMcpMode, shim = mcpShimPath()) {
   return mode === "local"
     ? { type: "stdio", command: shim, args: [] as string[] }
     : { type: "http", url: MCP_URL };
@@ -141,7 +141,7 @@ export function isStaleShim(command: unknown, shim: string): boolean {
   );
 }
 
-export function claudeState(
+function claudeState(
   json: Json,
   shim = mcpShimPath(),
 ): Omit<LaneworkMcpEntry, "configPath" | "unreadable"> {
@@ -177,7 +177,7 @@ export function withClaudeMcp(
   };
 }
 
-export function withoutClaudeMcp(json: Json): Json {
+function withoutClaudeMcp(json: Json): Json {
   if (!isObject(json.mcpServers) || !(MCP_NAME in json.mcpServers)) return json;
   const { [MCP_NAME]: _, ...rest } = json.mcpServers;
   return { ...json, mcpServers: rest };

@@ -11,7 +11,7 @@ import {
 import { isAgentSessionId } from "../../../shared/terminal";
 
 /** The longest prompt main passes on, in characters. */
-export const PROMPT_MAX = 256 * 1024;
+const PROMPT_MAX = 256 * 1024;
 const ATTACHMENTS_MAX = 20;
 const IMAGE_TYPES: Record<string, string> = {
   ".png": "image/png",

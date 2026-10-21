@@ -38,7 +38,7 @@ export interface Shape {
   required?: readonly string[];
 }
 
-export type JsonSchema = Record<string, unknown>;
+type JsonSchema = Record<string, unknown>;
 
 function paramSchema(param: Param): JsonSchema {
   const described = (schema: JsonSchema): JsonSchema =>

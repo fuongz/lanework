@@ -27,7 +27,7 @@ const api = () => {
  * One open file. A `preview` tab is the one a single click opens: the next
  * single click replaces it, the way an editor's italic tab does (FE-66/D3).
  */
-export interface FileTab {
+interface FileTab {
   path: string;
   preview: boolean;
 }

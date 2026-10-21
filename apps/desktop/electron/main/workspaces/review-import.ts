@@ -31,7 +31,7 @@ import { resolveCardLocation } from "./review-location";
  */
 
 /** The `source_kind` every card from a repo's review folder carries. */
-export const SOURCE_KIND = "local-review";
+const SOURCE_KIND = "local-review";
 
 /** How many records one request carries — the API's own cap. */
 export const IMPORT_BATCH = 50;
@@ -43,7 +43,7 @@ export function contentSha(text: string): string {
   return createHash("sha1").update(text).digest("hex").slice(0, 12);
 }
 
-export interface ImportChecklistRow {
+interface ImportChecklistRow {
   key: string;
   section: "decisions" | "verify";
   text: string;
@@ -53,7 +53,7 @@ export interface ImportChecklistRow {
   group?: string | null;
 }
 
-export interface ImportRecord {
+interface ImportRecord {
   title: string;
   body: string;
   columnKey: string;
@@ -73,7 +73,7 @@ export interface ImportRecord {
   attachments: { name: string; reference: string; sourceKind: string }[];
 }
 
-export interface MigrationInventory {
+interface MigrationInventory {
   cards: number;
   byColumn: Record<string, number>;
   checklistItems: number;
@@ -96,7 +96,7 @@ export interface MigrationInventory {
   problems: { path: string; reason: string }[];
 }
 
-export interface MigrationPlan {
+interface MigrationPlan {
   root: string;
   records: ImportRecord[];
   config: {
@@ -166,7 +166,7 @@ function escapeRegex(value: string): string {
 }
 
 /** Every review file in the repo, read and parsed. */
-export async function readReviewCards(root: string): Promise<{
+async function readReviewCards(root: string): Promise<{
   cards: ReviewFileCard[];
   problems: { path: string; reason: string }[];
 }> {

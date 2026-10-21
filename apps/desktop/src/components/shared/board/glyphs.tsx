@@ -35,7 +35,7 @@ const TONE_TEXT: Record<string, string> = {
   rose: "text-tone-rose",
 };
 
-export const toneText = (tone: string | undefined): string =>
+const toneText = (tone: string | undefined): string =>
   TONE_TEXT[tone ?? "neutral"] ?? TONE_TEXT.neutral;
 
 /** The board names its lane icons; this is the only place that maps them. */

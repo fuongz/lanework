@@ -42,7 +42,7 @@ export type ConfigFormat = "json" | "toml" | "markdown";
  * One folder name and nothing else: no separator, no `..`, no leading dot
  * (Codex's own `.system` skills are not the user's to edit).
  */
-export function isSkillName(value: string): boolean {
+function isSkillName(value: string): boolean {
   return (
     /^[A-Za-z0-9_][A-Za-z0-9._ -]{0,127}$/.test(value) && !value.includes("..")
   );

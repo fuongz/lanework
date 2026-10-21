@@ -6,7 +6,7 @@ import type { HarnessAgent } from "../../../shared/harness";
 import { commandPath, parseVersion } from "./rules";
 import { afterMarker, runInLoginShell, type ShellOptions } from "./shell";
 
-export interface ProbeResult {
+interface ProbeResult {
   /** The binary's real path, links resolved; null when it is not installed. */
   path: string | null;
   version: string | null;
@@ -17,7 +17,7 @@ export interface ProbeResult {
   answered: boolean;
 }
 
-export interface ProbeOptions extends Partial<ShellOptions> {
+interface ProbeOptions extends Partial<ShellOptions> {
   /**
    * The shell word that runs each CLI: its name by default, a quoted stand-in
    * path in a test run.

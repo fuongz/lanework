@@ -69,7 +69,7 @@ export function closeLocalStore(): void {
 }
 
 /** The store, created if need be — for the writes that start a local board. */
-export function requireLocalStore(): LocalStore {
+function requireLocalStore(): LocalStore {
   const store = localStore({ create: true });
   if (!store) throw new Error("Could not open the board on this machine.");
   return store;
@@ -122,7 +122,7 @@ export function findLocalWorkspace(
 // ── Refusals ─────────────────────────────────────────────────────────────────
 
 /** FE-52/D10: features that live on the control plane only. */
-export const CLOUD_ONLY_SUFFIX =
+const CLOUD_ONLY_SUFFIX =
   "is only on cloud boards. Sync this board to the cloud to use it.";
 
 /**

@@ -40,7 +40,7 @@ function activeFile(record: MachineRecord): string {
  * slug) is honoured for the same reason: dropping it would silently move every
  * existing user back to "no workspace selected" on upgrade.
  */
-export type ActiveSelection =
+type ActiveSelection =
   | { by: "id"; value: string }
   | { by: "slug"; value: string }
   | null;
@@ -293,7 +293,7 @@ function runFile(record: MachineRecord, workspaceId: string): string {
  * machine-local receipt into everybody's git history — while the whole promise
  * of the import is that the source folder is left exactly as it was.
  */
-export interface MigrationRun {
+interface MigrationRun {
   workspaceId: string;
   /** ISO, when the run finished. */
   at: string;

@@ -741,7 +741,7 @@ function codexPrompt(line: Line): string | null {
 }
 
 /** What a Codex rollout is, by its `session_meta` (FE-33). */
-export type CodexRole =
+type CodexRole =
   | { kind: "conversation" }
   | {
       kind: "spawned";

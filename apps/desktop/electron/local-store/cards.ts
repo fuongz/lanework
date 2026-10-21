@@ -206,7 +206,7 @@ function list(paths: string[]): string {
 }
 
 /** The brief a lead hands each sub-agent verbatim. Null for a card without streams. */
-export function buildDispatch(
+function buildDispatch(
   card: { taskId: string | null; title: string },
   streams: Stream[],
   checklist: ChecklistItem[],

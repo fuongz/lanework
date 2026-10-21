@@ -18,7 +18,7 @@ import {
  * retry — good advice in a log line, a duplicate under a retry button. The
  * REASON is the part worth keeping; the instruction is the button's job.
  */
-export function withoutRetryHint(message: string): string {
+function withoutRetryHint(message: string): string {
   return message.replace(/[\s.]*(?:Please\s+)?try again\.?\s*$/i, ".");
 }
 

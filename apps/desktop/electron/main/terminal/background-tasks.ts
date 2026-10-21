@@ -93,7 +93,7 @@ const cache = new Map<string, Parsed>();
 const reading = new Map<string, Promise<Parsed>>();
 
 /** Where conversation `conversation` of `folder` is kept, built here, never sent. */
-export function claudeTranscriptPath(
+function claudeTranscriptPath(
   home: string,
   folder: string,
   conversation: string,
@@ -502,7 +502,7 @@ export function backgroundCount(tasks: BackgroundTask[]): BackgroundCount {
  * Where Claude may keep task output: `/tmp` (where it really does on macOS),
  * the OS temp dir, and `$CLAUDE_CODE_TMPDIR` — each resolved, those that exist.
  */
-export function tempRoots(): string[] {
+function tempRoots(): string[] {
   const roots = new Set<string>();
   for (const dir of ["/tmp", tmpdir(), process.env.CLAUDE_CODE_TMPDIR]) {
     if (!dir) continue;
@@ -534,7 +534,7 @@ function insideTasks(resolved: string, task: string, roots: string[]): boolean {
 }
 
 /** Terminal escapes out; of a line a progress bar redrew, its last state. */
-export function plainOutput(text: string): string {
+function plainOutput(text: string): string {
   return text
     .replace(ANSI, "")
     .replace(/\r\n/g, "\n")
@@ -632,7 +632,7 @@ export function ownUid(): number {
 }
 
 /** The groups never signalled: the app's own, and every ancestor's. */
-export function guardedGroups(procs: Proc[]): Set<number> {
+function guardedGroups(procs: Proc[]): Set<number> {
   const byPid = new Map(procs.map((proc) => [proc.pid, proc]));
   const own = byPid.get(process.pid)?.pgid;
   if (own === undefined || !Number.isInteger(own) || own <= 1)

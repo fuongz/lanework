@@ -5,7 +5,7 @@ import type { Attachment } from "#/../shared/conversation";
  * page, handed to its chat page so the bubble is there from the first frame
  * — the CLI writes it down a moment later.
  */
-export interface FirstMessage {
+interface FirstMessage {
   text: string;
   attachments: Attachment[];
 }

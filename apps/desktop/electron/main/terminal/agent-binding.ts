@@ -18,7 +18,7 @@ import {
 import { codexStarts } from "./agent-sessions";
 
 /** A tab whose conversation is not the one it says: its id, and the right one. */
-export interface AgentBinding {
+interface AgentBinding {
   id: string;
   resume: string;
 }

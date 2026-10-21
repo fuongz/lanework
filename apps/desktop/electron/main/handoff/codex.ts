@@ -31,7 +31,7 @@ export const codexConfigPath = () => join(codexHome(), "config.toml");
 /** The line the user adds when hooks are off (FE-29/D5). */
 export const HOOKS_FEATURE_LINE = "[features]\nhooks = true";
 
-export type CodexConfig = {
+type CodexConfig = {
   /** False only for `[features] hooks = false` (or `features.hooks`, or the
    * old `codex_hooks`): Codex runs hooks by default. */
   hooksEnabled: boolean;

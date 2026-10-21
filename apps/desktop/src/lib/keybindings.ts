@@ -9,7 +9,7 @@
  * Keys are spelled the macOS way. The renderer's handlers take Ctrl for ⌘
  * off macOS (all but ⌘⇧M).
  */
-export interface Keybinding {
+interface Keybinding {
   /** "Area: Action", the way the list sorts and reads. */
   command: string;
   /** One or more ways to press it: `["⌘`", "⌃`"]`. */

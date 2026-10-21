@@ -598,7 +598,7 @@ export interface ClaudeQuotaWindow {
  * read by main with the CLI's credential; `statusline` is the last
  * `rate_limits` a Claude statusline reported.
  */
-export const CLAUDE_USAGE_SOURCES = ["oauth", "statusline"] as const;
+const CLAUDE_USAGE_SOURCES = ["oauth", "statusline"] as const;
 export type ClaudeUsageSource = (typeof CLAUDE_USAGE_SOURCES)[number];
 
 /**
@@ -614,13 +614,6 @@ export const CLAUDE_USAGE_ERRORS = [
   "failed",
 ] as const;
 export type ClaudeUsageError = (typeof CLAUDE_USAGE_ERRORS)[number];
-
-export function isClaudeUsageError(value: unknown): value is ClaudeUsageError {
-  return (
-    typeof value === "string" &&
-    (CLAUDE_USAGE_ERRORS as readonly string[]).includes(value)
-  );
-}
 
 /**
  * Safe, serialized Claude account usage for the footer (FE-46).

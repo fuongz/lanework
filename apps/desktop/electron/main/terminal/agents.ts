@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { TERMINAL_AGENTS, type TerminalAgent } from "../../../shared/terminal";
 import { defaultShell, type ShellChoice, shellEnv } from "./sessions";
 
-export interface AgentProbeOptions {
+interface AgentProbeOptions {
   /** Pin the shell (tests); otherwise `defaultShell()`. */
   shell?: ShellChoice;
   env?: NodeJS.ProcessEnv;
@@ -92,7 +92,7 @@ export function createAgentProbe(options: AgentProbeOptions = {}) {
   };
 }
 
-export interface ClaudeAuth {
+interface ClaudeAuth {
   plan: string | null;
   authMode: string | null;
   loggedIn: boolean;

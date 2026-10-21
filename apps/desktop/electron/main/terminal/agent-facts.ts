@@ -29,7 +29,7 @@ const CHUNK = 64 * 1024;
 const DAY = 24 * 60 * 60_000;
 
 /** What the agent view asks for, checked. */
-export interface FactsRequest {
+interface FactsRequest {
   workspace: string;
   agent: TerminalAgent;
   id: string;
@@ -71,7 +71,7 @@ type Ended = "enough" | "start" | "cap";
  * before it; at the cap that cut line is dropped, never guessed at. The
  * newest line may still be being written: it fails to parse, and is skipped.
  */
-export async function readBack(
+async function readBack(
   file: string,
   visit: (line: Buffer) => boolean,
   max = AGENT_FACTS_READ_MAX,

@@ -4,7 +4,7 @@
 /** What can notify. One row each in Settings → Notifications. */
 export type NotificationKind = "sessions" | "pulls";
 
-export const NOTIFICATION_KINDS: NotificationKind[] = ["sessions", "pulls"];
+const NOTIFICATION_KINDS: NotificationKind[] = ["sessions", "pulls"];
 
 /**
  * How a kind is delivered (FE-70/D1). `push` is the OS notification; there is
@@ -20,7 +20,7 @@ export type NotificationSettings = Record<
 >;
 
 /** Both on (FE-70/D6): a run finishing notified before this page existed. */
-export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
+const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   sessions: "push",
   pulls: "push",
 };

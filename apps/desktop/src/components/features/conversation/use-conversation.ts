@@ -7,7 +7,7 @@ import type {
 } from "#/../shared/conversation";
 import { ipcMessage } from "#/lib/ipc-error";
 
-export interface ConversationState {
+interface ConversationState {
   conversation: Conversation | null;
   error: string | null;
   engine: EngineState;

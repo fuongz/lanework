@@ -24,9 +24,9 @@ import { checkShape, InvalidParams, shapeSchema } from "./schema";
 import { TOOLS, type ToolContext } from "./tools";
 
 export const SERVER_NAME = "lanework";
-export const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.1.0";
 /** What we answer when a client asks for a version we do not know. */
-export const LATEST_PROTOCOL_VERSION = "2025-06-18";
+const LATEST_PROTOCOL_VERSION = "2025-06-18";
 const KNOWN_PROTOCOL_VERSIONS = [
   "2024-11-05",
   "2025-03-26",
@@ -35,7 +35,7 @@ const KNOWN_PROTOCOL_VERSIONS = [
 ];
 
 /** The cloud server's instructions, minus everything about accounts and other people. */
-export const INSTRUCTIONS = [
+const INSTRUCTIONS = [
   "lanework is a Kanban board for AI-driven development. A card is a review checklist: decisions to approve, then verify steps to prove. This server is the OFFLINE board: it lives in a SQLite file on this machine, has no accounts, and the Lanework app shows what you write here.",
   "Every tool needs a board_id and there is no default. To find it, run `git remote get-url origin` and call list_boards({ repo }) with the output as is. Exactly one board: use it. None: call list_boards without repo and ask the user which board this repo belongs to — the boards you can see, PLUS an option to create a new board for this repo (suggest `owner/name` from the remote as its name). Then link_repo the one they picked, or create_board if they chose a new one; never create a board they did not ask for. A board links to ONE repo: linking a board that already has another repo MOVES it (replace), it never adds a second. Several: ask the user. No git remote: ask the user. Never pick a board by its name.",
   "Before creating a card, read board_summary so its category and tags match the vocabulary the board already uses; the category is also what mints the card's permanent task id. After create_review, offer to review the new card right here.",
@@ -53,7 +53,7 @@ interface JsonRpcMessage {
   params?: unknown;
 }
 
-export interface JsonRpcResponse {
+interface JsonRpcResponse {
   jsonrpc: "2.0";
   id: JsonRpcId;
   result?: unknown;
@@ -66,7 +66,7 @@ const METHOD_NOT_FOUND = -32601;
 const INVALID_PARAMS = -32602;
 
 /** `claude-code`, `codex`, … — the slug a checkpoint is signed with. */
-export function agentSlug(clientName: unknown): string {
+function agentSlug(clientName: unknown): string {
   const name = typeof clientName === "string" ? clientName.toLowerCase() : "";
   if (name.includes("codex")) return "codex";
   if (name.includes("claude")) return "claude-code";
@@ -74,7 +74,7 @@ export function agentSlug(clientName: unknown): string {
   return slug.slice(0, 40) || "agent";
 }
 
-export function toolList() {
+function toolList() {
   return TOOLS.map((tool) => ({
     name: tool.name,
     description: tool.description,
@@ -225,7 +225,7 @@ export function handleLine(session: LocalMcpSession, line: string): string[] {
   return answer ? [JSON.stringify(answer)] : [];
 }
 
-export interface RunOptions extends OpenOptions {
+interface RunOptions extends OpenOptions {
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
 }

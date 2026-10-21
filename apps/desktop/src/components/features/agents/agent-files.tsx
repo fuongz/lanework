@@ -199,13 +199,7 @@ function FileRow({
 }
 
 /** `+81 −20`, coloured as the rail's Changes is; nothing for no change. */
-export function LineCounts({
-  added,
-  removed,
-}: {
-  added: number;
-  removed: number;
-}) {
+function LineCounts({ added, removed }: { added: number; removed: number }) {
   if (added === 0 && removed === 0) return null;
   return (
     <span className="flex shrink-0 items-center gap-1 tabular-nums">

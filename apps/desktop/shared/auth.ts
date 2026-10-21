@@ -164,7 +164,7 @@ export interface DesktopLaneworkMcpApi {
   login: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpAuth>;
 }
 
-export const anonymous: Principal = { kind: "anonymous" };
+const anonymous: Principal = { kind: "anonymous" };
 
 /** FE-52: the session "Skip for now" reports — no credential, the local board. */
 export function localSession(apiUrl: string): RedactedSession {

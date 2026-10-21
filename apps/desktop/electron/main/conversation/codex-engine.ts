@@ -42,7 +42,7 @@ import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { cut, inputText } from "./transcript";
 
-export interface CodexEngineDeps {
+interface CodexEngineDeps {
   cli: () => Promise<ClaudeCli>;
   emit: (event: ConversationEvent) => void;
   remember: (conversation: string, settings: ComposerSettings) => void;
@@ -51,7 +51,7 @@ export interface CodexEngineDeps {
   requestTimeoutMs?: number;
 }
 
-export type CodexOutgoing = Outgoing;
+type CodexOutgoing = Outgoing;
 
 const EXT: Record<string, string> = {
   "image/png": "png",
@@ -77,7 +77,7 @@ const str = (value: unknown): string | null =>
  * ⚠️ Full access stays `on-request`, not `never`: `never` refuses an
  * escalation before it reaches us, and Full access answers it with yes.
  */
-export function codexPolicy(permission: Permission): {
+function codexPolicy(permission: Permission): {
   approvalPolicy: "untrusted" | "on-request";
   approvalsReviewer: "user" | "auto_review";
   sandbox: "read-only" | "workspace-write" | "danger-full-access";

@@ -42,7 +42,7 @@ export interface ToolContext {
   host: string;
 }
 
-export interface ToolSpec extends Shape {
+interface ToolSpec extends Shape {
   name: string;
   description: string;
   readOnly: boolean;
@@ -205,7 +205,7 @@ function asInput(checklist: ChecklistItem[]): ChecklistItemInput[] {
  * exactly one option of every pick-ONE group. `pending` names what is not:
  * a box key, or `group:<name>`.
  */
-export function decisionState(checklist: ChecklistItem[]): {
+function decisionState(checklist: ChecklistItem[]): {
   ready: boolean;
   pending: string[];
 } {

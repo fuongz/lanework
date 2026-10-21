@@ -161,7 +161,7 @@ export function withHook(settings: Json, command: string): Json {
   };
 }
 
-export type SettingsRead =
+type SettingsRead =
   | { ok: true; settings: Json }
   | { ok: false; reason: "unreadable" };
 

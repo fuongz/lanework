@@ -32,7 +32,7 @@ export async function suggestRepo(
  * Any host, not only GitHub: the readiness check (FE-30) hands it to the
  * service, which decides what it can link.
  */
-export async function originUrl(folder: string | null): Promise<string | null> {
+async function originUrl(folder: string | null): Promise<string | null> {
   if (!folder) return null;
   try {
     const { stdout } = await run("git", ["remote", "get-url", "origin"], {

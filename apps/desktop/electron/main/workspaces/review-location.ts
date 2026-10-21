@@ -17,7 +17,7 @@ import { DEFAULT_COLUMNS } from "./review-defaults";
  */
 
 /** A `YYYY-MM-DD` path segment used as a date subfolder. */
-export const DATE_DIR = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_DIR = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The lane carrying the `start` role, which is where an unlabelled card lands. */
 const FALLBACK =

@@ -8,14 +8,14 @@ import { dirname } from "node:path";
 import { AGENT_NAME_MAX, type AgentSession } from "../../../shared/terminal";
 import { agentKey } from "./agent-sessions";
 
-export interface AgentMark {
+interface AgentMark {
   /** The name given in Lanework; absent means the CLI's own title. */
   name?: string;
   /** Epoch ms it was pinned; absent means not pinned. */
   pinnedAt?: number;
 }
 
-export type AgentMarks = Record<string, AgentMark>;
+type AgentMarks = Record<string, AgentMark>;
 
 /**
  * Every mark on this machine, by `agent:id`.

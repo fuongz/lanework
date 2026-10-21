@@ -36,7 +36,7 @@ const exact = (value: number) => value.toLocaleString("en-US");
  * is the whole CLI's spend on the conversation — its sub-agents' calls, its
  * titles and recaps included — priced as the API would be.
  */
-export const COST_NOTE =
+const COST_NOTE =
   "An estimate at API prices — not what a subscription is billed. It includes this conversation's sub-agents.";
 
 /** Why a Claude total lags its transcript: it is saved now and then. */
@@ -44,7 +44,7 @@ const STALE_NOTE =
   "As Claude last saved it: it saves when it is left or quit, so the turns since are not counted yet.";
 
 /** The context's window and how full it is: Claude's guessed from its model. */
-export function contextUse(
+function contextUse(
   facts: AgentFacts,
 ): { window: number | null; share: number | null; guessed: boolean } | null {
   if (!facts.context) return null;
@@ -73,7 +73,7 @@ const WINDOW_NOTE =
  * and out, and its context — each only when the CLI wrote it, so a number
  * never reads 0 for "not known". Cost is Claude's alone.
  */
-export function modelFacts(facts: AgentFacts): Fact[] {
+function modelFacts(facts: AgentFacts): Fact[] {
   const out: Fact[] = [];
   const stale = facts.stale ? `\n${STALE_NOTE}` : "";
   if (facts.model)

@@ -42,7 +42,7 @@ import {
 export const AGENT_FILES_READ_MAX = 32 * 1024 * 1024;
 
 /** What the agent view asks for, checked. */
-export interface AgentFilesRequest {
+interface AgentFilesRequest {
   workspace: string;
   agent: TerminalAgent;
   id: string;
@@ -469,7 +469,7 @@ export async function scanTranscript(
 }
 
 /** Where a conversation's paths are reckoned from. */
-export interface RepoRoots {
+interface RepoRoots {
   /** The project's folder, as the CLIs were started in it. */
   folder: string;
   /** Its real path: what git and Claude's file history spell it as. */
@@ -484,7 +484,7 @@ export interface RepoRoots {
 }
 
 /** `folder`'s repository, as the agent files are reckoned against it. */
-export async function repoRoots(folder: string): Promise<RepoRoots> {
+async function repoRoots(folder: string): Promise<RepoRoots> {
   const real = await realpath(folder).catch(() => folder);
   const found = await locate(folder);
   if (found.kind !== "ready")

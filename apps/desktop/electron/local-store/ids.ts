@@ -28,7 +28,7 @@ export function isUuid(value: string): boolean {
  * order. A card goes between two neighbours at their midpoint; a lane whose gap
  * has run out is renumbered by the caller (`RANK_STEP` apart).
  */
-export const RANK_WIDTH = 16;
+const RANK_WIDTH = 16;
 export const RANK_STEP = 1_000_000;
 
 export function rankString(value: number): string {

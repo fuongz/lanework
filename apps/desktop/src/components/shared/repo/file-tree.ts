@@ -93,7 +93,7 @@ export function buildTree<F extends { path: string }>(files: F[]): Node<F>[] {
   return root.children.map(compact).sort(byKind);
 }
 
-export type Row<F extends { path: string } = WorktreeFile> =
+type Row<F extends { path: string } = WorktreeFile> =
   | { kind: "folder"; folder: Folder<F>; depth: number }
   | { kind: "file"; file: F; depth: number };
 

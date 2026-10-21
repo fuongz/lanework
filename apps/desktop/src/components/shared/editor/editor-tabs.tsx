@@ -6,7 +6,7 @@ import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 
 /** One open file's tab. */
-export interface EditorTab {
+interface EditorTab {
   id: string;
   /** Shown on the tab. */
   label: string;

@@ -91,7 +91,7 @@ export const BACKUPS_KEPT = 5;
 const BACKUP = ".lanework-bak-";
 
 /** The folder each skill root names (D9). */
-export function skillRoot(root: SkillRoot, where: AgentHome): string {
+function skillRoot(root: SkillRoot, where: AgentHome): string {
   return root === "claude"
     ? join(where.claudeDir, "skills")
     : root === "agents"
@@ -102,7 +102,7 @@ export function skillRoot(root: SkillRoot, where: AgentHome): string {
 /** The most skills one root lists. */
 const SKILLS_MAX = 200;
 
-export function formatOf(id: ConfigFileId): ConfigFormat {
+function formatOf(id: ConfigFileId): ConfigFormat {
   return parseSkillId(id) ? "markdown" : SPECS[id as FixedConfigId].format;
 }
 

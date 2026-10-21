@@ -127,7 +127,7 @@ export function isInstructionAgent(value: unknown): value is InstructionAgent {
   return value === "claude" || value === "codex";
 }
 
-export interface ImportMatch {
+interface ImportMatch {
   /** Where the `@` is in the text. */
   start: number;
   /** Just after the path. */

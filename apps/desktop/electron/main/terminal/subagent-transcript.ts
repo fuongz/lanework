@@ -29,13 +29,13 @@ import {
 } from "./agent-sessions";
 
 /** The most of a transcript one read takes (FE-35/D10). */
-export const SUBAGENT_READ_MAX = 8 * 1024 * 1024;
+const SUBAGENT_READ_MAX = 8 * 1024 * 1024;
 /** Of a transcript longer than that: its end, for the report and the state. */
 const TAIL = 1024 * 1024;
 const META_MAX = 64 * 1024;
 
 /** What the viewer asks for, checked. */
-export interface SubagentRequest {
+interface SubagentRequest {
   workspace: string;
   agent: TerminalAgent;
   conversation: string;
@@ -246,7 +246,7 @@ interface ClaudeMeta {
  * did; otherwise its last answer — the text after the last thing it was
  * told or shown — once it is done.
  */
-export function claudeSubagentTranscript(
+function claudeSubagentTranscript(
   rows: Line[],
   meta: ClaudeMeta | null,
   {
@@ -375,7 +375,7 @@ function patched(patch: string, folder: string): string {
 }
 
 /** What a Codex tool call was made on, in one line (FE-35/D3). */
-export function codexStepSummary(
+function codexStepSummary(
   tool: string,
   input: unknown,
   folder: string,
@@ -476,7 +476,7 @@ function codexTold(rows: Line[]): string | null {
  * its tool calls are `function_call` and `custom_tool_call` items, each
  * answered by an output with the same `call_id`.
  */
-export function codexSubagentTranscript(
+function codexSubagentTranscript(
   rows: Line[],
   {
     folder,

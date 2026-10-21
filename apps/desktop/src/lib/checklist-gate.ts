@@ -12,7 +12,7 @@ import type { BoardChecklistItem } from "../../shared/workspaces";
  */
 const RECOMMENDED = /\(recommended\)/i;
 
-export function isRecommended(item: Pick<BoardChecklistItem, "text">): boolean {
+function isRecommended(item: Pick<BoardChecklistItem, "text">): boolean {
   return RECOMMENDED.test(item.text);
 }
 

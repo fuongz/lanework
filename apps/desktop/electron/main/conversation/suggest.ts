@@ -28,7 +28,7 @@ const BUILT_IN: Suggestion[] = [
 ];
 
 /** How well `query` matches `text`: higher is better, null is no match. */
-export function fuzzyScore(text: string, query: string): number | null {
+function fuzzyScore(text: string, query: string): number | null {
   if (!query) return 0;
   const hay = text.toLowerCase();
   const needle = query.toLowerCase();

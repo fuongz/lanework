@@ -164,7 +164,7 @@ async function agentStatus(
   };
 }
 
-export async function handoffStatus(): Promise<HandoffStatus> {
+async function handoffStatus(): Promise<HandoffStatus> {
   const record = await readRecord();
   const config = await readConfig();
   const stored = record
@@ -243,12 +243,6 @@ async function setPushWip(on: boolean): Promise<HandoffStatus> {
     throw new Error("Turn on handing work between agents first.");
   await writeConfig({ ...config, pushWip: on });
   return handoffStatus();
-}
-
-/** Kept for tests and for a FE-28 install that predates the config file. */
-export async function disableHandoff(): Promise<HandoffStatus> {
-  await disable("claude-code");
-  return disable("codex");
 }
 
 /**

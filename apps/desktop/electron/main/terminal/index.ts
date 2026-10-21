@@ -612,7 +612,7 @@ export function sendTerminalCommand(command: TerminalCommand): void {
   else send();
 }
 
-export interface RunningProject {
+interface RunningProject {
   name: string;
   workspace: string;
   slug: string;

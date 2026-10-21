@@ -7,7 +7,7 @@ import type {
 } from "../../shared/auth";
 import { useSession } from "./session";
 
-export const MCP_AGENTS = ["claude-code", "codex"] as const;
+const MCP_AGENTS = ["claude-code", "codex"] as const;
 
 /** What a row shows: the CLI's answer, or that one is on its way. */
 export type McpAuthView = LaneworkMcpAuth | "checking" | "login";

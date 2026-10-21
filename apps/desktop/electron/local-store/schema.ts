@@ -11,7 +11,7 @@ import type { SqlDatabase } from "./driver";
  * `Stream[]`, `Checkpoint[]`), so pushing a local card to the cloud later is a
  * copy, not a translation.
  */
-export const MIGRATIONS: readonly string[] = [
+const MIGRATIONS: readonly string[] = [
   // 1 — workspace + work_item + meta (FE-52, D3).
   `
   CREATE TABLE workspace (

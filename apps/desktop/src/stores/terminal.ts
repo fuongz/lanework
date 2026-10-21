@@ -28,7 +28,7 @@ const bump = (workspace: string) =>
 
 /** The panel's height, as a percentage of the content column. */
 const HEIGHT_KEY = "lanework:terminal-height";
-export const DEFAULT_TERMINAL_HEIGHT = 40;
+const DEFAULT_TERMINAL_HEIGHT = 40;
 
 /**
  * The height the panel opens at: the last one somebody dragged it to.

@@ -9,7 +9,6 @@ import { join } from "node:path";
 import {
   type AssistantTurn,
   type Attachment,
-  type Block,
   CONVERSATION_READ_MAX,
   type Conversation,
   TOOL_TEXT_MAX,
@@ -69,7 +68,7 @@ export function inputText(input: unknown): string {
 }
 
 /** How a tool call is drawn and counted (FE-62/D6). */
-export function toolKind(tool: string): ToolKind {
+function toolKind(tool: string): ToolKind {
   if (tool.startsWith("mcp__")) return "mcp";
   switch (tool) {
     case "Edit":
@@ -526,7 +525,7 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
 }
 
 /** What a read of a transcript's lines answers, before main adds its own. */
-export function conversationOf(
+function conversationOf(
   id: string,
   rows: readonly Line[],
   {
@@ -592,4 +591,4 @@ export async function readConversation(
 }
 
 /** Re-exported for the engine's live turns. */
-export type { Block, Line };
+export type { Line };

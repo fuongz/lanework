@@ -371,7 +371,7 @@ export function ChangesList({ files }: { files: WorktreeFile[] }) {
  * ⚠️ Unified by default, with Split one click away — the owner's call, over
  * FE-22/D4's Split. The choice is remembered per viewer (`readStyle`).
  */
-export function ChangesDiffControls({ files }: { files: WorktreeFile[] }) {
+function ChangesDiffControls({ files }: { files: WorktreeFile[] }) {
   const diffStyle = useWorktree((state) => state.diffStyle);
   const setDiffStyle = useWorktree((state) => state.setDiffStyle);
   const focus = useWorktree((state) => state.focus);

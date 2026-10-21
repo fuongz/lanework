@@ -3,7 +3,7 @@ import type { PromptLine } from "#/components/shared/conversation/turn-view";
 import { cn } from "#/lib/utils";
 
 /** Fewer prompts than this and there is nothing to find: no rail (D5). */
-export const TOC_MIN = 3;
+const TOC_MIN = 3;
 /** One tick's slot, px — its hit area; the rail shrinks them to fit. */
 const TICK = 12;
 

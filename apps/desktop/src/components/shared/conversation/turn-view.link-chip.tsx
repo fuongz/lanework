@@ -65,7 +65,7 @@ function usePreview(url: string | null): LinkPreview | null {
  * ⚠️ Only http(s) is ever fetched or opened. Anything else — a relative path
  * the agent wrote — stays text with its target in the tooltip.
  */
-export const LinkChip = memo(function LinkChip({
+const LinkChip = memo(function LinkChip({
   href,
   text,
 }: {

@@ -30,7 +30,7 @@ export interface LinkSpan {
   raw: string;
 }
 
-export interface MarkdownOptions {
+interface MarkdownOptions {
   /**
    * Read `[text](href)` and `[[name]]` as links (FE-36). Off by default: a
    * card body keeps every link exactly as written.

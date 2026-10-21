@@ -9,9 +9,9 @@ import {
 } from "./rules";
 import { afterMarker, runInLoginShell, type ShellOptions } from "./shell";
 
-export const NPM_REGISTRY = "https://registry.npmjs.org";
+const NPM_REGISTRY = "https://registry.npmjs.org";
 
-export interface LatestOptions extends Partial<ShellOptions> {
+interface LatestOptions extends Partial<ShellOptions> {
   /** The npm registry; a spec points it somewhere unreachable. */
   registry?: string;
 }

@@ -50,7 +50,7 @@ const text = (value: unknown): string | null =>
 /** What a listing reads of each SKILL.md or command, for its name and line. */
 const HEAD = 8 * 1024;
 /** The most of one skill or command `open` reads (FE-40/D4). */
-export const SETUP_FILE_MAX = 256 * 1024;
+const SETUP_FILE_MAX = 256 * 1024;
 /** `~/.claude.json` also holds Claude's caches: more room than other configs. */
 const CLAUDE_JSON_MAX = 16 * 1024 * 1024;
 /** The most entries one folder of skills, commands or rules gives. */
@@ -77,7 +77,7 @@ const idOf = (...parts: (string | number | null)[]) =>
   parts.map((part) => part ?? "").join(":");
 
 /** A URL's host and nothing else: no user, password, path or query. */
-export function hostOf(url: string): string | null {
+function hostOf(url: string): string | null {
   try {
     return new URL(url).host || null;
   } catch {
@@ -93,7 +93,7 @@ export function hostOf(url: string): string | null {
  * App.app/…/x` stays `x`, and `npx -y pkg`, `/usr/bin/node /srv/x.js` or
  * `node x.js --token=…` give `npx` and `node`.
  */
-export function programOf(command: string): string | null {
+function programOf(command: string): string | null {
   const trimmed = command.trim();
   const quoted = /^"([^"]+)"|^'([^']+)'/.exec(trimmed);
   const program = quoted

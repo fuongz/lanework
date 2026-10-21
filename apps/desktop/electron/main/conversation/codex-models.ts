@@ -23,7 +23,7 @@ function generation(id: string): number | null {
 }
 
 /** The cache's listed models, or null when there is none to read. */
-export function modelsOf(value: unknown): AgentModel[] | null {
+function modelsOf(value: unknown): AgentModel[] | null {
   const list = (value as { models?: unknown } | null)?.models;
   if (!Array.isArray(list)) return null;
   const models = (list as Record<string, unknown>[])

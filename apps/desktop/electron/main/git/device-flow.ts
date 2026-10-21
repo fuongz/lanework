@@ -50,7 +50,7 @@ const SCOPE = "repo read:user";
 /** How long a poll may run before it gives up on its own. */
 const MAX_WAIT_MS = 15 * 60 * 1000;
 
-export interface DeviceToken {
+interface DeviceToken {
   token: string;
   refreshToken: string | null;
   /** Epoch ms, or null when this token does not expire. */

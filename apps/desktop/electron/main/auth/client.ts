@@ -53,7 +53,7 @@ export function machineFacts(name?: string): MachineFacts & {
 }
 
 /** Thrown when we could not reach the control plane at all. */
-export class UnreachableError extends Error {
+class UnreachableError extends Error {
   constructor(api: string, cause?: unknown) {
     super(
       `Could not reach the control plane at ${api} — check the network, or LANEWORK_API_URL. (${
@@ -133,7 +133,7 @@ function str(value: unknown, max = 2048): string | null {
     : null;
 }
 
-export interface LoopbackStart {
+interface LoopbackStart {
   id: string;
   /** Already checked to be on `api`'s own origin — safe for `openExternal`. */
   authorizeUrl: string;
@@ -174,7 +174,7 @@ export async function startLoopback(
   return { id, authorizeUrl };
 }
 
-export interface DeviceStart {
+interface DeviceStart {
   id: string;
   deviceCode: string;
   userCode: string;
@@ -231,7 +231,7 @@ export async function startDevice(
 }
 
 /** The device flow's "not yet" answers, distinguished so polling can react. */
-export type PollOutcome =
+type PollOutcome =
   | { state: "pending" }
   | { state: "slow_down" }
   | { state: "denied" }

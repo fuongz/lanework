@@ -12,7 +12,7 @@ import { type Line, lines, readRange, tidy } from "../terminal/agent-sessions";
 import { transcriptPath } from "./transcript";
 
 /** The largest transcript forked. */
-export const FORK_MAX = 256 * 1024 * 1024;
+const FORK_MAX = 256 * 1024 * 1024;
 
 function firstPrompt(rows: Line[]): string | null {
   for (const line of rows) {

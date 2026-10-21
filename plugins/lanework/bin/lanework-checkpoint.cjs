@@ -381,6 +381,258 @@ function newState() {
 // apps/desktop/electron/mcp-local/server.ts
 var import_node_os3 = require("node:os");
 
+// apps/desktop/electron/local-store/driver.ts
+var import_node_module = require("node:module");
+var import_node_path = require("node:path");
+function sqliteDriverName() {
+  return "Bun" in globalThis ? "bun:sqlite" : "node:sqlite";
+}
+function openRaw(path) {
+  if (sqliteDriverName() === "bun:sqlite") {
+    const load = import_node_module.createRequire(import_node_path.join(process.cwd(), "noop.js"));
+    const { Database } = load("bun:sqlite");
+    return new Database(path, { create: true });
+  }
+  const sqlite = process.getBuiltinModule("node:sqlite");
+  if (!sqlite)
+    throw new Error("node:sqlite is not available in this runtime (needs Node 22.5 or later)");
+  return new sqlite.DatabaseSync(path);
+}
+function openDatabase(path) {
+  const raw = openRaw(path);
+  const cache = new Map;
+  return {
+    exec(sql) {
+      raw.exec(sql);
+    },
+    prepare(sql) {
+      const cached = cache.get(sql);
+      if (cached)
+        return cached;
+      const statement = raw.prepare(sql);
+      const wrapped = {
+        run: (...params) => statement.run(...params),
+        get: (...params) => statement.get(...params) ?? undefined,
+        all: (...params) => statement.all(...params)
+      };
+      cache.set(sql, wrapped);
+      return wrapped;
+    },
+    close() {
+      cache.clear();
+      raw.close();
+    }
+  };
+}
+// apps/desktop/electron/local-store/ids.ts
+var import_node_crypto2 = require("node:crypto");
+function uuidv7(now = Date.now()) {
+  const bytes = import_node_crypto2.randomBytes(16);
+  let ms = BigInt(now);
+  for (let index = 5;index >= 0; index -= 1) {
+    bytes[index] = Number(ms & 0xffn);
+    ms >>= 8n;
+  }
+  bytes[6] = bytes[6] & 15 | 112;
+  bytes[8] = bytes[8] & 63 | 128;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(value) {
+  return UUID.test(value);
+}
+var RANK_WIDTH = 16;
+var RANK_STEP = 1e6;
+function rankString(value) {
+  return String(value).padStart(RANK_WIDTH, "0");
+}
+function rankValue(rank) {
+  const value = Number(rank);
+  return Number.isFinite(value) ? value : 0;
+}
+function slugify(name) {
+  const slug = name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return slug || "board";
+}
+function normalizeRepo(remote) {
+  const value = remote.trim();
+  if (!value)
+    return null;
+  let host;
+  let path;
+  const scp = value.match(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/\/)(.+)$/);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      return null;
+    }
+    host = url.hostname;
+    path = url.pathname;
+  } else if (scp?.[1] && scp[2]) {
+    host = scp[1];
+    path = scp[2];
+  } else {
+    return null;
+  }
+  const parts = path.replace(/\.git\/?$/i, "").split("/").filter(Boolean);
+  if (!host || parts.length < 2)
+    return null;
+  return [host.toLowerCase(), ...parts].join("/").toLowerCase();
+}
+function formatTaskId(category, seq) {
+  return category.format.replace("{prefix}", category.prefix).replace("{seq}", String(seq).padStart(category.pad, "0"));
+}
+// apps/desktop/electron/local-store/schema.ts
+var MIGRATIONS = [
+  `
+  CREATE TABLE workspace (
+    id          TEXT PRIMARY KEY,
+    slug        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    repo_url    TEXT,
+    config      TEXT NOT NULL DEFAULT '{}',
+    task_heads  TEXT NOT NULL DEFAULT '{}',
+    cloud_id    TEXT,
+    synced_at   TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    deleted_at  TEXT
+  );
+  CREATE UNIQUE INDEX workspace_slug_live ON workspace(slug) WHERE deleted_at IS NULL;
+  CREATE INDEX workspace_repo ON workspace(repo_url) WHERE deleted_at IS NULL;
+
+  CREATE TABLE work_item (
+    id            TEXT PRIMARY KEY,
+    workspace_id  TEXT NOT NULL REFERENCES workspace(id),
+    parent_id     TEXT REFERENCES work_item(id),
+    task_id       TEXT,
+    task_seq      INTEGER,
+    category      TEXT,
+    type          TEXT NOT NULL DEFAULT 'issue',
+    title         TEXT NOT NULL,
+    body          TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL,
+    priority      TEXT,
+    tags          TEXT NOT NULL DEFAULT '[]',
+    checklist     TEXT NOT NULL DEFAULT '[]',
+    streams       TEXT NOT NULL DEFAULT '[]',
+    checkpoint    TEXT,
+    sort_key      TEXT NOT NULL,
+    revision      INTEGER NOT NULL DEFAULT 1,
+    change_seq    INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    deleted_at    TEXT,
+    cloud_id      TEXT
+  );
+  CREATE UNIQUE INDEX work_item_task_id ON work_item(workspace_id, task_id) WHERE task_id IS NOT NULL;
+  CREATE INDEX work_item_lane ON work_item(workspace_id, status, sort_key);
+  CREATE INDEX work_item_changes ON work_item(workspace_id, change_seq);
+  CREATE INDEX work_item_parent ON work_item(parent_id);
+
+  CREATE TABLE meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+  );
+  INSERT INTO meta(key, value) VALUES ('change_seq', '0');
+  `
+];
+var SCHEMA_VERSION = MIGRATIONS.length;
+function userVersion(db) {
+  const row = db.prepare("PRAGMA user_version").get();
+  return Number(row?.user_version ?? 0);
+}
+function migrate(db) {
+  if (userVersion(db) === SCHEMA_VERSION)
+    return SCHEMA_VERSION;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const from = userVersion(db);
+    if (from > SCHEMA_VERSION)
+      throw new Error(`local store is at schema ${from}, newer than this build (${SCHEMA_VERSION})`);
+    for (let version = from;version < SCHEMA_VERSION; version += 1) {
+      db.exec(MIGRATIONS[version]);
+    }
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return SCHEMA_VERSION;
+}
+// apps/desktop/electron/local-store/store.ts
+var import_node_fs = require("node:fs");
+var import_node_path3 = require("node:path");
+
+// apps/desktop/electron/main/paths.ts
+var import_node_os2 = require("node:os");
+var import_node_path2 = require("node:path");
+var APP_HOME_NAME = ".lanew";
+function appHomeDir() {
+  return process.env.LANEWORK_HOME || import_node_path2.join(import_node_os2.homedir(), APP_HOME_NAME);
+}
+
+// apps/desktop/electron/main/workspaces/review-defaults.ts
+var DEFAULT_COLUMNS = [
+  {
+    key: "backlog",
+    name: "Backlog",
+    role: "intake",
+    icon: "idea",
+    tone: "violet"
+  },
+  {
+    key: "todo",
+    name: "To-Do",
+    role: "start",
+    icon: "circle-dashed",
+    tone: "amber"
+  },
+  {
+    key: "processing",
+    name: "In Progress",
+    role: "active",
+    icon: "progress",
+    tone: "blue"
+  },
+  { key: "done", name: "Done", role: "done", icon: "check", tone: "emerald" },
+  {
+    key: "dropped",
+    name: "Archived",
+    role: "archive",
+    icon: "archive",
+    tone: "neutral"
+  }
+];
+var TASK_ID_FORMAT = "{prefix}-{seq}";
+var TASK_ID_PAD = 2;
+var DEFAULT_CATEGORIES = [
+  {
+    key: "product-design",
+    name: "Product Design",
+    prefix: "PD",
+    tone: "violet"
+  },
+  { key: "frontend", name: "Frontend", prefix: "FE", tone: "sky" },
+  { key: "backend", name: "Backend", prefix: "BE", tone: "emerald" },
+  {
+    key: "infrastructure",
+    name: "Infrastructure",
+    prefix: "INF",
+    tone: "amber"
+  },
+  { key: "documentation", name: "Documentation", prefix: "DOC", tone: "teal" }
+].map((category) => ({
+  ...category,
+  format: TASK_ID_FORMAT,
+  pad: TASK_ID_PAD
+}));
+var TAG_MAX = 3;
+
 // apps/desktop/electron/local-store/types.ts
 class LocalStoreError extends Error {
   code;
@@ -759,257 +1011,6 @@ function toCardDetail(row) {
     commentCount: 0
   };
 }
-// apps/desktop/electron/local-store/driver.ts
-var import_node_module = require("node:module");
-var import_node_path = require("node:path");
-function sqliteDriverName() {
-  return "Bun" in globalThis ? "bun:sqlite" : "node:sqlite";
-}
-function openRaw(path) {
-  if (sqliteDriverName() === "bun:sqlite") {
-    const load = import_node_module.createRequire(import_node_path.join(process.cwd(), "noop.js"));
-    const { Database } = load("bun:sqlite");
-    return new Database(path, { create: true });
-  }
-  const sqlite = process.getBuiltinModule("node:sqlite");
-  if (!sqlite)
-    throw new Error("node:sqlite is not available in this runtime (needs Node 22.5 or later)");
-  return new sqlite.DatabaseSync(path);
-}
-function openDatabase(path) {
-  const raw = openRaw(path);
-  const cache = new Map;
-  return {
-    exec(sql) {
-      raw.exec(sql);
-    },
-    prepare(sql) {
-      const cached = cache.get(sql);
-      if (cached)
-        return cached;
-      const statement = raw.prepare(sql);
-      const wrapped = {
-        run: (...params) => statement.run(...params),
-        get: (...params) => statement.get(...params) ?? undefined,
-        all: (...params) => statement.all(...params)
-      };
-      cache.set(sql, wrapped);
-      return wrapped;
-    },
-    close() {
-      cache.clear();
-      raw.close();
-    }
-  };
-}
-// apps/desktop/electron/local-store/ids.ts
-var import_node_crypto2 = require("node:crypto");
-function uuidv7(now = Date.now()) {
-  const bytes = import_node_crypto2.randomBytes(16);
-  let ms = BigInt(now);
-  for (let index = 5;index >= 0; index -= 1) {
-    bytes[index] = Number(ms & 0xffn);
-    ms >>= 8n;
-  }
-  bytes[6] = bytes[6] & 15 | 112;
-  bytes[8] = bytes[8] & 63 | 128;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isUuid(value) {
-  return UUID.test(value);
-}
-var RANK_WIDTH = 16;
-var RANK_STEP = 1e6;
-function rankString(value) {
-  return String(value).padStart(RANK_WIDTH, "0");
-}
-function rankValue(rank) {
-  const value = Number(rank);
-  return Number.isFinite(value) ? value : 0;
-}
-function slugify(name) {
-  const slug = name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
-  return slug || "board";
-}
-function normalizeRepo(remote) {
-  const value = remote.trim();
-  if (!value)
-    return null;
-  let host;
-  let path;
-  const scp = value.match(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/\/)(.+)$/);
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
-    let url;
-    try {
-      url = new URL(value);
-    } catch {
-      return null;
-    }
-    host = url.hostname;
-    path = url.pathname;
-  } else if (scp?.[1] && scp[2]) {
-    host = scp[1];
-    path = scp[2];
-  } else {
-    return null;
-  }
-  const parts = path.replace(/\.git\/?$/i, "").split("/").filter(Boolean);
-  if (!host || parts.length < 2)
-    return null;
-  return [host.toLowerCase(), ...parts].join("/").toLowerCase();
-}
-function formatTaskId(category, seq) {
-  return category.format.replace("{prefix}", category.prefix).replace("{seq}", String(seq).padStart(category.pad, "0"));
-}
-// apps/desktop/electron/local-store/schema.ts
-var MIGRATIONS = [
-  `
-  CREATE TABLE workspace (
-    id          TEXT PRIMARY KEY,
-    slug        TEXT NOT NULL,
-    name        TEXT NOT NULL,
-    repo_url    TEXT,
-    config      TEXT NOT NULL DEFAULT '{}',
-    task_heads  TEXT NOT NULL DEFAULT '{}',
-    cloud_id    TEXT,
-    synced_at   TEXT,
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
-    deleted_at  TEXT
-  );
-  CREATE UNIQUE INDEX workspace_slug_live ON workspace(slug) WHERE deleted_at IS NULL;
-  CREATE INDEX workspace_repo ON workspace(repo_url) WHERE deleted_at IS NULL;
-
-  CREATE TABLE work_item (
-    id            TEXT PRIMARY KEY,
-    workspace_id  TEXT NOT NULL REFERENCES workspace(id),
-    parent_id     TEXT REFERENCES work_item(id),
-    task_id       TEXT,
-    task_seq      INTEGER,
-    category      TEXT,
-    type          TEXT NOT NULL DEFAULT 'issue',
-    title         TEXT NOT NULL,
-    body          TEXT NOT NULL DEFAULT '',
-    status        TEXT NOT NULL,
-    priority      TEXT,
-    tags          TEXT NOT NULL DEFAULT '[]',
-    checklist     TEXT NOT NULL DEFAULT '[]',
-    streams       TEXT NOT NULL DEFAULT '[]',
-    checkpoint    TEXT,
-    sort_key      TEXT NOT NULL,
-    revision      INTEGER NOT NULL DEFAULT 1,
-    change_seq    INTEGER NOT NULL DEFAULT 0,
-    created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL,
-    deleted_at    TEXT,
-    cloud_id      TEXT
-  );
-  CREATE UNIQUE INDEX work_item_task_id ON work_item(workspace_id, task_id) WHERE task_id IS NOT NULL;
-  CREATE INDEX work_item_lane ON work_item(workspace_id, status, sort_key);
-  CREATE INDEX work_item_changes ON work_item(workspace_id, change_seq);
-  CREATE INDEX work_item_parent ON work_item(parent_id);
-
-  CREATE TABLE meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT
-  );
-  INSERT INTO meta(key, value) VALUES ('change_seq', '0');
-  `
-];
-var SCHEMA_VERSION = MIGRATIONS.length;
-function userVersion(db) {
-  const row = db.prepare("PRAGMA user_version").get();
-  return Number(row?.user_version ?? 0);
-}
-function migrate(db) {
-  if (userVersion(db) === SCHEMA_VERSION)
-    return SCHEMA_VERSION;
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const from = userVersion(db);
-    if (from > SCHEMA_VERSION)
-      throw new Error(`local store is at schema ${from}, newer than this build (${SCHEMA_VERSION})`);
-    for (let version = from;version < SCHEMA_VERSION; version += 1) {
-      db.exec(MIGRATIONS[version]);
-    }
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-  return SCHEMA_VERSION;
-}
-// apps/desktop/electron/local-store/store.ts
-var import_node_fs = require("node:fs");
-var import_node_path3 = require("node:path");
-
-// apps/desktop/electron/main/paths.ts
-var import_node_os2 = require("node:os");
-var import_node_path2 = require("node:path");
-var APP_HOME_NAME = ".lanew";
-function appHomeDir() {
-  return process.env.LANEWORK_HOME || import_node_path2.join(import_node_os2.homedir(), APP_HOME_NAME);
-}
-
-// apps/desktop/electron/main/workspaces/review-defaults.ts
-var DEFAULT_COLUMNS = [
-  {
-    key: "backlog",
-    name: "Backlog",
-    role: "intake",
-    icon: "idea",
-    tone: "violet"
-  },
-  {
-    key: "todo",
-    name: "To-Do",
-    role: "start",
-    icon: "circle-dashed",
-    tone: "amber"
-  },
-  {
-    key: "processing",
-    name: "In Progress",
-    role: "active",
-    icon: "progress",
-    tone: "blue"
-  },
-  { key: "done", name: "Done", role: "done", icon: "check", tone: "emerald" },
-  {
-    key: "dropped",
-    name: "Archived",
-    role: "archive",
-    icon: "archive",
-    tone: "neutral"
-  }
-];
-var TASK_ID_FORMAT = "{prefix}-{seq}";
-var TASK_ID_PAD = 2;
-var DEFAULT_CATEGORIES = [
-  {
-    key: "product-design",
-    name: "Product Design",
-    prefix: "PD",
-    tone: "violet"
-  },
-  { key: "frontend", name: "Frontend", prefix: "FE", tone: "sky" },
-  { key: "backend", name: "Backend", prefix: "BE", tone: "emerald" },
-  {
-    key: "infrastructure",
-    name: "Infrastructure",
-    prefix: "INF",
-    tone: "amber"
-  },
-  { key: "documentation", name: "Documentation", prefix: "DOC", tone: "teal" }
-].map((category) => ({
-  ...category,
-  format: TASK_ID_FORMAT,
-  pad: TASK_ID_PAD
-}));
-var TAG_MAX = 3;
 
 // apps/desktop/electron/local-store/store.ts
 var DATA_FILE_NAME = "data.sqlite";

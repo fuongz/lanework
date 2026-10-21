@@ -15,8 +15,8 @@ import { isIP } from "node:net";
 import { join } from "node:path";
 import { isPreviewUrl, type LinkPreview } from "../../../shared/conversation";
 
-export const PAGE_MAX = 512 * 1024;
-export const ICON_MAX = 100 * 1024;
+const PAGE_MAX = 512 * 1024;
+const ICON_MAX = 100 * 1024;
 const TIMEOUT_MS = 5_000;
 const REDIRECTS = 3;
 const TTL_MS = 7 * 24 * 60 * 60_000;
@@ -215,7 +215,7 @@ const ENTITIES: Record<string, string> = {
   middot: "·",
 };
 
-export function decodeEntities(text: string): string {
+function decodeEntities(text: string): string {
   return text.replace(
     /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
     (whole, name: string) => {
@@ -318,7 +318,7 @@ interface DomainEntry {
   titles: Record<string, { title: string | null; at: number }>;
 }
 
-export interface LinkPreviewOptions {
+interface LinkPreviewOptions {
   /** `userData/link-previews`. */
   dir: string;
   fetcher?: Fetcher;

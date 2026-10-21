@@ -187,7 +187,7 @@ interface Session {
   curtain: string | null;
 }
 
-export interface SessionsOptions {
+interface SessionsOptions {
   /** Pin the shell (tests); otherwise `defaultShell()`. */
   shell?: ShellChoice;
   env?: NodeJS.ProcessEnv;
@@ -725,5 +725,3 @@ export function createSessions(options: SessionsOptions = {}) {
     onChanged,
   };
 }
-
-export type Sessions = ReturnType<typeof createSessions>;

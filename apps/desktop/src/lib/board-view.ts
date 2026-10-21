@@ -23,14 +23,14 @@ export const isGroupBy = (value: unknown): value is GroupBy =>
  * "category is frontend OR backend" in a query string and a way to edit it in
  * the UI, and neither is worth building before somebody has asked for it.
  */
-export interface IssueFilters {
+interface IssueFilters {
   status?: string;
   category?: string;
   priority?: string;
   tag?: string;
 }
 
-export interface IssueGroup {
+interface IssueGroup {
   key: string;
   name: string;
   tone: string;
@@ -38,17 +38,6 @@ export interface IssueGroup {
   role: string | null;
   cards: BoardCard[];
 }
-
-/**
- * High → low, and `null` LAST.
- *
- * ⚠️ Not alphabetical, and not "null first". A card with no priority is not
- * urgent, and sorting `high, low, medium, null` — which is what a string sort
- * gives — puts the least urgent work in the middle of the list.
- */
-const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
-export const priorityRank = (value: string | null): number =>
-  value === null ? 3 : (PRIORITY_RANK[value] ?? 3);
 
 export const PRIORITY_GROUPS = [
   { key: "high", name: "High", tone: "rose" },

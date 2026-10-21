@@ -27,7 +27,7 @@ const LinkContext = createContext<LinkRenderer | null>(null);
  * provides one — it alone knows the project a path is relative to — so every
  * other reader's badges stay plain.
  */
-export type FileOpener = (path: string) => void;
+type FileOpener = (path: string) => void;
 export const FileOpenerContext = createContext<FileOpener | null>(null);
 
 /**
@@ -35,7 +35,7 @@ export const FileOpenerContext = createContext<FileOpener | null>(null);
  * conversation view's (FE-62): bigger type, bordered tables with rounded
  * corners, inline code as pills, and bare `https://…` read as links.
  */
-export type MarkdownVariant = "default" | "chat";
+type MarkdownVariant = "default" | "chat";
 const VariantContext = createContext<MarkdownVariant>("default");
 
 /**

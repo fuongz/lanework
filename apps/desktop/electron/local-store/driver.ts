@@ -46,7 +46,7 @@ interface RawDatabase {
 }
 
 /** Which binding this process gets. Exposed so a test can say what it ran on. */
-export function sqliteDriverName(): "node:sqlite" | "bun:sqlite" {
+function sqliteDriverName(): "node:sqlite" | "bun:sqlite" {
   return "Bun" in globalThis ? "bun:sqlite" : "node:sqlite";
 }
 

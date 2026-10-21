@@ -66,7 +66,7 @@ import {
 } from "./types";
 
 /** `~/.lanew/data.sqlite`, following `LANEWORK_HOME` like every other app path (D1a). */
-export const DATA_FILE_NAME = "data.sqlite";
+const DATA_FILE_NAME = "data.sqlite";
 
 export function localStorePath(): string {
   return join(appHomeDir(), DATA_FILE_NAME);
@@ -80,7 +80,7 @@ export interface OpenOptions {
 }
 
 /** The board a fresh local workspace starts with: the cloud defaults. */
-export function defaultBoardConfig(): LocalBoardConfig {
+function defaultBoardConfig(): LocalBoardConfig {
   return {
     columns: DEFAULT_COLUMNS.map((column, position) => ({
       ...column,

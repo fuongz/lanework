@@ -15,8 +15,7 @@ import type {
   ClaudeUsageError,
 } from "../../../shared/terminal";
 
-export const CLAUDE_OAUTH_USAGE_URL =
-  "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const OAUTH_BETA = "oauth-2025-04-20";
 const USER_AGENT = "claude-code/2.1.0";
 const HTTP_TIMEOUT_MS = 10_000;
@@ -32,7 +31,7 @@ export interface ClaudeCredential {
 }
 
 /** What a fetch leaves behind: windows and times only, never the token. */
-export interface ClaudeOAuthSnapshot {
+interface ClaudeOAuthSnapshot {
   primary: ClaudeQuotaWindow | null;
   secondary: ClaudeQuotaWindow | null;
   /** ISO time of the last successful fetch; null when none succeeded. */
@@ -90,7 +89,7 @@ export function claudeCredentialOf(raw: string): ClaudeCredential | null {
 }
 
 /** An unknown expiry counts as usable: the request then answers 401 if not. */
-export function claudeTokenExpired(
+function claudeTokenExpired(
   credential: ClaudeCredential,
   now = Date.now(),
 ): boolean {

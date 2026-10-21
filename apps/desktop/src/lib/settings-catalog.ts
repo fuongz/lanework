@@ -16,9 +16,9 @@ import {
 import type { LinkProps } from "@tanstack/react-router";
 
 /** Icon payload shape from `@hugeicons/core-free-icons` — data, not a component. */
-export type SettingsIcon = typeof Sun01Icon;
+type SettingsIcon = typeof Sun01Icon;
 
-export interface SettingsItem {
+interface SettingsItem {
   /** Typed destination, checked against the generated route tree. */
   to: LinkProps["to"];
   label: string;
@@ -34,7 +34,7 @@ export interface SettingsItem {
   keywords: string;
 }
 
-export interface SettingsGroup {
+interface SettingsGroup {
   label: string;
   items: SettingsItem[];
 }
@@ -159,11 +159,6 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     ],
   },
 ];
-
-/** Every item, flattened — for lookups that do not care about grouping. */
-export const SETTINGS_ITEMS: SettingsItem[] = SETTINGS_GROUPS.flatMap(
-  (group) => group.items,
-);
 
 /**
  * Does `query` match any of `text`?

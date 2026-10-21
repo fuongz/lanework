@@ -31,16 +31,13 @@ export interface AgentModel {
   legacy?: boolean;
 }
 
-/** @deprecated The old name, from when every model was Claude's. */
-export type ClaudeModel = AgentModel;
-
 /**
  * The picker's list, fixed in code (FE-62/D9).
  *
  * ⚠️ `id` is checked against this list in main: it becomes an argument, and
  * nothing the page typed may.
  */
-export const CLAUDE_MODELS: readonly AgentModel[] = [
+const CLAUDE_MODELS: readonly AgentModel[] = [
   { id: "claude-opus-5-5", label: "Opus 5.5", agent: "claude" },
   { id: "claude-fable-5-1", label: "Fable 5.1", agent: "claude" },
   { id: "claude-sonnet-5-5", label: "Sonnet 5.5", agent: "claude" },
@@ -118,21 +115,18 @@ export function allModels(): readonly AgentModel[] {
   return everyModel;
 }
 
-export const DEFAULT_MODEL = "claude-opus-5-5";
+const DEFAULT_MODEL = "claude-opus-5-5";
 
 /** Each CLI's default: Codex's is the first of its list. */
-export function defaultModel(agent: ConversationAgent): string {
+function defaultModel(agent: ConversationAgent): string {
   return agent === "codex"
     ? (codexList[0]?.id ?? "gpt-6.1-sol")
     : DEFAULT_MODEL;
 }
 
-export function isModel(value: unknown): value is string {
+function isModel(value: unknown): value is string {
   return typeof value === "string" && allModels().some((m) => m.id === value);
 }
-
-/** @deprecated Every listed model, Codex's too: use `isModel`. */
-export const isClaudeModel = isModel;
 
 /** The CLI that runs model `id`; Claude for one not listed. */
 export function agentOfModel(id: string | null): ConversationAgent {
@@ -171,7 +165,7 @@ export const EFFORT_LABELS: Record<Effort, string> = {
   max: "Max",
 };
 
-export function isEffort(value: unknown): value is Effort {
+function isEffort(value: unknown): value is Effort {
   return (
     typeof value === "string" && (EFFORTS as readonly string[]).includes(value)
   );

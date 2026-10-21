@@ -35,7 +35,7 @@ import { CodexEngine } from "./codex-engine";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { buildTurns, inputText, type Line } from "./transcript";
 
-export interface EngineDeps {
+interface EngineDeps {
   cli: () => Promise<ClaudeCli>;
   /** The `codex` binary, for a Codex conversation. */
   codexCli?: () => Promise<ClaudeCli>;
@@ -55,14 +55,12 @@ export interface EngineDeps {
   controlTimeoutMs?: number;
 }
 
-export type { Outgoing } from "./queue";
-
 /**
  * The CLI's arguments for `settings` — every value from a fixed list. A
  * `fresh` conversation has no transcript yet: the CLI starts it under `id`
  * (`--session-id`) instead of resuming it.
  */
-export function engineArgs(
+function engineArgs(
   id: string,
   value: ComposerSettings,
   fresh = false,
@@ -97,7 +95,7 @@ export function engineArgs(
 }
 
 /** `AskUserQuestion`'s questions, or null when its input is not that shape. */
-export function askQuestions(input: unknown): AskQuestion[] | null {
+function askQuestions(input: unknown): AskQuestion[] | null {
   const list = (input as { questions?: unknown } | null)?.questions;
   if (!Array.isArray(list) || list.length === 0) return null;
   const text = (value: unknown, max: number) =>
@@ -967,5 +965,3 @@ export function createEngines(deps: EngineDeps) {
     },
   };
 }
-
-export type Engines = ReturnType<typeof createEngines>;

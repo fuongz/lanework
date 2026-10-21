@@ -154,7 +154,7 @@ async function assertSameSession(record: MachineRecord): Promise<void> {
  * was written for the cloud. The same record is used signed in and not, so a
  * local board's folder link survives signing in and out.
  */
-export const LOCAL_RECORD: MachineRecord = {
+const LOCAL_RECORD: MachineRecord = {
   machineId: "local",
   secret: "",
   apiUrl: "lanework-local:",

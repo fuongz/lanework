@@ -17,7 +17,7 @@ import {
 import type { ImagePreview } from "../../../shared/conversation";
 
 /** The largest image the lightbox is sent, in bytes. */
-export const IMAGE_MAX = 20 * 1024 * 1024;
+const IMAGE_MAX = 20 * 1024 * 1024;
 
 const IMAGE_TYPES: Record<string, string> = {
   ".png": "image/png",

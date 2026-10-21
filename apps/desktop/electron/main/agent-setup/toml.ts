@@ -110,7 +110,7 @@ export function tomlBool(raw: string): boolean | null {
 }
 
 /** `a."b.c".d` → `["a", "b.c", "d"]`; null for a key this cannot read. */
-export function tomlKey(text: string): string[] | null {
+function tomlKey(text: string): string[] | null {
   const parts = splitTop(text, ".").map((part) => part.trim());
   const keys: string[] = [];
   for (const part of parts) {

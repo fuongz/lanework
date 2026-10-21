@@ -5,7 +5,7 @@ import type { Principal, RedactedSession } from "./auth";
  * by exactly one gate, so a free-form string would only ever name a permission
  * nothing consults.
  */
-export const ACTIONS = [
+const ACTIONS = [
   /** Use the app at all. The one question the UI gate and main both ask. */
   "app:use",
   "session:read",
@@ -23,7 +23,7 @@ export const ACTIONS = [
   "cloud:use",
 ] as const;
 
-export type Action = (typeof ACTIONS)[number];
+type Action = (typeof ACTIONS)[number];
 
 /**
  * May `principal` perform `action`?

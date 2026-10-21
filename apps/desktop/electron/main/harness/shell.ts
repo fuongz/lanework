@@ -11,7 +11,7 @@ export interface ShellOptions {
   timeoutMs: number;
 }
 
-export interface ShellResult {
+interface ShellResult {
   stdout: string;
   stderr: string;
   /** Null when it was killed — timed out — or never started. */

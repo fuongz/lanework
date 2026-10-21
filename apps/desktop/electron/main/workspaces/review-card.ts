@@ -31,7 +31,7 @@ import {
 
 const PRIORITIES = new Set(["low", "medium", "high"]);
 
-export function unquote(value: string): string {
+function unquote(value: string): string {
   return value.replace(/^['"]|['"]$/g, "");
 }
 
@@ -49,7 +49,7 @@ export function parseFrontmatterMap(md: string): Record<string, string> {
 }
 
 /** A YAML-ish list: `["a", "b"]` or `a, b`. */
-export function parseList(value: string): string[] {
+function parseList(value: string): string[] {
   try {
     const parsed = JSON.parse(value);
     if (Array.isArray(parsed)) return parsed.map(String);
@@ -70,18 +70,18 @@ export function parseList(value: string): string[] {
  * after an optional `Review:` the pattern walks past a blank line and captures
  * the first paragraph of the body as the title.
  */
-export function extractReviewTitle(md: string): string | null {
+function extractReviewTitle(md: string): string | null {
   const match = md.match(/^#[ \t]+(.+)$/m);
   if (!match) return null;
   return match[1].replace(/^Review:[ \t]*/, "").trim() || null;
 }
 
-export function extractDate(value: string): string | null {
+function extractDate(value: string): string | null {
   return value.match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
 }
 
 /** Leading `NN-`/`NN_` ordinal of a date-folder filename (`01-foo.md` → 1). */
-export function extractOrdinal(fileName: string): number | null {
+function extractOrdinal(fileName: string): number | null {
   const match = fileName.match(/^(\d+)[-_]/);
   return match ? Number(match[1]) : null;
 }

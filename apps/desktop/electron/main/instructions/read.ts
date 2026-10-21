@@ -38,15 +38,15 @@ const run = promisify(execFile);
 /** The most of one file a read takes; instruction files are a few KB. */
 export const INSTRUCTION_READ_MAX = 256 * 1024;
 /** The most an Effective view gathers, every file together (FE-37/D4). */
-export const EFFECTIVE_MAX = 1024 * 1024;
+const EFFECTIVE_MAX = 1024 * 1024;
 /** Claude follows imports four hops deep and no further. */
-export const IMPORT_HOPS = 4;
+const IMPORT_HOPS = 4;
 /** What one scan for nested files takes (FE-37/D5). */
-export const NESTED_FILES = 200;
+const NESTED_FILES = 200;
 const NESTED_DIRS = 5000;
 const RULES_MAX = 200;
 /** Codex's own default for `project_doc_max_bytes`. */
-export const CODEX_DOC_MAX = 32 * 1024;
+const CODEX_DOC_MAX = 32 * 1024;
 /** How long after a write it is reported, so a burst is one change. */
 const SETTLE_MS = 300;
 const WATCH_DIRS = 32;
@@ -135,7 +135,7 @@ const inside = (root: string, path: string) => {
 };
 
 /** Every folder from the filesystem's root down to `folder`, in that order. */
-export function ancestors(folder: string): string[] {
+function ancestors(folder: string): string[] {
   const chain: string[] = [];
   let dir = resolve(folder);
   for (;;) {
@@ -147,7 +147,7 @@ export function ancestors(folder: string): string[] {
 }
 
 /** The working tree's root, as Codex finds a project's: or the folder itself. */
-export async function projectRoot(folder: string): Promise<string> {
+async function projectRoot(folder: string): Promise<string> {
   try {
     const { stdout } = await run("git", ["rev-parse", "--show-toplevel"], {
       cwd: folder,
@@ -254,7 +254,7 @@ const MODES: readonly ClaudeInstructionMode[] = [
  * only layer besides managed ones it is read from. The built-in plugin turned
  * off means CLAUDE.md only.
  */
-export function claudeMode(settings: Json | null): ClaudeInstructionMode {
+function claudeMode(settings: Json | null): ClaudeInstructionMode {
   const plugins = settings?.enabledPlugins;
   if (isObject(plugins) && plugins["agents-md@builtin"] === false)
     return "claude-md";

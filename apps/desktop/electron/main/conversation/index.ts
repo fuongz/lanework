@@ -54,7 +54,7 @@ import { readConversation, transcriptPath } from "./transcript";
  * (FE-62/D3). The terminal's own list is the exact answer; until it is
  * wired in, Claude's pid files are (`live-claude.ts`).
  */
-export interface TerminalBridge {
+interface TerminalBridge {
   terminalOn: (
     workspace: string,
     conversation: string,

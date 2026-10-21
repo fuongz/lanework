@@ -29,7 +29,7 @@ import {
 import { IMPORT_BATCH, parseTaskSeq } from "./review-import";
 
 /** The `source.kind` a card moved from this machine's local board carries. */
-export const LOCAL_SOURCE_KIND = "lanework-local";
+const LOCAL_SOURCE_KIND = "lanework-local";
 
 export interface SyncRecord {
   title: string;
@@ -71,13 +71,13 @@ export interface SyncRecord {
 }
 
 /** One card to send, with the local parent it hangs under. */
-export interface PlannedCard {
+interface PlannedCard {
   localId: string;
   parentLocalId: string | null;
   record: SyncRecord;
 }
 
-export interface SyncOutcome {
+interface SyncOutcome {
   localId: string;
   cloudId: string;
   /** The cloud project's slug — the key this machine's folder link moves to. */
@@ -138,10 +138,7 @@ function streamsOf(streams: Stream[]): SyncRecord["streams"] {
  * demands; one whose category was cleared after it was minted goes without
  * it, and the cloud mints the card a new one when it is next categorized.
  */
-export function planSync(
-  store: LocalStore,
-  workspace: LocalWorkspace,
-): PlannedCard[] {
+function planSync(store: LocalStore, workspace: LocalWorkspace): PlannedCard[] {
   const categories = new Map(
     workspace.config.categories.map((category) => [category.key, category]),
   );
@@ -217,7 +214,7 @@ export function planSync(
 }
 
 /** Parents first: depth 0 (top-level), then their children, and so on. */
-export function byDepth(cards: PlannedCard[]): PlannedCard[][] {
+function byDepth(cards: PlannedCard[]): PlannedCard[][] {
   const parentOf = new Map(
     cards.map((card) => [card.localId, card.parentLocalId]),
   );

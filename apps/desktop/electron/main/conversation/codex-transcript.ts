@@ -223,7 +223,7 @@ function promptOf(item: Record<string, unknown>): {
  * everything after it — text, tool calls folded between two texts — as one
  * assistant turn. Usage is summed from its `token_count` events.
  */
-export function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
+function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
   const turns: Turn[] = [];
   // ⚠️ Newer CLIs write both the item and the old event for one message:
   // the items win wherever there are any.
@@ -354,7 +354,7 @@ export function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
 }
 
 /** What a read of a rollout's lines answers, before main adds its own. */
-export function codexConversationOf(
+function codexConversationOf(
   id: string,
   rows: readonly Line[],
   {

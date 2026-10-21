@@ -14,7 +14,7 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /** The item the hook looks up — `lanework-checkpoint.ts` names it too. */
-export const KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
+const KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
 
 const secretFile = () => process.env.LANEWORK_HOOK_SECRET_FILE || null;
 
