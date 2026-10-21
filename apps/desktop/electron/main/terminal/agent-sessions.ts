@@ -4,7 +4,7 @@
 // Read-only, and nothing here imports Electron: main calls it, and a spec can
 // drive it under plain Node against a fake home folder.
 import { open, readdir, readFile, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   AGENT_SESSION_LIMIT,
   type AgentCard,
@@ -208,6 +208,87 @@ export function claudeSubagentWorking(tail: Line[]): boolean {
   return false;
 }
 
+/** A background task's end, as the conversation that ran it is told. */
+const TASK_NOTIFICATION = /<task-notification>[\s\S]*?<\/task-notification>/g;
+const TASK_ID = /<task-id>([A-Za-z0-9_-]{1,64})<\/task-id>/;
+const TASK_STATUS = /<status>([a-z_]+)<\/status>/;
+
+/** How much of a conversation's transcript one read for task ends takes. */
+const ENDED_READ = 4 * 1024 * 1024;
+
+/**
+ * What each conversation's transcript has been read for: how far, and the
+ * sub-agents it says have ended. Only the bytes written since are read again.
+ */
+const endedRead = new Map<string, { end: number; ended: Set<string> }>();
+
+/**
+ * The background sub-agents a Claude conversation was told have ended.
+ *
+ * NOTE: A sub-agent stopped mid-turn (TaskStop, a crash) never writes the
+ * line that closes its turn, so its own transcript reads as working until it
+ * goes stale. Its conversation is told: a `<task-notification>` with the
+ * sub-agent's id and a status other than `running`.
+ *
+ * @param conversation The conversation's own transcript, `<id>.jsonl`.
+ * @returns The ids, as in `agent-<id>.jsonl`. Empty when it cannot be read.
+ */
+export async function claudeEndedSubagents(
+  conversation: string,
+): Promise<Set<string>> {
+  try {
+    const { size } = await stat(conversation);
+    let known = endedRead.get(conversation);
+    // Shorter than what was read: rewritten, so read it as new.
+    if (!known || known.end > size) {
+      known = { end: 0, ended: new Set() };
+      endedRead.set(conversation, known);
+    }
+    const handle = await open(conversation, "r");
+    try {
+      const buffer = Buffer.alloc(Math.min(ENDED_READ, size - known.end));
+      while (known.end < size) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          0,
+          Math.min(buffer.length, size - known.end),
+          known.end,
+        );
+        if (bytesRead === 0) break;
+        // Whole lines only, found in the bytes: a notification cut at the
+        // read's end is read with the next one.
+        const last = buffer.subarray(0, bytesRead).lastIndexOf(0x0a);
+        if (last === -1) {
+          // The line is still being written: try again on the next read.
+          if (known.end + bytesRead >= size) break;
+          // A line longer than a whole read (a pasted image) is skipped, or
+          // every read after it would stop here.
+          known.end += bytesRead;
+          continue;
+        }
+        const text = buffer.subarray(0, last).toString("utf8");
+        for (const [block] of text.matchAll(TASK_NOTIFICATION)) {
+          const id = TASK_ID.exec(block)?.[1];
+          const status = TASK_STATUS.exec(block)?.[1];
+          if (id && status && status !== "running") known.ended.add(id);
+        }
+        known.end += last + 1;
+      }
+    } finally {
+      await handle.close();
+    }
+    return known.ended;
+  } catch {
+    return new Set();
+  }
+}
+
+/** The conversation transcript a Claude sub-agent's file belongs to. */
+function conversationOfSubagent(file: string): string {
+  // `<dir>/<id>/subagents/agent-<sub>.jsonl` → `<dir>/<id>.jsonl`.
+  return `${dirname(dirname(file))}.jsonl`;
+}
+
 /** Whether a Codex task is open: `task_started` with no end after it. */
 export function codexWorking(tail: Line[]): boolean {
   for (let at = tail.length - 1; at >= 0; at--) {
@@ -351,10 +432,18 @@ export async function transcriptWorking(
       head: start === 0,
     });
     if (agent === "codex") return codexWorking(tail);
-    return subagent ? claudeSubagentWorking(tail) : claudeWorking(tail);
+    if (!subagent) return claudeWorking(tail);
+    return claudeSubagentWorking(tail) && !(await claudeSubagentEnded(file));
   } catch {
     return false;
   }
+}
+
+/** Whether a Claude sub-agent's conversation was told it ended. */
+async function claudeSubagentEnded(file: string): Promise<boolean> {
+  const sub = CLAUDE_SUBAGENT_FILE.exec(basename(file))?.[1];
+  if (!sub) return false;
+  return (await claudeEndedSubagents(conversationOfSubagent(file))).has(sub);
 }
 
 /**
@@ -564,7 +653,10 @@ async function claudeSubagents(
             ? meta.agentType
             : null,
         updatedAt: info.mtime.toISOString(),
-        working: recent && claudeSubagentWorking(tail),
+        working:
+          recent &&
+          claudeSubagentWorking(tail) &&
+          !(await claudeSubagentEnded(file)),
       };
     }),
   );

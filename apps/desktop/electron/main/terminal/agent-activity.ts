@@ -80,6 +80,10 @@ export function watchAgentActivity(
   const pending = new Map<string, NodeJS.Timeout>();
   const said = new Map<string, string>();
   const running = new Set<string>();
+  // The sub-agents last reported working, per conversation, by their files.
+  // A stopped one writes nothing more; its conversation's next write is when
+  // it is read again.
+  const busySubagents = new Map<string, Map<string, string>>();
   // The card each conversation last named, and how far its transcript has
   // been read for one (FE-27). Only the bytes written since are read again;
   // the first read of a conversation goes back `CARD_SCAN`.
@@ -144,6 +148,22 @@ export function watchAgentActivity(
             }
           }
           if (stopped) return;
+          const parentKey = `${agent}:${id}`;
+          if (subagent) {
+            const busy = busySubagents.get(parentKey) ?? new Map();
+            if (working) busy.set(subagent, file);
+            else busy.delete(subagent);
+            busySubagents.set(parentKey, busy);
+          } else if (agent === "claude") {
+            // NOTE: A sub-agent stopped mid-turn (TaskStop) never closes its
+            // turn in its own file, so no write of it will say it is done.
+            // Its conversation is told instead: read it again from there.
+            for (const [sub, subFile] of busySubagents.get(parentKey) ?? []) {
+              if (await transcriptWorking(subFile, "claude", true)) continue;
+              busySubagents.get(parentKey)?.delete(sub);
+              if (!stopped) onActivity(agent, id, false, null, sub);
+            }
+          }
           if (!subagent && said.get(key) === news) return;
           said.set(key, news);
           onActivity(agent, id, working, card, subagent);
