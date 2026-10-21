@@ -1,6 +1,7 @@
 import { UnfoldMoreIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   Select,
   SelectContent,
@@ -235,9 +236,7 @@ function FamilyCombobox({
               </>
             )}
             {loading ? (
-              <p className="text-muted-foreground px-2.5 py-1.5 text-xs">
-                Loading fonts…
-              </p>
+              <ListSkeleton label="Loading fonts" rows={5} icon={false} />
             ) : failed ? (
               <p className="text-muted-foreground px-2.5 py-1.5 text-xs">
                 Couldn’t read this Mac’s fonts.

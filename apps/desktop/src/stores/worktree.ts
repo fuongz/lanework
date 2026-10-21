@@ -63,7 +63,13 @@ let marksTicket = 0;
 /** What a project's screens held when another project was opened. */
 type Snapshot = Pick<
   WorktreeStore,
-  "state" | "patch" | "message" | "history" | "historyMore" | "commit"
+  | "state"
+  | "patch"
+  | "message"
+  | "history"
+  | "historyMore"
+  | "historyRead"
+  | "commit"
 >;
 
 /**
@@ -105,6 +111,8 @@ interface WorktreeStore {
 
   history: CommitSummary[];
   historyMore: boolean;
+  /** Whether the first page has answered, so an empty list means none. */
+  historyRead: boolean;
   historyLoading: boolean;
   historyError: string | null;
   commit: CommitChange | null;
@@ -182,6 +190,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
         message: current.message,
         history: current.history,
         historyMore: current.historyMore,
+        historyRead: current.historyRead,
         commit: current.commit,
       });
       while (snapshots.size > SNAPSHOT_LIMIT)
@@ -200,6 +209,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       message: kept?.message ?? "",
       history: kept?.history ?? [],
       historyMore: kept?.historyMore ?? false,
+      historyRead: kept?.historyRead ?? false,
       commit: kept?.commit ?? null,
       loading: false,
       historyLoading: false,
@@ -282,6 +292,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     message: "",
     history: [],
     historyMore: false,
+    historyRead: false,
     historyLoading: false,
     historyError: null,
     commit: null,
@@ -420,17 +431,20 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
             ? {
                 history: [...page.commits, ...kept.slice(page.commits.length)],
                 historyLoading: false,
+                historyRead: true,
               }
             : {
                 history: page.commits,
                 historyMore: page.more,
                 historyLoading: false,
+                historyRead: true,
               },
         );
       } catch (error) {
         if (mine !== ticket.history) return;
         set({
           historyLoading: false,
+          historyRead: true,
           historyError: ipcMessage(error, "The history could not be read."),
         });
       }
@@ -510,6 +524,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
             focus: null,
             history: [],
             historyMore: false,
+            historyRead: false,
             commit: null,
           });
           void get().loadAgentMarks();

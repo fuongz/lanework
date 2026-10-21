@@ -19,6 +19,7 @@ import { useMemo, useState } from "react";
 import { ConnectPanel } from "#/components/features/pulls/connect-panel";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { UserAvatar } from "#/components/shared/common/user-avatar";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +34,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
-import { Input } from "#/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "#/components/ui/input-group";
 import { shortAge } from "#/lib/board-view";
 import { PULL_TABS, type PullSearch, type PullTab } from "#/lib/pull-search";
 import { cn } from "#/lib/utils";
@@ -163,7 +168,7 @@ function Group({
   if (!pulls.length) return null;
   return (
     <section>
-      <h3 className="bg-background/95 text-muted-foreground sticky top-0 z-10 flex h-7 items-center gap-2 px-4 text-[11px] font-medium backdrop-blur">
+      <h3 className="bg-sidebar/95 text-muted-foreground sticky top-0 z-10 flex h-7 items-center gap-2 px-4 text-[11px] font-medium backdrop-blur">
         {name}
         <span className="tabular-nums">{pulls.length}</span>
       </h3>
@@ -431,22 +436,24 @@ export function PullsList() {
           {/* The tabs, the state filter and Refresh are in the window's
               title bar — see `PullsListControls`. */}
           <ForkSwitch />
-          <div className="px-2 pt-2 pb-2">
-            <div className="relative">
-              <HugeiconsIcon
-                icon={Search01Icon}
-                className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2"
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
-              <Input
+          <div className="flex shrink-0 items-center px-2 pt-2 pb-1.5">
+            <InputGroup>
+              <InputGroupAddon>
+                <HugeiconsIcon
+                  icon={Search01Icon}
+                  className="size-3.5"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+              </InputGroupAddon>
+              <InputGroupInput
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search pull requests"
+                placeholder="Search pull requests…"
                 aria-label="Search pull requests"
-                className="pl-7"
+                className="text-xs"
               />
-            </div>
+            </InputGroup>
           </div>
 
           {/* ⚠️ Says which copy this is. "No open pull requests" and "I could
@@ -466,14 +473,14 @@ export function PullsList() {
             </div>
           )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             {error && (
               <p className="text-destructive px-4 py-3 text-xs/relaxed">
                 {error}
               </p>
             )}
             {empty && nothing && (
-              <Empty className="py-10">
+              <Empty>
                 <EmptyHeader>
                   <EmptyMedia variant="icon">
                     <HugeiconsIcon
@@ -485,6 +492,13 @@ export function PullsList() {
                   <EmptyDescription>{nothing.description}</EmptyDescription>
                 </EmptyHeader>
               </Empty>
+            )}
+            {!view && !error && (
+              <ListSkeleton
+                label="Reading the pull requests"
+                lines={2}
+                rows={6}
+              />
             )}
             {groups.map((group) => (
               <Group
@@ -500,7 +514,14 @@ export function PullsList() {
         </>
       ) : ready ? (
         <ConnectPanel />
-      ) : null}
+      ) : (
+        <ListSkeleton
+          label="Reading the pull requests"
+          lines={2}
+          rows={6}
+          className="pt-12"
+        />
+      )}
     </div>
   );
 }

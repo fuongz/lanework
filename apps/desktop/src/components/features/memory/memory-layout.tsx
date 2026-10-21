@@ -2,6 +2,7 @@ import { Folder01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, Outlet } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
+import { SplitSkeleton } from "#/components/shared/loading/skeletons";
 import { MemoryMessage } from "#/components/shared/memory/memory-message";
 import {
   ProjectBar,
@@ -73,7 +74,7 @@ export function MemoryLayout() {
         />
       </Framed>
     ) : (
-      <p className="text-muted-foreground p-4 text-xs">Reading memory…</p>
+      <SplitSkeleton label="Reading memory" />
     );
   if (!list.folder || !list.dir)
     return (

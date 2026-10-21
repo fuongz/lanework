@@ -1,5 +1,6 @@
 import { ArrowDown01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { TextSkeleton } from "#/components/shared/loading/skeletons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -100,7 +101,10 @@ export function CommitPicker({ number }: { number: number }) {
               {shown.length} file{shown.length === 1 ? "" : "s"}
             </span>
             {commitDiffLoading ? (
-              <span className="shrink-0">…</span>
+              <TextSkeleton
+                label="Reading the commit"
+                className="w-12 shrink-0"
+              />
             ) : (
               <Counts additions={additions} deletions={deletions} />
             )}

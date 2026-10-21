@@ -18,6 +18,7 @@ import { canReadPulls, usePulls } from "#/stores/pulls";
 export function PullsEmpty() {
   const account = usePulls((state) => state.account);
   const repo = usePulls((state) => state.repo);
+  const ready = usePulls((state) => state.ready);
   const connected = canReadPulls(account, repo);
 
   return (
@@ -30,21 +31,25 @@ export function PullsEmpty() {
         <span className="ml-auto" />
         <PullsListControls />
       </WindowTitlebar>
-      <Empty className="py-16">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <HugeiconsIcon icon={GitPullRequestIcon} strokeWidth={1.8} />
-          </EmptyMedia>
-          <EmptyTitle>
-            {connected ? "No pull request open" : "Not set up yet"}
-          </EmptyTitle>
-          <EmptyDescription>
-            {connected
-              ? "Pick one from the list to read its diff."
-              : "Pull requests show here once the GitHub CLI can read this project's repo."}
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      {/* ⚠️ Nothing until the GitHub check answers: the list beside it shows
+          the skeleton, and "Not set up yet" there would be a guess. */}
+      {ready && (
+        <Empty className="py-16">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <HugeiconsIcon icon={GitPullRequestIcon} strokeWidth={1.8} />
+            </EmptyMedia>
+            <EmptyTitle>
+              {connected ? "No pull request open" : "Not set up yet"}
+            </EmptyTitle>
+            <EmptyDescription>
+              {connected
+                ? "Pick one from the list to read its diff."
+                : "Pull requests show here once the GitHub CLI can read this project's repo."}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
     </div>
   );
 }

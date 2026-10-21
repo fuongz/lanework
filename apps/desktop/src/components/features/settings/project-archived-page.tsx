@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useState } from "react";
 import type { ArchivedAgentSession } from "#/../shared/terminal";
 import type { Workspace } from "#/../shared/workspaces";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   SETTINGS_BUTTON,
   SettingsCard,
@@ -213,9 +214,11 @@ function Archived({ project }: { project: Workspace }) {
       title: "Reading",
       hideTitle: true,
       content: (
-        <p className="text-muted-foreground text-[13px]">
-          Reading {project.name}’s archive…
-        </p>
+        <ListSkeleton
+          label={`Reading ${project.name}’s archive`}
+          rows={4}
+          className="px-0"
+        />
       ),
     });
   else if (archived && archived.length === 0)

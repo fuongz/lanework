@@ -12,6 +12,10 @@ import { useEffect, useState } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import {
+  DocumentSkeleton,
+  SplitSkeleton,
+} from "#/components/shared/loading/skeletons";
+import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
@@ -190,14 +194,6 @@ export function PullDetail() {
 
   // ⚠️ The screen's name stays in the title bar until this pull request has a
   // title to put there, so the bar is never blank while one loads.
-  if (loading && !detail)
-    return (
-      <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
-        <PullsTitlebar />
-        Loading pull request…
-      </div>
-    );
-
   if (error)
     return (
       <div className="flex flex-1 items-start justify-center p-8">
@@ -206,7 +202,15 @@ export function PullDetail() {
       </div>
     );
 
-  if (!detail) return <PullsTitlebar />;
+  // ⚠️ Before the read starts too, not only while `loading`: the first
+  // render comes before the effect that opens the pull request.
+  if (!detail || (loading && detail.pull.number !== parsed))
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <PullsTitlebar />
+        <SplitSkeleton label="Loading the pull request" />
+      </div>
+    );
 
   const { pull } = detail;
   // ⚠️ The same function the file tree calls. Two answers to "which files are
@@ -400,9 +404,9 @@ export function PullDetail() {
                   baseSha={source.baseSha}
                 />
               ) : (
-                <p className="text-muted-foreground p-4 text-xs">
-                  {commitDiffError === null ? "Loading that commit…" : null}
-                </p>
+                commitDiffError === null && (
+                  <DocumentSkeleton label="Loading that commit" code />
+                )
               )}
             </div>
           </ResizablePanel>

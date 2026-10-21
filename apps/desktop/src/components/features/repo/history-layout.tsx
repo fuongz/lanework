@@ -1,10 +1,14 @@
+import { RefreshIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Outlet, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { SplitSkeleton } from "#/components/shared/loading/skeletons";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
 import { RepoEmpty, RepoMessage } from "#/components/shared/repo/repo-empty";
+import { Button } from "#/components/ui/button";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -26,6 +30,8 @@ export function HistoryLayout() {
   const openHistory = useWorktree((state) => state.openHistory);
   const state = useWorktree((state) => state.state);
   const error = useWorktree((state) => state.error);
+  const refresh = useWorktree((state) => state.refresh);
+  const loading = useWorktree((state) => state.historyLoading);
 
   const { defaultLayout, onLayoutChanged } = usePersistedLayout(
     "lanework:history",
@@ -46,6 +52,22 @@ export function HistoryLayout() {
   const title = (
     <WindowTitlebar>
       <h1 className={WINDOW_TITLE}>History</h1>
+      <span className="ml-auto" />
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Refresh history"
+        title="Refresh"
+        disabled={loading}
+        onClick={() => void refresh().then(() => openHistory(slug))}
+      >
+        <HugeiconsIcon
+          icon={RefreshIcon}
+          strokeWidth={1.8}
+          aria-hidden="true"
+          className={loading ? "animate-spin" : undefined}
+        />
+      </Button>
     </WindowTitlebar>
   );
 
@@ -59,9 +81,7 @@ export function HistoryLayout() {
             description={error}
           />
         ) : (
-          <p className="text-muted-foreground p-4 text-xs">
-            Reading the repository…
-          </p>
+          <SplitSkeleton label="Reading the repository" lines={2} />
         )}
       </>
     );
@@ -81,8 +101,8 @@ export function HistoryLayout() {
     >
       <ResizablePanel
         id="list"
-        defaultSize="340px"
-        minSize="18%"
+        defaultSize="280px"
+        minSize="15%"
         maxSize="45%"
         groupResizeBehavior="preserve-pixel-size"
       >

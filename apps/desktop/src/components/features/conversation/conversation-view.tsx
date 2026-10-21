@@ -2,7 +2,6 @@ import {
   Alert02Icon,
   ArrowDown01Icon,
   ComputerTerminal01Icon,
-  Loading03Icon,
   MessageMultiple01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -45,6 +44,7 @@ import {
   TurnView,
   UserBubble,
 } from "#/components/shared/conversation/turn-view";
+import { ConversationSkeleton } from "#/components/shared/loading/skeletons";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -714,18 +714,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     </EmptyHeader>
                   </Empty>
                 ) : (
-                  <div
-                    role="status"
-                    className="text-muted-foreground flex flex-col items-center gap-3 py-24 text-xs"
-                  >
-                    <HugeiconsIcon
-                      icon={Loading03Icon}
-                      className="size-5 animate-spin motion-reduce:animate-none"
-                      strokeWidth={1.8}
-                      aria-hidden="true"
-                    />
-                    Reading the conversation…
-                  </div>
+                  <ConversationSkeleton label="Reading the conversation" />
                 )
               ) : turns.length === 0 && waiting.length === 0 && !stream ? (
                 <Empty className="py-16">

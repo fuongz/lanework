@@ -16,6 +16,7 @@ import { useCopy } from "#/components/shared/common/use-copy";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { useDark } from "#/components/shared/diff/use-dark";
 import { EditorTabs } from "#/components/shared/editor/editor-tabs";
+import { DocumentSkeleton } from "#/components/shared/loading/skeletons";
 import { RepoMessage } from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
 import { isMarkdown, useFiles } from "#/stores/files";
@@ -325,8 +326,7 @@ export function FileView({
     body = (
       <RepoMessage title="This file could not be read" description={failed} />
     );
-  else if (!view)
-    body = <p className="text-muted-foreground p-4 text-xs">Reading…</p>;
+  else if (!view) body = <DocumentSkeleton label="Reading the file" code />;
   else if (view.kind === "missing")
     body = (
       <RepoMessage

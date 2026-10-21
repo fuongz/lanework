@@ -8,6 +8,7 @@ import { useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { type LoadSides, PatchView } from "#/components/shared/diff/patch-view";
+import { DocumentSkeleton } from "#/components/shared/loading/skeletons";
 import { RepoMessage } from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
 import { useWorktree } from "#/stores/worktree";
@@ -145,9 +146,7 @@ export function CommitDetail() {
       <RepoMessage title="That commit could not be read" description={error} />
     );
   if (!change?.commit.sha.startsWith(sha.slice(0, 7)))
-    return (
-      <p className="text-muted-foreground p-4 text-xs">Reading the commit…</p>
-    );
+    return <DocumentSkeleton label="Reading the commit" code />;
 
   const additions = change.files.reduce((sum, file) => sum + file.additions, 0);
   const deletions = change.files.reduce((sum, file) => sum + file.deletions, 0);

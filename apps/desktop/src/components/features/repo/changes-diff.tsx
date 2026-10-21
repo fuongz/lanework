@@ -2,6 +2,7 @@ import { Undo02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useMemo, useState } from "react";
 import { type LoadSides, PatchView } from "#/components/shared/diff/patch-view";
+import { DocumentSkeleton } from "#/components/shared/loading/skeletons";
 import { RestoreDialog } from "#/components/shared/repo/restore-dialog";
 import { StageBox } from "#/components/shared/repo/stage-box";
 import { Button } from "#/components/ui/button";
@@ -113,7 +114,7 @@ export function ChangesDiff({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {patch === null && !patchError ? (
-        <p className="text-muted-foreground p-4 text-xs">Reading the diff…</p>
+        <DocumentSkeleton label="Reading the diff" code />
       ) : (
         <PatchView
           patch={patch?.patch ?? ""}

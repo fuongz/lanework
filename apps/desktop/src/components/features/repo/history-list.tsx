@@ -8,6 +8,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useParams } from "@tanstack/react-router";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { RepoMessage } from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
 import {
@@ -36,6 +37,7 @@ export function HistoryList() {
   const commits = useWorktree((state) => state.history);
   const more = useWorktree((state) => state.historyMore);
   const loading = useWorktree((state) => state.historyLoading);
+  const read = useWorktree((state) => state.historyRead);
   const error = useWorktree((state) => state.historyError);
   const moreHistory = useWorktree((state) => state.moreHistory);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -81,8 +83,9 @@ export function HistoryList() {
           description={error}
         />
       );
-    return loading ? (
-      <p className="text-muted-foreground p-4 text-xs">Reading the history…</p>
+    // ⚠️ Not read yet is a loading state, not "No commits yet".
+    return loading || !read ? (
+      <ListSkeleton label="Reading the history" lines={2} rows={7} />
     ) : (
       <RepoMessage
         title="No commits yet"
@@ -93,43 +96,42 @@ export function HistoryList() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 flex-col gap-2 border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <InputGroup>
-            <InputGroupInput
-              type="search"
-              aria-label="Search commits"
-              placeholder="Search commits…"
-              value={query}
-              onChange={(event) =>
-                setSearch({ slug, value: event.target.value })
-              }
-              onKeyDown={(event) => {
-                if (event.key === "Escape") setSearch({ slug, value: "" });
-              }}
+      <div className="flex shrink-0 items-center gap-1 px-2 pt-2 pb-1.5">
+        <InputGroup>
+          <InputGroupAddon>
+            <HugeiconsIcon
+              icon={Search01Icon}
+              className="size-3.5"
+              strokeWidth={1.8}
+              aria-hidden="true"
             />
-            <InputGroupAddon align="inline-start">
-              <HugeiconsIcon
-                icon={Search01Icon}
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
-            </InputGroupAddon>
-          </InputGroup>
-          {query && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSearch({ slug, value: "" })}
-            >
-              Clear
-            </Button>
-          )}
-        </div>
+          </InputGroupAddon>
+          <InputGroupInput
+            type="search"
+            aria-label="Search commits"
+            placeholder="Search commits…"
+            className="text-xs"
+            value={query}
+            onChange={(event) => setSearch({ slug, value: event.target.value })}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setSearch({ slug, value: "" });
+            }}
+          />
+        </InputGroup>
+        {query && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
+            onClick={() => setSearch({ slug, value: "" })}
+          >
+            Clear
+          </Button>
+        )}
       </div>
       <nav
         aria-label="Commits"
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 py-1.5"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 pb-1.5"
       >
         {visible.map((commit, index) => {
           const date = new Date(commit.authoredAt);
@@ -220,7 +222,12 @@ export function HistoryList() {
         )}
         <div ref={sentinel} className="h-px shrink-0" />
         {loading && (
-          <p className="text-muted-foreground px-2.5 py-2 text-xs">Loading…</p>
+          <ListSkeleton
+            label="Loading more commits"
+            lines={2}
+            rows={2}
+            className="px-0"
+          />
         )}
         {error && (
           <p role="alert" className="text-destructive px-2.5 py-2 text-xs">

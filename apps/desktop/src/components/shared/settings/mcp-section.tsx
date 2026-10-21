@@ -8,6 +8,7 @@ import type {
   SetupScope,
 } from "#/../shared/agent-setup";
 import type { Workspace } from "#/../shared/workspaces";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   SettingsCard,
   SettingsPage,
@@ -242,7 +243,7 @@ function notices(
     sections.push({
       title: "Reading",
       hideTitle: true,
-      content: <p className="text-muted-foreground text-[13px]">{reading}</p>,
+      content: <ListSkeleton label={reading} rows={3} className="px-0" />,
     });
   return sections;
 }

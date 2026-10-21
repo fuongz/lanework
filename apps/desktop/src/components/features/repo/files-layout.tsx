@@ -2,6 +2,7 @@ import { RefreshIcon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { SplitSkeleton } from "#/components/shared/loading/skeletons";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -194,9 +195,7 @@ export function FilesLayout() {
             description={readError}
           />
         ) : (
-          <p className="text-muted-foreground p-4 text-xs">
-            Reading the repository…
-          </p>
+          <SplitSkeleton label="Reading the repository" />
         )}
       </>
     );
@@ -219,9 +218,7 @@ export function FilesLayout() {
             description={error}
           />
         ) : (
-          <p className="text-muted-foreground p-4 text-xs">
-            Reading the files…
-          </p>
+          <SplitSkeleton label="Reading the files" />
         )}
       </>
     );

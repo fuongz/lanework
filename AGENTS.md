@@ -246,6 +246,15 @@ e.g. `python3 main.py <args>`. Prefer running one of these over writing new
 code from scratch; add a new one there yourself if the task is likely to
 recur.
 
+## Loading states use skeletons
+
+A pane, list, panel or value that is still being read draws a **skeleton**
+shaped like what is coming (`apps/desktop/src/components/shared/loading/skeletons.tsx`,
+`role="status"` plus a label). It never draws a "Reading…" / "Loading…"
+sentence. Button labels while their action runs are the exception. Full rule:
+`docs/standards/loading-states.md`. `bun run lint` enforces it through
+`scripts/audit-loading.mjs`.
+
 ## Verification before done
 
 - Never mark a task complete without proving it works. Run the project's

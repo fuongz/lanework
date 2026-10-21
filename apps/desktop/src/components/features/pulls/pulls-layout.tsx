@@ -71,14 +71,19 @@ export function PullsLayout() {
       <ResizablePanel
         id="list"
         panelRef={listRef}
-        defaultSize="320px"
-        minSize="16%"
-        maxSize="40%"
+        defaultSize="280px"
+        minSize="15%"
+        maxSize="45%"
         collapsible
         collapsedSize="0px"
         groupResizeBehavior="preserve-pixel-size"
       >
-        <PullsList />
+        <aside
+          aria-label="Pull requests"
+          className="bg-sidebar flex h-full min-h-0 flex-col"
+        >
+          <PullsList />
+        </aside>
       </ResizablePanel>
       <ResizableHandle aria-label="Resize pull request list" />
 

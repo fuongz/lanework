@@ -1,5 +1,6 @@
 import { useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { SplitSkeleton } from "#/components/shared/loading/skeletons";
 import { RepoEmpty, RepoMessage } from "#/components/shared/repo/repo-empty";
 import {
   ResizableHandle,
@@ -59,9 +60,7 @@ export function ChangesLayout() {
             description={error}
           />
         ) : (
-          <p className="text-muted-foreground p-4 text-xs">
-            Reading the repository…
-          </p>
+          <SplitSkeleton label="Reading the repository" />
         )}
       </>
     );
@@ -81,8 +80,8 @@ export function ChangesLayout() {
     >
       <ResizablePanel
         id="list"
-        defaultSize="340px"
-        minSize="18%"
+        defaultSize="280px"
+        minSize="15%"
         maxSize="45%"
         groupResizeBehavior="preserve-pixel-size"
       >

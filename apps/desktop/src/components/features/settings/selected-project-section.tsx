@@ -8,6 +8,7 @@ import { useId, useState } from "react";
 import type { ReadinessFix } from "#/../shared/readiness";
 import type { Workspace } from "#/../shared/workspaces";
 import { ProjectTile } from "#/components/shared/common/project-tile";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   SETTINGS_BUTTON,
   SettingsCard,
@@ -93,10 +94,14 @@ function ReadinessSection({
             onFix={setFix}
             className="divide-border divide-y"
           />
+        ) : error ? (
+          <p className="text-muted-foreground py-3 text-[13px]">{error}</p>
         ) : (
-          <p className="text-muted-foreground py-3 text-[13px]">
-            {error ?? "Checking this project’s folder…"}
-          </p>
+          <ListSkeleton
+            label="Checking this project’s folder"
+            rows={4}
+            className="px-0"
+          />
         )}
       </SettingsCard>
       <ReadinessFixDialog

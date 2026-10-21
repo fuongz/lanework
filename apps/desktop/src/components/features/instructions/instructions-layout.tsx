@@ -1,6 +1,7 @@
 import { Link, Outlet } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { InstructionsMessage } from "#/components/shared/instructions/instructions-message";
+import { SplitSkeleton } from "#/components/shared/loading/skeletons";
 import {
   ProjectBar,
   ProjectPicker,
@@ -75,7 +76,7 @@ export function InstructionsLayout() {
         />
       </Framed>
     ) : (
-      <p className="text-muted-foreground p-4 text-xs">Reading instructions…</p>
+      <SplitSkeleton label="Reading instructions" />
     );
   if (!list.folder)
     return (

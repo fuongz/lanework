@@ -5,6 +5,7 @@ import type { SetupDoc, SetupFile } from "#/../shared/agent-setup";
 import type { Workspace } from "#/../shared/workspaces";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { EditorTabs } from "#/components/shared/editor/editor-tabs";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -215,9 +216,7 @@ function Skills({ project }: { project: Workspace }) {
             </p>
           )
         ) : (
-          <p className="text-muted-foreground px-3.5 py-3 text-xs">
-            Reading skills…
-          </p>
+          <ListSkeleton label="Reading skills" rows={6} />
         )
       }
     >

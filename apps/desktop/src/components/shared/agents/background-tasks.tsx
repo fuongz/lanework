@@ -19,6 +19,7 @@ import type {
   BackgroundTaskKind,
 } from "#/../shared/terminal";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { WorkingMark } from "#/components/shared/terminal/working-mark";
 import { Alert, AlertDescription } from "#/components/ui/alert";
 import {
@@ -430,6 +431,12 @@ export function BackgroundTasksButton({
             <p role="alert" className="text-destructive px-1.5 text-xs">
               {error}
             </p>
+          ) : !tasks ? (
+            <ListSkeleton
+              label="Reading its transcript"
+              rows={3}
+              className="px-0"
+            />
           ) : list.length === 0 ? (
             <Empty className="py-6">
               <EmptyHeader>
@@ -441,9 +448,7 @@ export function BackgroundTasksButton({
                 </EmptyMedia>
                 <EmptyTitle>No background tasks</EmptyTitle>
                 <EmptyDescription>
-                  {tasks
-                    ? "This conversation started nothing in the background."
-                    : "Reading its transcript…"}
+                  This conversation started nothing in the background.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>

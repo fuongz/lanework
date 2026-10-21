@@ -4,6 +4,7 @@ import {
   PrimaryFolderHint,
   SourceFolders,
 } from "#/components/shared/common/source-folders";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { Button } from "#/components/ui/button";
 import {
   Dialog,
@@ -101,7 +102,7 @@ export function SourceFoldersDialog({
         </DialogHeader>
 
         {loading ? (
-          <p className="text-muted-foreground text-[13px]">Reading…</p>
+          <ListSkeleton label="Reading the folders" rows={2} className="px-0" />
         ) : (
           // ⚠️ `min-w-0`: the dialog is a grid, and a grid item is content-sized
           // by default — an unbreakable path would otherwise draw outside it.

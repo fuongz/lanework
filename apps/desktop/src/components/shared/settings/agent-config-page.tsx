@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConfigFile } from "#/../shared/agent-config";
 import { AgentConfigPane } from "#/components/features/settings/agent-config-editor";
 import { EditorTabs } from "#/components/shared/editor/editor-tabs";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   FileBrowserLayout,
   FileBrowserTree,
@@ -231,9 +232,10 @@ export function AgentConfigPage({ kind }: { kind: "config" | "skill" }) {
             </p>
           )
         ) : (
-          <p className="text-muted-foreground px-3.5 py-3 text-xs">
-            Reading {page.title.toLowerCase()}…
-          </p>
+          <ListSkeleton
+            label={`Reading ${page.title.toLowerCase()}`}
+            rows={6}
+          />
         )
       }
     >

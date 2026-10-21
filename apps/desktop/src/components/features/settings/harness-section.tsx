@@ -9,6 +9,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { HARNESS_NAMES } from "#/components/shared/agents/harness-island";
 import { useCopy } from "#/components/shared/common/use-copy";
+import { TextSkeleton } from "#/components/shared/loading/skeletons";
 import {
   SETTINGS_BUTTON,
   SettingsCard,
@@ -793,15 +794,17 @@ function HarnessCard({
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className="text-sm font-medium">{name}</h3>
           <span className="text-muted-foreground text-[13px]">
-            {info === undefined
-              ? "Checking…"
-              : !installed
-                ? "Not installed"
-                : account === undefined
-                  ? "Reading the account…"
-                  : signedIn
-                    ? "1 account"
-                    : "Not signed in"}
+            {info === undefined ? (
+              <TextSkeleton label="Checking" />
+            ) : !installed ? (
+              "Not installed"
+            ) : account === undefined ? (
+              <TextSkeleton label="Reading the account" />
+            ) : signedIn ? (
+              "1 account"
+            ) : (
+              "Not signed in"
+            )}
           </span>
         </div>
         {info && installed && (
