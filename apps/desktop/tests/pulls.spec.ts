@@ -909,6 +909,7 @@ test("opens a diff, folds unchanged lines, and scrolls", async () => {
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     await expect(page.getByText("package.json")).toBeVisible({
       timeout: 15_000,
     });
@@ -967,6 +968,7 @@ test("folds a file shut and opens it again", async () => {
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     await expect(page.getByText('"@types/node": "^22.1.0",')).toBeVisible({
       timeout: 15_000,
     });
@@ -993,6 +995,7 @@ test("starts the file list flush against the header", async () => {
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     await expect(page.getByText("package.json")).toBeVisible({
       timeout: 15_000,
     });
@@ -1021,6 +1024,7 @@ test("names a file by its type, and by its folder apart from its name", async ()
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     const header = page.getByRole("button", {
       name: "Collapse src/lib/utils.ts",
     });
@@ -1068,6 +1072,7 @@ test("hands over the file path, once you point at the file", async () => {
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     const header = page.getByRole("button", {
       name: "Collapse src/lib/utils.ts",
     });
@@ -1125,6 +1130,7 @@ test("puts the changed files in a tree, and jumps the diff to the one you pick",
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     await expect(page.getByText("package.json")).toBeVisible({
       timeout: 15_000,
     });
@@ -1158,6 +1164,7 @@ test("the header names the branches as badges, not as text with an arrow in it",
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     await expect(page.getByText("package.json").first()).toBeVisible({
       timeout: 15_000,
     });
@@ -1182,6 +1189,7 @@ test("the files panel starts under the title row, not beside it", async () => {
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     const panel = page.getByRole("complementary", { name: "Files changed" });
     await expect(panel).toBeVisible({ timeout: 15_000 });
 
@@ -1222,6 +1230,7 @@ test("the summary has no file tree beside it", async () => {
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     const panel = page.getByRole("complementary", { name: "Files changed" });
     await expect(panel).toBeVisible({ timeout: 15_000 });
 
@@ -1251,6 +1260,7 @@ test("one commit can be reviewed on its own, and the whole pull request again", 
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     await expect(page.getByText("package.json").first()).toBeVisible({
       timeout: 15_000,
     });
@@ -1319,23 +1329,25 @@ test("summary and code are two tabs, and the tab is in the URL", async () => {
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
-    await expect(page.getByText("package.json").first()).toBeVisible({
+    await expect(page.getByText("Description")).toBeVisible({
       timeout: 15_000,
     });
 
-    // Code is the landing tab, spelled by absence: a pull request being
-    // reviewed keeps the short URL, and a `view` in a link means somebody
-    // went to the summary.
-    const code = page.getByRole("tab", { name: "Code" });
-    await expect(code).toHaveAttribute("aria-selected", "true");
+    // Summary is the landing tab, spelled by absence: a `view` in a link
+    // means somebody went to the code.
+    const summary = page.getByRole("tab", { name: "Summary" });
+    await expect(summary).toHaveAttribute("aria-selected", "true");
     expect(page.url()).not.toContain("view=");
 
-    await page.getByRole("tab", { name: "Summary" }).click();
-    await expect(page.getByRole("tab", { name: "Summary" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(page.url()).toContain("view=summary");
+    const code = page.getByRole("tab", { name: "Code" });
+    await code.click();
+    await expect(code).toHaveAttribute("aria-selected", "true");
+    expect(page.url()).toContain("view=code");
+    await expect(page.getByText("package.json").first()).toBeVisible();
+
+    await summary.click();
+    await expect(summary).toHaveAttribute("aria-selected", "true");
+    expect(page.url()).not.toContain("view=");
 
     // The summary is about the pull request, so it carries the facts the
     // header stopped carrying: the branches, and the description.
@@ -1369,6 +1381,7 @@ test("the switch between tabs keeps the list's own filters", async () => {
     // beside the diff would reset to every open pull request.
     await page.goto(`app://lanework/w/${SLUG}/issues/pulls?tab=all&status=all`);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     await expect(page.getByText("package.json").first()).toBeVisible({
       timeout: 15_000,
     });
@@ -1387,6 +1400,7 @@ test("the columns can be dragged, and the separator is a real one", async () => 
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     await expect(page.getByText("package.json").first()).toBeVisible({
       timeout: 15_000,
     });
@@ -1421,6 +1435,7 @@ test("focus mode puts the other columns away, and gives them back", async () => 
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     await expect(page.getByText("package.json").first()).toBeVisible({
       timeout: 15_000,
     });
@@ -1457,6 +1472,7 @@ test("the files panel can be filtered by name", async () => {
   try {
     await gotoPulls(page);
     await page.getByText("chore(deps): bump @types/node").click();
+    await page.getByRole("tab", { name: "Code" }).click();
     const filter = page.getByLabel("Filter files");
     await expect(filter).toBeVisible({ timeout: 15_000 });
 
@@ -1476,13 +1492,12 @@ test("the timeline is read for the summary, and not before", async () => {
       flag(call, "--json")?.startsWith("author,createdAt,comments"),
     ).length;
   try {
-    await gotoPulls(page);
-    await page.getByText("chore(deps): bump @types/node").click();
+    // Straight to the code, as a link carrying `view=code` does: reading a
+    // diff must not also read the timeline.
+    await page.goto(`app://lanework/w/${SLUG}/issues/pulls/7?view=code`);
     await expect(page.getByText("package.json").first()).toBeVisible({
       timeout: 15_000,
     });
-
-    // Reading a diff must not also read the timeline.
     expect(await activityReads()).toBe(0);
 
     await page.getByRole("tab", { name: "Summary" }).click();

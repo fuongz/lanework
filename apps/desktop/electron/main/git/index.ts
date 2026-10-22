@@ -24,6 +24,7 @@ import {
   selectedRepo,
 } from "../../../shared/git";
 import { broadcast, handle } from "../ipc";
+import { observePulls } from "../notifications/unseen-pulls";
 import { menuBarWorkspaces, projectFolders } from "../workspaces";
 import {
   addComment,
@@ -406,7 +407,8 @@ async function readIssues(
 /**
  * Every project's open pull requests, read fresh, for the new-PR watcher.
  *
- * - A repo another project already read is skipped.
+ * - A repo another project already read is read once; both projects get
+ *   its list.
  * - A repo that cannot be read is left out, not reported: a timer has no
  *   screen to show a refusal on.
  * - Nothing runs while a rate limit blocks `gh`, or when `gh` is missing or
@@ -420,16 +422,21 @@ export async function readLinkedOpenPulls(): Promise<
   if (!projects) return [];
   const known = await currentAccount(false).catch(() => null);
   if (known?.kind !== "ok") return [];
-  const read = new Set<string>();
+  const read = new Map<string, PullsView>();
   const out: { slug: string; view: PullsView }[] = [];
   for (const { slug } of projects) {
     if (ghBlocked()) break;
     try {
       const ref = await repoFor(slug);
       const key = formatRepoRef(ref).toLowerCase();
-      if (read.has(key)) continue;
-      read.add(key);
+      // Each project still gets the list: the rail counts per project.
+      const done = read.get(key);
+      if (done) {
+        out.push({ slug, view: done });
+        continue;
+      }
       const view = await withGh(() => fetchPulls(ref, "open", known.login));
+      read.set(key, view);
       pullsCache.set(pullsKey(ref, "open"), view);
       out.push({ slug, view });
     } catch {
@@ -537,7 +544,10 @@ export function registerGit(devUrl?: string): void {
       throw new Error("That is not a pull request state.");
     const refresh = args[2] === true;
     const ref = await repoFor(slug);
-    return readPulls(ref, status, refresh);
+    const view = await readPulls(ref, status, refresh);
+    // The rail's count is read again with the list (FE-76/D4).
+    void observePulls(slug, view);
+    return view;
   });
 
   handle(gitChannels.pull, devUrl, async (args): Promise<PullDetail> => {

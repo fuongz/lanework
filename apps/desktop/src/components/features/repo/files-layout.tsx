@@ -248,6 +248,7 @@ export function FilesLayout() {
                 selection are about one repository's paths, never another's. */}
             <FilesTree
               key={`${slug}#${folder}`}
+              memoryKey={`${slug}#${folder}`}
               base={base}
               loaded={loaded}
               changes={state.files}

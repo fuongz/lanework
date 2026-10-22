@@ -1,3 +1,4 @@
+import type { GitStatus, GitStatusEntry } from "@pierre/trees";
 import type { CSSProperties } from "react";
 import { TREE_ICON_TONES } from "./diff-icons";
 
@@ -103,8 +104,49 @@ export const FOLDER_STATUS_CSS = `
 }
 `;
 
+/** Every folder a path sits in, as the tree names folders: `a/`, `a/b/`. */
+export function parents(path: string): string[] {
+  const out: string[] = [];
+  const parts = path.split("/");
+  for (let at = 1; at < parts.length; at++)
+    out.push(`${parts.slice(0, at).join("/")}/`);
+  return out;
+}
+
+/** Which change colours a folder holding several kinds: the strongest. */
+const FOLDER_RANK: Record<GitStatus, number> = {
+  ignored: 0,
+  untracked: 1,
+  added: 2,
+  renamed: 3,
+  deleted: 4,
+  modified: 5,
+};
+
 /**
- * A denser tree for Repository › Files.
+ * Gives every folder above a changed file the strongest change inside it.
+ *
+ * So its name is coloured the way an editor colours it, not just the dot the
+ * library draws for "something changed below". `FOLDER_STATUS_CSS` turns the
+ * letter this would put in the git lane back into that dot. A folder already
+ * ignored stays ignored.
+ */
+export function rollUpFolders(
+  status: Map<string, GitStatus>,
+  changes: Iterable<GitStatusEntry>,
+): void {
+  for (const file of changes) {
+    for (const dir of parents(file.path)) {
+      const held = status.get(dir);
+      if (held === "ignored") continue;
+      if (!held || FOLDER_RANK[file.status] > FOLDER_RANK[held])
+        status.set(dir, file.status);
+    }
+  }
+}
+
+/**
+ * A denser tree, for Repository › Files and a pull request's files.
  *
  * 22px rows as an editor's explorer has them, a narrower icon column and
  * tighter indentation. NOTE: Paired with `density: "compact"` and

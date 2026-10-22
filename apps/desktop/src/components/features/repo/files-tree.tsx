@@ -25,6 +25,8 @@ import {
   COMPACT_TREE_STYLE,
   FOLDER_ICON_CSS,
   FOLDER_STATUS_CSS,
+  parents,
+  rollUpFolders,
   treeHostStyle,
 } from "#/components/shared/diff/tree-style";
 import { useDark } from "#/components/shared/diff/use-dark";
@@ -77,16 +79,6 @@ function folder(
   return item?.isDirectory() ? (item as FileTreeDirectoryHandle) : null;
 }
 
-/** Which change colours a folder holding several kinds: the strongest. */
-const FOLDER_RANK: Record<GitStatus, number> = {
-  ignored: 0,
-  untracked: 1,
-  added: 2,
-  renamed: 3,
-  deleted: 4,
-  modified: 5,
-};
-
 /** The tree row an event happened on; its path crosses the shadow root. */
 function rowPath(event: Event): string | undefined {
   const row = event
@@ -98,22 +90,35 @@ function rowPath(event: Event): string | undefined {
   return row?.dataset.itemPath;
 }
 
-/** Every folder a path sits in, as the tree names folders: `a/`, `a/b/`. */
-function parents(path: string): string[] {
-  const out: string[] = [];
-  const parts = path.split("/");
-  for (let at = 1; at < parts.length; at++)
-    out.push(`${parts.slice(0, at).join("/")}/`);
+/** Every folder in a listing: the ones named and the ones paths sit in. */
+function folders(list: Iterable<string>): Set<string> {
+  const out = new Set<string>();
+  for (const path of list) {
+    for (const dir of parents(path)) out.add(dir);
+    if (path.endsWith("/")) out.add(path);
+  }
   return out;
 }
 
+/**
+ * The folders left open in each tree, by `memoryKey`.
+ *
+ * The tree unmounts when another page is shown, and its model goes with it;
+ * coming back opens the folders that were open, not a tree folded shut.
+ * Memory only, for the app's lifetime.
+ */
+const openFolders = new Map<string, string[]>();
+
 export function FilesTree({
+  memoryKey,
   base,
   loaded,
   changes,
   onRefresh,
   refreshing,
 }: {
+  /** The project and folder this tree shows: whose open folders to keep. */
+  memoryKey: string;
   base: FileListing;
   loaded: Record<string, FileListing>;
   changes: WorktreeFile[];
@@ -157,19 +162,13 @@ export function FilesTree({
     for (const [dir, listing] of Object.entries(loaded))
       if (ignored(dir))
         for (const path of listing.paths) status.set(path, "ignored");
-    for (const file of changes) status.set(file.path, toGitStatus(file.status));
-    // A folder takes the strongest change inside it, so its name is coloured
-    // the way an editor colours it, not just the dot the library draws for
-    // "something changed below". `FOLDER_STATUS_CSS` turns the letter this
-    // would put in the git lane back into that dot.
-    for (const file of changes) {
-      const own = toGitStatus(file.status);
-      for (const dir of parents(file.path)) {
-        const held = status.get(dir);
-        if (held === "ignored") continue;
-        if (!held || FOLDER_RANK[own] > FOLDER_RANK[held]) status.set(dir, own);
-      }
-    }
+    const changed = changes.map((file) => ({
+      path: file.path,
+      status: toGitStatus(file.status),
+    }));
+    for (const file of changed) status.set(file.path, file.status);
+    // A folder takes the strongest change inside it.
+    rollUpFolders(status, changed);
     return [...status].map(([path, value]) => ({ path, status: value }));
   }, [base, loaded, changes]);
 
@@ -181,6 +180,7 @@ export function FilesTree({
   const { model } = useFileTree({
     paths,
     initialExpansion: "closed",
+    initialExpandedPaths: openFolders.get(memoryKey),
     // One folder per row, as in the pull request's tree: a folded
     // `src/components/features` truncates every segment at sidebar width.
     flattenEmptyDirectories: false,
@@ -217,14 +217,6 @@ export function FilesTree({
     } else {
       // Something went away (a refresh after a delete): rebuild, keeping
       // every folder that was open open.
-      const folders = (list: Iterable<string>) => {
-        const out = new Set<string>();
-        for (const path of list) {
-          for (const dir of parents(path)) out.add(dir);
-          if (path.endsWith("/")) out.add(path);
-        }
-        return out;
-      };
       const still = folders(paths);
       const expanded = [...folders(shown.current)].filter((dir) => {
         if (!still.has(dir)) return false;
@@ -234,6 +226,18 @@ export function FilesTree({
     }
     shown.current = next;
   }, [model, paths]);
+
+  // Leaving, the open folders are kept for the next mount. `useFileTree`
+  // cleans its model up a tick after unmount, so it still answers here.
+  useEffect(
+    () => () => {
+      const open = [...folders(shown.current)].filter(
+        (dir) => folder(model.getItem(dir))?.isExpanded() === true,
+      );
+      openFolders.set(memoryKey, open);
+    },
+    [model, memoryKey],
+  );
 
   useEffect(() => {
     model.setGitStatus(gitStatus);

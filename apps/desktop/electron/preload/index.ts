@@ -148,6 +148,12 @@ const notifications: DesktopNotificationsApi = {
   },
   onOpen: (listener) =>
     subscribe<NotificationTarget>(notificationChannels.open, listener),
+  unseenPulls: () => ipcRenderer.invoke(notificationChannels.unseenPulls),
+  onUnseenPulls: (listener) =>
+    subscribe<Record<string, number>>(
+      notificationChannels.unseenPullsChanged,
+      listener,
+    ),
 };
 
 /** Settings → Agents: the checkpoint hook, on and off. */

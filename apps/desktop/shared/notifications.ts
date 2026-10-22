@@ -68,6 +68,10 @@ export const notificationChannels = {
   location: "notifications:location",
   /** Main → renderer: a notification was clicked, go to its target. */
   open: "notifications:open",
+  /** The unseen pull requests per project, for the rail (FE-76). */
+  unseenPulls: "notifications:unseen-pulls",
+  /** Main → renderer: those counts changed. */
+  unseenPullsChanged: "notifications:unseen-pulls-changed",
 } as const;
 
 export interface DesktopNotificationsApi {
@@ -87,4 +91,12 @@ export interface DesktopNotificationsApi {
    */
   reportLocation: (path: string) => void;
   onOpen: (listener: (target: NotificationTarget) => void) => () => void;
+  /**
+   * New pull requests, yours included, not seen yet, by project slug
+   * (FE-76). A project with none is absent.
+   */
+  unseenPulls: () => Promise<Record<string, number>>;
+  onUnseenPulls: (
+    listener: (counts: Record<string, number>) => void,
+  ) => () => void;
 }

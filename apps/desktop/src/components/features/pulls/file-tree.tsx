@@ -7,7 +7,13 @@ import {
   FILE_TREE_ICONS,
   TREE_ICON_TINT_CSS,
 } from "#/components/shared/diff/diff-icons";
-import { treeHostStyle } from "#/components/shared/diff/tree-style";
+import {
+  COMPACT_TREE_STYLE,
+  FOLDER_ICON_CSS,
+  FOLDER_STATUS_CSS,
+  rollUpFolders,
+  treeHostStyle,
+} from "#/components/shared/diff/tree-style";
 import { useDark } from "#/components/shared/diff/use-dark";
 import {
   InputGroup,
@@ -66,7 +72,11 @@ function Tree({ files }: { files: PullFile[] }) {
       const status = toGitStatus(file.status);
       if (status !== null) entries.push({ path: file.path, status });
     }
-    return entries;
+    // Folders coloured by the strongest change inside, as in Files.
+    const status = new Map<string, GitStatus>();
+    for (const entry of entries) status.set(entry.path, entry.status);
+    rollUpFolders(status, entries);
+    return [...status].map(([path, value]) => ({ path, status: value }));
   }, [files]);
 
   // NOTE: `onSelectionChange` is read once, when the model is built, so the
@@ -90,7 +100,11 @@ function Tree({ files }: { files: PullFile[] }) {
     // decides whether that field is drawn; `setSearch()` works either way.
     search: false,
     icons: FILE_TREE_ICONS,
-    unsafeCSS: TREE_ICON_TINT_CSS,
+    // Drawn as Repository › Files draws its tree: folder icons, folders
+    // coloured by what changed inside, 22px rows.
+    unsafeCSS: TREE_ICON_TINT_CSS + FOLDER_ICON_CSS + FOLDER_STATUS_CSS,
+    density: "compact",
+    itemHeight: 22,
     gitStatus,
     onSelectionChange: (selected) => {
       const [path] = selected;
@@ -143,7 +157,7 @@ function Tree({ files }: { files: PullFile[] }) {
       <FileTree
         model={model}
         className="min-h-0 flex-1"
-        style={treeHostStyle(dark)}
+        style={{ ...treeHostStyle(dark), ...COMPACT_TREE_STYLE }}
       />
     </>
   );

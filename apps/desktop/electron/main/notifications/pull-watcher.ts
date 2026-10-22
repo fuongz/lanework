@@ -1,12 +1,19 @@
-// New pull requests on a project's repository. Every two minutes, while the
-// notification is on, read the open list of each project's GitHub repo
-// through `gh` and notify for what was not there before. A rate limit on `gh`
-// pauses the reads for every caller (see `git/gh.ts`).
+// New pull requests on a project's repository. Every two minutes, and when the
+// window comes back to the front, read the open list of each project's GitHub
+// repo through `gh`. It feeds the rail's count (FE-76) whatever the settings
+// say, and notifies for what was not there before when the notification is on
+// (FE-76/D3). A rate limit on `gh` pauses the reads for every caller (see
+// `git/gh.ts`).
+import { app } from "electron";
 import { formatRepoRef, type PullsView } from "../../../shared/git";
-import { notificationsOn, notify } from "./index";
+import { notify } from "./index";
+import { observePulls, onNavigate } from "./unseen-pulls";
 
 /** How often the open lists are read (FE-70/D4a). */
 const INTERVAL_MS = 2 * 60_000;
+
+/** A focus or a move within this long of the last read does not read again. */
+const FOCUS_GAP_MS = 30_000;
 
 interface RepoWatch {
   /** When this repo was first read. Anything opened before it is old news. */
@@ -24,6 +31,10 @@ interface RepoWatch {
  * (FE-70/D4a): what was opened while the app was closed is on the Pull
  * requests screen, and a burst of notifications at launch tells nobody
  * anything.
+ *
+ * NOTE: Kept up while the notification is off, too. `notify` drops what is
+ * off, and switched on later it starts from what is open now rather than
+ * announcing everything opened meanwhile.
  */
 const watched = new Map<string, RepoWatch>();
 
@@ -69,20 +80,19 @@ function check(slug: string, view: PullsView): void {
 
 let timer: NodeJS.Timeout | null = null;
 let polling = false;
+let lastPoll = 0;
 
 async function poll(
   read: () => Promise<{ slug: string; view: PullsView }[]>,
 ): Promise<void> {
   if (polling) return;
   polling = true;
+  lastPoll = Date.now();
   try {
-    if (!(await notificationsOn("pulls"))) {
-      // Switched back on later, it starts from a fresh look instead of
-      // announcing everything opened while it was off.
-      watched.clear();
-      return;
+    for (const { slug, view } of await read()) {
+      await observePulls(slug, view);
+      check(slug, view);
     }
-    for (const { slug, view } of await read()) check(slug, view);
   } catch {
     // The next tick tries again.
   } finally {
@@ -103,4 +113,11 @@ export function startPullWatcher(
   void poll(read);
   timer = setInterval(() => void poll(read), INTERVAL_MS);
   timer.unref();
+  // Back at the window after a while: the count should not wait out the
+  // tick (FE-76/D4).
+  const soon = () => {
+    if (Date.now() - lastPoll >= FOCUS_GAP_MS) void poll(read);
+  };
+  app.on("browser-window-focus", soon);
+  onNavigate(soon);
 }

@@ -55,10 +55,10 @@ function PullsTitlebar() {
 /**
  * Which half of a pull request is on screen.
  *
- * `code` is the default and is spelled by absence: the parser returns no
- * `view` for it. The URL of a pull request under review stays short, and
- * `view` in a link means someone chose the summary, not that a default got
- * written down.
+ * `summary` is the default and is spelled by absence: the parser returns no
+ * `view` for it. A pull request opens on what it is before what changed in
+ * it, and `view` in a link means someone chose the code, not that a default
+ * got written down.
  */
 type PullView = "summary" | "code";
 interface PullDetailSearch {
@@ -68,7 +68,7 @@ interface PullDetailSearch {
 export function parsePullDetailSearch(
   raw: Record<string, unknown>,
 ): PullDetailSearch {
-  return raw.view === "summary" ? { view: "summary" } : {};
+  return raw.view === "code" ? { view: "code" } : {};
 }
 
 function Verdict({
@@ -119,9 +119,10 @@ export function PullDetail() {
     from: "/_app/w/$slug/issues_/pulls/$number",
   });
   const navigate = useNavigate({ from: "/w/$slug/issues/pulls/$number" });
-  // Absent means `code`; see `parsePullDetailSearch`.
+  // Absent means `summary`; see `parsePullDetailSearch`.
   const view: PullView =
-    useSearch({ from: "/_app/w/$slug/issues_/pulls/$number" }).view ?? "code";
+    useSearch({ from: "/_app/w/$slug/issues_/pulls/$number" }).view ??
+    "summary";
   const focusMode = useLayout((state) => state.focusMode);
   const toggleFocusMode = useLayout((state) => state.toggleFocusMode);
   const parsed = Number(number);
@@ -257,7 +258,7 @@ export function PullDetail() {
               // pull requests the list beside it shows.
               search: (prev) => ({
                 ...prev,
-                view: value === "summary" ? "summary" : undefined,
+                view: value === "code" ? "code" : undefined,
               }),
               // Not `replace`: Back should undo the switch, which is why
               // this tab is in the URL, rather than leave the pull request.

@@ -13,6 +13,7 @@ import { type ReactNode, useEffect, useRef } from "react";
 import { LocalModeRail } from "#/components/shared/auth/local-mode";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
+import { Badge } from "#/components/ui/badge";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -24,11 +25,14 @@ import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { useCommandPalette } from "#/stores/command-palette";
+import { useGitHubIssues } from "#/stores/github-issues";
+import { usePulls } from "#/stores/pulls";
 import { useSession } from "#/stores/session";
 import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
 import { MiniRail } from "./mini-rail";
 import { ProjectSwitcher } from "./project-switcher";
+import { useUnseenPulls } from "./use-unseen-pulls";
 
 /**
  * One row of the rail's scroll area.
@@ -136,6 +140,13 @@ export function AppSidebar({
     unpushed === 1
       ? "1 commit not pushed yet"
       : `${unpushed} commits not pushed yet`;
+  // New pull requests nobody has looked at, beside Issues: Pull requests is
+  // a tab under it (FE-76).
+  const unseenPulls = useUnseenPulls(slug);
+  const unseenPullsLabel =
+    unseenPulls === 1
+      ? "1 new pull request"
+      : `${unseenPulls} new pull requests`;
   // The terminal's key for this project (the cloud id, or the slug), which
   // the Agents group resumes into.
   const workspaceKey = useWorkspaceKey(slug);
@@ -150,6 +161,20 @@ export function AppSidebar({
   const peek = useWorktree((state) => state.peek);
   const openChanges = useWorktree((state) => state.open);
   const openHistory = useWorktree((state) => state.openHistory);
+  const reloadBoard = useBoard((state) => state.reload);
+  const refreshGitHubIssues = useGitHubIssues((state) => state.refresh);
+  // Issues holds the board, the repo's GitHub issues and its pull requests;
+  // Refresh reads all three. The open list is read even when the Pull
+  // requests screen shows another state, so the count beside Issues is
+  // read again with it (FE-76).
+  const refreshIssues = (slug: string) => {
+    void reloadBoard();
+    void refreshGitHubIssues(slug);
+    const pulls = usePulls.getState();
+    if (pulls.slug === slug) void pulls.refresh();
+    if (pulls.slug !== slug || pulls.status !== "open")
+      void window.desktop?.git.pulls(slug, "open", true).catch(() => {});
+  };
   // History's badge is `git status`'s, so its refresh reads both.
   const refreshHistory = (slug: string) => {
     void openHistory(slug);
@@ -268,41 +293,42 @@ export function AppSidebar({
         {slug && (
           <nav aria-label="Project" className="flex flex-col gap-0.5">
             <SectionLabel>Project</SectionLabel>
-            <Link
-              to="/w/$slug/issues"
-              params={{ slug }}
-              // NOTE: The filters are cleared on the way in. "Issues" has to
-              // mean every issue; a rail entry that silently kept the last
-              // category filter would show a board that is missing work with
-              // no visible reason why.
-              search={{}}
-              className={ROW}
-              // Active on an open issue too, and on the Pull requests tab
-              // (`/issues/pulls`): both open under this path.
-              activeOptions={{ includeSearch: false }}
-              activeProps={ACTIVE}
-            >
-              <HugeiconsIcon
-                icon={ListViewIcon}
-                className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              />
-              <span className="min-w-0 truncate">Issues</span>
-            </Link>
-          </nav>
-        )}
-        {/* The repository, not the board: its working tree and its
-            history. Pull requests are a tab under Issues. */}
-        {slug && (
-          <nav aria-label="Repository" className="flex flex-col gap-0.5">
-            {/* The row takes the label's vertical padding, so the label and
-                the branch button share one box and centre on each other.
-                Bottom-aligned, the text sits below the pill's middle. */}
-            <div className="flex min-w-0 items-center justify-between gap-2 pt-4 pb-1 pr-1">
-              <SectionLabel className="shrink-0 py-0">Repository</SectionLabel>
-              <BranchSwitcher slug={slug} />
-            </div>
+            <RefreshMenu onRefresh={() => refreshIssues(slug)}>
+              <Link
+                to="/w/$slug/issues"
+                params={{ slug }}
+                // NOTE: The filters are cleared on the way in. "Issues" has to
+                // mean every issue; a rail entry that silently kept the last
+                // category filter would show a board that is missing work with
+                // no visible reason why.
+                search={{}}
+                className={ROW}
+                // Active on an open issue too, and on the Pull requests tab
+                // (`/issues/pulls`): both open under this path.
+                activeOptions={{ includeSearch: false }}
+                activeProps={ACTIVE}
+              >
+                <HugeiconsIcon
+                  icon={ListViewIcon}
+                  className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 truncate">Issues</span>
+                {unseenPulls > 0 && (
+                  <Badge
+                    role="img"
+                    aria-label={unseenPullsLabel}
+                    title={unseenPullsLabel}
+                    className="ml-auto h-4 min-w-4 rounded-[4px] bg-accent-brand px-1 text-[10px] leading-none text-accent-brand-foreground tabular-nums"
+                  >
+                    <span aria-hidden="true">
+                      {unseenPulls > 99 ? "99+" : unseenPulls}
+                    </span>
+                  </Badge>
+                )}
+              </Link>
+            </RefreshMenu>
             {/* The working tree itself, as an editor's explorer. */}
             <Link
               to="/w/$slug/files"
@@ -318,6 +344,19 @@ export function AppSidebar({
               />
               <span className="min-w-0 truncate">Files</span>
             </Link>
+          </nav>
+        )}
+        {/* The repository, not the board: its changes and its history.
+            Pull requests are a tab under Issues. */}
+        {slug && (
+          <nav aria-label="Repository" className="flex flex-col gap-0.5">
+            {/* The row takes the label's vertical padding, so the label and
+                the branch button share one box and centre on each other.
+                Bottom-aligned, the text sits below the pill's middle. */}
+            <div className="flex min-w-0 items-center justify-between gap-2 pt-4 pb-1 pr-1">
+              <SectionLabel className="shrink-0 py-0">Repository</SectionLabel>
+              <BranchSwitcher slug={slug} />
+            </div>
             <RefreshMenu onRefresh={() => void openChanges(slug)}>
               <Link
                 to="/w/$slug/changes"

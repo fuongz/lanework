@@ -14,6 +14,7 @@ import {
   notificationChannels,
 } from "../../../shared/notifications";
 import { handle } from "../ipc";
+import { seenAt, unseenPullCounts } from "./unseen-pulls";
 
 const settingsFile = () => join(app.getPath("userData"), "notifications.json");
 
@@ -205,5 +206,15 @@ export function registerNotifications(
     if (args.length !== 1 || typeof path !== "string" || path.length > 2000)
       throw new Error("A path is required.");
     location = path;
+    seenAt(path);
   });
+
+  handle(
+    notificationChannels.unseenPulls,
+    devUrl,
+    (args): Promise<Record<string, number>> => {
+      if (args.length) throw new Error("This operation takes no arguments");
+      return unseenPullCounts();
+    },
+  );
 }
