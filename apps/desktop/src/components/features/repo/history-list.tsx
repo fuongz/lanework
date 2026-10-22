@@ -22,13 +22,12 @@ import { useWorktree } from "#/stores/worktree";
 /**
  * Repository › History: HEAD's commits, newest first (FE-22/D11).
  *
- * ⚠️ A page of 100, and the next page when the last row scrolls into view —
- * except while searching, when loading more is an explicit action.
+ * - A page of 100, and the next page when the last row scrolls into view,
+ *   except while searching, when loading more is an explicit action.
+ * - The ↑ at a subject's end marks a commit no remote branch has yet: what
+ *   the next push sends.
  *
- * The ↑ at a subject's end marks a commit no remote branch has yet — what
- * the next push sends.
- *
- * ⚠️ The mark beside an author is an ORB seeded by their email, not a
+ * NOTE: The mark beside an author is an orb seeded by their email, not a
  * Gravatar. It is drawn from nothing but the commit, so opening History sends
  * no request anywhere about who wrote this repository.
  */
@@ -83,7 +82,7 @@ export function HistoryList() {
           description={error}
         />
       );
-    // ⚠️ Not read yet is a loading state, not "No commits yet".
+    // Not read yet is a loading state, not "No commits yet".
     return loading || !read ? (
       <ListSkeleton label="Reading the history" lines={2} rows={7} />
     ) : (

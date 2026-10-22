@@ -1,9 +1,8 @@
 import { useBoard } from "#/stores/board";
 
 /**
- * The terminal's key for a project — its cloud id, or its slug when the
- * service has none — which the pty host files every terminal and agent
- * under (FE-19, FE-26).
+ * The terminal's key for a project: its cloud id, or its slug when the service
+ * has none. The pty host files every terminal and agent under it.
  */
 export function useWorkspaceKey(slug: string | undefined): string | null {
   return useBoard((state) => {

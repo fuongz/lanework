@@ -16,9 +16,9 @@ import type { WorktreeState } from "../../../../shared/worktree";
 /**
  * Why there is no repository to show, in the sentence that fixes it.
  *
- * ⚠️ One per `WorktreeState` kind (FE-22/D3). "No folder", "folder gone", "not a
- * repository" and "no git" are four different fixes, and only two of them are
- * in Settings.
+ * One per {@link WorktreeState} kind (FE-22/D3). "No folder", "folder gone",
+ * "not a repository" and "no git" are four different fixes, and only two of
+ * them are in Settings.
  */
 function copy(state: Exclude<WorktreeState, { kind: "ready" }>): {
   title: string;

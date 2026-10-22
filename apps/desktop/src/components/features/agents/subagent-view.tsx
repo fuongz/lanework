@@ -96,8 +96,10 @@ function Fold({
 }
 
 /**
- * One tool call (FE-35/D3): its name and what it was called on, and its
- * input JSON once opened. Its result is never shown — only that it failed.
+ * One tool call: its name and what it was called on, and its input JSON once
+ * opened.
+ *
+ * Its result is never shown, only that it failed (FE-35/D3).
  */
 function Step({ step }: { step: SubagentStep }) {
   const [open, setOpen] = useState(false);
@@ -130,7 +132,8 @@ function Step({ step }: { step: SubagentStep }) {
         )}
       </button>
       {open && (
-        // Wide input scrolls inside its own box; the page never scrolls sideways.
+        // Wide input scrolls inside its own box; the page never scrolls
+        // sideways.
         <pre className="bg-foreground/[0.04] my-1 ms-6 max-h-80 overflow-auto rounded-lg p-3 font-mono text-[11px] leading-relaxed">
           <code>{step.input || "{}"}</code>
         </pre>
@@ -187,17 +190,17 @@ function Steps({ transcript }: { transcript: SubagentTranscript }) {
  * A sub-agent's transcript, read-only, full size in the main view (FE-35/D1):
  * what it was asked, the tools it called, and what it reported back.
  *
- * ⚠️ Nothing here resumes or stops it — a sub-agent has nothing of its own
- * to resume (FE-33). The way back to the agent is its conversation, which
- * the header's link opens as the rail's row does (FE-35/D9): the tab running
- * it, or else its chat.
+ * Nothing here resumes or stops it: a sub-agent has nothing of its own to
+ * resume. The way back to the agent is its conversation, which the header's
+ * link opens as the rail's row does (FE-35/D9): the tab running it, or else
+ * its chat.
  */
 export function SubagentView() {
   const { slug, conversation, sub } = useParams({ from: ROUTE });
   const { agent } = useSearch({ from: ROUTE });
-  // ⚠️ Keyed by WHICH sub-agent: the route stays mounted from one to the
-  // next, and the last one's folds — its prompt opened, its calls shown —
-  // are not this one's.
+  // NOTE: Keyed by which sub-agent: the route stays mounted from one to the
+  // next, and the last one's folds (its prompt opened, its calls shown) are
+  // not this one's.
   return (
     <SubagentPage
       key={`${agent}:${conversation}/${sub}`}
@@ -260,7 +263,7 @@ function SubagentPage({
     });
   };
 
-  /** Its kind, model, time, tools and state, as far as they are known. */
+  // Its kind, model, time, tools and state, as far as they are known.
   const facts: Fact[] = [];
   if (transcript) {
     const { type, model, startedAt, endedAt, steps, truncated, report } =
@@ -331,8 +334,8 @@ function SubagentPage({
       aria-label={`Sub-agent — ${title}`}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      {/* ⚠️ In the window's title bar (FE-58), as the agent's own view is:
-          the bar drags the window and clears its controls. */}
+      {/* In the window's title bar, as the agent's own view is: the bar
+          drags the window and clears its controls. */}
       <WindowTitlebar>
         {working ? (
           <span role="img" aria-label="Working" className="flex shrink-0">

@@ -22,7 +22,8 @@ import { ipcMessage } from "#/lib/ipc-error";
 
 /**
  * The files open as tabs, per page kind, in the order they were opened.
- * Per viewer, like the folds; the active one is `?file=`, not kept here.
+ *
+ * Per viewer, like the folds. The active one is `?file=`, not kept here.
  */
 function useOpenTabs(kind: "config" | "skill") {
   const key = `lanework:agent-config-tabs:${kind}`;
@@ -64,11 +65,13 @@ const PAGES = {
 } as const;
 
 /**
- * Settings › Config files and Settings › Skills (FE-47/D8, D9): the user's
- * own Claude Code and Codex config files — or skills — as a tree by agent,
- * beside the ones open as tabs in an editor, the way the Files screen is.
+ * Settings › Config files and Settings › Skills (FE-47/D8, D9).
  *
- * ⚠️ The active tab is in the URL (`?file=<id>`), so Back returns to the
+ * The user's own Claude Code and Codex config files, or skills, as a tree by
+ * agent, beside the ones open as tabs in an editor, the way the Files screen
+ * is.
+ *
+ * The active tab is in the URL (`?file=<id>`), so Back returns to the
  * previous one. Every open tab's pane stays mounted, only hidden, so its
  * edits survive switching away; closing one with edits not saved asks first.
  */
@@ -104,7 +107,7 @@ export function AgentConfigPage({ kind }: { kind: "config" | "skill" }) {
   const mine = (files ?? []).filter((file) => file.kind === kind);
 
   // Once the list is in: drop the tabs of files that are gone, and give the
-  // active file a tab if it has none — Back and links land here too.
+  // active file a tab if it has none: Back and links land here too.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `mine` comes from `files`
   useEffect(() => {
     if (!files) return;
@@ -168,8 +171,8 @@ export function AgentConfigPage({ kind }: { kind: "config" | "skill" }) {
     [dirty, tabs, openId, navigate, page.route, setTabs],
   );
 
-  // ⌘W closes the active tab while this page is up — the app menu leaves it
-  // unbound for exactly this.
+  // ⌘W closes the active tab while this page is up. The app menu leaves it
+  // unbound for this.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (

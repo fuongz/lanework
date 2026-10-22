@@ -28,21 +28,26 @@ export const HARNESS_NAMES: Record<HarnessAgent, string> = {
   codex: "Codex",
 };
 
-/** How long "✓ Codex 0.163.0" stands before the island goes (FE-61). */
+/** How long "✓ Codex 0.163.0" stands before the island goes. */
 const DONE_MS = 2000;
-/** A pointer that slips off the panel for a moment does not fold it. */
+/**
+ * How long the pointer may be off the panel before it folds.
+ *
+ * A pointer that slips off for a moment does not fold it.
+ */
 export const ISLAND_LEAVE_MS = 220;
 /**
- * The morph: low bounce, about half a second, and — being a spring on a
- * layout animation — re-targeted from wherever it is when the pointer changes
- * its mind halfway.
+ * The pill-to-panel morph: low bounce, about half a second.
+ *
+ * A spring on a layout animation, so it re-targets from wherever it is when
+ * the pointer changes its mind halfway.
  */
 export const ISLAND_MORPH: Transition = {
   type: "spring",
   bounce: 0.18,
   duration: 0.45,
 };
-/** Content swaps faster than the container moves, so it never reads squeezed. */
+/** The content swap, faster than the container moves so it never squeezes. */
 export const ISLAND_SWAP: Transition = {
   duration: 0.16,
   ease: [0.25, 0.1, 0.25, 1],
@@ -92,9 +97,9 @@ type Row = HarnessInfo & {
 /**
  * Which harnesses the island is about, and in what state.
  *
- * ⚠️ "Done" is shown for `DONE_MS` from the moment this window first saw it,
- * then never again for that version — main may keep reporting it, and an
- * island that came back on every launch would be noise.
+ * "Done" shows for {@link DONE_MS} from when this window first saw it, then
+ * never again for that version. Main may keep reporting it, and an island
+ * that came back on every launch would be noise.
  */
 function useRows(): Row[] {
   const list = useHarness((state) => state.list);
@@ -164,24 +169,22 @@ function announce(row: Row | undefined): string {
 }
 
 /**
- * The harness update island (FE-61): a black capsule at the top centre of the
- * window that says a newer Claude Code or Codex is out, and updates it.
+ * The harness update island: a black capsule at the top centre of the window
+ * that says a newer Claude Code or Codex is out, and updates it.
  *
- * ⚠️ It FLOATS — fixed, over the title bar's edge and the page — and takes no
- * layout space, so nothing under it moves when it comes and goes. It is there
- * only while an update is pending, running, or has just finished.
+ * - It floats (fixed, over the title bar's edge and the page) and takes no
+ *   layout space, so nothing under it moves when it comes and goes. It shows
+ *   only while an update is pending, running, or has just finished.
+ * - It opens on hover or a click, never by itself: an update is an offer,
+ *   not something to put in front of the work.
+ * - NOTE: Only the capsule is `no-drag`. The wrapper across the window has
+ *   no region, so the title bar either side still drags the window. It is
+ *   mounted last in the shell, because a later region wins over the title
+ *   bar's drag strip.
  *
- * ⚠️ It opens on hover or a click, never by itself: an update is something to
- * offer, not something to put in front of the work.
- *
- * ⚠️ Only the capsule is `no-drag`. The wrapper across the window has no
- * region at all, so the title bar either side of it still drags the window;
- * and it is mounted LAST in the shell, because a later region wins over the
- * title bar's drag strip.
- *
- * ⚠️ `yieldTo`: a board notice has the island (FE-63). An update is an offer
- * and a failed write is not, so the pill steps aside while the notice is up
- * and comes back once it is dismissed.
+ * @param yieldTo true while a board notice has the island (FE-63). A failed
+ *   write outranks an offer, so the pill steps aside and comes back once the
+ *   notice is dismissed.
  */
 export function HarnessIsland({ yieldTo = false }: { yieldTo?: boolean }) {
   useHarnessWatch();
@@ -249,9 +252,9 @@ export function HarnessIsland({ yieldTo = false }: { yieldTo?: boolean }) {
       <AnimatePresence initial={false} mode="popLayout">
         {visible && top && (
           <motion.div
-            // ⚠️ Reduced motion: one surface per view, crossfaded — no
-            // morph, no scale. Otherwise ONE surface whose box springs from
-            // pill to panel and back.
+            // Reduced motion: one surface per view, crossfaded, with no morph
+            // or scale. Otherwise one surface whose box springs from pill to
+            // panel and back.
             key={reduced ? view : "island"}
             ref={island}
             data-testid="harness-island"

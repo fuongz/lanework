@@ -4,11 +4,9 @@ import { useEffect } from "react";
  * Mark the document as translucent on macOS, so the window's native vibrancy
  * shows through instead of an opaque page background.
  *
- * ⚠️ Called ONCE at the root, not per shell. It used to live in `AppShell`,
- * which meant navigating to a route outside that shell ran the cleanup and
- * turned vibrancy off — the window went opaque for as long as you stayed there.
- * Translucency is a property of the WINDOW; nothing about which route is open
- * should change it.
+ * NOTE: Call it once at the root, not per shell. In a shell, navigating to a
+ * route outside it runs the cleanup and the window goes opaque for as long as
+ * you stay there. Translucency belongs to the window, not to a route.
  */
 export function useVibrancy(): void {
   useEffect(() => {

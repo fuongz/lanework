@@ -2,18 +2,18 @@ import type { CSSProperties } from "react";
 import { TREE_ICON_TONES } from "./diff-icons";
 
 /**
- * App tokens, poured into `@pierre/trees`' own variables — shared by the pull
- * request's changed files and Repository › Files (FE-66).
+ * App tokens, poured into `@pierre/trees`' own variables.
  *
- * ⚠️ Every one of these is an OVERRIDE the library documents, set on the host
- * element — custom properties inherit through a shadow boundary, and an inline
- * style on the host beats the `:host` rule that declares the default.
+ * Shared by the pull request's changed files and Repository › Files. Every
+ * one is an OVERRIDE the library documents, set on the host element: custom
+ * properties inherit through a shadow boundary, and an inline style on the
+ * host beats the `:host` rule that declares the default.
  *
- * ⚠️ `colorScheme` is here for the same reason `useDark` exists at all: the
+ * NOTE: `colorScheme` is here for the same reason `useDark` exists: the
  * library's defaults are `light-dark()` values, `light-dark()` reads
- * `color-scheme`, and `color-scheme` follows the OS — which this window's theme
- * does not (see `use-theme.ts`). Stating it explicitly is what stops the tree
- * from rendering a light palette inside a dark window.
+ * `color-scheme`, and `color-scheme` follows the OS, which this window's theme
+ * does not (see `use-theme.ts`). Without it the tree renders a light palette
+ * inside a dark window.
  */
 export function treeHostStyle(dark: boolean): CSSProperties {
   return {
@@ -27,7 +27,7 @@ export function treeHostStyle(dark: boolean): CSSProperties {
     "--trees-focus-ring-color-override": "var(--color-accent-brand)",
     "--trees-font-family-override": "inherit",
     "--trees-font-size-override": "12px",
-    // 8px rather than 16. The pane is 240px and every one of those pixels is a
+    // 8px rather than 16. The pane is 240px, and every one of those pixels is a
     // character of a filename at the bottom of a deep path.
     "--trees-padding-inline-override": "8px",
     "--trees-status-added-override": "var(--color-tone-emerald)",
@@ -39,7 +39,7 @@ export function treeHostStyle(dark: boolean): CSSProperties {
   } as CSSProperties;
 }
 
-/** A closed folder, filled — drawn as a mask, so it takes the row's colour. */
+/** A closed folder, filled; drawn as a mask, so it takes the row's colour. */
 const FOLDER_CLOSED =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3.38a1.5 1.5 0 0 1 1.06.44L8.62 3.6H13a1.5 1.5 0 0 1 1.5 1.5v6.9A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12z"/></svg>';
 
@@ -51,16 +51,16 @@ const mask = (svg: string) =>
   `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 
 /**
- * Folders drawn as folders — closed, or open while expanded — in place of the
- * library's chevron (FE-66). Open and closed already say what the chevron
- * said, and a folder's icon then lines up with its files' icons instead of
- * sitting one column to the left of them.
+ * Folders drawn as folders, closed or open, in place of the library's chevron.
  *
- * ⚠️ CSS, because `@pierre/trees` has no folder icon slot: a directory row's
+ * Open and closed already say what the chevron said, and a folder's icon then
+ * lines up with its files' icons instead of one column to their left.
+ *
+ * CSS, because `@pierre/trees` has no folder icon slot: a directory row's
  * icon section only ever holds the chevron (`remap` can change that glyph,
  * but not by state). The chevron is hidden and a mask drawn in its place,
- * switched on the row's own `aria-expanded`. A sticky folder row carries no
- * `aria-expanded` — it is sticky because it is open.
+ * switched on the row's own `aria-expanded`. NOTE: A sticky folder row
+ * carries no `aria-expanded`; it is sticky because it is open.
  */
 export const FOLDER_ICON_CSS = `
 [data-item-type="folder"] > [data-item-section="icon"] > [data-icon-name="file-tree-icon-chevron"] {
@@ -80,10 +80,12 @@ export const FOLDER_ICON_CSS = `
 `;
 
 /**
- * A folder with a status of its own — the strongest change inside it (FE-66)
- * — coloured whole: its folder icon takes the status colour as its name does.
- * In the git lane it keeps a DOT rather than the file's letter: "M" beside a
- * folder reads as a folder that was modified, and nothing happened to it.
+ * A folder with a status of its own (the strongest change inside it), coloured
+ * whole.
+ *
+ * Its folder icon takes the status colour as its name does. In the git lane
+ * it keeps a DOT rather than the file's letter: "M" beside a folder reads as
+ * a folder that was modified, and nothing happened to it.
  */
 export const FOLDER_STATUS_CSS = `
 [data-item-type="folder"][data-item-git-status]:not([data-item-git-status="ignored"]) > [data-item-section="icon"] {
@@ -102,10 +104,12 @@ export const FOLDER_STATUS_CSS = `
 `;
 
 /**
- * A denser tree for Repository › Files (FE-66): 22px rows as an editor's
- * explorer has them, a narrower icon column and tighter indentation. Paired
- * with `density: "compact"` and `itemHeight: 22` on the model, which own the
- * row height the virtualizer measures with.
+ * A denser tree for Repository › Files.
+ *
+ * 22px rows as an editor's explorer has them, a narrower icon column and
+ * tighter indentation. NOTE: Paired with `density: "compact"` and
+ * `itemHeight: 22` on the model, which own the row height the virtualizer
+ * measures with.
  */
 export const COMPACT_TREE_STYLE = {
   "--trees-icon-width-override": "14px",

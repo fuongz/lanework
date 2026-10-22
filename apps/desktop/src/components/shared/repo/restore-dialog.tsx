@@ -14,9 +14,9 @@ import type { WorktreeFile } from "../../../../shared/worktree";
 /**
  * The confirmation in front of throwing a change away (FE-22/D8).
  *
- * ⚠️ It says DELETE when that is what will happen. A new file has no earlier
- * version to go back to, so "discard" on it removes the file from disk — and a
- * dialog that said "discard changes" about that would be describing a
+ * NOTE: It says DELETE when that is what will happen. A new file has no
+ * earlier version to go back to, so "discard" on it removes the file from
+ * disk. A dialog that said "discard changes" there would describe a
  * different, recoverable-sounding act.
  */
 export function RestoreDialog({

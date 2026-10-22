@@ -1,17 +1,17 @@
 export interface Workspace {
   /**
-   * The cloud workspace id — the key everything board-related is addressed by.
+   * The cloud workspace id, the key every board call is addressed by.
    *
-   * ⚠️ Not the slug. Every board endpoint is `/v1/boards/:workspaceId/…`, and so
-   * is a rename (`PATCH /v1/sync/state/workspace/:id`). It arrives on
+   * NOTE: Not the slug. Every board endpoint is `/v1/boards/:workspaceId/…`,
+   * and so is a rename (`PATCH /v1/sync/state/workspace/:id`). It arrives on
    * `/v1/sync/state` (the machine surface); `/v1/workspaces` is `sessionAuth`
    * and refuses this app's credential by design.
    *
-   * ⚠️ NULL against a control plane that predates the field, and that case is
-   * not hypothetical: this app shipped a version that required it and refused
-   * every workspace a live service returned. A missing id means "no board yet",
-   * never "no workspace" — the picker still works, the selection is still
-   * remembered by slug, and only opening a board says what is wrong.
+   * NOTE: Null against a control plane that predates the field. This app once
+   * shipped a version that required it and refused every workspace a live
+   * service returned. A missing id means "no board yet", never "no
+   * workspace": the picker still works, the selection is still remembered by
+   * slug, and only opening a board says what is wrong.
    */
   id: string | null;
   slug: string;
@@ -19,36 +19,37 @@ export interface Workspace {
   /**
    * Where this machine keeps a checkout, or null.
    *
-   * ⚠️ Display and code-execution only. A workspace with no path is a complete,
-   * openable workspace — its cards live in the cloud — so nothing about the
-   * board may gate on this being set.
+   * NOTE: Display and code execution only. A workspace with no path is a
+   * complete, openable workspace (its cards live in the cloud), so nothing
+   * about the board may gate on this being set.
    */
   path: string | null;
   baseBranch: string | null;
   /**
-   * The project icon's key on the control plane (BE-18) — its GitHub repo
-   * owner's avatar — or null until the service first reads one.
+   * The project icon's key on the control plane, or null until the service
+   * first reads one. The icon is the GitHub repo owner's avatar.
    *
-   * ⚠️ The key names the bytes, so it is the cache key: a new value is a new
-   * icon, and the same value is the file already on disk. Optional because
-   * absent from a service older than BE-18, and from test fixtures that
-   * predate it.
+   * The key names the bytes, so it is the cache key: a new value is a new
+   * icon, and the same value is the file already on disk. Optional because a
+   * service older than BE-18, and older test fixtures, omit it.
    */
   iconKey?: string | null;
   /**
-   * FE-52: where the board lives. `local` boards are in the SQLite store on
-   * this machine and their `id` is the local UUIDv7; absent means `cloud`
-   * (every workspace before FE-52).
+   * Where the board lives; absent means `cloud`.
+   *
+   * A `local` board is in the SQLite store on this machine, and its `id` is
+   * the local UUIDv7.
    */
   origin?: "cloud" | "local";
   /**
-   * FE-52/D7a: a local board that was synced is read-only and points here —
-   * the cloud workspace id it moved to. Null/absent until then.
+   * The cloud workspace id a synced local board moved to, or null/absent.
+   *
+   * A local board that was synced is read-only and points here (FE-52/D7a).
    */
   movedTo?: string | null;
 }
 
-/** FE-52: what "Sync to cloud" answers. */
+/** What "Sync to cloud" answers. */
 export interface LocalSyncResult {
   /** The local workspace id that was moved. */
   localId: string;
@@ -82,13 +83,12 @@ export interface BoardCategory {
 }
 
 /**
- * One entry of the board's label vocabulary — a tag that has been given a name
- * and a colour.
+ * One entry of the board's label vocabulary: a tag given a name and a colour.
  *
- * ⚠️ This is NOT the list of tags in use. A card may carry a tag no label
- * describes, and that is a normal board rather than a broken one: the chip is
- * drawn neutral and the tag still filters. Treating the vocabulary as closed
- * here would hide tags the service happily stores.
+ * NOTE: This is NOT the list of tags in use. A card may carry a tag no label
+ * describes, and that board is normal, not broken: the chip is drawn neutral
+ * and the tag still filters. Treating the vocabulary as closed would hide
+ * tags the service stores.
  */
 export interface BoardLabel {
   key: string;
@@ -100,12 +100,12 @@ export interface BoardLabel {
 /**
  * Somebody who can see this board, as the config states them.
  *
- * ⚠️ The directory exists because everything else names a person by ID — a
- * comment's author, an audit row's actor, a card's assignee — and an id is not a
- * face. `name` falls back to the id itself for an account that no longer exists,
- * which is still what the log says happened.
+ * The directory exists because everything else names a person by id (a
+ * comment's author, an audit row's actor, a card's assignee), and an id is
+ * not a face. `name` falls back to the id itself for an account that no
+ * longer exists, which is still what the log says happened.
  *
- * ⚠️ No email, by design: the service does not send one. See `BoardMember` on
+ * No email, by design: the service does not send one. See `BoardMember` on
  * the API side for why a machine credential must not widen to it.
  */
 export interface BoardMember {
@@ -116,13 +116,14 @@ export interface BoardMember {
 }
 
 /**
- * Where an agent stopped on a card (BE-17) — the `latest` of
- * `GET /v1/boards/:id/items/:card/checkpoints`, as the issue detail shows it
- * (FE-28).
+ * Where an agent stopped on a card (BE-17).
  *
- * ⚠️ `nextStep` may be an OLDER checkpoint's: the Stop hook writes after every
- * turn but never states one, so the server carries the last stated step
- * forward and `nextStepFrom` says whose it was.
+ * The `latest` of `GET /v1/boards/:id/items/:card/checkpoints`, as the issue
+ * detail shows it.
+ *
+ * NOTE: `nextStep` may be an OLDER checkpoint's: the Stop hook writes after
+ * every turn but never states one, so the server carries the last stated
+ * step forward and `nextStepFrom` says whose it was.
  */
 export interface CardCheckpoint {
   agent: string;
@@ -141,19 +142,18 @@ export interface CardCheckpoint {
 }
 
 /**
- * An agent that called the Lanework MCP server about a card in the last few
- * minutes (BE-16) — `GET /v1/boards/:id/presence`.
+ * An agent that called the Lanework MCP about a card in the last few minutes.
  *
- * ⚠️ "Called recently", not "is running": the server sees tool calls and
- * nothing between them. This machine's own agents are known exactly from
- * their transcripts (FE-27), which is why a row here that duplicates one of
- * those is hidden rather than shown twice.
+ * From `GET /v1/boards/:id/presence`. "Called recently", not "is running":
+ * the server sees tool calls and nothing between them. This machine's own
+ * agents are known exactly from their transcripts, so a row here that
+ * duplicates one of those is hidden rather than shown twice.
  */
 export interface BoardPresence {
   cardId: string;
-  /** Resolvable against `BoardView.members`. */
+  /** Resolvable against {@link BoardView | BoardView.members}. */
   userId: string;
-  /** The OAuth client's slug — `claude-code`, `codex`, … */
+  /** The OAuth client's slug: `claude-code`, `codex`, … */
   agent: string;
   /** The machine credential the call used; null over OAuth, which has none. */
   machineId: string | null;
@@ -162,21 +162,21 @@ export interface BoardPresence {
 }
 
 /**
- * One entry in a card's history — the log and the thread as one sequence.
+ * One entry in a card's history: the log and the thread as one sequence.
  *
- * ⚠️ Merged BY THE SERVICE, not here. Two independently-paged reads stitched
- * together on this side are correct only while both fit in one page; past that
- * the seam silently drops whatever fell between them.
+ * NOTE: Merged BY THE SERVICE, not here. Two separately paged reads stitched
+ * together on this side are correct only while both fit in one page; past
+ * that, the seam silently drops whatever fell between them.
  */
 export type BoardActivity =
   | {
       kind: "audit";
       id: string;
       seq: number;
-      /** `created` | `patched` | `moved` | `checklist` | … — free text. */
+      /** `created` | `patched` | `moved` | `checklist` | …, free text. */
       verb: string;
       actorKind: string;
-      /** The account behind the actor, resolvable against `BoardView.members`. */
+      /** The account behind the actor, resolvable against `members`. */
       actorUserId: string | null;
       actorMachineId: string | null;
       /** `{ field: [before, after] }`, or whatever that verb records. */
@@ -187,7 +187,7 @@ export type BoardActivity =
       kind: "comment";
       id: string;
       authorKind: string;
-      /** A user id, a machine id or an agent slug — read with `authorKind`. */
+      /** A user id, a machine id or an agent slug; read with `authorKind`. */
       authorRef: string;
       /** The account it was written for, whichever door it came through. */
       authorUserId: string | null;
@@ -208,14 +208,14 @@ export interface BoardActivityPage {
 /**
  * The two sections a checklist row can belong to.
  *
- * ⚠️ The board's own closed set, not free text: a row filed under anything else
- * is refused at the API with "unknown section". Stated here so a caller finds
+ * The board's own closed set, not free text: the API refuses a row filed
+ * under anything else with "unknown section". Stated here so a caller finds
  * out while typing rather than from a 400.
  */
 export const CHECKLIST_SECTIONS = ["decisions", "verify"] as const;
 export type ChecklistSection = (typeof CHECKLIST_SECTIONS)[number];
 
-/** One checklist row. `checked` is derived from `checkedAt` by the server. */
+/** One checklist row. The server derives `checked` from `checkedAt`. */
 export interface BoardChecklistItem {
   key: string;
   section: string;
@@ -226,17 +226,17 @@ export interface BoardChecklistItem {
   /**
    * The "pick ONE" group this row belongs to, or null.
    *
-   * ⚠️ Two rows sharing a group are alternatives — exactly one may be ticked.
-   * The review cards in this very repo are written that way, so a screen that
-   * renders every box as an independent checkbox misreads its own board.
+   * NOTE: Rows sharing a group are alternatives; only one may be ticked. The
+   * review cards in this repo are written that way, so a screen that renders
+   * every box as an independent checkbox misreads its own board.
    */
   group: string | null;
   /**
-   * The stream (`W1`, …) a verify row proves, or null for the lead's own (BE-19).
+   * The stream (`W1`, …) a verify row proves, or null for the lead's own.
    *
-   * ⚠️ Optional because a service older than BE-19 never sends it; absent and
-   * null both mean "the lead's". A rewrite must send it back, or the row loses
-   * its stream.
+   * NOTE: Optional because a service older than BE-19 never sends it; absent
+   * and null both mean "the lead's". A rewrite must send it back, or the row
+   * loses its stream.
    */
   stream?: string | null;
 }
@@ -244,9 +244,9 @@ export interface BoardChecklistItem {
 /**
  * One row on the way IN, as `PUT /checklist` takes it.
  *
- * ⚠️ `key` is optional and stable once minted. A rewrite that sends the keys it
- * read back keeps the boxes a human already ticked — they are matched by key,
- * so a reworded item stays ticked. Dropping the keys silently un-ticks the card.
+ * NOTE: `key` is optional and stable once minted. Boxes are matched by key,
+ * so a rewrite that sends back the keys it read keeps a human's ticks, even
+ * on a reworded item. Dropping the keys silently un-ticks the card.
  */
 export interface BoardChecklistDraft {
   key?: string | null;
@@ -255,11 +255,11 @@ export interface BoardChecklistDraft {
   checked?: boolean;
   note?: string | null;
   group?: string | null;
-  /** See `BoardChecklistItem.stream`. */
+  /** See {@link BoardChecklistItem | BoardChecklistItem.stream}. */
   stream?: string | null;
 }
 
-/** The board's limits on a checklist, so a caller can refuse before the API does. */
+/** The board's checklist limits, so a caller can refuse before the API does. */
 export const CHECKLIST_LIMITS = {
   items: 200,
   text: 2000,
@@ -270,9 +270,9 @@ export const CHECKLIST_LIMITS = {
 /**
  * Who a card is on, split by what kind of actor they are.
  *
- * ⚠️ Two lists rather than one tagged list, because that is how the board
- * addresses them: a `user` is a GitHub login and an `agent` is a Lanework agent
- * name, and `agents[0]` is the dispatch role rather than just the first one.
+ * Two lists rather than one tagged list, because that is how the board
+ * addresses them: a `user` is a GitHub login and an `agent` is a Lanework
+ * agent name. `agents[0]` is the dispatch role, not just the first one.
  */
 export interface BoardAssignees {
   users: string[];
@@ -282,13 +282,14 @@ export interface BoardAssignees {
 /** A card, trimmed to what this app renders and writes. */
 export interface BoardCard {
   /**
-   * When the card was taken off the board, on a change-feed row (FE-17). A live
-   * read never carries one; a tombstone in `changes` does, and it is the only
-   * way a client learns a card it is drawing is gone.
+   * When the card was taken off the board, on a change-feed row.
+   *
+   * A live read never carries one; a tombstone in `changes` does, and it is
+   * the only way a client learns a card it is drawing is gone.
    */
   archivedAt?: string | null;
   id: string;
-  /** The precondition an edit must carry. See `BoardConflict`. */
+  /** The precondition an edit must carry. See {@link BoardConflict}. */
   revision: number;
   taskId: string | null;
   title: string;
@@ -301,11 +302,11 @@ export interface BoardCard {
   createdAt: string | null;
   updatedAt: string | null;
   /**
-   * `issue` unless the board says otherwise — the axis a hierarchy is drawn on.
+   * The axis a hierarchy is drawn on: `issue` unless the board says otherwise.
    *
-   * ⚠️ Free text, not a union. The board's own config names the types, so
-   * hard-coding a set here would make this app refuse a card whose type is
-   * perfectly valid on the board that sent it.
+   * NOTE: Free text, not a union. The board's own config names the types, so
+   * a hard-coded set would make this app refuse a card whose type is valid on
+   * the board that sent it.
    */
   type: string;
   /** The card this one hangs under, or null for a top-level card. */
@@ -315,21 +316,20 @@ export interface BoardCard {
   /**
    * The checklist, or NULL when this card was read from a list.
    *
-   * ⚠️ Null and `[]` are different answers and the difference is load-bearing.
-   * `GET /items` serializes without `parts`, so every card on a board read comes
-   * back with no checklist key at all — and the previous shape turned that into
-   * `[]`, which rendered as "this card has no decisions" for cards that have
-   * seven. A card with a checklist is read one at a time (`card` / `lookup`).
+   * NOTE: Null and `[]` are different answers. `GET /items` serializes without
+   * `parts`, so a card from a board read has no checklist key at all. Reading
+   * that as `[]` says "this card has no decisions" for a card that has seven.
+   * A card with a checklist is read one at a time (`card` / `lookup`).
    */
   checklist: BoardChecklistItem[] | null;
   /**
-   * How far through its checklist this card is — on EVERY read, list included.
+   * How far through its checklist this card is, on EVERY read, list included.
    *
-   * ⚠️ Not derivable from `checklist` and not a duplicate of it. A list read
-   * still carries no checklist at all (see above); this is the cheap count the
-   * board sends instead, so a lane can say `3/7` without shipping seven rows
-   * per card. `{ done: 0, total: 0 }` means the card has no checklist — the API
-   * never leaves this one unstated. Null only for a service too old to send it.
+   * Not derivable from `checklist`, and not a duplicate of it. A list read
+   * carries no checklist (see above); this is the cheap count the board sends
+   * instead, so a lane can say `3/7` without shipping seven rows per card.
+   * `{ done: 0, total: 0 }` means the card has no checklist; the API always
+   * states this one. Null only for a service too old to send it.
    */
   checklistProgress: BoardChecklistProgress | null;
   /** Null for the same reason as `checklist`: absent from a list read. */
@@ -337,17 +337,17 @@ export interface BoardCard {
   /**
    * Who is following this card. Null on a list read, like `assignees`.
    *
-   * ⚠️ User ids, to be resolved against `BoardView.members` — the same
-   * indirection every other person-shaped field uses, so one directory serves
-   * the whole screen instead of each row carrying a copy of somebody's name.
+   * User ids, resolved against `BoardView.members` like every other
+   * person-shaped field, so one directory serves the whole screen instead of
+   * each row carrying a copy of somebody's name.
    */
   subscribers: string[] | null;
   /**
-   * Whether the person at this machine follows it / has starred it.
+   * Whether the person at this machine follows / has starred this card.
    *
-   * ⚠️ Answers about the CALLER, not about the card, which is why they are not
-   * derivable from `subscribers` alone and why the service sends them. Null on a
-   * list read: "not asked" rather than "no".
+   * These answer about the CALLER, not the card, so they are not derivable
+   * from `subscribers` alone and the service sends them. Null on a list read
+   * means "not asked", not "no".
    */
   subscribed: boolean | null;
   favorite: boolean | null;
@@ -356,20 +356,22 @@ export interface BoardCard {
   /**
    * The files this card refers to. Null on a list read.
    *
-   * ⚠️ METADATA and a reference — the service stores no bytes and serves none.
-   * A row here is a path or a URL somebody recorded, so opening one is this
-   * machine's job, not a download.
+   * METADATA and a reference: the service stores and serves no bytes. A row
+   * is a path or a URL somebody recorded, so opening one is this machine's
+   * job, not a download.
    */
   attachments: BoardAttachment[] | null;
   /**
    * The card split into sub-agents' jobs (BE-19), `[]` when it has none.
    *
-   * ⚠️ Optional: absent from a service older than BE-19. Read it as `[]`.
+   * Optional: a service older than BE-19 omits it. Read absent as `[]`.
    */
   streams?: BoardStream[];
   /**
-   * Who runs when, and what each is told — single-card reads only, and null
-   * for a card without streams. When absent, `streamWaves` computes the waves.
+   * Who runs when, and what each is told, or null for a card without streams.
+   *
+   * Single-card reads only. When absent, {@link streamWaves} computes the
+   * waves.
    */
   dispatch?: BoardDispatch | null;
 }
@@ -378,8 +380,10 @@ const STREAM_ROLES = ["research", "implement", "test"] as const;
 export type StreamRole = (typeof STREAM_ROLES)[number];
 
 /**
- * One sub-agent's job on a card — `Stream` in `packages/db/src/board/streams.ts`,
- * restated because this app never imports the db package.
+ * One sub-agent's job on a card.
+ *
+ * Restates `Stream` in `packages/db/src/board/streams.ts`, because this app
+ * never imports the db package.
  */
 export interface BoardStream {
   key: string;
@@ -406,11 +410,11 @@ const stringList = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter(nonEmpty) : [];
 
 /**
- * A card's `streams` as the API sent them, or `[]`.
+ * A card's `streams` as the API sent them, in `position` order, or `[]`.
  *
- * ⚠️ Defensive like every other card parser: a row without a key is dropped
- * (a key is what checklist rows and waves point at), anything else unknown is
- * defaulted rather than refused, and the result is in `position` order.
+ * Defensive like every other card parser: a row without a key is dropped (a
+ * key is what checklist rows and waves point at), and anything else unknown
+ * is defaulted rather than refused.
  */
 export function parseStreams(value: unknown): BoardStream[] {
   if (!Array.isArray(value)) return [];
@@ -462,12 +466,12 @@ export function parseItemStream(value: unknown): string | null {
 }
 
 /**
- * The streams in waves: wave 0 depends on nothing, each later wave only on
- * earlier ones. The server's `dispatch.waves` wins when it is there.
+ * The streams in dependency waves, each stream drawn exactly once.
  *
- * ⚠️ A dependency on a key the card does not have is ignored, and a cycle (the
- * API refuses one, an old row might not) lands in one last wave rather than
- * looping or vanishing — every stream is always drawn exactly once.
+ * Wave 0 depends on nothing, each later wave only on earlier ones. The
+ * server's `dispatch.waves` wins when it is there. A dependency on a key the
+ * card does not have is ignored. A cycle (the API refuses one, an old row
+ * might not) lands in one last wave rather than looping or vanishing.
  */
 export function streamWaves(
   streams: BoardStream[],
@@ -535,10 +539,10 @@ export interface BoardChecklistProgress {
 /**
  * The fields a person may edit from this app.
  *
- * ⚠️ Deliberately NOT `Partial<BoardCard>`. `revision`, `rank`, `taskId` and the
- * timestamps are the server's to set, and a patch type that could name them is
- * one a caller will eventually fill in. An absent key means "leave it"; `null`
- * on a nullable field means "clear it".
+ * NOTE: NOT `Partial<BoardCard>`. `revision`, `rank`, `taskId` and the
+ * timestamps are the server's to set, and a patch type that could name them
+ * is one a caller will eventually fill in. An absent key means "leave it";
+ * `null` on a nullable field means "clear it".
  */
 export interface BoardCardPatch {
   title?: string;
@@ -547,11 +551,11 @@ export interface BoardCardPatch {
   tags?: string[];
   categoryKey?: string | null;
   /**
-   * Who the card is on — REPLACED, never merged, like `tags`.
+   * Who the card is on, REPLACED and never merged, like `tags`.
    *
-   * ⚠️ Both lists travel together even when only one is being changed. The
-   * service replaces the whole set, so sending `{ users: [...] }` alone would
-   * clear every agent assignment as a side effect of naming a person.
+   * NOTE: Both lists travel together even when only one changes. The service
+   * replaces the whole set, so sending `{ users: [...] }` alone would clear
+   * every agent assignment as a side effect of naming a person.
    */
   assignees?: BoardAssignees;
   /** The card this one hangs under; `null` promotes it to the top level. */
@@ -562,12 +566,12 @@ export interface BoardCardPatch {
 }
 
 /**
- * Where a card lands among its neighbours.
+ * Where a card lands among its neighbours; absent means "append to the lane".
  *
- * ⚠️ Stated as a NEIGHBOUR, never as a rank string. The board generates the
- * fractional index itself, and two clients that computed their own would
- * eventually pick the same one; `after`/`before` is a request the server can
- * always satisfy. Absent means "append to the lane".
+ * NOTE: Stated as a NEIGHBOUR, never as a rank string. The board generates
+ * the fractional index itself. Two clients computing their own would
+ * eventually pick the same one, while `after`/`before` is a request the
+ * server can always satisfy.
  */
 export type BoardPlacement = { after: string } | { before: string };
 
@@ -575,7 +579,7 @@ export interface BoardView {
   workspaceId: string;
   columns: BoardColumn[];
   categories: BoardCategory[];
-  /** The label vocabulary. Empty is normal — see `BoardLabel`. */
+  /** The label vocabulary. Empty is normal; see {@link BoardLabel}. */
   labels: BoardLabel[];
   /** Everyone who can see this board, for turning ids into faces. */
   members: BoardMember[];
@@ -585,35 +589,36 @@ export interface BoardView {
   /**
    * When this data was read, and whether it came from the last good copy.
    *
-   * ⚠️ The UI must say so. "Nothing here" and "I could not ask" look identical
-   * on screen, and a developer who trusts an empty board starts typing a card
-   * that already exists.
+   * NOTE: The UI must say so. "Nothing here" and "I could not ask" look the
+   * same on screen, and a developer who trusts an empty board starts typing a
+   * card that already exists.
    */
   fetchedAt: string;
   stale: boolean;
   /**
-   * The service's counts for the query this board was read under (FE-17), or
-   * absent from a service older than `/stats` — then the loaded cards ARE the
-   * board, and counting them is right.
+   * The service's counts for the query this board was read under.
    *
-   * ⚠️ Optional, like every field added after a Saved copy could exist: a
-   * cache written before it reads back without it.
+   * Absent from a service older than `/stats`; then the loaded cards ARE the
+   * board, and counting them is right. Optional also because a saved copy
+   * written before the field reads back without it.
    */
   stats?: BoardStats | null;
-  /** Every live card on the board, unfiltered — the rail's number. */
+  /** Every live card on the board, unfiltered: the rail's number. */
   total?: number | null;
-  /** `boardQueryKey` of the query the groups below were read under. */
+  /** {@link boardQueryKey} of the query the groups below were read under. */
   query?: string;
   /**
-   * Each group read so far, by its key (a lane, a priority, a category), and
-   * where its next page starts. `cursor: null` means the group is complete.
-   * Absent when the whole board was read in one go.
+   * Each group read so far, by key, and where its next page starts.
+   *
+   * A key is a lane, a priority or a category. `cursor: null` means the group
+   * is complete. Absent when the whole board was read in one go.
    */
   groups?: Record<string, { cursor: string | null; limit: number }>;
   /**
-   * The change head the read started from — the LOWEST any group page
-   * reported, so a change that landed between two of them is replayed by the
-   * feed rather than skipped. Absent from a whole-board read.
+   * The change head the read started from. Absent from a whole-board read.
+   *
+   * The LOWEST any group page reported, so the feed replays a change that
+   * landed between two of them rather than skipping it.
    */
   head?: number | null;
 }
@@ -622,8 +627,9 @@ export interface BoardView {
 export type BoardGroupBy = "status" | "category" | "priority";
 
 /**
- * What a board is read under (FE-17): its grouping, and the filters the
- * service applies to every group's query and to the counts.
+ * What a board is read under: its grouping and its filters.
+ *
+ * The service applies the filters to every group's query and to the counts.
  */
 export interface BoardQuery {
   groupBy: BoardGroupBy;
@@ -665,9 +671,9 @@ export interface BoardGroupPage {
 /**
  * What the server said when an edit lost a race.
  *
- * ⚠️ It carries the card as it stands NOW, because the API's 409 does. A
- * conflict dialog that could only say "you are out of date" would make the user
- * go and look; this one can show both sides.
+ * It carries the card as it stands NOW, because the API's 409 does. A
+ * conflict dialog that could only say "you are out of date" would send the
+ * user to go and look; this one can show both sides.
  */
 export interface BoardConflict {
   kind: "conflict";
@@ -678,12 +684,12 @@ export interface BoardConflict {
 /**
  * A card as somebody composed it, before the board has one.
  *
- * ⚠️ Deliberately NOT `Partial<BoardCard>`. A card carries an id, a revision, a
- * rank and a task id — all of them the board's to mint — and a draft that
- * borrowed that shape would invite a caller to send one back.
+ * NOTE: NOT `Partial<BoardCard>`. A card carries an id, a revision, a rank
+ * and a task id, all of them the board's to mint, and a draft that borrowed
+ * that shape would invite a caller to send one back.
  *
- * ⚠️ `columnKey` absent means "the board's first lane", which is the service's
- * own default rather than a guess made here. Sending a lane the composer never
+ * An absent `columnKey` means "the board's first lane", the service's own
+ * default rather than a guess made here. Sending a lane the composer never
  * showed would put cards somewhere nobody chose.
  */
 export interface BoardCardDraft {
@@ -692,24 +698,15 @@ export interface BoardCardDraft {
   categoryKey?: string | null;
   columnKey?: string | null;
   priority?: BoardCard["priority"];
-  /** Capped and normalized by the board; what it dropped comes back on the write. */
+  /** Capped and normalized by the board; the write reports what it dropped. */
   tags?: string[];
 }
 
 /**
- * The board's own tag rule, mirrored.
+ * The words of a search, folded the way the service's FTS index folds them.
  *
- * ⚠️ Duplicated from the API's `normalizeTag` on purpose, and it has to stay in
- * step. It lives HERE rather than in the main process because both sides need
- * the same answer: main compares what a write asked for against what came back
- * to name a dropped tag, and the renderer shows the chip a tag is ABOUT to
- * become. Two copies of this function would eventually disagree, and the screen
- * would promise a tag the board does not store.
- */
-/**
- * The words of a search, folded the way the service's FTS index folds them
- * (FE-18): lower case, diacritics dropped, split on anything that is not a
- * letter or a digit. "Dự án FE-1" is `["du", "an", "fe", "1"]`.
+ * Lower case, diacritics dropped, split on anything that is not a letter or
+ * a digit: "Dự án FE-1" is `["du", "an", "fe", "1"]`.
  */
 function searchTokens(raw: string): string[] {
   return raw
@@ -722,9 +719,11 @@ function searchTokens(raw: string): string[] {
 }
 
 /**
- * Whether a card answers a search: every word is the START of a word in its
- * title or task id — the rule the service's prefix query applies, so the
- * palette's instant local answer and the service's agree.
+ * Whether a card answers a search.
+ *
+ * Every word must be the START of a word in its title or task id. That is
+ * the rule the service's prefix query applies, so the palette's instant
+ * local answer and the service's agree.
  */
 export function matchesSearch(
   card: Pick<BoardCard, "title" | "taskId">,
@@ -736,6 +735,16 @@ export function matchesSearch(
   return wanted.every((word) => have.some((token) => token.startsWith(word)));
 }
 
+/**
+ * The board's own tag rule, mirrored.
+ *
+ * NOTE: Copied from the API's `normalizeTag`, and it has to stay in step. It
+ * lives here rather than in main because both sides need the same answer:
+ * main compares what a write asked for against what came back to name a
+ * dropped tag, and the renderer shows the chip a tag is ABOUT to become. Two
+ * copies here would eventually disagree, and the screen would promise a tag
+ * the board does not store.
+ */
 export function normalizeTag(raw: string): string {
   return raw
     .trim()
@@ -749,11 +758,12 @@ export function normalizeTag(raw: string): string {
 
 export type BoardWrite =
   /**
-   * ⚠️ `droppedTags` rides along on SUCCESS, which is the only place it can be
-   * useful. The board caps tags (3 by default) and applies the cap silently —
-   * so a write that "worked" is exactly the moment a user needs telling that
-   * two of the five tags they typed are not on the card. Empty on every write
-   * that named no tags.
+   * A write that landed, with the tags the board dropped from it.
+   *
+   * `droppedTags` rides along on SUCCESS, the only place it is useful. The
+   * board caps tags (3 by default) silently, so a write that "worked" is the
+   * moment a user needs telling that two of the five tags they typed are not
+   * on the card. Empty on every write that named no tags.
    */
   | { kind: "ok"; card: BoardCard; droppedTags: string[] }
   | BoardConflict
@@ -762,10 +772,10 @@ export type BoardWrite =
 /**
  * What changed on a board since a cursor.
  *
- * ⚠️ `nextSince` is the cursor to send back — NOT `since + 1`, and not the last
- * card's seq. The feed is monotonic but not contiguous, and board-level events
- * carry no card to advance past, so a client that derived its own cursor would
- * ask for the same delta forever.
+ * NOTE: `nextSince` is the cursor to send back, NOT `since + 1` and not the
+ * last card's seq. The feed is monotonic but not contiguous, and board-level
+ * events carry no card to advance past, so a client that derived its own
+ * cursor would ask for the same delta forever.
  */
 export interface BoardChanges {
   /** The board's current head, for "am I caught up?" without another read. */
@@ -773,12 +783,16 @@ export interface BoardChanges {
   nextSince: number;
   hasMore: boolean;
   /**
-   * The cards that changed. Read from a list, so their `checklist` and
-   * `assignees` are null — see `BoardCard`.
+  /**
+   * The cards that changed.
+   *
+   * Read from a list, so their `checklist` and `assignees` are null; see
+   * {@link BoardCard}.
    */
   cards: BoardCard[];
   /**
    * Board-level changes, which carry no card: lanes or categories were edited.
+   *
    * A client seeing one re-reads the whole board rather than patching it.
    */
   events: { seq: number; verb: string }[];
@@ -787,9 +801,9 @@ export interface BoardChanges {
 /**
  * What an import would do, before it does any of it.
  *
- * ⚠️ Read from the FOLDER on this machine, not from the cloud. Every number
- * here is about files that have not been migrated yet — which is why the screen
- * showing it is the one that says a board has no cards.
+ * Read from the FOLDER on this machine, not from the cloud. Every number is
+ * about files not migrated yet, which is why the screen that shows it is the
+ * one that says a board has no cards.
  */
 export interface ImportPreview {
   workspaceId: string;
@@ -800,21 +814,21 @@ export interface ImportPreview {
   checklistItems: number;
   withTaskId: number;
   duplicateTaskIds: string[];
-  /** Ticked boxes whose moment has to be inferred — never a fact. */
+  /** Ticked boxes whose moment has to be inferred, never a fact. */
   inferredCheckedAt: number;
   /** Options belonging to a "pick ONE" group, which travel as a group. */
   groups: number;
-  /** Items decided against; they travel as unchecked rows keeping the marker. */
+  /** Items decided against: unchecked rows that keep the marker. */
   dropped: number;
   attachments: number;
   auditEventsLeftBehind: number | null;
   /**
    * Why this project must not be migrated from this app, or null.
    *
-   * ⚠️ Not an error — a refusal with a reason. A repo carrying its own
-   * `.agents/reviews/config.json` can rename lanes and re-map statuses, and this
-   * app reads the defaults only; importing it from here would file cards into
-   * lanes the board does not have.
+   * A refusal with a reason, not an error. A repo with its own
+   * `.agents/reviews/config.json` can rename lanes and re-map statuses, and
+   * this app reads the defaults only, so importing it from here would file
+   * cards into lanes the board does not have.
    */
   blocked: string | null;
   problems: { path: string; reason: string }[];
@@ -830,19 +844,19 @@ export interface ImportReport {
   }[];
   /** Set once the cutover has been sealed against a verified count. */
   migratedAt?: string | null;
-  /** Set when the whole run stopped; records already accepted are on the board. */
+  /** Set when the run stopped; records already accepted stay on the board. */
   error?: string | null;
 }
 
 /**
  * One review card as read from a FILE, without opening its body.
  *
- * ⚠️ Front matter and the first heading, and nothing else. The definition of
- * "what a checklist item is" lives in one place — `scanTaskBlocks`/`parseDoc` in
- * the Lanework board — and a second reader of a card's BODY in this app is how
- * the two start disagreeing on a hand-edited card. Front matter is a fixed set
- * of `key: value` lines that no parser has an opinion about, so reading it
- * cannot drift; that is the whole reason this stops where it does.
+ * NOTE: Front matter and the first heading, nothing else. What a checklist
+ * item is gets defined in one place, `scanTaskBlocks`/`parseDoc` in the
+ * Lanework board, and a second reader of a card's BODY in this app is how
+ * the two start disagreeing on a hand-edited card. Front matter is a fixed
+ * set of `key: value` lines no parser has an opinion about, so reading it
+ * cannot drift.
  */
 export interface LocalFolderCard {
   /** Path relative to the folder, so it reads like the file it came from. */
@@ -857,15 +871,14 @@ export interface LocalFolderCard {
 /**
  * What a folder on this machine turned out to hold.
  *
- * ⚠️ Deliberately NOT a board. There is no checklist progress here and no card
- * body — this exists to answer "did I point at the right project, and what is
- * in it", so the user can decide whether to migrate it. Rendering cards from
- * files is a different feature with a different cost (it needs the board's own
- * parsers, which live in another repo).
+ * NOT a board: no checklist progress and no card body. It answers "did I
+ * point at the right project, and what is in it", so the user can decide
+ * whether to migrate. Rendering cards from files is a different feature with
+ * a different cost (it needs the board's own parsers, in another repo).
  */
 export interface LocalFolderSummary {
   path: string;
-  /** Where the cards were found, relative to `path`, or null when there are none. */
+  /** Where the cards were found, relative to `path`, or null when none. */
   reviewRoot: string | null;
   cards: number;
   /** Card counts by front-matter `status`, e.g. `{ done: 9, todo: 5 }`. */
@@ -877,15 +890,14 @@ export interface LocalFolderSummary {
   /** Files under the review root this reader could not read at all. */
   unreadable: number;
   /**
-   * True when the scan stopped at its own limit, so every count above is a
-   * FLOOR rather than a total.
+   * True when the scan stopped at its limit: every count above is a FLOOR.
    *
-   * ⚠️ Reported rather than swallowed. A cap that silently truncates makes a
-   * big repo look small, and "you have 2000 cards" would then be the one number
+   * Reported rather than swallowed. A cap that silently truncates makes a big
+   * repo look small, and "you have 2000 cards" would then be the one number
    * on screen that is wrong in the direction that matters.
    */
   capped: boolean;
-  /** True when the folder has no `.agents` directory — a different sentence. */
+  /** True when the folder has no `.agents` directory: a different sentence. */
   looksUnrelated: boolean;
   /** The first few cards, for a "is this the right project" glance. */
   sample: LocalFolderCard[];
@@ -894,18 +906,18 @@ export interface LocalFolderSummary {
 /**
  * Whether this workspace has a folder on this machine, and what is in it.
  *
- * ⚠️ `missing` is its own case rather than falling back to `none`. A folder that
- * was linked and has since been moved or deleted is a fact worth saying — "no
- * folder linked" would invite the user to link it again and be surprised.
+ * `missing` is its own case rather than falling back to `none`. A linked
+ * folder that has since moved or been deleted is worth saying: "no folder
+ * linked" would invite the user to link it again and be surprised.
  */
 export type LocalFolderState =
   | { kind: "none" }
   /**
-   * ⚠️ `summary` describes the PRIMARY folder; `others` are the rest, path only.
-   * A project can be assembled from several folders — that is what the create
-   * dialog asks for — but only one of them holds the `.agents/reviews` a
-   * migration reads, so reading all of them would produce a count that belongs
-   * to no folder in particular.
+   * A linked project: the PRIMARY folder's summary, the rest by path only.
+   *
+   * A project can be assembled from several folders (the create dialog asks
+   * for that), but only one holds the `.agents/reviews` a migration reads.
+   * Reading all of them would produce a count that belongs to no folder.
    */
   | { kind: "linked"; summary: LocalFolderSummary; others: string[] }
   | { kind: "missing"; path: string };
@@ -913,10 +925,10 @@ export type LocalFolderState =
 /**
  * A folder the user just chose in the OS chooser, on its way back to a window.
  *
- * ⚠️ `id` is what travels BACK to main, never `path`. The chooser runs in main
- * and mints an id per chosen folder; `path` rides along so the dialog can show
- * what was picked. A create call that took paths would be a channel that reads
- * any folder the renderer names — see `DesktopFolderApi`.
+ * NOTE: `id` is what travels BACK to main, never `path`. The chooser runs in
+ * main and mints an id per chosen folder; `path` rides along so the dialog
+ * can show what was picked. A create call that took paths would be a channel
+ * that reads any folder the renderer names; see {@link DesktopFolderApi}.
  */
 export interface PickedFolder {
   id: string;
@@ -967,20 +979,22 @@ export const workspaceChannels = {
   folderLink: "workspaces:folder:link",
   folderForget: "workspaces:folder:forget",
   folderReveal: "workspaces:folder:reveal",
-  /** FE-52/D7a: move a local board to the cloud, one click. */
+  /** Move a local board to the cloud, in one click (FE-52/D7a). */
   syncToCloud: "workspaces:local:sync",
   /**
-   * FE-52: main → renderer, the local store changed under us (the offline MCP
-   * or the hook wrote). Payload: the local workspace ids that changed, or
-   * empty for "re-read everything local".
+   * Main → renderer: the local store changed under this window.
+   *
+   * The offline MCP or the hook wrote. Payload: the local workspace ids that
+   * changed, or empty for "re-read everything local".
    */
   localChanged: "workspaces:local:changed",
 } as const;
 
 export interface DesktopBoardApi {
   /**
-   * A board, read one group at a time under `query` (FE-17): the counts, and
-   * the first page of every group the query draws.
+   * A board, read one group at a time under `query`.
+   *
+   * Answers the counts and the first page of every group the query draws.
    */
   load: (workspaceId: string, query?: BoardQuery) => Promise<BoardView>;
   /** The next page of one group, from where the last one stopped. */
@@ -996,13 +1010,15 @@ export interface DesktopBoardApi {
     query: BoardQuery,
   ) => Promise<{ stats: BoardStats; total: number } | null>;
   /**
-   * The agents working on the board's cards, from every machine (BE-16).
+   * The agents working on the board's cards, from every machine.
+   *
    * Empty from a service older than `/presence`.
    */
   presence: (workspaceId: string) => Promise<BoardPresence[]>;
   /**
-   * Where the last agent on this card stopped (FE-28), or null — none left,
-   * or a service older than BE-17.
+   * Where the last agent on this card stopped, or null.
+   *
+   * Null when none is left, or from a service older than BE-17.
    */
   checkpoint: (
     workspaceId: string,
@@ -1011,31 +1027,31 @@ export interface DesktopBoardApi {
   /**
    * One card WITH its checklist and assignees, by id.
    *
-   * ⚠️ A second read, and not a redundant one: `load` reads the board through
+   * A second read, not a redundant one: `load` reads the board through
    * `GET /items`, which serializes without parts. Every screen that shows a
    * card's decisions has to ask for that card by itself.
    */
   card: (workspaceId: string, cardId: string) => Promise<BoardCard>;
   /**
-   * The same card, addressed the way a human says it — `FE-06`.
+   * The same card, addressed the way a human says it: `FE-06`.
    *
-   * ⚠️ Answers null for "no such card", which is a real answer here rather than
-   * a failure: a deep link can name a task id that was never minted, and the
-   * board's own route makes that a 404 precisely so it cannot be confused with
-   * a read that failed.
+   * Answers null for "no such card", a real answer rather than a failure: a
+   * deep link can name a task id that was never minted, and the board's route
+   * makes that a 404 so it cannot be confused with a failed read.
    */
   lookup: (workspaceId: string, taskId: string) => Promise<BoardCard | null>;
   /**
-   * Cards whose title or task id answer `query`, from the SERVICE (FE-18) —
-   * not only the ones this window has loaded. At most 20.
+   * Cards whose title or task id answer `query`, at most 20.
+   *
+   * From the SERVICE, not only the cards this window has loaded.
    */
   search: (workspaceId: string, query: string) => Promise<BoardCard[]>;
   /**
    * Edit a card, against the revision the caller is looking at.
    *
-   * ⚠️ `revision` is not optional. The endpoint answers 428 without `If-Match`,
-   * and making the precondition a parameter rather than a convenience is what
-   * stops an edit from silently landing on somebody else's newer card.
+   * NOTE: `revision` is not optional. The endpoint answers 428 without
+   * `If-Match`, and a required precondition is what stops an edit from
+   * silently landing on somebody else's newer card.
    */
   update: (
     workspaceId: string,
@@ -1046,9 +1062,9 @@ export interface DesktopBoardApi {
   /**
    * Move a card between lanes, within a lane, or both.
    *
-   * ⚠️ `columnKey: null` means "stay in this lane" — a pure reorder. A single
-   * atomic request either way, because a move that changed the lane and then
-   * the position would be two writes a second client could interleave with.
+   * `columnKey: null` means "stay in this lane", a pure reorder. One atomic
+   * request either way: a move that changed the lane and then the position
+   * would be two writes a second client could interleave with.
    */
   move: (
     workspaceId: string,
@@ -1063,17 +1079,16 @@ export interface DesktopBoardApi {
     cardId: string,
     key: string,
     checked: boolean,
-    /** The revision the user is looking at — sent as `If-Match`. */
+    /** The revision the user is looking at, sent as `If-Match`. */
     revision: number,
   ) => Promise<BoardWrite>;
   /**
-   * Replace a card's whole checklist — the one call that creates, edits,
-   * reorders and deletes rows.
+   * Replace a card's whole checklist: creates, edits, reorders and deletes.
    *
-   * ⚠️ A REPLACE, not a set of row operations, because that is what the board
-   * offers and it is the honest shape: a checklist is an ordered document, and
-   * "delete row 3" is ambiguous the moment a second person is editing. Send
-   * back the keys you read and ticked boxes survive the rewrite.
+   * A REPLACE, not row operations, because that is what the board offers: a
+   * checklist is an ordered document, and "delete row 3" is ambiguous the
+   * moment a second person is editing. Send back the keys you read and ticked
+   * boxes survive the rewrite.
    */
   setChecklist: (
     workspaceId: string,
@@ -1084,47 +1099,45 @@ export interface DesktopBoardApi {
   /**
    * Put a new card on the board.
    *
-   * ⚠️ A DRAFT, not a title. The board mints a card's issue key from its
-   * CATEGORY (`taskId` stays null without one), so a create that could only
-   * send a title produced cards with no key — unreachable by ⌘K, undeep-linkable
-   * and unnamed in every list that shows one. Every field here is one the
-   * service already accepts on `POST /items`; only `title` is required, and the
-   * board picks its own first lane when `columnKey` is absent.
+   * A DRAFT, not a title. The board mints a card's issue key from its
+   * CATEGORY (`taskId` stays null without one), and a card with no key is
+   * unreachable by ⌘K, cannot be deep-linked, and is unnamed in every list.
+   * Every field is one `POST /items` already accepts; only `title` is
+   * required, and the board picks its first lane when `columnKey` is absent.
    */
   create: (workspaceId: string, draft: BoardCardDraft) => Promise<BoardWrite>;
   /**
    * Take a card off the board.
    *
-   * ⚠️ The service ARCHIVES rather than deletes — a tombstone with its own `seq`
-   * — because a row that simply vanished could not be reported by the change
-   * feed, and every other client holding that card would keep drawing it. It is
-   * called `archive` here for that reason and "Delete" on screen, where the
-   * word has to mean what a person meant by right-clicking a card.
+   * The service ARCHIVES rather than deletes, leaving a tombstone with its own
+   * `seq`: a row that simply vanished could not be reported by the change
+   * feed, and every other client holding that card would keep drawing it.
+   * Hence `archive` here, and "Delete" on screen, where the word has to mean
+   * what a person meant by right-clicking a card.
    *
-   * ⚠️ Answers nothing. The board is re-read afterwards rather than patched from
-   * a response: an archive changes what every lane's ranks and counts say, and
-   * a client that spliced one row out of its own copy would be guessing at the
-   * rest.
+   * Answers nothing. The board is re-read afterwards rather than patched: an
+   * archive changes every lane's ranks and counts, and a client that spliced
+   * one row out of its own copy would be guessing at the rest.
    */
   archive: (workspaceId: string, cardId: string) => Promise<void>;
   /**
-   * Permanently remove EVERY card on a board (FE-14).
+   * Permanently remove EVERY card on a board.
    *
-   * ⚠️ A real delete, unlike `archive`: cards, checklists, comments and their
-   * history go, and nothing in this app can bring them back. The project, its
-   * lanes, categories and members stay, and the migration seal is lifted.
+   * NOTE: A real delete, unlike `archive`: cards, checklists, comments and
+   * their history go, and nothing in this app can bring them back. The
+   * project, its lanes, categories and members stay, and the migration seal
+   * is lifted.
    *
-   * ⚠️ Takes the SLUG as well as the id, and the service checks it: the id
-   * says which board, the slug says the person meant that one. Resolves to the
-   * number of cards removed.
+   * Takes the SLUG as well as the id, and the service checks it: the id says
+   * which board, the slug says the person meant that one.
    */
   purge: (workspaceId: string, slug: string) => Promise<{ deleted: number }>;
   /**
    * One page of a card's history and thread, oldest first.
    *
-   * ⚠️ `cursor` is the service's, echoed back verbatim. It is keyed on
-   * `(createdAt, id)` across two tables, so nothing on this side can derive the
-   * next one from what it just read.
+   * NOTE: `cursor` is the service's, echoed back verbatim. It is keyed on
+   * `(createdAt, id)` across two tables, so nothing on this side can derive
+   * the next one from what it just read.
    */
   activity: (
     workspaceId: string,
@@ -1134,9 +1147,9 @@ export interface DesktopBoardApi {
   /**
    * Say something on a card. Answers the new comment's id.
    *
-   * ⚠️ No `revision` and no `If-Match`, unlike every card edit. A comment is an
+   * No `revision` and no `If-Match`, unlike every card edit. A comment is an
    * append: two people writing at once both succeed, and there is no earlier
-   * version for either of them to overwrite.
+   * version for either to overwrite.
    */
   comment: (
     workspaceId: string,
@@ -1153,8 +1166,8 @@ export interface DesktopBoardApi {
   /**
    * Retract your own comment.
    *
-   * ⚠️ A TOMBSTONE on the service — the row keeps its place with its body gone,
-   * so a thread that referred to it still reads as a conversation.
+   * The service keeps a TOMBSTONE: the row keeps its place with its body
+   * gone, so a thread that referred to it still reads as a conversation.
    */
   deleteComment: (
     workspaceId: string,
@@ -1164,9 +1177,9 @@ export interface DesktopBoardApi {
   /**
    * Follow or unfollow a card, and star or unstar it.
    *
-   * ⚠️ Idempotent and carrying no revision, because neither is an edit to the
-   * card: they are facts about the person at this machine. Calling either twice
-   * with the same value is the state the caller asked for, not an error.
+   * Idempotent and with no revision, because neither edits the card: both
+   * are facts about the person at this machine. Calling either twice with the
+   * same value gives the state the caller asked for, not an error.
    */
   subscribe: (
     workspaceId: string,
@@ -1179,11 +1192,11 @@ export interface DesktopBoardApi {
     favorite: boolean,
   ) => Promise<boolean>;
   /**
-   * Record a file this card refers to — a path or a URL, never bytes.
+   * Record a file this card refers to: a path or a URL, never bytes.
    *
-   * ⚠️ Nothing is uploaded. The service stores metadata and a reference and
-   * hands it back untouched; hosting content is a separate feature with its own
-   * storage, quota and signed URLs.
+   * Nothing is uploaded. The service stores metadata and a reference and
+   * hands it back untouched; hosting content is a separate feature with its
+   * own storage, quota and signed URLs.
    */
   attach: (
     workspaceId: string,
@@ -1200,10 +1213,10 @@ export interface DesktopBoardApi {
   /**
    * Hand the board over: the cloud owns these cards from now on.
    *
-   * ⚠️ A SECOND call, after `importRun`, on purpose. The cutover is what puts
-   * every local writer into read-only, so it is taken with the receipts of the
-   * import already on screen — one button that did both would change a board's
-   * source of truth while somebody was still reading whether it worked.
+   * A SECOND call, after `importRun`. The cutover puts every local writer
+   * into read-only, so it is taken with the import's receipts already on
+   * screen. One button doing both would change a board's source of truth
+   * while somebody was still reading whether it worked.
    */
   importSeal: (workspaceId: string) => Promise<ImportReport>;
 }
@@ -1211,43 +1224,40 @@ export interface DesktopBoardApi {
 /**
  * The folder on this machine a workspace's cards still live in.
  *
- * ⚠️ Every method is keyed by SLUG, not by the cloud workspace id. The id is
- * absent exactly when this surface matters most — a service that predates the
- * field sends none, and that is the screen where a user is told the board
- * cannot be opened — so keying on the id would make the feature unavailable in
- * its own main case. And a slug is STABLE: no route on the service can change
- * one — the rename validator refuses the field outright — so a link keyed by it
- * is not something a rename can strand.
+ * Every method is keyed by SLUG, not by the cloud workspace id. The id is
+ * absent exactly when this surface matters most: a service that predates the
+ * field sends none, and that is the screen that says the board cannot be
+ * opened. A slug is also STABLE: no route on the service can change one (the
+ * rename validator refuses the field), so a rename cannot strand a link.
  *
- * ⚠️ No method takes a PATH from the renderer. `pick` opens the OS folder
- * chooser in the main process, so the only paths this app ever reads are ones a
- * human selected or ones it wrote down itself.
+ * NOTE: No method takes a PATH from the renderer. `pick` opens the OS folder
+ * chooser in main, so the only paths this app reads are ones a human
+ * selected or ones it wrote down itself.
  */
 export interface DesktopFolderApi {
   state: (slug: string) => Promise<LocalFolderState>;
   /**
-   * Open the OS chooser and answer with what was picked — many folders at once.
+   * Open the OS chooser and answer with what was picked, many folders at once.
    *
-   * ⚠️ Bound to no workspace, because the main caller is the create dialog:
-   * the folders are chosen BEFORE the project they belong to exists. Nothing is
-   * written down here; the ids are spent by `create`.
+   * Bound to no workspace, because the main caller is the create dialog: the
+   * folders are chosen BEFORE their project exists. Nothing is written down
+   * here; `create` spends the ids.
    */
   choose: () => Promise<PickedFolder[]>;
   /**
    * The folders linked to a workspace, primary first, as addressable ids.
    *
-   * ⚠️ The same shape `choose` answers with, and that is the point: an editor
-   * works on ONE list — what is linked plus what was just picked — and hands
-   * the whole thing back to `link`. Ids for folders this app already holds are
-   * minted here, so nothing has to accept a path to keep one.
+   * The same shape `choose` answers with, so an editor works on ONE list
+   * (what is linked plus what was just picked) and hands it all back to
+   * `link`. Ids for folders this app already holds are minted here, so
+   * nothing has to accept a path to keep one.
    */
   list: (slug: string) => Promise<PickedFolder[]>;
   /**
    * Replace a workspace's folders with exactly these, primary first.
    *
-   * ⚠️ A REPLACE. The editor states the whole set — that is what makes remove
-   * and reorder expressible at all — and an empty list unlinks the workspace,
-   * which is the same thing `forget` does.
+   * A REPLACE: stating the whole set is what makes remove and reorder
+   * expressible. An empty list unlinks the workspace, as `forget` does.
    */
   link: (slug: string, folders: string[]) => Promise<LocalFolderState>;
   pick: (slug: string) => Promise<LocalFolderState>;
@@ -1259,71 +1269,70 @@ export interface DesktopWorkspacesApi {
   load: () => Promise<WorkspaceSnapshot>;
   select: (id: string) => Promise<WorkspaceSnapshot>;
   /**
-   * A project's icon as a `data:` URL (BE-18), or null for the letter tile.
+   * A project's icon as a `data:` URL, or null for the letter tile.
+   *
    * Pass the `iconKey` the list gave; main draws from its disk cache first.
    */
   icon: (workspaceId: string, iconKey: string | null) => Promise<string | null>;
   /**
    * Create a project on the account and open it.
    *
-   * ⚠️ Takes the NAME a human typed, not a slug. The slug is derived in main
-   * (`slug.ts`) because the service refuses to derive one, and asking a user
-   * for a url-safe key is asking them to do a computer's job.
+   * Takes the NAME a human typed, not a slug. Main derives the slug
+   * (`slug.ts`) because the service refuses to, and asking a user for a
+   * url-safe key is asking them to do a computer's job.
    *
-   * ⚠️ `folders` are `PickedFolder` IDS, in order, and the first one is the
-   * primary — the folder every single-folder surface (the migration, "open in
-   * file manager") means. Ids rather than paths so this channel cannot be asked
-   * to link a folder the user never chose.
+   * NOTE: `folders` are {@link PickedFolder} IDS, in order, and the first is
+   * the primary: the folder every single-folder surface (the migration, "open
+   * in file manager") means. Ids rather than paths, so this channel cannot be
+   * asked to link a folder the user never chose.
    */
   create: (name: string, folders?: string[]) => Promise<WorkspaceSnapshot>;
   /**
    * Rename a project on the account, by CLOUD WORKSPACE ID.
    *
-   * ⚠️ Only the display name moves. The SLUG is immutable service-wide — the
-   * rename validator refuses the field rather than ignoring it — so the folder
-   * link, the remembered selection and every other slug-keyed row survive a
-   * rename untouched. A rename here is not the local-folder equivalent either:
-   * it changes the project on the account, for every machine.
+   * Only the display name changes. The SLUG is immutable service-wide (the
+   * rename validator refuses the field rather than ignoring it), so the
+   * folder link, the remembered selection and every other slug-keyed row
+   * survive. The rename is on the account, for every machine, not a local
+   * one.
    *
-   * ⚠️ Keyed by ID, unlike `remove`, and the asymmetry is deliberate. A delete
-   * has to reach a project with no cloud id — that is the project someone most
-   * wants rid of — while a rename is a cloud write that a service old enough to
-   * send no id has no route for anyway. A workspace whose `id` is null is
-   * therefore un-renameable, and the screen says which rather than calling.
+   * A workspace whose `id` is null cannot be renamed: a service too old to
+   * send an id has no route for it. The screen says so rather than calling.
    */
   rename: (id: string, name: string) => Promise<WorkspaceSnapshot>;
   /**
-   * Put the account's projects in this order, first to last, by CLOUD ID
-   * (FE-32), and answer with the list as the service now orders it. The
-   * switcher and ⌘1…⌘9 follow that order.
+   * Put the account's projects in this order, first to last, by CLOUD ID.
+   *
+   * Answers the list as the service now orders it. The switcher and ⌘1…⌘9
+   * follow that order.
    */
   reorder: (ids: string[]) => Promise<WorkspaceSnapshot>;
   /**
-   * Delete a project from the ACCOUNT, by slug, and answer with what is left.
+   * Delete a project from the ACCOUNT, and answer with what is left.
    *
-   * ⚠️ Not "remove it from this machine": the service deletes the row and
-   * cascades the paths every machine reported for it. It cannot be undone from
-   * here — the human surface archives, this one deletes — so the only caller is
-   * behind a confirmation that says so.
+   * NOTE: Not "remove it from this machine": the service deletes the row and
+   * cascades the paths every machine reported for it. It cannot be undone
+   * from here (the human surface archives, this one deletes), so the only
+   * caller is behind a confirmation that says so.
    *
-   * ⚠️ Takes BOTH keys. The machine surface deletes by cloud id and refuses a
-   * slug with a 400 — it took the slug until the service moved it, precisely
-   * because a uuid matches its slug shape and the mix-up used to answer "200,
-   * deleted nothing". The slug is still needed on this side: the folder link
-   * this machine drops afterwards is keyed by it.
+   * Takes BOTH keys. The machine surface deletes by cloud id and refuses a
+   * slug with a 400; it moved off the slug because a uuid matches its slug
+   * shape, and the mix-up answered "200, deleted nothing". The folder link
+   * this machine drops afterwards is still keyed by slug.
    *
-   * ⚠️ So a project with NO cloud id cannot be deleted from here, and the button
+   * So a project with NO cloud id cannot be deleted from here, and the button
    * is disabled with that reason on it. That is a service older than the `id`
    * field, the same state that stops the project's board from opening.
    */
   remove: (id: string, slug: string) => Promise<WorkspaceSnapshot>;
   /**
-   * FE-52/D7a: upload a LOCAL board to the signed-in account, keeping task ids,
-   * checklists and lanes, then make the local copy read-only and point it at
-   * the cloud board. Refused while not signed in.
+   * Upload a LOCAL board to the signed-in account (FE-52/D7a).
+   *
+   * Keeps task ids, checklists and lanes, then makes the local copy read-only
+   * and points it at the cloud board. Refused while not signed in.
    */
   syncToCloud: (localId: string) => Promise<LocalSyncResult>;
-  /** FE-52: the local store changed from outside this window (MCP, hook). */
+  /** The local store changed from outside this window (MCP, hook). */
   onLocalChange: (listener: (workspaceIds: string[]) => void) => () => void;
   board: DesktopBoardApi;
   folder: DesktopFolderApi;

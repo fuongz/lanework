@@ -25,14 +25,15 @@ import { FolderSwitcher } from "./folder-switcher";
 import { QuickOpen } from "./quick-open";
 
 /**
- * Repository › Files (FE-66): the working tree on the left, the files open
- * from it on the right — an editor's explorer, read-only (FE-66/D1).
+ * Repository › Files: the working tree on the left, the files open from it on
+ * the right.
  *
- * ⚠️ The worktree STATUS is read too, the way Changes reads it: it says
- * whether there is a repository at all (`RepoEmpty` otherwise), and it is
- * what colours the tree's changed rows (FE-66/D7).
+ * An editor's explorer, read-only (FE-66/D1).
  *
- * ⚠️ Read on entry and on window focus, never on a timer (FE-22/D10).
+ * - The worktree status is read too, the way Changes reads it. It says
+ *   whether there is a repository at all ({@link RepoEmpty} otherwise), and
+ *   it colours the tree's changed rows (FE-66/D7).
+ * - Read on entry and on window focus, never on a timer (FE-22/D10).
  */
 export function FilesLayout() {
   const { slug } = useParams({ from: "/_app/w/$slug/files" });
@@ -56,7 +57,7 @@ export function FilesLayout() {
     ["tree", "file"],
   );
 
-  // The project's linked folders, primary first (FE-71). Null until read: the
+  // The project's linked folders, primary first. Null until read: the
   // remembered folder is only known once the list is, and opening the primary
   // first would flash its tree before switching.
   const [folders, setFolders] = useState<PickedFolder[] | null>(null);
@@ -88,8 +89,8 @@ export function FilesLayout() {
     saveFolder(slug, path);
   };
 
-  // ⚠️ The primary's status is the worktree store's — Changes and the rail
-  // read it too; another folder's is read by the Files store (FE-71/D1).
+  // The primary's status is the worktree store's, which Changes and the rail
+  // read too; another folder's is read by the Files store (FE-71/D1).
   const state = folder > 0 ? folderStatus : primaryState;
   const primaryReady = primaryState?.kind === "ready";
 
@@ -113,7 +114,7 @@ export function FilesLayout() {
   }, [refresh, refreshWorktree, readFolders]);
 
   // ⌘P finds a file; ⌘W closes the open one (FE-66/D3, D8). The menu leaves
-  // ⌘W unbound on purpose (`menu.ts`), so it reaches the page.
+  // ⌘W unbound (`menu.ts`) so it reaches the page.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey)
@@ -137,8 +138,8 @@ export function FilesLayout() {
     void readFolders();
   };
 
-  // ⚠️ Drawn in every state (FE-58), so the screen keeps its name while the
-  // repository is read, and when it is not one.
+  // Drawn in every state, so the screen keeps its name while the repository
+  // is read, and when the folder is not one.
   const title = (
     <WindowTitlebar>
       <h1 className={WINDOW_TITLE}>Files</h1>
@@ -179,8 +180,8 @@ export function FilesLayout() {
     folders && folders.length > 1 ? (
       <FolderSwitcher folders={folders} index={folder} onChange={pick} />
     ) : null;
-  // ⚠️ Drawn above every state that is not the tree, too: a picked folder
-  // that is not a repository must still offer the way back to another.
+  // Drawn above every state that is not the tree, too: a picked folder that
+  // is not a repository must still offer the way back to another.
   const lone = switcher && <div className="w-72 shrink-0">{switcher}</div>;
   const readError = folder > 0 ? error : worktreeError;
 
@@ -243,7 +244,7 @@ export function FilesLayout() {
             className="bg-sidebar flex h-full min-h-0 flex-col"
           >
             {switcher}
-            {/* ⚠️ Keyed by project and folder: the model's expansion and
+            {/* NOTE: Keyed by project and folder. The model's expansion and
                 selection are about one repository's paths, never another's. */}
             <FilesTree
               key={`${slug}#${folder}`}

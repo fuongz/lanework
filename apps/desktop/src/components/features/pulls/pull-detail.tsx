@@ -39,10 +39,10 @@ import { PullSummary } from "./pull-summary";
 
 /**
  * The screen's name in the window's title bar, until a pull request has a
- * title to put there (FE-58). `PullsEmpty` draws the same one.
+ * title to put there. `PullsEmpty` draws the same one.
  *
- * ⚠️ Rendered by the pane, not by `PullsLayout`: the bar holds ONE header,
- * and an open pull request's replaces this rather than standing beside it.
+ * Rendered by the pane, not by `PullsLayout`: the bar holds one header, and
+ * an open pull request's replaces this rather than standing beside it.
  */
 function PullsTitlebar() {
   return (
@@ -55,10 +55,10 @@ function PullsTitlebar() {
 /**
  * Which half of a pull request is on screen.
  *
- * ⚠️ `code` is the default and is spelled by ABSENCE — the parser returns no
- * `view` at all for it. The URL of a pull request somebody is reviewing stays
- * the short one, and `view` in a link means "they deliberately went to the
- * summary" rather than "a default got written down".
+ * `code` is the default and is spelled by absence: the parser returns no
+ * `view` for it. The URL of a pull request under review stays short, and
+ * `view` in a link means someone chose the summary, not that a default got
+ * written down.
  */
 type PullView = "summary" | "code";
 interface PullDetailSearch {
@@ -110,9 +110,9 @@ function Verdict({
 /**
  * One pull request: what it is, and what changed in it.
  *
- * ⚠️ The review controls are PR-level — approve, request changes, comment — and
- * nothing here writes to the branch. Line comments need a position model this
- * app does not have yet, so the screen does not pretend to offer them.
+ * The review controls are PR-level (approve, request changes, comment), and
+ * nothing here writes to the branch. Line comments need a position model
+ * this app does not have, so the screen does not offer them.
  */
 export function PullDetail() {
   const { slug, number } = useParams({
@@ -133,15 +133,12 @@ export function PullDetail() {
   const [composing, setComposing] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   /**
-   * Whether the file tree shares the window with the diff.
+   * Whether the file tree shares the pane with the diff.
    *
-   * ⚠️ In the STORE, not in this component. The tree is its own column of the
-   * window now — a sibling of this pane rather than a child — so the toggle and
-   * the panel it toggles no longer have a parent between them.
-   *
-   * ⚠️ Open by default, and closable. It is what makes a forty-file review
-   * navigable, but it is 240px taken from a diff that is already the fourth
-   * column, so a reviewer reading one long file has to be able to put it away.
+   * - In the store, not this component: {@link FilesPanel} reads it too.
+   * - Open by default, and closable. It makes a forty-file review navigable,
+   *   but its 240px come out of the diff, so a reviewer reading one long file
+   *   has to be able to put it away.
    */
   const filesOpen = usePulls((state) => state.filesOpen);
   const toggleFiles = usePulls((state) => state.toggleFiles);
@@ -162,7 +159,7 @@ export function PullDetail() {
     setComposing(false);
   }, [parsed, slug]);
 
-  // NOTE: waits for the store to be on this project. `openPull` reads the
+  // NOTE: Waits for the store to be on this project. `openPull` reads the
   // store's slug, which the list layout sets after this pane mounts on a
   // direct link; calling it earlier does nothing and leaves the pane blank.
   const storeSlug = usePulls((state) => state.slug);
@@ -174,16 +171,15 @@ export function PullDetail() {
   /**
    * Whether the tree is on screen right now.
    *
-   * ⚠️ TWO conditions, and they are not the same kind of thing. `filesOpen` is
-   * what the person chose; `view === "code"` is whether a tree means anything
-   * here at all — the summary is prose, and a file tree beside it navigates
-   * nothing. Derived rather than written back, so reading the summary does not
-   * erase the choice they made about the diff.
+   * Two different conditions: `filesOpen` is what the person chose, and
+   * `view === "code"` is whether a tree means anything here (beside the
+   * summary it navigates nothing). Derived rather than written back, so
+   * reading the summary does not erase their choice about the diff.
    */
   const showFiles = filesOpen && view === "code";
 
-  // ⚠️ The STORE stays the source of truth for that choice, so the button in
-  // the row below keeps working; this only makes the panel agree with it.
+  // The store stays the source of truth for that choice, so the toggle in
+  // the diff row keeps working; this only makes the panel agree with it.
   useEffect(() => {
     const panel = filesRef.current;
     if (!panel) return;
@@ -191,7 +187,7 @@ export function PullDetail() {
     if (!showFiles && !panel.isCollapsed()) panel.collapse();
   }, [showFiles, filesRef]);
 
-  // ⚠️ The screen's name stays in the title bar until this pull request has a
+  // The screen's name stays in the title bar until this pull request has a
   // title to put there, so the bar is never blank while one loads.
   if (error)
     return (
@@ -201,8 +197,8 @@ export function PullDetail() {
       </div>
     );
 
-  // ⚠️ Before the read starts too, not only while `loading`: the first
-  // render comes before the effect that opens the pull request.
+  // Before the read starts too, not only while `loading`: the first render
+  // comes before the effect that opens the pull request.
   if (!detail || (loading && detail.pull.number !== parsed))
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -212,24 +208,22 @@ export function PullDetail() {
     );
 
   const { pull } = detail;
-  // ⚠️ The same function the file tree calls. Two answers to "which files are
-  // on screen" is a tree listing the pull request while the diff shows one
-  // commit — see `diffSource`.
+  // NOTE: The same function the file tree calls. Two answers to "which files
+  // are on screen" would be a tree listing the pull request while the diff
+  // shows one commit.
   const source = diffSource(commit, commitDiff, detail);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      {/* ⚠️ Two rows with different jobs, and that split is the point. The top
-          row is about the PULL REQUEST — what it is called, and which half of it
-          you are looking at. The row under it is about the DIFF — where it came
-          from and what is being shown of it — so it is drawn only when a diff is
-          what is on screen. Held in one row, as it was, `#20 · @author ·
-          +798 −425` sat among the controls and read as if it were one.
+      {/* Two rows with different jobs. The top row is about the pull
+          request: its name, and which half of it is on screen. The row under
+          it is about the diff (where it came from, what is shown), so it is
+          drawn only when a diff is on screen. In one row, the diff's facts
+          sat among the controls and read as one.
 
-          ⚠️ The top row is the window's title bar now (FE-58), the way Codex
-          draws a thread's header. The bar keeps it clear of the window
-          controls — in focus mode too, with the list shut — so the row has no
-          clearance of its own to work out. */}
+          The top row is the window's title bar (FE-58), as Codex draws a
+          thread's header. The bar keeps it clear of the window controls,
+          also in focus mode with the list shut. */}
       <WindowTitlebar>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <HugeiconsIcon
@@ -243,8 +237,8 @@ export function PullDetail() {
           </h1>
         </div>
 
-        {/* Reserve space for tabs and merge actions; the title truncates as the
-            bar narrows so header actions stay reachable. */}
+        {/* Tabs and merge actions keep their space; the title truncates as
+            the bar narrows, so the actions stay reachable. */}
         <SegmentedControl
           label="Pull request view"
           semantics="tabs"
@@ -257,17 +251,16 @@ export function PullDetail() {
           onChange={(value) =>
             void navigate({
               to: ".",
-              // ⚠️ An updater, not a literal. This route's search inherits
-              // the list's `tab` and `status` from the parent, and a plain
-              // object would drop them — switching tab would quietly reset
-              // which pull requests the list beside it is showing.
+              // NOTE: An updater, not a literal. This route's search
+              // inherits the list's `tab` and `status` from the parent; a
+              // plain object drops them, and switching tab would reset which
+              // pull requests the list beside it shows.
               search: (prev) => ({
                 ...prev,
                 view: value === "summary" ? "summary" : undefined,
               }),
-              // ⚠️ NOT `replace`. Replacing the entry makes Back leave the
-              // pull request altogether instead of undoing the switch —
-              // which is the whole reason this tab is in the URL.
+              // Not `replace`: Back should undo the switch, which is why
+              // this tab is in the URL, rather than leave the pull request.
             })
           }
         />
@@ -293,9 +286,9 @@ export function PullDetail() {
               aria-hidden="true"
             />
           </a>
-          {/* ⚠️ Collapses the project rail AND the pull-request list, which sit
-              in two different panel groups — see `stores/layout.ts`. It is a
-              shortcut for two drags, not a mode with rules of its own. */}
+          {/* Collapses the project rail and the pull request list, which
+              sit in two panel groups (see `stores/layout.ts`). A shortcut for
+              two drags, not a mode with rules of its own. */}
           <button
             type="button"
             aria-pressed={focusMode}
@@ -320,11 +313,9 @@ export function PullDetail() {
       {view === "summary" ? (
         <PullSummary detail={detail} />
       ) : (
-        /* ⚠️ A group INSIDE the detail pane. The file tree used to be a
-           full-height column of the window, which stood it alongside the pull
-           request's title — a row that says nothing about files. Here it starts
-           below that title, level with the row that describes the diff, and the
-           header above spans the width it actually describes. */
+        /* A group inside the detail pane, so the file tree starts below the
+           title, level with the row that describes the diff, and the title
+           bar spans the width it describes. */
         <ResizablePanelGroup
           id="lanework:pull-detail"
           defaultLayout={defaultLayout}
@@ -332,9 +323,9 @@ export function PullDetail() {
         >
           <ResizablePanel id="diff" minSize="45%">
             <div className="border-sidebar-border flex h-9 shrink-0 items-center gap-2 border-b px-3">
-              {/* ⚠️ A breadcrumb rather than two badges with an arrow between them.
-              `head › base` is ONE fact — where this change is going — and the
-              row it now lives on contains nothing else to be confused with. */}
+              {/* A breadcrumb rather than two badges with an arrow between
+                  them: `head › base` is one fact, where this change is
+                  going. */}
               <nav
                 aria-label="Branches"
                 className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs"
@@ -370,14 +361,14 @@ export function PullDetail() {
               </div>
             </div>
 
-            {/* ⚠️ No `overflow-y-auto` here. The diff viewer virtualizes and
-                owns its own scrolling; wrapping it in a second scroller leaves
-                it no viewport to measure, and it renders every line of every
+            {/* NOTE: No `overflow-y-auto` here. The diff viewer virtualizes
+                and owns its scrolling; a second scroller leaves it no
+                viewport to measure, and it renders every line of every
                 file. */}
             <div className="flex min-h-0 flex-1 flex-col">
-              {/* ⚠️ Said out loud when the file list stopped at its cap, rather than
-            ending quietly. A partial diff that looks complete is how somebody
-            approves a change they never saw. */}
+              {/* Said out loud when the file list stopped at its cap. A
+                  partial diff that looks complete is how someone approves a
+                  change they never saw. */}
               {detail.truncated && (
                 <p className="text-muted-foreground bg-foreground/[0.04] shrink-0 px-4 py-2 text-xs/relaxed">
                   This pull request touches more files than this view loads.
@@ -389,9 +380,9 @@ export function PullDetail() {
                   {commitDiffError}
                 </p>
               )}
-              {/* ⚠️ Keyed by what it is showing. `CodeView` is controlled and keeps
-            per-item fold state; handing it another commit's files under the
-            same identity carries folds from one diff into a different one. */}
+              {/* NOTE: Keyed by what it shows. `CodeView` keeps per-item fold
+                  state; another commit's files under the same identity
+                  inherit folds from a different diff. */}
               {source ? (
                 <DiffView
                   key={commit ?? "pull"}
@@ -421,13 +412,12 @@ export function PullDetail() {
             collapsedSize="0px"
             groupResizeBehavior="preserve-pixel-size"
             disabled={!showFiles}
-            // Dragging the handle onto the edge is the same act as pressing the
-            // toggle, so it reports back rather than leaving the two
-            // disagreeing.
+            // Dragging the handle onto the edge is the same act as pressing
+            // the toggle, so it reports back and the two never disagree.
             //
-            // ⚠️ Only while the diff is on screen. Switching to the summary
-            // collapses this panel too, and reporting THAT back would record
-            // "they closed the file tree" about somebody who read a description.
+            // NOTE: Only while the diff is on screen. Switching to the summary
+            // collapses this panel too, and reporting that back would record
+            // "closed the file tree" for someone who read a description.
             onResize={(size) => {
               if (view !== "code") return;
               const collapsed = size.asPercentage <= 0.01;
@@ -439,15 +429,13 @@ export function PullDetail() {
         </ResizablePanelGroup>
       )}
 
-      {/* ⚠️ Open pull requests only. A verdict on something already merged or
-          closed cannot change what shipped, so the control is removed rather
-          than left to be pressed — a button whose outcome is "nothing" is worse
-          than no button. Saying so honestly: this is a UI judgement, not an API
-          limit; GitHub may well still accept the call.
+      {/* Open pull requests only. A verdict on merged or closed work cannot
+          change what shipped, and a button whose outcome is nothing is worse
+          than no button. A UI judgement, not an API limit: GitHub may still
+          accept the call.
 
-          ⚠️ Commenting is NOT removed with it. "Why was this done this way" is
-          a question people ask about merged work all the time, and the comment
-          box on the summary is where it goes. */}
+          Commenting stays: people ask about merged work all the time, and the
+          comment box on the summary is where that goes. */}
       {pull.state === "open" && (
         <footer className="border-sidebar-border shrink-0 border-t px-4 py-2.5">
           {composing ? (

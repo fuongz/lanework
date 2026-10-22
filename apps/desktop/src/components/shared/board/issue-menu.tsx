@@ -22,17 +22,16 @@ import { useBoard } from "#/stores/board";
 import { AssignAgentMenuItems, useAssignAgent } from "./assign-agent";
 
 /**
- * What a right click on a card offers — on a lane card and on a list row alike.
+ * What a right click on a card offers, on a lane card and a list row alike.
  *
- * ⚠️ `render` rather than a wrapper element. Both call sites already own their
- * own `<li>`: the list's carries a link, the board's carries dnd-kit's drag
- * listeners AND a layout animation, and neither survives being nested inside a
- * div this component invented. Base UI merges its trigger's handlers into the
- * element it is handed, so the card keeps being the card.
- *
- * ⚠️ The menu names the card it belongs to. On a lane of eight rows the
- * difference between the card you meant and the one under the cursor is one
- * pixel, and the confirmation is the only place that gap can still be caught.
+ * - NOTE: `render` rather than a wrapper element. Both call sites own their
+ *   `<li>`: the list's carries a link, the board's carries dnd-kit's drag
+ *   listeners and a layout animation, and neither survives being nested in a
+ *   div this component invents. Base UI merges its trigger's handlers into
+ *   the element it is handed, so the card keeps being the card.
+ * - The menu names the card it belongs to. On a lane of eight rows the card
+ *   you meant and the one under the cursor are one pixel apart, and the
+ *   confirmation is the only place that gap can still be caught.
  */
 export function IssueMenu({
   card,
@@ -63,9 +62,9 @@ export function IssueMenu({
             <AssignAgentMenuItems assign={assign} />
             <ContextMenuItem
               variant="destructive"
-              // ⚠️ Off while the board is a saved copy, like every other write.
-              // A delete that appeared to work offline would be a card gone
-              // from this screen and still on everybody else's.
+              // Off while the board is a saved copy, like every other write. A
+              // delete that appeared to work offline would be a card gone from
+              // this screen and still on everybody else's.
               disabled={stale || busy === card.id}
               onClick={() => setConfirming(true)}
             >
@@ -86,12 +85,11 @@ export function IssueMenu({
 }
 
 /**
- * The confirmation, on its own so two menus can share it.
+ * The delete confirmation, on its own so two menus can share it.
  *
- * ⚠️ Extracted rather than copied when the detail page grew a `…` button. Two
- * dialogs for one destructive action drift a sentence at a time, and the
- * sentence here is the only place a person is told that nothing in this app can
- * bring the card back.
+ * Two dialogs for one destructive action drift a sentence at a time, and the
+ * sentence here is the only place a person is told that nothing in this app
+ * can bring the card back.
  */
 export function DeleteIssueDialog({
   card,
@@ -109,12 +107,10 @@ export function DeleteIssueDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete {name}?</AlertDialogTitle>
-          {/* ⚠️ It says what actually happens, which is not quite "delete".
-                The service archives the card — a tombstone with its own change
-                seq, which is how every other machine is told it went — but
-                nothing in this app can bring one back, so from here it is gone.
-                Promising an undo this app cannot perform would be worse than
-                the plain sentence. */}
+          {/* It says what happens, which is not quite "delete". The service
+                archives the card (a tombstone with its own change seq, which
+                is how every other machine is told it went), but nothing in
+                this app can bring one back, so from here it is gone. */}
           <AlertDialogDescription>
             “{card.title}” comes off the board for everyone on this account. The
             service keeps an archived copy, but nothing in this app can restore
@@ -127,8 +123,8 @@ export function DeleteIssueDialog({
             variant="destructive"
             // The registry button pairs `border border-transparent` with
             // `bg-clip-padding`, so the fill stops short of the edge and the
-            // popup shows through as a 1px ring — the same `border-0` every
-            // other destructive confirmation in this app carries.
+            // popup shows through as a 1px ring. Every destructive
+            // confirmation in this app carries the same `border-0`.
             className="border-0"
             onClick={() => {
               onOpenChange(false);

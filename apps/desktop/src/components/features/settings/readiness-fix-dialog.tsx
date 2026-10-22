@@ -20,9 +20,8 @@ const CONTEXT = 3;
 /**
  * `before` → `after` as lines.
  *
- * ⚠️ Prefix and suffix, not a real diff: every fix appends a block or adds
- * one key, so the change is always one contiguous run, and that is all this
- * has to draw.
+ * NOTE: Prefix and suffix, not a real diff. Every fix appends a block or adds
+ * one key, so the change is always one contiguous run.
  */
 function lineDiff(before: string | null, after: string): Line[] {
   const a = before === null ? [] : before.replace(/\n$/, "").split("\n");
@@ -57,8 +56,8 @@ const SIGN = { same: " ", add: "+", remove: "-" } as const;
 /**
  * What a readiness fix would write, shown before it is written (FE-30/D5).
  *
- * ⚠️ Nothing is written until Apply, and Apply sends the file as this dialog
- * showed it: if it changed in between, main refuses and says so.
+ * Nothing is written until Apply, and Apply sends the file as this dialog
+ * showed it. If it changed in between, main refuses and says so.
  */
 export function ReadinessFixDialog({
   slug,

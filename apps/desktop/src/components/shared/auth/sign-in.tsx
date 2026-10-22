@@ -13,9 +13,9 @@ export type Locked = Extract<LockState, { locked: true }>;
 /**
  * The last screen of the first-run flow, and the whole of the gate afterwards.
  *
- * `lock` being `null` means there is no desktop bridge at all — nothing to sign
- * in with. `step` is passed only while this is running as part of onboarding;
- * on a later sign-out it stands on its own, with no dots under it.
+ * A null `lock` means there is no desktop bridge, so nothing to sign in with.
+ * `step` is passed only while this runs as part of onboarding. On a later
+ * sign-out the screen stands on its own, with no dots under it.
  */
 export function SignIn({ lock, step }: { lock: Locked | null; step?: Step }) {
   const busy = useSession((state) => state.busy);
@@ -61,16 +61,16 @@ export function SignIn({ lock, step }: { lock: Locked | null; step?: Step }) {
 
       {busy ? (
         <div className="flex w-full flex-col items-center gap-4">
-          {/* The wait has a heartbeat. The heading says what to go and do; this
-              says the app is still listening while you do it — a screen that
-              can sit here for a minute with nothing moving reads as hung. */}
+          {/* The wait has a heartbeat. The heading says what to go and do;
+              this says the app is still listening. A screen that sits for a
+              minute with nothing moving reads as hung. */}
           <div
             role="status"
             className="text-muted-foreground flex items-center gap-2 text-[13px]"
           >
-            {/* ⚠️ `startup-loading-spinner` carries the keyframes AND the
+            {/* NOTE: `startup-loading-spinner` carries the keyframes and the
                 reduced-motion fallback (a static, darker ring) from app.css.
-                A bare `animate-spin` here would spin for someone who asked the
+                A bare `animate-spin` would spin for someone who asked the
                 system for no animation. */}
             <span
               aria-hidden
@@ -79,8 +79,8 @@ export function SignIn({ lock, step }: { lock: Locked | null; step?: Step }) {
             Signing in…
           </div>
           {/* Not full width, unlike the button it replaced: the primary action
-              is happening in another window, and the way out of it should not
-              be the biggest thing on screen. */}
+              happens in another window, and the way out of it should not be
+              the biggest thing on screen. */}
           <Button
             variant="outline"
             size="lg"
@@ -91,9 +91,8 @@ export function SignIn({ lock, step }: { lock: Locked | null; step?: Step }) {
           {progress?.mode === "loopback" ? (
             <p className="text-muted-foreground text-xs leading-relaxed">
               If no browser opened, copy this link into one:{" "}
-              {/* Shown as text rather than a link on purpose: main blocks
-                  navigation away from the app origin, so an anchor here would
-                  look clickable and do nothing. */}
+              {/* Text, not a link: main blocks navigation away from the app
+                  origin, so an anchor would look clickable and do nothing. */}
               <code className="break-all select-all">
                 {progress.authorizeUrl}
               </code>
@@ -111,8 +110,8 @@ export function SignIn({ lock, step }: { lock: Locked | null; step?: Step }) {
         </div>
       ) : lock !== null ? (
         // Full-width and taller than the app's own buttons, like the steps
-        // before it: on a screen with exactly one thing to do, the button is
-        // the screen rather than a control sitting on it.
+        // before it: on a screen with one thing to do, the button is the
+        // screen rather than a control sitting on it.
         <div className="flex w-full flex-col items-center gap-2">
           <Button
             size="lg"
@@ -121,11 +120,11 @@ export function SignIn({ lock, step }: { lock: Locked | null; step?: Step }) {
           >
             {error ? "Try again" : "Sign in with your browser"}
           </Button>
-          {/* FE-52/D5: the app works without an account. Ghost, not a second
-              full-width button: signing in is still what most people came for,
-              and the way past it should not compete with it. Only for someone
-              signed OUT — a revoked machine has a credential on disk to deal
-              with first, and the screen is about that. */}
+          {/* The app works without an account (FE-52/D5). Ghost, not a second
+              full-width button: signing in is what most people came for, and
+              the way past it should not compete. Only for someone signed out:
+              a revoked machine has a credential on disk to deal with first,
+              and the screen is about that. */}
           {lock.reason === "signed-out" && (
             <>
               <Button
@@ -153,11 +152,10 @@ export function SignIn({ lock, step }: { lock: Locked | null; step?: Step }) {
           >
             {error}
           </p>
-          {/* ⚠️ R1 lives HERE now, not under every healthy sign-in. The gate is
-              still the only screen someone locked out can reach, so what it was
-              talking to has to be readable from it — but that is a question
-              nobody asks until it fails, and answering it unprompted was the
-              first thing a new user read about the app. */}
+          {/* The API origin shows only after a failure. The gate is the only
+              screen someone locked out can reach, so what it talked to must be
+              readable here. But nobody asks until it fails, and shown
+              unprompted it would be the first thing a new user reads. */}
           <p className="text-muted-foreground text-xs leading-relaxed break-all">
             Signing in against{" "}
             <code className="select-all">{session?.apiUrl ?? "—"}</code>

@@ -1,6 +1,5 @@
-// What the rail and the agent view say about Codex's goals (FE-41), with no
-// React in sight: how a goal's state reads. Codex's usage windows are drawn
-// by the terminal bar's usage strip (FE-54).
+// How the rail and the agent view word Codex's goals, with no React.
+// Codex's usage windows are drawn by the terminal bar's usage strip.
 import type { CodexGoal, CodexGoalStatus } from "../../shared/terminal";
 
 /** A goal's state in words, short enough for a rail badge. */

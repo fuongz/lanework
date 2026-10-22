@@ -11,12 +11,11 @@ import {
 } from "#/components/ui/empty";
 
 /**
- * Strip a trailing "Try again" from a message that is about to sit above a
- * button saying exactly that.
+ * Strip a trailing "Try again" from a message shown above a retry button.
  *
- * ⚠️ Main writes messages for a person, and most of them end by suggesting a
- * retry — good advice in a log line, a duplicate under a retry button. The
- * REASON is the part worth keeping; the instruction is the button's job.
+ * Most of main's messages end by suggesting a retry: good advice in a log
+ * line, a duplicate above the button. The reason is the part worth keeping;
+ * the instruction is the button's job.
  */
 function withoutRetryHint(message: string): string {
   return message.replace(/[\s.]*(?:Please\s+)?try again\.?\s*$/i, ".");
@@ -25,10 +24,9 @@ function withoutRetryHint(message: string): string {
 /**
  * A failure that occupies the whole pane.
  *
- * ⚠️ For errors that ARE the screen — nothing loaded, so there is nothing else
- * to look at. A failure that lands on top of a working board stays an `Alert`
- * banner: turning that into a full-pane state would hide the very cards the
- * user still has.
+ * For errors that are the screen: nothing loaded, so there is nothing else to
+ * look at. A failure on top of a working board stays an `Alert` banner, so it
+ * does not hide the cards the user still has.
  */
 export function ErrorState({
   title,

@@ -7,25 +7,19 @@ import { tags } from "@lezer/highlight";
 import { useEffect, useRef } from "react";
 
 /**
- * Markdown, edited as markdown.
+ * A markdown editor that edits the text itself, built on CodeMirror.
  *
- * ⚠️ CodeMirror over a rich-text editor, and the reason is the file rather than
- * the typing. A card's body is committed markdown — it lands in
- * `.agents/reviews/*.md`, agents write it through the MCP server, and people
- * read it in a diff. Every WYSIWYG editor parses to a document model and
- * re-serializes on the way out, which renormalizes list markers, escapes and
- * blank lines; changing one word in a card an agent wrote would produce a
- * forty-line diff. This edits the text buffer, so what goes in comes out.
- *
- * ⚠️ Not `basicSetup`. That bundle brings line numbers, a fold gutter, a
- * highlighted active line and bracket matching — a code editor's furniture on a
- * surface for prose. What is here is what prose actually needs: wrapping,
- * history, list continuation and the markdown grammar.
- *
- * ⚠️ Fenced code blocks are highlighted as markdown, NOT by nested language.
- * `@codemirror/language-data` would add that and pull every grammar it knows
- * into the bundle; the card bodies this edits are prose with the occasional
- * snippet, and a megabyte of grammars is not what makes them readable.
+ * - NOTE: CodeMirror, not a rich-text editor. A card's body is markdown that
+ *   agents write through the MCP server. A WYSIWYG editor parses to a
+ *   document model and re-serializes, renormalizing list markers, escapes and
+ *   blank lines, so changing one word in a card an agent wrote would rewrite
+ *   the whole body. This edits the text buffer: what goes in comes out.
+ * - Not `basicSetup`: line numbers, a fold gutter, an active-line highlight
+ *   and bracket matching are a code editor's furniture. Prose needs wrapping,
+ *   history, list continuation and the markdown grammar.
+ * - Fenced code blocks are highlighted as markdown, not by nested language.
+ *   `@codemirror/language-data` would pull every grammar it knows into the
+ *   bundle for bodies that are prose with the occasional snippet.
  */
 export function MarkdownEditor({
   value,
@@ -39,9 +33,9 @@ export function MarkdownEditor({
 }: {
   value: string;
   onChange: (next: string) => void;
-  /** ⌘↵ — bound here because the editor would otherwise eat it. */
+  /** On ⌘↵, bound here because the editor would otherwise eat it. */
   onSubmit?: () => void;
-  /** Escape — same reason. */
+  /** On Escape, bound here for the same reason. */
   onCancel?: () => void;
   label: string;
   placeholder?: string;
@@ -50,10 +44,9 @@ export function MarkdownEditor({
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
-  // ⚠️ EVERY prop the build effect reads lives in this ref, and the editor is
-  // built ONCE. Listing them as dependencies instead would rebuild the whole
-  // editor on each keystroke — `value` changes every one — and rebuilding drops
-  // the undo history and the cursor with it.
+  // NOTE: Every prop the build effect reads lives in this ref, and the editor
+  // is built once. As dependencies they would rebuild the editor on each
+  // keystroke (`value` changes every time), dropping undo history and cursor.
   const latest = useRef({ value, readOnly, onChange, onSubmit, onCancel });
   latest.current = { value, readOnly, onChange, onSubmit, onCancel };
 
@@ -73,11 +66,10 @@ export function MarkdownEditor({
           READ_ONLY.of(EditorState.readOnly.of(latest.current.readOnly)),
           THEME,
           EditorView.contentAttributes.of({ "aria-label": label }),
-          // ⚠️ HIGHEST precedence, and both bindings are load-bearing. The
-          // default keymap binds Mod-Enter to `insertBlankLine` and Escape to
-          // `simplifySelection`, so a composer whose Save is ⌘↵ and whose way
-          // out is Escape would find both swallowed by the field a person is
-          // most likely to be in when they use them.
+          // NOTE: Highest precedence. The default keymap binds Mod-Enter to
+          // `insertBlankLine` and Escape to `simplifySelection`, so a
+          // composer's ⌘↵ save and Escape exit would be swallowed by the
+          // field a person is most likely to be in.
           Prec.highest(
             keymap.of([
               {
@@ -115,9 +107,9 @@ export function MarkdownEditor({
     // Built once. `value` is synced by the effect below, never by a rebuild.
   }, [label, hint]);
 
-  // ⚠️ Compared against the editor's OWN document before dispatching. Without
-  // that guard every keystroke would echo back through this effect, reset the
-  // document to the same text and put the cursor at the start of the line.
+  // NOTE: Compared against the editor's own document before dispatching.
+  // Without that guard every keystroke echoes back through this effect, resets
+  // the document to the same text and puts the cursor at the start.
   useEffect(() => {
     const editor = view.current;
     if (!editor) return;
@@ -138,14 +130,15 @@ export function MarkdownEditor({
 }
 
 /**
- * ⚠️ A compartment, so read-only can be toggled without rebuilding the editor.
+ * The compartment that toggles read-only without rebuilding the editor.
+ *
  * Going offline mid-sentence must not cost somebody their undo history. One
  * instance for the module is correct: a compartment is a key, and each editor
  * resolves it against its own configuration.
  */
 const READ_ONLY = new Compartment();
 
-/** The app's own type, not a code editor's. */
+/** The editor's look, in the app's own type rather than a code editor's. */
 const THEME = EditorView.theme({
   "&": {
     height: "100%",
@@ -153,12 +146,12 @@ const THEME = EditorView.theme({
     color: "var(--foreground)",
     backgroundColor: "transparent",
   },
-  // ⚠️ The ring is dropped, like the title field beside it. These two ARE the
-  // panel, and a box drawn around one on focus reads as a form on a surface
-  // meant to read as a document.
+  // No focus ring, like the title field beside it: these two are the panel,
+  // and a box drawn around one reads as a form on a surface meant to read as
+  // a document.
   "&.cm-focused": { outline: "none" },
-  // The content font (FE-21): what is written here is what `MarkdownBody`
-  // shows once saved, and should not change face on the way.
+  // The content font: what is written here is what `MarkdownBody` shows once
+  // saved, and should not change face on the way.
   ".cm-scroller": {
     fontFamily: "var(--content-font)",
     fontWeight: "var(--content-font-weight)",
@@ -176,11 +169,11 @@ const THEME = EditorView.theme({
 });
 
 /**
- * Markdown seen while it is being written.
+ * Markdown highlighting while it is being written.
  *
- * ⚠️ Weight and colour only — the syntax characters stay on screen. An editor
+ * Weight and colour only; the syntax characters stay on screen. An editor
  * that hid the `##` would be a WYSIWYG editor with extra steps, and the person
- * writing a card has to be able to see the markup they are about to commit.
+ * writing a card has to see the markup they are about to save.
  */
 const HIGHLIGHT = HighlightStyle.define([
   { tag: tags.heading, fontWeight: "600" },

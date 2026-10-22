@@ -20,9 +20,10 @@ import { useBoard } from "#/stores/board";
 const ROUTE = "/_app/w/$slug/agents/chat/new" as const;
 
 /**
- * A new conversation (FE-62): the composer alone, under a question. The
- * model picked picks the CLI — Claude Code or Codex — so the page names no
- * agent until then; sending starts the user's own `claude` or `codex` on a
+ * The new-conversation page: the composer alone, under a question.
+ *
+ * The model picked picks the CLI — Claude Code or Codex — so the page names
+ * no agent until then. Sending starts the user's own `claude` or `codex` on a
  * new conversation and opens it as a chat.
  */
 export function NewConversationView() {

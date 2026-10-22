@@ -7,7 +7,10 @@ import type { MachineRecord } from "../auth/store";
 import { appHomeDir } from "../paths";
 
 /**
- * Include the origin so identical IDs on another control plane cannot share state.
+ * The file key for one Lanework account on one API origin.
+ *
+ * The origin is part of it, so identical ids on another control plane cannot
+ * share state.
  *
  * NOTE: Anything else filed per Lanework account must reuse this function. A
  * second copy would drift, and one account would read another's rows.
@@ -31,12 +34,13 @@ function activeFile(record: MachineRecord): string {
 /**
  * What the last selection named.
  *
- * ⚠️ Two shapes, and a `v2` file may carry EITHER key. The cloud workspace id is
- * preferred — it is what every board call is addressed by, and a rename cannot
- * move it — but a service that predates the id field gives the app nothing else
- * to remember, and "no id" must not mean "no selection". A `v1` file (a bare
- * slug) is honoured for the same reason: dropping it would silently move every
- * existing user back to "no workspace selected" on upgrade.
+ * NOTE: Two shapes, and a `v2` file may carry either key.
+ * - The cloud workspace id is preferred: every board call is addressed by it,
+ *   and a rename cannot move it.
+ * - A service that predates the id field gives the app only the slug, and
+ *   "no id" must not mean "no selection".
+ * - A `v1` file (a bare slug) is read for the same reason. Dropping it would
+ *   move every existing user back to "no workspace selected" on upgrade.
  */
 type ActiveSelection =
   | { by: "id"; value: string }
@@ -93,10 +97,9 @@ export async function writeAtomic(
 /**
  * Remember a selection.
  *
- * ⚠️ Both keys are written, because only one of them may exist. The id is what
- * the board needs; the slug is what an older service can still be matched on,
- * and keeping it is the difference between "your project is remembered" and
- * "choose a workspace" every time the app opens against such a service.
+ * NOTE: Both keys are written, because only one of them may exist. The board
+ * needs the id. An older service can only be matched on the slug; without it
+ * the app asks "choose a workspace" every time it opens against one.
  */
 export async function writeActive(
   record: MachineRecord,
@@ -113,8 +116,8 @@ export async function writeActive(
 }
 
 function boardFile(record: MachineRecord, workspaceId: string): string {
-  // The workspace id is hashed too: it comes from the service, and a value with
-  // a slash in it must not be able to choose a path.
+  // The workspace id is hashed too: it comes from the service, and a value
+  // with a slash in it must not be able to choose a path.
   const key = createHash("sha256")
     .update(`${accountKey(record)}:${workspaceId}`)
     .digest("hex");
@@ -122,12 +125,12 @@ function boardFile(record: MachineRecord, workspaceId: string): string {
 }
 
 /**
- * The last board read that succeeded.
+ * The last board read that succeeded, per account and per workspace.
  *
- * ⚠️ Derived, deletable, per account and per workspace — and the ONLY reason it
- * exists is so a failed read can show the last good copy WITH a label instead of
- * an empty board. "Nothing here" and "I could not ask" look identical on screen,
- * and the first one invites somebody to start typing a card that already exists.
+ * Derived and deletable. It exists only so a failed read can show the last
+ * good copy, labelled, instead of an empty board. "Nothing here" and "I could
+ * not ask" look the same on screen, and the first invites someone to retype a
+ * card that already exists.
  */
 export async function readBoardCache(
   record: MachineRecord,
@@ -139,16 +142,16 @@ export async function readBoardCache(
     ) as { v?: unknown; view?: BoardView };
     if (data?.v !== 1 || !data.view || data.view.workspaceId !== workspaceId)
       return null;
-    // ⚠️ Fields added to `BoardView` after a cache was written are ABSENT from
-    // it, and the read above is a cast rather than a parse — so `labels` comes
-    // back `undefined` and the first `.map` on it takes the offline board down.
-    // Filled in here rather than by bumping `v`, which would throw away every
-    // existing cache and leave a user with no board at all on the one launch
-    // they have no network for.
+    // NOTE: Fields added to `BoardView` after a cache was written are absent
+    // from it, and the read above is a cast, not a parse. `labels` would come
+    // back `undefined` and the first `.map` on it would take the offline board
+    // down. They are filled in here rather than by bumping `v`, which would
+    // drop every cache and leave a user with no board on the one launch they
+    // have no network for.
     //
-    // ⚠️ The card fields are filled with `null`, not `[]`/`false`. A cached
-    // board is a LIST read, where those five are legitimately "not asked" — and
-    // `false` there would draw "Subscribe" on a card the reader follows.
+    // NOTE: The card fields are filled with `null`, not `[]` or `false`. A
+    // cached board is a list read, where those five mean "not asked", and
+    // `false` would draw "Subscribe" on a card the reader follows.
     return {
       ...data.view,
       labels: data.view.labels ?? [],
@@ -161,8 +164,7 @@ export async function readBoardCache(
         commentCount: card.commentCount ?? null,
         attachments: card.attachments ?? null,
       })),
-      // Whatever it said when it was written, reading it back is by definition
-      // serving a copy.
+      // Whatever it said when written, reading it back is serving a copy.
       stale: true,
     };
   } catch {
@@ -181,8 +183,8 @@ export async function writeBoardCache(
     boardFile(record, workspaceId),
     JSON.stringify({ v: 1, view }),
   ).catch(() => {
-    // A board that cannot be cached still works; failing the read over it would
-    // trade a real answer for a housekeeping error.
+    // A board that cannot be cached still works. Failing the read over it
+    // would trade a real answer for a housekeeping error.
   });
 }
 
@@ -191,29 +193,23 @@ function foldersFile(record: MachineRecord): string {
 }
 
 /**
- * Which folders on this machine a workspace is assembled from, by SLUG.
+ * Which folders on this machine each workspace is made of, by slug.
  *
- * ⚠️ A LIST, primary first. A project is created against the folders a person
- * picked in one chooser — several of them, for a repo split across checkouts —
- * and `paths[0]` is the one every single-folder surface means: the migration
- * reader, "open in file manager", the rail's label. Order carries that fact
- * rather than a second field, so there is no way to store a primary that is not
- * in the list.
+ * - A list, primary first. A project is created against the folders picked in
+ *   one chooser (several, for a repo split across checkouts). `paths[0]` is
+ *   the one every single-folder surface means: the migration reader, "open in
+ *   file manager", the rail's label. Order carries that, so a primary that is
+ *   not in the list cannot be stored.
+ * - A `v1` file holds one path per slug and is read as a list of one.
+ *   Dropping it would unlink every folder existing users have chosen.
+ * - By slug, unlike {@link readActive}. A service that predates the workspace
+ *   id sends none, and that is the case this link matters most for: the
+ *   screen that says the board cannot be opened. The slug is safe to key on:
+ *   no route on the service can change one.
  *
- * ⚠️ A `v1` file holds ONE path per slug and is read as a list of one. Dropping
- * it would silently unlink every folder every existing user has chosen.
- *
- * ⚠️ By slug, and that is not the same choice `readActive` makes. The cloud
- * workspace id is absent exactly when this feature matters most — a service
- * that predates the field sends none, which is the screen that tells the user
- * their board cannot be opened — so an id-keyed link would be unavailable in
- * its own main case. And the slug is safe to key on: no route on the service
- * can change one, so a rename cannot strand a link written here.
- *
- * ⚠️ Per account and per API origin, like everything else in this file: two
+ * NOTE: Per account and per API origin, like everything in this file. Two
  * accounts on one machine may have projects with the same slug in different
- * folders, and one of them reading the other's path is a leak with a plausible
- * excuse.
+ * folders, and one reading the other's path is a leak.
  */
 export async function readFolders(
   record: MachineRecord,
@@ -251,12 +247,12 @@ export async function readFolders(
 }
 
 /**
- * Link folders to a workspace — primary first — or unlink it with `null`.
+ * Link folders to a workspace, primary first, or unlink it with `null`.
  *
- * ⚠️ A REPLACE, not an append. Every caller states the whole set it means: the
- * create dialog knows what was picked, "Change folder" means one folder now,
- * and an append would make "I chose the wrong one" unfixable from either.
- * Duplicates are dropped, because the same folder twice is one folder.
+ * A replace, not an append. Every caller states the whole set: the create
+ * dialog knows what was picked, and "Change folder" means one folder now. An
+ * append would make "I chose the wrong one" unfixable from either. Duplicates
+ * are dropped.
  */
 export async function writeFolders(
   record: MachineRecord,
@@ -281,19 +277,17 @@ function runFile(record: MachineRecord, workspaceId: string): string {
 /**
  * What the last import run did, per record.
  *
- * ⚠️ Written even when the run failed — especially then. "Which cards landed
- * before the network went?" is the one question a resumed migration needs
- * answered, and the API's idempotency only helps a client that knows what to
- * send again.
- *
- * ⚠️ Under the app home, never in the repo. A migration is a fact about THIS
- * machine's copy of the data, and writing it into `.agents/` would put a
- * machine-local receipt into everybody's git history — while the whole promise
- * of the import is that the source folder is left exactly as it was.
+ * - Written even when the run failed, and especially then. "Which cards
+ *   landed before the network went?" is the one question a resumed migration
+ *   needs answered. The API's idempotency only helps a client that knows what
+ *   to send again.
+ * - Under the app home, never in the repo. A migration is a fact about this
+ *   machine's copy, and a receipt in `.agents/` would land in everybody's git
+ *   history. The import promises to leave the source folder as it was.
  */
 interface MigrationRun {
   workspaceId: string;
-  /** ISO, when the run finished. */
+  /** When the run finished, as an ISO timestamp. */
   at: string;
   summary: Record<string, number>;
   receipts: {

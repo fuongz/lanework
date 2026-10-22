@@ -1,7 +1,7 @@
-// Everything the issue views need to decide WHAT to show, with no opinion about
-// how it looks and no React in sight. Grouping and filtering are the two things
-// that are easy to get subtly wrong and impossible to see wrong in a screenshot,
-// so they live here where a test can hold them still.
+// Everything the issue views need to decide WHAT to show, with no opinion
+// about how it looks and no React. Grouping and filtering are easy to get
+// subtly wrong and impossible to see wrong in a screenshot, so they live here
+// where a test can hold them still.
 import type {
   BoardCard,
   BoardCategory,
@@ -19,8 +19,8 @@ export const isGroupBy = (value: unknown): value is GroupBy =>
 /**
  * A filter, as it survives in the URL.
  *
- * ⚠️ One value per axis, except status: that one is a comma-separated set of
- * lane keys (FE-75), and `"none"` lets nothing through.
+ * One value per axis, except status: a comma-separated set of lane keys, and
+ * `"none"` lets nothing through.
  */
 interface IssueFilters {
   status?: string;
@@ -33,14 +33,17 @@ interface IssueGroup {
   key: string;
   name: string;
   tone: string;
-  /** Lane role when grouping by status — `done` and `archive` start collapsed. */
+  /**
+   * The lane's role when grouping by status: `done` and `archive` start
+   * collapsed.
+   */
   role: string | null;
   cards: BoardCard[];
 }
 
 /**
  * The order the status filter lists lanes in: the work being done first, then
- * what is next, then the rest (FE-75).
+ * what is next, then the rest.
  */
 const ROLE_ORDER = ["active", "start", "intake", "done", "archive"];
 
@@ -64,8 +67,9 @@ export function byStatusOrder<T extends { role: string | null }>(
 }
 
 /**
- * The lanes the list shows when the URL names none: everything not finished
- * (FE-75). Backlog, To-Do and In Progress on a default board.
+ * The lanes the list shows when the URL names none: everything not finished.
+ *
+ * Backlog, To-Do and In Progress on a default board.
  */
 export function defaultStatusKeys(
   columns: readonly { key: string; role: string | null }[],
@@ -97,7 +101,11 @@ export const PRIORITY_GROUPS = [
   { key: "none", name: "No priority", tone: "neutral" },
 ] as const;
 
-/** `rank` is a fractional index, so it sorts as a plain string — never a number. */
+/**
+ * Cards in board order.
+ *
+ * `rank` is a fractional index, so it sorts as a plain string, never a number.
+ */
 export const byRank = (a: BoardCard, b: BoardCard): number =>
   a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : a.id.localeCompare(b.id);
 
@@ -120,12 +128,12 @@ export function filterCards(
 /**
  * The board, cut into the groups one view renders.
  *
- * ⚠️ EVERY group is returned, including empty ones, when grouping by status.
- * A lane that vanishes because nothing is in it makes a board look like it has
- * fewer states than it does — and on a board view, an empty lane is also the
- * only place a card can be dropped INTO. Grouping by category or priority drops
- * the empties, because there the group is a property of the cards rather than a
- * shape of the board.
+ * NOTE: EVERY group is returned, including empty ones, when grouping by
+ * status. A lane that vanishes because nothing is in it makes a board look
+ * like it has fewer states than it does, and on a board view an empty lane is
+ * the only place a card can be dropped INTO. Grouping by category or priority
+ * drops the empties: there the group is a property of the cards, not a shape
+ * of the board.
  */
 export function groupIssues(
   view: Pick<BoardView, "columns" | "categories" | "cards">,
@@ -161,9 +169,9 @@ export function groupIssues(
     role: null,
     cards: bucket(category.key),
   }));
-  // ⚠️ A card with no category is not invisible. The board mints task ids from
-  // categories, so an uncategorised card is exactly the one somebody still has
-  // to file — dropping it from this view would hide the work it represents.
+  // NOTE: A card with no category is not invisible. The board mints task ids
+  // from categories, so an uncategorised card is the one somebody still has
+  // to file; dropping it from this view would hide the work it represents.
   const loose = bucket("none");
   if (loose.length)
     groups.push({
@@ -189,9 +197,9 @@ export const subIssues = (cards: BoardCard[], parentId: string): BoardCard[] =>
 /**
  * `2/5` for a card that has children, or null for one that has none.
  *
- * ⚠️ "Done" is whichever lanes the BOARD gives the `done` role, not a lane
- * called "Done". A board that renamed its last lane still has one, and counting
- * by name would report every card on it as unfinished.
+ * NOTE: "Done" is whichever lanes the BOARD gives the `done` role, not a lane
+ * called "Done". A board that renamed its last lane still has one, and
+ * counting by name would report every card on it as unfinished.
  */
 export function subIssueProgress(
   cards: BoardCard[],
@@ -235,12 +243,12 @@ export const categoryOf = (
 /**
  * How many boxes are ticked, or null when nobody has said.
  *
- * ⚠️ The board's own `checklistProgress` wins over counting `checklist`. Both
- * are right when both are there, but only the count arrives on a LIST read —
- * this used to return null for every card on a board, which is why the `3/7`
- * beside a row was dead code from the day it was written.
+ * NOTE: The board's own `checklistProgress` wins over counting `checklist`.
+ * Both are right when both are there, but only the count arrives on a LIST
+ * read; counting alone would give null for every card on a board, and no
+ * `3/7` beside a row.
  *
- * ⚠️ Still falls back to counting the rows. The count comes from a control
+ * It still falls back to counting the rows. The count comes from a control
  * plane this app does not deploy in lockstep with, so a service that has not
  * shipped it yet keeps working on the one screen that reads a card whole.
  */
@@ -258,15 +266,15 @@ export function checklistProgress(
 /**
  * "8 days ago", "just now" — an age written out, for prose.
  *
- * ⚠️ A second formatter beside `shortAge`, not a replacement for it. They serve
- * two different jobs: a lane row has space for `3d` and nothing more, while an
- * activity line is a SENTENCE — "decio created the issue. 3d" does not read as
- * one. `Intl.RelativeTimeFormat` so the wording follows the user's locale
+ * A second formatter beside {@link shortAge}, not a replacement for it. A lane
+ * row has space for `3d` and nothing more, while an activity line is a
+ * SENTENCE — "decio created the issue. 3d" does not read as one.
+ * `Intl.RelativeTimeFormat` makes the wording follow the user's locale
  * instead of an English template.
  *
- * ⚠️ `now` is a parameter for the same reason it is on `shortAge`: a function
- * that reads the clock cannot be tested at the boundary where this kind of
- * formatter goes wrong.
+ * `now` is a parameter for the same reason it is on {@link shortAge}: a
+ * function that reads the clock cannot be tested at the boundary where this
+ * kind of formatter goes wrong.
  */
 export function relativeTime(iso: string | null, now: number): string {
   if (!iso) return "";
@@ -274,8 +282,8 @@ export function relativeTime(iso: string | null, now: number): string {
   if (Number.isNaN(at)) return "";
   const seconds = Math.round((now - at) / 1000);
   // Clock skew between this machine and the service can put an event a few
-  // seconds in the future; "in 4 seconds" about something that just happened is
-  // worse than rounding it to now.
+  // seconds in the future; "in 4 seconds" about something that just happened
+  // is worse than rounding it to now.
   if (seconds < 45) return "just now";
   const format = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
   const scales: [Intl.RelativeTimeFormatUnit, number][] = [
@@ -296,9 +304,9 @@ export function relativeTime(iso: string | null, now: number): string {
 /**
  * "2h", "3d", "just now" — the age of a card at a glance.
  *
- * ⚠️ `now` is a parameter rather than `Date.now()`. A function that reads the
+ * `now` is a parameter rather than `Date.now()`. A function that reads the
  * clock cannot be tested at a boundary, and "1 day ago vs 23 hours ago" is
- * exactly where this kind of formatter goes wrong.
+ * where this kind of formatter goes wrong.
  */
 export function shortAge(iso: string | null, now: number): string {
   if (!iso) return "";

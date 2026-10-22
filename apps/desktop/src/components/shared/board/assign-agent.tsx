@@ -61,17 +61,17 @@ interface Asking {
 }
 
 /**
- * Hand a card to Claude or Codex (FE-34): a NEW agent tab, briefed by the
- * host to work the card end to end.
+ * Hand a card to Claude or Codex: a new agent tab, briefed by the host to
+ * work the card end to end.
  *
- * ⚠️ One hook for the header's menu AND the card's right-click menu, so both
- * ask the same question the same way. The dialog it answers is rendered by
- * whoever calls it, next to their own menu.
- *
- * ⚠️ The decisions gate first (AGENTS.md). Settled, the agent starts at once.
- * Open, the dialog says exactly which boxes approving the recommendations
- * would tick (D5a) — and ticks them HERE, in one write, before the agent
- * exists (D4a). The agent is never asked to approve anything itself.
+ * - One hook for the header's menu and the card's right-click menu, so both
+ *   ask the same question the same way. The caller renders the dialog it
+ *   returns, next to its own menu.
+ * - The decisions gate first (`AGENTS.md`). Settled, the agent starts at
+ *   once. Open, the dialog says which boxes approving the recommendations
+ *   would tick (FE-34/D5a), and ticks them here, in one write, before the
+ *   agent exists (FE-34/D4a). The agent is never asked to approve anything
+ *   itself.
  */
 export function useAssignAgent(card: BoardCard) {
   const { slug } = useParams({ strict: false }) as { slug?: string };
@@ -91,9 +91,9 @@ export function useAssignAgent(card: BoardCard) {
   const [busy, setBusy] = useState(false);
   const ref = card.taskId ?? card.id;
 
-  // ⚠️ D8: a card already being worked here is OPENED, never handed out a
-  // second time. Its own tab first — the one this app started for it — then
-  // any conversation on this machine whose latest MCP call named it (FE-27).
+  // A card already being worked here is opened, never handed out a second
+  // time (FE-34/D8). Its own tab first (the one this app started for it), then
+  // any conversation on this machine whose latest MCP call named it.
   const tab = useAgentTerminals((state) =>
     workspace
       ? (state.sessions[workspace] ?? []).find(
@@ -149,10 +149,10 @@ export function useAssignAgent(card: BoardCard) {
         );
       current = approved;
     }
-    // ⚠️ D2: the agent goes FIRST on the card's agents — `agents[0]` is the
-    // dispatch role — and nobody else's assignment is dropped to make room.
-    // Best effort: a card that could not be relabelled is still a card the
-    // agent can work, and a failed write reports itself on the board.
+    // The agent goes first on the card's agents, since `agents[0]` is the
+    // dispatch role, and nobody else's assignment is dropped to make room
+    // (FE-34/D2). Best effort: a card that could not be relabelled is still a
+    // card the agent can work, and a failed write reports itself on the board.
     const others = current.assignees?.agents ?? [];
     if (others[0] !== agent)
       await update(
@@ -198,7 +198,7 @@ export function useAssignAgent(card: BoardCard) {
     }
   }
 
-  /** One of the dialog's two ways forward (D4a or D6). */
+  /** One of the dialog's two ways forward (FE-34/D4a or D6). */
   async function answer(mode: CardBriefMode) {
     if (!asking || busy) return;
     setBusy(true);
@@ -242,11 +242,11 @@ export function useAssignAgent(card: BoardCard) {
 }
 
 /**
- * The confirmation (FE-34/D4a, D5a, D6).
+ * The confirmation before an agent starts (FE-34/D4a, D5a, D6).
  *
- * ⚠️ It LISTS what approving ticks, box by box, rather than counting. "Approve
- * 4 decisions" is a blank cheque; the keys and their words are what a person
- * is agreeing to.
+ * It lists what approving ticks, box by box, rather than counting. "Approve 4
+ * decisions" is a blank cheque; the keys and their words are what a person is
+ * agreeing to.
  */
 function AssignAgentDialog({
   name,
@@ -333,7 +333,7 @@ function AssignAgentDialog({
 
 /**
  * Issue detail's "Assign to agent ▾" (FE-34/D1a), or "Open session" when the
- * card already has one (D8).
+ * card already has one (FE-34/D8).
  */
 export function AssignAgentButton({
   card,
@@ -372,8 +372,8 @@ export function AssignAgentButton({
         }}
       >
         {unsaved ? (
-          // ⚠️ A disabled trigger takes no pointer events, so the tooltip
-          // that says why hangs off a wrapper around it.
+          // A disabled trigger takes no pointer events, so the tooltip that
+          // says why hangs off a wrapper around it.
           <Tooltip>
             <TooltipTrigger render={<span />}>{trigger}</TooltipTrigger>
             <TooltipContent>Save your ticks first</TooltipContent>
@@ -395,8 +395,10 @@ export function AssignAgentButton({
 }
 
 /**
- * The same choice in a card's right-click menu (FE-34/D1a). Rendered inside
- * `IssueMenu`'s content; `assign` is that menu's `useAssignAgent`.
+ * The same choice in a card's right-click menu (FE-34/D1a).
+ *
+ * Rendered inside {@link IssueMenu}'s content; `assign` is that menu's
+ * {@link useAssignAgent}.
  */
 export function AssignAgentMenuItems({
   assign,
@@ -422,7 +424,7 @@ export function AssignAgentMenuItems({
   );
 }
 
-/** One item per agent this machine has — or a line saying there are none. */
+/** One item per agent this machine has, or a line saying there are none. */
 function AgentItems({
   agents,
   disabled = false,

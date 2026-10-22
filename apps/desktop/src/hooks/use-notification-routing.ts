@@ -2,12 +2,15 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 /**
- * The window's half of OS notifications (FE-70): tell main which path is on
- * screen, so a focused window is not told what it already shows (D2a), and go
- * where a clicked notification points (D5).
+ * The window's half of OS notifications.
  *
- * ⚠️ At the root, not in `AppShell`: Settings is outside that shell, and a
- * click from there must still open the conversation or pull request.
+ * - Tells main which path is on screen, so a focused window is not told what
+ *   it already shows (FE-70/D2a).
+ * - Goes where a clicked notification points (FE-70/D5).
+ *
+ * NOTE: Call it at the root, not in {@link AppShell}. Settings is outside that
+ * shell, and a click from there must still open the conversation or pull
+ * request.
  */
 export function useNotificationRouting(): void {
   const navigate = useNavigate();

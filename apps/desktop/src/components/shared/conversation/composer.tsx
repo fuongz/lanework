@@ -39,7 +39,7 @@ import { AttachMenu, ModelMenu, PermissionMenu } from "./composer.menus";
 export interface ComposerHandle {
   /** Put `text` in the composer — a reply's quote — and focus it. */
   insert: (text: string) => void;
-  /** A queued message, back in the composer to be edited (FE-67). */
+  /** Put a queued message back in the composer to be edited. */
   restore: (taken: Unqueued) => void;
 }
 
@@ -97,9 +97,10 @@ function readBase64(file: File): Promise<string> {
 }
 
 /**
- * The composer (D8): where the next turn is written and sent — or queued
- * behind the running one — with attachments, `/` and `@` suggestions, and the
- * settings it is sent with.
+ * The composer, where the next turn is written and sent.
+ *
+ * A turn sent while one runs is queued behind it. The composer carries
+ * attachments, `/` and `@` suggestions, and the settings it is sent with.
  */
 export const Composer = forwardRef<
   ComposerHandle,
@@ -107,8 +108,9 @@ export const Composer = forwardRef<
     /** The project, for its branch switcher. */
     slug: string;
     /**
-     * Where the unsent text is kept (`./draft`): the conversation's id, or
-     * `new:<slug>`.
+     * Where the unsent text is kept in `./draft`.
+     *
+     * The conversation's id, or `new:<slug>` on the new-conversation page.
      */
     draftKey?: string;
     /** Take the caret on mount — the new-conversation page has nothing else. */
@@ -117,8 +119,9 @@ export const Composer = forwardRef<
     corner?: ReactNode;
     workspace: string;
     /**
-     * The CLI the conversation is on: its models only. Null on a new one,
-     * where the model picked picks the CLI.
+     * The CLI the conversation is on, whose models alone are offered.
+     *
+     * Null on a new conversation, where the model picked picks the CLI.
      */
     agent?: ConversationAgent | null;
     settings: ComposerSettings;
@@ -170,8 +173,10 @@ export const Composer = forwardRef<
   const picker = useRef<HTMLInputElement>(null);
   const asked = useRef(0);
   /**
-   * Where the caret goes once the next value is drawn. Placed in a layout
-   * effect, never a frame later: keys typed in between would land before it.
+   * Where the caret goes once the next value is drawn.
+   *
+   * Placed in a layout effect, never a frame later: keys typed in between
+   * would land before it.
    */
   const caret = useRef<number | null>(null);
   useLayoutEffect(() => {
@@ -205,8 +210,8 @@ export const Composer = forwardRef<
     return () => writeDraft(draftKey, latest.current);
   }, [draftKey]);
 
-  // Dictation (FE-69): the words heard go in where the caret was when the
-  // microphone opened, replacing what was selected — shown live, kept on ✓.
+  // Dictation: the words heard go in where the caret was when the microphone
+  // opened, replacing what was selected — shown live, kept on ✓.
   const anchor = useRef({ start: 0, end: 0 });
   const dictation = useDictation({
     onDone: (words) => {
@@ -234,8 +239,8 @@ export const Composer = forwardRef<
     if (dictation.status === "listening") dictation.finish();
     else if (!dictating) startDictation();
   };
-  // ⌘⇧M (D7): from the field, or from nowhere in particular — never while
-  // another field has the caret.
+  // ⌘⇧M: from the field, or from nowhere in particular — never while another
+  // field has the caret.
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (
@@ -394,8 +399,8 @@ export const Composer = forwardRef<
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    // While dictating the field is read-only: Esc is ✕ and Enter is ✓ (D7) —
-    // Enter never sends a message nobody has read yet.
+    // While dictating the field is read-only: Esc is ✕ and Enter is ✓. Enter
+    // never sends a message nobody has read yet.
     if (dictating) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -423,8 +428,8 @@ export const Composer = forwardRef<
         const line = value.lastIndexOf("\n", start - 1) + 1;
         node.setSelectionRange(line < start ? line : start - 1, start);
       }
-      // ⚠️ execCommand, not setText: the cut lands on the field's undo stack —
-      // ⌘Z brings it back — and fires the input onChange reads.
+      // NOTE: execCommand, not setText: the cut lands on the field's undo
+      // stack, so ⌘Z brings it back, and it fires the input onChange reads.
       document.execCommand("delete");
       return;
     }

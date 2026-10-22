@@ -1,6 +1,6 @@
 import { type GroupBy, isGroupBy } from "./board-view";
 
-/** The view state a URL carries. Every field optional; every field a plain string. */
+/** The view state a URL carries: every field optional, and a plain string. */
 export interface IssueSearch {
   group?: GroupBy;
   status?: string;

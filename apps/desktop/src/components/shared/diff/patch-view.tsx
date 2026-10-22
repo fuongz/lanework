@@ -16,31 +16,31 @@ import {
 import { DiffFileHeader } from "./diff-file-header";
 import { useDark } from "./use-dark";
 
-/**
- * A unified patch, rendered by `@pierre/diffs` — the part of the pull request
- * diff that does not care where the patch came from.
- *
- * ⚠️ Shared by the pull request's Code tab and the local repository's Changes
- * and History (FE-22). It takes a PATCH, not a pull request's file list: GitHub
- * hands over hunks that have to be given headers first, local git prints a
- * whole patch already, and both end here as the same string.
- *
- * ⚠️ `CodeView`, not `PatchDiff`. `PatchDiff` refuses a patch naming more than
- * one file — "Provided patch must contain exactly 1 file diff" — and `CodeView`
- * virtualizes, so a forty-file change renders what is on screen, not all of it.
- */
-
 interface FileCounts {
   additions: number;
   deletions: number;
 }
 
-/** Both sides of one file in full, for expanding the lines a patch leaves out. */
+/** Both sides of one file in full, to expand the lines a patch leaves out. */
 export type LoadSides = (
   oldPath: string,
   newPath: string,
 ) => Promise<{ oldText: string; newText: string }>;
 
+/**
+ * A unified patch, rendered by `@pierre/diffs`: the part of the pull request
+ * diff that does not care where the patch came from.
+ *
+ * Shared by the pull request's Code tab and the local repository's Changes
+ * and History. It takes a PATCH, not a pull request's file list: GitHub hands
+ * over hunks that need headers first, local git prints a whole patch, and
+ * both end here as the same string.
+ *
+ * `CodeView`, not `PatchDiff`. `PatchDiff` refuses a patch naming more than
+ * one file ("Provided patch must contain exactly 1 file diff"), and
+ * `CodeView` virtualizes, so a forty-file change renders what is on screen,
+ * not all of it.
+ */
 export function PatchView({
   patch,
   counts,
@@ -55,46 +55,37 @@ export function PatchView({
   /**
    * Line counts by path, from whoever produced the patch.
    *
-   * ⚠️ The caller's numbers, not ones summed from parsed hunks: they are the
-   * numbers the list beside the diff already shows, and a patch GitHub
+   * NOTE: The caller's numbers, not ones summed from parsed hunks: they are
+   * the numbers the list beside the diff already shows, and a patch GitHub
    * truncated has hunks that add up to less than what changed.
    */
   counts: Map<string, FileCounts>;
   loadSides: LoadSides;
   diffStyle: "split" | "unified";
-  /** A file to bring on screen; `at` moves on every request, even for the same one. */
+  /** A file to bring on screen; `at` moves on every request, even a repeat. */
   focus: { path: string; at: number } | null;
   /** Drawn above the first file, inside the scroller. */
   header?: ReactNode;
-  /** Per-file controls before the name — a stage checkbox. */
+  /** Per-file controls before the name: a stage checkbox. */
   fileLeading?: (path: string) => ReactNode;
-  /** Per-file controls after the counts — restore. */
+  /** Per-file controls after the counts: restore. */
   fileActions?: (path: string) => ReactNode;
 }) {
   const dark = useDark();
-  /**
-   * Which files are folded shut, by item id.
-   *
-   * ⚠️ Held HERE, not by the library. `collapsed` is a field on each item and
-   * `CodeView` is controlled, so the host owns the state and the control that
-   * flips it — the library ships neither.
-   */
+  // Which files are folded shut, by item id. Held HERE, not by the library:
+  // `collapsed` is a field on each item and `CodeView` is controlled, so the
+  // host owns the state and the control that flips it.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  /**
-   * The handle `focus` steers.
-   *
-   * ⚠️ `scrollTo` is the only way to reach a file that virtualization has not
-   * rendered yet. An anchor or a `scrollIntoView` on the header element works
-   * for the three files on screen and silently does nothing for the rest.
-   */
+  // The handle `focus` steers. NOTE: `scrollTo` is the only way to reach a
+  // file virtualization has not rendered yet. An anchor or `scrollIntoView`
+  // on the header works for the files on screen and silently does nothing
+  // for the rest.
   const view = useRef<CodeViewHandle<undefined, undefined>>(null);
 
-  /**
-   * ⚠️ Called only when somebody expands something — never as part of drawing
-   * the diff. A change touching forty files would otherwise be eighty reads for
-   * context nobody asked to see.
-   */
+  // Called only when somebody expands something, never to draw the diff. A
+  // change touching forty files would otherwise be eighty reads for context
+  // nobody asked to see.
   const loadDiffFiles = useCallback(
     async (fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
       const newPath = fileDiff.name;
@@ -115,11 +106,11 @@ export function PatchView({
       diffStyle,
       overflow: "scroll" as const,
       stickyHeaders: true,
-      // ⚠️ The JS highlighter, not the wasm one. This window's CSP is
+      // NOTE: The JS highlighter, not the wasm one. This window's CSP is
       // `script-src 'self'` with no `wasm-unsafe-eval` (see `protocol.ts`), so
-      // the wasm engine would be blocked — silently, at highlight time.
+      // the wasm engine would be blocked, silently, at highlight time.
       preferredHighlighter: "shiki-js" as const,
-      // ⚠️ `gap: 0` so the files read as one list instead of a column of loose
+      // `gap: 0` so the files read as one list instead of a column of loose
       // cards; the hairline on each header does the separating.
       layout: { paddingTop: 0, paddingBottom: 8, gap: 0 },
       loadDiffFiles,
@@ -140,9 +131,9 @@ export function PatchView({
         type: "diff" as const,
         fileDiff,
         collapsed: shut,
-        // ⚠️ `version` has to move when the item's value does. CodeView diffs
-        // items by it, so a changed `collapsed` with an unchanged version is a
-        // change it ignores — the button clicks and nothing folds.
+        // NOTE: `version` has to move when the item's value does. CodeView
+        // diffs items by it, so it ignores a changed `collapsed` with an
+        // unchanged version: the button clicks and nothing folds.
         version: shut ? 1 : 0,
       };
     });
@@ -181,10 +172,8 @@ export function PatchView({
     [collapsed, counts, fileActions, fileLeading],
   );
 
-  /**
-   * ⚠️ Unfolding is part of the answer. Landing on a collapsed header would
-   * look exactly like a click that did nothing.
-   */
+  // Unfolding is part of the answer. Landing on a collapsed header would look
+  // exactly like a click that did nothing.
   useEffect(() => {
     if (!focus) return;
     const id = idByPath.get(focus.path);
@@ -211,11 +200,11 @@ export function PatchView({
       items={items}
       options={options}
       renderCustomHeader={renderCustomHeader}
-      // ⚠️ `overflow-y-auto` HERE, on CodeView's own root. It virtualizes
-      // against this element, so it must be the scroller — but it does not set
-      // `overflow` itself, and without this the root computes `visible` and the
-      // nearest `overflow-hidden` ancestor clips it. Equally, it must not sit
-      // inside a second scroller, which would leave it no viewport to measure.
+      // NOTE: `overflow-y-auto` HERE, on CodeView's own root. It virtualizes
+      // against this element, so it must be the scroller, but it does not set
+      // `overflow` itself: without this the root computes `visible` and the
+      // nearest `overflow-hidden` ancestor clips it. Nor may it sit inside a
+      // second scroller, which would leave it no viewport to measure.
       className="min-h-0 min-w-0 flex-1 overflow-y-auto"
       renderCodeViewHeader={header ? () => header : undefined}
     />

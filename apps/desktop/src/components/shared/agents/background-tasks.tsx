@@ -50,8 +50,10 @@ import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
 
 /**
- * Whether the app can stop `task`: a running shell (FE-43), or a running
- * monitor whose one process was found (FE-56/D1). An agent never.
+ * Whether the app can stop `task`.
+ *
+ * A running shell, or a running monitor whose one process was found
+ * (FE-56/D1). Never an agent.
  */
 export function canStop(task: BackgroundTask): boolean {
   return (
@@ -60,7 +62,7 @@ export function canStop(task: BackgroundTask): boolean {
   );
 }
 
-/** `pid 59852`, for a running task whose process is known (FE-56/D3). */
+/** `pid 59852`, for a running task whose process is known. */
 export function pidText(task: BackgroundTask): string | null {
   return task.status === "running" && task.pid !== null
     ? `pid ${task.pid}`
@@ -239,8 +241,10 @@ export function backgroundCue(session: AgentSession | undefined): string {
 }
 
 /**
- * One task in the popover (FE-42/D2): a shell or monitor opens its own page;
- * an agent opens its transcript in the sub-agent viewer.
+ * One task in the popover.
+ *
+ * A shell or monitor opens its own page; an agent opens its transcript in the
+ * sub-agent viewer.
  */
 function TaskRow({
   task,
@@ -286,8 +290,8 @@ function TaskRow({
           {task.description || task.command || task.id}
         </span>
         {!running && (
-          // A coloured mark beside the word, level with it: how it ended reads
-          // at a glance.
+          // A coloured mark level with the word, so how it ended reads at a
+          // glance.
           <span
             className={cn(
               "flex shrink-0 items-center gap-1 text-[11px] tabular-nums",
@@ -329,12 +333,12 @@ function TaskRow({
 }
 
 /**
- * The agent view's background tasks (FE-42/D1): a chip counting the running
- * ones by kind — `1 shell, 5 agents`, or `3 tasks` muted once none runs —
- * and a popover listing them, running first, the finished folded (D2).
+ * The agent view's background tasks: a chip and a popover (FE-42/D1).
  *
- * ⚠️ Hidden while the conversation has none: most never start one. Claude
- * only — Codex's listing always counts 0.
+ * The chip counts the running ones by kind (`1 shell, 5 agents`, or `3 tasks`
+ * muted once none runs). The popover lists them, running first, the finished
+ * folded (FE-42/D2). Hidden while the conversation has none, since most never
+ * start one. Claude only: Codex's listing always counts 0.
  */
 export function BackgroundTasksButton({
   slug,
@@ -347,7 +351,11 @@ export function BackgroundTasksButton({
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  /** The Finished group, folded (D2) — unless the user said, or nothing runs. */
+  /**
+   * The user's fold choice for the Finished group.
+   *
+   * Null follows the default (FE-42/D2): folded unless nothing runs.
+   */
   const [finishedChoice, setFinishedChoice] = useState<boolean | null>(null);
   const stopping = useStopBackgroundTask(workspace, session.id);
   const any = session.agent === "claude" && session.background.total > 0;
@@ -400,7 +408,7 @@ export function BackgroundTasksButton({
             />
           }
         >
-          {/* Running: the spinner every running thing has, in the icon's place. */}
+          {/* Running: the usual spinner, in the icon's place. */}
           {running.length > 0 ? (
             <WorkingMark />
           ) : (

@@ -10,9 +10,10 @@ import {
 import type { PickedFolder } from "../../../../shared/workspaces";
 
 /**
- * Which of the project's linked folders the Files tree reads (FE-71). Drawn
- * only when there are two or more — a project with one folder has nothing to
- * pick. The primary comes first, as Settings lists them.
+ * Picks which of the project's linked folders the Files tree reads.
+ *
+ * Drawn only when there are two or more: a project with one folder has
+ * nothing to pick. The primary comes first, as Settings lists them.
  */
 export function FolderSwitcher({
   folders,

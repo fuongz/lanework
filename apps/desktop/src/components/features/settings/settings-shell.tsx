@@ -14,13 +14,13 @@ const WIDE =
 /**
  * The full-window settings view: a sidebar of sections beside the open one.
  *
- * ⚠️ Deliberately outside `AppShell`. Settings replaces the whole window rather
- * than sitting inside the app's chrome, so it carries its own way back — the
- * app's nav would otherwise offer two competing places to click.
+ * Outside `AppShell`. Settings replaces the whole window rather than sitting
+ * inside the app's chrome, so it carries its own way back; the app's nav
+ * would offer a second, competing one.
  *
- * The sidebar's background lives in CSS (`.settings-sidebar`) rather than in a
- * utility class, because on macOS it has to become fully transparent so the
- * window's vibrancy shows through, and that depends on an ancestor attribute.
+ * The sidebar's background lives in CSS (`.settings-sidebar`), not a utility
+ * class. On macOS it turns fully transparent so the window's vibrancy shows
+ * through, and that depends on an ancestor attribute.
  */
 const CARD =
   "bg-background border-panel-edge my-1.5 mr-1.5 flex-1 rounded-lg border";
@@ -28,21 +28,22 @@ const CARD =
 export function SettingsShell({ children }: { children: ReactNode }) {
   const query = useSettingsSearch((state) => state.query);
   const setQuery = useSettingsSearch((state) => state.setQuery);
-  // Config files and Skills are a tree beside an editor (FE-47/D8), Memory
-  // and Instructions a list beside the file open (FE-51): they take the whole
+  // Config files and Skills are a tree beside an editor (FE-47/D8); Memory
+  // and Instructions are a list beside the open file. They take the whole
   // pane and draw their own headers, not a column of rows.
   const wide = useRouterState({
     select: (state) => WIDE.test(state.location.pathname),
   });
 
   return (
-    // The same window as the app shell: a title bar across it (FE-58), and
-    // under it the rail beside an inset card. Most pages keep their title in
-    // their own content; the file pages (Skills, Config files) put theirs in
-    // the bar as Files does, and the Projects pages their project picker.
-    // ⚠️ The split is stated, not read from `--rail-width`: that one is the
-    // app rail's, and it stays on <html> at whatever width the rail had when
-    // the app shell went away.
+    // The same window as the app shell: a title bar across it, and under it
+    // the rail beside an inset card. Most pages keep their title in their own
+    // content. The file pages (Skills, Config files) put theirs in the bar as
+    // Files does, and the Projects pages their project picker.
+    //
+    // NOTE: The split is stated, not read from `--rail-width`. That variable
+    // is the app rail's, and it stays on <html> at whatever width the rail had
+    // when the app shell went away.
     <div className="bg-sidebar flex h-screen flex-col">
       <WindowTitlebarHost
         style={{ "--titlebar-split": "15rem" } as CSSProperties}
@@ -72,11 +73,12 @@ export function SettingsShell({ children }: { children: ReactNode }) {
             <Input
               aria-label="Search settings"
               placeholder="Search settings…"
-              // `md:` too: the base Input drops to `text-xs` at that breakpoint,
-              // which would undo this everywhere the window is wider than 768px.
-              // `border-0` rather than a transparent border: the base
-              // Input's `border-input` wins the colour, and a transparent
-              // border still leaves a 1px gap under `bg-clip-padding`.
+              // - `md:` too: the base Input drops to `text-xs` at that
+              //   breakpoint, which would undo this in any window wider than
+              //   768px.
+              // - `border-0`, not a transparent border: the base Input's
+              //   `border-input` wins the colour, and a transparent border
+              //   still leaves a 1px gap under `bg-clip-padding`.
               className="bg-foreground/[0.035] h-[30px] rounded-md border-0 pl-7.5 text-[13px] md:text-[13px]"
               value={query}
               onChange={(event) => setQuery(event.target.value)}

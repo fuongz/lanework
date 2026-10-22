@@ -33,7 +33,7 @@ const POLL_MS = 3000;
 /** What a confirmation is for: one port's process, or every one listed. */
 type Confirm = { kind: "one"; port: ListeningPort } | { kind: "all" };
 
-/** How many distinct ports are listening — one process may hold several rows. */
+/** How many distinct ports are listening; one process may hold several rows. */
 function portCount(ports: ListeningPort[]): number {
   return new Set(ports.map((row) => row.port)).size;
 }
@@ -51,12 +51,15 @@ function uptime(port: ListeningPort, now: number): string | null {
 }
 
 /**
- * The project's listening TCP ports, beside the agents' usage on the terminal
- * bar (FE-68): what a dev server an agent started is listening on, and Stop —
- * like PortKiller, but only this project's processes, each Stop confirmed.
+ * The project's listening TCP ports, beside the agents' usage on the
+ * terminal bar.
  *
- * ⚠️ Read every `POLL_MS` only while the window has focus, and at once when
- * it gets it back: `lsof` is cheap, not free. Hidden when nothing listens.
+ * What a dev server an agent started is listening on, and Stop: like
+ * PortKiller, but only this project's processes, each Stop confirmed. Hidden
+ * when nothing listens.
+ *
+ * Read every {@link POLL_MS} only while the window has focus, and at once
+ * when it gets it back: `lsof` is cheap, not free.
  */
 export function PortsStrip({ workspace }: { workspace: string }) {
   const [ports, setPorts] = useState<ListeningPort[]>([]);
@@ -229,7 +232,7 @@ export function PortsStrip({ workspace }: { workspace: string }) {
                     className="text-muted-foreground"
                     aria-label={`Open localhost:${row.port}`}
                     title={`Open http://localhost:${row.port}`}
-                    // Main opens a localhost URL in the OS browser (FE-68).
+                    // Main opens a localhost URL in the OS browser.
                     onClick={() =>
                       window.open(`http://localhost:${row.port}`, "_blank")
                     }

@@ -19,9 +19,9 @@ import { useWorktree } from "#/stores/worktree";
 import { HistoryList } from "./history-list";
 
 /**
- * Repository › History: the commit list, and one commit beside it (FE-22).
+ * Repository › History: the commit list, and one commit beside it.
  *
- * ⚠️ The chosen commit is in the URL (`history/$sha`), like a pull request's
+ * The chosen commit is in the URL (`history/$sha`), like a pull request's
  * number: Back returns to the previous commit, and a link carries it.
  */
 export function HistoryLayout() {
@@ -38,17 +38,17 @@ export function HistoryLayout() {
     ["list", "detail"],
   );
 
-  // ⚠️ Status first, for the ONE thing History needs from it: whether there is
-  // a repository at all. Without it a folder that is not one would read as a
-  // repository with no commits.
+  // NOTE: Status first, for the one thing History needs from it: whether
+  // there is a repository at all. Without it a folder that is not one would
+  // read as a repository with no commits.
   useEffect(() => {
     void open(slug).then(() => openHistory(slug));
   }, [open, openHistory, slug]);
 
-  // ⚠️ The screen's name in the window's title bar (FE-58), drawn by the
-  // layout — not the list — so it is there while the repository is read and
-  // when there is none. A commit's own header stays in its pane: the bar holds
-  // one header, and the commit's is the diff's first row.
+  // The screen's name in the window's title bar, drawn by the layout rather
+  // than the list, so it is there while the repository is read and when there
+  // is none. A commit's own header stays in its pane: the bar holds one
+  // header, and the commit's is the diff's first row.
   const title = (
     <WindowTitlebar>
       <h1 className={WINDOW_TITLE}>History</h1>

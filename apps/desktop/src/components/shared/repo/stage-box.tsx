@@ -5,9 +5,9 @@ import type { WorktreeFile } from "../../../../shared/worktree";
 /**
  * A checkbox standing for several files at once.
  *
- * ⚠️ Ticking a PARTIAL box stages the rest rather than unstaging what is there:
- * the half-ticked state is "some of this is going in", and the obvious next
- * step from there is all of it.
+ * Ticking a PARTIAL box stages the rest rather than unstaging what is there:
+ * the half-ticked state means "some of this is going in", and the obvious
+ * next step from there is all of it.
  */
 export function StageBox({
   files,

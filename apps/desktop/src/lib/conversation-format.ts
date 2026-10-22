@@ -61,7 +61,7 @@ export function isImagePath(path: string | null): boolean {
 }
 
 /**
- * Save `text` as a `.md` file through the browser's own download — no IPC,
+ * Saves `text` as a `.md` file through the browser's own download — no IPC,
  * no folder named by the page (D7).
  */
 export function downloadMarkdown(text: string, name: string) {

@@ -14,8 +14,9 @@ export interface MachineProvider {
 }
 
 /**
- * What a client tells the control plane about the machine it enrols. Display
- * data only; every field is bounded and trimmed by the server.
+ * What a client tells the control plane about the machine it enrols.
+ *
+ * Display data only; the server bounds and trims every field.
  */
 export interface MachineFacts {
   /** 1-120 characters. Required. */
@@ -30,8 +31,10 @@ export interface MachineFacts {
 }
 
 /**
- * A machine credential, returned exactly once — by `POST /v1/cli/token` and by
- * `POST /v1/machines/register`, both with HTTP 201. Only its hash is stored.
+ * A machine credential, returned once.
+ *
+ * Returned by `POST /v1/cli/token` and `POST /v1/machines/register`, both
+ * with HTTP 201. Only its hash is stored.
  */
 export interface MachineCredential {
   machineId: string;
@@ -41,7 +44,11 @@ export interface MachineCredential {
 
 // ── POST /v1/cli/auth — start a login ───────────────────────────────────────
 
-/** Only S256: `plain` would let anyone who reads the authorize URL forge the proof. */
+/**
+ * The PKCE challenge method: S256 only.
+ *
+ * `plain` would let anyone who reads the authorize URL forge the proof.
+ */
 export type PkceMethod = "S256";
 
 interface CliAuthBase extends MachineFacts {
@@ -136,8 +143,10 @@ export type CliApproveResponse =
 // ── POST /v1/cli/token — redeem ─────────────────────────────────────────────
 
 /**
- * Unauthenticated: the code (or device code) plus the PKCE verifier IS the
- * authentication. Send `code` for loopback, `device_code` for device.
+ * The body of `POST /v1/cli/token`, which is unauthenticated.
+ *
+ * The code (or device code) plus the PKCE verifier is the authentication.
+ * Send `code` for loopback, `device_code` for device.
  */
 export interface CliTokenRequest {
   code?: string;
@@ -145,13 +154,14 @@ export interface CliTokenRequest {
   code_verifier: string;
 }
 
-/** 201 with the credential. */
+/** The 201 answer of `POST /v1/cli/token`: the credential. */
 export type CliTokenResponse = MachineCredential;
 
 /**
- * The device flow's "not yet" answers (HTTP 400) — the RFC 8628 vocabulary.
- * `invalid_grant` at HTTP 401 is the ONE answer for wrong / unapproved / spent
- * / expired / bad verifier.
+ * The device flow's "not yet" answers (HTTP 400), in RFC 8628's vocabulary.
+ *
+ * `invalid_grant` at HTTP 401 is the one answer for a wrong, unapproved,
+ * spent or expired code, or a bad verifier.
  */
 export type CliTokenErrorCode =
   | "authorization_pending"
@@ -169,13 +179,19 @@ export interface CliTokenError {
 
 // ── /v1/machines ────────────────────────────────────────────────────────────
 
-/** `POST /v1/machines/register` — trade a registration token for a credential. */
+/**
+ * `POST /v1/machines/register`: trade a registration token for a credential.
+ */
 export interface MachineRegisterRequest extends MachineFacts {
   /** `lw_reg_…`, single use, 15 minutes. */
   token: string;
 }
 
-/** 201. A 401 is one message for "wrong", "already used" and "expired". */
+/**
+ * The 201 answer of `POST /v1/machines/register`.
+ *
+ * A 401 is one message for "wrong", "already used" and "expired".
+ */
 export type MachineRegisterResponse = MachineCredential;
 
 /** The account behind a machine. Each field may be null. */
@@ -186,7 +202,8 @@ export interface MachineOwner {
 }
 
 /**
- * `GET /v1/machines/me` (machine credential) — who this machine is, and whose.
+ * `GET /v1/machines/me` (machine credential): who this machine is, and whose.
+ *
  * Doubles as the presence ping. 401 means revoked or unknown, alike.
  */
 export interface MachineMeResponse {
@@ -197,7 +214,7 @@ export interface MachineMeResponse {
   user: MachineOwner | null;
 }
 
-/** `DELETE /v1/machines/me` (machine) and `DELETE /v1/machines/:id` (session). */
+/** `DELETE /v1/machines/me` (machine), `DELETE /v1/machines/:id` (session). */
 export interface MachineRevokeResponse {
   revoked: string;
 }
@@ -225,7 +242,7 @@ export interface MachineListResponse {
   machines: MachineSummary[];
 }
 
-/** `POST /v1/tokens/registration` (session) — what `/setup` mints. */
+/** `POST /v1/tokens/registration` (session): what `/setup` mints. */
 export interface RegistrationTokenResponse {
   /** `lw_reg_…`. */
   token: string;

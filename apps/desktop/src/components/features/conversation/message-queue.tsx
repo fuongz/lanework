@@ -8,10 +8,11 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { QueuedMessage } from "#/../shared/conversation";
 
 /**
- * What the engine holds back (FE-67), on top of the composer: messages that
- * could not go into the running turn yet. Each one can be taken back to the
- * composer to edit (✏️, or ↑ there for the last) or dropped; a queue Stop
- * paused waits for Resume.
+ * The messages the engine holds back, drawn on top of the composer.
+ *
+ * They could not go into the running turn yet. Each one can be taken back to
+ * the composer to edit (✏️, or ↑ there for the last) or dropped. A queue that
+ * Stop paused waits for Resume.
  */
 export function MessageQueue({
   queue,

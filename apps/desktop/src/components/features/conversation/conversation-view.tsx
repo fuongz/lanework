@@ -89,8 +89,9 @@ interface Sent {
   text: string;
   attachments: Attachment[];
   /**
-   * User turns the transcript must reach for this one to be in it — null
-   * while the engine holds it back (FE-67): it is counted once it goes.
+   * User turns the transcript must reach for this one to be in it.
+   *
+   * `null` while the engine holds it back: it is counted once it goes.
    */
   expect: number | null;
 }
@@ -118,13 +119,12 @@ function unqueued(taken: {
 }
 
 /**
- * A Claude conversation as a chat (FE-62): its turns, folded tool calls and
- * per-turn usage, and a composer that sends the next turn through the
- * user's own `claude` CLI.
+ * A conversation as a chat: its turns, folded tool calls and per-turn usage,
+ * and a composer that sends the next turn through the user's own CLI.
  */
 export function ConversationView() {
   const { slug, conversation } = useParams({ from: ROUTE });
-  // ⚠️ Keyed by WHICH conversation: the route stays mounted from one to the
+  // NOTE: Keyed by WHICH conversation: the route stays mounted from one to the
   // next, and the last one's scroll, draft and folds are not this one's.
   return <ConversationPage key={conversation} slug={slug} id={conversation} />;
 }
@@ -167,7 +167,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   // else the last used anywhere.
   const loaded = conversation !== null;
   const own = conversation?.settings ?? null;
-  // ⚠️ On the conversation's own CLI: the last used anywhere may be the
+  // NOTE: On the conversation's own CLI: the last used anywhere may be the
   // other one's model.
   useEffect(() => {
     if (!loaded || settings || !agent) return;
@@ -190,7 +190,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
 
   const turns = conversation?.turns ?? [];
   const users = turns.filter((turn) => turn.role === "user").length;
-  // What the engine holds back (FE-67), drawn above the composer instead.
+  // What the engine holds back, drawn above the composer instead.
   const queue = (engine.state !== "terminal" && engine.queue) || NOTHING;
   const paused = engine.state !== "terminal" && engine.paused === true;
   const held = useMemo(() => new Set(queue.map((entry) => entry.id)), [queue]);
@@ -241,8 +241,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   useEffect(release, [held, release]);
 
   const running = engine.state === "running" || engine.state === "starting";
-  // ⚠️ One writer per conversation (D3). A Lanework tab running it is where
-  // it lives now: the chat opens that tab instead of asking. A Claude in
+  // NOTE: One writer per conversation (D3). A Lanework tab running it is
+  // where it lives: the chat opens that tab instead of asking. A Claude in
   // another terminal app has no tab to open; a send then says so.
   const tab =
     engine.state === "terminal" && !engine.terminalId.startsWith("pid:")
@@ -304,7 +304,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     });
   }, []);
 
-  // ⚠️ Only the READER moving up lets go of the end. The view also moves
+  // NOTE: Only the READER moving up lets go of the end. The view also moves
   // under them: the composer mounting shrinks it, and turns drawn with
   // `content-visibility` settle smaller than their placeholder, which clamps
   // `scrollTop` down. Those keep it stuck. A move up counts as the reader's
@@ -329,7 +329,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     frame.current = requestAnimationFrame(locate);
   };
 
-  // ⚠️ Stick to the end while text streams — only if the reader was there:
+  // NOTE: Stick to the end while text streams, only if the reader was there:
   // one who scrolled up to read is never pulled away.
   useLayoutEffect(() => {
     const node = content.current;
@@ -380,7 +380,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
 
   const handlers = useMemo<TurnHandlers>(
     () => ({
-      // ⚠️ Forking copies a Claude transcript; Codex's are not forked here.
+      // Forking copies a Claude transcript; Codex's are not forked here.
       onFork:
         agent === "codex"
           ? undefined
@@ -487,8 +487,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   };
 
   /**
-   * Queued messages taken out — dropped, or back to the composer. ⚠️ One
-   * may go to the CLI meanwhile: only what main says it removed leaves.
+   * Takes queued messages out: dropped, or back to the composer.
+   *
+   * NOTE: One may go to the CLI meanwhile, so only what main says it removed
+   * leaves.
    */
   const unqueue = async (
     keys: string[],
@@ -561,7 +563,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     background: { running: 0, total: 0 },
   };
 
-  /** Hand the conversation to a terminal (D3): one writer at a time. */
+  /** Hands the conversation to a terminal (D3): one writer at a time. */
   const openTerminal = async () => {
     if (!workspace) return;
     if (engine.state === "terminal") {
@@ -621,7 +623,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         }
       : null;
 
-  // ⚠️ Only the chat's OWN engine holds the Terminal button and the
+  // NOTE: Only the chat's OWN engine holds the Terminal button and the
   // composer. A transcript left mid-turn by a CLI that was killed or crashed
   // still reads as working for a while, but nothing is writing it — and a
   // live CLI anywhere answers `terminal`, not this.
@@ -661,8 +663,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 <Button
                   size="sm"
                   variant="outline"
-                  // ⚠️ aria-disabled, not disabled: a disabled button gets
-                  // no pointer events, and its tooltip says why it is off.
+                  // NOTE: aria-disabled, not disabled: a disabled button
+                  // gets no pointer events, and its tooltip says why it is
+                  // off.
                   aria-disabled={blocked || undefined}
                   onClick={() => {
                     if (!blocked) void openTerminal();
@@ -813,9 +816,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               since={lastPromptAt}
             />
           )}
-          {/* ⚠️ Claude's question stands where the prompt is typed, the way
-              the CLI asks it at its own prompt. The composer stays mounted
-              under it — hidden, not unmounted — so a draft survives. */}
+          {/* NOTE: Claude's question stands where the prompt is typed, the
+              way the CLI asks it at its own prompt. The composer stays
+              mounted under it — hidden, not unmounted — so a draft
+              survives. */}
           {question && (
             <PermissionCard
               key={question.id}

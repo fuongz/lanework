@@ -18,7 +18,7 @@ describe("Codex account", () => {
             chatgpt_plan_type: "Plus",
             organizations: [
               { id: "a", title: "Other", is_default: false },
-              { id: "b", title: "Hiip", is_default: true },
+              { id: "b", title: "Acme", is_default: true },
             ],
           },
         }),
@@ -28,7 +28,7 @@ describe("Codex account", () => {
       agent: "codex",
       signedIn: true,
       email: "me@example.com",
-      org: "Hiip",
+      org: "Acme",
       plan: "plus",
     });
   });

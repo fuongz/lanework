@@ -1,16 +1,16 @@
-// The conversation view's contract (FE-62): a Claude conversation read as a
-// chat — turns, folded tool calls, per-turn usage — and a composer that sends
-// the next turn through the user's own `claude` CLI, headless.
+// The conversation view's contract: a Claude conversation read as a chat
+// (turns, folded tool calls, per-turn usage), and a composer that sends the
+// next turn through the user's own `claude` CLI, headless.
 //
-// ⚠️ As with the terminal (FE-19), the renderer never names a command, a
-// binary or a folder. It names a WORKSPACE and a conversation id; main
-// resolves the folder from the links it wrote down itself and runs the one
-// CLI it stands for. Settings are names picked from the lists below, checked
-// again in main before they become a flag.
+// NOTE: As with the terminal (FE-19), the renderer never names a command, a
+// binary or a folder. It names a workspace and a conversation id. Main
+// resolves the folder from the links it wrote itself and runs the one CLI it
+// stands for. Settings are names picked from the lists below, checked again
+// in main before they become a flag.
 
 import type { AgentCard } from "./terminal";
 
-// ─── Composer settings (FE-62/D9) ───────────────────────────────────────────
+// ─── Composer settings ──────────────────────────────────────────────────────
 
 /** The CLI a conversation runs on: Claude Code, or Codex. */
 export type ConversationAgent = "claude" | "codex";
@@ -22,20 +22,20 @@ export const AGENT_LABELS: Record<ConversationAgent, string> = {
 
 /** A model the picker offers, newest first within a family. */
 export interface AgentModel {
-  /** What `--model` / `-m` is given — an alias or a full id. */
+  /** What `--model` / `-m` is given: an alias or a full id. */
   id: string;
   label: string;
-  /** The CLI that runs it: picking it picks the agent (new conversation). */
+  /** The CLI that runs it. Picking it picks the agent (a new conversation). */
   agent: ConversationAgent;
   /** Shown below the current generation, after a divider. */
   legacy?: boolean;
 }
 
 /**
- * The picker's list, fixed in code (FE-62/D9).
+ * Claude's models in the picker, fixed in code (FE-62/D9).
  *
- * ⚠️ `id` is checked against this list in main: it becomes an argument, and
- * nothing the page typed may.
+ * NOTE: `id` is checked against this list in main. It becomes an argument,
+ * and nothing the page typed may.
  */
 const CLAUDE_MODELS: readonly AgentModel[] = [
   { id: "claude-opus-5-5", label: "Opus 5.5", agent: "claude" },
@@ -58,9 +58,10 @@ const CLAUDE_MODELS: readonly AgentModel[] = [
 ];
 
 /**
- * Codex's (ChatGPT's) models when its own list cannot be read — no
- * `~/.codex/models_cache.json` yet. Main reads that file (`codexModels`)
- * and hands the list over with `setCodexModels`.
+ * Codex's (ChatGPT's) models when its own list cannot be read.
+ *
+ * That is before `~/.codex/models_cache.json` exists. Main reads that file
+ * and hands the list over with {@link setCodexModels}.
  */
 export const CODEX_MODELS: readonly AgentModel[] = [
   { id: "gpt-6.1-sol", label: "GPT-6.1-Sol", agent: "codex" },
@@ -76,16 +77,19 @@ export const CODEX_MODELS: readonly AgentModel[] = [
 export const CODEX_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /**
- * Codex's models as this process knows them: the fallback until main has
- * read Codex's own cache (in main) or the page has asked main (renderer).
+ * Codex's models as this process knows them.
+ *
+ * The fallback until main has read Codex's own cache (in main), or the page
+ * has asked main (in the renderer).
  */
 let codexList: readonly AgentModel[] = CODEX_MODELS;
 let everyModel: readonly AgentModel[] = [...CLAUDE_MODELS, ...codexList];
 const listeners = new Set<() => void>();
 
 /**
- * Take `list` as Codex's models — the ones `codex` itself lists. An empty
- * list keeps the fallback; ids that are not plain names are dropped.
+ * Take `list` as Codex's models, the ones `codex` itself lists.
+ *
+ * An empty list keeps the fallback. Ids that are not plain names are dropped.
  */
 export function setCodexModels(list: readonly AgentModel[]): void {
   const clean = list.filter(
@@ -101,15 +105,17 @@ export function setCodexModels(list: readonly AgentModel[]): void {
   for (const listener of listeners) listener();
 }
 
-/** Told when `setCodexModels` changed the list (the picker re-draws). */
+/** Told when {@link setCodexModels} changed the list, so the picker redraws. */
 export function onModelsChanged(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
 /**
- * Every model the picker offers: Claude's, then Codex's current list. The
- * same array until the list changes — a snapshot React may compare.
+ * Every model the picker offers: Claude's, then Codex's current list.
+ *
+ * The same array until the list changes, so React may compare it as a
+ * snapshot.
  */
 export function allModels(): readonly AgentModel[] {
   return everyModel;
@@ -140,9 +146,10 @@ export function modelName(id: string | null): string | null {
 }
 
 /**
- * `settings` for a conversation on `agent`: a model of another CLI — the
- * last settings used anywhere were Claude's, this one is Codex — becomes
- * that agent's default.
+ * `settings` for a conversation on `agent`.
+ *
+ * A model of another CLI becomes that agent's default: the last settings used
+ * anywhere may be Claude's while this conversation is Codex.
  */
 export function settingsFor(
   agent: ConversationAgent,
@@ -172,8 +179,9 @@ function isEffort(value: unknown): value is Effort {
 }
 
 /**
- * `--permission-mode`, as the picker offers it (ảnh 9). The CLI's `plan` and
- * `dontAsk` are not offered.
+ * `--permission-mode`, as the picker offers it.
+ *
+ * The CLI's `plan` and `dontAsk` are not offered.
  */
 export const PERMISSIONS = [
   "manual",
@@ -228,7 +236,11 @@ export const DEFAULT_SETTINGS: ComposerSettings = {
   permission: "manual",
 };
 
-/** A settings object from the page, checked field by field; null if any is off. */
+/**
+ * A settings object from the page, checked field by field.
+ *
+ * @returns null when any field is not one the lists above allow.
+ */
 export function checkSettings(value: unknown): ComposerSettings | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
@@ -268,22 +280,22 @@ export interface ToolCall {
   kind: ToolKind;
   /** One line for the folded row: a command's first line, a path, a pattern. */
   summary: string;
-  /** Its input as pretty JSON, cut at `TOOL_TEXT_MAX`. */
+  /** Its input as pretty JSON, cut at {@link TOOL_TEXT_MAX}. */
   input: string;
-  /** Its result as text, cut at `TOOL_TEXT_MAX`; null while it runs. */
+  /** Its result as text, cut at {@link TOOL_TEXT_MAX}; null while it runs. */
   output: string | null;
   /** Its result said it failed. */
   error: boolean;
-  /** The file it read or wrote, when it names one — for the file chip. */
+  /** The file it read or wrote, when it names one, for the file chip. */
   filePath: string | null;
-  /** A sub-agent's id, when this call spawned one (opens the sub-agent view). */
+  /** The sub-agent this call spawned, if any; it opens the sub-agent view. */
   subagent: string | null;
 }
 
-/** The most of one tool call's input or output the page is sent, in characters. */
+/** The most of one tool call's input or output sent to the page, in chars. */
 export const TOOL_TEXT_MAX = 16 * 1024;
 
-/** Something the user attached to a prompt — a pasted image, a file. */
+/** Something the user attached to a prompt: a pasted image, a file. */
 export interface Attachment {
   name: string;
   /** `image/png`, `text/plain`… */
@@ -293,9 +305,10 @@ export interface Attachment {
 }
 
 /**
- * An image named in the chat, read back (FE-65): its real path and its
- * bytes as a `data:` URL — or, when it is not there or out of scope, the
- * path as asked.
+ * An image named in the chat, read back.
+ *
+ * Its real path and its bytes as a `data:` URL; or, when it is missing or out
+ * of scope, the path as asked.
  */
 export type ImagePreview =
   | { found: true; path: string; url: string }
@@ -324,11 +337,11 @@ export interface TurnUsage {
 
 export interface UserTurn {
   role: "user";
-  /** The transcript line's uuid — stable, the TOC's anchor (D5). */
+  /** The transcript line's uuid: stable, the TOC's anchor (D5). */
   id: string;
   text: string;
   attachments: Attachment[];
-  /** ISO. */
+  /** When it was sent, as an ISO timestamp. */
   at: string;
 }
 
@@ -340,8 +353,9 @@ export interface AssistantTurn {
   /** The model that answered, as the CLI names it. */
   model: string | null;
   usage: TurnUsage | null;
-  /** When it started and last wrote, ISO. */
+  /** When it started, as an ISO timestamp. */
   at: string;
+  /** When it last wrote, as an ISO timestamp. */
   endedAt: string | null;
   /** Still being written: the last turn of a working conversation. */
   open: boolean;
@@ -353,12 +367,12 @@ export interface Conversation {
   id: string;
   /** The CLI whose transcript it is, and that sends its next turn. */
   agent: ConversationAgent;
-  /** The folder it runs in, for the composer's "Current checkout" (display only). */
+  /** The folder it runs in, shown as the composer's "Current checkout". */
   cwd: string | null;
   /** Its git branch when it was last written, for the composer row. */
   branch: string | null;
   turns: Turn[];
-  /** A turn is open — the agent is thinking or working. */
+  /** A turn is open: the agent is thinking or working. */
   working: boolean;
   /** The card its agent last named to the Lanework MCP, as the rail has it. */
   card: AgentCard | null;
@@ -371,22 +385,23 @@ export interface Conversation {
 /** The most of a transcript one read takes. */
 export const CONVERSATION_READ_MAX = 32 * 1024 * 1024;
 
-// ─── Sending (FE-62/D1) ─────────────────────────────────────────────────────
+// ─── Sending ────────────────────────────────────────────────────────────────
 
 /** A file the composer attaches, by the path the OS dialog or a drop gave. */
 export type OutgoingAttachment =
   /** A file on disk, by the path `pathForFile` gave for a pick or a drop. */
   | { kind: "path"; path: string }
   /**
-   * A pasted image, which has no path: its bytes, base64. Main sends it as an
-   * image block; at most `PASTE_MAX` bytes decoded.
+   * A pasted image, which has no path: its bytes, base64.
+   *
+   * Main sends it as an image block; at most {@link PASTE_MAX} bytes decoded.
    */
   | { kind: "data"; name: string; mediaType: string; data: string };
 
 /** The most a pasted image may weigh, decoded. */
 export const PASTE_MAX = 5 * 1024 * 1024;
 
-/** What `/` and `@` offer in the composer (FE-62/D8). */
+/** What `/` and `@` offer in the composer. */
 export type SuggestionKind = "command" | "file";
 
 export interface Suggestion {
@@ -400,8 +415,8 @@ export interface SendRequest {
   workspace: string;
   conversation: string;
   /**
-   * The page's name for this message, so it is the same one while it waits
-   * in the queue (FE-67). Main makes one when absent.
+   * The page's name for this message, so it keeps it while it waits in the
+   * queue. Main makes one when absent.
    */
   id?: string;
   text: string;
@@ -414,7 +429,9 @@ export type StartRequest = Omit<SendRequest, "conversation">;
 
 /**
  * The CLI asked to use a tool (`control_request` / `can_use_tool`) and waits.
- * Shown as a card in the chat; answered with `answerPermission`.
+ *
+ * Shown as a card in the chat; answered with
+ * {@link DesktopConversationApi | answerPermission}.
  */
 export interface PermissionRequest {
   /** The control request's id. */
@@ -422,13 +439,15 @@ export interface PermissionRequest {
   tool: string;
   /** What it would do, in one line: the CLI's `description`, else a summary. */
   summary: string;
-  /** Its input as pretty JSON, cut at `TOOL_TEXT_MAX`. */
+  /** Its input as pretty JSON, cut at {@link TOOL_TEXT_MAX}. */
   input: string;
   /** The CLI offers "allow and switch to this mode for the session". */
   suggestMode: Permission | null;
   /**
-   * `AskUserQuestion`: the questions Claude asks before acting, drawn as a
-   * question card instead of Allow/Deny. Null for every other tool.
+   * `AskUserQuestion`'s questions, asked before acting.
+   *
+   * Drawn as a question card instead of Allow/Deny. Null for every other
+   * tool.
    */
   questions: AskQuestion[] | null;
 }
@@ -441,32 +460,37 @@ export interface AskQuestion {
   multiSelect: boolean;
 }
 
-/** Most answers one reply carries, and the longest one. */
+/** The most answers one reply carries. */
 export const ANSWERS_MAX = 8;
+/** The longest one answer may be, in characters. */
 export const ANSWER_MAX = 2000;
 
 export type PermissionAnswer =
   | {
-      behavior: "allow" /** Also switch the session to this mode. */;
+      behavior: "allow";
+      /** Also switch the session to this mode. */
       mode?: Permission;
       /**
-       * `AskUserQuestion`'s answers, by question text: an option's label —
-       * several joined by ", " — or what was typed under "Something else".
+       * `AskUserQuestion`'s answers, by question text.
+       *
+       * Each is an option's label (several joined by ", "), or what was typed
+       * under "Something else".
        */
       answers?: Record<string, string>;
     }
   | { behavior: "deny"; message?: string };
 
 /**
- * A message the engine holds back (FE-67): sent while the CLI could not take
- * it in — the queue is paused, the turn is not ready, or it asks for other
- * settings than the running turn's. It goes once it can.
+ * A message the engine holds back until the CLI can take it.
+ *
+ * It was sent while the queue was paused, the turn was not ready, or it asked
+ * for other settings than the running turn's.
  */
 export interface QueuedMessage {
   id: string;
   text: string;
   attachments: { name: string; image: boolean }[];
-  /** Why it did not go — it stays until sent, edited or removed. */
+  /** Why it did not go. It stays until sent, edited or removed. */
   error: string | null;
 }
 
@@ -478,9 +502,10 @@ export interface EngineQueue {
 }
 
 /**
- * Where a conversation's engine stands. Only one process writes a
- * conversation at a time: `terminal` means a pty is running Claude on it, and
- * the composer stays paused until that tab is stopped.
+ * Where a conversation's engine stands.
+ *
+ * Only one process writes a conversation at a time. `terminal` means a pty is
+ * running Claude on it, and the composer stays paused until that tab stops.
  */
 export type EngineState =
   | ({ state: "idle" } & EngineQueue)
@@ -500,11 +525,12 @@ export type ConversationEvent =
   /** The transcript moved on: read it again (or patch from `turn`). */
   | { type: "turn"; workspace: string; conversation: string; turn: Turn }
   /**
-   * The engine saw the transcript move on — a Codex item finished — and the
-   * page reads it again, without waiting for the file watcher.
+   * The engine saw the transcript move on (a Codex item finished).
+   *
+   * The page reads it again without waiting for the file watcher.
    */
   | { type: "moved"; workspace: string; conversation: string }
-  /** Text arriving for the open turn's last text block, before the line lands. */
+  /** Text for the open turn's last text block, before its line lands. */
   | { type: "delta"; workspace: string; conversation: string; text: string }
   | {
       type: "permission";
@@ -520,12 +546,12 @@ export type ConversationEvent =
       id: string;
     };
 
-// ─── Links (FE-62/D4) ───────────────────────────────────────────────────────
+// ─── Links ──────────────────────────────────────────────────────────────────
 
-/** A link's favicon and title, fetched by main and kept on disk per domain. */
+/** A link's favicon and title, fetched by main and kept on disk by domain. */
 export interface LinkPreview {
   url: string;
-  /** The page's `<title>`, trimmed; null when it had none or fetching failed. */
+  /** The page's `<title>`, trimmed; null if it had none or the fetch failed. */
   title: string | null;
   /** A `data:` URL of the icon; null when none was found. */
   icon: string | null;
@@ -538,7 +564,7 @@ export function isOpenableUrl(value: unknown): value is string {
   return !url.username && !url.password;
 }
 
-/** Only these reach main's fetcher; anything else is refused. */
+/** A URL main's fetcher accepts: http(s), at most 2048 characters. */
 export function isPreviewUrl(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 2048) return false;
   try {
@@ -560,7 +586,7 @@ export const conversationChannels = {
   stop: "conversation:stop",
   /** Drop what is queued behind the running turn; answers how many went. */
   clearQueue: "conversation:clear-queue",
-  /** Take one queued message back out, to be edited (FE-67). */
+  /** Take one queued message back out, to be edited. */
   takeQueued: "conversation:take-queued",
   /** Drop one queued message. */
   removeQueued: "conversation:remove-queued",
@@ -580,7 +606,7 @@ export const conversationChannels = {
   engineState: "conversation:engine-state",
   /** What the engine is waiting on the person for: a tool, or questions. */
   permissions: "conversation:permissions",
-  /** The last settings used anywhere, for a conversation never sent from chat. */
+  /** The last settings used anywhere, for one never sent from chat. */
   lastSettings: "conversation:last-settings",
   /** Codex's models, as `codex` lists them in its own cache. */
   codexModels: "conversation:codex-models",
@@ -589,24 +615,25 @@ export const conversationChannels = {
   suggest: "conversation:suggest",
   /** Open a link the person clicked in the chat in the OS browser. */
   openLink: "conversation:open-link",
-  /** An image the chat names, read back for its lightbox (FE-65). */
+  /** An image the chat names, read back for its lightbox. */
   image: "conversation:image",
   /** That image, opened in the OS's default app. */
   openImage: "conversation:open-image",
-  /** Main → renderer: a `ConversationEvent`. */
+  /** Main → renderer: a {@link ConversationEvent}. */
   event: "conversation:event",
 } as const;
 
 export interface DesktopConversationApi {
   read: (workspace: string, conversation: string) => Promise<Conversation>;
   /**
-   * A new conversation, `request` its first message: main makes the id and
-   * answers it once the turn has started — not when it ends.
+   * Start a new conversation with `request` as its first message.
+   *
+   * Main makes the id and answers once the turn has started, not when it ends.
    */
   start: (
     request: StartRequest,
   ) => Promise<{ conversation: string; engine: EngineState }>;
-  /** Resolves once queued or started — not when the turn ends. */
+  /** Resolves once queued or started, not when the turn ends. */
   send: (request: SendRequest) => Promise<EngineState>;
   stop: (workspace: string, conversation: string) => Promise<void>;
   /** Answers how many were dropped: one may have started meanwhile. */
@@ -639,8 +666,10 @@ export interface DesktopConversationApi {
     conversation: string,
   ) => Promise<EngineState>;
   /**
-   * The requests the engine is still waiting on, for a page that opens after
-   * they were asked: `permission` events reach only the pages already open.
+   * The requests the engine is still waiting on.
+   *
+   * For a page that opens after they were asked: `permission` events reach
+   * only the pages already open.
    */
   permissions: (
     workspace: string,
@@ -658,15 +687,17 @@ export interface DesktopConversationApi {
   /**
    * Open a clicked link in the OS browser: http(s) only, no credentials.
    *
-   * ⚠️ Its own channel, not `window.open`: the window's popup handler stays
-   * GitHub-only (external-links.spec.ts), and only a click in the chat
-   * reaches this.
+   * NOTE: Its own channel, not `window.open`. The window's popup handler
+   * stays GitHub-only (`external-links.spec.ts`), and only a click in the
+   * chat reaches this.
    */
   openLink: (url: string) => Promise<void>;
   /**
-   * The image a chat badge names (FE-65) — `details.png`, `assets/x.png`, an
-   * attached `/tmp/…/1.png` — as a `data:` URL. Main reads only the
-   * workspace's folder and the conversation's own attachments.
+   * The image a chat badge names, as a `data:` URL.
+   *
+   * The name may be `details.png`, `assets/x.png` or an attached
+   * `/tmp/…/1.png`. Main reads only the workspace's folder and the
+   * conversation's own attachments.
    */
   image: (
     workspace: string,

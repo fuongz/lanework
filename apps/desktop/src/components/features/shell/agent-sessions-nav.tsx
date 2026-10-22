@@ -69,10 +69,13 @@ import { AgentSessionSearch } from "./agent-session-search";
 import { CodexGoalBadge } from "./codex-goal-badge";
 import { RenameAgentDialog } from "./rename-agent-dialog";
 
-/** Stable empty lists: a selector that allocated one would re-render forever. */
+/** Stable empty lists: a selector that allocates one re-renders forever. */
 const NONE: AgentSession[] = [];
 const NO_TERMINALS: TerminalSession[] = [];
-/** Rows before "Show more" (FE-23/D4); the rest, up to the listing's 20, after. */
+/**
+ * Rows before "Show more"; the rest, up to the listing's 20, after it
+ * (FE-23/D4).
+ */
 const FOLDED = 5;
 /** A conversation's sub-agent rows before its own "Show more" (FE-33/D4). */
 const SUBAGENTS_FOLDED = 3;
@@ -81,16 +84,19 @@ const SUBAGENTS_FOLDED = 3;
  * sits under its conversation's title (`px-2` + the 12px icon + `gap-2.5`).
  */
 const SUB_ROW = "h-[26px] w-full ps-[30px] text-left text-xs";
-/** A pointer resting this long on a row means it: its numbers are read (FE-38/D5). */
+/**
+ * How long a pointer rests on a row before its numbers are read (FE-38/D5).
+ */
 const PEEK_MS = 150;
 /** A row's numbers read this recently are shown again, not read again. */
 const FACTS_FRESH_MS = 15_000;
 
 /**
- * A row's quick actions, shown on hover or keyboard focus in place of its age
- * — Stop for a running agent, then Pin, rightmost like the rail's others.
+ * A row's quick actions, shown on hover or keyboard focus in place of its age.
  *
- * ⚠️ SIBLINGS laid over the row, not inside it: the row is a button, and a
+ * Stop for a running agent, then Pin, rightmost like the rail's others.
+ *
+ * NOTE: Siblings laid over the row, not inside it: the row is a button, and a
  * button cannot hold another. Both live in the context menu too.
  */
 function QuickActions({
@@ -153,12 +159,12 @@ function QuickAction({
 }
 
 /**
- * A conversation's background shells and monitors still running (FE-42/D1),
- * as rows under it beside its sub-agents' — its background agents already
- * are sub-agent rows. A row opens the task's own page.
+ * A conversation's background shells and monitors still running, as rows
+ * under it beside its sub-agents' (FE-42/D1).
  *
- * ⚠️ Mounted only for a conversation whose listing counts one running, so
- * the rail reads no task list for the rest.
+ * Its background agents are already sub-agent rows. A row opens the task's
+ * own page. Mounted only for a conversation whose listing counts one running,
+ * so the rail reads no task list for the rest.
  */
 function BackgroundShellRows({
   workspace,
@@ -258,22 +264,22 @@ function StopItem({ onStop }: { onStop: () => void }) {
 }
 
 /**
- * The rail's Agents group (FE-23): the Claude and Codex conversations this
- * project's folder has, newest first. A row opens its agent full size in the
- * main view — the one already resuming it, or a new one (FE-26).
+ * The rail's Agents group: the Claude and Codex conversations this project's
+ * folder has, newest first.
  *
- * ⚠️ The rail IS the agents' tab list (FE-26/D1): the row whose agent is on
- * screen is marked the way an active link is, and a new conversation that
- * has not written a transcript yet still has a row, so it can be got back to.
+ * A row opens its agent full size in the main view: the one already resuming
+ * it, or a new one.
  *
- * ⚠️ Three groups, and a row is in exactly ONE: Running holds the agents
- * whose pty is alive, Stop in each one's context menu; Pinned the pinned
- * transcripts; Agents the rest. Running wins over Pinned — a pinned
- * conversation that is resumed moves up to Running, and comes back on Stop.
- *
- * ⚠️ Hidden when there is nothing here to do: no agent CLI on this machine,
- * or no folder and no conversation (FE-23/D9). A folder with no conversation
- * yet keeps the group, for its + (FE-26/D3).
+ * - The rail is the agents' tab list (FE-26/D1). The row whose agent is on
+ *   screen is marked the way an active link is, and a new conversation with
+ *   no transcript yet still has a row, so it can be got back to.
+ * - Three groups, and a row is in exactly one: Running holds the agents whose
+ *   pty is alive, Stop in each one's context menu; Pinned the pinned
+ *   transcripts; Agents the rest. Running wins over Pinned: a pinned
+ *   conversation that is resumed moves up to Running, and back on Stop.
+ * - Hidden when there is nothing here to do: no agent CLI on this machine, or
+ *   no folder and no conversation (FE-23/D9). A folder with no conversation
+ *   yet keeps the group, for its + (FE-26/D3).
  */
 export function AgentSessionsNav({
   workspace,
@@ -286,11 +292,11 @@ export function AgentSessionsNav({
   workspace: string;
   slug: string;
   /**
-   * The folded rail's form (FE-58): one icon per agent — running, then
-   * pinned, then the most recent idle ones — and no sub-agents.
+   * The folded rail's form: one icon per agent (running, then pinned, then
+   * the most recent idle ones) and no sub-agents.
    */
   mini?: boolean;
-  /** Whether this project has a folder here, so a new agent has somewhere to run. */
+  /** Whether this project has a folder here for a new agent to run in. */
   hasFolder: boolean;
   /** The rail's row classes, so these read as its rows. */
   row: string;
@@ -305,7 +311,7 @@ export function AgentSessionsNav({
     (state) => state.sessions[workspace] ?? NO_TERMINALS,
   );
   const refreshRunning = useAgentTerminals((state) => state.refresh);
-  // Conversations the chat runs (FE-62): Running too, like a live tab.
+  // Conversations the chat runs count as Running too, like a live tab.
   const chats = useChatEngines((state) => state.alive[workspace] ?? NO_CHATS);
   const refreshChats = useChatEngines((state) => state.refresh);
   const watchChats = useChatEngines((state) => state.watch);
@@ -324,7 +330,7 @@ export function AgentSessionsNav({
     sub?: string;
     task?: string;
   };
-  // The sub-agent viewer's (FE-35): which CLI's conversation `viewing` is.
+  // The sub-agent viewer's: which CLI's conversation `viewing` is.
   const { agent: viewingAgent } = useSearch({ strict: false }) as {
     agent?: string;
   };
@@ -345,14 +351,14 @@ export function AgentSessionsNav({
   const [renaming, setRenaming] = useState<AgentSession | null>(null);
   /** Why an Archive was refused; it has no dialog of its own to show it in. */
   const [archiveError, setArchiveError] = useState<string | null>(null);
-  /** The conversation whose transcript is about to go for good (FE-57). */
+  /** The conversation whose transcript is about to go for good. */
   const [deleting, setDeleting] = useState<{
     session: AgentSession;
     busy: boolean;
     error: string | null;
   } | null>(null);
-  // ⚠️ The tooltip lines, not the facts: a view open on an agent reads its
-  // facts on every write, and the rail redraws only when a line changes.
+  // The tooltip lines, not the facts: a view open on an agent reads its facts
+  // on every write, and the rail redraws only when a line changes.
   const summaries = useAgentFacts(
     useShallow((state) =>
       Object.fromEntries(
@@ -366,10 +372,10 @@ export function AgentSessionsNav({
   const readFacts = useAgentFacts((state) => state.read);
   const peeking = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
-   * A row's cost and context, for its tooltip (FE-38/D5).
+   * Read a row's cost and context, for its tooltip (FE-38/D5).
    *
-   * ⚠️ Read only once a pointer rests on that row — never for the whole
-   * list, and not for one it merely passes over on its way down the rail.
+   * Only once a pointer rests on that row: never for the whole list, and not
+   * for one it merely passes over on its way down the rail.
    */
   const peek = (session: AgentSession) => {
     if (peeking.current) clearTimeout(peeking.current);
@@ -395,9 +401,9 @@ export function AgentSessionsNav({
     void refreshChats(workspace);
   }, [refreshChats, workspace]);
 
-  // ⚠️ Re-read on entering the project, on focus, and when its terminals
-  // change — an agent tab exiting is when a conversation gets its last
-  // words and its title. Never on a timer, the Changes badge's rule.
+  // Re-read on entering the project, on focus, and when its terminals change:
+  // an agent tab exiting is when a conversation gets its last words and its
+  // title. Never on a timer, the Changes badge's rule.
   useEffect(() => {
     void load(workspace);
     void refreshRunning(workspace);
@@ -414,9 +420,9 @@ export function AgentSessionsNav({
     };
   }, [load, refreshRunning, workspace]);
 
-  // ⚠️ Asked only once there is something to filter (FE-23/D8): the probe
-  // starts the pty host and a shell, which a project with no conversation
-  // has no reason to pay for.
+  // Asked only once there is something to filter (FE-23/D8): the probe starts
+  // the pty host and a shell, which a project with no conversation has no
+  // reason to pay for.
   const any = all.length > 0 || hasFolder;
   useEffect(() => {
     if (any) void loadAgents();
@@ -427,7 +433,7 @@ export function AgentSessionsNav({
     [all, agents],
   );
 
-  /** Thinking or working: a turn open in its transcript (FE-25). */
+  /** Thinking or working: a turn open in its transcript. */
   const isWorking = (session: AgentSession) =>
     live[agentKey(session)] ?? session.working;
   /** A sub-agent still going, as the watcher last said, else the listing. */
@@ -443,15 +449,15 @@ export function AgentSessionsNav({
         entry.kind === session.agent &&
         !entry.exit,
     );
-  /** The chat's own engine is running `session` (FE-62). */
+  /** The chat's own engine is running `session`. */
   const chatFor = (session: AgentSession) => chats.includes(session.id);
   /** Running: a live terminal on it, or the chat's engine. */
   const isRunning = (session: AgentSession) =>
     Boolean(runningFor(session)) || chatFor(session);
 
   /**
-   * Agents running a NEW conversation — started from + — whose transcript is
-   * not listed yet: they need a row too, or leaving one would lose it.
+   * Agents running a new conversation, started from +, whose transcript is
+   * not listed yet. They need a row too, or leaving one would lose it.
    */
   const fresh = running.filter(
     (entry) =>
@@ -465,9 +471,9 @@ export function AgentSessionsNav({
 
   if (agents.length === 0) return null;
 
-  // ⚠️ A conversation is in ONE group: Running while its agent is, Agents
-  // once it is only a transcript again — never both, so the rail marks one
-  // row as on screen.
+  // A conversation is in one group: Running while its agent is, Agents once
+  // it is only a transcript again. Never both, so the rail marks one row as
+  // on screen.
   const inRunning = sessions.filter(isRunning);
   const idle = sessions.filter((session) => !isRunning(session));
   const hasRunning = fresh.length > 0 || inRunning.length > 0;
@@ -482,8 +488,9 @@ export function AgentSessionsNav({
   };
 
   /**
-   * A conversation's row (FE-62/D3): Claude's and Codex's open as a chat —
-   * unless a tab is running it, where it was last used, and that tab opens.
+   * Open a conversation's row: Claude's and Codex's open as a chat (FE-62/D3).
+   *
+   * Unless a tab is running it, where it was last used; then that tab opens.
    */
   const openSession = (session: AgentSession) => {
     const tab = runningFor(session);
@@ -499,8 +506,8 @@ export function AgentSessionsNav({
     (onScreen?.resume === session.id && onScreen.kind === session.agent) ||
     (viewing === session.id && !viewingSub && !viewingTask);
 
-  // ⚠️ Pinned is its own group, newest pin on top, and ALWAYS shown in full
-  // — the fold only ever hides Agents' rows (FE-25/D1).
+  // Pinned is its own group, newest pin on top, and always shown in full: the
+  // fold only hides Agents' rows (FE-25/D1).
   const pinned = idle
     .filter((session) => session.pinnedAt !== null)
     .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
@@ -605,8 +612,8 @@ export function AgentSessionsNav({
     const working = isWorking(session);
     const key = agentKey(session);
     const subagents = session.subagents;
-    // ⚠️ Working first, then newest (FE-33/D4): the ones still going are
-    // the ones worth seeing above the fold.
+    // Working first, then newest (FE-33/D4): the ones still going are the
+    // ones worth seeing above the fold.
     const ordered = subagents
       .map((sub) => ({ sub, working: subagentWorking(session, sub) }))
       .sort(
@@ -615,7 +622,7 @@ export function AgentSessionsNav({
           b.sub.updatedAt.localeCompare(a.sub.updatedAt),
       );
     const going = ordered.filter((entry) => entry.working).length;
-    // Its background tasks still running (FE-42/D1): Claude counts them.
+    // Its background tasks still running; only Claude counts them (FE-42/D1).
     const background =
       session.agent === "claude" ? session.background.running : 0;
     const nested = subagents.length > 0 || background > 0;
@@ -629,8 +636,8 @@ export function AgentSessionsNav({
     const tab = runningFor(session);
     const chat = chatFor(session);
     const terminal = Boolean(tab) || chat;
-    // ⚠️ Stop asks first while it works, as for a tab; a chat's ends its
-    // engine — the turn is cut off, the conversation kept.
+    // Stop asks first while it works, as for a tab. A chat's Stop ends its
+    // engine: the turn is cut off, the conversation kept.
     const stopChat = () =>
       void window.desktop?.conversation
         .close(workspace, session.id)
@@ -697,8 +704,8 @@ export function AgentSessionsNav({
               >
                 {session.title}
               </span>
-              {/* Pinned says so itself; in Running the mark is where the row goes
-              back to on Stop. */}
+              {/* The Pinned group says so itself; in Running the mark is where
+              the row goes back to on Stop. */}
               {isPinned && !inPinned && (
                 <HugeiconsIcon
                   icon={PinIcon}
@@ -707,8 +714,8 @@ export function AgentSessionsNav({
                   aria-label="Pinned"
                 />
               )}
-              {/* How many it spawned; while some are going, how many are, by
-                the dot a still spinner is (FE-33/D7). */}
+              {/* How many it spawned; while some are going, how many are,
+                beside a dot that stands for a spinner (FE-33/D7). */}
               {subagents.length > 0 && (
                 <span
                   aria-hidden="true"
@@ -770,7 +777,7 @@ export function AgentSessionsNav({
               </ContextMenuItem>
               {onStop && <StopItem onStop={onStop} />}
               <ContextMenuSeparator />
-              {/* ⚠️ Off while a tab runs it (FE-57/D4): the CLI would only
+              {/* NOTE: Off while a tab runs it (FE-57/D4): the CLI would only
                   write the transcript again. Stop first. */}
               <ContextMenuItem
                 variant="destructive"
@@ -783,8 +790,8 @@ export function AgentSessionsNav({
               </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
-          {/* ⚠️ A sibling laid over the icon, like the quick actions: the
-            row is a button, and a button cannot hold another. */}
+          {/* NOTE: A sibling laid over the icon, like the quick actions:
+            the row is a button, and a button cannot hold another. */}
           {nested && (
             <button
               type="button"
@@ -826,9 +833,9 @@ export function AgentSessionsNav({
         )}
         {open &&
           shownSubagents.map(({ sub, working: busy }) => (
-            // ⚠️ Opens its transcript, read-only (FE-35/D9) — not its
-            // conversation, which was usually the one on screen already, so
-            // a click looked like it did nothing. A sub-agent has nothing of
+            // Opens its transcript, read-only (FE-35/D9), not its
+            // conversation: that is usually the one on screen already, so a
+            // click would look like it did nothing. A sub-agent has nothing of
             // its own to resume; its conversation's row still resumes.
             <button
               key={sub.id}
@@ -879,9 +886,9 @@ export function AgentSessionsNav({
   };
 
   return (
-    // ⚠️ One provider for the rail's quick actions: Base UI's own 600ms is
-    // longer than a pointer rests on a 20px icon, so the tip never showed;
-    // and once one is open, the next (Stop → Pin) opens without waiting.
+    // One provider for the rail's quick actions. Base UI's own 600ms is longer
+    // than a pointer rests on a 20px icon, so the tip would never show; and
+    // once one is open, the next (Stop → Pin) opens without waiting.
     <TooltipProvider delay={50}>
       {pinned.length > 0 && (
         <nav aria-label="Pinned" className="flex flex-col gap-0.5">
@@ -894,7 +901,7 @@ export function AgentSessionsNav({
         </nav>
       )}
       {/* The agents running right now (their pty is alive), whether or not
-          they are mid-turn — the ones with Stop. Hidden when none is. */}
+          they are mid-turn: the ones with Stop. Hidden when none is. */}
       {hasRunning && (
         <nav aria-label="Running" className="flex flex-col gap-0.5">
           <div className="flex min-w-0 items-center gap-2 pt-4 pb-1 pr-1">
@@ -945,7 +952,7 @@ export function AgentSessionsNav({
               Agents
             </span>
             <span className="flex items-center gap-0.5">
-              {/* Every conversation by title, past the fold — Claude Code's
+              {/* Every conversation by title, past the fold: Claude Code's
                 and Codex's in one list. */}
               <button
                 type="button"
@@ -961,8 +968,8 @@ export function AgentSessionsNav({
                   strokeWidth={2}
                 />
               </button>
-              {/* A new conversation opens as a chat (FE-62): its model picks
-                the CLI, Claude Code or Codex, and its composer starts it. */}
+              {/* A new conversation opens as a chat: its model picks the CLI,
+                Claude Code or Codex, and its composer starts it. */}
               <button
                 type="button"
                 aria-label="New conversation"
@@ -1062,8 +1069,8 @@ export function AgentSessionsNav({
               variant="destructive"
               disabled={deleting?.busy}
               onClick={(event) => {
-                // ⚠️ Kept open until main answers: a refusal is shown here,
-                // not lost with a dialog that already closed.
+                // NOTE: Kept open until main answers, so a refusal is shown
+                // here, not lost with a dialog that already closed.
                 event.preventDefault();
                 if (!deleting) return;
                 const { session } = deleting;

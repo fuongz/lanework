@@ -1,14 +1,6 @@
 import { SettingsCard } from "#/components/shared/settings/settings-page";
 import { cn } from "#/lib/utils";
 
-/**
- * A two-sided diff, drawn in the code font as it is picked (FE-21).
- *
- * ⚠️ Static markup, not `@pierre/diffs`. It is a sample the reader looks at
- * while choosing — the same five lines every time — and mounting a highlighter
- * and a shadow root to draw them would cost more than the page it sits on.
- */
-
 type Kind = "kw" | "id" | "type" | "prop" | "str" | "num" | "plain";
 
 /** Tokens as a light and a dark syntax theme colour them. */
@@ -94,6 +86,13 @@ function Pane({ lines, side }: { lines: Line[]; side: "removed" | "added" }) {
   );
 }
 
+/**
+ * A two-sided diff, drawn in the code font as it is picked.
+ *
+ * Static markup, not `@pierre/diffs`. It is a sample of the same five lines
+ * every time, and a highlighter with a shadow root would cost more than the
+ * page it sits on.
+ */
 export function CodePreview() {
   return (
     <figure aria-label="Code font preview" className="m-0">

@@ -63,9 +63,10 @@ function CommandDialog({
 }
 
 /**
- * The search field, edge to edge across the top of the list with a rule
- * under it — the menu's header, not a boxed input inside it. `trailing` sits
- * at its end (a Clear).
+ * The search field, edge to edge across the top of the list.
+ *
+ * A rule under it makes it the menu's header, not a boxed input inside it.
+ * `trailing` sits at its end (a Clear).
  */
 function CommandInput({
   className,

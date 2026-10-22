@@ -61,11 +61,11 @@ const NO_CONVERSATIONS: AgentSession[] = [];
 const NO_FACTS: Fact[] = [];
 
 /**
- * One agent, full size in the main view (FE-26).
+ * One agent, full size in the main view.
  *
- * ⚠️ The pty belongs to the HOST, not to this view: leaving the route
- * detaches and the agent keeps going (FE-26/D5); coming back attaches again
- * and the host's snapshot redraws the screen as it is. Only Stop ends it.
+ * The pty belongs to the host, not to this view. Leaving the route detaches
+ * and the agent keeps going (FE-26/D5); coming back attaches again and the
+ * host's snapshot redraws the screen as it is. Only Stop ends it.
  */
 export function AgentView() {
   const { slug, terminalId } = useParams({
@@ -90,7 +90,7 @@ export function AgentView() {
   const live = useAgentSessions((state) => state.live);
   const [listed, setListed] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  /** The terminal id whose CLI has drawn something; until then, a spinner. */
+  // The terminal id whose CLI has drawn something; until then, a spinner.
   const [drawn, setDrawn] = useState<string | null>(null);
 
   useEffect(() => {
@@ -101,8 +101,8 @@ export function AgentView() {
 
   const session = sessions.find((entry) => entry.id === terminalId);
 
-  // ⚠️ The agent on screen went away — `/exit`, ⌃C⌃C (FE-26): the view goes
-  // with it, back to the board, rather than showing an agent that is over.
+  // The agent on screen went away (`/exit`, ⌃C⌃C): the view goes with it,
+  // back to the board, rather than showing an agent that is over.
   const [seen, setSeen] = useState<string | null>(null);
   useEffect(() => {
     if (session) setSeen(session.id);
@@ -115,13 +115,13 @@ export function AgentView() {
         (entry) => entry.id === session.resume && entry.agent === agent,
       )
     : undefined;
-  // Thinking or working: a turn open in its transcript (FE-25).
+  // Thinking or working: a turn open in its transcript.
   const working =
     !!conversation &&
     !session?.exit &&
     (live[agentKey(conversation)] ?? conversation.working);
-  // ⚠️ By the tab's own conversation, listed or not: a new one has numbers
-  // from its first answer, before the rail has its title (FE-38).
+  // By the tab's own conversation, listed or not: a new one has numbers from
+  // its first answer, before the rail has its title.
   const goal = useAgentSessions((state) =>
     workspace && conversation?.agent === "codex"
       ? state.codexGoals[workspace]?.[conversation.id]
@@ -138,7 +138,7 @@ export function AgentView() {
   };
 
   const [toChat, setToChat] = useState(false);
-  /** Stop this tab, then open its conversation as a chat (FE-62/D3). */
+  // Stop this tab, then open its conversation as a chat (FE-62/D3).
   const openChat = async () => {
     const id = session?.resume;
     if (!workspace || !id || toChat || working) return;
@@ -201,9 +201,9 @@ export function AgentView() {
       aria-label={`${label} — ${title}`}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
-      {/* ⚠️ The header is the window's title bar now (FE-58), as Codex has
-          it: the bar drags the window and clears its controls, so the row
-          keeps only its content, in its order. */}
+      {/* The header is the window's title bar, as Codex has it: the bar
+          drags the window and clears its controls, so the row keeps only its
+          content, in its order. */}
       <WindowTitlebar className="gap-2.5">
         {working ? (
           <span role="img" aria-label="Working" className="flex shrink-0">
@@ -246,7 +246,7 @@ export function AgentView() {
             session={conversation}
           />
         )}
-        {/* What this conversation edited (FE-39/D1): only once there is one. */}
+        {/* What this conversation edited (FE-39/D1), once there is one. */}
         {conversation && workspace && (
           <AgentFilesButton
             slug={slug}
@@ -258,7 +258,7 @@ export function AgentView() {
           />
         )}
         {/* The same conversation as a chat (FE-62/D3). One writer at a
-            time: this tab is stopped first, so not mid-turn — the chat's
+            time: this tab is stopped first, so not mid-turn. The chat's
             Terminal button waits the same way. */}
         {agent === "claude" && session.resume && (
           <Button
@@ -316,9 +316,9 @@ export function AgentView() {
           onExit={markExited}
           onOutput={() => setDrawn(session.id)}
         />
-        {/* ⚠️ Until the CLI draws, a spinner rather than a blank screen: the
-            host holds back the shell getting ready (FE-26), so there is
-            nothing to look at yet — and nothing worth seeing. */}
+        {/* Until the CLI draws, a spinner rather than a blank screen: the
+            host holds back the shell getting ready, so there is nothing
+            worth seeing yet. */}
         {drawn !== session.id && !session.exit && (
           <div
             role="status"
@@ -337,9 +337,9 @@ export function AgentView() {
         )}
       </div>
 
-      {/* ⚠️ Asked only while it is working (FE-26/D5): stopping an agent
+      {/* Asked only while it is working (FE-26/D5): stopping an agent
           mid-task throws away what it was doing; stopping an idle one costs
-          nothing — its conversation is on disk and resumes. */}
+          nothing, since its conversation is on disk and resumes. */}
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent>
           <AlertDialogHeader>

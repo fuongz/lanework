@@ -57,8 +57,10 @@ function DeliverySelect({
 }
 
 /**
- * Shows one now, past the rows' choices: it answers whether this Mac lets
- * Lanework notify at all, which is the usual reason nothing appears.
+ * Sends a test notification now, whatever the rows say.
+ *
+ * It answers whether this Mac lets Lanework notify at all, the usual reason
+ * nothing appears.
  */
 function TestButton() {
   return (
@@ -74,8 +76,10 @@ function TestButton() {
 }
 
 /**
- * Settings → Notifications (FE-70). Main holds the choices — it is what
- * notifies, with or without a window — so they are read and written there.
+ * Settings → Notifications.
+ *
+ * Main holds the choices, since it is what notifies, with or without a
+ * window. So they are read and written there.
  */
 export function NotificationsSection() {
   const [settings, setSettings] = useState<NotificationSettings | null>(null);

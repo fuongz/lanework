@@ -26,13 +26,12 @@ import { Button } from "#/components/ui/button";
 import { useSession } from "#/stores/session";
 
 /**
- * Who is signed in, and on which machine.
+ * The Account page: who is signed in, and on which machine.
  *
- * ⚠️ Name and email come from `GET /v1/machines/me` — the ONE machine route the
- * control plane uses for account display. Editing is `sessionAuth`, which this
- * app never holds; workspace discovery uses `/v1/sync/state`. So this page shows
- * the account, never edits it, and falls back to the id when an older control
- * plane does not send the block.
+ * Name and email come from `GET /v1/machines/me`, the one machine route the
+ * control plane offers for account display. Editing needs `sessionAuth`,
+ * which this app never holds. So the page shows the account, never edits it,
+ * and falls back to the id when an older control plane omits the block.
  */
 export function AccountSection() {
   const session = useSession((state) => state.session);
@@ -42,9 +41,10 @@ export function AccountSection() {
   const [copied, copy] = useCopy();
 
   /**
-   * A value with a button that copies the ID behind it — the account's
-   * beside the email, the machine's beside its name. The IDs are what
-   * support asks for, and too long to be worth a row of their own.
+   * A value with a button that copies the ID behind it.
+   *
+   * The account's ID sits beside the email, the machine's beside its name.
+   * Support asks for them, and they are too long for a row of their own.
    */
   const withCopy = (
     value: string,
@@ -77,9 +77,9 @@ export function AccountSection() {
   const owner = machine?.owner ?? null;
   const error = useSession((state) => state.error);
 
-  // FE-52/D5 + D10: "Skip for now" leaves no account and no machine to show.
-  // The page becomes the way in instead — the rows a signed-in machine has
-  // would all read "—", and Sign out would have nothing to revoke.
+  // "Skip for now" leaves no account and no machine to show (FE-52/D5, D10).
+  // The page becomes the way in instead: a signed-in machine's rows would all
+  // read "—", and Sign out would have nothing to revoke.
   if (principal?.kind === "local")
     return (
       <SettingsPage
@@ -166,13 +166,14 @@ export function AccountSection() {
                     size="lg"
                     className={`${SETTINGS_BUTTON} border-0`}
                     variant="destructive"
-                    // `border-0`, not a colour override: the base button pairs
-                    // `border border-transparent` with `bg-clip-padding`, so the
-                    // fill stops short of the edge and the page shows through as
-                    // a 1px ring. On a tinted pill that reads as a border.
-                    // Optically, not geometrically centred: the icon side takes
-                    // 2px less than the text side, or the glyph reads as pushed
-                    // away from the edge it sits against.
+                    // - `border-0`, not a colour override: the base button
+                    //   pairs `border border-transparent` with
+                    //   `bg-clip-padding`, so the fill stops short of the edge
+                    //   and the page shows through as a 1px ring. On a tinted
+                    //   pill that reads as a border.
+                    // - Optically centred, not geometrically: the icon side
+                    //   takes 2px less than the text side, or the glyph looks
+                    //   pushed away from its edge.
                     disabled={busy || !machine}
                     onClick={() => setConfirming(true)}
                   >
@@ -209,12 +210,10 @@ export function AccountSection() {
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              // Same `border-0` as the row button, and the same reason: the base
-              // button pairs `border border-transparent` with `bg-clip-padding`,
-              // so the fill stops short of the edge and the popup shows through
-              // as a 1px ring. Third call site this has caught — it is a
-              // property of the registry button, and `components/ui/` is
-              // overwritten by the next `shadcn add`, so the fix belongs here.
+              // `border-0` for the row button's reason: without it the popup
+              // shows through as a 1px ring. It is a property of the registry
+              // button, and the next `shadcn add` overwrites `components/ui/`,
+              // so the fix belongs at each call site.
               className="border-0"
               disabled={busy}
               onClick={async () => {

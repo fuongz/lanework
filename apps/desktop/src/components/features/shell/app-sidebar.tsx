@@ -31,12 +31,14 @@ import { MiniRail } from "./mini-rail";
 import { ProjectSwitcher } from "./project-switcher";
 
 /**
- * One row of the rail's scroll area. The active language is `settings-nav`'s,
- * on purpose; the HOVER is `RailHover`'s one sliding background, not the row's.
+ * One row of the rail's scroll area.
+ *
+ * The active look is `settings-nav`'s. The hover is `RailHover`'s one sliding
+ * background, not the row's.
  */
 const ROW = `${RAIL_ROW} group relative flex h-[30px] items-center gap-2.5 rounded-md px-2 text-[13px] transition-[background-color,scale] duration-150 ease-out active:scale-[0.98]`;
 
-/** A row outside the scroll area — Settings — which lights on its own. */
+/** A row outside the scroll area (Settings), which lights on its own. */
 const LONE_ROW = `${ROW} [&:not([aria-current])]:hover:bg-foreground/[0.04]`;
 
 const ACTIVE = {
@@ -64,9 +66,11 @@ function SectionLabel({
 }
 
 /**
- * A rail row with Refresh on right click — reads the row's source again
- * without opening its screen. The wrapper is `contents`, so the row stays the
- * nav's own child for layout and for `RailHover`.
+ * A rail row with Refresh on right click, which reads the row's source again
+ * without opening its screen.
+ *
+ * The wrapper is `contents`, so the row stays the nav's own child for layout
+ * and for {@link RailHover}.
  */
 function RefreshMenu({
   children,
@@ -88,8 +92,11 @@ function RefreshMenu({
 }
 
 /**
- * `mini`: the rail folded to its icons (FE-57); `onExpand` opens it again —
- * from its sidebar button, or from Agents, whose list only reads open.
+ * The rail: the project, its repository, its agents, and Settings.
+ *
+ * @param mini The rail folded to its icons.
+ * @param onExpand Opens it again, from its sidebar button or from Agents,
+ *   whose list only reads open.
  */
 export function AppSidebar({
   mini = false,
@@ -98,15 +105,15 @@ export function AppSidebar({
   mini?: boolean;
   onExpand?: () => void;
 } = {}) {
-  // ⚠️ Read from the URL, not from the store. The rail has to draw correctly on
-  // the very first paint of a deep link, before anything has been fetched — and
-  // the URL is the only thing that is already true at that moment.
+  // Read from the URL, not the store. The rail has to draw correctly on the
+  // first paint of a deep link, before anything has been fetched, and the URL
+  // is the only thing already true at that moment.
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const _view = useBoard((state) => state.view);
   const open = useCommandPalette((state) => state.open);
   const session = useSession((state) => state.session);
-  // ⚠️ Two selectors returning numbers, not one returning `{ additions,
+  // NOTE: Two selectors returning numbers, not one returning `{ additions,
   // deletions }`: a fresh object on every read is a new value to zustand, and
   // the rail would re-render on every store change.
   const added = useWorktree((state) =>
@@ -119,7 +126,7 @@ export function AppSidebar({
       ? state.state.files.reduce((sum, file) => sum + file.deletions, 0)
       : 0,
   );
-  // History's ↑ rows, counted — what the next push sends.
+  // History's ↑ rows, counted: what the next push sends.
   const unpushed = useWorktree((state) =>
     state.slug === slug && state.state?.kind === "ready"
       ? state.state.unpushed
@@ -129,7 +136,7 @@ export function AppSidebar({
     unpushed === 1
       ? "1 commit not pushed yet"
       : `${unpushed} commits not pushed yet`;
-  // The terminal's key for this project — the cloud id, or the slug — which
+  // The terminal's key for this project (the cloud id, or the slug), which
   // the Agents group resumes into.
   const workspaceKey = useWorkspaceKey(slug);
   const hasFolder = useWorktree(
@@ -149,10 +156,10 @@ export function AppSidebar({
     void peek(slug);
   };
 
-  // ⚠️ Read with the board, not when Changes is opened: the badge is the reason
-  // to open Changes, so it cannot wait for it. `git status` only — the patch
-  // stays the Changes screen's to read — on project change and on focus, never
-  // on a timer.
+  // Read with the board, not when Changes is opened: the badge is the reason
+  // to open Changes, so it cannot wait for it. `git status` only (the patch
+  // stays the Changes screen's to read), on project change and on focus,
+  // never on a timer.
   useEffect(() => {
     if (!slug) return;
     void peek(slug);
@@ -161,7 +168,7 @@ export function AppSidebar({
     return () => window.removeEventListener("focus", onFocus);
   }, [peek, slug]);
 
-  // ⚠️ ⌘N is free on macOS: Electron's default menu binds ⌘W and ⌘Q, never ⌘N,
+  // ⌘N is free on macOS: Electron's default menu binds ⌘W and ⌘Q, never ⌘N,
   // so nothing native swallows this before the window sees it.
   useEffect(() => {
     if (!slug) return;
@@ -175,19 +182,19 @@ export function AppSidebar({
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate, slug]);
 
-  // The orb's seed, not a label — see `AccountOrb`. Absent when the control
-  // plane never told us who owns this machine, and then there is no mark to
-  // draw rather than a mark standing for nobody.
+  // The orb's seed, not a label (see `AccountOrb`). Empty when the control
+  // plane never said who owns this machine: then there is no mark to draw,
+  // rather than a mark standing for nobody.
   const accountSeed =
     session?.principal.kind === "machine"
       ? (session.principal.userId ?? "")
       : "";
 
-  // ⚠️ Swapping between the open rail and the icons fades the new one in,
-  // so the swap reads as part of the glide; the first paint, at launch,
-  // does not fade.
-  // Worked out while rendering, not in an effect: a flag set after the swap
-  // would draw the new rail fully once, then start its fade from nothing.
+  // Swapping between the open rail and the icons fades the new one in, so the
+  // swap reads as part of the glide; the first paint, at launch, does not
+  // fade. Worked out while rendering, not in an effect: a flag set after the
+  // swap would draw the new rail fully once, then start its fade from
+  // nothing.
   const firstMini = useRef(mini);
   const swappedOnce = useRef(false);
   if (mini !== firstMini.current) swappedOnce.current = true;
@@ -221,19 +228,19 @@ export function AppSidebar({
       className={`app-sidebar flex min-h-0 flex-1 flex-col px-2.5 ${swapped ? "motion-safe:animate-in motion-safe:fade-in-0 duration-200" : ""}`}
     >
       {/* No spacer for the window controls: the window's title bar above the
-          rail holds them, open or folded (FE-58). */}
+          rail holds them, open or folded. */}
       <div className="mt-2 shrink-0">
         <ProjectSwitcher />
       </div>
 
-      {/* Search sits where composing used to: the palette behind it reaches
-          New issue too, and ⌘N still opens it straight. */}
+      {/* Search, not a compose button: the palette behind it reaches New
+          issue too, and ⌘N still opens that directly. */}
       <div className="mt-1 mb-1 shrink-0">
         <button
           type="button"
           onClick={open}
           title="Search — ⌘K"
-          // ⚠️ A size container, so the ⌘K hint steps aside before the label
+          // A size container, so the ⌘K hint steps aside before the label
           // has to at the rail's narrowest.
           className="hover:bg-foreground/[0.06] bg-foreground/[0.035] text-muted-foreground @container flex h-[30px] w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors duration-150"
         >
@@ -250,13 +257,13 @@ export function AppSidebar({
         </button>
       </div>
 
-      {/* ⚠️ `overflow-x-hidden`: nothing in the rail may scroll it sideways —
-          a row too wide for it truncates instead.
-          ⚠️ Pulled into the rail's right padding, so the scrollbar sits on the
-          window's edge rather than 10px in from it. The gutter is kept STABLE:
-          the 10px bar (app.css) then always takes exactly the padding it
-          replaces, and the rows line up with Search and Settings whether
-          the list overflows or not. */}
+      {/* - `overflow-x-hidden`: nothing in the rail may scroll it sideways; a
+            row too wide for it truncates instead.
+          - Pulled into the rail's right padding, so the scrollbar sits on the
+            window's edge rather than 10px in from it. The gutter is kept
+            stable: the 10px bar (app.css) always takes the padding it
+            replaces, and the rows line up with Search and Settings whether
+            the list overflows or not. */}
       <RailHover className="-mr-2.5 min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
         {slug && (
           <nav aria-label="Project" className="flex flex-col gap-0.5">
@@ -271,7 +278,7 @@ export function AppSidebar({
               search={{}}
               className={ROW}
               // Active on an open issue too, and on the Pull requests tab
-              // (`/issues/pulls`, FE-75): both open under this path.
+              // (`/issues/pulls`): both open under this path.
               activeOptions={{ includeSearch: false }}
               activeProps={ACTIVE}
             >
@@ -285,19 +292,18 @@ export function AppSidebar({
             </Link>
           </nav>
         )}
-        {/* The repository, not the board: its working tree and its history
-            (FE-21). Pull requests moved under Issues as a tab (FE-75). */}
+        {/* The repository, not the board: its working tree and its
+            history. Pull requests are a tab under Issues. */}
         {slug && (
           <nav aria-label="Repository" className="flex flex-col gap-0.5">
-            {/* ⚠️ The ROW takes the label's vertical padding, so the label and
-                the branch button share one box and centre on each other —
-                bottom-aligning them left the text sitting below the pill's
-                middle. */}
+            {/* The row takes the label's vertical padding, so the label and
+                the branch button share one box and centre on each other.
+                Bottom-aligned, the text sits below the pill's middle. */}
             <div className="flex min-w-0 items-center justify-between gap-2 pt-4 pb-1 pr-1">
               <SectionLabel className="shrink-0 py-0">Repository</SectionLabel>
               <BranchSwitcher slug={slug} />
             </div>
-            {/* The working tree itself, as an editor's explorer (FE-66). */}
+            {/* The working tree itself, as an editor's explorer. */}
             <Link
               to="/w/$slug/files"
               params={{ slug }}
@@ -381,7 +387,7 @@ export function AppSidebar({
           <AgentSessionsNav
             workspace={workspaceKey}
             slug={slug}
-            // ⚠️ The group shows for a project with a folder even before its
+            // The group shows for a project with a folder even before its
             // first conversation, so its + has somewhere to live (FE-25/D3).
             hasFolder={hasFolder}
             row={ROW}

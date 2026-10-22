@@ -35,16 +35,14 @@ import { useBoard } from "#/stores/board";
 /**
  * Compose one issue.
  *
- * ⚠️ A ROUTE, not a dialog, for the same reason the detail is one (FE-08 D5): a
- * card being written is a place you can be, so Back leaves it, ⌘K can send you
- * to it, and a half-typed issue survives a click on something else. It is also
- * the only surface with room for a description, which is the field the toolbar's
- * one-line quick-add can never offer.
- *
- * ⚠️ CATEGORY is the field this page exists for. The board mints a card's issue
- * key from it — `taskId` stays null without one — so every card the quick-add
- * had ever made was unkeyed: invisible to ⌘K, impossible to deep-link, and blank
- * in the column every list reserves for `FE-06`.
+ * - A route, not a dialog, for the same reason the detail is one (FE-08/D5).
+ *   A card being written is a place you can be, so Back leaves it, ⌘K can
+ *   send you to it, and a half-typed issue survives a click on something
+ *   else. It is also the only surface with room for a description.
+ * - Category is the field this page exists for. The board mints a card's
+ *   issue key from it (`taskId` stays null without one), and an unkeyed card
+ *   is invisible to ⌘K, impossible to deep-link, and blank in the column
+ *   every list reserves for `FE-06`.
  */
 export function NewIssue() {
   const { slug } = useParams({ from: "/_app/w/$slug/issues/new" });
@@ -58,13 +56,13 @@ export function NewIssue() {
   const busy = useBoard((state) => state.busy);
   const createCard = useBoard((state) => state.createCard);
 
-  // Seeded once from the URL, for "Create card from issue" on a GitHub issue
-  // (FE-75). Later changes to the URL do not overwrite what was typed.
+  // Seeded once from the URL, for "Create card from issue" on a GitHub issue.
+  // Later changes to the URL do not overwrite what was typed.
   const [title, setTitle] = useState(() => (prefill.title ?? "").slice(0, 200));
   const [body, setBody] = useState(prefill.body ?? "");
-  // ⚠️ Seeded from the board's own first lane rather than left empty. The
-  // service defaults to it when `columnKey` is absent, so showing anything else
-  // — or nothing — would be this page disagreeing with what it is about to do.
+  // Shows the board's own first lane until one is picked, rather than nothing.
+  // The service defaults to it when `columnKey` is absent, so showing anything
+  // else would be this page disagreeing with what it is about to do.
   const [columnKey, setColumnKey] = useState<string | null>(null);
   const [categoryKey, setCategoryKey] = useState(NONE);
   const [priority, setPriority] = useState(NONE);
@@ -93,15 +91,15 @@ export function NewIssue() {
         : { priority: priority as BoardCard["priority"] }),
       ...(tags.length ? { tags } : {}),
     });
-    // ⚠️ Stays put on failure, with the draft intact. The reason is already on
-    // screen — `WorkspaceLayout` renders the store's error across every view —
+    // Stays put on failure, with the draft intact. The reason is already on
+    // screen (`WorkspaceLayout` renders the store's error across every view),
     // and navigating away would take a person's unsaved paragraph with it.
     if (result.error || !result.card) return;
 
-    // ⚠️ The detail route is addressed by TASK ID and resolves it through
+    // NOTE: The detail route is addressed by task id and resolves it through
     // `lookup`, which only knows minted keys. A card created with no category
-    // has none, so following it there would land on "No card called …" — the
-    // list is where an unkeyed card is actually reachable.
+    // has none, so following it there would land on "No card called …". The
+    // list is where an unkeyed card is reachable.
     void navigate(
       result.card.taskId
         ? {
@@ -116,18 +114,18 @@ export function NewIssue() {
   return (
     <form
       id={formId}
-      // ⚠️ TWO PANELS, not one page with a rail floating in it. The divider runs
-      // the full height and each side scrolls on its own, so "what this
-      // issue says" and "what this issue is" read as two places rather than one
+      // Two panels, not one page with a rail floating in it. The divider runs
+      // the full height and each side scrolls on its own, so "what this issue
+      // says" and "what this issue is" read as two places rather than one
       // column that happens to have fields at the end of it.
       className="flex min-h-0 flex-1"
       onSubmit={(event) => {
         event.preventDefault();
         void save();
       }}
-      // ⚠️ On the form, not on the title field. ⌘↵ has to save from the
-      // description too — that is where the hands are when an issue is finished
-      // — and Escape has to leave from anywhere for the same reason.
+      // On the form, not on the title field. ⌘↵ has to save from the
+      // description too (that is where the hands are when an issue is
+      // finished), and Escape has to leave from anywhere for the same reason.
       onKeyDown={(event) => {
         if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
@@ -137,10 +135,10 @@ export function NewIssue() {
       }}
     >
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* ⚠️ In the WINDOW's title bar (FE-58), the way Codex has it. The
-            bar is portalled out of this form's DOM, so Save names the form
-            with `form` — a bare submit button out there submits nothing. ⌘↵
-            and Escape still reach the form's handler: React bubbles a
+        {/* NOTE: In the window's title bar, the way Codex has it. The bar is
+            portalled out of this form's DOM, so Save names the form with
+            `form`: a bare submit button out there submits nothing. ⌘↵ and
+            Escape still reach the form's handler, because React bubbles a
             portal's events through the tree it was rendered from. */}
         <WindowTitlebar>
           <span className="bg-foreground/[0.06] text-muted-foreground truncate rounded px-1.5 py-0.5 text-xs">
@@ -173,30 +171,29 @@ export function NewIssue() {
             aria-label="Issue title"
             placeholder="Issue title"
             value={title}
-            // ⚠️ 200, the service's own `MAX_TITLE`. The quick-add allowed 500
-            // for a while and the extra 300 characters only ever bought a
+            // The service's own `MAX_TITLE`. Anything longer only buys a
             // refusal at the far end of a round trip.
             maxLength={200}
             autoFocus
             disabled={stale}
-            // ⚠️ No ground on focus, unlike every other borderless field in
-            // this app. Those sit in a row of controls where a field has to say
-            // which one you are in; these two ARE the panel, and a slab across
+            // No ground on focus, unlike every other borderless field in this
+            // app. Those sit in a row of controls where a field has to say
+            // which one you are in; these two are the panel, and a slab across
             // its whole width reads as a form on a surface meant to read as a
-            // document. The caret carries it — and it is always in one of these
+            // document. The caret carries it, and it is always in one of these
             // two, because the title takes focus on arrival.
             className="h-auto rounded-md border-0 bg-transparent px-1.5 text-xl font-semibold tracking-tight shadow-none focus-visible:border-0 focus-visible:ring-0 md:text-xl dark:bg-transparent"
             onChange={(event) => setTitle(event.target.value)}
           />
-          {/* ⚠️ `min-h-0` on a flex child that scrolls. Without it the editor
-              grows with its content and pushes the panel instead of scrolling
-              inside it, which is the same trap the textarea here fell into. */}
+          {/* NOTE: `min-h-0` on a flex child that scrolls. Without it the
+              editor grows with its content and pushes the panel instead of
+              scrolling inside it. */}
           <MarkdownEditor
             label="Description"
             placeholder="Add description…"
             value={body}
             onChange={setBody}
-            // ⌘↵ and Escape are bound INSIDE the editor: CodeMirror's default
+            // ⌘↵ and Escape are bound inside the editor: CodeMirror's default
             // keymap claims both, so the form's own handler never sees them
             // from the field a person is most likely to be typing in.
             onSubmit={() => void save()}
@@ -211,9 +208,8 @@ export function NewIssue() {
         aria-label="Card properties"
         className="border-border flex w-72 shrink-0 flex-col border-l"
       >
-        {/* The rail's own header band. ⚠️ It stays in the card when the page's
-            header moves to the window's title bar (FE-58), and is no drag
-            region any more — it no longer sits at the window's top edge. */}
+        {/* The rail's own header band. It is no drag region: it does not sit
+            at the window's top edge. */}
         <header className="border-border flex h-11 shrink-0 items-center border-b px-4">
           <span className="text-[13px] font-medium">Details</span>
         </header>
@@ -309,11 +305,10 @@ export function NewIssue() {
           </Row>
 
           <Row label="Labels">
-            {/* ⚠️ The same control AND the same word the detail rail uses. A
-                card's labels are the same thing whether it exists yet or not,
-                and the two rails are read as one panel by anyone who creates a
-                card and then opens it — a field that changes name between them
-                is a field they look for twice. */}
+            {/* The same control and the same word the detail rail uses. The
+                two rails read as one panel to anyone who creates a card and
+                then opens it, and a field that changes name between them is a
+                field they look for twice. */}
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
               {tags.map((tag) => (
                 <LabelChip
@@ -336,7 +331,7 @@ export function NewIssue() {
             </div>
           </Row>
 
-          {/* ⚠️ Said in the rail rather than discovered afterwards. Without a
+          {/* Said in the rail rather than discovered afterwards. Without a
               category the board mints no `FE-06`, and a key is not something a
               card can be given later without every link to it changing. */}
           {categoryKey === NONE && (

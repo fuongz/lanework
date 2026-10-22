@@ -49,7 +49,7 @@ import type { WorktreeFile } from "../../../../shared/worktree";
 /** A stable empty, so the tree is not rebuilt on every render while loading. */
 const NO_FILES: AgentFileTouch[] = [];
 
-/** Said wherever the list is: what it cannot know (FE-39). */
+/** Said wherever the list is: what it cannot know. */
 const SHELL_NOTE =
   "Only edits made with the agent's file tools are listed. Files it changed through the shell — sed, a script, a formatter — are not.";
 
@@ -85,8 +85,8 @@ function FolderRow({
         strokeWidth={1.5}
         aria-hidden="true"
       />
-      {/* ⚠️ Truncated from the START, as Changes does: the end of a
-          compacted chain is the part that says where you are. */}
+      {/* Truncated from the start, as Changes does: the end of a compacted
+          chain is the part that says where you are. */}
       <span
         className="text-muted-foreground min-w-0 flex-1 truncate text-left text-[13px] [direction:rtl]"
         title={folder.path}
@@ -103,10 +103,10 @@ function FolderRow({
 }
 
 /**
- * One file the conversation edited (FE-39/D1, D6): how often, how lately.
+ * One file the conversation edited: how often, how lately (FE-39/D1, D6).
  *
- * ⚠️ A file still changed in the working tree opens its diff in Changes; one
- * that is not — committed since, or put back — is dimmed and does nothing,
+ * A file still changed in the working tree opens its diff in Changes. One
+ * that is not (committed since, or put back) is dimmed and does nothing,
  * since Changes has nothing to show for it.
  */
 function FileRow({
@@ -198,7 +198,7 @@ function FileRow({
   );
 }
 
-/** `+81 −20`, coloured as the rail's Changes is; nothing for no change. */
+/** Line counts as `+81 −20`, coloured as the rail's Changes is. */
 function LineCounts({ added, removed }: { added: number; removed: number }) {
   if (added === 0 && removed === 0) return null;
   return (
@@ -214,12 +214,12 @@ function LineCounts({ added, removed }: { added: number; removed: number }) {
 }
 
 /**
- * The agent view's "Changes" (FE-39/D1): the files this conversation edited
- * — its sub-agents' with them, "via" their kind (D5) — nested by folder the
- * way Changes is.
+ * The agent view's "Changes" (FE-39/D1): the files this conversation edited,
+ * nested by folder the way Changes is.
  *
- * ⚠️ Read again on every turn that opens or closes and whenever the list is
- * opened. Main caches each transcript by size and mtime, so a re-read only
+ * Its sub-agents' files are listed with them, "via" their kind (FE-39/D5).
+ * The list is read again on every turn that opens or closes and whenever it is
+ * opened; main caches each transcript by size and mtime, so a re-read only
  * parses what the agent appended since.
  */
 export function AgentFilesButton({
@@ -241,7 +241,7 @@ export function AgentFilesButton({
   const navigate = useNavigate();
   const peek = useWorktree((state) => state.peek);
   const focusFile = useWorktree((state) => state.focusFile);
-  /** The working tree's changes, once this project's status has been read. */
+  // The working tree's changes, once this project's status has been read.
   const changes = useWorktree((state) =>
     state.slug === slug && state.state?.kind === "ready"
       ? state.state.files
@@ -250,7 +250,7 @@ export function AgentFilesButton({
   const [open, setOpen] = useState(false);
   const [found, setFound] = useState<AgentFiles | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** Folders folded shut, by path. */
+  // Folders folded shut, by path.
   const [shut, setShut] = useState<Set<string>>(() => new Set());
   const asked = useRef(0);
 
@@ -286,7 +286,7 @@ export function AgentFilesButton({
   }, [load, working]);
 
   // The count on the button is git's: the working tree's status, read once
-  // here — Changes keeps it current after that.
+  // here. Changes keeps it current after that.
   useEffect(() => {
     void peek(slug);
   }, [peek, slug]);
@@ -301,7 +301,7 @@ export function AgentFilesButton({
     return map;
   }, [changes]);
   const files = found?.files ?? NO_FILES;
-  /** What git still sees changed in the files it edited. */
+  // What git still sees changed in the files it edited.
   let added = 0;
   let removed = 0;
   const counted = new Set<WorktreeFile>();
@@ -326,7 +326,7 @@ export function AgentFilesButton({
       return next;
     });
 
-  /** Its diff, scrolled to in Changes. */
+  // Its diff, scrolled to in Changes.
   const openDiff = (file: WorktreeFile) => {
     setOpen(false);
     focusFile(file.path);

@@ -1,5 +1,5 @@
 // Whether a card may be worked yet, and what "approve the recommended options"
-// would tick on it (FE-34) — no React, so a spec can hold it still.
+// would tick on it. No React, so a spec can hold it still.
 import type { BoardChecklistItem } from "../../shared/workspaces";
 
 /**
@@ -7,7 +7,7 @@ import type { BoardChecklistItem } from "../../shared/workspaces";
  * the start of a box (the MCP's own review flow), or `*(Recommended)*` at the
  * end (the old markdown cards).
  *
- * ⚠️ Matched anywhere in the text and in any case, never as a field: the
+ * NOTE: Matched anywhere in the text and in any case, never as a field: the
  * board has no column for it, and the two spellings above are both live.
  */
 const RECOMMENDED = /\(recommended\)/i;
@@ -41,10 +41,11 @@ export interface ChecklistGate {
 }
 
 /**
- * The card's decisions as AGENTS.md gates them — the same count as the
- * service's `openDecisions` (`packages/db/src/board/ops.ts`): an ungrouped
- * decision not ticked, or a group with no option ticked. Verify boxes never
- * gate.
+ * The card's decisions as AGENTS.md gates them.
+ *
+ * The same count as the service's `openDecisions`
+ * (`packages/db/src/board/ops.ts`): an ungrouped decision not ticked, or a
+ * group with no option ticked. Verify boxes never gate.
  */
 export function checklistGate(
   items: readonly BoardChecklistItem[],
@@ -52,7 +53,7 @@ export function checklistGate(
   const picks: GatePick[] = [];
   const blocked: string[] = [];
   const groups = new Map<string, BoardChecklistItem[]>();
-  // ⚠️ Collected first, then judged where each group FIRST appears, so a
+  // NOTE: Collected first, then judged where each group FIRST appears, so a
   // group whose options are not next to each other is still one choice.
   for (const item of items) {
     if (item.section !== "decisions" || !item.group) continue;
@@ -70,7 +71,7 @@ export function checklistGate(
     judged.add(item.group);
     const options = groups.get(item.group) ?? [];
     if (options.some((option) => option.checked)) continue;
-    // ⚠️ Exactly one. Two options both marked recommended is a card that
+    // NOTE: Exactly one. Two options both marked recommended is a card that
     // contradicts itself, and picking the first would be a guess.
     const recommended = options.filter(isRecommended);
     if (recommended.length === 1)

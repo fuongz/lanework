@@ -8,14 +8,14 @@ const indexOf = (location: HistoryLocation): number =>
   location.state?.__TSR_index ?? 0;
 
 /**
- * Back and forward through the window's own history, the way a browser's
- * buttons work.
+ * Back and forward through the window's own history, like a browser's
+ * buttons.
  *
- * ⚠️ "Can go forward" is not something the History API answers, so it is kept
- * here: the highest entry index seen since the last PUSH. A push drops every
- * entry after it, exactly as the browser does; going back or forward only
- * moves within them. After a reload the entries ahead are unknown, so the
- * forward button starts off until the person goes back once.
+ * The History API does not answer "can go forward", so it is kept here: the
+ * highest entry index seen since the last push. A push drops every entry
+ * after it, as the browser does; back and forward only move within them.
+ * After a reload the entries ahead are unknown, so the forward button starts
+ * off until the person goes back once.
  */
 function useHistoryNav() {
   const { history } = useRouter();

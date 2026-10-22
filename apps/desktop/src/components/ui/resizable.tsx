@@ -10,29 +10,26 @@ import {
   useDefaultLayout,
 } from "react-resizable-panels";
 
-/**
- * Columns a person can drag.
- *
- * ⚠️ Written against `react-resizable-panels` **v4**, whose components are
- * `Group` / `Panel` / `Separator`. shadcn's published `resizable` block wraps
- * `PanelGroup` / `PanelResizeHandle` from v2 — pasting it here would import
- * names this version does not export.
- *
- * ⚠️ The separator is a real `role="separator"` with the WAI-ARIA properties
- * the library maintains, which is the whole reason to take the dependency:
- * arrow keys resize it, Home/End jump to the extremes, and double-click
- * restores the default size. A div with a pointer handler gives back none of
- * that, and this app's panes are the only navigation some screens have.
- */
+// Columns a person can drag.
+//
+// - NOTE: Written against `react-resizable-panels` v4, whose components are
+//   `Group` / `Panel` / `Separator`. shadcn's published `resizable` block
+//   wraps `PanelGroup` / `PanelResizeHandle` from v2; pasting it here would
+//   import names this version does not export.
+// - The separator is a real `role="separator"` with the WAI-ARIA properties
+//   the library maintains, which is the reason to take the dependency: arrow
+//   keys resize it, Home/End jump to the extremes, and double-click restores
+//   the default size. A div with a pointer handler gives none of that, and
+//   these panes are the only navigation some screens have.
 
 function ResizablePanelGroup({ className, ...props }: GroupProps) {
   return (
     <Group
       data-slot="resizable-panel-group"
-      // ⚠️ No `flex-row` / `flex-col` here. The library sets `display` and
-      // `flexDirection` inline from `orientation` and documents that its inline
-      // styles cannot be overridden; a class stating the direction would either
-      // lose silently or fight it.
+      // NOTE: No `flex-row` / `flex-col` here. The library sets `display` and
+      // `flexDirection` inline from `orientation`, and its inline styles
+      // cannot be overridden; a class stating the direction would lose
+      // silently or fight it.
       className={cn("h-full w-full", className)}
       {...props}
     />
@@ -43,9 +40,9 @@ function ResizablePanel({ className, ...props }: PanelProps) {
   return (
     <Panel
       data-slot="resizable-panel"
-      // `min-w-0` because every pane in this app scrolls its own content: a
-      // panel whose child cannot shrink below its intrinsic width pushes the
-      // separator past the edge of the window, out of reach.
+      // `min-w-0` because every pane scrolls its own content: a panel whose
+      // child cannot shrink below its intrinsic width pushes the separator
+      // past the window's edge, out of reach.
       className={cn("flex min-h-0 min-w-0 flex-col", className)}
       {...props}
     />
@@ -55,9 +52,9 @@ function ResizablePanel({ className, ...props }: PanelProps) {
 /**
  * The line between two panels.
  *
- * ⚠️ One pixel to look at, nine to hit. The `after:` pseudo-element widens the
- * grab target without taking any space in the layout — a one-pixel target is a
- * target people miss, and they conclude the panel does not resize at all.
+ * One pixel to look at, nine to hit. The `after:` pseudo-element widens the
+ * grab target without taking layout space; people miss a one-pixel target
+ * and conclude the panel does not resize at all.
  */
 function ResizableHandle({ className, ...props }: SeparatorProps) {
   return (
@@ -81,12 +78,12 @@ function ResizableHandle({ className, ...props }: SeparatorProps) {
 }
 
 /**
- * Somewhere to keep column widths that is allowed to not exist.
+ * Storage for column widths that may be unavailable.
  *
- * ⚠️ Every read and write is wrapped, and the fallback is an in-memory object
+ * NOTE: Every read and write is wrapped, and the fallback is an in-memory map
  * rather than `undefined`. Handing the hook nothing makes it reach for
- * `localStorage` itself, which is the thing that just threw — a layout that
- * forgets is a small annoyance, an exception during render is a blank window.
+ * `localStorage` itself, which is what just threw. A layout that forgets is
+ * an annoyance; an exception during render is a blank window.
  */
 function layoutStorage(): LayoutStorage {
   const memory = new Map<string, string>();
@@ -111,14 +108,12 @@ function layoutStorage(): LayoutStorage {
 /**
  * Remembered column widths.
  *
- * ⚠️ `localStorage`, not the main process. This is one window's display
- * preference — not account data, and not worth an IPC round trip per drag.
- * `stores/preferences.ts` already keeps renderer preferences this way.
- *
- * ⚠️ `onlySaveAfterUserInteractions` matters more than it looks. Without it,
- * collapsing a panel from a button — or resizing the window — overwrites the
- * width somebody dragged to, so the layout they chose survives until the first
- * time they use the toggle beside it.
+ * - `localStorage`, not the main process: one window's display preference is
+ *   not account data and not worth an IPC round trip per drag.
+ *   `stores/preferences.ts` keeps renderer preferences the same way.
+ * - NOTE: `onlySaveAfterUserInteractions` matters. Without it, collapsing a
+ *   panel from a button, or resizing the window, overwrites the width someone
+ *   dragged to.
  */
 export function usePersistedLayout(id: string, panelIds: string[]) {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({

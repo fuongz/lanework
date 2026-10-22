@@ -12,14 +12,12 @@ import { ipcMessage } from "#/lib/ipc-error";
 /**
  * The folders a project is built from, as an editable list.
  *
- * ⚠️ ONE implementation, two dialogs: creating a project and changing an
- * existing one. They are the same list with the same rules — primary is first,
- * a folder appears once, removing the last one is allowed — and two copies
- * would be two places for those rules to drift apart.
- *
- * ⚠️ Every row is a `PickedFolder`, never a bare path, including the ones read
- * back from a workspace that already had them. Main mints the ids and resolves
- * them itself, so no screen can ask this app to read a folder nobody chose.
+ * - One implementation for two dialogs, creating a project and changing one.
+ *   Both follow the same rules (primary is first, a folder appears once,
+ *   removing the last one is allowed), so one copy keeps them from drifting.
+ * - NOTE: Every row is a {@link PickedFolder}, never a bare path, including
+ *   rows read back from an existing workspace. Main mints the ids and resolves
+ *   them itself, so no screen can ask this app to read a folder nobody chose.
  */
 export function SourceFolders({
   folders,
@@ -59,8 +57,8 @@ export function SourceFolders({
 
   if (folders.length === 0)
     return (
-      // ⚠️ A drop-target-sized button, not a link in a corner. Where a dialog's
-      // second half is about folders, the way to add one is the second half.
+      // A drop-target-sized button, not a link in a corner: where half the
+      // dialog is about folders, that half is the way to add one.
       <button
         type="button"
         onClick={() => void add()}
@@ -73,9 +71,9 @@ export function SourceFolders({
           strokeWidth={1.5}
           aria-hidden="true"
         />
-        {/* ⚠️ The label does not change while the chooser is open. The OS panel
-            is modal — nobody can see this button while it is up — so a
-            "Choosing…" state only ever renders to something unreadable. */}
+        {/* The label does not change while the chooser is open: the OS panel
+            is modal and covers this button, so a "Choosing…" state is never
+            seen. */}
         Add folders Lanework can read
       </button>
     );
@@ -93,19 +91,18 @@ export function SourceFolders({
             strokeWidth={1.5}
             aria-hidden="true"
           />
-          {/* ⚠️ The name AND the path. Two checkouts of one repo have the same
-              basename, and a list that cannot tell them apart is one you have
-              to remove rows from to read. */}
+          {/* The name and the path: two checkouts of one repo share a
+              basename, and only the path tells them apart. */}
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] leading-tight">
               {folder.name}
             </span>
-            {/* ⚠️ Truncated from the LEFT. Two checkouts of one repo share
-                every character of their prefix and differ at the end, so an
-                ellipsis on the right hides the only part that tells them
-                apart. `direction: rtl` moves the ellipsis; the `bdi` keeps the
-                path itself in logical order, without which the leading slash
-                is re-ordered to the far end of a short path. */}
+            {/* NOTE: Truncated from the left. Two checkouts of one repo share
+                their prefix and differ at the end, so an ellipsis on the
+                right hides the only part that tells them apart. `dir="rtl"`
+                moves the ellipsis; the `bdi` keeps the path in logical order,
+                without which the leading slash moves to the far end of a
+                short path. */}
             <span
               title={folder.path}
               dir="rtl"
@@ -114,7 +111,7 @@ export function SourceFolders({
               <bdi>{folder.path}</bdi>
             </span>
           </span>
-          {/* ⚠️ Nothing is marked primary while there is only one row: a badge
+          {/* Nothing is marked primary while there is only one row: a badge
               on the only folder answers a question nobody has yet. */}
           {folders.length > 1 &&
             (index === 0 ? (
@@ -131,8 +128,8 @@ export function SourceFolders({
                 aria-label={`Make ${folder.name} the primary folder`}
                 onClick={() =>
                   onChange([
-                    // Primary IS first — the order carries the fact, so making
-                    // one primary moves it where the eye already looks for it.
+                    // Primary is first: the order carries the fact, so making
+                    // one primary moves it where the eye already looks.
                     folder,
                     ...folders.filter((entry) => entry.id !== folder.id),
                   ])
@@ -180,7 +177,7 @@ export function SourceFolders({
   );
 }
 
-/** Said once the choice exists, and not before. */
+/** The note on which folder is read, shown only once there are two or more. */
 export function PrimaryFolderHint({ folders }: { folders: PickedFolder[] }) {
   if (folders.length < 2) return null;
   return (

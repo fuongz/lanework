@@ -1,5 +1,5 @@
-// The Changes list's folder tree (0d310d6), shared with the agent view's Files
-// list (FE-39/D1): the same nesting, compacted chains and marks in both.
+// The Changes list's folder tree, shared with the agent view's Files list
+// (FE-39/D1): the same nesting, compacted chains and marks in both.
 import { splitPath } from "#/components/shared/diff/diff-file-header";
 import type {
   WorktreeFile,
@@ -20,14 +20,16 @@ export const MARK: Record<
 };
 
 /**
- * A directory holding changes. `files` is every change beneath it, at any depth.
- * Generic over the file, so the agent view's Files list (FE-39/D1) is the same tree.
+ * A directory holding changes.
+ *
+ * `files` is every change beneath it, at any depth. Generic over the file, so
+ * the agent view's Files list is the same tree.
  */
 export interface Folder<F extends { path: string } = WorktreeFile> {
   kind: "folder";
   /** The full path, which is also its key and its accessible name. */
   path: string;
-  /** What the row shows: one segment, or a compacted chain like `apps/desktop`. */
+  /** What the row shows: one segment, or a compacted chain (`apps/desktop`). */
   name: string;
   children: Node<F>[];
   files: F[];
@@ -37,7 +39,7 @@ export type Node<F extends { path: string } = WorktreeFile> =
   | Folder<F>
   | { kind: "file"; file: F };
 
-/** Folders first, then files, each alphabetical — the order a file tree uses. */
+/** Folders first, then files, each alphabetical: a file tree's order. */
 function byKind<F extends { path: string }>(a: Node<F>, b: Node<F>): number {
   if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
   const left = a.kind === "folder" ? a.name : splitPath(a.file.path).name;
@@ -87,9 +89,9 @@ export function buildTree<F extends { path: string }>(files: F[]): Node<F>[] {
     }
     parent.children.push({ kind: "file", file });
   }
-  // ⚠️ The root's children are compacted one by one, never the root itself: a
-  // repo whose every change sits under `apps/` would otherwise fold the whole
-  // list into a single unnamed row.
+  // NOTE: The root's children are compacted one by one, never the root
+  // itself. A repo whose every change sits under `apps/` would otherwise fold
+  // the whole list into a single unnamed row.
   return root.children.map(compact).sort(byKind);
 }
 
@@ -117,5 +119,5 @@ export function visibleRows<F extends { path: string }>(
 
 /** Pixels of indentation per level of nesting. */
 export const INDENT = 12;
-/** A folder's chevron and the gap after it — what a file leaves blank instead. */
+/** A folder's chevron and the gap after it; a file leaves this blank. */
 export const TWISTIE = 18;

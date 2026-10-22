@@ -3,14 +3,13 @@ import { cn } from "#/lib/utils";
 
 /**
  * A small pill on the first line of an issue-list row: where it stands, and
- * its id (FE-75).
+ * its id.
  *
- * NOTE: Pills rather than a sentence with separators. Two facts set side by
- * side read as two, without a "·" between them to say so.
- *
- * NOTE: Filled with the page colour and outlined, not tinted. The list sits on
- * the sidebar's grey, and a selected or hovered row is a shade darker again;
- * a tint of the same grey disappeared into both.
+ * - Pills rather than a sentence with separators: two facts set side by side
+ *   read as two, without a "·" between them to say so.
+ * - Filled with the page colour and outlined, not tinted. The list sits on the
+ *   sidebar's grey, and a selected or hovered row is a shade darker again; a
+ *   tint of the same grey disappears into both.
  */
 export function RowBadge({
   children,

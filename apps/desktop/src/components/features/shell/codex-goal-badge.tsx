@@ -6,8 +6,9 @@ import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 
 /**
- * A Codex conversation's goal on its rail row, while it has stopped short
- * and waits on somebody — blocked, out of usage, over budget (FE-41/D4).
+ * A Codex conversation's goal on its rail row, while it has stopped short and
+ * waits on somebody: blocked, out of usage, over budget (FE-41/D4).
+ *
  * Nothing for any other state, or any other conversation.
  */
 export function CodexGoalBadge({

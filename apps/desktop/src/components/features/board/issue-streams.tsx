@@ -1,11 +1,9 @@
-/**
- * A card's work breakdown (BE-19): its streams, wave by wave — who runs first,
- * what each owns, what it waits for, and how far its verify rows are.
- *
- * ⚠️ Read-only. Streams are written by the agent that drafts the card (through
- * the MCP); this section exists so a person reviewing the card can see the
- * split before approving it, not to edit it.
- */
+// A card's work breakdown: its streams, wave by wave. Who runs first, what
+// each owns, what it waits for, and how far its verify rows are.
+//
+// Read-only. The agent that drafts the card writes its streams through the
+// MCP; this section lets a person reviewing the card see the split before
+// approving it, not edit it.
 import type {
   BoardCard,
   BoardChecklistItem,
@@ -20,8 +18,10 @@ const ROLE_NAME: Record<BoardStream["role"], string> = {
 };
 
 /**
- * `items` is the checklist as the page shows it — the draft laid over the
- * server's ticks — so a stream's count agrees with the boxes right above it.
+ * A card's streams, wave by wave, or nothing when it has none.
+ *
+ * `items` is the checklist as the page shows it (the draft laid over the
+ * server's ticks), so a stream's count agrees with the boxes right above it.
  */
 export function IssueStreams({
   card,
@@ -145,7 +145,7 @@ function StreamRow({
   );
 }
 
-/** `W1` as a small mono chip — also what a verify row carries. */
+/** A stream key such as `W1` as a small mono chip, as a verify row shows it. */
 export function StreamKey({ value }: { value: string }) {
   return (
     <span className="border-border text-muted-foreground inline-flex h-[18px] shrink-0 items-center rounded border px-1 font-mono text-[11px]">

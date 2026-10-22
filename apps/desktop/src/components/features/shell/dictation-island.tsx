@@ -17,21 +17,23 @@ function elapsed(since: number | null, now: number): string {
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-/** Whether a dictation is listening — the other islands give way to it. */
+/** Whether a dictation is listening; the other islands give way to it. */
 export function useDictationUp(): boolean {
   return useLiveDictation((state) => state.live !== null);
 }
 
 /**
- * The microphone is open (FE-69): a black capsule in the islands' spot, with
- * the level in red, the running time and a stop — so it is plain from
- * anywhere in the window that Lanework is listening.
+ * The open microphone: a black capsule in the islands' spot, with the level
+ * in red, the running time and a stop.
  *
- * ⚠️ It outranks every other island while it is up. An update offer or a
- * board notice can wait a minute; an open microphone nobody noticed cannot.
+ * It makes it plain from anywhere in the window that Lanework is listening.
  *
- * ⚠️ Stop keeps the words, like ✓ in the composer: the red square reads as
- * "end the recording", not "throw it away". ✕ and Esc stay in the composer.
+ * - It outranks every other island while it is up. An update offer or a
+ *   board notice can wait a minute; an open microphone nobody noticed
+ *   cannot.
+ * - Stop keeps the words, like ✓ in the composer: the red square reads as
+ *   "end the recording", not "throw it away". ✕ and Esc stay in the
+ *   composer.
  */
 export function DictationIsland() {
   const live = useLiveDictation((state) => state.live);

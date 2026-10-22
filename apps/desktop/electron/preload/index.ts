@@ -77,9 +77,11 @@ function subscribe<T>(
 }
 
 /**
- * The auth surface. Every method is a named operation on a fixed channel —
- * there is no way to reach an arbitrary channel from here, and nothing on this
- * object can return the credential: `main` only ever sends a redacted session.
+ * The auth surface.
+ *
+ * Every method is a named operation on a fixed channel, so nothing here can
+ * reach an arbitrary channel. Nothing here can return the credential either:
+ * `main` only ever sends a redacted session.
  */
 const auth: DesktopAuthApi = {
   getSession: () => ipcRenderer.invoke(authChannels.session),
@@ -92,11 +94,11 @@ const auth: DesktopAuthApi = {
 };
 
 /**
- * The local-repository surface (FE-22).
+ * The local-repository surface.
  *
- * ⚠️ Every call names a project, never a folder; main resolves it. Paths are
- * the ones `status` answered, and main re-checks them against a fresh status
- * before it acts.
+ * NOTE: Every call names a project, never a folder; main resolves it. Paths
+ * are the ones `status` answered, and main re-checks them against a fresh
+ * status before it acts.
  */
 const worktree: DesktopWorktreeApi = {
   files: (slug, folder) =>
@@ -133,7 +135,7 @@ const worktree: DesktopWorktreeApi = {
     ipcRenderer.invoke(worktreeChannels.switchBranch, slug, name),
 };
 
-/** Settings → Notifications, and where a clicked one leads (FE-70). */
+/** Settings → Notifications, and where a clicked one leads. */
 const notifications: DesktopNotificationsApi = {
   get: () => ipcRenderer.invoke(notificationChannels.get),
   set: (kind, delivery) =>
@@ -148,7 +150,7 @@ const notifications: DesktopNotificationsApi = {
     subscribe<NotificationTarget>(notificationChannels.open, listener),
 };
 
-/** Settings → Agents (FE-28): the checkpoint hook, on and off. */
+/** Settings → Agents: the checkpoint hook, on and off. */
 const handoff: DesktopHandoffApi = {
   status: () => ipcRenderer.invoke(handoffChannels.status),
   enable: (agent) => ipcRenderer.invoke(handoffChannels.enable, agent),
@@ -157,9 +159,11 @@ const handoff: DesktopHandoffApi = {
 };
 
 /**
- * The conversation view (FE-62). Every call names a workspace and a
- * conversation id, never a folder or a command; main checks the settings
- * against its own lists before any of them becomes a flag.
+ * The conversation view.
+ *
+ * Every call names a workspace and a conversation id, never a folder or a
+ * command. Main checks the settings against its own lists before any of them
+ * becomes a flag.
  */
 const conversation: DesktopConversationApi = {
   read: (workspace, id) =>
@@ -219,7 +223,7 @@ const conversation: DesktopConversationApi = {
     subscribe<ConversationEvent>(conversationChannels.event, listener),
 };
 
-/** Whether a project's folder is ready for an agent (FE-30). A slug, never a path. */
+/** The agent CLIs on this machine: versions, accounts and updates. */
 const harness: DesktopHarnessApi = {
   list: () => ipcRenderer.invoke(harnessChannels.list),
   accounts: () => ipcRenderer.invoke(harnessChannels.accounts),
@@ -233,7 +237,7 @@ const harness: DesktopHarnessApi = {
     subscribe<HarnessInfo[]>(harnessChannels.changed, listener),
 };
 
-/** Dictation in the composer (FE-69): the helper's events, by session. */
+/** Dictation in the composer: the helper's events, by session. */
 const dictation: DesktopDictationApi = {
   supported: () => ipcRenderer.invoke(dictationChannels.supported),
   start: (locale, hints) =>
@@ -244,6 +248,7 @@ const dictation: DesktopDictationApi = {
     subscribe<DictationEvent>(dictationChannels.event, listener),
 };
 
+/** Whether a project's folder is ready for an agent. A slug, never a path. */
 const readiness: DesktopReadinessApi = {
   check: (slug) => ipcRenderer.invoke(readinessChannels.check, slug),
   preview: (slug, fix) =>
@@ -252,7 +257,7 @@ const readiness: DesktopReadinessApi = {
     ipcRenderer.invoke(readinessChannels.apply, slug, fix, before),
 };
 
-/** What Claude remembers about a project (FE-36): read-only, by file NAME. */
+/** What Claude remembers about a project: read-only, by file NAME. */
 const memory: DesktopMemoryApi = {
   list: (workspace) => ipcRenderer.invoke(memoryChannels.list, workspace),
   read: (workspace, file) =>
@@ -262,7 +267,7 @@ const memory: DesktopMemoryApi = {
     subscribe<MemoryChange>(memoryChannels.changed, listener),
 };
 
-/** What a project's agents are told (FE-37): read-only, by an id main minted. */
+/** What a project's agents are told: read-only, by an id main minted. */
 const instructions: DesktopInstructionsApi = {
   list: (workspace) => ipcRenderer.invoke(instructionChannels.list, workspace),
   read: (workspace, id) =>
@@ -275,7 +280,12 @@ const instructions: DesktopInstructionsApi = {
     subscribe<InstructionChange>(instructionChannels.changed, listener),
 };
 
-/** A project's agent setup (FE-40): read-only, a slug and an id, never a path. */
+/**
+ * The agents' config files, by an id main minted.
+ *
+ * A write carries the hash of the text it was based on, so it cannot
+ * overwrite a change made since that read.
+ */
 const agentConfig: DesktopAgentConfigApi = {
   list: () => ipcRenderer.invoke(agentConfigChannels.list),
   read: (id) => ipcRenderer.invoke(agentConfigChannels.read, id),
@@ -284,6 +294,7 @@ const agentConfig: DesktopAgentConfigApi = {
   reveal: (id) => ipcRenderer.invoke(agentConfigChannels.reveal, id),
 };
 
+/** A project's agent setup: read-only, a slug and an id, never a path. */
 const agentSetup: DesktopAgentSetupApi = {
   read: (slug) => ipcRenderer.invoke(agentSetupChannels.read, slug),
   readGlobal: () => ipcRenderer.invoke(agentSetupChannels.readGlobal),
@@ -313,8 +324,8 @@ const git: DesktopGitApi = {
   repo: (slug) => ipcRenderer.invoke(gitChannels.repo, slug),
   selectRepo: (slug, side) =>
     ipcRenderer.invoke(gitChannels.selectRepo, slug, side),
-  // ⚠️ `refresh` is passed through as a boolean rather than omitted: the
-  // handler validates on argument COUNT, the same rule `board.move` follows.
+  // NOTE: `refresh` is sent as a boolean, never omitted: the handler validates
+  // on argument COUNT, the same rule `board.move` follows.
   pulls: (slug, status, refresh) =>
     ipcRenderer.invoke(gitChannels.pulls, slug, status, refresh === true),
   pull: (slug, number) => ipcRenderer.invoke(gitChannels.pull, slug, number),
@@ -338,20 +349,21 @@ const git: DesktopGitApi = {
 };
 
 /**
- * The terminal surface (FE-19).
+ * The terminal surface.
  *
- * ⚠️ The port to the pty host lives HERE and never crosses into the page. The
- * page gets named operations — attach this session, type this, resize to that
- * — and callbacks; it cannot post an arbitrary message to the host, and it
- * cannot reach another channel through the port.
+ * NOTE: The port to the pty host lives HERE and never crosses into the page.
+ * The page gets named operations (attach this session, type this, resize to
+ * that) and callbacks. It cannot post an arbitrary message to the host, nor
+ * reach another channel through the port.
  *
- * ⚠️ Connected on first use, and again after the host goes away: main says so
- * on `hostExited`, and the next call asks for a fresh port.
+ * The port connects on first use, and again after the host goes away: main
+ * says so on `hostExited`, and the next call asks for a fresh port.
  */
 function createTerminal(): DesktopTerminalApi {
   const commandListeners = new Set<(command: TerminalCommand) => void>();
   let pendingFocus: Extract<TerminalCommand, { type: "focus" }> | null = null;
-  // A newly reopened window receives native navigation before React mounts.
+  // A reopened window can receive native navigation before React mounts, so
+  // a focus command with no listener yet is held for the first one.
   subscribe<TerminalCommand>(terminalChannels.command, (command) => {
     if (!commandListeners.size && typeof command === "object")
       pendingFocus = command;
@@ -409,8 +421,8 @@ function createTerminal(): DesktopTerminalApi {
     notify("*");
   });
 
-  // ⚠️ Every message waits on the same connection, so they leave in the order
-  // they were posted even while the port is still being set up.
+  // Every message waits on the same connection, so messages leave in the
+  // order they were posted, even while the port is still being set up.
   const post = (message: TerminalClientMessage) => {
     void connect()
       .then((ready) => ready.postMessage(message))
@@ -421,7 +433,7 @@ function createTerminal(): DesktopTerminalApi {
     list: (workspace) => ipcRenderer.invoke(terminalChannels.list, workspace),
     spawn: (workspace, cols, rows, kind = "shell", resume, card) => {
       const args: unknown[] = [workspace, cols, rows, kind];
-      // ⚠️ A card goes sixth, behind an explicit `null` resume: main counts
+      // NOTE: A card goes sixth, behind an explicit `null` resume: main counts
       // its arguments, and a hole would read as a resume of `undefined`.
       if (card !== undefined) args.push(resume ?? null, card);
       else if (resume !== undefined) args.push(resume);
@@ -574,13 +586,13 @@ const desktop: DesktopApi = {
   auth,
   workspaces: {
     load: () => ipcRenderer.invoke(workspaceChannels.load),
-    // ⚠️ The cloud workspace id, not the slug: every board call is addressed by
-    // it.
+    // NOTE: The cloud workspace id, not the slug: every board call is
+    // addressed by it.
     select: (id) => ipcRenderer.invoke(workspaceChannels.select, id),
     icon: (workspaceId, iconKey) =>
       ipcRenderer.invoke(workspaceChannels.icon, workspaceId, iconKey),
     // The NAME a human typed; main derives the slug the service demands. The
-    // folders are pick IDS, primary first — main resolves them to paths it
+    // folders are pick IDS, primary first. Main resolves them to paths it
     // handed out itself, so no path ever travels this way.
     create: (name, folders) =>
       ipcRenderer.invoke(
@@ -588,16 +600,15 @@ const desktop: DesktopApi = {
         name,
         folders ?? [],
       ),
-    // ⚠️ By ID, unlike `remove` right below — the two keys are not
-    // interchangeable and a uuid matches the service's slug shape, so a mix-up
-    // is caught by the service rather than by anything here.
+    // NOTE: By cloud ID, never the slug. A uuid matches the service's slug
+    // shape, so only the service, not anything here, would catch a mix-up.
     rename: (id, name) =>
       ipcRenderer.invoke(workspaceChannels.renameWorkspace, id, name),
     reorder: (ids) =>
       ipcRenderer.invoke(workspaceChannels.reorderWorkspaces, ids),
-    // ⚠️ By ID for the service and by SLUG for this machine, and both have to
-    // travel: the machine surface deletes by cloud id — it refuses a slug with a
-    // 400 — while the folder link main has to drop afterwards is keyed by slug.
+    // NOTE: By ID for the service and by SLUG for this machine, and both must
+    // travel. The machine surface deletes by cloud id (it refuses a slug with
+    // a 400), while the folder link main drops afterwards is keyed by slug.
     remove: (id, slug) =>
       ipcRenderer.invoke(workspaceChannels.deleteWorkspace, id, slug),
     syncToCloud: (localId) =>
@@ -635,10 +646,10 @@ const desktop: DesktopApi = {
           patch,
           revision,
         ),
-      // ⚠️ `placement` is passed through as `null` when absent rather than
-      // omitted: the handler validates on argument COUNT, and a call that
-      // sometimes sends four arguments and sometimes five is one the sender
-      // check cannot state a rule about.
+      // NOTE: `placement` is sent as `null` when absent, never omitted. The
+      // handler validates on argument COUNT, and the sender check cannot
+      // state a rule for a call that sends four arguments one time and five
+      // the next.
       move: (workspaceId, cardId, columnKey, placement) =>
         ipcRenderer.invoke(
           workspaceChannels.move,
@@ -666,9 +677,8 @@ const desktop: DesktopApi = {
           items,
           revision,
         ),
-      // ⚠️ `cursor` is passed through as `null` when absent rather than
-      // omitted, for the same reason `move` sends a null placement: the handler
-      // validates on argument COUNT.
+      // NOTE: `cursor` is sent as `null` when absent, never omitted, as `move`
+      // does with placement: the handler validates on argument COUNT.
       activity: (workspaceId, cardId, cursor) =>
         ipcRenderer.invoke(
           workspaceChannels.activity,
@@ -712,7 +722,7 @@ const desktop: DesktopApi = {
           cardId,
           favorite,
         ),
-      // ⚠️ A file REFERENCE — a path or a URL — never bytes and never a handle.
+      // NOTE: A file REFERENCE (a path or a URL), never bytes or a handle.
       // Main does not open what is named here; the service stores the string.
       attach: (workspaceId, cardId, file) =>
         ipcRenderer.invoke(workspaceChannels.attach, workspaceId, cardId, file),
@@ -736,8 +746,8 @@ const desktop: DesktopApi = {
       importSeal: (workspaceId) =>
         ipcRenderer.invoke(workspaceChannels.importSeal, workspaceId),
     },
-    // ⚠️ Keyed by SLUG, not by the workspace id: the id is absent on a service
-    // that predates it, which is the very screen this surface serves.
+    // NOTE: Keyed by SLUG, not by the workspace id: an older service has no
+    // id, and that is the very screen this surface serves.
     folder: {
       state: (slug) => ipcRenderer.invoke(workspaceChannels.folderState, slug),
       choose: () => ipcRenderer.invoke(workspaceChannels.folderChoose),

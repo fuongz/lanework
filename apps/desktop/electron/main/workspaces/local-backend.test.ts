@@ -3,8 +3,8 @@
 // typecheck needs no Bun types.
 //
 // FE-52/V2's unit half: every board IPC a local board serves is answered from
-// the store alone. `fetch` is replaced with one that FAILS the test, so any
-// request this path made — to any origin — would show up here.
+// the store alone. `fetch` is replaced with one that fails the test, so any
+// request this path makes, to any origin, shows up here.
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

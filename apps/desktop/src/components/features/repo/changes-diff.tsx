@@ -19,7 +19,7 @@ const api = () => {
 /**
  * Every current change as one diff, beside the list that steers it.
  *
- * ⚠️ ALL the files, scrolled to the one clicked — not one file at a time. It is
+ * All the files, scrolled to the one clicked, not one file at a time. It is
  * the pull request's model (the list is a table of contents for a single
  * scroll), and it means ↑/↓ and a scroll wheel reach the same places.
  */
@@ -42,10 +42,12 @@ export function ChangesDiff({
   );
 
   /**
-   * ⚠️ The old side is HEAD's copy and the new side is the file on disk — what
-   * the patch was made between. A side that does not exist (a new file's past,
-   * a deleted file's present) is empty text rather than a failure, so expanding
-   * around a new file's only hunk still works.
+   * Reads both sides of a file for expanding around a hunk.
+   *
+   * The old side is HEAD's copy and the new side is the file on disk: what
+   * the patch was made between. A side that does not exist (a new file's
+   * past, a deleted file's present) is empty text rather than a failure, so
+   * expanding around a new file's only hunk still works.
    */
   const loadSides = useCallback<LoadSides>(
     async (oldPath, newPath) => {

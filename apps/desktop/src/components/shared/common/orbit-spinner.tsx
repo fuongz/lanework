@@ -7,12 +7,12 @@ import { cn } from "#/lib/utils";
 const RING = [0, 1, 2, 5, 8, 7, 6, 3];
 
 /**
- * "Working": a light orbiting a 3×3 grid of dots, a fading trail behind it —
- * the Claude CLI's own spinner, drawn in the page rather than as glyphs.
+ * A "working" spinner: a light orbiting a 3×3 grid with a fading trail.
  *
- * ⚠️ Each cell runs the SAME keyframes, offset by a negative delay, so they
- * are all mid-cycle from the first frame: no cell waits its turn to start.
- * Reduced motion stops it on one frame of the orbit (see `app.css`).
+ * It is the Claude CLI's own spinner, drawn in the page rather than as glyphs.
+ * Each cell runs the same keyframes offset by a negative delay, so all are
+ * mid-cycle from the first frame and no cell waits its turn to start. Reduced
+ * motion stops it on one frame of the orbit (see `app.css`).
  */
 export function OrbitSpinner({ className = "" }: { className?: string }) {
   return (

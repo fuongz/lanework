@@ -112,15 +112,15 @@ export function IssueDetail() {
   const filters = parseIssueSearch(useSearch({ from: "/_app/w/$slug/issues" }));
   const propertiesOpen = useIssueView((state) => state.propertiesOpen);
 
-  // ⚠️ Keyed on the workspace too. Opening `FE-06` in one project and then the
-  // same id in another would otherwise reuse the first project's card while the
-  // second was still loading.
+  // NOTE: Keyed on the workspace too. Opening `FE-06` in one project and then
+  // the same id in another would otherwise reuse the first project's card
+  // while the second was still loading.
   useEffect(() => {
     if (active?.id) void openIssue(taskId);
     return () => closeIssue();
   }, [active?.id, closeIssue, openIssue, taskId]);
 
-  // ⚠️ Leaving with unsaved ticks asks first (FE-13/D7). The draft is only in
+  // Leaving with unsaved ticks asks first (FE-13/D7). The draft is only in
   // this window's memory; a click on the breadcrumb or a ⌘K jump would drop
   // decisions somebody had just made without a word.
   const dirty = useChecklistDraft(card).dirty.size > 0;
@@ -130,17 +130,17 @@ export function IssueDetail() {
     withResolver: true,
   });
 
-  // ⚠️ Two panes side by side, each scrolling on its own — the shape the New
-  // issue page already had. A card's properties are a fixed, short list; letting
-  // them scroll away with a body that can run for pages meant the rail was off
-  // screen exactly when a long card was being read.
+  // Two panes side by side, each scrolling on its own, as on the New issue
+  // page. A card's properties are a fixed, short list; scrolling them away
+  // with a body that can run for pages puts the rail off screen exactly when a
+  // long card is being read.
   return (
     <div className="flex min-h-0 flex-1">
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* ⚠️ The breadcrumb and the card's actions live in the WINDOW's title
-            bar (FE-58), the way Codex has it, so the pane is the card's body
-            from its first line. Portalled out of this tree, but React still
-            delivers its events through it. */}
+        {/* The breadcrumb and the card's actions live in the window's title
+            bar, the way Codex has it, so the pane is the card's body from its
+            first line. Portalled out of this tree, but React still delivers
+            its events through it. */}
         <WindowTitlebar className="gap-1">
           <Link
             to="/w/$slug/issues"
@@ -202,20 +202,19 @@ export function IssueDetail() {
         </div>
       </section>
 
-      {/* NOTE: The rail's frame is drawn before the card arrives, not with
-          it. It is 288px of the pane; mounting it on load would shove a body
-          that had already been laid out and read. It is a panel somebody can
-          put away (FE-75/D3), and the choice is remembered app-wide. */}
+      {/* The rail's frame is drawn before the card arrives, not with it. It
+          is 288px of the pane; mounting it on load would shove a body that
+          had already been laid out and read. It is a panel somebody can put
+          away (FE-75/D3), and the choice is remembered app-wide. */}
       {propertiesOpen && (
         <aside
           id={PROPERTIES_ID}
           aria-label="Card properties"
           className="border-border flex w-72 shrink-0 flex-col border-l"
         >
-          {/* The rail's own header band. ⚠️ It stays in the card when the
-            breadcrumb moves to the window's title bar (FE-58): its id and
-            actions belong to this rail, not to the page. Not a drag region
-            any more either — it no longer sits at the window's top edge. */}
+          {/* The rail's own header band: its id and actions belong to this
+            rail, not to the page. Not a drag region, since it does not sit
+            at the window's top edge. */}
           <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b px-4">
             <span className="text-muted-foreground font-mono text-xs">
               {card?.taskId ?? taskId}
@@ -285,16 +284,16 @@ function PaneToggles() {
 /**
  * The branch name a card would be worked on.
  *
- * ⚠️ Derived from the task id and the title, not from the card's uuid. The point
- * is a branch a human reads — `be-06-issue-detail-activity` — and one carrying a
- * uuid tells nobody what it is for.
+ * Derived from the task id and the title, not from the card's uuid: a branch a
+ * human reads, like `be-06-issue-detail-activity`. One carrying a uuid tells
+ * nobody what it is for.
  */
 function branchName(card: BoardCard): string {
   const words = card.title
     .toLowerCase()
     .normalize("NFD")
     // Marks only: this strips the accents off a Vietnamese title rather than
-    // the letters, so "Kết nối git" becomes `ket-noi-git` and not `k-t-n-i-git`.
+    // the letters, so "Kết nối git" becomes `ket-noi-git`, not `k-t-n-i-git`.
     .replace(/\p{M}+/gu, "")
     .replace(/đ/g, "d")
     .replace(/[^a-z0-9]+/g, "-")
@@ -307,7 +306,7 @@ function branchName(card: BoardCard): string {
   return [prefix, words].filter(Boolean).join("-") || card.id;
 }
 
-/** The star and the `…` beside the breadcrumb. */
+/** The card's actions beside the breadcrumb: star, assign, save, and `…`. */
 function HeaderActions({ card }: { card: BoardCard }) {
   const setFavorite = useBoard((state) => state.setFavorite);
   const stale = useBoard((state) => state.view?.stale ?? false);
@@ -333,7 +332,7 @@ function HeaderActions({ card }: { card: BoardCard }) {
 
   return (
     <>
-      {/* ⚠️ `favorite === null` means nobody asked — a list read. It draws
+      {/* `favorite === null` means nobody asked (a list read). It draws
           nothing rather than an empty star, which would invite a click that
           silently means the opposite of what it looks like. */}
       {card.favorite !== null && (
@@ -360,9 +359,10 @@ function HeaderActions({ card }: { card: BoardCard }) {
           />
         </Button>
       )}
-      {/* ⚠️ Only while there IS something to save (FE-13/D7). A Save button
-          that is always there, greyed out, reads as "this page has unsaved
-          state somewhere" — the one thing it must never say when it is false. */}
+      {/* Save and Discard only while there is something to save (FE-13/D7).
+          A Save button that is always there, greyed out, reads as "this page
+          has unsaved state somewhere", the one thing it must never say when
+          it is false. */}
       <div className="flex items-center gap-1">
         <AssignAgentButton card={card} unsaved={changes > 0} />
         {changes > 0 && (
@@ -429,10 +429,10 @@ function HeaderActions({ card }: { card: BoardCard }) {
 /**
  * The two copy buttons at the top of the rail.
  *
- * ⚠️ Neither of them copies a URL, and that is deliberate. This app registers no
- * deep-link scheme, so a "copy link" would hand somebody a string that opens
- * nothing. The issue id is what people actually say to each other and what every
- * agent tool takes; the branch name is what the id is for next.
+ * Neither copies a URL. This app registers no deep-link scheme, so a "copy
+ * link" would hand somebody a string that opens nothing. The issue id is what
+ * people say to each other and what every agent tool takes; the branch name is
+ * what the id is for next.
  */
 function RailActions({ card }: { card: BoardCard }) {
   const [copied, copy] = useCopy();
@@ -483,7 +483,7 @@ function RailActions({ card }: { card: BoardCard }) {
 
 function Article({ card, slug }: { card: BoardCard; slug: string }) {
   const view = useBoard((state) => state.view);
-  // FE-52/D10: a local board keeps no attachments.
+  // A local board keeps no attachments (FE-52/D10).
   const { attachments } = useCloudFeatures(useBoard((state) => state.active));
   const update = useBoard((state) => state.update);
   const stale = view?.stale ?? false;
@@ -513,25 +513,24 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
           <span className="truncate">{parent.title}</span>
         </Link>
       )}
-      {/* ⚠️ Stuck to the top of the pane once the page scrolls — right under
-          the window's title bar since the breadcrumb moved there (FE-58): the
-          title stays in view over frosted glass — the page showing through,
-          blurred, as the app's popovers do. It is its own row rather than part
-          of the title bar, so the bar keeps one height on every screen.
+      {/* Stuck to the top of the pane once the page scrolls, right under the
+          window's title bar: the title stays in view over frosted glass (the
+          page showing through, blurred, as the app's popovers do). It is its
+          own row rather than part of the title bar, so the bar keeps one
+          height on every screen.
 
-          NOTE: One size, scrolled or not (FE-75). It used to start large and
-          shrink once it stuck, which moved the page under the pointer at the
-          moment it started to scroll. */}
+          One size, scrolled or not. A title that shrinks once it sticks
+          moves the page under the pointer the moment it starts to scroll. */}
       <div className="bg-background/70 sticky top-0 z-10 -mx-6 px-6 py-1.5 backdrop-blur-xl backdrop-saturate-150">
         <Input
           aria-label="Card title"
           value={title}
           maxLength={500}
           disabled={stale}
-          // ⚠️ `dark:bg-transparent` as well as `bg-transparent`. The base Input
-          // carries `dark:bg-input/30`, a DIFFERENT variant that class merging
-          // does not cancel — so in dark mode this field kept a filled box that
-          // light mode never showed.
+          // NOTE: `dark:bg-transparent` as well as `bg-transparent`. The base
+          // Input carries `dark:bg-input/30`, a different variant that class
+          // merging does not cancel, so without it this field keeps a filled
+          // box in dark mode only.
           className={cn(
             "h-auto rounded-md border-0 bg-transparent px-1.5 text-[15px] font-semibold tracking-tight shadow-none transition-[color,background-color] duration-150 focus-visible:border-0 focus-visible:bg-foreground/[0.04] focus-visible:ring-0 md:text-[15px] dark:bg-transparent dark:focus-visible:bg-foreground/[0.06]",
           )}
@@ -564,7 +563,7 @@ function WorkBreakdown({ card }: { card: BoardCard }) {
   return <IssueStreams card={card} items={items} />;
 }
 
-/** `5.11 MB` — a file size as a person reads one. */
+/** A file size as a person reads one: `5.11 MB`. */
 function fileSize(bytes: number | null): string | null {
   if (bytes === null || !Number.isFinite(bytes) || bytes < 0) return null;
   if (bytes < 1024) return `${bytes} B`;
@@ -581,10 +580,9 @@ function fileSize(bytes: number | null): string | null {
 /**
  * The files a card refers to.
  *
- * ⚠️ METADATA and a reference — the service stores no bytes and serves none, so
- * there is nothing here to download. A row states what was recorded and copies
- * the reference, which is the most this can honestly offer until content
- * hosting is its own feature.
+ * Metadata and a reference only: the service stores no bytes and serves none,
+ * so there is nothing here to download. A row states what was recorded and
+ * copies the reference.
  */
 function Attachments({ card }: { card: BoardCard }) {
   const [copied, copy] = useCopy();
@@ -649,10 +647,10 @@ function AttachmentRow({
 /**
  * The cards filed under this one.
  *
- * ⚠️ Collapsible, and collapsed state is remembered PER CARD in this session
- * only. A card with fourteen sub-issues pushes its own activity off the screen;
- * a card with two does not, and one preference applied to both would be wrong
- * for one of them every time.
+ * Collapsible, per card, for as long as the card is open. A card with fourteen
+ * sub-issues pushes its own activity off the screen; a card with two does
+ * not, and one preference applied to both would be wrong for one of them
+ * every time.
  */
 function SubIssues({ card, slug }: { card: BoardCard; slug: string }) {
   const view = useBoard((state) => state.view);
@@ -675,9 +673,8 @@ function SubIssues({ card, slug }: { card: BoardCard; slug: string }) {
           aria-expanded={!collapsed}
           className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-xs font-medium transition-colors"
         >
-          {/* The same disclosure arrow the issue list folds its groups with.
-              One gesture, one glyph — a second shape for "this collapses" is a
-              second thing to learn. */}
+          {/* The app's one disclosure arrow: a second shape for "this
+              collapses" is a second thing to learn. */}
           <HugeiconsIcon
             icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon}
             className="size-3.5"
@@ -717,9 +714,9 @@ function SubIssues({ card, slug }: { card: BoardCard; slug: string }) {
                     <LabelChip key={tag} tag={tag} labels={labels} />
                   ))}
                   <PriorityIcon priority={child.priority} />
-                  {/* ⚠️ `assignees` is null on a board read — every card here
-                      came from one — so this draws the unassigned outline
-                      rather than claiming nobody is on it. */}
+                  {/* `assignees` is null on a board read, and every card here
+                      came from one, so this can draw the unassigned outline
+                      for a card somebody is on. */}
                   <Avatar
                     member={memberOf(members, child.assignees?.users[0])}
                     size="sm"
@@ -735,12 +732,11 @@ function SubIssues({ card, slug }: { card: BoardCard; slug: string }) {
 }
 
 /**
- * A moment in the rail — the day AND the time of day.
+ * A moment in the rail: the day and the time of day.
  *
- * ⚠️ `toLocaleDateString` was all this used to show, and on a board where a card
- * is created and worked in the same afternoon, "Updated 9/9/2026" is the one
- * fact you already knew. `dateStyle: "medium"` also drops the 9/7 vs 7/9
- * ambiguity that a numeric date carries between locales.
+ * On a board where a card is created and worked in the same afternoon, the
+ * date alone is the one fact you already knew. `dateStyle: "medium"` also
+ * drops the 9/7 vs 7/9 ambiguity a numeric date carries between locales.
  */
 function Stamp({ value }: { value: string | null }) {
   const at = value ? new Date(value) : null;
@@ -762,9 +758,10 @@ function Stamp({ value }: { value: string | null }) {
 /**
  * Who the card is on.
  *
- * ⚠️ Writes BOTH lists every time, because the service replaces the whole set.
- * Sending only `users` would clear every agent assignment as a side effect of
- * naming a person — and the agents on a card are how work is dispatched.
+ * NOTE: `onChange` gets the users only, and the caller must write both lists,
+ * because the service replaces the whole set. Sending only `users` clears
+ * every agent assignment as a side effect of naming a person, and the agents
+ * on a card are how work is dispatched.
  */
 function AssigneeRow({
   card,
@@ -780,9 +777,9 @@ function AssigneeRow({
   const users = card.assignees?.users ?? [];
   const on = new Set(users);
   const first = memberOf(members, users[0]);
-  // ⚠️ Shown, never edited here (FE-34/D2): an agent is put on a card by
-  // handing it the card, which starts it. A menu entry that only relabelled
-  // the card would claim work nobody is doing.
+  // Agents are shown, never edited here (FE-34/D2): an agent is put on a card
+  // by handing it the card, which starts it. A menu entry that only
+  // relabelled the card would claim work nobody is doing.
   const agents = (card.assignees?.agents ?? []).map((agent) => ({
     agent,
     kind: presenceKind(agent),
@@ -832,8 +829,8 @@ function AssigneeRow({
         {members.map((member) => (
           <DropdownMenuItem
             key={member.userId}
-            // Three people on one card is one task; a menu that shut after each
-            // would make it three.
+            // Three people on one card is one task; a menu that shut after
+            // each would make it three.
             closeOnClick={false}
             onClick={() =>
               onChange(
@@ -858,13 +855,12 @@ function AssigneeRow({
 /**
  * The card's properties, in the rail's own shape.
  *
- * ⚠️ Status, Priority, Assignee, Labels — the order the design draws, and the
- * order the New issue page follows. The two rails are read as one panel by
- * anyone who creates a card and then opens it, and a field that moves between
- * them is a field they look for twice.
- *
- * ⚠️ Category stays, though the design has no such row: it is what MINTS a
- * card's task id. Dropping it to match a screenshot would take `BE-06` with it.
+ * - Status, Priority, Assignee, Labels: the order the design draws, and the
+ *   order the New issue page follows. The two rails read as one panel to
+ *   anyone who creates a card and then opens it, and a field that moves
+ *   between them is a field they look for twice.
+ * - Category stays, though the design has no such row: it is what mints a
+ *   card's task id.
  */
 function Fields({ card }: { card: BoardCard }) {
   const checklist = useChecklistDraft(card).items;
@@ -955,11 +951,11 @@ function Fields({ card }: { card: BoardCard }) {
       </Row>
 
       <Row label="Labels">
-        {/* ⚠️ Disabled by `stale` ONLY, unlike the menus above it. Binding this
-            to `busy` as well made the control go dead for the length of each
-            round trip, which on a board being edited is most of the time. A
-            second label chosen before the first write lands can still lose the
-            revision race; that is what the conflict banner is for. */}
+        {/* Disabled by `stale` only, unlike the menus above it. Bound to
+            `busy` as well, the control goes dead for each round trip, which
+            on a board being edited is most of the time. A second label chosen
+            before the first write lands can still lose the revision race;
+            that is what the conflict banner is for. */}
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
           {card.tags.map((tag) => (
             <LabelChip
@@ -1007,10 +1003,7 @@ function Fields({ card }: { card: BoardCard }) {
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {/* ⚠️ A sentinel, not `""`. An empty string is how a Select says
-                "nothing is selected", so using it for the real choice "this
-                card has no category" renders the trigger blank instead of
-                saying so. */}
+            {/* A sentinel, not `""`: see `NONE`. */}
             <SelectItem value={NONE}>No category</SelectItem>
             {(view?.categories ?? []).map((category) => (
               <SelectItem key={category.key} value={category.key}>
@@ -1021,12 +1014,12 @@ function Fields({ card }: { card: BoardCard }) {
         </Select>
       </Row>
 
-      {/* Facts, not fields — but read as the same table, so they keep the row. */}
+      {/* Facts, not fields, but read as the same table, so they keep the
+          row. */}
       <Separator className="my-1.5" />
-      {/* ⚠️ In the rail rather than only above the list. The rail is a pane of
-          its own now, so this is the one place a card's progress stays on screen
-          while a body that runs for pages is being read — which is the whole
-          reason not to hide either section behind a tab. */}
+      {/* In the rail, not only above the list. The rail is a pane of its
+          own, so this is the one place a card's progress stays on screen
+          while a body that runs for pages is being read. */}
       {sections(checklist).map(({ section, rows, done }) => (
         <Row key={section} label={SECTION_NAME[section] ?? section}>
           <RailValue>
@@ -1065,9 +1058,9 @@ const ROW = "flex items-start gap-2.5 text-[13px] leading-relaxed";
  * The checklist split into its sections, in the order they were written, each
  * carrying how far through it is.
  *
- * ⚠️ One function for the list AND the rail's counters. They were two passes
- * over the same array for a while, and a rail reading `3/7` beside a section
- * headed `4/7` is the kind of disagreement nobody thinks to test for.
+ * One function for the list and the rail's counters. A rail reading `3/7`
+ * beside a section headed `4/7` is the kind of disagreement nobody thinks to
+ * test for.
  */
 function sections(items: BoardChecklistItem[]) {
   return [...new Set(items.map((item) => item.section))].map((section) => {
@@ -1081,12 +1074,12 @@ function sections(items: BoardChecklistItem[]) {
 }
 
 /**
- * The rows in the order they were written, with each "pick ONE" group collapsed
- * into a single run sitting where its first row did.
+ * The rows in the order they were written, with each "pick ONE" group
+ * collapsed into a single run sitting where its first row did.
  *
- * ⚠️ Collected by group NAME, not by adjacency. Rows of one group that are not
- * next to each other are still one choice, and splitting them into two radio
- * groups would let each half hold a ticked option.
+ * NOTE: Collected by group name, not by adjacency. Rows of one group that are
+ * not next to each other are still one choice, and splitting them into two
+ * radio groups would let each half hold a ticked option.
  */
 function alternatives(rows: BoardChecklistItem[]) {
   const runs: { group: string | null; items: BoardChecklistItem[] }[] = [];
@@ -1104,11 +1097,11 @@ function alternatives(rows: BoardChecklistItem[]) {
 }
 
 /**
- * The open card's checklist as the person currently has it: the server's ticks
- * with the unsaved draft laid over them, plus which keys differ.
+ * The open card's checklist as the person currently has it: the server's
+ * ticks with the unsaved draft laid over them, plus which keys differ.
  *
- * ⚠️ Derived on every read, never stored. A box the draft says "on" that a poll
- * shows is already on is simply not a change any more — the Save button, the
+ * Derived on every read, never stored. A box the draft says "on" that a poll
+ * shows is already on is not a change any more, and the Save button, the
  * marker and the leave prompt all agree about that without anyone pruning.
  */
 function useChecklistDraft(card: BoardCard | null) {
@@ -1138,13 +1131,13 @@ function RowLabel({
   unsaved?: boolean;
 }) {
   return (
-    // ⚠️ `relative`, and it is load-bearing: the `sr-only` text below is
-    // `position: absolute`, and with no positioned ancestor it was placed
-    // against the PAGE at its row's offset inside the scrolled pane — below the
-    // window's bottom edge. That made the document itself taller than the
-    // window, and the whole app scrolled up under a grey band.
+    // NOTE: `relative` is load-bearing. The `sr-only` text below is
+    // `position: absolute`, and with no positioned ancestor it is placed
+    // against the page at its row's offset inside the scrolled pane, below the
+    // window's bottom edge. That makes the document taller than the window,
+    // and the whole app scrolls up under a grey band.
     <label htmlFor={htmlFor} className="relative cursor-pointer">
-      {/* ⚠️ A mark on the ROW, not only the Save button's count: on a card with
+      {/* A mark on the row, not only the Save button's count: on a card with
           thirty boxes, "3 changes" does not say which three. */}
       {unsaved && (
         <>
@@ -1159,13 +1152,13 @@ function RowLabel({
       <span className="text-muted-foreground mr-1.5 font-mono text-xs">
         {item.key}
       </span>
-      {/* The stream this row proves (BE-19); untagged rows are the lead's. */}
+      {/* The stream this row proves; untagged rows are the lead's. */}
       {item.section === "verify" && item.stream && (
         <span className="mr-1.5 inline-flex align-[1px]">
           <StreamKey value={item.stream} />
         </span>
       )}
-      {/* ⚠️ Rendered, not printed: cards are written in markdown, and a
+      {/* Rendered, not printed: cards are written in markdown, and a
           decision that reads `**Tool \`create_board\`**` as literal asterisks
           and backticks is noise around the one sentence being approved. */}
       <InlineMarkdown source={item.text} />
@@ -1186,10 +1179,10 @@ function RowLabel({
 /**
  * The card's checklist, grouped the way it was written.
  *
- * ⚠️ Rows sharing a `group` are ALTERNATIVES — the board's "pick ONE" — so they
- * are a `RadioGroup`, not checkboxes. Rendering them as independent boxes would
- * let a reader tick two options that contradict each other and believe both
- * were approved.
+ * NOTE: Rows sharing a `group` are alternatives (the board's "pick ONE"), so
+ * they are a `RadioGroup`, not checkboxes. Independent boxes would let a
+ * reader tick two options that contradict each other and believe both were
+ * approved.
  */
 function Checklist({ card }: { card: BoardCard }) {
   const stageTick = useBoard((state) => state.stageTick);
@@ -1201,9 +1194,9 @@ function Checklist({ card }: { card: BoardCard }) {
   const stale = view?.stale ?? false;
   if (!items.length) return null;
 
-  // ⚠️ Prefixed, not the bare `item.key`. Every card's checklist starts at `D1`,
-  // and the detail pane is not the only thing on the page — a duplicated id
-  // points a label at whichever box the document happens to hold first.
+  // NOTE: Prefixed, not the bare `item.key`. Every card's checklist starts at
+  // `D1`, and the detail pane is not the only thing on the page: a duplicated
+  // id points a label at whichever box the document happens to hold first.
   const rowId = (item: BoardChecklistItem) => `${uid}-${item.key}`;
   // While a save is running every box holds still: a tick made mid-save would
   // be neither in the request being sent nor safely in the draft after it.
@@ -1230,10 +1223,10 @@ function Checklist({ card }: { card: BoardCard }) {
                   return (
                     <li key={first.key} className={ROW}>
                       <Checkbox
-                        // ⚠️ A tick goes into the DRAFT, not to the server
-                        // (FE-13/D7): decisions are made as a set and sent with
-                        // Save. The row's mark says it is not saved yet — an
-                        // approval is still never shown as saved before it is.
+                        // A tick goes into the draft, not to the server
+                        // (FE-13/D7): decisions are made as a set and sent
+                        // with Save. The row's mark says it is not saved yet,
+                        // so an approval is never shown as saved before it is.
                         id={rowId(first)}
                         checked={first.checked}
                         disabled={rowBusy(first)}
@@ -1253,10 +1246,10 @@ function Checklist({ card }: { card: BoardCard }) {
                   <li key={run.group}>
                     <RadioGroup
                       aria-label={run.group}
-                      // ⚠️ `null` while nothing is picked, never `undefined` —
-                      // Base UI reads an undefined `value` as "uncontrolled" and
-                      // the group would start tracking a selection of its own
-                      // instead of the one the server confirmed.
+                      // NOTE: `null` while nothing is picked, never
+                      // `undefined`. Base UI reads an undefined `value` as
+                      // "uncontrolled", and the group would track a selection
+                      // of its own instead of the one the server confirmed.
                       value={
                         run.items.find((item) => item.checked)?.key ?? null
                       }

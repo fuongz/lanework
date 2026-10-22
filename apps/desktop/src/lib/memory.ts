@@ -1,4 +1,4 @@
-// The Memory screen's words and its links (FE-36), kept framework-free.
+// The Memory screen's words and its links, kept framework-free.
 import {
   isMemoryFile,
   MEMORY_INDEX,
@@ -29,9 +29,13 @@ export function shortPath(path: string): string {
 }
 
 /**
- * The memory a link inside one names (FE-36/D7): a `[[name]]` by its file,
- * its frontmatter name or its title, a `[text](file.md)` by its file. `null` when it names
- * none yet; `undefined` when it is not a link to a memory at all.
+ * The memory that a link inside a memory names (FE-36/D7).
+ *
+ * A `[[name]]` matches a file, a frontmatter name or a title; a
+ * `[text](file.md)` matches a file.
+ *
+ * @returns The file; `null` when the link names no memory yet; `undefined`
+ *   when it is not a link to a memory at all.
  */
 export function memoryTarget(
   span: LinkSpan,

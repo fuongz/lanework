@@ -10,7 +10,7 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 
-/** Why the Memory screen has nothing to show, or what went wrong (FE-36). */
+/** Why the Memory screen has nothing to show, or what went wrong. */
 export function MemoryMessage({
   title,
   description,

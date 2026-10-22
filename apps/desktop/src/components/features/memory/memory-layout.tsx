@@ -31,15 +31,13 @@ function Framed({ slug, children }: { slug: string; children: ReactNode }) {
 }
 
 /**
- * Settings › Memory: what Claude Code saved about a project, beside the one
- * memory open (FE-36, moved out of the project rail by FE-51). Read-only.
+ * Settings › Memory: what Claude Code saved about a project, read-only.
  *
- * ⚠️ The open memory is in the URL (`memory/$file`), like a commit is in
- * History's: Back returns to the previous one, and a link inside a memory is
- * a link to a route. The project rides along as `?project=`.
- *
- * ⚠️ Listed while the screen is open (`useMemoryWatch`), which keeps it
- * current while main reports writes.
+ * - The open memory is in the URL (`memory/$file`), as a commit is in
+ *   History's: Back returns to the previous one, and a link inside a memory
+ *   is a link to a route. The project rides along as `?project=`.
+ * - The list is read while the screen is open ({@link useMemoryWatch}), which
+ *   keeps it current as main reports writes.
  */
 export function MemoryLayout() {
   const slug = useSettingsProject();

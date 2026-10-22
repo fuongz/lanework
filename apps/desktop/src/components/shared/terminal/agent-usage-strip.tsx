@@ -30,12 +30,12 @@ import { useTerminal } from "#/stores/terminal";
 
 /** How often the ages and countdowns are drawn again. */
 const CLOCK_MS = 30_000;
-/** Coming back to the window refreshes at most this often (FE-53). */
+/** Coming back to the window refreshes at most this often. */
 const FOCUS_REFRESH_MS = 60_000;
 /** A window this full reads in the warning tone. */
 const NEARLY_SPENT = 90;
 
-/** When the window's focus last asked for a refresh — one for every strip. */
+/** When the window's focus last asked for a refresh, shared by every strip. */
 let focusRefreshed = 0;
 
 const ERROR_TEXT: Record<ClaudeUsageError, string> = {
@@ -44,7 +44,7 @@ const ERROR_TEXT: Record<ClaudeUsageError, string> = {
   failed: "Couldn’t refresh Claude usage.",
 };
 
-/** The agents whose account usage the strip can show (FE-54). */
+/** The agents whose account usage the strip can show. */
 type UsageAgent = "claude" | "codex";
 
 /** One limit as the strip draws it, whichever agent it came from. */
@@ -71,7 +71,7 @@ export interface UsageView {
   empty: string;
   /** Why there are no subscription limits: an API key, a cloud provider. */
   planNote: string | null;
-  /** Codex's banked resets (FE-74); null for Claude, or when unknown. */
+  /** Codex's banked resets; null for Claude, or when unknown. */
   resets: CodexResetCredits | null;
 }
 
@@ -80,7 +80,7 @@ const clamp = (percent: number) => Math.max(0, Math.min(100, percent));
 const titleCase = (word: string) =>
   `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
 
-/** "now", "42m", "3h 5m", "4d 6h" — how long until `ms` from now. */
+/** How long `ms` is, as a countdown: "now", "42m", "3h 5m", "4d 6h". */
 function resetDuration(ms: number): string {
   if (ms <= 0) return "now";
   const minutes = Math.floor(ms / 60_000);
@@ -100,9 +100,10 @@ function resetText(window: UsageWindow, now: number): string {
 }
 
 /**
- * When a window resets, for "resets …": "at 8:30 PM" today, "Thu at 9:00 AM"
- * on another day, "now" once it is past. The time is in the system's own
- * format, so a 24-hour Mac reads "at 20:30".
+ * When a window resets, for "resets …".
+ *
+ * "at 8:30 PM" today, "Thu at 9:00 AM" on another day, "now" once it is past.
+ * The time is in the system's own format, so a 24-hour Mac reads "at 20:30".
  */
 function resetClock(at: number, now: number): string {
   if (at <= now) return "now";
@@ -119,7 +120,7 @@ function resetClock(at: number, now: number): string {
   return `${day} at ${time}`;
 }
 
-/** "Updated just now", "Updated 5m ago", "Updated 3h ago", "Updated 2d ago". */
+/** How old the numbers are: "Updated just now", "Updated 5m ago", …. */
 export function updatedText(at: string | null, now: number): string {
   const time = at ? Date.parse(at) : Number.NaN;
   if (!Number.isFinite(time)) return "Not updated yet";
@@ -141,8 +142,10 @@ function claudePlanNote(usage: ClaudeUsage): string | null {
 }
 
 /**
- * Claude's usage, or null when there is nothing to say (FE-53): `unavailable`
- * alone — no Claude sign-in on this machine — keeps the strip hidden.
+ * Claude's usage, or null when there is nothing to say.
+ *
+ * An `unavailable` error alone (no Claude sign-in on this machine) keeps the
+ * strip hidden.
  */
 export function claudeView(usage: ClaudeUsage | null): UsageView | null {
   if (
@@ -169,9 +172,11 @@ export function claudeView(usage: ClaudeUsage | null): UsageView | null {
 }
 
 /**
- * Codex's usage as its newest turn on this machine reported it (FE-41), or
- * null before any turn did. A window past its reset has started over since,
- * so its number is dropped rather than shown wrong (FE-41/D3).
+ * Codex's usage as its newest turn on this machine reported it, or null before
+ * any turn did.
+ *
+ * A window past its reset has started over since, so its number is dropped
+ * rather than shown wrong (FE-41/D3).
  */
 export function codexView(
   quota: CodexQuota | null,
@@ -203,14 +208,16 @@ const usageAgent = (kind: string | undefined): UsageAgent | null =>
   kind === "claude" || kind === "codex" ? kind : null;
 
 /**
- * Whose usage the strip shows (FE-54): the agent on screen in the main view —
- * a running agent, a sub-agent's conversation, or a Claude chat — else the
- * agent in the terminal panel's active tab. Null for a shell, or nothing (D1b).
+ * Whose usage the strip shows.
  *
- * ⚠️ The chat pages (`agents/chat/…`, FE-62) say whose they are: a
- * conversation its CLI's, the new page the one its picked model runs on
- * (`useChatAgent`). Missed, a chat showed no usage at all unless the
- * terminal panel happened to have that agent's tab active.
+ * The agent on screen in the main view (a running agent, a sub-agent's
+ * conversation, or a chat), else the agent in the terminal panel's active
+ * tab. Null for a shell, or nothing (FE-54/D1b).
+ *
+ * NOTE: The chat pages (`agents/chat/…`) say whose they are through
+ * {@link useChatAgent}: a conversation its CLI's, the new page the one its
+ * picked model runs on. Skip them and a chat shows no usage at all unless the
+ * terminal panel happens to have that agent's tab active.
  */
 function useUsageAgent(workspace: string): UsageAgent | null {
   const chat = useLocation({
@@ -251,18 +258,20 @@ export function useClock() {
 }
 
 /**
- * The account usage of the agent in the active terminal tab, on the right of
- * the terminal bar (FE-53, FE-54): the agent's mark and its 5-hour session,
- * "9% resets at 8:30 PM": how full, and when it starts over. Clicking it opens
- * the 5-hour and weekly cards, with the plan and ⟳.
+ * The account usage of the agent on screen, on the right of the terminal bar.
  *
- * ⚠️ Follows the session on screen: a Claude agent or chat shows Claude's
- * usage, a Codex agent Codex's — the main view's agent first, else the
- * panel's active tab. A shell, or no agent at all, shows nothing (FE-54/D1b).
+ * The agent's mark and its 5-hour session, "9% resets at 8:30 PM": how full,
+ * and when it starts over. Clicking it opens the 5-hour and weekly cards, with
+ * the plan and ⟳.
  *
- * ⚠️ Claude's numbers come from its account and ⟳ asks Anthropic again;
- * Codex's are only as fresh as its newest turn here, and ⟳ reads them again
- * from this machine. An error keeps the last snapshot and says why it is old.
+ * - Follows the session on screen: a Claude agent or chat shows Claude's
+ *   usage, a Codex agent Codex's. The main view's agent first, else the
+ *   panel's active tab. A shell, or no agent at all, shows nothing
+ *   (FE-54/D1b).
+ * - Claude's numbers come from its account and ⟳ asks Anthropic again.
+ *   Codex's are only as fresh as its newest turn here, and ⟳ reads them again
+ *   from this machine. An error keeps the last snapshot and says why it is
+ *   old.
  */
 export function AgentUsageStrip({ workspace }: { workspace: string }) {
   const agent = useUsageAgent(workspace);
@@ -331,13 +340,12 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
   const left =
     session?.resetsAt == null ? null : resetClock(session.resetsAt, now);
 
-  // ⚠️ The strip shows the session alone: how full it is and when it
-  // starts over. The weekly limit, the plan and ⟳ are one click away, in
-  // the popover — the terminal bar is narrow.
+  // The strip shows the session alone, since the terminal bar is narrow. The
+  // weekly limit, the plan and ⟳ are one click away, in the popover.
   return (
     <Popover
       onOpenChange={(open) => {
-        // Codex is asked again on opening, at most once a minute (FE-74).
+        // Codex is asked again on opening, at most once a minute.
         if (open && view.agent === "codex") void refreshCodex(workspace, false);
       }}
     >
@@ -425,7 +433,7 @@ function UsageDetails({
   now: number;
   /** ⟳, at the header's end. */
   refresh: ReactNode;
-  /** Spend a banked reset (FE-74); Codex only. */
+  /** Spend a banked reset; Codex only. */
   onUseReset: (creditId: string) => Promise<CodexResetOutcome>;
 }) {
   const hasWindows = Boolean(view.fiveHour || view.weekly);
@@ -439,8 +447,8 @@ function UsageDetails({
         <span className="bg-muted grid size-8 shrink-0 place-items-center rounded-lg">
           <TerminalKindIcon kind={view.agent} className="size-4" />
         </span>
-        {/* Line 1: the agent and its plan. Line 2: the account — signed
-            in, its organization, its email. The plan Settings › Agents
+        {/* Line 1: the agent and its plan. Line 2: the account (signed
+            in, its organization, its email). The plan Settings › Agents
             read wins over the one the usage named. */}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex min-w-0 items-center gap-1.5">
@@ -525,11 +533,11 @@ const expiryFormat = new Intl.DateTimeFormat(undefined, {
 });
 
 /**
- * Codex's banked "usage limit resets" (FE-74), as its own Usage window lists
- * them: how many, and each with its expiry and Use reset.
+ * Codex's banked "usage limit resets", as its own Usage window lists them: how
+ * many, and each with its expiry and Use reset.
  *
- * ⚠️ Spending one is not undoable, so Use reset asks first, in the row:
- * "Spend this reset now?" — Cancel or Confirm. Nothing at all with none left.
+ * Spending one cannot be undone, so Use reset asks first, in the row: "Spend
+ * this reset now?", then Cancel or Confirm. Draws nothing with none left.
  */
 function CodexResets({
   resets,
@@ -663,9 +671,10 @@ function CodexResets({
 }
 
 /**
- * One limit: its name, when it resets, how full it is, and the bar — in
- * Settings › Agents and in the terminal bar's popover. A window with no
- * numbers says so rather than drawing an empty bar that reads as 0%.
+ * One limit: its name, when it resets, how full it is, and the bar.
+ *
+ * Used in Settings › Agents and in the terminal bar's popover. A window with
+ * no numbers says so rather than drawing an empty bar that reads as 0%.
  */
 export function UsageBar({
   name,
@@ -676,7 +685,7 @@ export function UsageBar({
 }: {
   name: string;
   label: string;
-  /** The region's accessible name, "5-hour limit". */
+  /** The region's accessible name: "5-hour limit". */
   region: string;
   window: UsageWindow | null;
   now: number;

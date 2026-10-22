@@ -37,9 +37,10 @@ function Icon({ icon }: { icon: IconSvgElement }) {
 }
 
 /**
- * A slot with its name beside it on hover. The accessible name is the same
- * word the row has when the rail is open, so "Issues" is "Issues" either way;
- * the shortcut rides in the tooltip only.
+ * A slot with its name beside it on hover.
+ *
+ * The accessible name is the word the row has when the rail is open, so
+ * "Issues" is "Issues" either way. The shortcut rides in the tooltip only.
  */
 function Slot({
   label,
@@ -66,11 +67,11 @@ function Slot({
 }
 
 /**
- * The rail folded to its icons (FE-58): what the open rail offers, one square
- * each, with the sidebar button on top to open it again.
+ * The rail folded to its icons: what the open rail offers, one square each,
+ * with the sidebar button on top to open it again.
  *
- * Agents shows one icon per agent — running, pinned, then the most recent —
- * named in its tooltip; sub-agents stay the open rail's.
+ * Agents shows one icon per agent (running, pinned, then the most recent),
+ * named in its tooltip. Sub-agents stay the open rail's.
  */
 export function MiniRail({
   slug,
@@ -84,7 +85,7 @@ export function MiniRail({
   accountSeed: string;
   /** The open rail's switcher in its compact form, handed in by the rail. */
   projectSwitcher: ReactNode;
-  /** The project's agents as icons — running, pinned, recent — or null. */
+  /** The project's agents as icons (running, pinned, recent), or null. */
   agents: ReactNode;
   onExpand: () => void;
   /** Fade in: true when it replaces the open rail, not at launch. */
@@ -97,13 +98,13 @@ export function MiniRail({
       <aside
         data-mini=""
         aria-label="Sidebar"
-        // ⚠️ A fixed 56px column at the rail's left edge, not one that fills
-        // the panel: while the rail glides shut the icons stay put instead of
+        // A fixed 56px column at the rail's left edge, not one that fills the
+        // panel: while the rail glides shut the icons stay put instead of
         // drifting from the middle of a narrowing column to its edge.
         className={`app-sidebar flex min-h-0 w-14 flex-1 flex-col items-center ${appear ? "motion-safe:animate-in motion-safe:fade-in-0 duration-200" : ""}`}
       >
         {/* No spacer for the window controls: folded, the window's title bar
-            above the rail holds them (FE-58). */}
+            above the rail holds them. */}
         <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden pt-2 pb-2.5">
           <Slot
             label="Show sidebar"

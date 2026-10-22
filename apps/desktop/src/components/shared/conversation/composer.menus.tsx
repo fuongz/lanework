@@ -44,7 +44,7 @@ import { Switch } from "#/components/ui/switch";
 import { cn } from "#/lib/utils";
 import { useModels } from "./composer.models";
 
-/** A pill in the composer's bottom row (ảnh 7). */
+/** A pill in the composer's bottom row. */
 const PILL =
   "text-foreground hover:bg-foreground/[0.08] aria-expanded:bg-foreground/[0.08] bg-foreground/[0.05] flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50";
 
@@ -66,17 +66,18 @@ function writeFavorites(ids: string[]) {
   try {
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(ids));
   } catch {
-    /* A favourite that is not kept is only a convenience lost. */
+    // A favourite that is not kept is only a convenience lost.
   }
 }
 
 const AGENTS: readonly ConversationAgent[] = ["claude", "codex"];
 
 /**
- * The model panel (ảnh 8): a narrow column — favourites, then one tab per
- * CLI, Claude and Codex — and a search over that tab's models, the legacy
- * ones after a divider. `agent` locks it to one CLI's: a conversation stays
- * on the CLI that wrote it.
+ * The model panel: favourites, a tab per CLI, and a search over its models.
+ *
+ * A narrow column: favourites, then one tab each for Claude and Codex, the
+ * tab's legacy models after a divider. `agent` locks it to one CLI's models,
+ * because a conversation stays on the CLI that wrote it.
  */
 function ModelPanel({
   model,
@@ -191,7 +192,7 @@ function ModelPanel({
             aria-hidden="true"
           />
           <input
-            // ⚠️ The menu reads keys for its own typeahead: a letter typed
+            // NOTE: The menu reads keys for its own typeahead: a letter typed
             // here is the search's, and only the arrows and Escape move on.
             onKeyDown={(event) => {
               if (
@@ -229,8 +230,9 @@ function ModelPanel({
 }
 
 /**
- * The model pill and its menu (D9, ảnh 7–8): Fast, Effort ›, Model ›. The
- * mark is the model's CLI.
+ * The model pill and its menu: Fast, Effort ›, Model ›.
+ *
+ * The pill's mark is the model's CLI.
  */
 export function ModelMenu({
   settings,
@@ -372,7 +374,7 @@ function PermissionIcon({
   );
 }
 
-/** The permission pill and its menu (D9, ảnh 9): the same four for both CLIs. */
+/** The permission pill and its menu: the same four modes for both CLIs. */
 export function PermissionMenu({
   permission,
   onChange,
@@ -403,8 +405,8 @@ export function PermissionMenu({
         side="top"
         align="start"
         sideOffset={6}
-        // ⚠️ A gap between the rows: the picked one is tinted, and so is the
-        // one under the pointer — touching, the two read as one block.
+        // A gap between the rows: the picked one is tinted, and so is the one
+        // under the pointer. Touching, the two would read as one block.
         className="flex w-[22rem] flex-col gap-1 p-1.5"
       >
         {PERMISSIONS.map((entry) => (
@@ -433,8 +435,9 @@ export function PermissionMenu({
 }
 
 /**
- * The composer's + (ảnh 6): what can be added to the message. Upload file is
- * the only entry for now; the menu is where the next ones go.
+ * The composer's +: what can be added to the message.
+ *
+ * Upload file is the only entry; the menu is where the next ones go.
  */
 export function AttachMenu({
   onUpload,

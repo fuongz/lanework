@@ -68,8 +68,8 @@ function CapsuleMark({ running }: { running: number }) {
 }
 
 /**
- * One group of jobs (ảnh 9): a mark, its name, a count, Completed once none
- * runs, and its rows under a fold.
+ * One group of jobs: a mark, its name, a count, Completed once none runs, and
+ * its rows under a fold.
  */
 function Capsule({
   title,
@@ -149,10 +149,11 @@ function Capsule({
 }
 
 /**
- * What the conversation has going besides its own turn (FE-62): its
- * sub-agents and its background shells and monitors, as capsules above the
- * composer — the ones still running, and those of the current prompt once
- * done. Hidden when there are none.
+ * What the conversation has going besides its own turn, as capsules above the
+ * composer.
+ *
+ * Its sub-agents, background shells and monitors: the ones still running, and
+ * those of the current prompt once done. Hidden when there are none.
  */
 export function JobCapsules({
   slug,
@@ -189,7 +190,7 @@ export function JobCapsules({
         Number(b.working) - Number(a.working) ||
         b.sub.updatedAt.localeCompare(a.sub.updatedAt),
     );
-  // ⚠️ An agent task is a sub-agent already listed above: shells and
+  // NOTE: An agent task is a sub-agent already listed above, so shells and
   // monitors only.
   const jobs = (tasks ?? [])
     .filter((task) => task.kind !== "agent")

@@ -69,16 +69,18 @@ const NAMES: Record<HookAgent, string> = {
 };
 
 /**
- * Each CLI under both of its names: the harness store's (`claude`) and the
- * hook's and MCP entry's (`claude-code`). ⚠️ Two spellings of one agent, so a
- * card reads every store with the right key rather than guessing.
+ * Each CLI under both of its names.
+ *
+ * The harness store says `claude`; the hook and the MCP entry say
+ * `claude-code`. Both spellings sit here so a card reads every store with the
+ * right key rather than guessing.
  */
 const CLIS = [
   { harness: "claude", agent: "claude-code" },
   { harness: "codex", agent: "codex" },
 ] as const satisfies readonly { harness: HarnessAgent; agent: HookAgent }[];
 
-/** How the CLI got here, after the version: "via Homebrew". */
+/** How the CLI was installed, shown after the version: "via Homebrew". */
 const INSTALLED_WITH: Record<InstallMethod, string> = {
   native: "via the native installer",
   "brew-cask": "via a Homebrew cask",
@@ -101,22 +103,23 @@ const rowWords = (rows: SettingsRowSpec[]) =>
     .join(" ");
 
 /**
- * Settings › Agents › Harness: the coding agent CLIs Lanework runs, one card
- * each — its version and usage limits, its Lanework MCP entry and its
- * checkpoint hook — then what both share (FE-28, FE-29, FE-52, FE-61).
+ * Settings › Agents › Harness: the coding agent CLIs Lanework runs.
  *
- * ⚠️ A switch per CLI, and pushing code as a third, separate choice that
- * starts off (FE-28/D3). A checkpoint is text, redacted on this machine;
- * pushing the working tree to GitHub is a different kind of act, and nobody
- * should learn their unfinished work left the machine by reading the small
- * print under a switch they flipped for something else.
+ * One card each, with its version and usage limits, its Lanework MCP entry
+ * and its checkpoint hook; then what both share.
  *
- * ⚠️ Codex runs a hook only once the user approves it in Codex. This page
- * reports whether Codex holds that approval and says how to give it — it
- * never gives it (FE-29/D7).
+ * NOTE: A switch per CLI, and pushing code is a third, separate choice that
+ * starts off (FE-28/D3). A checkpoint is text, redacted on this machine.
+ * Pushing the working tree to GitHub is a different kind of act, and nobody
+ * should learn their unfinished work left the machine from the small print
+ * under a switch they flipped for something else.
  *
- * ⚠️ The cards are `content` sections, so search cannot narrow them row by
- * row: a card matches on every word of its rows (`rowWords`) and shows whole.
+ * NOTE: Codex runs a hook only once the user approves it in Codex. This page
+ * reports whether Codex holds that approval and says how to give it. It never
+ * gives it (FE-29/D7).
+ *
+ * The cards are `content` sections, so search cannot narrow them row by row:
+ * a card matches on every word of its rows ({@link rowWords}) and shows whole.
  */
 export function HarnessSection() {
   const accounts = useHarnessAccounts();
@@ -127,19 +130,19 @@ export function HarnessSection() {
   const [copied, copy] = useCopy();
   // "Approve in Codex" opens Codex in the app's own terminal, in the project
   // last open, so its hook review is one keypress away rather than a trip to
-  // another window (FE-29). The approval itself is still Codex's (D7).
+  // another window. The approval itself is still Codex's (FE-29/D7).
   const project = useBoard((state) => state.active);
   const projectKey = useWorkspaceKey(project?.slug);
   const startAgent = useAgentTerminals((state) => state.start);
   const navigate = useNavigate();
   const { signedIn } = useCloudFeatures();
-  // FE-52/D9: the hook also runs in local mode, writing checkpoints to the
-  // local store, so its switches stay. Only the credential row is cloud-only.
+  // The hook also runs in local mode, writing checkpoints to the local store,
+  // so its switches stay. Only the credential row is cloud-only (FE-52/D9).
   const local = useIsLocalMode();
   const handoff = signedIn || local;
 
-  // FE-61: which version of each CLI runs here and which is out — the same
-  // facts the update island works from, with a way to ask again now.
+  // Which version of each CLI runs here and which is out: the same facts the
+  // update island works from, with a way to ask again now.
   useHarnessWatch();
   const harness = useHarness((state) => state.list);
   const harnessLoaded = useHarness((state) => state.loaded);
@@ -152,9 +155,9 @@ export function HarnessSection() {
     .sort()
     .at(-1);
 
-  // FE-53, FE-41: the same usage the terminal bar's strip shows. Claude's is
-  // asked of its account once when the page opens; Codex's is only what its
-  // newest turn in the open project reported, so it needs a project.
+  // The same usage the terminal bar's strip shows. Claude's is asked of its
+  // account once when the page opens. Codex's is only what its newest turn in
+  // the open project reported, so it needs a project.
   const claudeUsage = useAgentSessions((state) => state.claudeUsage);
   const codexQuota = useAgentSessions((state) => state.codexQuota);
   const refreshClaude = useAgentSessions((state) => state.refreshClaudeUsage);
@@ -208,10 +211,11 @@ export function HarnessSection() {
     return () => window.removeEventListener("focus", again);
   }, [refresh]);
 
-  // FE-52/D8: the `lanework` MCP entry in each agent's own config, and
-  // whether each CLI is signed in to the cloud server — the same store the
-  // shell's sign-in island reads. ⚠️ Settings is outside the app shell, so
-  // it runs the watch itself.
+  // The `lanework` MCP entry in each agent's own config, and whether each CLI
+  // is signed in to the cloud server (FE-52/D8). The same store the shell's
+  // sign-in island reads.
+  //
+  // NOTE: Settings is outside the app shell, so it runs the watch itself.
   useMcpAuthWatch();
   const mcpStatus = useMcpAuth((state) => state.status);
   const setMcpStatus = useMcpAuth((state) => state.setStatus);
@@ -258,7 +262,7 @@ export function HarnessSection() {
 
   const surface = window.desktop?.handoff;
   const mcpSurface = window.desktop?.laneworkMcp;
-  // FE-52/D9: local mode needs no credential — the hook writes locally.
+  // Local mode needs no credential: the hook writes locally (FE-52/D9).
   const blocked = !status?.supported || (!status.signedIn && !local);
   const anyOn = !!status && (status.claude.installed || status.codex.installed);
 
@@ -506,9 +510,9 @@ export function HarnessSection() {
       : []),
   ];
 
-  // FE-52: signed out without "Skip for now" there is nowhere for a checkpoint
-  // to land, so the switches go rather than sitting disabled under a reason
-  // that reads like a fault. The version and usage stay: they are local.
+  // Signed out without "Skip for now", a checkpoint has nowhere to land. The
+  // switches go rather than sit disabled under a reason that reads like a
+  // fault. The version and usage stay: they are local.
   const cardSections: SettingsSectionSpec[] = CLIS.map(
     ({ harness: kind, agent }) => {
       const info = harness.find((entry) => entry.agent === kind);
@@ -694,10 +698,14 @@ export function HarnessSection() {
 }
 
 /**
- * One CLI's card, as a provider list draws one: its mark, name and how many
- * accounts it has, its version on the right; then the account — its
- * organization, whether it is ready, the plan and the email, blurred — its
- * usage limits, and its rows, drawn as `SettingsPage` draws a section's.
+ * One CLI's card, drawn as a provider list draws one.
+ *
+ * - Its mark, its name and how many accounts it has; its version on the
+ *   right.
+ * - The account: its organization, whether it is ready, the plan, and the
+ *   email, blurred.
+ * - Its usage limits.
+ * - Its rows, drawn as {@link SettingsPage} draws a section's.
  */
 function HarnessCard({
   kind,
@@ -824,8 +832,10 @@ function HarnessCard({
 
 /**
  * The 5-hour and weekly limits side by side, as the terminal bar's popover
- * has them (FE-53, FE-41). ⚠️ Nothing at all when there are no numbers and no
- * error: a row of dashes would say "0% used" to anyone skimming.
+ * has them.
+ *
+ * Draws nothing when there are no numbers and no error: a row of dashes would
+ * read as "0% used" to anyone skimming.
  */
 function UsageRow({ view, now }: { view: UsageView; now: number }) {
   const windows = (

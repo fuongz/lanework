@@ -16,12 +16,12 @@ const RESIZE_SETTLE_MS = 60;
  */
 const SHIFT_ENTER = "\x1b\r";
 
-/** Characters a shell never needs quoted — a path made only of these goes raw. */
+/** Characters a shell never needs quoted; a path made only of these goes raw. */
 const SHELL_SAFE = /^[\w@%+=:,./-]+$/;
 
 /**
  * A dropped path as Terminal.app types it: single-quoted when it needs it, so
- * `export (3).csv` reaches the shell and an agent's prompt as ONE argument.
+ * `export (3).csv` reaches the shell and an agent's prompt as one argument.
  */
 function quotePath(path: string): string {
   if (SHELL_SAFE.test(path)) return path;
@@ -31,17 +31,16 @@ function quotePath(path: string): string {
 /**
  * One terminal on screen: an xterm attached to a session in the pty host.
  *
- * ⚠️ The view is disposable; the session is not. Unmounting — another tab,
- * another project, a hidden panel, a reload — DETACHES and nothing else. The
- * shell keeps running in the host, and the next mount is drawn from its
- * snapshot (FE-19/D3).
- *
- * ⚠️ xterm is imported lazily, inside the effect. It touches `window` when it
- * loads, and the production build prerenders the app shell with no window.
- *
- * ⚠️ Fitted BEFORE attaching. The host resizes to the geometry attach carries
- * and only then serializes; a snapshot taken at another width replays wrapped
- * wrong, and a TUI comes back as garbage.
+ * - The view is disposable; the session is not. Unmounting (another tab,
+ *   another project, a hidden panel, a reload) detaches and nothing else. The
+ *   shell keeps running in the host, and the next mount is drawn from its
+ *   snapshot (FE-19/D3).
+ * - NOTE: xterm is imported lazily, inside the effect. It touches `window`
+ *   when it loads, and the production build prerenders the app shell with no
+ *   window.
+ * - NOTE: Fitted before attaching. The host resizes to the geometry attach
+ *   carries and only then serializes; a snapshot taken at another width
+ *   replays wrapped wrong, and a TUI comes back as garbage.
  */
 export function XtermPane({
   session,
@@ -51,13 +50,12 @@ export function XtermPane({
   session: TerminalSession;
   /**
    * Who is told the shell exited. The panel's store by default; an agent's
-   * view (FE-26) keeps its sessions in a store of its own.
+   * view keeps its sessions in a store of its own.
    */
   onExit?: (workspace: string, id: string, code: number) => void;
   /**
-   * Told once, when the screen first has something on it — a snapshot with
-   * content, or the first live output. An agent's view keeps its spinner up
-   * until then (FE-26).
+   * Told when the screen has something on it: a snapshot with content, or
+   * live output. An agent's view keeps its spinner up until then.
    */
   onOutput?: () => void;
 }) {
@@ -103,7 +101,7 @@ export function XtermPane({
         cursorBlink: !reduced,
         scrollback: TERMINAL_LIMITS.scrollback,
         theme: readTerminalColors(),
-        // ⌥ as Meta, the way Terminal.app's "Use Option as Meta key" does —
+        // ⌥ as Meta, the way Terminal.app's "Use Option as Meta key" does:
         // what word-jumps in a shell and every Emacs binding expect.
         macOptionIsMeta: true,
       });
@@ -135,8 +133,8 @@ export function XtermPane({
       const typing = term.onData((data) => surface.input(session.id, data));
       cleanup.push(() => typing.dispose());
 
-      // ⚠️ Returning false for EVERY event of a ⇧↩ — keydown and keypress —
-      // or xterm still sends its own CR from the one we let through.
+      // NOTE: Return false for every event of a ⇧↩ (keydown and keypress), or
+      // xterm still sends its own CR from the one let through.
       term.attachCustomKeyEventHandler((event) => {
         const shiftEnter =
           event.key === "Enter" &&
@@ -150,7 +148,7 @@ export function XtermPane({
       });
 
       // Files dragged in from Finder are typed as their paths, the way a
-      // terminal does it — what Claude Code and Codex take as an attachment.
+      // terminal does it: what Claude Code and Codex take as an attachment.
       const onDragOver = (event: DragEvent) => {
         if (!event.dataTransfer?.types.includes("Files")) return;
         event.preventDefault();
@@ -216,8 +214,8 @@ export function XtermPane({
       cleanup.push(() => theme.disconnect());
 
       // The code font picked in Settings, applied to a terminal already open
-      // (FE-21/D5). The cell size changes with it, so it is refitted — and the
-      // shell told — the way a drag would.
+      // (FE-21/D5). The cell size changes with it, so it is refitted, and the
+      // shell told, the way a drag would.
       cleanup.push(
         usePreferences.subscribe((state, previous) => {
           const next = state.fonts.code;
@@ -248,9 +246,9 @@ export function XtermPane({
     };
   }, [session.id, session.workspace, markExited]);
 
-  // ⚠️ The padding is on the WRAPPER. FitAddon measures the element xterm was
-  // opened in, and padding on that element would be counted as room for text
-  // — the last row and column would render under the edge.
+  // NOTE: The padding is on the wrapper. FitAddon measures the element xterm
+  // was opened in, and padding on that element would count as room for text:
+  // the last row and column would render under the edge.
   return (
     <div className="h-full min-h-0 px-3 pt-1.5 pb-1">
       <div ref={host} className="h-full w-full min-h-0 overflow-hidden" />

@@ -15,7 +15,10 @@ import { useBoard } from "#/stores/board";
 /** How often an open card re-asks where its agent stopped. */
 const REFRESH_MS = 30_000;
 
-/** `claude-code-lanework` → Claude Code: the OAuth client names vary. */
+/**
+ * An agent's display name from its OAuth client slug, which varies:
+ * `claude-code-lanework` → Claude Code.
+ */
 function agentName(slug: string): string {
   if (slug.startsWith("claude")) return "Claude Code";
   if (slug.startsWith("codex")) return "Codex";
@@ -37,15 +40,14 @@ const RESUMERS = [
 
 /**
  * Where the last agent on this card stopped, and how to hand it to the next
- * one (FE-28) — the checkpoint `get_review` gives an agent, shown to a person.
+ * one: the checkpoint `get_review` gives an agent, shown to a person.
  *
- * ⚠️ Nothing at all when there is no checkpoint. A card nobody handed over is
- * the normal case, and an empty "no agent stopped here" box on every card
- * would be noise about the absence of something rare.
- *
- * ⚠️ Polled while the card is open, not driven by the change feed: a
- * checkpoint deliberately never bumps the card's revision (BE-17), so the feed
- * never says one arrived.
+ * - Nothing at all when there is no checkpoint. A card nobody handed over is
+ *   the normal case, and an empty "no agent stopped here" box on every card
+ *   would be noise about the absence of something rare.
+ * - NOTE: Polled while the card is open, not driven by the change feed. A
+ *   checkpoint never bumps the card's revision (BE-17), so the feed never
+ *   says one arrived.
  */
 export function IssueCheckpoint({ card }: { card: BoardCard }) {
   const workspaceId = useBoard((state) => state.active?.id ?? null);

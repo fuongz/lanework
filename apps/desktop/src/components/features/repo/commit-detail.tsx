@@ -105,7 +105,7 @@ function CommitHeader({ commit }: { commit: CommitSummary }) {
 /**
  * One commit: who, when, why, and what it changed (FE-22/D11).
  *
- * ⚠️ The header rides INSIDE the diff's scroller, above the first file, so a
+ * The header rides inside the diff's scroller, above the first file, so a
  * long commit scrolls it away instead of pinning a block of prose over the
  * code somebody came to read.
  */
@@ -126,9 +126,11 @@ export function CommitDetail() {
   );
 
   /**
-   * ⚠️ Both sides are read from GIT, never from disk: the file as it is now has
-   * nothing to do with a commit made last week. `<sha>^` is the first parent;
-   * a root commit has none, and its old side is empty.
+   * Reads both sides of a file for expanding around a hunk.
+   *
+   * NOTE: Both sides come from git, never from disk: the file as it is now
+   * has nothing to do with a commit made last week. `<sha>^` is the first
+   * parent; a root commit has none, and its old side is empty.
    */
   const loadSides = useCallback<LoadSides>(
     async (oldPath, newPath) => {
@@ -155,8 +157,8 @@ export function CommitDetail() {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <DiffToolbar additions={additions} deletions={deletions} />
       <PatchView
-        // ⚠️ Keyed by the commit: fold state belongs to one commit's files, and
-        // carrying it into another's folds files that are not the same.
+        // NOTE: Keyed by the commit. Fold state belongs to one commit's files,
+        // and carrying it into another's folds files that are not the same.
         key={change.commit.sha}
         patch={change.patch}
         counts={counts}

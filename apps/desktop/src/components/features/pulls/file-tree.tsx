@@ -20,22 +20,15 @@ import type { PullFile, PullFileStatus } from "../../../../shared/git";
 /**
  * The files in the open pull request, as a tree, in a panel of its own.
  *
- * ⚠️ A COLUMN of the window, beside the pull request rather than inside it. It
- * used to sit within the detail pane, which put it below that pane's header and
- * above its review footer — a sidebar boxed inside the thing it navigates. As
- * its own column it runs the full height, the way the project rail and the pull
- * request list do.
- *
- * ⚠️ It holds the CHANGED files, not the repository. Nothing in this app has the
- * repo's file list — `PullDetail` carries what GitHub said changed and
- * `git.fileText` fetches one blob at a time — and a tree that enumerated a
- * repository over the API to draw a sidebar would spend a rate limit on it. It
- * is the right content anyway: this is a review, and a file nobody touched is
- * not part of one.
- *
- * ⚠️ Rendered by `@pierre/trees`, which is a WEB COMPONENT with its own shadow
- * root. Nothing here can reach inside it with a class, so everything this screen
- * wants from it arrives as a CSS variable on the host or as `unsafeCSS`.
+ * - A resizable panel beside the diff, inside the pull request's pane. It
+ *   starts below the title bar, level with the row that describes the diff.
+ * - It holds the changed files, not the repository. Nothing in this app has
+ *   the repo's file list, and enumerating it over the API for a sidebar would
+ *   spend the rate limit. A file nobody touched is not part of a review
+ *   anyway.
+ * - NOTE: Rendered by `@pierre/trees`, a web component with its own shadow
+ *   root. No class reaches inside it; styling arrives as a CSS variable on
+ *   the host or as `unsafeCSS`.
  */
 
 /** GitHub's word for what happened to a file, in the tree's vocabulary. */
@@ -76,30 +69,25 @@ function Tree({ files }: { files: PullFile[] }) {
     return entries;
   }, [files]);
 
-  // ⚠️ `onSelectionChange` is a CONSTRUCTION-time option and the model is built
-  // exactly once, so the callback the tree holds is the first one it was given.
-  // The ref is what lets a fresh closure still be the one that runs.
+  // NOTE: `onSelectionChange` is read once, when the model is built, so the
+  // tree holds the first callback it was given. The ref lets the latest
+  // closure run.
   const onSelectRef = useRef(focusFile);
   onSelectRef.current = focusFile;
 
   const { model } = useFileTree({
     paths,
-    // Open, not closed: this tree exists to show what a pull request touches,
-    // and a reviewer should not have to click a folder open to find out.
+    // Open: the tree shows what a pull request touches, and a reviewer
+    // should not have to click a folder open to find out.
     initialExpansion: "open",
-    // ⚠️ NOT flattened. The library will fold `src/components/features/pulls`
-    // into one row, which is what an editor does in a wide sidebar — and at
-    // 240px it truncates every segment of that row at once, into
-    // `compo…/featu…/pu…`. One folder per row costs indentation and gives back
-    // names somebody can actually read.
+    // Not flattened. Folding `src/components/features/pulls` into one row
+    // truncates every segment at 240px, into `compo…/featu…/pu…`. One folder
+    // per row costs indentation and keeps names readable.
     flattenEmptyDirectories: false,
-    // ⚠️ FALSE, and the filter box in the header above drives `setSearch()`
-    // instead. `true` renders the library's OWN search field inside the shadow
-    // root — which put two search boxes on top of each other — and that field
-    // takes no placeholder and exposes only bg/fg/font-weight overrides, so it
-    // can neither say "Filter 8 files…" nor be shaped like the rest of the app.
-    // The controller's search does not consult this flag; it only decides
-    // whether the library draws a field of its own.
+    // Off: the filter box above drives `setSearch()` instead. `true` draws the
+    // library's own search field inside the shadow root, which takes no
+    // placeholder and exposes only bg/fg/font-weight overrides. The flag only
+    // decides whether that field is drawn; `setSearch()` works either way.
     search: false,
     icons: FILE_TREE_ICONS,
     unsafeCSS: TREE_ICON_TINT_CSS,
@@ -120,11 +108,10 @@ function Tree({ files }: { files: PullFile[] }) {
     model.setGitStatus(gitStatus);
   }, [model, gitStatus]);
 
-  // ⚠️ The library's OWN filter, driven from our input rather than reimplemented
-  // beside it. `useFileTree` is constructed with `search: true`, so the tree
-  // already knows how to match a path, expand the folders around a hit and keep
-  // its virtualization honest; a second filter over `paths` would disagree with
-  // it the first time somebody typed a path separator.
+  // The library's own filter, driven from our input rather than reimplemented.
+  // The tree already matches a path, expands the folders around a hit and
+  // keeps its virtualization honest; a second filter over `paths` would
+  // disagree with it the first time someone typed a path separator.
   useEffect(() => {
     model.setSearch(query.trim() === "" ? null : query);
   }, [model, query]);
@@ -144,11 +131,9 @@ function Tree({ files }: { files: PullFile[] }) {
           <InputGroupInput
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            // ⚠️ The count lives HERE, in the placeholder, rather than in the
-            // `FILES 15` header this input replaced. It is the same fact and it
-            // costs no row; but it disappears as soon as somebody types, which
-            // is exactly when "how many files are in this pull request" stops
-            // being the question they are asking.
+            // The count lives in the placeholder rather than a header row: it
+            // costs no space, and it goes away once someone types, which is
+            // when the count stops being the question.
             placeholder={`Filter ${files.length} ${files.length === 1 ? "file" : "files"}…`}
             aria-label="Filter files"
             className="text-xs"
@@ -174,8 +159,8 @@ export function FilesPanel() {
     [commit, commitDiff, detail],
   );
 
-  // No pull request open, or the panel put away. Nothing to say about either —
-  // the toggle that brings it back lives in the pull request's own header.
+  // No pull request open, or the panel put away. The toggle that brings it
+  // back lives in the pull request's own header.
   if (!filesOpen || !source) return null;
 
   return (
@@ -183,10 +168,10 @@ export function FilesPanel() {
       aria-label="Files changed"
       className="bg-sidebar flex min-h-0 flex-1 flex-col overflow-hidden"
     >
-      {/* ⚠️ Keyed by what it is listing. The tree model is built once per mount
-          and fed new paths afterwards — but its EXPANSION and selection are
-          about the old list, and carrying those into another commit's files
-          leaves folders open that are no longer there. */}
+      {/* NOTE: Keyed by what it lists. The model is built once per mount and
+          fed new paths afterwards, but its expansion and selection belong to
+          the old list; carried into another commit's files they leave
+          folders open that are no longer there. */}
       <Tree key={commit ?? "pull"} files={source.files} />
     </aside>
   );

@@ -32,9 +32,10 @@ import {
 const exact = (value: number) => value.toLocaleString("en-US");
 
 /**
- * What the cost is, wherever it is shown (FE-38/V5): Claude's `cost-state`
- * is the whole CLI's spend on the conversation — its sub-agents' calls, its
- * titles and recaps included — priced as the API would be.
+ * What the cost is, wherever it is shown.
+ *
+ * Claude's `cost-state` is the whole CLI's spend on the conversation (its
+ * sub-agents' calls, titles and recaps included), priced as the API would be.
  */
 const COST_NOTE =
   "An estimate at API prices — not what a subscription is billed. It includes this conversation's sub-agents.";
@@ -64,14 +65,15 @@ function contextText(facts: AgentFacts): string {
   return `${tokenText(facts.context.tokens)}${share != null ? ` (${Math.round(share * 100)}%)` : ""}`;
 }
 
-/** Why a Claude window is a guess (FE-38/D2): the CLI writes none down. */
+/** Why a Claude window is a guess: the CLI writes none down (FE-38/D2). */
 const WINDOW_NOTE =
   "Claude does not record its window: it is taken from the model, 1M unless it is Haiku.";
 
 /**
- * The model's popover (FE-38/D1): which model, what it cost ≈, its tokens in
- * and out, and its context — each only when the CLI wrote it, so a number
- * never reads 0 for "not known". Cost is Claude's alone.
+ * The model popover's facts: model, cost ≈, tokens in and out, context.
+ *
+ * Each only when the CLI wrote it, so a number never reads 0 for "not
+ * known". Cost is Claude's alone.
  */
 function modelFacts(facts: AgentFacts): Fact[] {
   const out: Fact[] = [];
@@ -144,8 +146,9 @@ function runFacts(facts: AgentFacts): Fact[] {
 }
 
 /**
- * Cost and context in one line, for a rail row's tooltip (FE-38/D5); null
- * when neither is known.
+ * Cost and context in one line, for a rail row's tooltip.
+ *
+ * @returns null when neither is known.
  */
 export function factsSummary(facts: AgentFacts): string | null {
   const parts = [
@@ -158,8 +161,9 @@ export function factsSummary(facts: AgentFacts): string | null {
 }
 
 /**
- * Claude's newest recap of the conversation, under its facts (FE-38/D4):
- * one line until opened, and when Claude wrote it.
+ * Claude's newest recap of the conversation, under its facts.
+ *
+ * One line until opened, with when Claude wrote it.
  */
 export function ConversationRecap({
   recap,
@@ -170,8 +174,8 @@ export function ConversationRecap({
   return (
     <section
       aria-label="Recap"
-      // ⚠️ One line height for the three parts — the label, the text and its
-      // time — so they sit level shut, and the first line stays level open.
+      // One line height for the label, the text and its time, so they sit
+      // level when shut and the first line stays level when open.
       className="border-sidebar-border flex shrink-0 items-start gap-2 border-b px-3 py-2 text-xs"
     >
       <button
@@ -213,12 +217,14 @@ export function ConversationRecap({
 }
 
 /**
- * A conversation's run time, in the agent view's header itself (FE-38):
- * nothing at all when the CLI wrote none. Its model and usage are the
- * `ModelButton`'s; Claude's recap is its own row, `ConversationRecap`.
+ * A conversation's run time, in the agent view's header itself.
  *
- * `extra` joins the same row — a Codex goal's (FE-41/D4) — and shows
- * even before the transcript's own numbers are read.
+ * Nothing when the CLI wrote none. Its model and usage are
+ * {@link ModelButton}'s; Claude's recap is its own row,
+ * {@link ConversationRecap}.
+ *
+ * @param extra facts that join the same row (a Codex goal's, FE-41/D4),
+ *   shown even before the transcript's own numbers are read.
  */
 export function ConversationFacts({
   facts,
@@ -235,9 +241,10 @@ export function ConversationFacts({
 }
 
 /**
- * The model, by name, with how full its context is as the ring before it —
- * opening its usage: cost ≈, tokens, context. Nothing until the CLI names
- * a model.
+ * The model by name, with a context ring before it, opening its usage.
+ *
+ * The usage is cost ≈, tokens and context. Nothing until the CLI names a
+ * model.
  */
 export function ModelButton({
   facts,
@@ -279,9 +286,9 @@ export function ModelButton({
 }
 
 /**
- * `ModelButton` as the chat composer's corner has it (FE-62): the context
- * ring alone — the composer names the model already — opening the same
- * usage.
+ * {@link ModelButton} for the chat composer's corner: the context ring alone.
+ *
+ * The composer already names the model; this opens the same usage.
  */
 export function ContextButton({
   facts,

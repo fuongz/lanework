@@ -16,7 +16,7 @@ function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
     <SelectPrimitive.Group
       data-slot="select-group"
       // The inset belongs to the popup (see `SelectContent`); a group that
-      // added its own would double it for anyone who used one.
+      // added its own would double it.
       className={cn("scroll-my-1", className)}
       {...props}
     />
@@ -93,11 +93,11 @@ function SelectContent({
           data-slot="select-content"
           data-align-trigger={alignItemWithTrigger}
           className={cn(
-            // ⚠️ `p-1` is a LOCAL change to a registry file, and it will be
-            // lost by the next `shadcn add select`. It lives here rather than
-            // at each call site so every Select in the app is inset the same
-            // 4px — the popup shipped with none, which left every item flush
-            // against the popup's edge and its rounded corners.
+            // NOTE: `p-1` is a local change to a registry file; the next
+            // `shadcn add select` loses it. It lives here rather than at each
+            // call site so every Select is inset the same 4px. The registry
+            // popup has none, which leaves items flush against its rounded
+            // corners.
             "isolate z-50 max-h-(--available-height) w-(--anchor-width) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 animate-none! relative bg-popover/70 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-2xl before:backdrop-saturate-150 **:data-[slot$=-item]:focus:bg-foreground/10 **:data-[slot$=-item]:data-highlighted:bg-foreground/10 **:data-[slot$=-separator]:bg-foreground/5 **:data-[slot$=-trigger]:focus:bg-foreground/10 **:data-[slot$=-trigger]:aria-expanded:bg-foreground/10! **:data-[variant=destructive]:focus:bg-foreground/10! **:data-[variant=destructive]:text-accent-foreground! **:data-[variant=destructive]:**:text-accent-foreground!",
             className,
           )}

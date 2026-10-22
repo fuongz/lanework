@@ -1,14 +1,13 @@
-/**
- * Every keyboard shortcut the app handles, for Settings › Keybindings.
- *
- * ⚠️ A LIST, not the source of the keys. The menu's accelerators live in
- * `electron/main/menu.ts` and each screen's in its own key handler; this
- * only says what they are. Adding or changing a shortcut means changing it
- * there AND here — `where` names the file, so the two can be checked.
- *
- * Keys are spelled the macOS way. The renderer's handlers take Ctrl for ⌘
- * off macOS (all but ⌘⇧M).
- */
+// Every keyboard shortcut the app handles, for Settings › Keybindings.
+//
+// NOTE: A LIST, not the source of the keys. The menu's accelerators live in
+// `electron/main/menu.ts` and each screen's in its own key handler; this only
+// says what they are. Adding or changing a shortcut means changing it there
+// AND here — `where` names the file, so the two can be checked.
+//
+// Keys are spelled the macOS way. The renderer's handlers take Ctrl for ⌘ off
+// macOS (all but ⌘⇧M).
+
 interface Keybinding {
   /** "Area: Action", the way the list sorts and reads. */
   command: string;

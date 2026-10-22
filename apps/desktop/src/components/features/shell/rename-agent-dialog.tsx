@@ -17,9 +17,9 @@ import { useAgentSessions } from "#/stores/agent-sessions";
 /**
  * Name an agent conversation in Lanework (FE-24/D4).
  *
- * ⚠️ The name is Lanework's alone (FE-24/D1): the CLI keeps its own title,
- * which is what the field falls back to — so emptying it is the way back,
- * and the placeholder says what that would be.
+ * The name is Lanework's alone (FE-24/D1). The CLI keeps its own title, which
+ * is what the field falls back to, so emptying it is the way back, and the
+ * placeholder says what that would be.
  */
 export function RenameAgentDialog({
   workspace,

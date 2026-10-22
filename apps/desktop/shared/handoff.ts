@@ -1,6 +1,6 @@
-// Handing a card between agents (FE-28, FE-29): the Stop hook that leaves a
-// checkpoint on the card after every turn (BE-17), for Claude Code and for
-// Codex, switched on from Settings → Agents instead of from a terminal.
+// Handing a card between agents: the Stop hook that leaves a checkpoint on
+// the card after every turn (BE-17), for Claude Code and for Codex, switched
+// on from Settings → Agents instead of from a terminal.
 
 export type HookAgent = "claude-code" | "codex";
 
@@ -9,25 +9,31 @@ export interface AgentHookStatus {
   /** Our Stop hook is in this CLI's settings file. */
   installed: boolean;
   /**
-   * The settings file exists but is not JSON we can safely rewrite. The
-   * switch refuses rather than overwrite a file somebody else owns.
+   * The settings file exists but is not JSON we can safely rewrite.
+   *
+   * The switch refuses rather than overwrite a file somebody else owns.
    */
   settingsUnreadable: boolean;
   /** The file the hook goes into, for the row that names it. */
   settingsPath: string;
   /**
-   * We installed it and it is gone — another tool rewrote the file
-   * (FE-29/D8). Shown, never silently re-added.
+   * We installed the hook and it is gone: another tool rewrote the file.
+   *
+   * Shown, never silently re-added (FE-29/D8).
    */
   removedElsewhere: boolean;
 }
 
 export interface CodexHookStatus extends AgentHookStatus {
-  /** `[features] hooks = true` in Codex's config.toml; without it no hook runs. */
+  /**
+   * Codex's config.toml does not turn hooks off with `[features] hooks =
+   * false`. When it does, no hook runs.
+   */
   hooksEnabled: boolean;
   /**
-   * Codex holds an approval for the hook at our position (FE-29/D7). Read
-   * from config.toml, never written by the app.
+   * Codex holds an approval for the hook at our position.
+   *
+   * Read from config.toml, never written by the app (FE-29/D7).
    */
   approved: boolean;
   configPath: string;
@@ -36,16 +42,17 @@ export interface CodexHookStatus extends AgentHookStatus {
 /** What Settings → Agents shows. Everything here is read on the machine. */
 export interface HandoffStatus {
   /**
-   * Whether this build can install the hook here. macOS only for now: the
-   * credential lives in the Keychain, and elsewhere there is nowhere as safe
-   * to put it.
+   * Whether this build can install the hook here.
+   *
+   * macOS only: the credential lives in the Keychain, and elsewhere there is
+   * nowhere as safe to put it.
    */
   supported: boolean;
   /** Signed in, so there is a machine credential to hand the hook. */
   signedIn: boolean;
   /** The hook's credential is in the Keychain and matches this machine's. */
   credential: boolean;
-  /** FE-28/D3: the hook also pushes the uncommitted tree. Off by default. */
+  /** The hook also pushes the uncommitted tree. Off by default (FE-28/D3). */
   pushWip: boolean;
   /** The newest checkpoint the hook recorded on this machine, if any. */
   last: { taskId: string; at: string } | null;

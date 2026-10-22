@@ -1,13 +1,12 @@
-/**
- * Putting a label on a card: pick one the board already names, or type a new one.
- *
- * ⚠️ BOTH, in one menu, and that is the point. The board's vocabulary is a
- * palette rather than a whitelist — the service accepts any tag — so a picker
- * that only offered the named labels would make every free tag unreachable from
- * this screen, and a plain text field would throw away the colours the board
- * does define. The list is what a person reaches for; the field is what keeps
- * the surface honest about what the board actually stores.
- */
+// Putting a label on a card: pick one the board already names, or type a new
+// one.
+//
+// Both, in one menu. The board's vocabulary is a palette rather than a
+// whitelist (the service accepts any tag), so a picker that only offered the
+// named labels would make every free tag unreachable from this screen, and a
+// plain text field would throw away the colours the board does define. The
+// list is what a person reaches for; the field keeps the surface honest about
+// what the board stores.
 import { Add01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
@@ -50,10 +49,9 @@ export function LabelPicker({
   const toggle = (tag: string) =>
     onChange(on.has(tag) ? tags.filter((t) => t !== tag) : [...tags, tag]);
 
-  // ⚠️ Splits on commas, like the field this replaced. A pasted
-  // "ui, electron" is how a list actually arrives, and `normalizeTag` turns
-  // spaces into hyphens rather than stripping commas — so the whole string
-  // would otherwise become the single tag `ui,-electron`.
+  // NOTE: Splits on commas. A pasted "ui, electron" is how a list arrives, and
+  // `normalizeTag` turns spaces into hyphens rather than stripping commas, so
+  // the whole string would otherwise become the single tag `ui,-electron`.
   const commit = () => {
     const next = [...tags];
     for (const part of draft.split(",")) {
@@ -65,7 +63,7 @@ export function LabelPicker({
     if (next.length !== tags.length) onChange(next);
   };
 
-  // Tags the card wears that the board has not named — shown so they can be
+  // Tags the card wears that the board has not named, shown so they can be
   // taken off from the same menu they would be added in.
   const unnamed = tags.filter((tag) => !labels.some((l) => l.key === tag));
 
@@ -92,14 +90,14 @@ export function LabelPicker({
                 commit();
                 return;
               }
-              // ⚠️ Escape and Tab are the MENU's, and they have to reach it.
-              // Stopping every key here closed nothing: the picker stayed open
-              // over the page with the caret in this field, and every click
-              // after it — Save, the next rail row — hit the menu's backdrop
-              // instead. A field inside a menu owns its typing, not its exits.
+              // NOTE: Escape and Tab are the menu's, and they have to reach it.
+              // Stopped here, the picker stays open over the page with the
+              // caret in this field, and every click after it (Save, the next
+              // rail row) hits the menu's backdrop instead. A field inside a
+              // menu owns its typing, not its exits.
               if (event.key === "Escape" || event.key === "Tab") return;
               // Everything else is typing, and it must not reach the menu's own
-              // typeahead — which would jump the highlight to whichever item
+              // typeahead, which would jump the highlight to whichever item
               // starts with that letter and take the caret out of this field.
               event.stopPropagation();
             }}
@@ -110,8 +108,8 @@ export function LabelPicker({
           return (
             <DropdownMenuItem
               key={tag}
-              // ⚠️ `closeOnClick={false}`: putting three labels on a card is one
-              // task, and a menu that shut after each one would make it three.
+              // Putting three labels on a card is one task, and a menu that
+              // shut after each one would make it three.
               closeOnClick={false}
               onClick={() => toggle(tag)}
             >

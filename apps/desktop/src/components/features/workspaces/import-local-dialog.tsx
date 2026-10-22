@@ -12,11 +12,10 @@ import { LocalFolderPanel } from "./local-folder-panel";
 /**
  * Linking a folder and putting its files on the cloud board, for one project.
  *
- * ⚠️ It opens from Settings → Projects, not from the rail. The rail carried
- * this as "Link a folder" against whichever project happened to be open, which
- * made a per-project act look like a global one; the projects page already
- * lists every project with the folder it holds on this machine, so the door
- * belongs next to the project it acts on.
+ * It opens from Settings → Projects, not from the rail. On the rail it acted
+ * on whichever project happened to be open, which made a per-project act look
+ * like a global one. The projects page lists every project with the folder it
+ * holds on this machine, so the door belongs next to the project it acts on.
  */
 export function ImportLocalDialog({
   workspace,
@@ -44,13 +43,13 @@ export function ImportLocalDialog({
         </DialogHeader>
         <LocalFolderPanel
           workspace={workspace}
-          // ⚠️ Only the OPEN board's `migrated` flag says anything about this
-          // project. The loaded view belongs to whatever is open, so reading it
-          // for another project would answer a question about the wrong board.
-          // The panel's other signal — the folder's own `migratedAt` — covers
-          // every project either way.
+          // NOTE: Only the OPEN board's `migrated` flag says anything about
+          // this project. The loaded view belongs to whatever is open, so
+          // reading it for another project answers for the wrong board. The
+          // panel's other signal, the folder's own `migratedAt`, covers every
+          // project either way.
           boardMigrated={isOpenBoard && migrated}
-          // Same reason: reloading is only meaningful when the board behind
+          // Same reason: a reload only means something when the board behind
           // this dialog is the one that just changed owner.
           onMigrated={isOpenBoard ? () => void reload() : undefined}
         />

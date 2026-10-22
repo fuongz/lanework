@@ -8,7 +8,7 @@ import type {
 } from "../../shared/git";
 
 /**
- * Why a project's GitHub issues cannot be read (FE-75).
+ * Why a project's GitHub issues cannot be read.
  *
  * The first five come from `gh` and the project's folder, and each has its
  * own way out. `failed` is a read that was allowed and still did not answer.
@@ -24,8 +24,8 @@ export type GitHubIssuesProblem =
 /**
  * What blocks the read, or null when `gh` is signed in on a GitHub checkout.
  *
- * NOTE: The same test as `canReadPulls`, answered as a reason rather than a
- * yes or no, because the empty state has to say which step is missing.
+ * The same test as `canReadPulls`, answered as a reason rather than a yes or
+ * no, because the empty state has to say which step is missing.
  */
 function problemOf(
   account: GitAccount,
@@ -154,8 +154,8 @@ interface GitHubIssuesState {
   /**
    * Each project's list, by slug.
    *
-   * NOTE: Kept per project rather than reset on a switch. Going back to a
-   * project draws its last list at once, and the re-read replaces it.
+   * Kept per project rather than reset on a switch. Going back to a project
+   * draws its last list at once, and the re-read replaces it.
    */
   lists: Record<string, GitHubIssuesList>;
   /** Each opened issue, by `issueKey(slug, number)`. */
@@ -164,26 +164,26 @@ interface GitHubIssuesState {
   checking: boolean;
 
   /**
-   * Read this project's open issues, from main's cache when it has them.
+   * Reads this project's open issues, from main's cache when it has them.
    *
    * Asks for the account and the folder's repo first, so a project that
    * cannot be read says why instead of failing a request.
    */
   open: (slug: string) => Promise<void>;
   /**
-   * Read the list again, past main's cache.
+   * Reads the list again, past main's cache.
    *
    * For window focus and the refresh button (FE-75/D7); nothing calls it on
    * a timer.
    */
   refresh: (slug: string) => Promise<void>;
   /**
-   * Ask `gh` again, then re-read this project.
+   * Asks `gh` again, then re-reads this project.
    *
    * Backs "Check again" after somebody installs `gh` or runs `gh auth login`.
    */
   check: (slug: string) => Promise<void>;
-  /** Read one issue with its body and comments. */
+  /** Reads one issue with its body and comments. */
   openIssue: (slug: string, number: number) => Promise<void>;
 }
 
@@ -225,8 +225,8 @@ export const useGitHubIssues = create<GitHubIssuesState>((set, get) => {
       patchList(slug, { view, loading: false, problem: null });
     } catch (error) {
       if (!current()) return;
-      // NOTE: A list already on screen stays. A failed re-read says so beside
-      // it rather than emptying what somebody is reading.
+      // A list already on screen stays. A failed re-read says so beside it
+      // rather than emptying what somebody is reading.
       patchList(slug, {
         loading: false,
         problem: {

@@ -34,7 +34,7 @@ import { HistoryButtons } from "./history-nav";
 import { McpAuthIsland, useMcpAuthRows } from "./mcp-auth-island";
 
 const RAIL_DEFAULT_PX = 240;
-/** The rail folded to its icons (FE-57): one 36px slot and its margins. */
+/** The rail folded to its icons: one 36px slot and its margins. */
 const RAIL_MINI_PX = 56;
 const RAIL_WIDTH_KEY = "lanework:rail-width";
 const RAIL_HIDDEN_KEY = "lanework:rail-hidden";
@@ -44,9 +44,9 @@ const RAIL_GLIDE_MS = 240;
 /**
  * The width the rail comes back at: the last one it was dragged to.
  *
- * ⚠️ Kept here, not only in the group's saved layout. A rail that was last
- * hidden saved THAT, and `expand()` on a panel that mounted collapsed has no
- * size to go back to — it would open at its 180px minimum.
+ * NOTE: Kept here, not only in the group's saved layout. A rail last hidden
+ * saved that, and `expand()` on a panel that mounted collapsed has no size to
+ * go back to: it would open at its 180px minimum.
  */
 function readRailWidth(): number {
   try {
@@ -61,11 +61,10 @@ function readRailWidth(): number {
 /**
  * Whether the rail was last left hidden: by its button, ⌘B, or a drag.
  *
- * ⚠️ Its own key, because the group's saved layout keeps only what a DRAG
- * did (`onlySaveAfterUserInteractions`): the button and ⌘B hide it through the
- * panel's API, which that save ignores, so a relaunch would have undone it.
- * Focus mode is never written here — it is a mode for a few minutes, not a
- * choice.
+ * Its own key, because the group's saved layout keeps only what a drag did
+ * (`onlySaveAfterUserInteractions`). The button and ⌘B hide it through the
+ * panel's API, which that save ignores, so a relaunch would undo it. Focus
+ * mode is never written here: it is a mode for a few minutes, not a choice.
  */
 function readRailHidden(): boolean | null {
   try {
@@ -87,13 +86,12 @@ function saveRailHidden(hidden: boolean) {
 /**
  * The window: a rail beside one scrolling pane.
  *
- * ⚠️ Only the pane scrolls. A shell that scrolls as a whole takes the project
- * switcher and the lane list off screen the moment a board is long, which is
- * the one thing a persistent sidebar exists to prevent.
- *
- * ⚠️ The rail is a PANEL now, not a fixed `w-60`, so it is draggable on every
- * route rather than only on the one that asked for it. A sidebar that resizes
- * under Pull requests and is frozen under Issues reads as a bug, not a feature.
+ * - Only the pane scrolls. A shell that scrolls as a whole takes the project
+ *   switcher and the lane list off screen the moment a board is long, which
+ *   is the one thing a persistent sidebar exists to prevent.
+ * - The rail is a panel, not a fixed `w-60`, so it is draggable on every
+ *   route. A sidebar that resizes under Pull requests and is frozen under
+ *   Issues reads as a bug.
  */
 export function AppShell() {
   const navigate = useNavigate();
@@ -104,24 +102,23 @@ export function AppShell() {
   const focusMode = useLayout((state) => state.focusMode);
   const sidebarRef = usePanelRef();
   const railElement = useRef<HTMLDivElement | null>(null);
-  // "Hidden" is the rail FOLDED: since FE-57 that is the mini rail, never
-  // nothing at all.
+  // "Hidden" is the rail folded to the mini rail, never gone altogether.
   const [railHidden, setRailHidden] = useState(false);
   const railWidth = useRef(readRailWidth());
   const glideTimer = useRef<number | undefined>(undefined);
   /**
-   * Let the NEXT change of the rail's size animate.
+   * Let the next change of the rail's size animate.
    *
-   * ⚠️ Only for the button, ⌘B and focus mode — never a drag, which has to
-   * follow the pointer exactly, and never the restore at launch. The flag goes
-   * on the group's element directly, BEFORE the size changes, so the
-   * transition is already in force when the library writes the new
-   * `flex-grow`; a React state would land in the same commit as the size and
-   * race it.
+   * Only for the button, ⌘B and focus mode: never a drag, which has to follow
+   * the pointer, and never the restore at launch.
    *
-   * ⚠️ `--rail-w` pins the sidebar's content at its full width while the
-   * panel narrows, so it slides out of view behind the edge instead of
-   * re-wrapping every label at each frame.
+   * - NOTE: The flag goes on the group's element directly, before the size
+   *   changes, so the transition is in force when the library writes the new
+   *   `flex-grow`. A React state would land in the same commit as the size
+   *   and race it.
+   * - `--rail-w` pins the sidebar's content at its full width while the panel
+   *   narrows, so it slides out behind the edge instead of re-wrapping every
+   *   label at each frame.
    */
   const glide = useCallback(() => {
     const group = railElement.current?.parentElement;
@@ -140,12 +137,13 @@ export function AppShell() {
   /**
    * Where a glide by the button, ⌘B or focus mode is headed, while it runs.
    *
-   * ⚠️ The folded flag (`data-rail-mini`) and the rail's content are
-   * choreographed around it, not around the rail's size (FE-57): folding,
-   * the flag goes on at once, so the title bar's rule fades and its slot
-   * already clears back and forward while the rail narrows. Opening, the
-   * open rail's content shows at once and slides in, while the flag stays
-   * until the end, so the sidebar button never pops in mid-glide.
+   * The folded flag (`data-rail-mini`) and the rail's content are
+   * choreographed around it, not around the rail's size:
+   * - folding, the flag goes on at once, so the title bar's rule fades and
+   *   its slot clears back and forward while the rail narrows;
+   * - opening, the open rail's content shows at once and slides in, while the
+   *   flag stays until the end, so the sidebar button never pops in
+   *   mid-glide.
    */
   const glideTo = useRef<"mini" | "open" | null>(null);
   const glideEnd = useRef<number | undefined>(undefined);
@@ -178,7 +176,7 @@ export function AppShell() {
     }, RAIL_GLIDE_MS);
     showRail();
   }, [glide, showRail, setMiniFlag]);
-  /** The sidebar button and ⌘B: fold ↔ open (FE-19, FE-57). */
+  /** The sidebar button and ⌘B: fold ↔ open. */
   const toggleRail = useCallback(() => {
     const panel = sidebarRef.current;
     if (!panel) return;
@@ -188,7 +186,7 @@ export function AppShell() {
     saveRailHidden(hiding);
   }, [sidebarRef, foldRail, openRail]);
 
-  // The rail as it was last LEFT, before the first paint.
+  // The rail as it was last left, before the first paint.
   useLayoutEffect(() => {
     const panel = sidebarRef.current;
     const hidden = readRailHidden();
@@ -203,9 +201,9 @@ export function AppShell() {
   // asked again on a timer and on focus; the island speaks when they are not.
   useMcpAuthWatch();
   const mcpAuthUp = useMcpAuthRows().length > 0;
-  // ⚠️ The project in the URL, not the board store's `active`: on the project
-  // picker there is no project, so no terminal — neither the panel nor its
-  // bar — rather than whichever project's was open last.
+  // The project in the URL, not the board store's `active`: on the project
+  // picker there is no project, so no terminal (neither the panel nor its
+  // bar) rather than whichever project's was open last.
   const { slug } = useParams({ strict: false }) as { slug?: string };
   const workspaceKey = useBoard((state) => {
     const found = slug
@@ -240,11 +238,12 @@ export function AppShell() {
     [navigate],
   );
 
-  // ⚠️ A LAYOUT effect: a panel opened or folded after paint shows one frame
-  // of the old size first.
-  // ⚠️ `resize` to the remembered height, never `expand()`. A panel that
-  // mounted collapsed has no size to expand back to, and `expand()` then opens
-  // it at its 96px minimum — which is what every launch after a hide did.
+  // NOTE:
+  // - A layout effect: a panel opened or folded after paint shows one frame
+  //   of the old size first.
+  // - `resize` to the remembered height, never `expand()`. A panel that
+  //   mounted collapsed has no size to expand back to, and `expand()` then
+  //   opens it at its 96px minimum.
   useLayoutEffect(() => {
     const panel = terminalRef.current;
     if (!panel) return;
@@ -253,13 +252,15 @@ export function AppShell() {
   }, [terminalShowing, terminalRef]);
 
   // Where back, forward and the sidebar button sit, and how tall the title
-  // bar is, in this page's CSS px (app.css). The controls sit at fixed points
-  // while the page zooms, and on current macOS they are the larger ones: 14pt
-  // lights 22.5pt apart, the last ending about 79pt in. The first button's
-  // glyph follows 19pt after that — Codex's spacing — so the 24px button
-  // starts at 94pt, centred on their 22pt line, as is the 44pt title bar.
-  // ⚠️ Rewritten only when the ZOOM changes (a zoom fires `resize` too), and
-  // the zoom is Electron's own — a resize of the window moves none of it.
+  // bar is, in this page's CSS px (app.css). The window controls sit at fixed
+  // points while the page zooms, and on current macOS they are the larger
+  // ones: 14pt lights 22.5pt apart, the last ending about 79pt in. The first
+  // button's glyph follows 19pt after that (Codex's spacing), so the 24px
+  // button starts at 94pt, centred on their 22pt line, as is the 44pt title
+  // bar.
+  //
+  // Rewritten only when the zoom changes (a zoom fires `resize` too). The
+  // zoom is Electron's own; resizing the window moves none of it.
   useEffect(() => {
     const root = document.documentElement;
     let applied = 0;
@@ -279,14 +280,15 @@ export function AppShell() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
-  // The rail's width as it is DRAWN, for the title bar's rule and slot and
+  // The rail's width as it is drawn, for the title bar's rule and slot and
   // for back and forward (app.css).
-  // ⚠️ From a ResizeObserver, not from React state: the panel changes size
-  // straight away, while a re-render lands a frame or more later — and in that
-  // frame the page's title had lost the rail beside it but not yet gained its
-  // clearance, so "All issues" flashed under the window controls. A
-  // ResizeObserver runs after layout and before paint, so the frame that shows
-  // the rail gone also shows the title clear of them.
+  //
+  // NOTE: From a ResizeObserver, not React state. The panel changes size at
+  // once, while a re-render lands a frame or more later; in that frame the
+  // page's title has lost the rail beside it but not yet gained its
+  // clearance, so "All issues" flashes under the window controls. A
+  // ResizeObserver runs after layout and before paint, so the frame that
+  // shows the rail gone also shows the title clear of them.
   useEffect(() => {
     const rail = railElement.current;
     if (!rail) return;
@@ -311,9 +313,9 @@ export function AppShell() {
     [toggleRail, navigate],
   );
 
-  // ⚠️ Driven FROM the store, never the other way round: focus mode is asked
-  // for from a pull request's header, in the other panel group. It hides the
-  // rail, and leaving it gives back what the rail WAS — a rail somebody had
+  // Driven from the store, never the other way round: focus mode is asked for
+  // from a pull request's header, in the other panel group. It hides the
+  // rail, and leaving it gives back what the rail was: a rail somebody had
   // already hidden stays hidden.
   const railBeforeFocus = useRef<"hidden" | "shown" | null>(null);
   useEffect(() => {
@@ -330,15 +332,15 @@ export function AppShell() {
 
   return (
     // The window's ground is the rail's colour, and the page sits on it as an
-    // inset card: the card's own border is the edge between the two,
-    // so the separator below draws nothing until it is pointed at.
+    // inset card. The card's border is the edge between the two, so the
+    // separator below draws nothing until it is pointed at.
     <div className="bg-sidebar flex h-screen flex-col overflow-hidden">
-      {/* ⚠️ The window's title bar across its whole width, open or folded
-          (FE-58): the window controls, back and forward over the rail, and
-          the page's header — `<WindowTitlebar>` — beside them. The rail and
-          the page's card start under it, so no header has to step around the
-          controls. `app-titlebar` keeps its slot clear of back and forward
-          too (app.css). */}
+      {/* The window's title bar across its whole width, open or folded: the
+          window controls, back and forward over the rail, and the page's
+          header (`<WindowTitlebar>`) beside them. The rail and the page's
+          card start under it, so no header has to step around the controls.
+          `app-titlebar` keeps its slot clear of back and forward too
+          (app.css). */}
       <WindowTitlebarHost className="app-titlebar" />
       <ResizablePanelGroup
         className="h-auto min-h-0 flex-1"
@@ -348,15 +350,15 @@ export function AppShell() {
           onLayoutChanged(layout, meta);
           const panel = sidebarRef.current;
           if (!panel) return;
-          // ⚠️ Only what somebody DID is remembered. A mount lays the saved
+          // NOTE: Only what somebody did is remembered. A mount lays the saved
           // layout's percentages over whatever size the window now has, and a
-          // window resize or an API call moves the rail too — none of those is
-          // a width anybody chose, and writing them down drifted it.
+          // window resize or an API call moves the rail too. None of those is
+          // a width anybody chose, and writing them down drifts it.
           if (!meta.isUserInteraction) return;
           // Dragged shut, or dragged open: that is where it stays.
           saveRailHidden(panel.isCollapsed());
-          // ⚠️ The width to come back at is read HERE, once the drag has let
-          // go, and never mid-drag: a drag shut passes through the 180px
+          // NOTE: The width to come back at is read here, once the drag has
+          // let go, never mid-drag. A drag shut passes through the 180px
           // minimum on its way to nothing, and remembering that would bring
           // the rail back at its narrowest instead of where it was.
           if (panel.isCollapsed()) return;
@@ -370,7 +372,7 @@ export function AppShell() {
           }
         }}
       >
-        {/* ⚠️ Sized in pixels, and `preserve-pixel-size`. A rail is a column of
+        {/* Sized in pixels, and `preserve-pixel-size`. A rail is a column of
             labels, not a proportion of the window: held as a percentage it
             grows into empty space every time somebody maximises the window. */}
         <ResizablePanel
@@ -385,11 +387,11 @@ export function AppShell() {
           groupResizeBehavior="preserve-pixel-size"
           onResize={(size) => {
             // A glide by the button, ⌘B or focus mode sets these itself, on
-            // its own schedule (`glideTo`); a drag, a launch or a window
+            // its own schedule (`glideTo`). A drag, a launch or a window
             // resize follows the rail's size.
             if (glideTo.current) return;
             const mini = size.inPixels < RAIL_MINI_PX + 1;
-            // ⚠️ Written on the root straight away, not through a render: the
+            // NOTE: Written on the root at once, not through a render: the
             // title bar (app.css) follows it, and a re-render would land a
             // frame after the rail has already moved.
             setMiniFlag(mini);
@@ -403,13 +405,13 @@ export function AppShell() {
           className="bg-transparent"
         />
         <ResizablePanel id="main" minSize="40%">
-          {/* ⚠️ The terminal is a panel of the CONTENT column, under whatever
-              route is showing — not a route of its own, and not under the
-              rail — so it survives every navigation and never covers the
+          {/* The terminal is a panel of the content column, under whatever
+              route is showing: not a route of its own, and not under the
+              rail. So it survives every navigation and never covers the
               project switcher (FE-18/D4). Hidden, it folds into the bar below
               the group and stops no shell. */}
-          {/* ⚠️ `overflow-hidden` clips the page, the terminal and its bar to
-              the card's corners; each of them still scrolls on its own. */}
+          {/* `overflow-hidden` clips the page, the terminal and its bar to
+              the card's corners; each still scrolls on its own. */}
           <div className="bg-background my-1.5 mr-1.5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-edge">
             <div className="min-h-0 flex-1">
               <ResizablePanelGroup
@@ -462,21 +464,22 @@ export function AppShell() {
         </ResizablePanel>
       </ResizablePanelGroup>
       <CommandPalette />
-      {/* ⚠️ In the window's title bar, the way Codex has it, and there in
-          BOTH states: against the rail's edge while it is open, beside the
-          window controls once it is folded — so the way back is always where
-          the way out was. Drawn on macOS only (app.css), where the controls
-          it sits beside are.
-          ⚠️ LAST in the shell, after every title bar it floats over. Window
-          drag regions are laid down in document order and a later one wins:
-          placed before the rail, the rail's drag strip was laid over it and
-          ate every click — which a test's synthetic click never shows. */}
+      {/* In the window's title bar, the way Codex has it, in both states:
+          against the rail's edge while it is open, beside the window
+          controls once it is folded, so the way back is always where the way
+          out was. Drawn on macOS only (app.css), where those controls are.
+
+          NOTE: Last in the shell, after every title bar it floats over.
+          Window drag regions are laid down in document order and a later one
+          wins: placed before the rail, the rail's drag strip lies over it and
+          eats every click, which a test's synthetic click never shows. */}
       <nav aria-label="Window" className="sidebar-nav items-center gap-0.5">
         <HistoryButtons />
-        {/* Folded, the sidebar button is the mini rail's first slot (FE-57/D5a)
-            and this one is hidden — by app.css, off the same `data-rail-mini`
-            the title bar's slot reads, so the two never disagree for a frame;
-            back and forward stay here, beside the window controls. */}
+        {/* Folded, the sidebar button is the mini rail's first slot
+            (FE-57/D5a) and this one is hidden by app.css, off the same
+            `data-rail-mini` the title bar's slot reads, so the two never
+            disagree for a frame. Back and forward stay here, beside the
+            window controls. */}
         <button
           type="button"
           onClick={toggleRail}
@@ -492,14 +495,15 @@ export function AppShell() {
           />
         </button>
       </nav>
-      {/* The islands — harness updates (FE-61), board notices (FE-63) and
-          the Lanework MCP sign-in:
-          fixed at the top centre, over the title bar's edge and the page.
-          ⚠️ After the nav for the same reason as the nav: their `no-drag`
+      {/* The islands (harness updates, board notices, the Lanework MCP
+          sign-in, dictation), fixed at the top centre over the title bar's
+          edge and the page. One spot, one island: an open microphone has it,
+          then a notice, then sign-in, and the harness pill waits for all of
+          them.
+
+          NOTE: After the nav for the same reason as the nav: their `no-drag`
           must be laid down after the title bar's drag strip, or the strip
-          eats their clicks. One spot, one island: an open microphone has
-          it (FE-69), then a notice, then sign-in, and the harness pill waits
-          for all of them. */}
+          eats their clicks. */}
       <HarnessIsland yieldTo={dictating || notice !== null || mcpAuthUp} />
       <McpAuthIsland yieldTo={dictating || notice !== null} />
       <BoardNoticeIsland notice={dictating ? null : notice} />
@@ -510,11 +514,11 @@ export function AppShell() {
 
 /**
  * The terminal bar's right end: listening ports, then the agent's usage,
- * apart and with a hairline between them.
+ * with a hairline between them.
  *
- * ⚠️ The line is drawn by the SECOND item that is there, not placed between
- * them: either strip draws nothing when it has nothing to say, and a line
- * beside one strip alone would divide nothing.
+ * The line is drawn by the second item present, not placed between them:
+ * either strip draws nothing when it has nothing to say, and a line beside
+ * one strip alone would divide nothing.
  */
 function BarStrips({ workspace }: { workspace: string }) {
   return (

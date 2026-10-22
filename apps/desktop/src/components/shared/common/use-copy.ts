@@ -3,9 +3,11 @@ import { useEffect, useState } from "react";
 /**
  * Put something on the clipboard and say so, briefly.
  *
- * ⚠️ The confirmation is the whole feature. A copy button that looks identical
- * before and after being pressed is one people press twice, and then paste
- * whatever was there before.
+ * The confirmation matters: a copy button that looks the same before and
+ * after a press gets pressed twice, or trusted when the copy failed.
+ *
+ * @returns the key copied last (null once the confirmation times out), and
+ *   the function that copies `value` under `key`.
  */
 export function useCopy(): [
   string | null,
@@ -23,7 +25,7 @@ export function useCopy(): [
       void navigator.clipboard.writeText(value).then(
         () => setCopied(key),
         // A clipboard that refuses is not worth an error banner over a card;
-        // the button simply does not confirm, which is the honest signal.
+        // the button does not confirm, which is the honest signal.
         () => setCopied(null),
       );
     },

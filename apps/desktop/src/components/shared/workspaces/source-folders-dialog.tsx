@@ -19,15 +19,14 @@ import { ipcMessage } from "#/lib/ipc-error";
 /**
  * Change which folders on this machine a project is built from.
  *
- * ⚠️ The folders, and only the folders. The name is edited next door
- * (`rename-project-dialog.tsx`) because it is a write to the ACCOUNT, while
- * these paths belong to this machine alone — two different blast radii behind
- * one "edit" button is how somebody changes more than they meant to. The slug
- * is on neither dialog: no route on the service can change one.
- *
- * ⚠️ It reads the current folders as IDS rather than paths, so what is linked
- * and what was just chosen are the same kind of thing and the whole list goes
- * back in one write.
+ * - The folders only. The name is edited in `rename-project-dialog.tsx`
+ *   because it is a write to the account, while these paths belong to this
+ *   machine alone; two blast radii behind one "edit" button is how someone
+ *   changes more than they meant to. The slug is on neither dialog: no route
+ *   on the service can change one.
+ * - It reads the current folders as ids rather than paths, so what is linked
+ *   and what was just chosen are the same kind of thing, and the whole list
+ *   goes back in one write.
  */
 export function SourceFoldersDialog({
   workspace,
@@ -45,9 +44,9 @@ export function SourceFoldersDialog({
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
 
-  // ⚠️ Re-read every time it OPENS, not once. Another window — or the folder
-  // panel on the board — can have changed the link since this dialog last ran,
-  // and editing a stale list would silently put the old one back.
+  // NOTE: Re-read every time it opens, not once. Another window, or the
+  // folder panel on the board, can have changed the link since, and editing a
+  // stale list would silently put the old one back.
   useEffect(() => {
     if (!open) return;
     let alive = true;
@@ -104,8 +103,8 @@ export function SourceFoldersDialog({
         {loading ? (
           <ListSkeleton label="Reading the folders" rows={2} className="px-0" />
         ) : (
-          // ⚠️ `min-w-0`: the dialog is a grid, and a grid item is content-sized
-          // by default — an unbreakable path would otherwise draw outside it.
+          // `min-w-0`: the dialog is a grid, and a grid item is content-sized
+          // by default, so an unbreakable path would draw outside it.
           <div className="flex min-w-0 flex-col gap-1.5">
             <SourceFolders
               folders={folders}

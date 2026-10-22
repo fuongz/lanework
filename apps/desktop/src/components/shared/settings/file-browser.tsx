@@ -1,3 +1,11 @@
+// The Files screen's pieces for Settings pages that browse files that are
+// not a working tree (Skills, a project's skills, Config files): the title in
+// the window's title bar, the tree in the sidebar beside the open files as
+// tabs, each with its path above it.
+//
+// Drawn the way `files-layout.tsx`, `files-tree.tsx` and `FileTabs` draw
+// them, but not built on them: those read the worktree store and the git
+// status of one project, and these files belong to no repository.
 import { Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type {
@@ -34,17 +42,6 @@ import {
 } from "#/components/ui/resizable";
 import { cn } from "#/lib/utils";
 
-/**
- * The Files screen's pieces (FE-66) for Settings pages that browse files
- * that are not a working tree — Skills, a project's skills, Config files:
- * the title in the window's title bar, the tree in the sidebar beside the
- * open files as tabs, each with its path above it.
- *
- * ⚠️ Drawn the way `files-layout.tsx`, `files-tree.tsx` and `FileTabs` draw
- * them, but not built on them: those read the worktree store and the git
- * status of one project, and these files belong to no repository.
- */
-
 /** One file in the tree: its id for the page, and where it sits. */
 interface BrowserEntry {
   id: string;
@@ -73,9 +70,10 @@ function folder(
 }
 
 /**
- * The page: its title (and actions) in the title bar, the tree on the left
- * on the sidebar's surface, and `children` — tabs and the open file — on the
- * right.
+ * The page around a file browser.
+ *
+ * Its title (and actions) in the title bar, the tree on the left on the
+ * sidebar's surface, and `children` (tabs and the open file) on the right.
  */
 export function FileBrowserLayout({
   id,
@@ -88,7 +86,7 @@ export function FileBrowserLayout({
   /** Keys the panel sizes, per page. */
   id: string;
   title: string;
-  /** Drawn in the title bar instead of `title` — a project picker. */
+  /** Drawn in the title bar instead of `title`: a project picker. */
   heading?: ReactNode;
   actions?: ReactNode;
   sidebar: ReactNode;
@@ -134,9 +132,11 @@ export function FileBrowserLayout({
 }
 
 /**
- * The files as a tree, with the filter box above it — the Files screen's
- * explorer. A click opens a file; the active one is selected, and its
- * folders opened, so the tree follows the tabs.
+ * The files as a tree, with the filter box above it: the Files screen's
+ * explorer.
+ *
+ * A click opens a file. The active one is selected, and its folders opened,
+ * so the tree follows the tabs.
  */
 export function FileBrowserTree({
   entries,
@@ -160,8 +160,8 @@ export function FileBrowserTree({
   );
   const activePath = entries.find((entry) => entry.id === active)?.path ?? null;
 
-  // ⚠️ Construction-time callbacks, and the model is built once: refs are
-  // what let a fresh closure still be the one that runs.
+  // NOTE: Construction-time callbacks, and the model is built once. Refs let
+  // a fresh closure still be the one that runs.
   const openRef = useRef(onOpen);
   openRef.current = onOpen;
   const idRef = useRef(idOf);
@@ -185,7 +185,7 @@ export function FileBrowserTree({
     },
   });
 
-  // A new list — a refresh, another project — rebuilds the tree, keeping
+  // A new list (a refresh, another project) rebuilds the tree, keeping
   // open what was open and opening what is new.
   const shown = useRef(paths.join("\n"));
   useEffect(() => {
@@ -246,8 +246,9 @@ export function FileBrowserTree({
 }
 
 /**
- * The open file's path as a breadcrumb, with its actions on the right — the
- * Files screen's file header.
+ * The open file's path as a breadcrumb, with its actions on the right.
+ *
+ * The Files screen's file header.
  */
 export function FileBrowserPath({
   path,

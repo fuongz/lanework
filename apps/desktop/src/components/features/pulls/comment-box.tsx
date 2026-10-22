@@ -5,16 +5,13 @@ import { usePulls } from "#/stores/pulls";
 /**
  * An ordinary comment on a pull request.
  *
- * ⚠️ NOT the review footer, and deliberately somewhere else on the screen. A
- * review carries a verdict that can block a merge; this cannot. Putting them in
- * one control is how somebody asking a question ends up requesting changes.
- *
- * ⚠️ The box is cleared only AFTER the post succeeds. A failed send that had
- * already emptied the field is a lost paragraph, and the error message does not
- * bring it back.
- *
- * The frame — outline, initial, send button — is `ComposerCard`, shared with
- * an issue's Activity so both comment boxes are one shape.
+ * - Not the review footer, and placed apart from it. A review carries a
+ *   verdict that can block a merge; this cannot. One control for both is how
+ *   someone asking a question ends up requesting changes.
+ * - NOTE: The box is cleared only after the post succeeds. A failed send that
+ *   had already emptied the field loses the paragraph.
+ * - The frame (outline, initial, send button) is {@link ComposerCard}, shared
+ *   with an issue's Activity so both comment boxes are one shape.
  */
 export function CommentBox({ number }: { number: number }) {
   const [body, setBody] = useState("");

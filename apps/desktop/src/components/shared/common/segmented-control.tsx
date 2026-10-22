@@ -4,30 +4,31 @@ import { motion } from "motion/react";
 import { useId } from "react";
 import { cn } from "#/lib/utils";
 
-/**
- * A pill that slides between two or three choices — the List/Board switch,
- * made the one shape every switch in the app wears.
- *
- * ⚠️ One component, three ARIA readings, because the controls using it mean
- * different things even though they look alike:
- * - `pressed`: how THIS region is drawn (List/Board, Split/Unified) — buttons
- *   with `aria-pressed`.
- * - `tabs`: which panel is shown (a pull request's Summary/Code) — a real
- *   `tablist`.
- * - `current`: which slice of a list the URL is on (All/Reviewing/Authored) —
- *   `aria-current`, the way the rail marks where you are.
- *
- * ⚠️ The pill is a shared `layoutId`, scoped by `useId` so two switches on one
- * screen never trade pills. It only glides while the control stays mounted —
- * which is why callers keep it in a bar that survives the switch — and
- * `MotionConfig reducedMotion="user"` at the root turns the glide into a jump.
- */
+/** One choice in a {@link SegmentedControl}. */
 interface SegmentOption<T extends string> {
   value: T;
   label: string;
   icon?: IconSvgElement;
 }
 
+/**
+ * A pill that slides between two or three choices; every switch in the app
+ * wears this shape.
+ *
+ * One component, three ARIA readings, because the controls using it mean
+ * different things even though they look alike:
+ * - `pressed`: how this region is drawn (List/Board, Split/Unified); buttons
+ *   with `aria-pressed`.
+ * - `tabs`: which panel is shown (a pull request's Summary/Code); a real
+ *   `tablist`.
+ * - `current`: which slice of a list the URL is on (All/Reviewing/Authored);
+ *   `aria-current`, the way the rail marks where you are.
+ *
+ * The pill is a shared `layoutId`, scoped by `useId` so two switches on one
+ * screen never trade pills. It glides only while the control stays mounted,
+ * so callers keep it in a bar that survives the switch.
+ * `MotionConfig reducedMotion="user"` at the root turns the glide into a jump.
+ */
 export function SegmentedControl<T extends string>({
   options,
   value,
@@ -45,16 +46,17 @@ export function SegmentedControl<T extends string>({
   semantics?: "pressed" | "tabs" | "current";
   className?: string;
   /**
-   * The pill's shared id, for a switch drawn by two screens in turn (FE-75's
-   * Issues and Pull requests): the same id on both lets the pill glide from
+   * The pill's shared id, for a switch drawn by two screens in turn.
+   *
+   * The same id on both (Issues and Pull requests) lets the pill glide from
    * one screen's copy to the next instead of appearing in place.
    */
   layoutId?: string;
 }) {
   const pill = useId();
-  // ⚠️ Spread, so each role arrives with the ARIA attributes it supports and
-  // no others — a `tablist` names itself, a `tab` is selected, a button is
-  // pressed or current.
+  // Spread, so each role gets the ARIA attributes it supports and no others:
+  // a `tablist` names itself, a `tab` is selected, a button is pressed or
+  // current.
   const group =
     semantics === "tabs"
       ? { role: "tablist" as const, "aria-label": label }

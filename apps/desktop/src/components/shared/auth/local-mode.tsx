@@ -14,23 +14,22 @@ import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { isLocalWorkspace, useSession } from "#/stores/session";
 
-/**
- * FE-52: everything a LOCAL board shows that a cloud one does not — the badge,
- * the one-click move to the account (D7a), and the way back to signing in (D5).
- *
- * One file so the switcher, the rail, Settings → Projects and the board itself
- * all say "Local" the same way: a quiet outline badge, the app's own, never a
- * new colour for it.
- */
+// Everything a local board shows that a cloud one does not: the badge, the
+// one-click move to the account (FE-52/D7a), and the way back to signing in
+// (FE-52/D5).
+//
+// One file so the switcher, the rail, Settings → Projects and the board
+// itself all say "Local" the same way: a quiet outline badge, the app's own,
+// never a new colour.
 
-/** A synced local board: read-only, pointing at the cloud board (D7a). */
+/** A synced local board: read-only, pointing at the cloud board (FE-52/D7a). */
 export function isMovedWorkspace(
   workspace: Pick<Workspace, "origin" | "movedTo"> | null | undefined,
 ): boolean {
   return isLocalWorkspace(workspace) && !!workspace?.movedTo;
 }
 
-/** "Local" — saved on this machine only. */
+/** The "Local" badge: saved on this machine only. */
 export function LocalBadge({ className }: { className?: string }) {
   return (
     <Badge
@@ -44,7 +43,7 @@ export function LocalBadge({ className }: { className?: string }) {
 }
 
 /**
- * Move one local board to the signed-in account (D7a).
+ * Move one local board to the signed-in account (FE-52/D7a).
  *
  * The list is read again afterwards: the local entry has turned read-only and
  * gained `movedTo`, and the cloud board it became is new on the account.
@@ -60,9 +59,9 @@ export function useSyncToCloud() {
     setError(null);
     try {
       const result = await api.syncToCloud(workspace.id);
-      // The snapshot main answered with already holds both entries; reading the
-      // list again keeps the store's own bookkeeping (`listLoaded`, the active
-      // project) the one place that decides them.
+      // The snapshot main answered with already holds both entries. Reading
+      // the list again keeps the store's own bookkeeping (`listLoaded`, the
+      // active project) the one place that decides them.
       await useBoard.getState().hydrate();
       return result;
     } catch (failure) {
@@ -93,9 +92,9 @@ function useMovedTarget(
 /**
  * The one button that signs a local install in, wherever it is drawn.
  *
- * ⚠️ Signing in from inside the app never passes the gate, so the wait has to
- * be said HERE: the browser opens elsewhere and this button is the only thing
- * on screen that knows.
+ * Signing in from inside the app never passes the gate, so this button shows
+ * the wait. The browser opens elsewhere, and it is the only thing on screen
+ * that knows.
  */
 export function SignInButton({
   label = "Sign in",
@@ -146,11 +145,13 @@ export function SignInButton({
 }
 
 /**
- * A one-line bar across the top of a LOCAL board, the way "Offline" is: being
- * local is a property of the board, not of the screen looking at it.
+ * A one-line bar across the top of a local board, as "Offline" is.
  *
- * Three states: local and signed out (sign in to sync), local and signed in
- * (sync to cloud), and moved — read-only, with the way to the cloud board.
+ * Being local is a property of the board, not of the screen looking at it.
+ * Three states:
+ * - local and signed out: sign in to sync;
+ * - local and signed in: sync to cloud;
+ * - moved: read-only, with the way to the cloud board.
  */
 export function LocalBoardBar({ workspace }: { workspace: Workspace }) {
   const signedIn = useSession(
@@ -250,11 +251,11 @@ export function LocalBoardBar({ workspace }: { workspace: Workspace }) {
 }
 
 /**
- * The rail's footer in local mode (D5): nobody is signed in, and this is the
- * way to change that without hunting through Settings.
+ * The rail's footer in local mode (FE-52/D5).
  *
- * Draws nothing once signed in — a local board then says "Local" in its own
- * bar and in the project list (D6a), and the rail goes back to how it was.
+ * Nobody is signed in, and this is the way to change that without hunting
+ * through Settings. Draws nothing once signed in: a local board then says
+ * "Local" in its own bar and in the project list, and the rail is as before.
  */
 export function LocalModeRail() {
   const local = useSession(

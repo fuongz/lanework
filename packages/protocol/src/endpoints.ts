@@ -79,8 +79,10 @@ import type {
 const seg = encodeURIComponent;
 
 /**
- * Paths, relative to the API origin. Every dynamic segment is URI-encoded
- * here, so a caller never builds one by hand.
+ * Paths, relative to the API origin.
+ *
+ * Every dynamic segment is URI-encoded here, so a caller never builds one by
+ * hand.
  */
 export const paths = {
   health: () => "/v1/health",
@@ -168,7 +170,7 @@ function withQuery(path: string, query?: Query): string {
 
 /** The authentication an endpoint takes. */
 export type EndpointAuth =
-  /** None: the body is the proof (PKCE, a registration token) or it is public. */
+  /** None: the body is the proof (PKCE, a registration token), or public. */
   | "none"
   /** `Authorization: Bearer <machine secret>` only. */
   | "machine"
@@ -181,7 +183,11 @@ interface Endpoint<Req, Res, A extends EndpointAuth> {
   auth: A;
 }
 
-/** `void` request: no body. Query parameters are in the path builders. */
+/**
+ * Every endpoint, by `"METHOD /path"`.
+ *
+ * A `void` request has no body. Query parameters are in the path builders.
+ */
 export interface Endpoints {
   "GET /v1/health": Endpoint<void, HealthResponse, "none">;
 

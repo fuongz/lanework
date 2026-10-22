@@ -3,9 +3,10 @@ import type { ReactNode } from "react";
 import { cn } from "#/lib/utils";
 
 /**
- * One fact in a header's second row: what it is, said by its icon — a
- * sub-agent's (FE-35) or a conversation's (FE-38). A plain record, so a
- * caller appends whatever facts it has to the list.
+ * One fact in a header's second row, a sub-agent's or a conversation's.
+ *
+ * Its icon says what it is. A plain record, so a caller appends whatever
+ * facts it has to the list.
  */
 export interface Fact {
   key: string;
@@ -23,11 +24,10 @@ export interface Fact {
 /**
  * The header's second row: each fact by its own icon, no separators.
  *
- * ⚠️ ABOVE the scroller, not sticky inside it, for the issue page's reason:
- * a sticky row is laid out in the scroller's content box, which stops at
- * the scrollbar gutter — its `border-b` ended short of the pane's edge. Out
- * here it is always in view and its line runs the full width. A `<dl>`, so
- * each fact is read with what it is.
+ * NOTE: Above the scroller, not sticky inside it, as on the issue page. A
+ * sticky row is laid out in the scroller's content box, which stops at the
+ * scrollbar gutter, so its `border-b` ends short of the pane's edge. A
+ * `<dl>`, so each fact is read with what it is.
  */
 export function Facts({
   facts,
@@ -37,8 +37,10 @@ export function Facts({
 }: {
   facts: Fact[];
   /**
-   * Inside a header's own row rather than a row of its own: no rule under
-   * it, no wrapping — what does not fit is cut, the tooltips keep it all.
+   * Draw inside a header's own row rather than a row of its own.
+   *
+   * No rule under it and no wrapping: what does not fit is cut, and the
+   * tooltips keep it all.
    */
   inline?: boolean;
   /** Its side padding, lined up with the header above it. */
@@ -81,8 +83,9 @@ export function Facts({
 }
 
 /**
- * Facts one under the other, in a popover: each by its icon and its name,
- * its value at the end of the row.
+ * Facts one under the other, in a popover.
+ *
+ * Each by its icon and its name, its value at the end of the row.
  */
 export function FactList({
   facts,
@@ -127,10 +130,13 @@ export function FactList({
 }
 
 /**
- * A Claude model's context window, guessed: Claude Code writes none down
- * (FE-38/D2). Haiku's is 200k; any other model's is taken to be 1M — and a
- * context already past 200k can only be in a 1M window. Null for a model
- * that is not Claude's.
+ * A Claude model's context window, guessed.
+ *
+ * Claude Code writes none down (FE-38/D2). Haiku's is 200k; any other model's
+ * is taken to be 1M, and a context already past 200k can only be in a 1M
+ * window.
+ *
+ * @returns null for a model that is not Claude's.
  */
 export function claudeWindow(
   model: string | null,
@@ -142,8 +148,9 @@ export function claudeWindow(
 }
 
 /**
- * How full the context is, as a ring filling clockwise from the top; an
- * empty ring when its window is not known.
+ * How full the context is, as a ring filling clockwise from the top.
+ *
+ * An empty ring when its window is not known.
  */
 export function ContextRing({
   share,
@@ -214,8 +221,9 @@ export function tokenText(count: number): string {
 }
 
 /**
- * An estimate in dollars, as one: `≈ $0.73` — and under a cent, said so
- * rather than `≈ $0.00`.
+ * An estimate in dollars, marked as one: `≈ $0.73`.
+ *
+ * Under a cent is said so, rather than `≈ $0.00`.
  */
 export function costText(usd: number): string {
   if (usd < 0.01) return "< $0.01";

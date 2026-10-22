@@ -34,18 +34,19 @@ const NO_MEMBERS: BoardMember[] = [];
 type CardRef = { id: string; taskId: string | null };
 
 /**
- * One agent on a card: this machine's, known from its transcript (FE-27), or
- * one the service saw calling about it from anywhere (BE-16).
+ * One agent on a card: this machine's, known from its transcript, or one the
+ * service saw calling about it from anywhere.
  */
 type CardAgent =
   | { from: "local"; session: AgentSession }
   | { from: "cloud"; row: BoardPresence; name: string };
 
 /**
- * The agents working on `card` right now: this machine's rail conversations
- * whose latest Lanework MCP call named it, then every other one the service
- * saw in the last few minutes — minus the service's copy of the first kind
- * (BE-16/D7).
+ * The agents working on `card` right now.
+ *
+ * This machine's rail conversations whose latest Lanework MCP call named it
+ * come first, then every other one the service saw in the last few minutes,
+ * minus the service's copy of the first kind (BE-16/D7).
  */
 export function useCardAgents(card: CardRef): CardAgent[] {
   const { slug } = useParams({ strict: false }) as { slug?: string };
@@ -131,16 +132,18 @@ function WorkingMark() {
 }
 
 /**
- * A card's status icon, or — while an agent works on it — the rail's orbit
- * spinner IN ITS PLACE (FE-27/D2a): no extra column, the way a working row
- * on the rail trades its agent icon for it. The tooltip names who. An agent
- * on another machine gets the same spinner (BE-16/D6a); the tooltip says whose
- * it is and when the service last heard from it.
+ * A card's status icon, or the rail's orbit spinner in its place while an
+ * agent works on it.
  *
- * ⚠️ Not a control: it sits inside the card's link or its lane Select, and a
- * button in one of those is two targets in one place. Its words are in the
- * sr-only text for anybody who cannot hover — a parent with its own
- * `aria-label` has to say them itself (`describeAgents`).
+ * No extra column, the way a working row on the rail trades its agent icon
+ * for it (FE-27/D2a). The tooltip names who. An agent on another machine gets
+ * the same spinner (BE-16/D6a); the tooltip says whose it is and when the
+ * service last heard from it.
+ *
+ * NOTE: Not a control. It sits inside the card's link or its lane Select, and
+ * a button in one of those is two targets in one place. Its words are in the
+ * sr-only text for anybody who cannot hover; a parent with its own
+ * `aria-label` has to say them itself ({@link describeAgents}).
  */
 export function CardAgentsMark({
   card,
@@ -173,10 +176,11 @@ export function CardAgentsMark({
 }
 
 /**
- * Issue detail's "Claude · working" line in the header (FE-27/D4): one
- * button per agent on this machine, and a click opens that agent full size —
- * the tab already resuming it, or a new one. An agent the service saw is
- * listed after them but is NOT a button (BE-16/D6a): its session is on
+ * Issue detail's "Claude · working" line in the header (FE-27/D4).
+ *
+ * One button per agent on this machine; a click opens that agent full size,
+ * in the tab already resuming it or a new one. An agent the service saw is
+ * listed after them but is not a button (BE-16/D6a): its session is on
  * another machine, and there is nothing here to open.
  */
 export function CardAgentsLine({ card }: { card: CardRef }) {

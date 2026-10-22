@@ -6,7 +6,7 @@ export type IsoDate = string;
 /**
  * The body of every refusal: 4xx and 5xx alike.
  *
- * ⚠️ A 500 always says `"internal error"` and nothing else; the cause is logged
+ * A 500 always says `"internal error"` and nothing else. The cause is logged
  * on the server, never returned.
  */
 export interface ErrorResponse {
@@ -18,11 +18,12 @@ export const DEFAULT_API_ORIGIN = "https://api.lanework.dev";
 
 /**
  * The request header an agent caller names itself with (`claude`, `codex`).
- * Display only: it attributes checkpoints and audit rows, it grants nothing.
+ *
+ * Display only: it attributes checkpoints and audit rows, and grants nothing.
  */
 export const AGENT_HEADER = "x-lanework-agent";
 
-/** `Authorization: Bearer <machine secret>` — the credential a machine holds. */
+/** `Authorization: Bearer <machine secret>`: the credential a machine holds. */
 export type BearerAuthorization = `Bearer ${string}`;
 
 /** Prefixes of the tokens the API mints. A token is opaque past its prefix. */

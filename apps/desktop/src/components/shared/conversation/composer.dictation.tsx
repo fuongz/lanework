@@ -26,9 +26,9 @@ import { type DictationStatus, useLiveDictation } from "#/stores/dictation";
 import { usePreferences } from "#/stores/preferences";
 import { DictationWaveform } from "./dictation-waveform";
 
-// The composer's dictation (FE-69): the hook that runs a session, and what the
-// composer draws for it — the microphone with its language menu, and the
-// level with ✕ and ✓ while listening.
+// The composer's dictation: the hook that runs a session, and what the
+// composer draws for it — the microphone with its language menu, and the level
+// with ✕ and ✓ while listening.
 
 /** How many meter readings the waveform draws, newest on the right. */
 const LEVELS = 28;
@@ -51,9 +51,11 @@ const MESSAGES: Record<string, string> = {
 };
 
 /**
- * Dictation for one composer (FE-69): a helper in main listens, and what it
- * has heard so far — corrected by the user's rules (D5) — comes back as
- * `heard`. `finish` hands the final words to `onDone`; `cancel` drops them.
+ * Dictation for one composer.
+ *
+ * A helper in main listens, and what it has heard so far, corrected by the
+ * user's rules, comes back as `heard`. `finish` hands the final words to
+ * `onDone`; `cancel` drops them.
  */
 export function useDictation({
   onDone,
@@ -172,7 +174,7 @@ export function useDictation({
   if (status === "listening" && since.current === null)
     since.current = Date.now();
   if (status === "idle") since.current = null;
-  // ⚠️ Cleared only if it is still this composer's: another one unmounting,
+  // NOTE: Cleared only if it is still this composer's: another one unmounting,
   // or going idle, must not take down the island of the one listening.
   useEffect(() => {
     if (status !== "idle")
@@ -193,10 +195,7 @@ export function useDictation({
   return { available, status, heard, levels, start, finish, cancel };
 }
 
-/**
- * The composer's right corner while dictating (FE-69): the microphone's
- * level, then ✕ and ✓.
- */
+/** The composer's right corner while dictating: the level, then ✕ and ✓. */
 export function DictationBar({
   status,
   levels,
@@ -243,7 +242,8 @@ export function DictationBar({
 }
 
 /**
- * The microphone and, beside it, ▾: the language it listens for (FE-69/D6).
+ * The microphone and, beside it, ▾: the language it listens for.
+ *
  * Two hit targets side by side, like a split button.
  */
 export function DictationButton({ onStart }: { onStart: () => void }) {

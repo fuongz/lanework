@@ -55,8 +55,8 @@ type Entry = { kind: "card"; taskId: string } | { kind: "gh"; number: number };
 /**
  * What the board is read grouped by.
  *
- * NOTE: The list is not grouped (FE-75), but the service still reads one page
- * per status (FE-17), so that is the grouping it is asked for.
+ * The list is not grouped, but the service still reads one page per status,
+ * so that is the grouping it is asked for.
  */
 const GROUP_BY = "status";
 
@@ -105,15 +105,15 @@ function CardRow({
 }) {
   const column = columnOf(view.columns, card.columnKey);
   // How far through its checklist the card is: only while it is being
-  // worked on, and only when it has a checklist (FE-75). Before work starts
-  // it is 0% and after it ends 100%, which the status already says.
+  // worked on, and only when it has a checklist. Before work starts it is 0%
+  // and after it ends 100%, which the status already says.
   const progress = checklistProgress(card);
   const done =
     column?.role === "active" && progress && progress.total > 0
       ? Math.round((progress.done / progress.total) * 100)
       : null;
   return (
-    // NOTE: The menu RENDERS the `li` rather than wrapping it: a `ul` whose
+    // NOTE: The menu renders the `li` rather than wrapping it: a `ul` whose
     // children are divs reports the wrong number of items to a screen reader.
     <IssueMenu card={card} render={<li />}>
       <Link
@@ -126,8 +126,8 @@ function CardRow({
         activeProps={{ className: "bg-foreground/[0.06]" }}
         className={`${RAIL_ROW} group focus-visible:ring-accent-brand relative flex flex-col gap-1 rounded-lg px-3 py-2.5 outline-none focus-visible:ring-2 aria-disabled:cursor-default`}
       >
-        {/* NOTE: Two lines, the shape every row in this list shares: where
-            it stands, then what it is. A card in progress adds a third. */}
+        {/* Two lines, the shape every row in this list shares: where it
+            stands, then what it is. A card in progress adds a third. */}
         <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
           <PriorityIcon priority={card.priority} />
           <RowBadge className="max-w-[60%]">
@@ -199,12 +199,13 @@ export function IssuesList() {
   const [query, setText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // NOTE: The URL IS the board's query (FE-17): the service reads one page
-  // per group, under these filters, so changing either is a new read — not a
-  // new filter over the cards already here.
-  // NOTE: Status is NOT sent: the board is read one page per status anyway,
-  // and the status filter is a set of lanes (FE-75), so it picks among the
-  // groups that came back rather than asking the service for one.
+  // The URL is the board's query (FE-17): the service reads one page per
+  // group, under these filters, so changing either is a new read, not a new
+  // filter over the cards already here.
+  //
+  // NOTE: Status is not sent. The board is read one page per status anyway,
+  // and the status filter is a set of lanes, so it picks among the groups that
+  // came back rather than asking the service for one.
   const { category, priority, tag } = search;
   useEffect(
     () =>
@@ -222,9 +223,9 @@ export function IssuesList() {
       replace: true,
     });
 
-  // NOTE: Ages are measured from when each list was READ, not from now. A row
-  // that says "2h" next to a badge saying the copy is from this morning would
-  // be two clocks disagreeing on one screen.
+  // Ages are measured from when each list was read, not from now. A row that
+  // says "2h" next to a badge saying the copy is from this morning would be
+  // two clocks disagreeing on one screen.
   const now = view ? new Date(view.fetchedAt).getTime() : Date.now();
   const githubNow = github.view
     ? new Date(github.view.fetchedAt).getTime()
@@ -256,16 +257,16 @@ export function IssuesList() {
       : all;
   }, [github.view, needle]);
 
-  // NOTE: The SERVICE's counts when it sent them (FE-17): a group holds one
-  // page of its cards, and the header counting those would say "20" for 226.
-  // A search is the exception — it only sees the cards that are here.
+  // NOTE: The service's counts when it sent them. A group holds one page of
+  // its cards, and counting those would say "20" for 226. A search is the
+  // exception: it only sees the cards that are here.
   const counts = needle ? undefined : view?.stats?.byColumn;
-  // "No cards yet" is about the BOARD, not the page of it on screen.
+  // "No cards yet" is about the board, not the page of it on screen.
   const emptyBoard = view ? (view.total ?? view.cards.length) === 0 : false;
 
-  // NOTE: One list, newest activity first, cards and GitHub issues mixed:
-  // the row's first line already says which is which, so a header per group
-  // would only push the work further down.
+  // One list, newest activity first, cards and GitHub issues mixed. The row's
+  // first line already says which is which, so a header per group would only
+  // push the work further down.
   const rows = useMemo(() => {
     const out: Row[] = [];
     const seen = new Set<string>();
@@ -393,9 +394,9 @@ export function IssuesList() {
                     strokeWidth={1.8}
                   />
                 </EmptyMedia>
-                {/* NOTE: An empty BOARD and an empty RESULT are different
-                  situations with different ways out: one wants a card, the
-                  other wants the filter loosened. */}
+                {/* An empty board and an empty result have different ways
+                  out: one wants a card, the other wants the filter
+                  loosened. */}
                 <EmptyTitle>
                   {emptyBoard ? "No cards yet" : "No matches"}
                 </EmptyTitle>
@@ -443,7 +444,7 @@ export function IssuesList() {
             </div>
           )}
           {!github.view && github.loading && <GitHubIssuesSkeleton rows={2} />}
-          {/* NOTE: A project with no folder or no GitHub remote has no GitHub
+          {/* A project with no folder or no GitHub remote has no GitHub
               issues to read, and saying so on every open would be noise. */}
           {!github.view &&
             !github.loading &&

@@ -19,10 +19,10 @@ import { cn } from "#/lib/utils";
 /**
  * A board tone as a text colour.
  *
- * ⚠️ A literal map, not `` `text-tone-${tone}` ``. Tailwind reads source text to
- * decide which classes to emit, so an interpolated name produces no CSS at all —
- * and the failure is a colourless icon rather than an error. The board's tone
- * vocabulary is closed, so writing it out costs nothing.
+ * NOTE: A literal map, not `` `text-tone-${tone}` ``. Tailwind reads source
+ * text to decide which classes to emit, so an interpolated name produces no
+ * CSS, and the failure is a colourless icon rather than an error. The board's
+ * tone vocabulary is closed, so writing it out costs nothing.
  */
 const TONE_TEXT: Record<string, string> = {
   neutral: "text-tone-neutral",
@@ -57,7 +57,7 @@ export function StatusIcon({
   return (
     <HugeiconsIcon
       icon={LANE_ICON[column?.icon ?? ""] ?? CircleIcon}
-      // Decorative: the lane's NAME is always beside it, in the group header or
+      // Decorative: the lane's name is always beside it, in the group header or
       // the properties rail. An `aria-label` here would make a screen reader
       // announce the status twice.
       aria-hidden="true"
@@ -76,9 +76,8 @@ const PRIORITY_TONE: Record<string, string> = {
 /**
  * Priority as three bars, not an arrow.
  *
- * ⚠️ Height carries the value, so it survives being read without colour —
- * which is the whole point, since the tones are 3:1 non-text contrast and
- * colour alone is never allowed to be the only cue.
+ * Height carries the value, so it survives being read without colour. The
+ * tones are 3:1 non-text contrast, and colour is never the only cue.
  */
 export function PriorityIcon({
   priority,
@@ -142,14 +141,13 @@ export function CategoryDot({
 /**
  * `03/07`: a count of done out of total, always at least two digits a side.
  *
- * ⚠️ Padded so the column lines up (FE-13/D1). `5/5` beside `15/17` made every
- * row's right edge a different width, and the eye read the jitter before the
- * numbers. Past 99 the number is printed whole — a width jump there is rarer
- * than a truncated count is wrong.
- *
- * ⚠️ The DONE half is muted until it reaches the total, and the total never
- * is: the unfinished part is the half to look at, and a finished `07/07`
- * reads as one solid value at a glance.
+ * - Padded so the column lines up (FE-13/D1). `5/5` beside `15/17` makes
+ *   every row's right edge a different width, and the eye reads the jitter
+ *   before the numbers. Past 99 the number is printed whole: a width jump
+ *   there is rarer than a truncated count is wrong.
+ * - The done half is muted until it reaches the total, and the total never
+ *   is. The unfinished part is the half to look at, and a finished `07/07`
+ *   reads as one solid value at a glance.
  */
 export function Fraction({
   done,
@@ -179,9 +177,9 @@ export function Fraction({
 /**
  * `03/07`, or nothing at all.
  *
- * ⚠️ Renders NOTHING when the checklist is null, and that is not the same as
- * rendering `00/00`. A card read from a board list carries no checklist — saying
- * "0 of 0 done" about a card with seven decisions is a confident lie.
+ * NOTE: Renders nothing when the checklist is null, which is not the same as
+ * `00/00`. A card read from a board list carries no checklist, and "0 of 0
+ * done" about a card with seven decisions is a confident lie.
  */
 export function ChecklistProgress({
   card,

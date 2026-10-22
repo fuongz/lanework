@@ -1,12 +1,14 @@
 // Run with `bun test apps/desktop/electron/main/workspaces`.
 //
-// FE-52/V3: "Sync to cloud" moves every card — task id, checklist ticks, lane,
-// parent — and a failure part way through leaves the local board exactly as it
-// was, still writable, and resumable into the SAME cloud board.
+// FE-52/V3: "Sync to cloud" moves every card (task id, checklist ticks, lane,
+// parent), and a failure part way through leaves the local board as it was,
+// still writable, and resumable into the same cloud board.
 //
 // The control plane is a stub on a loopback port that behaves like the real
-// import surface where it matters: records keyed on `source.ref` (a re-run
-// skips what landed), receipts carry `itemId`, and the seal COUNTS the board.
+// import surface where it matters:
+// - records are keyed on `source.ref`, so a re-run skips what landed;
+// - receipts carry `itemId`;
+// - the seal counts the board.
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -248,7 +250,7 @@ describe("sync to cloud", () => {
     assert.equal(cloudEpic?.columnKey, "processing");
     assert.equal(cloudChild?.taskId, "FE-08");
     assert.equal(cloudChild?.columnKey, "todo");
-    // The parent link is re-addressed to the CLOUD id of the parent.
+    // The parent link is re-addressed to the parent's cloud id.
     assert.equal(cloudChild?.parentId, cloudEpic?.itemId);
     const tick = cloudChild?.checklist.find((item) => item.key === "D1");
     assert.equal(tick?.checked, true);
@@ -333,7 +335,8 @@ describe("sync to cloud", () => {
   test("a seal the cloud refuses leaves the local board writable", async () => {
     const workspace = store.createWorkspace({ name: "Sealed out" });
     store.createWorkItem(workspace.id, { title: "One" });
-    // Somebody else put a card on the cloud board between the import and the seal.
+    // Somebody else put a card on the cloud board between the import and the
+    // seal.
     const originalSet = plane.boards.set.bind(plane.boards);
     plane.boards.set = (key, value) => {
       value.items.push({

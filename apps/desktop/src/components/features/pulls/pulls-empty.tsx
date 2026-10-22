@@ -22,14 +22,14 @@ export function PullsEmpty() {
 
   return (
     <div className="flex min-w-0 flex-1 items-center justify-center">
-      {/* ⚠️ The screen's name in the title bar (FE-58) only while no pull
-          request is open: the bar holds one header, and `PullDetail` puts the
-          pull request's own there. */}
+      {/* The screen's name in the title bar only while no pull request is
+          open: the bar holds one header, and `PullDetail` puts the pull
+          request's own there. */}
       <WindowTitlebar>
         <h1 className={WINDOW_TITLE}>Pull requests</h1>
       </WindowTitlebar>
-      {/* ⚠️ Nothing until the GitHub check answers: the list beside it shows
-          the skeleton, and "Not set up yet" there would be a guess. */}
+      {/* Nothing until the GitHub check answers: the list beside it shows
+          the skeleton, and "Not set up yet" here would be a guess. */}
       {ready && (
         <Empty className="py-16">
           <EmptyHeader>

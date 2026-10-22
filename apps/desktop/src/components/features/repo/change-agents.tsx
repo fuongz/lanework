@@ -22,7 +22,7 @@ import { useWorktree } from "#/stores/worktree";
 
 /** A stable empty: a selector that allocated one would re-render forever. */
 const NONE: AgentFileMark[] = [];
-/** Marks drawn on a row, at most (FE-39/D2); the menu lists every one. */
+/** The most marks drawn on a row (FE-39/D2); the menu lists every one. */
 const SHOWN = 3;
 
 const MARK_BUTTON =
@@ -53,11 +53,12 @@ function Stack({ marks }: { marks: AgentFileMark[] }) {
 }
 
 /**
- * Which agent conversations edited a changed file since HEAD's commit
- * (FE-39/D2, D3): their marks, a tooltip naming them, and a click that opens
- * one — the way its row on the rail does.
+ * Which agent conversations edited a changed file since HEAD's commit.
  *
- * ⚠️ Only edits made with the agents' FILE TOOLS. A file an agent changed
+ * Their marks, a tooltip naming them, and a click that opens one the way its
+ * row on the rail does (FE-39/D2, D3).
+ *
+ * Only edits made with the agents' file tools count. A file an agent changed
  * through the shell carries no mark, which is not proof it did not.
  */
 export function ChangeAgents({ path }: { path: string }) {

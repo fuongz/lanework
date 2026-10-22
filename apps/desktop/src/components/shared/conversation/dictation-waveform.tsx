@@ -4,8 +4,9 @@ import { cn } from "#/lib/utils";
 const QUIET = 0.08;
 
 /**
- * The microphone's level as a strip of dots and bars moving right to left
- * (FE-69): the composer draws it in its own colour, the island in red.
+ * The microphone's level as a strip of dots and bars moving right to left.
+ *
+ * The composer draws it in its own colour, the island in red.
  */
 export function DictationWaveform({
   levels,

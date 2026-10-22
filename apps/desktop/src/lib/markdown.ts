@@ -1,16 +1,15 @@
-/**
- * A deliberately small Markdown reader for review-card bodies.
- *
- * ⚠️ It produces a BLOCK LIST, never HTML. The renderer builds React elements
- * from these, so there is no `dangerouslySetInnerHTML` anywhere in the app and a
- * card body — which arrives from a service, over a network, written by anyone
- * on the account — cannot inject markup. That constraint is the reason this
- * exists at all rather than a library.
- *
- * ⚠️ It covers what these cards actually contain: headings, paragraphs, lists,
- * fenced code, quotes and tables. Anything it does not know stays literal text,
- * which is the correct failure for a document nobody can re-edit from here.
- */
+// A small Markdown reader for review-card bodies.
+//
+// NOTE: It produces a BLOCK LIST, never HTML. The renderer builds React
+// elements from these, so there is no `dangerouslySetInnerHTML` anywhere in
+// the app, and a card body — which arrives from a service, over a network,
+// written by anyone on the account — cannot inject markup. That constraint is
+// why this exists rather than a library.
+//
+// It covers what these cards contain: headings, paragraphs, lists, fenced
+// code, quotes and tables. Anything it does not know stays literal text, the
+// right failure for a document nobody can re-edit from here.
+
 export type Inline =
   | { kind: "text"; text: string }
   | { kind: "code"; text: string }
@@ -19,7 +18,8 @@ export type Inline =
   | LinkSpan;
 
 /**
- * `[text](href)`, or `[[name]]` (`wiki`) — only when asked for (FE-36).
+ * `[text](href)`, or `[[name]]` (`wiki`), read only when asked for.
+ *
  * `raw` is the link as written, for a reader that does not follow it.
  */
 export interface LinkSpan {
@@ -32,8 +32,8 @@ export interface LinkSpan {
 
 interface MarkdownOptions {
   /**
-   * Read `[text](href)` and `[[name]]` as links (FE-36). Off by default: a
-   * card body keeps every link exactly as written.
+   * Reads `[text](href)` and `[[name]]` as links. Off by default: a card
+   * body keeps every link as written.
    */
   links?: boolean;
 }
@@ -50,8 +50,8 @@ export type Block =
  * A code span, as Markdown has it: a run of backticks, then everything up to
  * a run of the SAME length — so `` `x` `` is code that shows its backticks.
  *
- * ⚠️ Was `` `[^`]+` ``, which paired the inner "` `" of `` `` `x` `` `` into
- * two code spans of one space each and left `x` as plain text. The run is
+ * NOTE: Not `` `[^`]+` ``, which pairs the inner "` `" of `` `` `x` `` `` into
+ * two code spans of one space each and leaves `x` as plain text. The run is
  * group 2 in both patterns below.
  */
 const CODE_SPAN = "(?<!`)(`+)(?!`)(?:.+?)(?<!`)\\2(?!`)";
@@ -66,7 +66,7 @@ const INLINE_LINKS = new RegExp(
 );
 const LINK = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/;
 
-/** Split one line into spans. Unmatched text stays exactly as written. */
+/** Splits one line into spans. Unmatched text stays as written. */
 export function inlines(line: string, options: MarkdownOptions = {}): Inline[] {
   const spans: Inline[] = [];
   let at = 0;

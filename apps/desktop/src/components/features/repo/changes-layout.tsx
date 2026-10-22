@@ -15,12 +15,12 @@ import { CommitBox } from "./commit-box";
 
 /**
  * Repository › Changes: the working tree's changes, their diff, and the box
- * that commits them (FE-22).
+ * that commits them.
  *
- * ⚠️ Read on entry and on window FOCUS, never on a timer (FE-22/D10) — the same
+ * Read on entry and on window focus, never on a timer (FE-22/D10), the same
  * rule the pull request screen and the board follow. The folder changes while
- * somebody is in their editor, and coming back to this window is the moment
- * they want it read again.
+ * somebody is in their editor, and coming back to this window is when they
+ * want it read again.
  */
 export function ChangesLayout() {
   const { slug } = useParams({ from: "/_app/w/$slug/changes" });
@@ -44,8 +44,8 @@ export function ChangesLayout() {
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
-  // ⚠️ The title bar is drawn in every state (FE-58), so the screen keeps its
-  // name while the repository is read, and when it is not one.
+  // The title bar is drawn in every state, so the screen keeps its name while
+  // the repository is read, and when the folder is not one.
   const title = (
     <ChangesTitlebar files={state?.kind === "ready" ? state.files : []} />
   );

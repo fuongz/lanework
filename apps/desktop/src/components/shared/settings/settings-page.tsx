@@ -4,8 +4,10 @@ import { cn } from "#/lib/utils";
 import { useSettingsSearch } from "#/stores/settings-search";
 
 /**
- * Every text button on a settings row, one size: Danger zone's (pass with
- * `size="lg"`). A destructive one adds `border-0` — see `account-section.tsx`.
+ * Every text button on a settings row, one size: Danger zone's.
+ *
+ * Pass it with `size="lg"`. A destructive one adds `border-0`, as in
+ * `account-section.tsx`.
  */
 export const SETTINGS_BUTTON =
   "h-8 gap-1.5 rounded-lg px-3 text-sm has-[>svg:first-child]:pl-2.5";
@@ -23,31 +25,32 @@ export interface SettingsSectionSpec {
   title: string;
   rows?: SettingsRowSpec[];
   /**
-   * A section that is not a list of rows — rendered in place of the row card.
+   * A section that is not a list of rows, rendered in place of the row card.
    *
    * Theme previews are the reason this exists: they are three pictures to pick
    * between, not a labelled control on the right of a line.
    */
   content?: ReactNode;
-  /** Searchable words for a `content` section, which has no rows to match on. */
+  /** Searchable words for a `content` section, which has no rows to match. */
   keywords?: string;
   /**
-   * Keep `title` for search and screen readers but draw no heading — for a
-   * section whose first row already says what it is (Projects → the selected
-   * project's own name and avatar).
+   * Draws no heading, but keeps `title` for search and screen readers.
+   *
+   * For a section whose first row already says what it is (Projects → the
+   * selected project's own name and avatar).
    */
   hideTitle?: boolean;
-  /** A heading in the destructive tone — Danger zone. */
+  /** A heading in the destructive tone: Danger zone. */
   destructive?: boolean;
 }
 
 /**
  * A settings section page: title, a line of prose, and grouped rows.
  *
- * ⚠️ Sections and rows are DATA rather than children, and that is what makes
+ * Sections and rows are data rather than children, and that is what makes
  * search work. Filtering `children` would leave a section heading above an
- * empty card, and nothing could tell that the whole page matched nothing —
- * which is exactly the state that needs its own message.
+ * empty card, and nothing could tell that the whole page matched nothing,
+ * which is the state that needs its own message.
  */
 export function SettingsPage({
   title,
@@ -132,10 +135,10 @@ export function SettingsPage({
 /**
  * The card a settings section's rows sit in.
  *
- * ⚠️ Exported so a `content` section — a list this component cannot describe as
- * rows — draws the SAME container instead of restating the classes. Two
- * hand-written copies is how one settings page ends up with a card and the next
- * with a bare list, which is the state this app has already been in once.
+ * Exported so a `content` section (a list this component cannot describe as
+ * rows) draws the same container instead of restating the classes. Two
+ * hand-written copies is how one settings page ends up with a card and the
+ * next with a bare list, which this app has already shipped once.
  */
 export function SettingsCard({
   className,

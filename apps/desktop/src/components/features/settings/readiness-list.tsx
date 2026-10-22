@@ -33,7 +33,7 @@ function StatusIcon({ check }: { check: ReadinessCheck }) {
   );
 }
 
-/** The file each fix writes — the button says which, not just "Fix…". */
+/** The file each fix writes, so the button says which, not just "Fix…". */
 const FIX_FILE: Record<ReadinessFix, string> = {
   "agents-md": "AGENTS.md",
   "claude-md": "CLAUDE.md",
@@ -45,12 +45,13 @@ const ORDER = { blocker: 0, warning: 1, info: 2 } as const;
 const rank = (check: ReadinessCheck) => (check.ok ? 3 : ORDER[check.level]);
 
 /**
- * A project's readiness checks, each with the one thing to do about it
- * (FE-30): a Fix that previews its change, or the settings page that fixes it.
- * Passed checks are listed too, after the ones still to do.
+ * A project's readiness checks, each with the one thing to do about it.
  *
- * ⚠️ The Fix dialog is the CALLER's, via `onFix`, so it outlives a fix that
- * changes this list.
+ * That is a Fix that previews its change, or the settings page that fixes it.
+ * Passed checks follow the ones still to do.
+ *
+ * NOTE: The Fix dialog belongs to the caller, through `onFix`, so it outlives
+ * a fix that changes this list.
  */
 export function ReadinessList({
   report,

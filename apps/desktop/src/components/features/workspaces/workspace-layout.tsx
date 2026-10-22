@@ -22,10 +22,9 @@ import { useLastRoute } from "#/stores/last-route";
 /**
  * One project, open.
  *
- * ⚠️ A failed write, a lost race and being offline are not drawn here any more: they are the
- * board notice island in the shell (FE-63), for the same reason they once
- * lived here rather than in each view — they are a property of the board, not
- * of the screen looking at it.
+ * A failed write, a lost race and being offline are not drawn here: they are
+ * the board notice island in the shell (FE-63), because they are a property
+ * of the board, not of the screen looking at it.
  */
 export function WorkspaceLayout() {
   const { slug } = useParams({ from: "/_app/w/$slug" });
@@ -36,18 +35,16 @@ export function WorkspaceLayout() {
   const notFound = useBoard((state) => state.notFound);
   const navigate = useNavigate();
 
-  // ⚠️ `open` refreshes the list itself. This used to be
-  // `hydrate().then(() => open(slug))` while `open` ALSO hydrated when the slug
-  // was unknown, so a control plane that was down was asked twice per
-  // navigation and logged twice.
+  // `open` refreshes the list itself. Hydrating here as well would ask a
+  // control plane that is down twice per navigation, and log it twice.
   useEffect(() => {
     void open(slug);
   }, [open, slug]);
 
   // Where this project was left, so switching away and back returns here.
-  // ⚠️ Only an href UNDER this slug: mid-switch the location already names the
-  // next project while the params still name this one, and filing the next
-  // project's href under this slug made switching back a no-op.
+  // NOTE: Only an href UNDER this slug. Mid-switch the location already names
+  // the next project while the params still name this one, and filing the
+  // next project's href under this slug makes switching back a no-op.
   const href = useLocation({ select: (location) => location.href });
   const remember = useLastRoute((state) => state.remember);
   useEffect(() => {
@@ -60,18 +57,18 @@ export function WorkspaceLayout() {
     if (notFound === slug) void navigate({ to: "/", replace: true });
   }, [navigate, notFound, slug]);
 
-  // ⚠️ On focus, not on a timer. A desktop window that is not being looked at
-  // has nobody to show a change to, and a poll it fires anyway is a request per
-  // interval per open window, forever.
+  // On focus, not on a timer. A window nobody is looking at has nobody to
+  // show a change to, and a poll fired anyway is a request per interval per
+  // open window, forever.
   useEffect(() => {
     const onFocus = () => void poll();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [poll]);
 
-  // FE-52: the offline MCP and the checkpoint hook write a LOCAL board from
-  // outside this window, and nothing polls the SQLite store — main says when
-  // it changed. An empty list means "re-read everything local".
+  // The offline MCP and the checkpoint hook write a LOCAL board from outside
+  // this window, and nothing polls the SQLite store, so main says when it
+  // changed. An empty list means "re-read everything local".
   const reload = useBoard((state) => state.reload);
   const activeId = active?.id ?? null;
   const activeIsLocal = active?.origin === "local";
@@ -83,15 +80,10 @@ export function WorkspaceLayout() {
     });
   }, [reload, activeId, activeIsLocal]);
 
-  // ⚠️ A workspace whose id the service never sent. Not a failure and not an
-  // empty board: this app shipped a version that refused the whole workspace
-  // list over it, and the fix was to keep the project openable and say exactly
-  // which half is missing. The rail's folder item is the other half — the cards
-  // are on disk the whole time.
-  // ⚠️ The list could not be read, so there is no project to draw and no
-  // picker worth sending anybody to — the picker is built from the same list.
-  // One screen with one Try again, rather than an empty board under a banner
-  // or, as it was, a bounce back to "Opening your project…" and round again.
+  // The list could not be read, so there is no project to draw and no picker
+  // worth sending anybody to: the picker is built from the same list. One
+  // screen with one Try again, rather than an empty board under a banner or a
+  // bounce back to "Opening your project…" and round again.
   if (!active && error)
     return (
       <div className="grid flex-1 place-items-center p-10">
@@ -105,6 +97,10 @@ export function WorkspaceLayout() {
       </div>
     );
 
+  // A workspace whose id the service never sent. Not a failure and not an
+  // empty board: this app once refused the whole workspace list over it, so
+  // the project stays openable and the screen says which half is missing. The
+  // folder in the sidebar is the other half; the cards are on disk.
   if (active && active.id === null)
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -120,9 +116,9 @@ export function WorkspaceLayout() {
                 strokeWidth={1.8}
               />
             </EmptyMedia>
-            {/* ⚠️ Not a destructive state. Nothing failed — this service is
-                simply older than the field a board is addressed by, and the
-                project is still perfectly real. */}
+            {/* Not a destructive state. Nothing failed: this service is older
+                than the field a board is addressed by, and the project is
+                still real. */}
             <EmptyTitle>Board not available yet</EmptyTitle>
             <EmptyDescription>
               This service sent no id for {active.name}. Update it, then reopen.

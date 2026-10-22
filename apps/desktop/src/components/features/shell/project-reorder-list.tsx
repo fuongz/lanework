@@ -26,9 +26,9 @@ const glide = { duration: 0.2, ease: [0.22, 1, 0.36, 1] } as const;
 /**
  * One project while the switcher is in reorder mode.
  *
- * ⚠️ The WHOLE row drags here, unlike Settings → Projects (`ProjectRow`),
- * where only the grip does. In this mode a row has no click of its own — it
- * does not open the project — so there is no click for a drag to steal.
+ * The whole row drags here, unlike Settings → Projects (`ProjectRow`), where
+ * only the grip does. In this mode a row has no click of its own (it does not
+ * open the project), so there is no click for a drag to steal.
  */
 function ReorderRow({
   workspace,
@@ -93,9 +93,11 @@ function ReorderRow({
 }
 
 /**
- * The switcher's project list as a drag-to-reorder list (the Reorder entry in
- * its sort menu). The same order Settings → Projects edits, ⌘1…⌘9 follow, and
- * the "Default" sort shows; it is saved at each drop.
+ * The switcher's project list as a drag-to-reorder list, from the Reorder
+ * entry in its sort menu.
+ *
+ * The same order Settings → Projects edits, ⌘1…⌘9 follow, and the "Default"
+ * sort shows. It is saved at each drop.
  */
 export function ProjectReorderList({
   workspaces,
@@ -120,7 +122,7 @@ export function ProjectReorderList({
   };
   const onDragOver = (event: DragOverEvent) => {
     const over = event.over ? slugs.indexOf(String(event.over.id)) : -1;
-    // ⚠️ Measured here, not in `onDragStart` — see `workspaces-section.tsx`.
+    // NOTE: Measured here, not in `onDragStart`; see `workspaces-section.tsx`.
     // Plus the list's 2px gap, so the rows step aside by a whole slot.
     const height = (event.active.rect.current.initial?.height ?? 0) + 2;
     setDragging(

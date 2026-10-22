@@ -21,9 +21,9 @@ import { isLocalWorkspace, useSession } from "#/stores/session";
 /**
  * The app's front door, which nobody should ever see for long.
  *
- * ⚠️ It redirects to the remembered project rather than asking which one. Main
- * already knows — it wrote the choice down — so a picker here would be asking a
- * question the app can answer, every single launch.
+ * It redirects to the remembered project rather than asking which one. Main
+ * wrote the choice down, so a picker here would ask a question the app can
+ * answer, on every launch.
  */
 export function WorkspaceLanding() {
   const session = useSession((state) => state.session);
@@ -49,10 +49,11 @@ function Landing() {
     void hydrate();
   }, [hydrate]);
 
-  // ⚠️ ONLY the remembered project, never `workspaces[0]`. Main clears the saved
-  // selection when that project stops existing, and falling back to whichever
-  // one happens to be first would drop somebody into a different project's board
-  // with nothing on screen saying so. No selection is a question, not a default.
+  // NOTE: ONLY the remembered project, never `workspaces[0]`. Main clears the
+  // saved selection when that project stops existing, and falling back to
+  // whichever is first would drop somebody into a different project's board
+  // with nothing on screen saying so. No selection is a question, not a
+  // default.
   const target = active?.slug;
   useEffect(() => {
     if (!ready || !target) return;
@@ -127,18 +128,18 @@ function Landing() {
                 />
               </EmptyMedia>
               <EmptyTitle>No projects yet</EmptyTitle>
-              {/* ⚠️ No longer points at the switcher: the field is directly
-                  below. Advice that sends somebody somewhere else, past the
-                  control that does the job, is worse than no advice. */}
+              {/* Not a pointer at the switcher: the control is right below,
+                  and advice that sends somebody past the control that does the
+                  job is worse than no advice. */}
               <EmptyDescription>
                 Name your first one to get started.
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
-              {/* ⚠️ The create control itself, not a pointer at the switcher.
-                  On an account with nothing in it, making a project is the ONLY
-                  thing to do — sending somebody to another corner of the
-                  window to do it is a step that exists for no reason. */}
+              {/* The create control itself, not a pointer at the switcher. On
+                  an empty account, making a project is the ONLY thing to do, so
+                  sending somebody to another corner of the window is a step
+                  that exists for no reason. */}
               <Button size="lg" onClick={() => setCreating(true)}>
                 Create your first project
               </Button>

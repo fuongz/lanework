@@ -1,4 +1,4 @@
-// Dictation in the composer (FE-69): speech to text on the Mac, by Apple's
+// Dictation in the composer: speech to text on the Mac, by Apple's
 // DictationTranscriber in a helper main spawns. Words go into the composer for
 // the user to edit and send; nothing is ever sent by voice.
 
@@ -15,7 +15,11 @@ export function isDictationLocale(value: unknown): value is DictationLocale {
   return DICTATION_LOCALES.includes(value as DictationLocale);
 }
 
-/** Hints are words, not documents: what main passes on to the helper. */
+/**
+ * The most hints main passes on to the helper, and the longest one.
+ *
+ * Hints are words, not documents.
+ */
 export const HINT_MAX = 100;
 export const HINT_LENGTH_MAX = 60;
 
@@ -46,8 +50,11 @@ export interface DesktopDictationApi {
   /** macOS 26 or later with the helper built in. */
   supported: () => Promise<boolean>;
   /**
-   * Open the microphone and start transcribing; answers the session's id,
-   * which every event carries. A session still running is cancelled first.
+   * Open the microphone and start transcribing.
+   *
+   * A session still running is cancelled first.
+   *
+   * @returns The session's id, which every event carries.
    */
   start: (locale: DictationLocale, hints: string[]) => Promise<number>;
   /** Close the microphone; a `done` event follows with the words. */
@@ -89,9 +96,10 @@ const escapeRegExp = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * `text` with every rule applied, whole words only and ignoring case — "bấp"
- * is fixed, "bấpbênh" is not. Longer phrases go first, so a rule for
- * "ti te check" wins over one for "ti te".
+ * Apply every correction rule to `text`.
+ *
+ * Whole words only, ignoring case: "bấp" is fixed, "bấpbênh" is not. Longer
+ * phrases go first, so a rule for "ti te check" wins over one for "ti te".
  */
 export function applyCorrections(
   text: string,
@@ -115,8 +123,9 @@ export function applyCorrections(
 }
 
 /**
- * Words put in at a selection, spaced from those either side — monocode's
- * `insertDictation`.
+ * Put words in at a selection, spaced from those either side.
+ *
+ * The same rule as monocode's `insertDictation`.
  */
 export function insertDictation(
   text: string,

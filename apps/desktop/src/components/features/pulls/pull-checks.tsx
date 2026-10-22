@@ -10,10 +10,9 @@ import type { CheckState, PullChecks } from "../../../../shared/git";
 /**
  * CI on a pull request's head commit.
  *
- * ⚠️ "No CI checks" is a real answer and is drawn as one. A repository without
- * CI is an ordinary repository; showing it a spinner, an error or an empty box
- * would each say something untrue about it. The caller is what reports a read
- * that actually failed — see `PullSummary`.
+ * "No CI checks" is a real answer and is drawn as one: a spinner, an error or
+ * an empty box would each say something untrue about a repository without
+ * CI. A read that failed is reported by the caller, `PullSummary`.
  */
 
 const TONE: Record<CheckState, { icon: typeof CircleIcon; className: string }> =
@@ -47,9 +46,9 @@ function summarise(checks: PullChecks): string {
   if (failed) parts.push(`${failed} failing`);
   if (running) parts.push(`${running} running`);
   if (passed) parts.push(`${passed} passing`);
-  // ⚠️ Counts, not "All checks passed". A rollup can be `SUCCESS` while several
-  // checks were skipped, and a sentence claiming they all passed would be the
-  // one thing somebody reads before approving.
+  // Counts, not "All checks passed". A rollup can be `SUCCESS` while several
+  // checks were skipped, and that sentence is what someone reads before
+  // approving.
   return parts.length ? parts.join(", ") : `${checks.checks.length} checks`;
 }
 
@@ -75,9 +74,9 @@ export function PullChecksSection({ checks }: { checks: PullChecks }) {
                 aria-label={check.state}
               />
               <span className="min-w-0 flex-1 truncate">{check.name}</span>
-              {/* ⚠️ Opens the OS browser, like every other GitHub link here. A
+              {/* Opens the OS browser, like every other GitHub link here. A
                   CI log inside an Electron window would be this app holding a
-                  session on somebody's behalf. */}
+                  session on someone's behalf. */}
               {check.url && (
                 <a
                   href={check.url}

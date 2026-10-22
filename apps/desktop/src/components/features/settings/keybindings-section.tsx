@@ -16,10 +16,10 @@ import { matches } from "#/lib/settings-catalog";
 import { useSettingsSearch } from "#/stores/settings-search";
 
 /**
- * Settings › Keybindings: every shortcut the app handles, from the app menu
- * and the screens' own key handlers (`lib/keybindings.ts`).
+ * Settings › Keybindings: every shortcut the app handles.
  *
- * ⚠️ Read-only. The keys are fixed where they are handled; recording new
+ * From the app menu and the screens' own key handlers (`lib/keybindings.ts`).
+ * Read-only: the keys are fixed where they are handled, and recording new
  * ones would need each handler to read its key from one place first.
  */
 export function KeybindingsSection() {

@@ -10,11 +10,13 @@ import {
 import { useBoard } from "#/stores/board";
 
 /**
- * The project Settings › Memory and Settings › Instructions show (FE-51/D3):
- * `?project=` when it names one, else the project last open, else "".
+ * The project Settings › Memory and Settings › Instructions show.
  *
- * ⚠️ "" only ever reaches the layouts: they render no `<Outlet />` without a
- * project, so the screens inside can treat the slug as real.
+ * `?project=` when it names one, else the project last open, else ""
+ * (FE-51/D3).
+ *
+ * NOTE: "" only ever reaches the layouts. They render no `<Outlet />` without
+ * a project, so the screens inside can treat the slug as real.
  */
 export function useSettingsProject(): string {
   const { project } = useSearch({ strict: false }) as { project?: string };
@@ -72,9 +74,11 @@ export function ProjectPicker({
 }
 
 /**
- * The bar above Memory or Instructions when there is no list beside it to
- * carry the picker — no project, no folder, nothing written yet — so another
- * project is always one click away.
+ * The bar above Memory or Instructions when no list beside it carries the
+ * picker.
+ *
+ * Drawn when there is no project, no folder or nothing written yet, so
+ * another project is always one click away.
  */
 export function ProjectBar({
   title,

@@ -1,11 +1,8 @@
-/**
- * The fonts Settings → Appearance picks from, and how a pick reaches the page
- * (FE-21).
- *
- * ⚠️ The list comes from `queryLocalFonts()` — Chromium's own enumeration of
- * what this Mac has installed. Main grants its `local-fonts` permission and
- * nothing else about it; there is no IPC and no file walking.
- */
+// The fonts Settings → Appearance picks from, and how a pick reaches the page.
+//
+// The list comes from `queryLocalFonts()`, Chromium's own enumeration of what
+// this Mac has installed. Main grants its `local-fonts` permission and nothing
+// else about it: no IPC, no file walking.
 import type {
   FontChoice,
   FontPreferences,
@@ -55,7 +52,7 @@ function weightOf(style: string): number {
 }
 
 /**
- * Group what the system reports into families.
+ * Groups what the system reports into families.
  *
  * Italics are left out: a picker choosing the face the whole UI is set in has
  * no use for one. Two styles landing on the same weight keep the first — a
@@ -127,8 +124,10 @@ const PROPERTIES: Record<FontRole, [family: string, weight: string]> = {
 };
 
 /**
- * Write the picks onto `<html>`. A role left at its default REMOVES its
- * properties, so the stylesheet's own values — content following UI — apply.
+ * Writes the picks onto `<html>`.
+ *
+ * A role left at its default REMOVES its properties, so the stylesheet's own
+ * values — content following UI — apply.
  */
 export function applyFonts(
   fonts: FontPreferences,

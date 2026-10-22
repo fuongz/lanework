@@ -1,18 +1,18 @@
-// The offline Lanework MCP server (FE-52/W3): MCP over stdio, newline-delimited
-// JSON-RPC 2.0, serving the board tools against the local SQLite board.
+// The offline Lanework MCP server: MCP over stdio, newline-delimited JSON-RPC
+// 2.0, serving the board tools against the local SQLite board.
 //
-// ⚠️ Hand-rolled on purpose: `@modelcontextprotocol/sdk` and zod are not
-// dependencies of the desktop app, and this entry runs under the app's own Node
-// (`ELECTRON_RUN_AS_NODE=1`) and the plugin's `lanework mcp`, where nothing can
-// be installed. The protocol surface a tools-only server needs is small:
-// `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`.
+// - Hand-rolled: `@modelcontextprotocol/sdk` and zod are not dependencies of
+//   the desktop app, and this entry runs under the app's own Node
+//   (`ELECTRON_RUN_AS_NODE=1`) and the plugin's `lanework mcp`, where nothing
+//   can be installed. A tools-only server needs little: `initialize`,
+//   `notifications/initialized`, `ping`, `tools/list`, `tools/call`.
+// - A tool that fails answers `isError: true` with the reason, never a crash
+//   and never a JSON-RPC error: an agent reads the text and corrects its call.
+//   Only a malformed request (unknown method, unknown tool) is a protocol
+//   error.
 //
-// ⚠️ stdout is the protocol channel. Nothing else may ever be written to it —
+// NOTE: stdout is the protocol channel. Nothing else may be written to it;
 // logs go to stderr.
-//
-// ⚠️ A tool that fails answers `isError: true` with the reason, never a crash
-// and never a JSON-RPC error: an agent reads the text and corrects its call.
-// Only a malformed request (unknown method, unknown tool) is a protocol error.
 import { hostname } from "node:os";
 import {
   type LocalStore,
@@ -34,7 +34,7 @@ const KNOWN_PROTOCOL_VERSIONS = [
   "2025-11-25",
 ];
 
-/** The cloud server's instructions, minus everything about accounts and other people. */
+/** The cloud server's instructions, minus accounts and other people. */
 const INSTRUCTIONS = [
   "lanework is a Kanban board for AI-driven development. A card is a review checklist: decisions to approve, then verify steps to prove. This server is the OFFLINE board: it lives in a SQLite file on this machine, has no accounts, and the Lanework app shows what you write here.",
   "Every tool needs a board_id and there is no default. To find it, run `git remote get-url origin` and call list_boards({ repo }) with the output as is. Exactly one board: use it. None: call list_boards without repo and ask the user which board this repo belongs to — the boards you can see, PLUS an option to create a new board for this repo (suggest `owner/name` from the remote as its name). Then link_repo the one they picked, or create_board if they chose a new one; never create a board they did not ask for. A board links to ONE repo: linking a board that already has another repo MOVES it (replace), it never adds a second. Several: ask the user. No git remote: ask the user. Never pick a board by its name.",
@@ -199,7 +199,7 @@ class RpcError extends Error {
   }
 }
 
-/** One line of input → the line(s) to write back (none for a notification). */
+/** The lines to write back for one line of input; none for a notification. */
 export function handleLine(session: LocalMcpSession, line: string): string[] {
   if (!line.trim()) return [];
   let parsed: unknown;

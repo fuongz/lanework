@@ -24,8 +24,8 @@ import {
 /**
  * Why a project's GitHub issues are not on screen, and the way out.
  *
- * NOTE: A satellite of the row so the issue list and the issue page draw the
- * same state from one file. The app never installs `gh` or signs anybody in;
+ * A satellite of the row, so the issue list and the issue page draw the same
+ * state from one file. The app never installs `gh` or signs anybody in;
  * it says what to run, and "Check again" asks `gh` once more.
  */
 export function GitHubIssuesProblemState({

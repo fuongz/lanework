@@ -1,20 +1,20 @@
-// "Sync to cloud" (FE-52/D7a): MOVE a local board to the signed-in account.
+// "Sync to cloud": move a local board to the signed-in account (FE-52/D7a).
 //
-// The upload is the migration path the cloud already has — `PUT /config`, then
-// `POST /import` in batches, then `POST /migrated` to seal — with the records
-// built from the local store instead of `.agents/reviews/`. Task ids, checklist
-// ticks (with when they were ticked), lanes, streams and parent links all go
-// across; only once the cloud has SEALED the board is the local copy marked as
-// moved (`synced_at`) and turned read-only.
+// The upload is the migration path the cloud already has for
+// `.agents/reviews/` folders: `PUT /config`, then `POST /import` in batches,
+// then `POST /migrated` to seal. Only the records come from the local store.
+// Task ids, checklist ticks (with when they were ticked), lanes, streams and
+// parent links all go across. Only once the cloud has sealed the board is the
+// local copy marked as moved (`synced_at`) and turned read-only.
 //
-// ⚠️ Nothing local is changed until the very end, and nothing local is ever
-// deleted. A failure anywhere before the seal leaves every card exactly where
-// it was, still writable; the one local write before then is the cloud id of
-// the board being filled, so the next run continues INTO that board instead of
-// creating a second one. The cloud keys every record on `(source.kind,
-// source.ref)` — the local card's uuid — so a re-run skips what already landed.
+// NOTE: Nothing local changes until the end, and nothing local is ever
+// deleted. A failure before the seal leaves every card where it was, still
+// writable. The one local write before then is the cloud id of the board
+// being filled, so the next run continues into that board instead of creating
+// a second one. The cloud keys every record on `(source.kind, source.ref)`,
+// the local card's uuid, so a re-run skips what already landed.
 //
-// ⚠️ Electron-free: `tests/` and `bun test` drive it against a stub plane.
+// Electron-free: `tests/` and `bun test` drive it against a stub plane.
 import { createHash } from "node:crypto";
 import type { CardDetail, ChecklistItem, Stream } from "@lanework/protocol";
 import type { LocalStore, LocalWorkspace } from "../../local-store";
@@ -80,7 +80,7 @@ interface PlannedCard {
 interface SyncOutcome {
   localId: string;
   cloudId: string;
-  /** The cloud project's slug — the key this machine's folder link moves to. */
+  /** The cloud project's slug: the key this machine's folder link moves to. */
   cloudSlug: string;
   /** Cards the cloud board now holds from this one. */
   cards: number;
@@ -97,10 +97,10 @@ function checklistOf(items: ChecklistItem[], fallbackAt: string) {
     key: item.key,
     section: item.section,
     text: item.text,
-    // ⚠️ The import REQUIRES `checkedAt` with `checked: true` and refuses it
-    // otherwise. A tick the store holds without a moment (written before it
-    // stamped one) gets the card's own last change, the latest moment the
-    // store can vouch for.
+    // NOTE: The import requires `checkedAt` with `checked: true`, and refuses
+    // the record otherwise. A tick the store holds without a moment (written
+    // before it stamped one) gets the card's last change, the latest moment
+    // the store can vouch for.
     ...(item.checked
       ? { checked: true, checkedAt: item.checkedAt ?? fallbackAt }
       : {}),
@@ -128,15 +128,14 @@ function streamsOf(streams: Stream[]): SyncRecord["streams"] {
 /**
  * The records a move sends, parents before children, in lane order.
  *
- * ⚠️ Sent in `(lane, rank)` order WITHOUT a rank, like the folder migration:
- * the cloud appends each record to the bottom of its lane, so arriving in
- * order IS the order — and a local rank string is not the cloud's fractional
- * index, so sending it would be a second copy of that code that has to agree
- * with the first forever.
- *
- * ⚠️ A task id travels only with its sequence AND a category, as the import
- * demands; one whose category was cleared after it was minted goes without
- * it, and the cloud mints the card a new one when it is next categorized.
+ * - Sent in `(lane, rank)` order without a rank, like the folder migration.
+ *   The cloud appends each record to the bottom of its lane, so arriving in
+ *   order is the order. A local rank string is not the cloud's fractional
+ *   index; sending it would need a second copy of that code that agrees with
+ *   the first forever.
+ * - A task id travels only with its sequence and a category, as the import
+ *   demands. One whose category was cleared after it was minted goes without
+ *   it, and the cloud mints a new one when the card is next categorized.
  */
 function planSync(store: LocalStore, workspace: LocalWorkspace): PlannedCard[] {
   const categories = new Map(
@@ -213,7 +212,7 @@ function planSync(store: LocalStore, workspace: LocalWorkspace): PlannedCard[] {
   });
 }
 
-/** Parents first: depth 0 (top-level), then their children, and so on. */
+/** Parents first: depth 0 (top level), then their children, and so on. */
 function byDepth(cards: PlannedCard[]): PlannedCard[][] {
   const parentOf = new Map(
     cards.map((card) => [card.localId, card.parentLocalId]),
@@ -255,9 +254,10 @@ function configOf(workspace: LocalWorkspace) {
 }
 
 /**
- * The cloud project the board moves into: the one a stopped run already made,
- * or a new one under the local board's slug (`-2`, `-3`, … when the account
- * already has that slug).
+ * The cloud project the board moves into.
+ *
+ * The one a stopped run already made, or a new one under the local board's
+ * slug (`-2`, `-3`, … when the account already has that slug).
  */
 async function cloudTarget(
   store: LocalStore,
@@ -275,10 +275,10 @@ async function cloudTarget(
         name: workspace.name,
         ...(path ? { path } : {}),
       });
-      // ⚠️ Written down AT ONCE, before a single card is sent. This is the
-      // one local write before the seal, and it is what makes a stopped run
-      // resumable: the next run continues into this board instead of making a
-      // second project with half the cards in each.
+      // NOTE: Written down at once, before a single card is sent. This one
+      // local write before the seal makes a stopped run resumable: the next
+      // run continues into this board instead of making a second project with
+      // half the cards in each.
       store.updateWorkspace(workspace.id, { cloudId: created.id });
       return { id: created.id, slug: created.slug };
     } catch (error) {
@@ -310,7 +310,7 @@ const stopped = (reason: string) =>
 /**
  * Move `localId` to the account `record` belongs to.
  *
- * Throws, with the local board untouched, on any failure before the seal.
+ * @throws On any failure before the seal, with the local board untouched.
  */
 export async function syncLocalWorkspace(
   store: LocalStore,
@@ -331,7 +331,7 @@ export async function syncLocalWorkspace(
     options.path ?? null,
   );
 
-  // A run that stopped AFTER the seal (while marking the local copy) has
+  // A run that stopped after the seal, while marking the local copy, has
   // nothing left to send: the cloud owns the board already.
   const sealedBefore = workspace.cloudId
     ? await fetchBoardConfig(record, target.id)
@@ -374,9 +374,9 @@ export async function syncLocalWorkspace(
       }
     }
 
-    // ⚠️ A conflict or a failure is a card the cloud board does NOT hold, and
-    // sealing over it would mark the local copy — the only one left with that
-    // card — read-only. Stop and name them instead.
+    // NOTE: A conflict or a failure is a card the cloud board does not hold.
+    // Sealing over it would make the local copy, the only one left with that
+    // card, read-only. Stop and name them instead.
     const refused = receipts.filter(
       (receipt) => receipt.status === "conflict" || receipt.status === "failed",
     );

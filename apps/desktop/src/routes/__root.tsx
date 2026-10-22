@@ -32,9 +32,8 @@ function RootShell() {
   useTheme();
   useFonts();
   useNotificationRouting();
-  // Hydrated once for the whole app. It used to live in `AppShell`, which left
-  // a route outside that shell reading the store's defaults rather than the
-  // user's saved preference.
+  // Hydrated here, once for the whole app, so a route outside `AppShell` reads
+  // the user's saved preference rather than the store's defaults.
   useEffect(() => {
     void usePreferences.persist.rehydrate();
   }, []);

@@ -22,15 +22,15 @@ export const channels = {
   viewCommand: "app:view-command",
 } as const;
 
-/** What the View menu can ask of the window's layout (FE-20). */
+/** What the View menu can ask of the window's layout. */
 export type ViewCommand = "toggle-sidebar" | "open-settings";
 
 /**
  * Which appearance the window should follow.
  *
- * The same three values Electron's `nativeTheme.themeSource` takes, on purpose:
- * main hands this straight to it, so there is nothing to translate and no
- * fourth state to reconcile.
+ * The same three values Electron's `nativeTheme.themeSource` takes: main hands
+ * this straight to it, so there is nothing to translate and no fourth state to
+ * reconcile.
  */
 export type ThemeSource = "system" | "light" | "dark";
 
@@ -49,11 +49,12 @@ export interface DesktopApi {
   /**
    * Switch the native theme and answer with whether the window is now dark.
    *
-   * ⚠️ Main RESOLVES the theme; the renderer must not. `prefers-color-scheme`
-   * does NOT follow `nativeTheme.themeSource` in this Electron build — verified,
-   * not assumed: `themeSource` read back "dark" and `shouldUseDarkColors` true
-   * while the renderer's media query still said light. So the answer travels
-   * over IPC, and `onThemeChange` carries later ones.
+   * NOTE: Main RESOLVES the theme; the renderer must not.
+   * `prefers-color-scheme` does NOT follow `nativeTheme.themeSource` in this
+   * Electron build. Verified: `themeSource` read back "dark" and
+   * `shouldUseDarkColors` true while the renderer's media query still said
+   * light. So the answer travels over IPC, and {@link onThemeChange} carries
+   * later ones.
    */
   setTheme: (source: ThemeSource) => Promise<boolean>;
   /** Fires when the resolved theme changes, including from the OS. */
@@ -63,37 +64,40 @@ export interface DesktopApi {
   /**
    * The page's zoom, as Electron holds it (1 is 100%).
    *
-   * ⚠️ Asked of Electron, not worked out from `outerWidth / innerWidth`: the
-   * two are updated at different moments while the window is resized, and the
-   * ratio wobbled by a few percent on every step of a drag — which moved
+   * NOTE: Asked of Electron, not worked out from `outerWidth / innerWidth`.
+   * The two update at different moments while the window is resized, so the
+   * ratio wobbles by a few percent on every step of a drag and moves
    * everything placed by it.
    */
   zoomFactor: () => number;
   auth: DesktopAuthApi;
   workspaces: DesktopWorkspacesApi;
   git: DesktopGitApi;
-  /** The project's local repository — changes, commits, history (FE-22). */
+  /** The project's local repository: changes, commits, history. */
   worktree: DesktopWorktreeApi;
   terminal: DesktopTerminalApi;
-  /** A Claude conversation as a chat, and its composer (FE-62). */
+  /** A Claude conversation as a chat, and its composer. */
   conversation: DesktopConversationApi;
-  /** Speech to text for the composer, on the Mac (FE-69). */
+  /** Speech to text for the composer, on the Mac. */
   dictation: DesktopDictationApi;
-  /** Settings → Notifications, and where a clicked one leads (FE-70). */
+  /** Settings → Notifications, and where a clicked one leads. */
   notifications: DesktopNotificationsApi;
-  /** Settings → Agents: the checkpoint hook for Claude Code (FE-28). */
+  /** Settings → Agents: the checkpoint hook for Claude Code. */
   handoff: DesktopHandoffApi;
-  /** Whether a project's folder is ready for an agent to work its board (FE-30). */
+  /** Whether a project's folder is ready for an agent to work its board. */
   readiness: DesktopReadinessApi;
   harness: DesktopHarnessApi;
-  /** What Claude Code remembers about a project, read-only (FE-36). */
+  /** What Claude Code remembers about a project, read-only. */
   memory: DesktopMemoryApi;
-  /** What a project's agents are told, read-only (FE-37). */
+  /** What a project's agents are told, read-only. */
   instructions: DesktopInstructionsApi;
-  /** What Claude Code and Codex load in a project's folder, read-only (FE-40). */
+  /** What Claude Code and Codex load in a project's folder, read-only. */
   agentSetup: DesktopAgentSetupApi;
-  /** The user's own Claude Code and Codex config files, edited (FE-47). */
+  /** The user's own Claude Code and Codex config files, edited. */
   agentConfig: DesktopAgentConfigApi;
-  /** The `lanework` MCP entry in Claude Code and Codex, local or cloud (FE-52/D8). */
+  /**
+   * The `lanework` MCP entry in Claude Code and Codex, local or cloud
+   * (FE-52/D8).
+   */
   laneworkMcp: DesktopLaneworkMcpApi;
 }

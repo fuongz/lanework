@@ -14,19 +14,15 @@ import type { PullTimelineItem } from "../../../../shared/git";
 /**
  * What happened on a pull request, oldest first.
  *
- * ⚠️ Every entry is a CARD, including the one-line ones. A timeline that boxed
- * only the entries with a body made the rest read as captions between the
- * cards rather than as events in the same list — the eye follows the outline,
- * and half the history was outside it.
- *
- * ⚠️ The SHAPE of `issue-activity.tsx`, not its code. That component speaks the
- * board's language — task cards, checklist items, lanes — and one component
- * serving two models would carry both sets of props forever.
- *
- * ⚠️ No avatars. This window's CSP is `img-src 'self' data:` (see
- * `protocol.ts`), so an `avatars.githubusercontent.com` URL would be blocked
- * and draw a broken image — which is what the reference screenshot shows
- * happening. An initial is what `AccountOrb` already does for the same reason.
+ * - Every entry is a card, including the one-line ones. Boxing only entries
+ *   with a body makes the rest read as captions between cards rather than
+ *   events in the same list.
+ * - The shape of `issue-activity.tsx`, not its code. That one speaks the
+ *   board's language (task cards, checklist items, lanes), and one component
+ *   serving two models would carry both sets of props forever.
+ * - NOTE: No avatars. This window's CSP is `img-src 'self' data:` (see
+ *   `protocol.ts`), so an `avatars.githubusercontent.com` URL is blocked and
+ *   draws a broken image. An initial stands in, as in `AccountOrb`.
  */
 
 /** One row: a tinted glyph, a sentence, and when it happened. */
@@ -61,12 +57,12 @@ function Entry({
           </span>
         )}
       </div>
-      {/* ⚠️ Drawn only when there IS a body. An approval with no note is the
-          commonest review there is, and an empty block under it would read as a
+      {/* Drawn only when there is a body. An approval with no note is the
+          commonest review, and an empty block under it would read as a
           comment that failed to load. */}
       {hasBody && (
         <div className="mt-2.5 pl-7 text-xs">
-          {/* Elements, never HTML — see `lib/markdown`. This is text other
+          {/* Elements, never HTML (see `lib/markdown`): this is text other
               people wrote, arriving in a web origin. */}
           <MarkdownBody source={body} />
         </div>

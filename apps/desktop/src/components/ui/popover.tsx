@@ -25,9 +25,11 @@ function PopoverContent({
     "align" | "alignOffset" | "side" | "sideOffset"
   > & {
     /**
-     * `menu`: a picker — a search over a list — drawn as the dropdown menus
-     * are: menu glass, no padding of its own, as wide as its rows (within
-     * bounds), and no open/close animation.
+     * The popup's look.
+     *
+     * `menu` is for a picker (a search over a list), drawn as the dropdown
+     * menus are: menu glass, no padding of its own, as wide as its rows
+     * (within bounds), and no open/close animation.
      */
     variant?: "default" | "menu";
   }) {

@@ -1,3 +1,11 @@
+// Project icons on this machine: the owner avatars the control plane keeps,
+// cached on disk by their key.
+//
+// The key names the bytes (`owner-avatars/<owner>/<sha256>.png`), so a cached
+// file is never wrong for its key; a new key only supersedes it. What is on
+// disk draws at once, offline too. The service is asked once per launch per
+// project, with the key held, and answers 304 when nothing changed. That ask
+// is also what lets the service notice a week-old avatar and read it again.
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -5,18 +13,6 @@ import type { MachineRecord } from "../auth/store";
 import { appHomeDir } from "../paths";
 import { fetchIcon } from "./client";
 import { writeAtomic } from "./store";
-
-/**
- * Project icons on this machine (BE-18): the owner avatars the control plane
- * keeps, cached on disk by their key.
- *
- * ⚠️ The key names the bytes (`owner-avatars/<owner>/<sha256>.png`), so a
- * cached file is never wrong for its key — it is only ever superseded by a new
- * key. What is on disk is drawn at once, offline too; the service is asked
- * once per launch per project, with the key held, and answers 304 when
- * nothing changed. That ask is also what lets the service notice a week-old
- * avatar and read it again.
- */
 
 type Cached = { type: string; data: string };
 
@@ -39,7 +35,7 @@ const url = (icon: Cached) => `data:${icon.type};base64,${icon.data}`;
 
 /** What this launch already answered, by workspace id. */
 const answered = new Map<string, { key: string | null; url: string | null }>();
-/** The ask per workspace in flight, so a list of tiles makes ONE request. */
+/** The ask per workspace in flight, so a list of tiles makes one request. */
 const inFlight = new Map<string, Promise<string | null>>();
 
 /** Ask the service, keep what is new, and return what to draw. */
@@ -67,8 +63,10 @@ async function ask(
 }
 
 /**
- * The icon to draw for a project, as a `data:` URL, or null for the letter
- * tile. `iconKey` is what `/v1/sync/state` said the project's icon is.
+ * The icon to draw for a project, as a `data:` URL.
+ *
+ * @param iconKey What `/v1/sync/state` said the project's icon is.
+ * @returns null for the letter tile.
  */
 export async function workspaceIcon(
   record: MachineRecord,

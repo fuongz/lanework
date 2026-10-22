@@ -15,12 +15,12 @@ import { useCloudFeatures } from "#/stores/session";
 import { IssuesList } from "./issues-list";
 
 /**
- * The issues screen: a list that stays, and one issue beside it (FE-75).
+ * The issues screen: a list that stays, and one issue beside it.
  *
- * The same shape as `PullsLayout`. The list lives here, not in a child route,
- * so moving between issues never remounts it and it keeps its scroll.
+ * The same shape as {@link PullsLayout}. The list lives here, not in a child
+ * route, so moving between issues never remounts it and it keeps its scroll.
  *
- * NOTE: GitHub issues are re-read on FOCUS, never on a timer (FE-75/D7). A
+ * NOTE: GitHub issues are re-read on focus, never on a timer (FE-75/D7). A
  * window nobody is looking at has nobody to show a change to, and a poll
  * would spend the user's `gh` budget per interval per open window.
  */
@@ -83,7 +83,7 @@ export function IssuesLayout() {
         groupResizeBehavior="preserve-pixel-size"
       >
         {/* The list column's ground is the Pull requests list's, so the
-            two tabs read as one column (FE-75). */}
+            two tabs read as one column. */}
         <aside
           aria-label="Issues"
           className="bg-sidebar flex h-full min-h-0 flex-col"

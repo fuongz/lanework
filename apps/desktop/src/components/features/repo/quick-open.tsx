@@ -1,3 +1,11 @@
+// ⌘P in Repository › Files (FE-66/D8): a file by name, fuzzily.
+//
+// - Over git's list only: what is tracked or untracked, not what is ignored.
+//   `node_modules` is not read until somebody opens it, and a search that
+//   walked it would answer every query with a thousand copies of `index.js`.
+//   An editor leaves it out of Quick Open for the same reason.
+// - Scored here, not by cmdk (`shouldFilter={false}`): cmdk ranks every item
+//   it is handed on each keystroke, and a repository holds tens of thousands.
 import { useMemo, useState } from "react";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import {
@@ -10,25 +18,14 @@ import {
 } from "#/components/ui/command";
 import { useFiles } from "#/stores/files";
 
-/**
- * ⌘P in Repository › Files (FE-66/D8): a file by name, fuzzily.
- *
- * ⚠️ Over git's list only — what is tracked or untracked, not what is
- * ignored. `node_modules` is not read until somebody opens it, and a search
- * that walked it would answer every query with a thousand copies of
- * `index.js`; an editor leaves it out of Quick Open for the same reason.
- *
- * ⚠️ Scored here, not by cmdk (`shouldFilter={false}`): cmdk ranks every item
- * it is handed on each keystroke, and a repository is tens of thousands.
- */
-
 /** Results drawn. Past this nobody scrolls; they type another letter. */
 const LIMIT = 50;
 
 /**
  * How well `query` matches `path` as a subsequence, or -1 for not at all.
- * Letters in the file's NAME, at the start of a word, and in a run count for
- * more — `fv` finds `file-view.tsx` before `features/views/index.ts`.
+ *
+ * Letters in the file's name, at the start of a word, and in a run count for
+ * more: `fv` finds `file-view.tsx` before `features/views/index.ts`.
  */
 function score(path: string, query: string): number {
   const lower = path.toLowerCase();

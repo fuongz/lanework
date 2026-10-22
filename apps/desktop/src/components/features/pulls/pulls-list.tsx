@@ -48,9 +48,11 @@ import {
 import { ConnectPanel } from "./connect-panel";
 
 /**
- * ⚠️ Real words, not `text-transform: capitalize` over the raw values. CSS
- * capitalisation does not reach the accessible name, so a screen reader — and
- * any test — heard "authored" while the screen said "Authored".
+ * The Show filter's labels.
+ *
+ * Real words, not `text-transform: capitalize` over the raw values: CSS
+ * capitalisation does not reach the accessible name, so a screen reader (and
+ * any test) heard "authored" while the screen said "Authored".
  */
 const TAB_LABEL: Record<PullTab, string> = {
   all: "All",
@@ -68,9 +70,8 @@ const STATUS_LABEL: Record<PullStatus, string> = {
 /**
  * What a pull request's state looks like.
  *
- * ⚠️ Merged and closed get different marks, because they are different
- * outcomes. GitHub draws them apart for the same reason, and one icon for both
- * would say a shipped change and an abandoned one are the same thing.
+ * Merged and closed get different marks because they are different outcomes,
+ * as GitHub draws them: a shipped change and an abandoned one.
  */
 function stateIcon(pull: PullRequest) {
   if (pull.state === "merged")
@@ -88,7 +89,7 @@ function stateIcon(pull: PullRequest) {
   };
 }
 
-/** What the pull request list can be filtered on (FE-75). */
+/** What the pull request list can be filtered on. */
 const PULL_FILTERS = [
   {
     key: "tab",
@@ -231,12 +232,12 @@ function Group({
 }
 
 /**
- * The list's filter and Refresh, beside its search box (FE-75).
+ * The list's filter and Refresh, beside its search box.
  *
- * NOTE: The issue list's Filter menu (`FilterMenu`), with two fields: Show
- * (All, Reviewing, Authored) and State. Show used to be a row of tabs in the
- * window's title bar; with Issues and Pull requests as tabs above the list, a
- * second row of tabs read as a third level of navigation.
+ * The issue list's Filter menu ({@link FilterMenu}), with two fields: Show
+ * (All, Reviewing, Authored) and State. Show is not a row of tabs because
+ * Issues and Pull requests are already tabs above the list (FE-75), and a
+ * second row would read as a third level of navigation.
  *
  * Nothing until `gh` is signed in and the folder is a GitHub repo: there is
  * no list to filter.
@@ -341,10 +342,10 @@ function ForkSwitch() {
 /**
  * The middle pane: which pull requests there are, and which one is open.
  *
- * ⚠️ The three TABS are filters over one read — they all answer "where do I
- * stand on this?", and the fact that decides them (the viewer's login) arrives
- * with the list. The STATE filter is not: a closed pull request is not in the
- * open list to be filtered out of, so that one is sent to GitHub.
+ * The Show values filter one read: they answer "where do I stand on this?",
+ * and what decides them (the viewer's login) arrives with the list. The State
+ * filter is sent to GitHub instead: a closed pull request is not in the open
+ * list to be filtered out of.
  */
 export function PullsList() {
   const { slug } = useParams({ from: "/_app/w/$slug/issues_/pulls" });
@@ -357,9 +358,8 @@ export function PullsList() {
   const ready = usePulls((state) => state.ready);
   const [query, setQuery] = useState("");
 
-  // ⚠️ Ages are measured from when the list was READ. A row that says "2h" next
-  // to a banner saying the copy is from this morning is two clocks disagreeing
-  // on one screen.
+  // Ages count from when the list was read, so a row's "2h" never disagrees
+  // with a banner saying the copy is from this morning.
   const now = view ? new Date(view.fetchedAt).getTime() : Date.now();
 
   const groups = useMemo(() => {
@@ -386,9 +386,9 @@ export function PullsList() {
     return [
       { name: "Needs my review", pulls: review },
       { name: "Authored", pulls: mine },
-      // ⚠️ Everything else still gets a group. Without one, a pull request that
-      // is neither mine nor assigned to me would be invisible in all three tabs
-      // while the header still counted it.
+      // Everything else still gets a group. Without one, a pull request that
+      // is neither mine nor assigned to me would be invisible under every Show
+      // value while the header still counted it.
       { name: "Everything else", pulls: rest },
     ];
   }, [query, tab, view?.pulls]);
@@ -399,8 +399,8 @@ export function PullsList() {
   /**
    * Why the list is empty, said precisely.
    *
-   * ⚠️ Three situations with three different ways out: the repository has none
-   * in this state, the search matched nothing, or this tab is empty while the
+   * Three situations with three ways out: the repository has none in this
+   * state, the search matched nothing, or this Show value is empty while
    * others are not. One sentence for all three would be wrong twice.
    */
   const nothing = view
@@ -448,7 +448,7 @@ export function PullsList() {
         <>
           <ForkSwitch />
 
-          {/* ⚠️ Says which copy this is. "No open pull requests" and "I could
+          {/* Says which copy this is. "No open pull requests" and "I could
               not reach GitHub" are different facts that draw identically. */}
           {view?.stale && (
             <div

@@ -66,7 +66,7 @@ const keyOf = (entry: ArchivedAgentSession) => `${entry.agent}:${entry.id}`;
  */
 const PAGE = 20;
 
-/** "May 15, 2026, 11:15 PM": when it was last written to. */
+/** When a conversation was last written to: "May 15, 2026, 11:15 PM". */
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en-US", {
     dateStyle: "medium",
@@ -80,7 +80,7 @@ function Archived({ project }: { project: Workspace }) {
   const [error, setError] = useState<string | null>(null);
   const [shown, setShown] = useState(PAGE);
   const query = useSettingsSearch((state) => state.query);
-  /** The row whose Unarchive or Delete is waiting on main. */
+  // The row whose Unarchive or Delete is waiting on main.
   const [busy, setBusy] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<{
     entry: ArchivedAgentSession;
@@ -237,7 +237,8 @@ function Archived({ project }: { project: Workspace }) {
     sections.push({
       title: "Conversations",
       hideTitle: true,
-      // The titles too: the page's search keeps this section while any matches.
+      // The titles too, so the page's search keeps this section while any
+      // title matches.
       keywords: `archived ${archived.map((entry) => entry.title).join(" ")}`,
       content: list,
     });

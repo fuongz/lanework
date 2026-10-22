@@ -31,7 +31,7 @@ const CLI: Record<LaneworkMcpAgent, "claude" | "codex"> = {
   "claude-code": "claude",
   codex: "codex",
 };
-/** How long "✓ Signed in" stands before the island goes. */
+/** How long "✓ Signed in" stays before the island goes. */
 const DONE_MS = 2000;
 
 type Shown = "needs-login" | "failed" | "login" | "done";
@@ -41,8 +41,10 @@ interface Row {
 }
 
 /**
- * The agents the island is about: signing in, signed out or failing — and not
- * waved away for that same answer — or signed in from here a moment ago.
+ * The agents the island is about.
+ *
+ * Those signing in, signed out or failing (and not dismissed for that same
+ * answer), or signed in from here a moment ago.
  */
 export function useMcpAuthRows(): Row[] {
   const status = useMcpAuth((state) => state.status);
@@ -108,17 +110,17 @@ function Spinner({ className }: { className?: string }) {
 }
 
 /**
- * The Lanework MCP sign-in island: Claude Code or Codex lost — or never had —
- * its token for the cloud board, or holds one the server will not take. The
- * harness island's capsule, in the same spot.
+ * The Lanework MCP sign-in island, in the harness island's capsule and spot.
  *
- * ⚠️ It arrives as a pill and opens on hover or a click, like the harness
- * island: nothing the user just did caused it, so it does not take the top
- * of the window by itself. The pill stays until the agent signs in, or the
- * user dismisses that answer — a later, different answer brings it back.
+ * It speaks when Claude Code or Codex lost, or never had, its token for the
+ * cloud board, or holds one the server will not take.
  *
- * ⚠️ `yieldTo`: a board notice outranks it (it answers something the user
- * just did); it outranks the harness update offer, which yields to it.
+ * - It arrives as a pill and opens on hover or a click, like the harness
+ *   island: nothing the user just did caused it, so it does not take the top
+ *   of the window by itself. The pill stays until the agent signs in, or the
+ *   user dismisses that answer; a later, different answer brings it back.
+ * - `yieldTo`: a board notice outranks it, since that answers something the
+ *   user just did. It outranks the harness update offer, which yields to it.
  */
 export function McpAuthIsland({ yieldTo = false }: { yieldTo?: boolean }) {
   const rows = useMcpAuthRows();

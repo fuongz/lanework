@@ -1,15 +1,12 @@
-/**
- * The project's LOCAL repository: its working tree, its index, its history
- * (FE-22).
- *
- * ⚠️ Separate from `git.ts`, which is GitHub. Nothing here touches the network
- * except `sync`, nothing here needs a token, and a project with no GitHub
- * connection at all still has a folder with changes in it.
- *
- * ⚠️ Every call names a PROJECT, never a folder. Main resolves the slug to the
- * primary folder it wrote down itself, so no channel here can be pointed at an
- * arbitrary directory on the machine.
- */
+// The project's local repository: its working tree, its index, its history.
+//
+// Separate from `git.ts`, which is GitHub. Nothing here touches the network
+// except `sync`, nothing needs a token, and a project with no GitHub
+// connection still has a folder with changes in it.
+//
+// NOTE: Every call names a project, never a folder. Main resolves the slug to
+// a folder it wrote down itself, so no channel here can be pointed at an
+// arbitrary directory on the machine.
 
 /** What happened to one file, in the working tree's own terms. */
 export type WorktreeFileStatus =
@@ -23,7 +20,7 @@ export type WorktreeFileStatus =
 /**
  * How much of a file's change is in the index.
  *
- * ⚠️ `partial` is real, not a rounding: a file staged and then edited again has
+ * `partial` is real, not a rounding: a file staged and then edited again has
  * one change in the index and another beside it. The checkbox shows it as
  * indeterminate, and ticking it stages the rest.
  */
@@ -37,7 +34,7 @@ export interface WorktreeFile {
   staged: StagedState;
   additions: number;
   deletions: number;
-  /** True when git calls it binary — there are no lines to count or show. */
+  /** True when git calls it binary: there are no lines to count or show. */
   binary: boolean;
 }
 
@@ -45,15 +42,15 @@ export interface CommitSummary {
   sha: string;
   shortSha: string;
   subject: string;
-  /** Everything after the subject line, trimmed. Empty for a one-line message. */
+  /** Everything after the subject line, trimmed. Empty for a one-liner. */
   body: string;
   authorName: string;
   authorEmail: string;
   /** ISO 8601, as git wrote it. */
   authoredAt: string;
   /**
-   * True when no remote branch has this commit yet — it goes out on the next
-   * push. Only History (`log`) sets it; absent everywhere else.
+   * True when no remote branch has this commit yet, so it goes out on the
+   * next push. Only History (`log`) sets it; absent everywhere else.
    */
   unpushed?: boolean;
 }
@@ -69,10 +66,10 @@ export interface BranchState {
 /**
  * What the project's folder turned out to be.
  *
- * ⚠️ Four ways to have nothing, each with its own sentence. "No folder linked",
- * "the folder is gone", "not a git repository" and "git is not installed" need
- * four different fixes, and one generic empty state would send somebody to the
- * wrong one.
+ * Four ways to have nothing, each with its own sentence. "No folder linked",
+ * "the folder is gone", "not a git repository" and "git is not installed"
+ * need four different fixes; one generic empty state would send somebody to
+ * the wrong one.
  */
 export type WorktreeState =
   | { kind: "none" }
@@ -89,17 +86,17 @@ export type WorktreeState =
       /** The repository's remotes by name, as `git remote` lists them. */
       remotes: string[];
       /**
-       * Commits on HEAD no remote branch has — History's ↑ rows, counted.
+       * Commits on HEAD no remote branch has: History's ↑ rows, counted.
        * 0 with no remote: with nowhere to push, nothing is "not pushed".
        */
       unpushed: number;
     };
 
 /**
- * Every changed file as ONE unified patch, as git itself printed it.
+ * Every changed file as one unified patch, as git printed it.
  *
- * ⚠️ Full headers, unlike GitHub's per-file hunks. The viewer parses this as
- * is; nothing has to rebuild `diff --git` lines the way the pull request screen
+ * Full headers, unlike GitHub's per-file hunks. The viewer parses this as is;
+ * nothing has to rebuild `diff --git` lines the way the pull request screen
  * does.
  */
 export interface WorktreePatch {
@@ -126,7 +123,7 @@ export interface CommitChange {
 /**
  * The branches a project can switch to.
  *
- * ⚠️ `remote` leaves out every remote branch that already has a local branch of
+ * `remote` leaves out every remote branch that already has a local branch of
  * the same name: switching to `origin/main` when `main` exists would mean the
  * local one, and listing both invites picking the wrong row.
  */
@@ -145,7 +142,7 @@ export const HISTORY_PAGE = 100;
 /**
  * Which side of a file to read, when the viewer expands unchanged lines.
  *
- * ⚠️ A revision the RENDERER names is only ever a sha it was given, or the
+ * NOTE: A revision the renderer names is only ever a sha it was given, or the
  * literal `HEAD`. Main checks the shape before it reaches `git show`.
  */
 export type FileSide = { kind: "worktree" } | { kind: "rev"; rev: string };
@@ -156,9 +153,9 @@ export type CommitMode = "staged" | "tracked";
 /**
  * One exchange with a remote, from the Changes screen's sync button.
  *
- * ⚠️ `force-push` is `--force-with-lease`, never a bare `--force`: it refuses
- * when the remote moved since the last fetch, so it cannot erase a commit
- * somebody else pushed that this machine has never seen.
+ * NOTE: `force-push` is `--force-with-lease`, never a bare `--force`. It
+ * refuses when the remote moved since the last fetch, so it cannot erase a
+ * commit somebody else pushed that this machine has never seen.
  */
 export type SyncAction =
   | "fetch"
@@ -168,13 +165,13 @@ export type SyncAction =
   | "force-push";
 
 /**
- * Paths for Repository › Files (FE-66): directories end with `/`, the way
+ * Paths for Repository › Files. Directories end with `/`, the way
  * `@pierre/trees` takes them.
  *
- * ⚠️ `lazy` are directories listed WITHOUT their contents — what git ignores
+ * `lazy` are directories listed without their contents: what git ignores
  * (`node_modules/`, `dist/`) at the top read, and every subdirectory of a
- * directory read with `dir`. The tree asks for one when somebody opens it;
- * walking a `node_modules` up front to draw a sidebar would be a hundred
+ * directory read with `dir`. The tree asks for one when somebody opens it.
+ * Walking a `node_modules` up front to draw a sidebar would be a hundred
  * thousand stats nobody looks at.
  */
 export interface FileListing {
@@ -182,7 +179,7 @@ export interface FileListing {
   root: string;
   paths: string[];
   lazy: string[];
-  /** Paths git ignores — drawn greyed, the way an editor does. */
+  /** Paths git ignores, drawn greyed the way an editor does. */
   ignored: string[];
   /** True when the listing hit its cap and stops short. */
   truncated: boolean;
@@ -191,7 +188,7 @@ export interface FileListing {
 /** One file as the Files screen shows it. */
 export type FileView =
   | { kind: "text"; text: string; size: number }
-  /** An image, as a `data:` URL — drawn rather than called binary. */
+  /** An image, as a `data:` URL, drawn rather than called binary. */
   | { kind: "image"; url: string; size: number }
   | { kind: "binary"; size: number }
   | { kind: "too-large"; size: number }
@@ -221,18 +218,18 @@ export const worktreeChannels = {
 /**
  * The local-repository surface.
  *
- * ⚠️ Paths travel as the paths `status` answered, and main re-reads the status
- * before acting on them: a path that is not a current change is refused rather
- * than handed to `git`. That is what keeps `restore` — which deletes untracked
- * files — from being a way to delete anything else.
+ * NOTE: Paths travel as the paths `status` answered, and main re-reads the
+ * status before acting on them: a path that is not a current change is
+ * refused rather than handed to `git`. That keeps `restore`, which deletes
+ * untracked files, from being a way to delete anything else.
  */
 export interface DesktopWorktreeApi {
   /**
-   * The working tree for Repository › Files (FE-66), ignored folders unread.
+   * The working tree for Repository › Files, ignored folders unread.
    *
-   * ⚠️ `folder` on the Files channels is the INDEX of one of the project's
-   * linked folders, primary = 0 and the default (FE-71/D3) — never a path.
-   * Main looks the folder up in what this machine wrote down.
+   * NOTE: `folder` on the Files channels is the index of one of the project's
+   * linked folders, never a path; the primary is 0 and the default
+   * (FE-71/D3). Main looks the folder up in what this machine wrote down.
    */
   files: (slug: string, folder?: number) => Promise<FileListing>;
   /** One directory's own entries; every subdirectory comes back `lazy`. */
@@ -242,14 +239,19 @@ export interface DesktopWorktreeApi {
   /** Show one file of the working tree in Finder / Explorer. */
   reveal: (slug: string, path: string, folder?: number) => Promise<void>;
   /**
-   * A path as somebody wrote it — relative to the project's folder, to the
-   * repository, absolute, or a bare name — as the repository path of the one
-   * file it means. Null when it is not in the repository, or is ambiguous.
+   * A path as somebody wrote it, as the repository path of the one file it
+   * means.
+   *
+   * The input may be relative to the project's folder or to the repository,
+   * absolute, or a bare name.
+   *
+   * @returns null when it is not in the repository, or is ambiguous.
    */
   locate: (slug: string, path: string) => Promise<string | null>;
   /**
-   * Open a file or folder of the working tree in its default app. Refused for
-   * anything that would RUN — an app, a script, an executable.
+   * Open a file or folder of the working tree in its default app.
+   *
+   * Refused for anything that would run: an app, a script, an executable.
    */
   openDefault: (slug: string, path: string, folder?: number) => Promise<void>;
   status: (slug: string, folder?: number) => Promise<WorktreeState>;
@@ -262,7 +264,7 @@ export interface DesktopWorktreeApi {
   ) => Promise<string | null>;
   stage: (slug: string, paths: string[]) => Promise<WorktreeState>;
   unstage: (slug: string, paths: string[]) => Promise<WorktreeState>;
-  /** Throw a change away. Untracked files are DELETED. */
+  /** Throw a change away. NOTE: Untracked files are deleted. */
   restore: (slug: string, paths: string[]) => Promise<WorktreeState>;
   commit: (
     slug: string,
@@ -270,9 +272,11 @@ export interface DesktopWorktreeApi {
     mode: CommitMode,
   ) => Promise<WorktreeState>;
   /**
-   * Fetch, pull or push. `remote` names one of `remotes` for Fetch From and
-   * Push To; null means the branch's upstream (or, to push a branch that has
-   * none yet, `origin` — and the push then sets it).
+   * Fetch, pull or push.
+   *
+   * @param remote One of `remotes`, for Fetch From and Push To. null means
+   *   the branch's upstream, or `origin` to push a branch that has none yet
+   *   (the push then sets it).
    */
   sync: (
     slug: string,
@@ -284,29 +288,30 @@ export interface DesktopWorktreeApi {
   /** Null when the project has no repository to have branches in. */
   branches: (slug: string) => Promise<BranchList | null>;
   /**
-   * Check out a branch — a local name, or `origin/name` to start tracking one.
+   * Check out a branch: a local name, or `origin/name` to start tracking one.
    *
-   * ⚠️ Never forced. When uncommitted changes would be overwritten git refuses,
+   * Never forced. When uncommitted changes would be overwritten git refuses,
    * and that refusal is the answer the screen shows.
    */
   switchBranch: (slug: string, name: string) => Promise<WorktreeState>;
 }
 
 /**
- * Line counts per file, read straight off a unified patch.
+ * Files "Open in Default App" will not open, because opening them runs them.
  *
- * ⚠️ Counted from the patch rather than asked of `--numstat` separately. The
- * numbers a row shows and the lines the viewer draws then come from ONE read,
- * and cannot disagree because the tree changed between two.
- */
-/**
- * Files "Open in Default App" will not open (FE-66): opening them runs them.
  * Main also refuses anything with an execute bit; this list is what the menu
  * can know without asking.
  */
 export const LAUNCHABLE =
   /\.(app|command|tool|terminal|workflow|action|scpt|applescript|sh|bash|zsh|fish|py|rb|pl|jar|exe|bat|cmd|ps1|msi|pkg|mpkg|dmg|webloc|inetloc|url|desktop)\/?$/i;
 
+/**
+ * Line counts per file, read straight off a unified patch.
+ *
+ * Counted from the patch rather than asked of `--numstat` separately, so the
+ * numbers a row shows and the lines the viewer draws come from one read and
+ * cannot disagree because the tree changed between two.
+ */
 export function patchStats(
   patch: string,
 ): Map<string, { additions: number; deletions: number; binary: boolean }> {
@@ -324,8 +329,8 @@ export function patchStats(
     if (line.startsWith("diff --git ")) {
       current = { additions: 0, deletions: 0, binary: false };
       inHunk = false;
-      // The b/ side names the file as it is now; rename/new headers below may
-      // say it again, and the last word wins.
+      // The b/ side names the file as it is now. Rename and new-file headers
+      // below may say it again, and the last word wins.
       const match = / b\/(.*)$/.exec(line);
       if (match?.[1]) out.set(match[1], current);
       continue;

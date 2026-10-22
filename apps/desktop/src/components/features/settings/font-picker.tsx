@@ -35,8 +35,8 @@ const DEFAULT_LABEL: Record<FontRole, string> = {
 /**
  * The installed fonts, for every picker on the page.
  *
- * ⚠️ Read on mount AND again when a picker opens. The first read can be
- * refused for want of a user gesture; opening a select is one.
+ * NOTE: Read on mount and again when a picker opens. The first read can be
+ * refused for want of a user gesture, and opening a picker is one.
  */
 function useFontCatalog() {
   const [catalog, setCatalog] = useState<FontCatalog | null>(null);
@@ -58,7 +58,7 @@ function useFontCatalog() {
   return { catalog, failed, retry };
 }
 
-/** The style closest to `weight` — what a new family starts on. */
+/** The style closest to `weight`, which a newly picked family starts on. */
 function closest(styles: FontStyle[], weight: number): FontStyle | undefined {
   return styles.reduce<FontStyle | undefined>(
     (best, style) =>
@@ -70,10 +70,10 @@ function closest(styles: FontStyle[], weight: number): FontStyle | undefined {
 }
 
 /**
- * A family and a style of it, for one of the three font roles (FE-21).
+ * A family and a style of it, for one of the three font roles.
  *
- * The style select is disabled while the role is at its default — there is
- * no family to list styles of, and the default's own weight is the app's.
+ * The style select is disabled while the role is at its default: there is no
+ * family to list styles of, and the default's weight is the app's.
  */
 export function FontPicker({
   font: role,
@@ -88,7 +88,7 @@ export function FontPicker({
 
   const families = catalog ?? [];
   // A saved family this machine no longer has still shows as picked, so the
-  // select does not silently read "Default" over a setting that is in force.
+  // select does not read "Default" over a setting that is in force.
   const listed = choice && !families.some((f) => f.family === choice.family);
   const styles: FontStyle[] = choice
     ? (families.find((f) => f.family === choice.family)?.styles ?? [
@@ -149,11 +149,11 @@ export function FontPicker({
 }
 
 /**
- * The family picker: a searchable list, since a Mac has hundreds of families
- * and a plain select only lets you scroll through them.
+ * The family picker, a searchable list.
  *
- * The default sits in its own group above a separator. It is not a font and
- * should not be sorted in among them, or turned up by a search for one.
+ * A Mac has hundreds of families, and a plain select only scrolls. The
+ * default sits in its own group above a separator: it is not a font, so it is
+ * not sorted among them or matched by a search.
  */
 function FamilyCombobox({
   label,

@@ -32,20 +32,18 @@ import { shortPath } from "#/lib/memory";
 import { cn } from "#/lib/utils";
 
 /**
- * What each agent reads, as a tree (FE-44, after FE-37/D3): Claude, then
- * Codex, each in the order it reads its files with imports folded under the
- * file that names them — and the files below the folder that load as an
- * agent works there, under their folders (FE-44/D3).
+ * What each agent reads, as a tree.
  *
- * ⚠️ Drawn here, not by `@pierre/trees` (FE-44/D1). That library is a tree of
- * PATHS: it would sort these files by folder and lose the one thing this list
- * says — the order an agent reads them in — and it has no room on a row for
- * the scope beside each name.
+ * Claude, then Codex, each in the order it reads its files, imports folded
+ * under the file that names them; then the files below the folder that load
+ * as an agent works there, under their folders (FE-44/D3).
  *
- * ⚠️ Rows stay LINKS inside a `nav`, the way they were: the chevron is a
- * button of its own beside the link, never inside it, and the arrow keys move
- * between rows by hand rather than through an ARIA `tree`, which would take
- * every link's role away.
+ * - Drawn here, not by `@pierre/trees` (FE-44/D1). That library is a tree of
+ *   paths: it would sort these files by folder and lose the order an agent
+ *   reads them in, and it has no room on a row for the scope.
+ * - Rows are links inside a `nav`. The chevron is a button beside the link,
+ *   never inside it, and the arrow keys move between rows by hand rather
+ *   than through an ARIA `tree`, which would take every link's role away.
  */
 
 /** Pixels each level of the tree sits further in. */
@@ -82,7 +80,7 @@ function useCollapsed(slug: string) {
         try {
           localStorage.setItem(key, JSON.stringify([...next]));
         } catch {
-          // Private window or blocked storage: it just won't be remembered.
+          // Private window or blocked storage: the fold is not remembered.
         }
         return next;
       }),
@@ -170,7 +168,7 @@ function FileRow({
   path: string;
   /** The row ← steps out to. */
   parent: string;
-  /** Under a folder row its folder is already said. */
+  /** Show the file's folder; a row under a folder row already says it. */
   showFolder?: boolean;
   collapsed: Set<string>;
   toggle: Toggle;
@@ -189,7 +187,8 @@ function FileRow({
       : SCOPE_LABELS[node.scope];
   const expandable = node.children.length > 0;
   const open = expandable && !collapsed.has(path);
-  // The note left the row (FE-44/D4): the detail's header says it in full.
+  // The note goes in the tooltip only; the detail's header says it in full
+  // (FE-44/D4).
   const title = [
     file.missing
       ? `No file at ${file.path}`
@@ -203,7 +202,7 @@ function FileRow({
 
   const content = (
     <>
-      {/* The chevron's slot: the button itself sits over it, outside the link. */}
+      {/* The chevron's slot: the button sits over it, outside the link. */}
       <span className="size-4 shrink-0" />
       <FileTypeIcon
         path={base}
@@ -262,7 +261,8 @@ function FileRow({
             />
           </span>
         )}
-        {/* Only Markdown that exists opens: anything else is listed by name (FE-37/D6). */}
+        {/* Only Markdown that exists opens; anything else is listed by name
+            (FE-37/D6). */}
         {file.markdown && !file.missing ? (
           <Link
             to="/settings/instructions/$id"
@@ -414,7 +414,7 @@ function AgentGroup({
   );
 }
 
-/** A folder of the subfolder group (FE-44/D3), and what is under it. */
+/** A folder of the subfolder group, and what is under it. */
 function FolderRow({
   slug,
   list,
@@ -525,8 +525,10 @@ function NestedRows({
 }
 
 /**
+ * Arrow-key movement through the tree (FE-44/D4).
+ *
  * ↑/↓ between rows, ← folds a row or steps out to its parent, → unfolds it
- * or steps into its first child (FE-44/D4). Enter is the link's own.
+ * or steps into its first child. Enter is the link's own.
  */
 function onTreeKey(event: KeyboardEvent<HTMLElement>, toggle: Toggle) {
   const rows = [

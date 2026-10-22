@@ -22,7 +22,7 @@ interface Command {
   label: string;
   hint?: string;
   icon?: typeof Sun01Icon;
-  /** Rendered instead of `icon` when a card's own lane glyph is the right cue. */
+  /** Drawn instead of `icon` when a card's own lane glyph is the right cue. */
   lane?: string;
   run: () => void;
 }
@@ -31,14 +31,14 @@ interface Command {
 const SEARCH_DEBOUNCE_MS = 250;
 
 /**
- * ⌘K.
+ * The ⌘K palette: commands, and cards by title or task id.
  *
- * ⚠️ Cards are searched on the SERVICE once two characters are typed (FE-18).
- * The board is read one page per group now (FE-17), so the cards in memory are
- * a fraction of it, and a search over them alone would miss the old ones —
- * exactly the ones you open a palette to find. The loaded matches still show
- * at once, so the palette never waits on the network to answer something it
- * already knows, and they are what is left when the service cannot be asked.
+ * Cards are searched on the service once two characters are typed. The board
+ * is read one page per group, so the cards in memory are a fraction of it,
+ * and a search over them alone would miss the old ones: the ones you open a
+ * palette to find. The loaded matches still show at once, so the palette
+ * never waits on the network for something it already knows, and they are
+ * what is left when the service cannot be asked.
  */
 export function CommandPalette() {
   const isOpen = useCommandPalette((state) => state.isOpen);
@@ -55,7 +55,7 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [at, setAt] = useState(0);
   const workspaceId = useBoard((state) => state.active?.id ?? null);
-  /** The service's answer, for the query it answered — never a stale one. */
+  /** The service's answer, for the query it answered; never a stale one. */
   const [remote, setRemote] = useState<{
     query: string;
     cards: BoardCard[] | null;
@@ -63,7 +63,7 @@ export function CommandPalette() {
   const trimmed = query.trim();
   const searching = Boolean(slug && workspaceId) && trimmed.length >= 2;
 
-  // ⚠️ One request per PAUSE, not per keystroke, and an answer only counts for
+  // One request per pause, not per keystroke, and an answer counts only for
   // the query it was asked for: typing on drops whatever was in flight.
   useEffect(() => {
     if (!isOpen || !searching || !workspaceId) return;
@@ -123,8 +123,8 @@ export function CommandPalette() {
           label: "New issue",
           hint: "⌘N",
           icon: Add01Icon,
-          // It used to land on the issues LIST, which is a page with a
-          // one-line add field on it — not a place to write an issue.
+          // The composer, not the issues list: a one-line add field is not a
+          // place to write an issue.
           run: () =>
             void navigate({ to: "/w/$slug/issues/new", params: { slug } }),
         },
@@ -194,10 +194,10 @@ export function CommandPalette() {
     : searching
       ? [...cardCommands, ...commands.filter(byText)]
       : [...cardCommands, ...commands].filter(byText);
-  // ⚠️ A task id that is not among the loaded cards still opens (FE-17/D4). A
-  // board is read one page per group now, so "not loaded" is not "not there":
-  // the card page asks the service for it by that id, and says so if it is
-  // not a card.
+  // A task id that is not among the loaded cards still opens (FE-17/D4). A
+  // board is read one page per group, so "not loaded" is not "not there": the
+  // card page asks the service for it by that id, and says so if it is not a
+  // card.
   const taskId = /^[a-z][a-z0-9]*-\d+$/i.test(needle)
     ? query.trim().toUpperCase()
     : null;

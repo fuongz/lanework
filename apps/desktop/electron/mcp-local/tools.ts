@@ -1,20 +1,21 @@
-// The offline MCP server's tools (FE-52/W3): the cloud server's 14 board tools,
-// same names, same parameter names and types, run against the local SQLite
-// board instead of the API.
+// The offline MCP server's tools: the cloud server's 14 board tools, with the
+// same names and parameters, run against the local SQLite board instead of the
+// API.
 //
-// ⚠️ Thin. Every rule a card obeys (task-id minting, checklist keys, stream
-// validation, checkpoint trimming, tombstones) lives in `../local-store`, which
-// the app also writes through — a rule spelled twice here would drift. What
-// lives here is only what the cloud does ABOVE its store: pick-ONE groups for
-// `review_card`, the lifecycle roll-up, the stream-plan checks a card is
-// refused on, and the answer shapes.
-//
-// ⚠️ Every write goes through the store, which bumps `dataVersion()` in the
-// same transaction: that is how the app sees an agent's write (it polls).
-//
-// ⚠️ `board_id` is the local workspace id. There are no accounts, machines,
+// `board_id` is the local workspace id. There are no accounts, machines,
 // members, comments, attachments or subscriptions offline, so those tools do
 // not exist here and `assignees.users` is accepted and ignored.
+//
+// NOTE: Keep this layer thin. Every rule a card obeys (task-id minting,
+// checklist keys, stream validation, checkpoint trimming, tombstones) lives in
+// `../local-store`, which the app also writes through; a rule spelled twice
+// here would drift. Only what the cloud does ABOVE its store lives here:
+// pick-ONE groups for `review_card`, the lifecycle roll-up, the stream-plan
+// checks a card is refused on, and the answer shapes.
+//
+// NOTE: Every write goes through the store, which bumps `dataVersion()` in the
+// same transaction. The app polls that, so a write around the store never
+// shows up in the app.
 import type {
   BoardColumn,
   CardDetail,
@@ -36,9 +37,9 @@ import type { Param, Shape } from "./schema";
 
 export interface ToolContext {
   store: LocalStore;
-  /** The writer's agent slug, from the client's `initialize` (`claude-code`, `codex`). */
+  /** The writer's agent slug from the client's `initialize`: `claude-code`. */
   agent: string;
-  /** This machine's name — every offline checkpoint was written here. */
+  /** This machine's name, where every offline checkpoint was written. */
   host: string;
 }
 
@@ -146,7 +147,7 @@ function cardOf(store: LocalStore, board: LocalWorkspace, card: unknown) {
 const str = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined;
 
-/** The lane `create_review` lands a card in when none is named: the start lane. */
+/** The start lane, where `create_review` lands a card when none is named. */
 function startColumn(board: LocalWorkspace): string | undefined {
   return board.config.columns.find((column) => column.role === "start")?.key;
 }
@@ -187,7 +188,10 @@ function checkStreamPlan(
     );
 }
 
-/** A checklist as `updateWorkItem` takes it back: everything kept, keys included. */
+/**
+ * A checklist in the shape `updateWorkItem` takes back: everything kept, keys
+ * included.
+ */
 function asInput(checklist: ChecklistItem[]): ChecklistItemInput[] {
   return checklist.map((item) => ({
     key: item.key,
@@ -280,8 +284,7 @@ export const TOOLS: ToolSpec[] = [
     properties: {
       name: {
         type: "string",
-        description:
-          "Board name the user agreed to, e.g. `hiip/headless-controller`",
+        description: "Board name the user agreed to, e.g. `acme/widgets`",
       },
       repo: REPO,
       slug: {
@@ -562,8 +565,8 @@ export const TOOLS: ToolSpec[] = [
       const streams = args.streams as StreamInput[] | undefined;
       if (streams)
         checkStreamPlan(streams, checklist ?? asInput(current.checklist));
-      // ⚠️ One write, at the revision read above: the retagged checklist was
-      // built from it, so a box ticked in between must refuse, not vanish.
+      // NOTE: One write, at the revision read above. The retagged checklist
+      // was built from it, so a box ticked in between must refuse, not vanish.
       const item = store.updateWorkItem(
         current.id,
         {

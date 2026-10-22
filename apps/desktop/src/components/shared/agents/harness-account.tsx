@@ -3,8 +3,10 @@ import { cn } from "#/lib/utils";
 import type { HarnessAccount, HarnessAgent } from "../../../../shared/harness";
 
 /**
- * Who each CLI is signed in as (`HarnessAccount`), read on mount and again on
- * coming back to the window — signing in happens in a terminal.
+ * Who each CLI is signed in as.
+ *
+ * Read on mount and again on coming back to the window, because signing in
+ * happens in a terminal.
  */
 export function useHarnessAccounts(): Partial<
   Record<HarnessAgent, HarnessAccount>
@@ -39,10 +41,11 @@ const titleCase = (word: string) =>
   `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
 
 /**
- * The signed-in account, as Settings › Agents draws it: "Default account",
- * its organization as a badge, then its state (`HarnessAccountState`).
+ * The signed-in account, as Settings › Agents draws it.
  *
- * ⚠️ Wraps rather than truncates, so a long email never pushes the name out.
+ * "Default account", its organization as a badge, then its state
+ * (`HarnessAccountState`). Wraps rather than truncates, so a long email never
+ * pushes the name out.
  */
 export function HarnessAccountRow({
   kind,
@@ -93,8 +96,9 @@ function HarnessOrgBadge({
 }
 
 /**
- * "● Ready  Team  email": the account's state, its plan and its email,
- * blurred, as Settings › Agents draws them.
+ * The account's state, plan and blurred email: "● Ready  Team  email".
+ *
+ * As Settings › Agents draws them.
  */
 function HarnessAccountState({
   kind,
@@ -130,9 +134,11 @@ function HarnessAccountState({
 }
 
 /**
- * The usage popover's second line: a pinging dot for a signed-in account,
- * its organization ("Personal", "Hiip") and its email, blurred. The plan is
- * on the line above, beside the name.
+ * The usage popover's second line.
+ *
+ * A pinging dot for a signed-in account, its organization ("Personal",
+ * "Acme") and its email, blurred. The plan is on the line above, beside the
+ * name.
  */
 export function HarnessAccountLine({
   kind,
@@ -163,11 +169,11 @@ export function HarnessAccountLine({
 }
 
 /**
- * An email drawn blurred, the way a screenshot-safe settings page shows one:
- * hover or focus it to read it, click to keep it shown.
+ * An email drawn blurred, as a screenshot-safe settings page shows one.
  *
- * ⚠️ The blur is for the screen, not for safety — the text is in the DOM and
- * a screen reader reads it. That is the point: it is the user's own email.
+ * Hover or focus it to read it, click to keep it shown. The blur is for the
+ * screen, not for safety: the text is in the DOM and a screen reader reads
+ * it, which is fine for the user's own email.
  */
 function BlurredEmail({ email }: { email: string }) {
   const [shown, setShown] = useState(false);

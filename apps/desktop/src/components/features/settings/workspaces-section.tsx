@@ -35,15 +35,15 @@ const NONE: Workspace[] = [];
 /**
  * The folders linked to each project on this machine, primary first.
  *
- * ⚠️ It hands back the READ as well as the result. Editing a project's folders
- * changes nothing about the workspace list, so there would otherwise be no
- * dependency to change and the page would keep showing the old paths — and a
- * counter in the dependency array is a dependency the effect does not use.
+ * NOTE: It hands back the read (`refresh`) as well as the result. Editing a
+ * project's folders changes nothing about the workspace list, so no
+ * dependency would change and the page would keep the old paths. A counter in
+ * the dependency array would be a dependency the effect does not use.
  */
 function useFolderPaths(workspaces: Workspace[]) {
   const [paths, setPaths] = useState<Record<string, string[]>>({});
-  // The slugs as one string: a new array every render must not be a reason to
-  // re-read every project's folders.
+  // The slugs as one string: a new array every render must not re-read every
+  // project's folders.
   const slugs = workspaces.map((workspace) => workspace.slug).join(" ");
 
   const read = useCallback(async () => {
@@ -55,8 +55,8 @@ function useFolderPaths(workspaces: Workspace[]) {
         .filter(Boolean)
         .map(
           async (slug) =>
-            // A folder read that fails is not worth failing the page over: the
-            // row still names the project, and the folder line stays empty.
+            // A failed folder read is not worth failing the page over: the row
+            // still names the project, and the folder line stays empty.
             [
               slug,
               (await api.list(slug).catch(() => [])).map(
@@ -79,23 +79,19 @@ function useFolderPaths(workspaces: Workspace[]) {
  * Settings › Projects › General: the project picked in the sidebar's Projects
  * heading, and what this app can do to it.
  *
- * ⚠️ Create, rename and delete are all on the MACHINE surface this app holds a
- * credential for — `POST`, `PATCH` and `DELETE /v1/sync/state/workspace`. The
- * human surface (`/v1/workspaces`) is `sessionAuth` and refuses this app's
- * credential by design, so none of these three may be pointed at it.
+ * NOTE: Create, rename and delete all use the machine surface this app holds
+ * a credential for: `POST`, `PATCH` and `DELETE /v1/sync/state/workspace`.
+ * The human surface (`/v1/workspaces`) is `sessionAuth` and refuses this
+ * app's credential by design, so none of the three may be pointed at it.
  *
- * ⚠️ Rename moves the NAME only. No route on the service can change a slug, so
- * the key under the project's name is fixed for the life of the project —
- * which is what makes the folder link and the saved selection, both keyed by
- * slug, safe from a rename. The rename dialog says so, where the question
- * comes up (`rename-project-dialog.tsx`).
- *
- * ⚠️ Delete on this surface is not the archive the web app does. The service
- * removes the row and cascades every machine's recorded path for it, so the
- * confirmation says that rather than asking "are you sure?".
- *
- * ⚠️ No project list here any more: the picker in the sidebar chooses the
- * project, and the order lives in the project switcher (FE-32).
+ * - Rename changes the name only. No route on the service can change a slug,
+ *   so the folder link and the saved selection, both keyed by slug, survive
+ *   a rename. The rename dialog says so (`rename-project-dialog.tsx`).
+ * - Delete here is not the web app's archive. The service removes the row
+ *   and every machine's recorded path for it, so the confirmation says that
+ *   rather than asking "are you sure?".
+ * - No project list: the sidebar's picker chooses the project, and the order
+ *   lives in the project switcher.
  */
 export function WorkspacesSection() {
   const selected = useSettingsProject();
@@ -106,24 +102,25 @@ export function WorkspacesSection() {
   const [renaming, setRenaming] = useState<(Workspace & { id: string }) | null>(
     null,
   );
-  // ⚠️ `id` narrowed to a string, like `renaming` above: the delete is addressed
-  // by cloud id, so a project without one must not be able to reach this dialog.
+  // NOTE: `id` narrowed to a string, like `renaming`. The delete is addressed
+  // by cloud id, so a project without one must not reach this dialog.
   const [confirming, setConfirming] = useState<
     (Workspace & { id: string }) | null
   >(null);
   const [failed, setFailed] = useState<string | null>(null);
   const shown = selected ? [selected] : NONE;
   const { paths, refresh } = useFolderPaths(shown);
-  // FE-52: local mode keeps every project on this machine; signing in adds the
-  // account's beside them (D6a), and a local one can then be moved (D7a).
+  // Local mode keeps every project on this machine. Signing in adds the
+  // account's beside them (FE-52/D6a), and a local one can then be moved
+  // (FE-52/D7a).
   const signedIn = useSession(
     (state) => state.session?.principal.kind === "machine",
   );
   const { sync, syncing, error: syncError } = useSyncToCloud();
   const failure = failed ?? syncError;
 
-  // FE-52/D7a: one click moves it to the account. Only once signed in —
-  // there is no account to move it to before — and never twice.
+  // One click moves it to the account. Only once signed in, since before that
+  // there is no account to move it to, and never twice.
   const canSync =
     signedIn &&
     !!selected &&
@@ -276,8 +273,8 @@ export function WorkspacesSection() {
               variant="destructive"
               // The registry button pairs `border border-transparent` with
               // `bg-clip-padding`, so the fill stops short of the edge and the
-              // popup shows through as a 1px ring — the same `border-0` every
-              // other destructive confirmation in this app carries.
+              // popup shows through as a 1px ring. Every destructive
+              // confirmation in this app carries this `border-0`.
               className="border-0"
               onClick={() => {
                 const target = confirming;

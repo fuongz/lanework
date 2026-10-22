@@ -17,12 +17,11 @@ const SOURCES = [
 ] as const;
 
 /**
- * Issues and Pull requests as two tabs over one list column (FE-75). Pull
- * requests used to be their own row under Repository; they live here now.
+ * Issues and Pull requests as two tabs over one list column.
  *
- * NOTE: Each tab is its own screen with its own route, and the bar is drawn
- * at the top of both lists. Switching keeps nothing of the other's filters:
- * a filter on cards means nothing to a pull request.
+ * Each tab is its own screen with its own route, and the bar is drawn at the
+ * top of both lists. Switching keeps nothing of the other's filters: a filter
+ * on cards means nothing to a pull request.
  */
 function SourceTabs({ slug, value }: { slug: string; value: Source }) {
   const navigate = useNavigate();
@@ -48,11 +47,11 @@ function SourceTabs({ slug, value }: { slug: string; value: Source }) {
 
 /**
  * The top of either list: the tabs, then the search box and whatever acts on
- * the list beside it (FE-75).
+ * the list beside it.
  *
  * NOTE: One component for both, not two copies that look alike. Switching tab
- * swaps the screen under this header, and any pixel the two disagreed on —
- * a gap, the search box's height — made the whole header jump.
+ * swaps the screen under this header, and any pixel the two disagree on (a
+ * gap, the search box's height) makes the whole header jump.
  */
 export function SourceHeader({
   slug,

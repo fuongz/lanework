@@ -21,7 +21,7 @@ import {
   useSettingsProjectPick,
 } from "#/stores/settings-project";
 
-/** Lower case, accents off: `Đơn` finds `don`, `Hiip` finds `hiip`. */
+/** Lower case, accents off: `Đơn` finds `don`, `Acme` finds `acme`. */
 const fold = (text: string) =>
   text
     .normalize("NFD")
@@ -30,9 +30,11 @@ const fold = (text: string) =>
     .toLowerCase();
 
 /**
- * The project Settings › Projects is about, in the window's title bar of
- * each of its pages: the project switcher's button and menu — a search, the
- * list, and New project — but picking only chooses what these pages show.
+ * The project Settings › Projects is about, in the title bar of each of its
+ * pages.
+ *
+ * The project switcher's button and menu (a search, the list, and New
+ * project), but picking only chooses what these pages show.
  */
 export function SettingsProjectPicker() {
   const workspaces = useBoard((state) => state.workspaces);
@@ -73,10 +75,11 @@ export function SettingsProjectPicker() {
             <button
               type="button"
               aria-label={`Pick a project — currently ${selected?.name ?? "none"}`}
-              // ⚠️ `-ml-3.5`: the slot keeps 17px clear of the card's edge for
-              // a page's title; the picker's tile sits close to it instead.
-              // `translate-y-[3px]`: centred in the 44px bar it had 8px above
-              // and 14px below — the card starts 6px (`my-1.5`) under the bar.
+              // - `-ml-3.5`: the slot keeps 17px clear of the card's edge for a
+              //   page's title; the picker's tile sits close to it instead.
+              // - `translate-y-[3px]`: centred in the 44px bar it had 8px above
+              //   and 14px below, since the card starts 6px (`my-1.5`) under
+              //   the bar.
               className="hover:bg-foreground/[0.05] -ml-3.5 mr-3 flex h-7 translate-y-[3px] min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-md px-1.5 text-left transition-colors duration-150"
             >
               <ProjectTile
@@ -210,8 +213,8 @@ export function SettingsProjectPicker() {
           </RailHover>
         </PopoverContent>
       </Popover>
-      {/* Outside the popover on purpose: rendered inside it, closing the menu
-          would unmount the dialog the menu just opened. */}
+      {/* Outside the popover: rendered inside it, closing the menu would
+          unmount the dialog the menu just opened. */}
       <CreateProjectDialog
         open={creating}
         onOpenChange={setCreating}

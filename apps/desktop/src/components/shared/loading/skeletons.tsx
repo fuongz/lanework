@@ -1,16 +1,13 @@
 import { Skeleton } from "#/components/ui/skeleton";
 import { cn } from "#/lib/utils";
 
-/**
- * The app's loading placeholders, shaped like what is coming
- * (docs/standards/loading-states.md).
- *
- * ⚠️ Every one is a `role="status"` with a real label: a screen reader gets
- * nothing from grey bars, and the label is what replaced the old text.
- *
- * ⚠️ Widths come from fixed tables, never `Math.random`: a placeholder that
- * reshuffles on every render flickers.
- */
+// The app's loading placeholders, shaped like what is coming
+// (`docs/standards/loading-states.md`).
+//
+// - Every one is a `role="status"` with a real label: a screen reader gets
+//   nothing from grey bars.
+// - NOTE: Widths come from fixed tables, never `Math.random`. A placeholder
+//   that reshuffles on every render flickers.
 
 const LINE_WIDTHS = ["72%", "54%", "86%", "63%", "45%", "78%", "58%", "68%"];
 
@@ -75,8 +72,9 @@ export function ListSkeleton({
 }
 
 /**
- * A file, a diff or a document: a header row, then text lines. `code` draws
- * the lines indented like source, in a gutter.
+ * A file, a diff or a document: a header row, then text lines.
+ *
+ * `code` draws the lines indented like source, in a gutter.
  */
 export function DocumentSkeleton({
   label,

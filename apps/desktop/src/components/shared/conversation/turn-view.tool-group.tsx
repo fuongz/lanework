@@ -36,15 +36,17 @@ const KIND_ICONS: Record<ToolKind, IconSvgElement> = {
 };
 
 /**
- * What a fold's open and close share: the panel's height eases between 0 and
- * what Base UI measured (`auto` once open, so a call opening inside a group
- * still grows it), the calls fading with it. Short, and a strong ease-out:
- * height costs layout every frame, and the reader is waiting on the rows.
+ * The timing a fold's open and close share.
+ *
+ * The panel's height eases between 0 and what Base UI measured (`auto` once
+ * open, so a call opening inside a group still grows it), the calls fading
+ * with it. Short, with a strong ease-out: height costs layout every frame,
+ * and the reader is waiting on the rows.
  */
 const EASE = "duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]";
 const PANEL = `h-(--collapsible-panel-height) overflow-hidden transition-[height,opacity] ${EASE} data-starting-style:h-0 data-starting-style:opacity-0 data-ending-style:h-0 data-ending-style:opacity-0 motion-reduce:transition-none`;
 
-/** A file the call read or wrote: its icon and its path, mono (ảnh 3). */
+/** A file the call read or wrote: its icon and its path, mono. */
 function FileChip({ path }: { path: string }) {
   return (
     <span
@@ -101,8 +103,9 @@ function CallLine({ call }: { call: ToolCall }) {
 }
 
 /**
- * One call (D6): a row that opens its full input and output, mono. A
- * sub-agent's row also links to its transcript.
+ * One call: a row that opens its full input and output, mono.
+ *
+ * A sub-agent's row also links to its transcript.
  */
 function CallRow({
   call,
@@ -181,9 +184,11 @@ function CallRow({
 }
 
 /**
- * Consecutive tool calls folded into one row (D6): `Edited links.mjs · Ran 3
- * commands · Read 3 files`. Closed by default; open while it is the group
- * still running, until the person decides otherwise.
+ * Consecutive tool calls folded into one row.
+ *
+ * The row reads `Edited links.mjs · Ran 3 commands · Read 3 files`. Closed by
+ * default; open while it is the group still running, until the person
+ * decides otherwise.
  */
 export const ToolGroup = memo(function ToolGroup({
   calls,
@@ -195,7 +200,7 @@ export const ToolGroup = memo(function ToolGroup({
   calls: ToolCall[];
   /** The open turn's last group, a call still without its result. */
   running: boolean;
-  /** The first thing of its turn: the Claude mark leads it (ảnh 1). */
+  /** The first thing of its turn: the Claude mark leads it. */
   lead: boolean;
   slug: string;
   conversation: string;

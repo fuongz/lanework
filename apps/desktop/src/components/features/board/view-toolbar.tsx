@@ -60,7 +60,7 @@ function Freshness({ stale, at }: { stale: boolean; at: string }) {
 }
 
 /**
- * The issue list's header: search, filter and refresh (FE-75).
+ * The issue list's header: search, filter and refresh.
  *
  * It sits at the top of the list's own column, sized for a column a third of
  * the window wide. The window's title bar belongs to the issue beside it.
@@ -98,8 +98,8 @@ export function ViewToolbar({
           <FilterButton search={search} onSearch={onSearch} />
 
           {/* The freshness lives in the tooltip, and in the button's name for
-            anybody who cannot hover. A SAVED copy still marks the button
-            itself — the one state that must not wait for a hover. */}
+            anybody who cannot hover. A saved copy still marks the button
+            itself: the one state that must not wait for a hover. */}
           <Tooltip>
             <TooltipTrigger
               render={

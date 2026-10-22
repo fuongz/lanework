@@ -1,7 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 export const Route = createFileRoute("/_app/w/$slug/pulls/$number")({
-  // ⚠️ Kept as a redirect, not deleted (FE-75): one pull request at its old
-  // address lands on the same pull request at its new one.
+  // Kept as a redirect, not deleted (FE-75): a pull request's old address
+  // lands on the same pull request at its new one.
   beforeLoad: ({ params, search }) => {
     throw redirect({
       to: "/w/$slug/issues/pulls/$number",

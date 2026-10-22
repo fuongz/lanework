@@ -47,12 +47,12 @@ import { type ProjectSort, usePreferences } from "#/stores/preferences";
 import { isLocalWorkspace } from "#/stores/session";
 import { ProjectReorderList } from "./project-reorder-list";
 
-/** The terminal key a project's agents are filed under (FE-19, FE-26). */
+/** The terminal key a project's agents are filed under. */
 const keyOf = (workspace: Workspace) => workspace.id ?? workspace.slug;
 
 const NO_AGENTS: TerminalSession[] = [];
 
-/** Lower case, accents off: `Đơn` finds `don`, `Hiip` finds `hiip`. */
+/** Lower case, accents off: `Đơn` finds `don`, `Acme` finds `acme`. */
 const fold = (text: string) =>
   text
     .normalize("NFD")
@@ -66,8 +66,8 @@ type RunningAgent = Pick<TerminalSession, "id" | "kind">;
 /**
  * The agents running in a project on this machine, as overlapping marks.
  *
- * ⚠️ Capped at three with the rest counted: a project with five agents
- * going says five, not three and silence.
+ * Capped at three with the rest counted: a project with five agents going
+ * says five, not three and silence.
  */
 function RunningAgents({ agents }: { agents: RunningAgent[] }) {
   if (agents.length === 0) return null;
@@ -104,26 +104,24 @@ function RunningAgents({ agents }: { agents: RunningAgent[] }) {
 /**
  * The project this window is looking at, and the way to any other one.
  *
- * ⚠️ This replaces the old "Change workspace" screen entirely. Choosing a
- * project is navigation, not a page: it belongs in the same place every time,
- * at the top of the rail, rather than behind a button that only appears when a
- * board is already open.
- */
-/**
- * `compact`: the mini rail's form (FE-58) — the project's tile alone, its
- * list opening to the side instead of below.
+ * Choosing a project is navigation, not a page: it belongs in the same place
+ * every time, at the top of the rail, rather than behind a button that only
+ * appears when a board is already open.
+ *
+ * @param compact The mini rail's form: the project's tile alone, its list
+ *   opening to the side instead of below.
  */
 export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
-  // The Reorder entry in the sort menu turns the list into a drag-to-reorder
-  // one until Done, or until the menu closes.
   // Opened from a row's context menu; outside the popover, like `creating`.
   const [renaming, setRenaming] = useState<(Workspace & { id: string }) | null>(
     null,
   );
   const [editing, setEditing] = useState<Workspace | null>(null);
+  // The Reorder entry in the sort menu turns the list into a drag-to-reorder
+  // one until Done, or until the menu closes.
   const [reordering, setReordering] = useState(false);
   const [reorderFailed, setReorderFailed] = useState<string | null>(null);
   const reorderProjects = useBoard((state) => state.reorderProjects);
@@ -141,11 +139,11 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const refreshChats = useChatEngines((state) => state.refresh);
   /**
    * A project's running agents: its live agent tabs, then the conversations
-   * the chat runs (FE-62).
+   * the chat runs.
    *
-   * ⚠️ The chats count too. "New Claude" opens a chat now, so a project whose
-   * Claude runs there has no agent tab at all — counting tabs alone left its
-   * row blank while the rail listed it under Running.
+   * The chats count too. "New Claude" opens a chat, so a project whose Claude
+   * runs there has no agent tab at all; counting tabs alone would leave its
+   * row blank while the rail lists it under Running.
    */
   const runningIn = (workspace: Workspace): RunningAgent[] => {
     const tabs = (agentsByKey[keyOf(workspace)] ?? NO_AGENTS).filter(
@@ -176,9 +174,9 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
       )
     : sortedWorkspaces;
 
-  // ⚠️ Asked for EVERY project each time the menu opens. The rail only lists
-  // the open project's agents, so without this the other rows would show
-  // whatever was running the last time each one was open — or nothing.
+  // Asked for every project each time the menu opens. The rail only lists the
+  // open project's agents, so without this the other rows would show whatever
+  // was running the last time each one was open, or nothing.
   useEffect(() => {
     if (!open) return;
     for (const workspace of workspaces) {
@@ -206,8 +204,8 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   /**
    * ⌘1…⌘9 open a project, in the menu's order.
    *
-   * The menu no longer prints them beside each row — the list reads cleaner
-   * without — but the keys still work for whoever knows them.
+   * The menu does not print them beside each row, as the list reads cleaner
+   * without, but the keys work for whoever knows them.
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -241,10 +239,10 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           render={
             <button
               type="button"
-              // ⚠️ Named for what it DOES, with the current project inside the
-              // name. A button whose accessible name is only "Lanework" tells a
-              // screen-reader user what they are looking at and nothing about
-              // what pressing it would do.
+              // Named for what it does, with the current project inside the
+              // name. A button whose accessible name is only "Lanework" tells
+              // a screen-reader user what they are looking at and nothing
+              // about what pressing it would do.
               aria-label={`Switch project — currently ${active?.name ?? "none"}`}
               title={compact ? (active?.name ?? "Choose a project") : undefined}
               className={
@@ -275,7 +273,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           align="start"
           side={compact ? "right" : undefined}
           initialFocus={reordering ? undefined : search}
-          // ⚠️ A set width: as wide as its rows, it would narrow with every
+          // A set width: as wide as its rows, it would narrow with every
           // letter typed.
           className="w-72 p-1"
         >
@@ -345,7 +343,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 aria-label="Projects"
                 className="flex flex-col gap-0.5"
                 onKeyDown={(event) => {
-                  // ↑ ↓ walk the rows; ↑ from the first goes back to the search.
+                  // ↑ ↓ walk the rows; ↑ from the first returns to the search.
                   if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
                     return;
                   const rows = [
@@ -397,9 +395,9 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                     {/* The two everyday edits from Settings → Projects,
                         without leaving the switcher. Rename is addressed by
                         cloud id, so a project without one cannot. */}
-                    {/* ⚠️ `finalFocus={false}`: focus handed back to the row
-                        on close lit it as focused, so a second row stayed
-                        highlighted beside the one under the pointer. */}
+                    {/* NOTE: `finalFocus={false}`: focus handed back to the
+                        row on close lights it as focused, so a second row
+                        stays highlighted beside the one under the pointer. */}
                     <ContextMenuContent finalFocus={false}>
                       <ContextMenuItem
                         disabled={workspace.id === null}
@@ -427,10 +425,9 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
             </RailHover>
           )}
           <RailHover className="border-foreground/10 mt-1 flex gap-0.5 border-t pt-1">
-            {/* ⚠️ A row that opens a DIALOG, and the menu closes behind it. A
-              project is named and pointed at its folders in one go now, and
-              that does not fit — nor belong — inside a menu people open to
-              switch. */}
+            {/* A row that opens a dialog, and the menu closes behind it. A
+              project is named and pointed at its folders in one go, which
+              neither fits nor belongs inside a menu people open to switch. */}
             <button
               type="button"
               onClick={() => {
@@ -466,7 +463,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
               />
             </button>
             {/* Turns the list into a drag-to-reorder one: the order "Default"
-                  shows, edited in place — so the sort goes back to Default and
+                  shows, edited in place. So the sort goes back to Default and
                   the list reads the way it was just left. */}
             <button
               type="button"
@@ -513,9 +510,10 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 }
               />
               <DropdownMenuContent align="end">
-                {/* ⚠️ `closeOnClick`: a radio item keeps Base UI's menu open by
-                    default, and the next press of the trigger then only
-                    closed it instead of letting a second order be picked. */}
+                {/* NOTE: `closeOnClick`: a radio item keeps Base UI's menu
+                    open by default, and the next press of the trigger then
+                    only closes it instead of letting a second order be
+                    picked. */}
                 <DropdownMenuRadioGroup
                   value={sort}
                   onValueChange={(value) => setSort(value as ProjectSort)}
@@ -535,7 +533,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           </RailHover>
         </PopoverContent>
       </Popover>
-      {/* Outside the popover on purpose: rendered inside it, closing the menu
+      {/* NOTE: Outside the popover: rendered inside it, closing the menu
           would unmount the dialog the menu just opened. */}
       <CreateProjectDialog
         open={creating}

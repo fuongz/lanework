@@ -5,8 +5,10 @@ import { useSettingsProject } from "#/components/shared/settings/project-picker"
 import { memoryEntry, useMemory } from "#/stores/memory";
 
 /**
- * Memory with none open: the index, which is where Claude starts too — or,
- * without one, a word on what to do.
+ * The Memory screen with no file open.
+ *
+ * Opens the index, which is where Claude starts too; without one, says what
+ * to do.
  */
 export function MemoryPick() {
   const slug = useSettingsProject();

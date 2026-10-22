@@ -1,7 +1,7 @@
-// The Codex account's limits and banked resets, asked of `codex app-server`
-// (FE-74): `account/rateLimits/read`, and `account/rateLimitResetCredit/
-// consume` to spend one reset. The same calls Codex's own TUI makes, and
-// monocode's usage footer.
+// The Codex account's limits and banked resets, asked of `codex app-server`:
+// `account/rateLimits/read`, and `account/rateLimitResetCredit/consume` to
+// spend one reset. The same calls Codex's own TUI makes, and monocode's usage
+// footer.
 //
 // One `codex app-server` per request: started, `initialize`d, asked, stopped.
 // Requests run one after another, never side by side.
@@ -56,6 +56,7 @@ const seconds = (value: unknown): number | null => {
   return at === null || at <= 0 ? null : at * 1000;
 };
 
+/** The last request in line, so the next one starts only after it. */
 let queue: Promise<unknown> = Promise.resolve();
 
 /**
@@ -295,7 +296,7 @@ const OUTCOMES: readonly CodexResetOutcome[] = [
 /**
  * Spend the banked reset `creditId`.
  *
- * ⚠️ Not undoable. Only ever on the user's confirmed click.
+ * NOTE: Not undoable. Only ever on the user's confirmed click.
  */
 export async function consumeCodexResetCredit(
   cli: CodexCliRun,

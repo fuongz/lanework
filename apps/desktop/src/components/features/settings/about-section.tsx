@@ -6,15 +6,13 @@ import {
 import type { AppInfo } from "../../../../shared/desktop";
 
 /**
- * Which build this is. Nothing else.
+ * The About page: which build this is, and nothing else.
  *
- * ⚠️ There used to be a "Control plane" section here — the API origin in force
- * and the heartbeat's last verdict. Both are the app's own plumbing: the origin
- * is set by an environment variable a user never sets, and the verdict already
- * reaches them as the thing it causes (a board that will not load, a gate that
- * says access was revoked) rather than as a line to interpret. The one moment
- * the origin is worth reading is a sign-in that failed, and the gate prints it
- * there — see `SignIn`.
+ * No API origin or heartbeat verdict here. Both are the app's own plumbing:
+ * the origin comes from an environment variable a user never sets, and the
+ * verdict reaches them as what it causes (a board that will not load, a gate
+ * that says access was revoked). The origin matters only when a sign-in
+ * fails, and `SignIn` prints it there.
  */
 export function AboutSection() {
   const [info, setInfo] = useState<AppInfo | null>(null);

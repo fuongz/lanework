@@ -8,9 +8,11 @@ import {
 } from "#/components/ui/tooltip";
 
 /**
- * Each URL's preview, for the whole session (D4): a link drawn twice — or
- * redrawn by the next read — never asks main again. Main keeps its own cache
- * on disk per domain; this one only saves the round trip.
+ * Each URL's preview, kept for the whole session.
+ *
+ * A link drawn twice, or redrawn by the next read, never asks main again.
+ * Main keeps its own cache on disk per domain; this one only saves the round
+ * trip.
  */
 const previews = new Map<string, LinkPreview | Promise<LinkPreview>>();
 
@@ -59,11 +61,12 @@ function usePreview(url: string | null): LinkPreview | null {
 }
 
 /**
- * A link in the chat (D4): the site's favicon and its page title when main
- * found them, else the link's own text; the URL in a tooltip.
+ * A link in the chat: the site's favicon and page title, the URL in a tooltip.
  *
- * ⚠️ Only http(s) is ever fetched or opened. Anything else — a relative path
- * the agent wrote — stays text with its target in the tooltip.
+ * Without a favicon and title from main, it shows the link's own text.
+ *
+ * NOTE: Only http(s) is ever fetched or opened. Anything else, such as a
+ * relative path the agent wrote, stays text with its target in the tooltip.
  */
 const LinkChip = memo(function LinkChip({
   href,
@@ -112,6 +115,6 @@ const LinkChip = memo(function LinkChip({
   );
 });
 
-/** The chat's link renderer, for `MarkdownBody` and `LinkedText`. */
+/** The chat's link renderer for {@link MarkdownBody} and {@link LinkedText}. */
 export const chatLink: LinkRenderer = (span) =>
   span.wiki ? span.raw : <LinkChip href={span.href} text={span.text} />;

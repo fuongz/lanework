@@ -14,10 +14,10 @@ import { useInstructions } from "#/stores/instructions";
 const ROUTE = "/settings/instructions/effective/$agent" as const;
 
 /**
- * Everything one agent reads at the start of a conversation here, in the
- * order it reads it, each file under a rule naming it (FE-37/D4).
+ * Everything one agent reads at the start of a conversation here.
  *
- * ⚠️ Gathered again with every listing that lands: main's watch (D7) and
+ * In the order it reads it, each file under a rule naming it (FE-37/D4).
+ * Gathered again with every listing that lands: main's watch (FE-37/D7) and
  * window focus both list again, so this is never older than the list.
  */
 export function InstructionsEffective() {

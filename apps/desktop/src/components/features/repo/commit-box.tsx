@@ -41,9 +41,9 @@ import type {
 /**
  * What a commit made from here would take in, and the message it would get.
  *
- * ⚠️ Staged first, tracked otherwise (FE-22/D9). With something staged the
- * button commits exactly that; with nothing staged it says "Commit Tracked" and
- * takes every change git already follows — never an untracked file, which
+ * Staged first, tracked otherwise (FE-22/D9). With something staged the
+ * button commits exactly that. With nothing staged it says "Commit Tracked"
+ * and takes every change git already follows, never an untracked file, which
  * somebody has to decide to add.
  */
 function commitPlan(files: WorktreeFile[]): {
@@ -74,9 +74,10 @@ const RUNNING: Record<SyncAction, string> = {
 /**
  * Fetch, pull and push, as one split button.
  *
- * ⚠️ The main half is PUSH while there are local commits the upstream lacks,
- * and FETCH otherwise — the one thing worth doing next, the way a Git client's
- * toolbar reads. Everything else sits in the menu, where Force Push asks first.
+ * The main half is Push while there are local commits the upstream lacks, and
+ * Fetch otherwise: the one thing worth doing next, the way a Git client's
+ * toolbar reads. Everything else sits in the menu, where Force Push asks
+ * first.
  */
 function SyncButton({
   branch,
@@ -259,8 +260,8 @@ export function CommitBox({
   };
 
   return (
-    // ⚠️ `shrink-0` under a `flex-1` list: the box stays pinned to the bottom of
-    // the panel while the list above it scrolls, however long it gets.
+    // NOTE: `shrink-0` under a `flex-1` list keeps the box pinned to the
+    // bottom of the panel while the list above it scrolls, however long.
     <div className="border-sidebar-border flex shrink-0 flex-col border-t">
       <div className="flex h-9 items-center gap-2 px-3 text-xs">
         <HugeiconsIcon

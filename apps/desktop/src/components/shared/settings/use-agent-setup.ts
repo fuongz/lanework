@@ -6,11 +6,13 @@ import { ipcMessage } from "#/lib/ipc-error";
 const FOCUS_MIN_AGE_MS = 30_000;
 
 /**
- * One project's agent setup (FE-40), as main last read it: on opening the
- * page, when its folders change, and on window focus once the last read is
- * half a minute old — config files change in an editor, not here.
+ * One project's agent setup, as main last read it.
  *
- * ⚠️ Filed under the slug it was read for, so a read that lands after
+ * Read on opening the page, when its folders change, and on window focus once
+ * the last read is half a minute old: config files change in an editor, not
+ * here.
+ *
+ * NOTE: Filed under the slug it was read for, so a read that lands after
  * another project was picked is never shown on it.
  */
 export function useAgentSetup(

@@ -15,17 +15,17 @@ import {
 import { relativeTime } from "#/lib/board-view";
 
 /**
- * The Agents group's search: every conversation of this project — Claude
- * Code's and Codex's alike, past the rail's fold and the pinned ones too —
- * by its title, newest first.
+ * The Agents group's search: every conversation of this project by title,
+ * newest first.
  *
- * ⚠️ Filtered here (`shouldFilter={false}`), not by cmdk: cmdk ranks what it
- * is handed and reorders the list, and newest first is the order that finds
- * a conversation.
+ * Claude Code's and Codex's alike, past the rail's fold, pinned ones too.
  *
- * ⚠️ Titles only (the Lanework name and the CLI's own), never the
- * transcripts: those are read from disk one conversation at a time, and a
- * search box that read them all on each keystroke would stall the window.
+ * - Filtered here (`shouldFilter={false}`), not by cmdk: cmdk ranks what it
+ *   is handed and reorders the list, and newest first is the order that
+ *   finds a conversation.
+ * - Titles only (the Lanework name and the CLI's own), never the
+ *   transcripts. Those are read from disk one conversation at a time; a
+ *   search box that read them all on each keystroke would stall the window.
  */
 export function AgentSessionSearch({
   open,
@@ -90,7 +90,7 @@ export function AgentSessionSearch({
                 kind={session.agent}
                 className="size-3.5 shrink-0"
               />
-              {/* ⚠️ The title takes the room, so the time sits on the right
+              {/* The title takes the room, so the time sits on the right
                   edge: the item's hidden tick has `ml-auto` too. */}
               <span
                 className="min-w-0 flex-1 truncate"

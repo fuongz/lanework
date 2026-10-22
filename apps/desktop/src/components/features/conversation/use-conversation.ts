@@ -18,9 +18,12 @@ interface ConversationState {
   delta: string;
   /** Permissions the CLI is waiting on, oldest first. */
   permissions: PermissionRequest[];
-  /** Set the engine's state from an answer that carried one (send, takeOver). */
+  /**
+   * Sets the engine's state from an answer that carried one (send,
+   * takeOver).
+   */
   setEngine: (engine: EngineState) => void;
-  /** Read again now — after a send, a fork, a take-over. */
+  /** Reads again now: after a send, a fork, a take-over. */
   reload: () => void;
 }
 
@@ -53,13 +56,15 @@ function patched(turns: Turn[], turn: Turn): Turn[] {
 }
 
 /**
- * One conversation — Claude's or Codex's — as a chat (FE-62): read once, read again each time
- * the watcher says IT was written, with main's events laid over the read —
- * streamed text, a permission waiting, the engine's state.
+ * One conversation, Claude's or Codex's, as a chat.
  *
- * ⚠️ One read in flight at a time, and at most one queued behind it, as the
- * sub-agent view does: a working agent writes many times a second, and a read
- * that started first must not land after a later one.
+ * Read once, and again each time the watcher says IT was written, with main's
+ * events laid over the read: streamed text, a permission waiting, the
+ * engine's state.
+ *
+ * NOTE: One read in flight at a time, and at most one queued behind it, as
+ * the sub-agent view does. A working agent writes many times a second, and a
+ * read that started first must not land after a later one.
  */
 export function useConversation(
   workspace: string | null,
@@ -125,8 +130,8 @@ export function useConversation(
       })
       .catch(() => {});
 
-    // ⚠️ A question asked while this page was not open came as an event
-    // nobody heard, and the CLI waits on it for as long as it takes: read
+    // NOTE: A question asked while this page was not open came as an event
+    // nobody heard, and the CLI waits on it for as long as it takes, so read
     // what the engine is still waiting on. `?.`: an older preload has none.
     void surface
       .permissions?.(workspace, id)

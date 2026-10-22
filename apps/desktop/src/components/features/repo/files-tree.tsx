@@ -1,3 +1,12 @@
+// The working tree, as a tree.
+//
+// - Lazy below what git ignores. The first read is git's list plus the
+//   ignored folders as empty rows; opening `node_modules/` reads that one
+//   folder, and each folder inside it waits for its own click.
+//   `@pierre/trees` has no "load children" hook, so the tree is watched
+//   (`subscribe`) for an unread folder that has just been expanded.
+// - A web component with its own shadow root, styled through variables on
+//   the host: see `treeHostStyle`.
 import { RefreshIcon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type {
@@ -40,19 +49,6 @@ import {
   type WorktreeFileStatus,
 } from "../../../../shared/worktree";
 
-/**
- * The working tree, as a tree (FE-66).
- *
- * ⚠️ LAZY below what git ignores. The first read is git's list plus the
- * ignored folders as empty rows; opening `node_modules/` reads that one folder,
- * and each folder inside it waits for its own click. `@pierre/trees` has no
- * "load children" hook, so the tree is watched (`subscribe`) for an unread
- * folder that has just been expanded.
- *
- * ⚠️ A web component with its own shadow root, styled through variables on the
- * host — see `treeHostStyle`.
- */
-
 /** Changes, in the tree's vocabulary (FE-66/D7). */
 function toGitStatus(status: WorktreeFileStatus): GitStatus {
   switch (status) {
@@ -70,7 +66,11 @@ function toGitStatus(status: WorktreeFileStatus): GitStatus {
   }
 }
 
-/** The handle when it is a folder. `isDirectory()` does not narrow the union. */
+/**
+ * The handle when it is a folder.
+ *
+ * `isDirectory()` does not narrow the union.
+ */
 function folder(
   item: FileTreeItemHandle | null,
 ): FileTreeDirectoryHandle | null {
@@ -87,7 +87,7 @@ const FOLDER_RANK: Record<GitStatus, number> = {
   modified: 5,
 };
 
-/** The tree row an event happened on — its path crosses the shadow root. */
+/** The tree row an event happened on; its path crosses the shadow root. */
 function rowPath(event: Event): string | undefined {
   const row = event
     .composedPath()
@@ -117,7 +117,7 @@ export function FilesTree({
   base: FileListing;
   loaded: Record<string, FileListing>;
   changes: WorktreeFile[];
-  /** Read the tree again — the same read as the title bar's Refresh. */
+  /** Reads the tree again: the same read as the title bar's Refresh. */
   onRefresh: () => void;
   refreshing: boolean;
 }) {
@@ -137,7 +137,7 @@ export function FilesTree({
     return [...seen];
   }, [base, loaded]);
 
-  /** Folders listed but not read yet — the ones to watch for an expand. */
+  /** Folders listed but not read yet: the ones to watch for an expand. */
   const unread = useMemo(() => {
     const out = new Set(base.lazy);
     for (const listing of Object.values(loaded))
@@ -148,7 +148,7 @@ export function FilesTree({
 
   const gitStatus = useMemo<GitStatusEntry[]>(() => {
     const status = new Map<string, GitStatus>();
-    // ⚠️ Ignored is a property of the FOLDER git named: what is read out of
+    // Ignored is a property of the folder git named: what is read out of
     // `node_modules/` later is just as ignored, and greys out with it.
     const ignoredDirs = base.ignored.filter((path) => path.endsWith("/"));
     const ignored = (path: string) =>
@@ -158,8 +158,8 @@ export function FilesTree({
       if (ignored(dir))
         for (const path of listing.paths) status.set(path, "ignored");
     for (const file of changes) status.set(file.path, toGitStatus(file.status));
-    // A folder takes the strongest change inside it, so its NAME is coloured
-    // the way an editor colours it — not just the dot the library draws for
+    // A folder takes the strongest change inside it, so its name is coloured
+    // the way an editor colours it, not just the dot the library draws for
     // "something changed below". `FOLDER_STATUS_CSS` turns the letter this
     // would put in the git lane back into that dot.
     for (const file of changes) {
@@ -173,8 +173,8 @@ export function FilesTree({
     return [...status].map(([path, value]) => ({ path, status: value }));
   }, [base, loaded, changes]);
 
-  // ⚠️ Construction-time callbacks, and the model is built once: refs are what
-  // let a fresh closure still be the one that runs.
+  // NOTE: Construction-time callbacks, and the model is built once. Refs let
+  // a fresh closure still be the one that runs.
   const openRef = useRef(openFile);
   openRef.current = openFile;
 
@@ -189,7 +189,7 @@ export function FilesTree({
     search: false,
     icons: FILE_TREE_ICONS,
     unsafeCSS: TREE_ICON_TINT_CSS + FOLDER_ICON_CSS + FOLDER_STATUS_CSS,
-    // An editor's explorer, not a review list: 22px rows (FE-66).
+    // An editor's explorer, not a review list: 22px rows.
     density: "compact",
     itemHeight: 22,
     gitStatus,
@@ -200,8 +200,10 @@ export function FilesTree({
   });
 
   /**
-   * What the model holds, so a folder's contents arriving can be ADDED rather
-   * than the whole tree rebuilt — a rebuild folds every open folder shut.
+   * The paths the model holds.
+   *
+   * Kept so a folder's contents arriving can be added rather than the whole
+   * tree rebuilt: a rebuild folds every open folder shut.
    */
   const shown = useRef(new Set(paths));
 
@@ -254,11 +256,11 @@ export function FilesTree({
     [model, loadDir],
   );
 
-  // The tab on screen is the row selected — after a tab click, Quick Open or
+  // The tab on screen is the row selected. After a tab click, Quick Open or
   // a chat badge, the tree opens down to it, as an editor's explorer follows
   // its editor.
   //
-  // ⚠️ A file inside an unread folder (`node_modules/x/y.js`) is reached one
+  // A file inside an unread folder (`node_modules/x/y.js`) is reached one
   // folder at a time: expanding the unread one has the watcher above read it,
   // `unread` changes when it lands, and this runs again a level deeper.
   useEffect(() => {
@@ -276,8 +278,9 @@ export function FilesTree({
   }, [model, active, unread]);
 
   /**
-   * Open `dir` and every folder below it, or — when it is open — shut them
-   * all. ⚠️ Only folders already READ: an unread one (inside `node_modules`)
+   * Opens `dir` and every folder below it, or shuts them all when it is open.
+   *
+   * NOTE: Only folders already read. An unread one (inside `node_modules`)
    * stays shut, or one ⌥-click would read a thousand folders. It still opens
    * a level at a time, the ordinary way.
    */
@@ -349,16 +352,16 @@ export function FilesTree({
           Only the first {base.paths.length.toLocaleString()} paths are listed.
         </p>
       )}
-      {/* ⚠️ The app's own context menu around the tree, not the library's:
+      {/* The app's own context menu around the tree, not the library's:
           `@pierre/trees` anchors its menu at the row's right edge, and a
           right click should open where the pointer is, as every other menu
-          here does. The row comes from the event's composed path — it
+          here does. The row comes from the event's composed path, which
           crosses the tree's (open) shadow root. Off a row, no menu. */}
       <ContextMenu>
         <ContextMenuTrigger
           render={<div className="flex min-h-0 flex-1 flex-col" />}
           // ⌥-click (Alt-click elsewhere) on a folder opens or shuts the
-          // whole branch. CAPTURE, so the click is taken before it reaches
+          // whole branch. Capture, so the click is taken before it reaches
           // the tree's shadow root and the library's own toggle never runs.
           onClickCapture={(event) => {
             if (!event.altKey) return;
@@ -382,7 +385,8 @@ export function FilesTree({
             model={model}
             className="min-h-0 flex-1"
             style={{ ...treeHostStyle(dark), ...COMPACT_TREE_STYLE }}
-            // A double click keeps the preview tab the first click opened (FE-66/D3).
+            // A double click keeps the preview tab the first click opened
+            // (FE-66/D3).
             onDoubleClick={() => {
               const [path] = model.getSelectedPaths();
               if (path !== undefined && !path.endsWith("/")) pin(path);
@@ -396,7 +400,8 @@ export function FilesTree({
 }
 
 /**
- * A row's context menu (FE-66): Finder and the default app, then its paths.
+ * A row's context menu: Finder and the default app, then its paths.
+ *
  * A folder's path drops the tree's trailing `/`.
  */
 function RowMenu({ path, root }: { path: string; root: string }) {
@@ -422,7 +427,7 @@ function RowMenu({ path, root }: { path: string; root: string }) {
         Reveal in Finder
       </ContextMenuItem>
       <ContextMenuItem
-        // Opening an app or a script runs it — main refuses those too.
+        // Opening an app or a script runs it; main refuses those too.
         disabled={!surface || !slug || LAUNCHABLE.test(path)}
         onClick={() =>
           slug &&

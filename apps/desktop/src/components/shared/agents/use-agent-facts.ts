@@ -4,10 +4,11 @@ import { useAgentFacts } from "#/stores/agent-facts";
 import { agentKey } from "#/stores/agent-sessions";
 
 /**
- * One conversation's numbers, as main last read them (FE-38) — read when the
- * view opens on it, then again each time its transcript settles a write.
- * Never on a timer: a conversation nobody is in is never written, so it is
- * read once.
+ * One conversation's numbers, as main last read them.
+ *
+ * Read when the view opens on it, then again each time its transcript settles
+ * a write. Never on a timer: a conversation nobody is in is never written, so
+ * it is read once.
  */
 export function useConversationFacts(
   workspace: string | null,

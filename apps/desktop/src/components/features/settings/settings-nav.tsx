@@ -42,10 +42,10 @@ export function SettingsNav() {
               >
                 <HugeiconsIcon
                   icon={item.icon}
-                  // The open section needs a cue beyond a few percent of
-                  // background. Colour is it — and unlike the label's weight it
-                  // costs nothing, since a heavier label would want a 2px stroke
-                  // here and the icon set carries stroke as a prop, not a class.
+                  // The open section needs a cue beyond a faint background.
+                  // Colour costs nothing. A heavier label would want a 2px
+                  // stroke here, and the icon set takes stroke as a prop, not
+                  // a class.
                   className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 transition-colors duration-150 ease-out"
                   strokeWidth={1.5}
                 />

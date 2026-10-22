@@ -5,13 +5,13 @@ import { cn } from "cn";
 import { MENU_SURFACE } from "./menu-surface";
 
 /**
- * Right click, or long press.
+ * A menu opened by right click, or long press.
  *
- * ⚠️ The same popup language as `dropdown-menu`, deliberately: one menu surface
- * in this app, whether it was opened by a button or by a right click. What it is
- * NOT is the same positioner — a dropdown is anchored to its trigger and takes
- * `--anchor-width` from it, while this one is anchored to the pointer, where
- * that variable is a zero-width point.
+ * The same popup look as `dropdown-menu`: one menu surface in this app,
+ * whether a button or a right click opened it. Not the same positioner,
+ * though. A dropdown is anchored to its trigger and takes `--anchor-width`
+ * from it; this one is anchored to the pointer, where that variable is a
+ * zero-width point.
  */
 function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props) {
   return <ContextMenuPrimitive.Root {...props} />;
@@ -33,7 +33,7 @@ function ContextMenuContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
-            // The menu glass — the macOS menu, not a card — as every menu has.
+            // The menu glass (the macOS menu, not a card), as every menu has.
             "z-50 max-h-(--available-height) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto p-1 text-popover-foreground outline-none **:data-[slot$=-item]:data-highlighted:bg-foreground/10",
             MENU_SURFACE,
             className,
@@ -66,9 +66,12 @@ function ContextMenuItem({
 }
 
 /**
- * ⚠️ Required around a `ContextMenuLabel`. Base UI throws — error #31, "MenuGroupContext
- * is missing" — for a group label with no group, and in a production build that
- * arrives as an error CODE with the whole renderer replaced by the boundary.
+ * A group of menu items.
+ *
+ * NOTE: Required around a {@link ContextMenuLabel}. Base UI throws error #31
+ * ("MenuGroupContext is missing") for a group label with no group, and in a
+ * production build that arrives as a bare error code with the whole renderer
+ * replaced by the error boundary.
  */
 function ContextMenuGroup({ ...props }: ContextMenuPrimitive.Group.Props) {
   return (

@@ -10,17 +10,17 @@ import { usePreferences } from "#/stores/preferences";
 const STEPS = 3;
 
 /**
- * Everything that comes before the app: the first-run walk-through when a
- * machine still needs it, and the sign-in gate on its own when it does not.
+ * Everything that comes before the app.
  *
- * ⚠️ The flow runs BEFORE sign-in and ends ON it — the gate is the last step,
- * not something waiting on the other side. What it asks for (an appearance) is
- * a local choice, so nothing here needs an account first, and a new user meets
- * the app rather than a login form.
+ * The first-run walk-through when a machine still needs it, and the sign-in
+ * gate on its own when it does not.
  *
- * There is no way back a step, matching the reference: the one real choice on
- * the way through is the theme, which Settings and the command menu both change
- * in a keystroke.
+ * - The flow runs before sign-in and ends on it: the gate is the last step,
+ *   not something waiting on the other side. What it asks for (an appearance)
+ *   is a local choice, so a new user meets the app rather than a login form.
+ * - There is no way back a step, matching the reference design. The one real
+ *   choice on the way is the theme, which Settings and the command menu both
+ *   change in a keystroke.
  */
 export function Onboarding({ lock }: { lock: Locked }) {
   const onboarded = usePreferences((state) => state.onboarded);
@@ -28,27 +28,27 @@ export function Onboarding({ lock }: { lock: Locked }) {
     (state) => state.completeOnboarding,
   );
 
-  // ⚠️ Read ONCE, at mount, and never again — hence the initialiser rather than
-  // a plain expression. Reaching the last step ticks `onboarded`, and a flow
-  // that re-read it there would decide mid-walk that it should never have
-  // started and drop the person straight out of it.
+  // NOTE: Read once, at mount, hence the initialiser rather than a plain
+  // expression. Reaching the last step ticks `onboarded`, and a flow that
+  // re-read it there would decide mid-walk it should never have started and
+  // drop the person out of it.
   //
-  // A REVOKED machine was plainly set up here already, so it skips to the gate:
-  // walking it back through "Welcome to Lanework" to re-enrol would be the app
-  // pretending not to know that.
+  // A revoked machine was set up here already, so it skips to the gate.
+  // Walking it back through "Welcome to Lanework" would be the app pretending
+  // not to know that.
   const [start] = useState(() =>
     onboarded || lock.reason !== "signed-out" ? 2 : 0,
   );
   const [index, setIndex] = useState(start);
 
-  // Dots only while this actually IS a flow. A later sign-out reaches the same
-  // screen with nothing before it, and three dots there would promise steps
-  // that do not exist.
+  // Dots only while this is a flow. A later sign-out reaches the same screen
+  // with nothing before it, and three dots there would promise steps that do
+  // not exist.
   const step = start === 0 ? { index, count: STEPS } : undefined;
 
-  // Recorded on the way INTO the last step, not on a successful sign-in: both
-  // questions have been answered by then, and someone who quits at the gate
-  // should come back to the gate rather than to the welcome screen again.
+  // Recorded on the way into the last step, not on a successful sign-in. Both
+  // questions are answered by then, and someone who quits at the gate should
+  // come back to the gate, not the welcome screen.
   const toSignIn = () => {
     completeOnboarding();
     setIndex(2);
@@ -76,9 +76,9 @@ export function Onboarding({ lock }: { lock: Locked }) {
             </p>
           </div>
           {/* No `autoFocus`: it lands as `:focus-visible` in Electron, so the
-              very first thing anyone sees would be a ring around a button
-              nobody has reached for yet. Tab still gets there in one press —
-              it is the only focusable thing on the screen. */}
+              first thing anyone sees would be a ring around a button nobody
+              has reached for. Tab still gets there in one press: it is the
+              only focusable thing on the screen. */}
           <Button size="lg" className="h-9 w-full" onClick={() => setIndex(1)}>
             Get started
           </Button>
@@ -94,9 +94,9 @@ export function Onboarding({ lock }: { lock: Locked }) {
               menu.
             </p>
           </div>
-          {/* The same control Settings draws. Picking here applies immediately —
-              the window changes under the cursor — so Continue confirms a choice
-              already made rather than committing an unseen one. */}
+          {/* The same control Settings draws. Picking here applies at once, so
+              Continue confirms a choice already seen rather than committing an
+              unseen one. */}
           <ThemeChoice name="onboarding-theme" />
           <Button size="lg" className="h-9 w-full max-w-xs" onClick={toSignIn}>
             Continue

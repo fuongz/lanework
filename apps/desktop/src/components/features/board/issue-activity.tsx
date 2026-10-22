@@ -1,11 +1,9 @@
-/**
- * A card's history and its thread, as the one sequence a reader sees.
- *
- * ⚠️ The merge happens on the SERVICE, not here. Two independently-paged reads
- * stitched together on this side are correct only while both fit in one page;
- * past that the seam silently drops whatever fell between them. Everything in
- * this file renders an already-ordered list.
- */
+// A card's history and its thread, as the one sequence a reader sees.
+//
+// NOTE: The merge happens on the service, not here. Two independently paged
+// reads stitched together on this side are correct only while both fit in one
+// page; past that the seam silently drops whatever fell between them.
+// Everything in this file renders an already-ordered list.
 import {
   Delete02Icon,
   MoreHorizontalIcon,
@@ -54,7 +52,7 @@ const list = (value: unknown): string[] =>
     ? value.filter((v): v is string => typeof v === "string")
     : [];
 
-/** `{ users, agents }` out of a diff half. */
+/** Everyone in a diff half's `{ users, agents }`, users first. */
 function people(value: unknown): string[] {
   if (!value || typeof value !== "object") return [];
   const row = value as Record<string, unknown>;
@@ -64,11 +62,12 @@ function people(value: unknown): string[] {
 /**
  * What an audit row says, in a sentence.
  *
- * ⚠️ Returns null for a verb it does not recognise, and the caller DROPS that
- * row. The service's verbs are free text and this app is not deployed in lock
- * step with it — an unknown one is a line this version genuinely cannot narrate,
- * and "decio patched the issue" for something that was actually an import is
- * worse than a gap.
+ * The service's verbs are free text and this app is not deployed in lock step
+ * with it. An unknown verb is a line this version cannot narrate, and "decio
+ * patched the issue" for something that was an import is worse than a gap.
+ *
+ * @returns Null for a verb it does not recognise, or one drawn elsewhere; the
+ * caller drops that row.
  */
 function sentence(
   event: Extract<BoardActivity, { kind: "audit" }>,
@@ -101,8 +100,8 @@ function sentence(
       return <>updated the checklist.</>;
     case "config":
       return <>changed the board's settings.</>;
-    // A comment is in this feed as itself — see `CommentEntry`. Narrating it
-    // here as well would report one sentence twice.
+    // A comment is in this feed as itself (`CommentEntry`). Narrating it here
+    // as well would report one sentence twice.
     case "commented":
       return null;
     case "moved": {
@@ -129,10 +128,10 @@ function sentence(
 /**
  * What one `patched` row changed.
  *
- * ⚠️ A patch can move several fields at once, and this states EVERY one of them
- * rather than picking the first. A card where somebody set the priority and the
- * due date in one save is one event, and reporting half of it makes the feed a
- * record you cannot trust to be complete.
+ * A patch can move several fields at once, and this states every one of them
+ * rather than picking the first. Setting the priority and the due date in one
+ * save is one event, and reporting half of it makes the feed a record you
+ * cannot trust to be complete.
  */
 function patched(
   diff: Record<string, unknown>,
@@ -233,7 +232,7 @@ const Strong = ({ children }: { children: React.ReactNode }) => (
   <span className="text-foreground font-medium">{children}</span>
 );
 
-/** "Bug, Feature and Improvement" — a list a person would say out loud. */
+/** "Bug, Feature and Improvement": a list a person would say out loud. */
 function Names({ names }: { names: string[] }) {
   return (
     <>
@@ -344,10 +343,10 @@ function CommentEntry({
               (edited)
             </span>
           )}
-          {/* ⚠️ Shown for everyone, not only the author. The service is the one
-              that decides who may edit — it answers 403 — and hiding the menu on
-              a guess would mean this app deciding authorship twice, in two
-              places, from two different fields. */}
+          {/* Shown for everyone, not only the author. The service decides who
+              may edit (it answers 403), and hiding the menu on a guess would
+              mean this app deciding authorship a second time, from a
+              different field. */}
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -435,7 +434,7 @@ function CommentEntry({
 /**
  * The box a reply is written in.
  *
- * ⚠️ NOT optimistic, unlike the star and the follow beside it. The service
+ * NOTE: Not optimistic, unlike the star and the follow beside it. The service
  * stamps a comment's moment and orders it against the audit log with its own
  * counter; a comment spliced in here would sit in the feed at a time this
  * machine's clock invented, and jump when the real one arrived.
@@ -446,7 +445,7 @@ function Composer({ card }: { card: BoardCard }) {
   const stale = useBoard((state) => state.view?.stale ?? false);
   const [draft, setDraft] = useState("");
   const writing = busy === `${card.id}:comment`;
-  // Whose reply it is — the account that owns this machine, as the control
+  // Whose reply it is: the account that owns this machine, as the control
   // plane named it. Null when it never said, and the card draws "?".
   const owner = useSession((state) =>
     state.session?.principal.kind === "machine"
@@ -458,7 +457,7 @@ function Composer({ card }: { card: BoardCard }) {
     const body = draft.trim();
     if (!body || writing || stale) return;
     void comment(card.id, body).then((result) => {
-      // ⚠️ The draft survives a failure. Clearing it on the way out would throw
+      // The draft survives a failure. Clearing it on the way out would throw
       // away what someone wrote the moment the network was worst.
       if (!result.error) setDraft("");
     });
@@ -475,7 +474,7 @@ function Composer({ card }: { card: BoardCard }) {
           sending={writing}
           onSend={send}
         >
-          {/* ⚠️ `-mx-1.5` cancels CodeMirror's own 6px content padding, so the
+          {/* `-mx-1.5` cancels CodeMirror's own 6px content padding, so the
               text starts where the pull request's textarea does. */}
           <MarkdownEditor
             value={draft}
@@ -503,12 +502,13 @@ export function IssueActivity({ card }: { card: BoardCard }) {
   const loading = useBoard((state) => state.activityLoading);
   const loadActivity = useBoard((state) => state.loadActivity);
   const setSubscribed = useBoard((state) => state.setSubscribed);
-  // FE-52/D10: a local board has no comments and no subscribers.
+  // A local board has no comments and no subscribers (FE-52/D10).
   const active = useBoard((state) => state.active);
   const { comments, subscribers: canSubscribe } = useCloudFeatures(active);
 
-  // ⚠️ Read again when the card id changes, not only when the page mounts.
-  // Following a sub-issue link swaps the card under a page that never unmounts.
+  // NOTE: Read again when the card id changes, not only when the page mounts.
+  // Following a sub-issue link swaps the card under a page that never
+  // unmounts.
   useEffect(() => {
     void loadActivity(card.id);
   }, [card.id, loadActivity]);
@@ -516,7 +516,7 @@ export function IssueActivity({ card }: { card: BoardCard }) {
   const members = view?.members ?? [];
   const labels = view?.labels ?? [];
   const columns = view?.columns ?? [];
-  // ⚠️ Only for THIS card. The store keys the feed by card id precisely so the
+  // NOTE: Only for this card. The store keys the feed by card id so the
   // previous card's history is not drawn under a new one while its read is in
   // flight.
   const events = activity?.cardId === card.id ? activity.events : [];
@@ -525,11 +525,11 @@ export function IssueActivity({ card }: { card: BoardCard }) {
   const [shown, setShown] = useState(RECENT);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on a new card
   useEffect(() => setShown(RECENT), [card.id]);
-  // ⚠️ The feed is OLDEST first and its cursor pages FORWARD in time, so the
-  // newest entries are on the last page. Every page is read before slicing —
-  // three rows off the end of page one would be three rows from the middle.
-  // A failed page leaves the cursor where it was; remembering which one was
-  // asked for keeps that from turning into a request loop.
+  // NOTE: The feed is oldest first and its cursor pages forward in time, so
+  // the newest entries are on the last page. Every page is read before
+  // slicing: three rows off the end of page one would be three rows from the
+  // middle. A failed page leaves the cursor where it was; remembering which
+  // one was asked for keeps that from turning into a request loop.
   const tried = useRef<string | null>(null);
   const loaded = activity?.cardId === card.id;
   useEffect(() => {
@@ -538,7 +538,8 @@ export function IssueActivity({ card }: { card: BoardCard }) {
     void loadActivity(card.id, true);
   }, [loaded, cursor, loading, card.id, loadActivity]);
   // Counted in rows a reader sees: a `commented` audit row or an unknown verb
-  // draws nothing, and slicing before dropping them would show fewer than three.
+  // draws nothing, and slicing before dropping them would show fewer than
+  // three.
   const rows = events.filter(
     (event) =>
       event.kind === "comment" ||
@@ -553,9 +554,9 @@ export function IssueActivity({ card }: { card: BoardCard }) {
       <div className="flex items-center gap-2">
         <h2 className="text-[13px] font-medium">Activity</h2>
         <div className="ml-auto flex items-center gap-2">
-          {/* ⚠️ `subscribed === null` means a list read, which never reaches this
-              page — but it is still not `false`, so the button says nothing
-              rather than inviting a click that would do the opposite. */}
+          {/* `subscribed === null` means a list read, which never reaches
+              this page. It is still not `false`, so no button is drawn rather
+              than one inviting a click that would do the opposite. */}
           {canSubscribe && card.subscribed !== null && (
             <Button
               variant="ghost"

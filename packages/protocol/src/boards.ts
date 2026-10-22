@@ -1,9 +1,9 @@
-// The board: `/v1/boards/*`. A human session OR a machine credential reaches
+// The board: `/v1/boards/*`. A human session or a machine credential reaches
 // it (`actorAuth`). Derived from the server's `routes/boards.ts` and the
 // serializers it calls (`serializeItem`, `serializeBoard`, …).
 //
-// ⚠️ A board is addressed by its workspace UUID, never its slug. A 404 means
-// "no such board, or not yours" — the API never says which.
+// NOTE: A board is addressed by its workspace UUID, never its slug. A 404
+// means "no such board, or not yours"; the API never says which.
 
 import type { IsoDate } from "./common";
 
@@ -27,7 +27,11 @@ export const COLUMN_ROLES = [
 ] as const;
 export type ColumnRole = (typeof COLUMN_ROLES)[number];
 
-/** What a caller may ask for. `blocked_by` is input only; it is stored flipped. */
+/**
+ * The link kinds a caller may send.
+ *
+ * `blocked_by` is input only; it is stored flipped.
+ */
 export const LINK_TYPES = [
   "blocks",
   "blocked_by",
@@ -45,7 +49,7 @@ export type StreamIsolation = (typeof STREAM_ISOLATIONS)[number];
 /** Who did something: a signed-in human, a machine credential, or an agent. */
 export type ActorKind = "user" | "machine" | "agent";
 
-/** Page size the list routes serve by default, and their ceiling. */
+/** The page size the list routes serve by default, and their ceiling. */
 export const DEFAULT_LIMIT = 50;
 export const MAX_LIMIT = 200;
 
@@ -72,7 +76,11 @@ export interface BoardCategory {
   position: number;
 }
 
-/** One entry of the label vocabulary. `key` is a normalized tag. */
+/**
+ * One entry of the label vocabulary.
+ *
+ * `key` is a normalized tag.
+ */
 export interface BoardLabel {
   key: string;
   name: string;
@@ -86,7 +94,7 @@ export interface TagPolicy {
   allowed: string[];
 }
 
-/** A member as every avatar surface reads it — no email, by design. */
+/** A member as every avatar surface reads it: no email, by design. */
 export interface BoardMember {
   userId: string;
   name: string;
@@ -113,14 +121,22 @@ export interface BoardConfigResponse {
   board: BoardConfig;
 }
 
-/** `PUT /v1/boards/:workspaceId/config` — replace lanes and categories. Owner only. */
+/**
+ * `PUT /v1/boards/:workspaceId/config`: replace lanes and categories.
+ *
+ * Owner only.
+ */
 export interface BoardConfigRequest {
   columns: BoardColumn[];
   categories: BoardCategory[];
   tags: TagPolicy;
   /** Absent leaves the vocabulary as it is; `[]` clears it. */
   labels?: BoardLabel[];
-  /** Removed lane key → lane its cards move to. Required for a non-empty lane. */
+  /**
+   * Removed lane key → the lane its cards move to.
+   *
+   * Required for a non-empty lane.
+   */
   reassign?: Record<string, string>;
 }
 
@@ -148,8 +164,10 @@ export interface BoardSummary {
 }
 
 /**
- * `GET /v1/boards?repo=` — the boards linked to a repo. `repo` is required; a
- * remote the server cannot read is a 400. Callers act only on exactly one.
+ * `GET /v1/boards?repo=`: the boards linked to a repo.
+ *
+ * `repo` is required; a remote the server cannot read is a 400. Callers act
+ * only when there is exactly one.
  */
 export interface BoardsForRepoResponse {
   /** The normalized form of the remote that was sent. */
@@ -158,13 +176,14 @@ export interface BoardsForRepoResponse {
 }
 
 /**
- * `PUT /v1/boards/:workspaceId/repo` (BE-20) — make this board THE board for
- * a repo: link it, and unlink the caller's other boards that have it.
+ * `PUT /v1/boards/:workspaceId/repo`: make this board the one for a repo.
+ *
+ * Links it, and unlinks the caller's other boards that have it.
  */
 export interface BoardRepoRequest {
   /** A git remote URL, as `git remote get-url origin` prints it. */
   repo: string;
-  /** Move this board off a DIFFERENT repo it is linked to now. */
+  /** Move this board off a different repo it is linked to now. */
   replace?: boolean;
 }
 
@@ -178,9 +197,11 @@ export interface BoardRepoResponse {
 }
 
 /**
- * 409 from `PUT /repo`. `linked` is the repo this board is on now when that
- * is why it refused — ask, then send `replace`; null when another board is
- * the reason (one only its owner can unlink).
+ * 409 from `PUT /repo`.
+ *
+ * `linked` is the repo this board is on now, when that is why it refused:
+ * ask, then send `replace`. Null when another board is the reason (one only
+ * its owner can unlink).
  */
 export interface BoardRepoConflictError {
   error: string;
@@ -207,7 +228,7 @@ export interface ChecklistItem {
   stream: string | null;
 }
 
-/** A stream as stored and served (BE-19). */
+/** A stream as stored and served. */
 export interface Stream {
   key: string;
   title: string;
@@ -220,7 +241,7 @@ export interface Stream {
   position: number;
 }
 
-/** How a lead runs a card with streams: who goes when, and what each is told. */
+/** How a lead runs a card with streams: who goes when, and each one's brief. */
 export interface Dispatch {
   waves: string[][];
   briefs: Record<string, string>;
@@ -288,7 +309,7 @@ export interface Card {
 /**
  * A card as a single-card read states it: the list shape plus its parts.
  *
- * ⚠️ Clients tell the two apart by whether `checklist` is present.
+ * NOTE: Clients tell the two apart by whether `checklist` is present.
  */
 export interface CardDetail extends Card {
   checklist: ChecklistItem[];
@@ -299,9 +320,9 @@ export interface CardDetail extends Card {
   attachments: CardAttachment[];
   /** User ids following the card. */
   subscribers: string[];
-  /** Whether the CALLER follows it. */
+  /** Whether the caller follows it. */
   subscribed: boolean;
-  /** Whether the CALLER starred it. */
+  /** Whether the caller starred it. */
   favorite: boolean;
   commentCount: number;
 }
@@ -321,7 +342,8 @@ export interface CardConflictError {
 // ── Listing ─────────────────────────────────────────────────────────────────
 
 /**
- * Query of `GET /v1/boards/:workspaceId/items` (and `/stats`, `/lookup`).
+ * The query of `GET /v1/boards/:workspaceId/items` (and `/stats`, `/lookup`).
+ *
  * Every value is a string on the wire.
  */
 export interface CardListQuery {
@@ -348,7 +370,7 @@ export interface CardListQuery {
   cursor?: string;
 }
 
-/** `GET /v1/boards/:workspaceId/items` — ordered by (columnKey, rank, id). */
+/** `GET /v1/boards/:workspaceId/items`, ordered by (columnKey, rank, id). */
 export interface CardListResponse {
   items: Card[];
   /** Null on the last page. */
@@ -357,12 +379,17 @@ export interface CardListResponse {
 }
 
 /**
- * `GET /v1/boards/:workspaceId/lookup?taskId=` or `?source=` — EXACTLY one
- * selector. 404 when no card carries that identity.
+ * `GET /v1/boards/:workspaceId/lookup?taskId=` or `?source=`.
+ *
+ * Exactly one selector. 404 when no card carries that identity.
  */
 export type CardLookupResponse = CardResponse;
 
-/** `GET /v1/boards/:workspaceId/stats` — takes `column`, `category`, `priority`, `tag`. */
+/**
+ * `GET /v1/boards/:workspaceId/stats`.
+ *
+ * Takes `column`, `category`, `priority` and `tag`.
+ */
 export interface BoardStats {
   total: number;
   byColumn: Record<string, number>;
@@ -384,7 +411,11 @@ export interface BoardEvent {
   verb: string;
 }
 
-/** `GET /v1/boards/:workspaceId/changes?since=<seq>&limit=` — archived cards included. */
+/**
+ * `GET /v1/boards/:workspaceId/changes?since=<seq>&limit=`.
+ *
+ * Archived cards are included.
+ */
 export interface BoardChangesResponse {
   head: number;
   /** The `since` to ask with next. */
@@ -411,11 +442,11 @@ export interface BoardPresenceResponse {
 
 // ── Writes ──────────────────────────────────────────────────────────────────
 
-/** Where a card lands in its lane. Neither: the bottom. */
+/** Where a card lands in its lane; with neither, the bottom. */
 export interface Placement {
-  /** The card this one goes directly BELOW. */
+  /** The card this one goes directly below. */
   after?: string | null;
-  /** The card this one goes directly ABOVE. */
+  /** The card this one goes directly above. */
   before?: string | null;
 }
 
@@ -426,7 +457,7 @@ export interface ChecklistItemInput {
   section?: ChecklistSection;
   /** 1-2000 characters. */
   text: string;
-  /** Absent keeps what the stored item says — NOT the same as `false`. */
+  /** Absent keeps what the stored item says, which is not `false`. */
   checked?: boolean;
   note?: string | null;
   group?: string | null;
@@ -455,8 +486,10 @@ export interface CardSourceInput {
 }
 
 /**
- * `POST /v1/boards/:workspaceId/items` — 201 `{ item }`. Honors an
- * `Idempotency-Key` header: a replay answers 200 `{ item, idempotent: true }`.
+ * `POST /v1/boards/:workspaceId/items`, answered with 201 `{ item }`.
+ *
+ * Honors an `Idempotency-Key` header: a replay answers 200
+ * `{ item, idempotent: true }`.
  */
 export interface CardCreateRequest {
   title: string;
@@ -485,9 +518,11 @@ export interface CardCreateResponse {
 }
 
 /**
- * `PATCH /v1/boards/:workspaceId/items/:itemId` — `If-Match: <revision>` is
- * REQUIRED. Only the fields sent change; `null` clears one. `columnKey`,
- * `rank`, `revision`, `seq`, `taskId` and `taskSeq` are refused.
+ * `PATCH /v1/boards/:workspaceId/items/:itemId`.
+ *
+ * `If-Match: <revision>` is required. Only the fields sent change; `null`
+ * clears one. `columnKey`, `rank`, `revision`, `seq`, `taskId` and `taskSeq`
+ * are refused.
  */
 export interface CardPatchRequest {
   type?: WorkItemType;
@@ -506,8 +541,9 @@ export interface CardPatchRequest {
 }
 
 /**
- * `POST /v1/boards/:workspaceId/items/:itemId/move` — `If-Match` optional.
- * Needs a `columnKey` or a placement.
+ * `POST /v1/boards/:workspaceId/items/:itemId/move`.
+ *
+ * `If-Match` is optional. Needs a `columnKey` or a placement.
  */
 export interface CardMoveRequest {
   /** Null reorders inside the current lane. */
@@ -515,7 +551,11 @@ export interface CardMoveRequest {
   placement?: Placement | null;
 }
 
-/** `PUT /v1/boards/:workspaceId/items/:itemId/checklist` — `If-Match` REQUIRED. */
+/**
+ * `PUT /v1/boards/:workspaceId/items/:itemId/checklist`.
+ *
+ * `If-Match` is required.
+ */
 export interface ChecklistReplaceRequest {
   items: ChecklistItemInput[];
 }
@@ -526,7 +566,11 @@ export interface ChecklistReplaceError {
   errors: string[];
 }
 
-/** `PATCH /v1/boards/:workspaceId/items/:itemId/checklist/:key` — `If-Match` optional. */
+/**
+ * `PATCH /v1/boards/:workspaceId/items/:itemId/checklist/:key`.
+ *
+ * `If-Match` is optional.
+ */
 export interface ChecklistItemPatchRequest {
   checked?: boolean;
   note?: string | null;
@@ -535,7 +579,7 @@ export interface ChecklistItemPatchRequest {
   stream?: string | null;
 }
 
-/** `DELETE /v1/boards/:workspaceId/items/:itemId` — archive (a tombstone). */
+/** `DELETE /v1/boards/:workspaceId/items/:itemId`: archive (a tombstone). */
 export interface CardArchiveResponse {
   archived: string;
   /** Absent when the card was already archived. */
@@ -548,7 +592,7 @@ export interface CardRestoreResponse {
   seq: number;
 }
 
-/** `POST /v1/boards/:workspaceId/items/:itemId/links` — 201. */
+/** `POST /v1/boards/:workspaceId/items/:itemId/links`, answered with 201. */
 export interface CardLinkRequest {
   type: LinkType;
   targetId: string;
@@ -580,12 +624,16 @@ export interface Comment {
   deletedAt: IsoDate | null;
 }
 
-/** `GET /v1/boards/:workspaceId/items/:itemId/comments` — oldest first. */
+/** `GET /v1/boards/:workspaceId/items/:itemId/comments`, oldest first. */
 export interface CommentListResponse {
   comments: Comment[];
 }
 
-/** `POST …/comments` (201) and `PATCH …/comments/:commentId`. 1-20000 characters. */
+/**
+ * `POST …/comments` (201) and `PATCH …/comments/:commentId`.
+ *
+ * The body is 1-20000 characters.
+ */
 export interface CommentRequest {
   body: string;
 }
@@ -599,22 +647,30 @@ export interface CommentPatchResponse {
   comment: { id: string; body: string; updatedAt: IsoDate };
 }
 
-/** `DELETE …/comments/:commentId` — a tombstone. Only the author may delete. */
+/**
+ * `DELETE …/comments/:commentId`: a tombstone.
+ *
+ * Only the author may delete.
+ */
 export interface CommentDeleteResponse {
   deleted: string;
 }
 
-/** `PUT` / `DELETE …/subscription` — answers the state that now holds. */
+/** `PUT` / `DELETE …/subscription`; answers the state that now holds. */
 export interface SubscriptionResponse {
   subscribed: boolean;
 }
 
-/** `PUT` / `DELETE …/favorite` — answers the state that now holds. */
+/** `PUT` / `DELETE …/favorite`; answers the state that now holds. */
 export interface FavoriteResponse {
   favorite: boolean;
 }
 
-/** `POST …/attachments` — a reference to a file, not its bytes. 201. */
+/**
+ * `POST …/attachments`, answered with 201.
+ *
+ * A reference to a file, not its bytes.
+ */
 export interface AttachmentRequest {
   name: string;
   reference: string;
@@ -644,7 +700,7 @@ export interface AuditEvent {
   at: IsoDate;
 }
 
-/** `GET …/items/:itemId/audit` — newest first. */
+/** `GET …/items/:itemId/audit`, newest first. */
 export interface AuditResponse {
   events: AuditEvent[];
 }
@@ -669,7 +725,11 @@ export interface ActivityComment {
 
 export type ActivityEntry = ActivityAudit | ActivityComment;
 
-/** `GET …/items/:itemId/activity?limit=&cursor=` — oldest first, audit and comments merged. */
+/**
+ * `GET …/items/:itemId/activity?limit=&cursor=`.
+ *
+ * Oldest first, audit and comments merged.
+ */
 export interface ActivityResponse {
   events: ActivityEntry[];
   cursor: string | null;
@@ -694,8 +754,10 @@ export interface ImportRestore {
 }
 
 /**
- * One record of an import: a create body that MUST carry `source` and
- * `columnKey`, with its checklist under `restore`, never at the top level.
+ * One record of an import.
+ *
+ * A create body that must carry `source` and `columnKey`, with its checklist
+ * under `restore`, never at the top level.
  */
 export interface ImportRecord extends Omit<CardCreateRequest, "checklist"> {
   columnKey: string;
@@ -704,7 +766,7 @@ export interface ImportRecord extends Omit<CardCreateRequest, "checklist"> {
   attachments?: AttachmentRequest[];
 }
 
-/** `POST /v1/boards/:workspaceId/import` — 1-50 records. */
+/** `POST /v1/boards/:workspaceId/import`: 1-50 records. */
 export interface ImportRequest {
   records: ImportRecord[];
 }
@@ -730,7 +792,11 @@ export interface ImportResponse {
   head: number;
 }
 
-/** `POST /v1/boards/:workspaceId/migrated` — seal the cutover, verified by count. */
+/**
+ * `POST /v1/boards/:workspaceId/migrated`: seal the cutover.
+ *
+ * Verified by count.
+ */
 export interface MigratedRequest {
   items: number;
   manifest?: string | null;
@@ -747,7 +813,7 @@ export interface MigratedMismatchError {
   actual: number;
 }
 
-/** `POST /v1/boards/:workspaceId/purge` — removes EVERY card. */
+/** `POST /v1/boards/:workspaceId/purge`: removes every card. */
 export interface PurgeRequest {
   /** Must be the project's slug, exactly. */
   confirm: string;
@@ -761,7 +827,8 @@ export interface PurgeResponse {
 // ── Icon ────────────────────────────────────────────────────────────────────
 
 /**
- * `GET /v1/boards/:workspaceId/icon` — image bytes, not JSON. 404 means no
- * icon; send `If-None-Match` with the last ETag for a 304.
+ * `GET /v1/boards/:workspaceId/icon`: image bytes, not JSON.
+ *
+ * 404 means no icon. Send `If-None-Match` with the last ETag for a 304.
  */
 export const ICON_KEY_HEADER = "x-icon-key";

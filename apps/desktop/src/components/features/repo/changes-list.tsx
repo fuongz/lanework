@@ -1,3 +1,15 @@
+// The working tree's changes, one row per file, nested by folder.
+//
+// - A tree with single-child chains compacted, the way an editor's source
+//   control view draws it. One row per changed directory would list
+//   `crates/olm`, `crates/olm/src` and `crates/olm/tests` as unrelated
+//   siblings; a plain tree spends three rows of indentation to say
+//   `apps/desktop/src`. Folding the chains keeps the nesting and drops the
+//   empty steps.
+// - Plain React, not `@pierre/trees`. The pull request's tree is a web
+//   component with its own shadow root, and every row here carries a
+//   checkbox and a restore button that have to be real, focusable controls
+//   in this document.
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
@@ -38,20 +50,6 @@ import { type DiffStyle, stagedTally, useWorktree } from "#/stores/worktree";
 import type { WorktreeFile } from "../../../../shared/worktree";
 import { ChangeAgents } from "./change-agents";
 
-/**
- * The working tree's changes, one row per file, nested by folder.
- *
- * ⚠️ A TREE with single-child chains compacted, the way an editor's source
- * control view draws it. One row per changed directory listed
- * `crates/olm`, `crates/olm/src` and `crates/olm/tests` as unrelated siblings;
- * a plain tree spends three rows of indentation to say `apps/desktop/src`.
- * Folding the chains keeps the nesting and drops the empty steps.
- *
- * ⚠️ Plain React, not `@pierre/trees`. The pull request's tree is a web
- * component with its own shadow root, and every row here carries a checkbox and
- * a restore button that have to be real, focusable controls in this document.
- */
-
 function Counts({
   additions,
   deletions,
@@ -91,9 +89,9 @@ function FileRow({
   const active = focus?.path === file.path;
 
   return (
-    // ⚠️ A row that is a button, with two controls beside it rather than inside
-    // it — a checkbox nested in a button is not a thing assistive tech can
-    // reach, and a click on it would also open the diff.
+    // NOTE: A row that is a button, with two controls beside it rather than
+    // inside it. A checkbox nested in a button is not something assistive
+    // tech can reach, and a click on it would also open the diff.
     <div
       data-active={active || undefined}
       className="group hover:bg-foreground/[0.04] data-active:bg-foreground/[0.06] flex h-7 min-w-0 items-center gap-2 rounded-md pr-2"
@@ -126,9 +124,10 @@ function FileRow({
           <Counts additions={file.additions} deletions={file.deletions} />
         )}
       </button>
-      {/* Beside the row's button, not in it: each mark is a button (FE-39/D2). */}
+      {/* Beside the row's button, not in it: each mark is a button
+          (FE-39/D2). */}
       <ChangeAgents path={file.path} />
-      {/* ⚠️ A real tooltip, not `title`: the native one waits a second and a
+      {/* A real tooltip, not `title`: the native one waits a second and a
           half, which on an icon-only destructive button is too long to learn
           what it does before clicking it. */}
       <Tooltip>
@@ -190,7 +189,7 @@ function FolderRow({
           strokeWidth={1.5}
           aria-hidden="true"
         />
-        {/* ⚠️ Truncated from the START, like the diff header: the end of a
+        {/* Truncated from the start, like the diff header: the end of a
             compacted chain is the part that says where you are. */}
         <span
           className="text-muted-foreground min-w-0 flex-1 truncate text-left text-[13px] [direction:rtl]"
@@ -219,7 +218,8 @@ function Section({
   onRestore: (file: WorktreeFile) => void;
 }) {
   const [open, setOpen] = useState(true);
-  /** Folders folded shut, by path. Open by default: a change list is read whole. */
+  // Folders folded shut, by path. Open by default: a change list is read
+  // whole.
   const [shut, setShut] = useState<Set<string>>(() => new Set());
   const toggle = (dir: string) =>
     setShut((current) => {
@@ -279,12 +279,12 @@ function Section({
 }
 
 /**
- * The screen's header, in the window's title bar (FE-58): its name, what the
- * working tree adds and removes, and Refresh.
+ * The screen's header, in the window's title bar.
  *
- * ⚠️ Drawn by `ChangesLayout`, not by the list: the list is only there while
- * something changed, and the screen still needs its name — and Refresh — when
- * nothing has.
+ * Its name, what the working tree adds and removes, and Refresh. Drawn by
+ * `ChangesLayout`, not by the list: the list is only there while something
+ * changed, and the screen still needs its name (and Refresh) when nothing
+ * has.
  */
 export function ChangesTitlebar({ files }: { files: WorktreeFile[] }) {
   const refresh = useWorktree((state) => state.refresh);
@@ -344,7 +344,7 @@ export function ChangesList({ files }: { files: WorktreeFile[] }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The screen's name, counts, the diff's controls, Stage All and
-          Refresh are all in the title bar — see `ChangesTitlebar`. */}
+          Refresh are all in the title bar: see `ChangesTitlebar`. */}
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pt-2 pb-2">
         <Section
           title="Tracked"
@@ -363,12 +363,14 @@ export function ChangesList({ files }: { files: WorktreeFile[] }) {
 }
 
 /**
- * How the diff beside the list is drawn and walked: Split/Unified, the
- * previous and next file, and staging the one in view. Drawn in the window's
- * title bar (FE-58) by `ChangesTitlebar`; the screen's +/− is already beside
- * its name there, so the diff carries no strip of its own.
+ * How the diff beside the list is drawn and walked.
  *
- * ⚠️ Unified by default, with Split one click away — the owner's call, over
+ * Split/Unified, the previous and next file, and staging the one in view.
+ * Drawn in the window's title bar by {@link ChangesTitlebar}; the screen's
+ * +/− is already beside its name there, so the diff carries no strip of its
+ * own.
+ *
+ * Unified by default, with Split one click away: the owner's call, over
  * FE-22/D4's Split. The choice is remembered per viewer (`readStyle`).
  */
 function ChangesDiffControls({ files }: { files: WorktreeFile[] }) {

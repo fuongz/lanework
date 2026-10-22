@@ -44,7 +44,7 @@ function statusParam(
   return same ? undefined : keys.join(",");
 }
 
-/** `OptionGlyph` as the shared menu asks for it. */
+/** {@link OptionGlyph} as the shared menu asks for it. */
 const glyph = (field: FilterField, option: FilterOption) => (
   <OptionGlyph field={field} option={option} />
 );
@@ -102,10 +102,10 @@ function OptionGlyph({
 }
 
 /**
- * One filter in play: what, the relation, and the value — three cells.
+ * One filter in play, in three cells: what, the relation, and the value.
  *
- * ⚠️ The VALUE cell is a button. Changing "Status is Done" to "Status is
- * In Progress" is the commonest edit there is, and routing it back through the
+ * The value cell is a button. Changing "Status is Done" to "Status is In
+ * Progress" is the commonest edit there is, and routing it back through the
  * Filter menu means removing a chip and building the same filter again.
  */
 function FilterChip({
@@ -204,9 +204,9 @@ export function FilterButton({
   const fields = filterFields(view);
   if (!fields.length) return null;
   return (
-    // NOTE: Keyed on the applied filters, which REMOUNTS the menu whenever one
+    // NOTE: Keyed on the applied filters, which remounts the menu whenever one
     // lands. Closing it from the click that picked a value does not stick:
-    // that click also navigates — the filters live in the URL — and the close
+    // that click also navigates (the filters live in the URL), and the close
     // is lost in the re-render, leaving a menu open over the chip it just
     // created. A remount is the one close that cannot be raced.
     <FilterMenu

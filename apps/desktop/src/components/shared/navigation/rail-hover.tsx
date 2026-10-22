@@ -20,18 +20,16 @@ interface Box {
 }
 
 /**
- * A scroll area of rail rows with ONE hover background that slides from row to
- * row, rather than each row lighting on its own.
+ * A scroll area of rail rows with one hover background that slides from row
+ * to row, rather than each row lighting on its own.
  *
- * ⚠️ Arriving from outside, it appears where the pointer is — only a move
- * BETWEEN rows slides. A highlight that flew in from wherever it last was
- * would be motion nobody asked for.
- *
- * ⚠️ Measured in the scroll area's CONTENT coordinates (plus `scrollTop`), so
- * the background scrolls with its row instead of staying on the screen.
- *
- * ⚠️ Rows are `relative` (see `ROW`): positioned and later in the DOM, they
- * paint over this background, which is the first child.
+ * - Arriving from outside, it appears where the pointer is; only a move
+ *   between rows slides. A highlight that flew in from wherever it last was
+ *   would be motion nobody asked for.
+ * - Measured in the scroll area's content coordinates (plus `scrollTop`), so
+ *   the background scrolls with its row instead of staying on the screen.
+ * - NOTE: Rows are `relative` (see `ROW`): positioned and later in the DOM,
+ *   they paint over this background, which is the first child.
  */
 export function RailHover({
   className,

@@ -9,11 +9,10 @@ export function getRouter() {
   return createTanStackRouter({
     routeTree,
     defaultPreload: "intent",
-    // Treat loader data as fresh for the session so loaders don't re-run on window
-    // refocus. Drop this if your server data is NOT cache-bounded elsewhere —
-    // without it, every refocus re-runs every loader; with it and no other cache,
-    // the user can sit on stale data indefinitely. Routes can always call
-    // `router.invalidate()` to force a refresh.
+    // Loader data stays fresh for the session, so loaders do not re-run on
+    // window refocus. That is safe only while server data is cached
+    // elsewhere: with no other cache, the user can sit on stale data forever.
+    // A route calls `router.invalidate()` to force a refresh.
     defaultStaleTime: Infinity,
     scrollRestoration: true,
     defaultErrorComponent: RouteError,

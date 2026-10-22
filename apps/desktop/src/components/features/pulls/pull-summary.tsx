@@ -23,12 +23,12 @@ import { PullActivityList } from "./pull-activity";
 import { PullChecksSection } from "./pull-checks";
 
 /**
- * What a pull request IS, as opposed to what changed in it.
+ * What a pull request is, as opposed to what changed in it.
  *
- * ⚠️ The timeline and the checks are read HERE, not with the pull request. The
- * screen lands on the diff (see the `view` search param), so most opens never
- * show this tab — attaching the read to `openPull` would charge every one of
- * them for it. `loadActivity` is safe to call on each mount; it skips a read it
+ * The timeline and the checks are read here, not with the pull request. The
+ * screen lands on the diff (the `view` search param), so most opens never
+ * show this tab, and attaching the read to `openPull` would charge every one
+ * of them. `loadActivity` is safe to call on each mount: it skips a read it
  * has already answered.
  */
 
@@ -60,9 +60,8 @@ function Row({
 /**
  * One foldable section.
  *
- * ⚠️ Open by default and NOT remembered between pull requests. A remembered
- * fold is how somebody opens a new pull request, does not see its description,
- * and has no idea why.
+ * Open by default and not remembered between pull requests. A remembered
+ * fold hides a new pull request's description with no hint why.
  */
 function Section({
   title,
@@ -144,15 +143,14 @@ export function PullSummary({ detail }: { detail: PullDetail }) {
     void loadActivity(pull.number);
   }, [loadActivity, pull.number]);
 
-  // ⚠️ Only when it is THIS pull request's. The store keeps one activity and it
-  // survives a switch for as long as the next read takes; drawing it meanwhile
+  // NOTE: Only when it is this pull request's. The store keeps one activity,
+  // and it survives a switch until the next read lands; drawing it meanwhile
   // would put one pull request's history under another's title.
   const mine = activity?.number === pull.number ? activity : null;
 
   return (
-    // ⚠️ This pane scrolls, unlike the diff beside it. The diff virtualizes and
-    // owns its own viewport; a description is ordinary prose and has to be
-    // given somewhere to overflow.
+    // This pane scrolls, unlike the diff: the diff virtualizes and owns its
+    // viewport, while a description is prose that needs room to overflow.
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex max-w-3xl flex-col gap-7 px-8 py-7">
         <div className="flex flex-col gap-2">
@@ -161,8 +159,8 @@ export function PullSummary({ detail }: { detail: PullDetail }) {
           </h1>
           <p className="text-muted-foreground flex items-center gap-2 text-xs">
             {pull.author && <span>{pull.author.login}</span>}
-            {/* The age behind a clock rather than a "·": it says what the
-                number is, which a separator never did. */}
+            {/* The age behind a clock rather than a "·", which says what the
+                number is. */}
             {age && (
               <span className="flex items-center gap-1">
                 <HugeiconsIcon
@@ -182,9 +180,8 @@ export function PullSummary({ detail }: { detail: PullDetail }) {
           <Row icon={GitBranchIcon} label="Branch">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="font-mono">{pull.headRef}</span>
-              {/* Decorative: the row is already labelled "Branch", and a screen
-                  reader reading "head into base" gains nothing over reading the
-                  two names in order. */}
+              {/* Decorative: the row is already labelled "Branch", and the
+                  two names read in order say the rest. */}
               <span className="text-muted-foreground" aria-hidden="true">
                 ›
               </span>
@@ -220,15 +217,15 @@ export function PullSummary({ detail }: { detail: PullDetail }) {
         </div>
 
         <Section title="Description">
-          {/* `MarkdownBody` draws its own empty state when the body is blank —
-              the same one the board's cards use. */}
+          {/* `MarkdownBody` draws its own empty state for a blank body, the
+              same one the board's cards use. */}
           <MarkdownBody source={detail.body} />
         </Section>
 
-        {/* ⚠️ A failed read is reported as a failure, in place of the sections
+        {/* A failed read is reported as a failure, in place of the sections
             it would have filled. "No CI checks" and "I could not ask GitHub"
-            are opposite facts that look identical when both are drawn as
-            nothing — the same rule `PullsView.stale` exists for. */}
+            look identical when both are drawn as nothing; `PullsView.stale`
+            exists for the same reason. */}
         {error !== null ? (
           <p className="text-destructive text-xs/relaxed">{error}</p>
         ) : mine === null ? (

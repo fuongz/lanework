@@ -1,16 +1,16 @@
-/* Every `@import` must come before any other at-rule, or the import is invalid
-   CSS — so `@source` / `@plugin` / `@custom-variant` sit below the block, not
-   interleaved with it. Tailwind does not care about the relative order; the CSS
-   spec (and biome's noInvalidPositionAtImportRule) does. */
+/* Every `@import` must come before any other at-rule, or it is invalid CSS,
+   so `@source` / `@plugin` / `@custom-variant` sit below the block, not
+   interleaved with it. Tailwind does not care about the order; the CSS spec
+   (and biome's noInvalidPositionAtImportRule) does. */
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
 
-/* Content detection is relative to THIS FILE, which lives in src/styles — so `../`
-   is the app's src/. Declared explicitly rather than left to Tailwind's automatic
-   detection, which resolves against the vite root and misses it entirely: the
-   symptom is a page with no classes and no error. */
+/* Content detection is relative to this file, in src/styles, so `../` is the
+   app's src/. Declared rather than left to Tailwind's automatic detection,
+   which resolves against the vite root and misses it: the symptom is a page
+   with no classes and no error. */
 @source "../**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
@@ -86,8 +86,8 @@
 }
 
 /* A working agent's title (with OrbitSpinner): a band of the full ink
-   sweeping through muted text. Only with motion allowed — reduced motion keeps
-   the text as it is, readable, rather than a still gradient. */
+   sweeping through muted text. Only with motion allowed: reduced motion
+   keeps the text as it is, readable, rather than a still gradient. */
 @keyframes text-shimmer {
   from {
     background-position: 100% 0;
@@ -122,21 +122,21 @@
 }
 
 /* Semantic tokens only. Components use `bg-card` / `text-muted-foreground` /
-   `ring-border` — never a literal hex or oklch.
+   `ring-border`, never a literal hex or oklch.
 
-   ⚠️ Picking one shade out of a color scale for a semantic token is not an eyeball
-   decision: check WCAG contrast against BOTH the page background and the token's
-   paired foreground, computing light and dark separately. A scale's "500" is
-   rarely the accessible pick in either mode.
+   NOTE: Picking one shade out of a color scale for a semantic token is not an
+   eyeball decision. Check WCAG contrast against both the page background and
+   the token's paired foreground, light and dark separately. A scale's "500"
+   is rarely the accessible pick in either mode.
 
    `shadcn init` extends this block with its own token set — keep the names. */
 :root {
   --radius: 0.625rem;
 
   /* Elevation for cards and containers, as a shadow rather than a border:
-     `--card` and `--background` are the SAME white in light mode, so a card's
-     only separation from the page was a hairline whose job was depth. Three
-     layers here — a 1px ring, a subtle lift, then ambient depth. */
+     `--card` and `--background` are the same white in light mode, so a card
+     needs depth to stand off the page. Three layers: a 1px ring, a subtle
+     lift, then ambient depth. */
   --elevation-card:
     0px 0px 0px 1px oklch(0 0 0 / 0.06), 0px 1px 2px -1px oklch(0 0 0 / 0.06),
     0px 2px 4px 0px oklch(0 0 0 / 0.04);
@@ -147,8 +147,8 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  /* The brand, #bb4d00 (FE-64): every primary button, radio, checkbox and
-     switch. White on it is 5.0:1, so the SAME value holds in both themes. */
+  /* The brand, #bb4d00: every primary button, radio, checkbox and switch.
+     White on it is 5.0:1, so the same value holds in both themes. */
   --primary: oklch(0.557 0.158 45.4);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
@@ -180,23 +180,24 @@
   /* The edge of the page's card on the window's ground. */
   --panel-edge: var(--border);
 
-  /* The ONE chromatic accent, for selection and focus. Everything else on this
-     board stays neutral — colour that means something has to be scarce, and a
-     board where lanes, categories, priorities and the cursor are all coloured
-     is a board where none of them reads.
-     ⚠️ The brand itself in light mode (FE-64), so a button and a focus ring
-     are one colour. Dark mode lifts it: see there. */
+  /* The one chromatic accent, for selection and focus. Everything else on
+     this board stays neutral: colour that means something has to be scarce,
+     and on a board where lanes, categories, priorities and the cursor are all
+     coloured, none of them reads.
+
+     The brand itself in light mode, so a button and a focus ring are one
+     colour. Dark mode lifts it: see there. */
   --accent-brand: oklch(0.557 0.158 45.4);
   --accent-brand-foreground: oklch(0.985 0 0);
 
-  /* Board tones. The board NAMES these — `column.tone` and `category.tone` — so
+  /* Board tones. The board names these (`column.tone`, `category.tone`), so
      the set is fixed by the service rather than chosen here.
 
-     ⚠️ They are carried by dots and icons beside a text label, never by the
-     label itself, so the bar is WCAG's 3:1 for non-text. Each is checked against
-     its own theme's page background: light sits near L 0.52 (~4:1 on white),
-     dark near L 0.72 (~7:1 on the dark ground). A single value for both themes
-     cannot clear either bar without failing the other. */
+     NOTE: They are carried by dots and icons beside a text label, never by
+     the label itself, so the bar is WCAG's 3:1 for non-text. Each is checked
+     against its own theme's page background: light sits near L 0.52 (~4:1 on
+     white), dark near L 0.72 (~7:1 on the dark ground). A single value for
+     both themes cannot clear either bar without failing the other. */
   --tone-neutral: oklch(0.55 0 0);
   --tone-violet: oklch(0.52 0.2 290);
   --tone-amber: oklch(0.55 0.13 75);
@@ -207,26 +208,27 @@
   --tone-rose: oklch(0.54 0.2 20);
 
   /* File-type icon hues, for the `@pierre/trees` icon set the pull-request
-     screen draws — in its file tree AND, through the same sprite, in each
+     screen draws, in its file tree and, through the same sprite, in each
      diff's file header.
 
-     ⚠️ A SEPARATE palette from `--tone-*`, not an extension of it. The board
-     tones are named by the service (`column.tone`, `category.tone`) and that
-     set is fixed; these thirteen are named by the icon library, which colours
-     JSON and JavaScript differently and would collapse into one amber if it
-     had to borrow from a palette of eight.
+     A separate palette from `--tone-*`, not an extension of it. The board
+     tones are named by the service and that set is fixed; these thirteen are
+     named by the icon library, which colours JSON and JavaScript differently
+     and would collapse into one amber if it had to borrow from a palette of
+     eight.
 
-     ⚠️ The library's own values are `light-dark()` literals, and this app
-     switches theme with a `.dark` CLASS rather than `color-scheme` — so its
-     palette would be stuck in light mode here (see `use-theme.ts` for why the
+     NOTE: The library's own values are `light-dark()` literals, and this app
+     switches theme with a `.dark` class rather than `color-scheme`, so its
+     palette would be stuck in light mode (see `use-theme.ts` for why the
      media query cannot be trusted in this Electron build). Restating the hues
-     as tokens is what makes the dark theme work at all; matching the app's own
-     token discipline is the second reason.
+     as tokens is what makes the dark theme work at all; it also keeps the
+     app's token discipline.
 
-     Same bar as the board tones — a coloured glyph beside a text label, so
+     Same bar as the board tones: a coloured glyph beside a text label, so
      WCAG's 3:1 for non-text, measured per theme against that theme's page
-     background. Every value is inside sRGB; chroma is capped where the hue ran
-     out of gamut at this lightness rather than left to the browser to clip. */
+     background. Every value is inside sRGB; chroma is capped where the hue
+     ran out of gamut at this lightness rather than left to the browser to
+     clip. */
   --file-icon-gray: oklch(0.55 0 0); /* 4.85:1 */
   --file-icon-red: oklch(0.54 0.2 25); /* 5.61:1 */
   --file-icon-vermilion: oklch(0.58 0.162 45); /* 4.58:1 */
@@ -250,9 +252,10 @@
   /* A warm near-black, not a neutral grey: the page card is #120e0b on a
      #0d0a08 ground (`--sidebar`), so the window reads as one dark surface
      with the page lifted a step off it.
-     ⚠️ Every surface ON it — card, popover, muted, accent — carries the same
-     warm hue at its old lightness. Left neutral, a settings card read as a
-     third, grey tone between two brown ones. */
+
+     NOTE: Every surface on it (card, popover, muted, accent) carries the same
+     warm hue. Left neutral, a settings card reads as a third, grey tone
+     between two brown ones. */
   --background: oklch(0.168 0.009 59);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0.008 58);
@@ -285,18 +288,18 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: var(--accent-brand);
-  /* ⚠️ OPAQUE, unlike `--sidebar-border`. A panel handle has no surface of its
-     own underneath it — only the window — so white 10% there was composited
-     over whatever the window was painted with, and read as a bright stripe
+  /* NOTE: Opaque, unlike `--sidebar-border`. A panel handle has no surface of
+     its own underneath it, only the window, so white 10% there is composited
+     over whatever the window is painted with and reads as a bright stripe
      down the whole app. This is that 10% already laid over `--sidebar`. */
   --panel-rule: oklch(0.235 0.008 58);
-  /* ⚠️ The card's edge, a step above the card and no more — Codex's way.
-     `--border` (white 10%) drew a bright frame round the whole page. */
+  /* The card's edge, a step above the card and no more, as Codex draws it.
+     `--border` (white 10%) would draw a bright frame round the whole page. */
   --panel-edge: oklch(0.2 0.009 58);
 
-  /* ⚠️ The brand's hue, lifted (FE-64/D2a). A button is a filled surface and
+  /* The brand's hue, lifted (FE-64/D2a). A button is a filled surface and
      keeps #bb4d00 (`--primary`); a focus ring, a drop line or a link is a
-     hairline on the dark ground, where #bb4d00 is only 3.8:1 — this is 6.8:1. */
+     hairline on the dark ground, where #bb4d00 is only 3.8:1. This is 6.8:1. */
   --accent-brand: oklch(0.7 0.15 48);
   --accent-brand-foreground: oklch(0.145 0 0);
 
@@ -325,11 +328,12 @@
   --file-icon-mauve: oklch(0.68 0.05 320); /* 6.73:1 */
 }
 
-/* The three fonts Settings → Appearance picks (FE-20). `useFonts` overrides
-   them on <html>; these are the defaults it falls back to.
-   ⚠️ Plain properties, then mapped in `@theme inline` below. `inline` writes a
-   theme value straight into the utility, so overriding `--font-sans` itself at
-   runtime would change nothing — overriding what it points at does. */
+/* The three fonts Settings → Appearance picks. `useFonts` overrides them on
+   <html>; these are the defaults it falls back to.
+
+   NOTE: Plain properties, then mapped in `@theme inline` below. `inline`
+   writes a theme value straight into the utility, so overriding `--font-sans`
+   itself at runtime would change nothing; overriding what it points at does. */
 :root {
   --ui-font: "Inter Variable", sans-serif;
   --ui-font-weight: 400;
@@ -416,12 +420,12 @@
 }
 
 @layer base {
-  /* ⚠️ The default border colour lives HERE, in the base layer, and nowhere
-     else. An unlayered copy of it sat above this block from the scaffold on,
-     and an unlayered rule outranks every layered one: it beat Tailwind's
-     `border-transparent` and every other border-colour utility, so each ghost
-     button and badge wore a grey outline, and a focus ring, an invalid field
-     or a drop target never showed its own colour. */
+  /* NOTE: The default border colour lives here, in the base layer, and
+     nowhere else. An unlayered rule outranks every layered one: an unlayered
+     copy would beat Tailwind's `border-transparent` and every other
+     border-colour utility, so each ghost button and badge would wear a grey
+     outline, and a focus ring, an invalid field or a drop target would never
+     show its own colour. */
   * {
     @apply border-border outline-ring/50;
   }
@@ -469,14 +473,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* ⚠️ `MotionConfig reducedMotion="user"` only covers motion/react. The board's
+  /* `MotionConfig reducedMotion="user"` only covers motion/react. The board's
      drag feedback, hovers and the palette are CSS transitions, and a user who
-     asked the OS for less motion asked for less of all of it. */
-  /* ⚠️ UNLAYERED on purpose, and that is what replaces `!important` here.
-     Tailwind's utilities live in `@layer utilities`, and an unlayered rule beats
-     every layered one no matter how specific — so this wins without the sledge-
-     hammer a linter is right to complain about. Move it inside `@layer base`
-     and every hover transition quietly comes back. */
+     asked the OS for less motion asked for less of all of it.
+
+     NOTE: Unlayered, which is what replaces `!important` here. Tailwind's
+     utilities live in `@layer utilities`, and an unlayered rule beats every
+     layered one however specific, so this wins without the sledgehammer a
+     linter is right to complain about. Moved inside `@layer base`, every
+     hover transition comes back. */
   *,
   *::before,
   *::after {
@@ -488,22 +493,22 @@
 }
 
 @layer base {
-  /* Not a utility class: `--sidebar` is exactly the token for this surface and
-     it is correct in BOTH themes — 0.985 against a white page, a warm 0.148
-     ground under a 0.168 one — where a single blend of `--muted` could only ever be right in
-     one of them.
+  /* Not a utility class: `--sidebar` is the token for this surface and it is
+     right in both themes (0.985 against a white page, a warm 0.148 ground
+     under a 0.168 one), where a single blend of `--muted` could only be right
+     in one of them.
 
-     ⚠️ Opaque on purpose, including under vibrancy. It was translucent, and the
-     result was a sidebar whose colour depended on whatever the window happened
-     to be composited over: fine in light, a washed mid-grey in dark. Settings
-     is a full-window view; it paints its own surfaces. */
+     NOTE: Opaque, including under vibrancy. Translucent, the sidebar's colour
+     would depend on whatever the window is composited over: fine in light, a
+     washed mid-grey in dark. Settings is a full-window view; it paints its
+     own surfaces. */
   .settings-sidebar,
   .app-sidebar {
     background-color: var(--sidebar);
   }
-  /* The window controls live in the window's title bar above the rail
-     (FE-58), so the rail itself is no drag region; its controls say so
-     anyway, for a rail drawn inside one. */
+  /* The window controls live in the window's title bar above the rail, so
+     the rail itself is no drag region; its controls say so anyway, for a
+     rail drawn inside one. */
   .app-sidebar a,
   .app-sidebar button {
     app-region: no-drag;
@@ -520,8 +525,8 @@
   [data-rail-gliding] .app-sidebar {
     min-width: var(--rail-w);
   }
-  /* …but the mini rail (FE-57) is its own narrow column: pinned at the full
-     width its icons would sit off-centre for the whole glide. */
+  /* …but the mini rail is its own narrow column: pinned at the full width
+     its icons would sit off-centre for the whole glide. */
   [data-rail-gliding] .app-sidebar[data-mini] {
     min-width: 0;
   }
@@ -530,19 +535,20 @@
       transition: none;
     }
   }
-  /* The window's title bar (FE-58, `WindowTitlebarHost`): one row across the
-     whole window whatever the rail is doing — the window controls, back,
-     forward and the sidebar button on its left, the open page's header
-     (`<WindowTitlebar>`) in its slot on the right, from where the rail ends.
-     No rule between the two: the ground runs on unbroken. The rail and the page's
-     card both start UNDER it, so no header has to step around the controls.
-     Off macOS the window keeps its native title bar and there is nothing to
-     clear: the row stays, as the page's header.
-     ⚠️ Two lengths place it, set on the bar so a shell can override them:
-     `--titlebar-split` (where the rail ends) and `--titlebar-slot-start` (what the slot
-     must clear). The app rail's DRAWN width (`--rail-width`, kept by a
-     ResizeObserver) is the default, so the slot follows a drag or a glide in
-     the very frame the rail moves. */
+  /* The window's title bar (`WindowTitlebarHost`): one row across the whole
+     window whatever the rail is doing. The window controls, back, forward
+     and the sidebar button sit on its left; the open page's header
+     (`<WindowTitlebar>`) sits in its slot on the right, from where the rail
+     ends. No rule between the two: the ground runs on unbroken. The rail and
+     the page's card both start under it, so no header has to step around the
+     controls. Off macOS the window keeps its native title bar and there is
+     nothing to clear: the row stays, as the page's header.
+
+     Two lengths place it, set on the bar so a shell can override them:
+     `--titlebar-split` (where the rail ends) and `--titlebar-slot-start`
+     (what the slot must clear). The app rail's drawn width (`--rail-width`,
+     kept by a ResizeObserver) is the default, so the slot follows a drag or a
+     glide in the frame the rail moves. */
   .window-titlebar {
     --titlebar-split: var(--rail-width, 240px);
     --titlebar-slot-start: var(--titlebar-split);
@@ -550,8 +556,9 @@
     flex-shrink: 0;
     height: 44px;
   }
-  /* ⚠️ In CSS px worked out from the ZOOM (app-shell.tsx): the controls sit at
-     fixed points while the page zooms, and the bar has to hold their line. */
+  /* NOTE: In CSS px worked out from the zoom (app-shell.tsx): the controls
+     sit at fixed points while the page zooms, and the bar has to hold their
+     line. */
   html[data-vibrancy="true"] .window-titlebar {
     height: var(--titlebar-height, 44px);
   }
@@ -564,10 +571,10 @@
     align-items: center;
     min-width: 0;
   }
-  /* Back, forward and the sidebar button, as one group, in the title bar
-     (FE-19) — so macOS only, beside the controls they belong with. The
-     group's display lives HERE, not in a utility: a `flex` class would
-     outrank this `none` and draw it on every platform. */
+  /* Back, forward and the sidebar button, as one group in the title bar, so
+     macOS only, beside the controls they belong with. The group's display
+     lives here, not in a utility: a `flex` class would outrank this `none`
+     and draw it on every platform. */
   .sidebar-nav {
     display: none;
   }
@@ -575,7 +582,7 @@
   .sidebar-nav .sidebar-toggle {
     display: grid;
   }
-  /* Folded (FE-57), the sidebar button is the mini rail's first slot. */
+  /* Folded, the sidebar button is the mini rail's first slot. */
   html[data-rail-mini="true"] .sidebar-nav .sidebar-toggle {
     display: none;
   }
@@ -601,9 +608,9 @@
     top: var(--sidebar-toggle-top, 10px);
     app-region: no-drag;
   }
-  /* ⚠️ The page's header clears the group as well as the rail: folded, the
-     rail ends at 56px, under the window controls, and a slot starting there
-     put the page's title under back and forward. */
+  /* NOTE: The page's header clears the group as well as the rail: folded,
+     the rail ends at 56px, under the window controls, and a slot starting
+     there would put the page's title under back and forward. */
   html[data-vibrancy="true"] .app-titlebar {
     --titlebar-slot-start: max(
       var(--titlebar-split),
@@ -615,19 +622,19 @@
 @layer base {
   /* Scrollbars the app draws itself, so every OS shows the same one.
 
-     ⚠️ `::-webkit-scrollbar`, not `scrollbar-width`/`scrollbar-color`. The two
-     standard properties keep each platform's own bar and only retint it — which
-     is the opposite of what is wanted here, because the platforms disagree about
-     the SHAPE: Windows and most Linux themes draw a stepper arrow at each end
-     and a filled track behind the thumb, and neither of those is reachable from
-     the standard properties. The renderer is Chromium on all three platforms,
-     so the legacy pseudo-elements are the portable answer, not the hack.
+     NOTE: `::-webkit-scrollbar`, not `scrollbar-width` / `scrollbar-color`.
+     The two standard properties keep each platform's own bar and only
+     retint it, while the platforms disagree about the shape: Windows and
+     most Linux themes draw a stepper arrow at each end and a filled track
+     behind the thumb, and neither is reachable from the standard properties.
+     The renderer is Chromium on all three platforms, so the legacy
+     pseudo-elements are the portable answer, not the hack.
 
-     ⚠️ The trade this makes is on macOS: styling the pseudo-elements at all
-     turns Chromium's OVERLAY scrollbar into a classic one, so the bar stops
-     fading out and starts taking 10px of layout width. That is the cost of one
-     scrollbar everywhere. The thumb is pitched low enough to read as an overlay
-     until it is pointed at. */
+     The trade is on macOS: styling the pseudo-elements at all turns
+     Chromium's overlay scrollbar into a classic one, so the bar stops fading
+     out and takes 10px of layout width. That is the cost of one scrollbar
+     everywhere. The thumb is pitched low enough to read as an overlay until
+     it is pointed at. */
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -643,10 +650,10 @@
     display: none;
   }
   ::-webkit-scrollbar-thumb {
-    /* A 6px thumb in a 10px gutter. The border is transparent and the fill stops
-       at the padding box, which is how a scrollbar gets its inset without a
-       track to hold it — `width: 6px` alone would put the bar hard against the
-       edge of the pane. */
+    /* A 6px thumb in a 10px gutter. The border is transparent and the fill
+       stops at the padding box, which is how a scrollbar gets its inset
+       without a track to hold it: `width: 6px` alone would put the bar hard
+       against the edge of the pane. */
     border: 2px solid transparent;
     background-clip: padding-box;
     border-radius: 9999px;

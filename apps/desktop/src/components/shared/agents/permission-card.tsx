@@ -19,9 +19,10 @@ import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 
 /**
- * The CLI asked to use a tool and is waiting (D1): what it would do, its
- * input on demand, and the answer — Allow, Allow and switch the session's
- * mode when the CLI offers it, or Deny.
+ * The CLI asked to use a tool and is waiting for an answer.
+ *
+ * Shows what it would do, its input on demand, and the answers: Allow, Allow
+ * and switch the session's mode when the CLI offers it, or Deny.
  */
 export function PermissionCard({
   request,
@@ -155,9 +156,11 @@ function said(picked: Picked): string {
 }
 
 /**
- * `AskUserQuestion` (ảnh 8): Claude asks before acting. One question at a
- * time — its options, "Something else…", and Skip or Continue; the last
- * Continue sends every answer at once. × (or skipping them all) says no.
+ * `AskUserQuestion`: Claude asks before acting.
+ *
+ * One question at a time: its options, "Something else…", and Skip or
+ * Continue. The last Continue sends every answer at once; × (or skipping them
+ * all) says no.
  */
 function QuestionCard({
   id,
@@ -245,8 +248,8 @@ function QuestionCard({
         </button>
       </div>
 
-      {/* Toggle buttons in a fieldset: a pick is one press, and several are
-          when the question takes more than one. */}
+      {/* Toggle buttons in a fieldset: a pick is one press, and a question
+          that takes several takes several presses. */}
       <fieldset
         aria-label={question.header || question.question}
         className="-mx-1.5 flex min-w-0 flex-col gap-0.5"
@@ -267,9 +270,9 @@ function QuestionCard({
                 className={cn(
                   "mt-0.5 flex size-4 shrink-0 items-center justify-center border transition-colors",
                   question.multiSelect ? "rounded-[5px]" : "rounded-full",
-                  // ⚠️ `primary`, as the app's own radio and checkbox fill
-                  // (components/ui): a board tone here read as a second
-                  // accent beside the neutral Continue.
+                  // `primary`, like the app's own radio and checkbox fill
+                  // (components/ui): a board tone reads as a second accent
+                  // beside the neutral Continue.
                   on
                     ? "border-primary bg-primary text-primary-foreground"
                     : "border-foreground/25",

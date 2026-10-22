@@ -1,13 +1,14 @@
-// Harness updates (FE-61): which version of each agent CLI this machine runs,
-// whether a newer one is out, and updating it from the app.
+// Harness updates: which version of each agent CLI this machine runs, whether
+// a newer one is out, and updating it from the app.
 import type { TerminalAgent } from "./terminal";
 
 /** A harness is one of the agent CLIs a tab can run. */
 export type HarnessAgent = TerminalAgent;
 
 /**
- * How the CLI was installed, read from where its binary really lives. It
- * decides both where "latest" comes from and which command updates it.
+ * How the CLI was installed, read from where its binary really lives.
+ *
+ * It decides both where "latest" comes from and which command updates it.
  */
 export type InstallMethod =
   | "native"
@@ -32,12 +33,13 @@ export interface HarnessInfo {
   latest: string | null;
   installMethod: InstallMethod;
   /**
-   * The command that updates it, fixed by main from the install method —
-   * never anything the renderer supplied. Null when the app cannot tell how
-   * it was installed, and there is no Update button.
+   * The command that updates the CLI, fixed by main from the install method.
+   *
+   * Never anything the renderer supplied. Null when the app cannot tell how
+   * it was installed; then there is no Update button.
    */
   updateCommand: string | null;
-  /** The version the user closed the island on (FE-61/D9), or null. */
+  /** The version the user closed the island on, or null (FE-61/D9). */
   dismissed: string | null;
   update: HarnessUpdateState;
   /** ISO time of the last check; null before the first one finishes. */
@@ -56,8 +58,11 @@ export function hasPendingUpdate(info: HarnessInfo): boolean {
 }
 
 /**
- * Compare two dotted versions numerically: negative, zero or positive.
+ * Compare two dotted versions numerically.
+ *
  * A pre-release (`1.2.0-beta.1`) sorts before its release.
+ *
+ * @returns Negative when `a` is older, zero when equal, positive when newer.
  */
 export function compareVersions(a: string, b: string): number {
   const split = (v: string) => {
@@ -81,12 +86,13 @@ export function compareVersions(a: string, b: string): number {
 }
 
 /**
- * Who a CLI is signed in as, for Settings › Harness: the email (drawn
- * blurred), the organization and the plan. Null fields when it is not signed
- * in, or does not say.
+ * Who a CLI is signed in as, for Settings › Harness.
  *
- * ⚠️ Only these labels, read in main from what the CLI keeps — `claude auth
- * status`, the claims of Codex's `id_token` — never a token or credential.
+ * The email (drawn blurred), the organization and the plan. Fields are null
+ * when the CLI is not signed in, or does not say.
+ *
+ * NOTE: Only these labels, read in main from what the CLI keeps (`claude auth
+ * status`, the claims of Codex's `id_token`). Never a token or credential.
  */
 export interface HarnessAccount {
   agent: HarnessAgent;
@@ -104,7 +110,7 @@ export const harnessChannels = {
   update: "harness:update",
   dismiss: "harness:dismiss",
   openInTerminal: "harness:open-in-terminal",
-  /** main → renderer: the list changed. Carries `HarnessInfo[]`. */
+  /** Main → renderer: the list changed. Carries `HarnessInfo[]`. */
   changed: "harness:changed",
 } as const;
 
@@ -115,11 +121,11 @@ export interface DesktopHarnessApi {
   check: () => Promise<HarnessInfo[]>;
   /** Run the harness's update command in the background. */
   update: (agent: HarnessAgent) => Promise<HarnessInfo[]>;
-  /** Skip exactly `version` of this harness until a newer one is out. */
+  /** Skip only `version` of this harness, until a newer one is out. */
   dismiss: (agent: HarnessAgent, version: string) => Promise<HarnessInfo[]>;
   /** Run the update command in Terminal, where its output can be read. */
   openInTerminal: (agent: HarnessAgent) => Promise<void>;
-  /** Who each CLI is signed in as (`HarnessAccount`). */
+  /** Who each CLI is signed in as. */
   accounts: () => Promise<HarnessAccount[]>;
   onChanged: (listener: (list: HarnessInfo[]) => void) => () => void;
 }

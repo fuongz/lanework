@@ -14,16 +14,14 @@ import { useFiles } from "#/stores/files";
 const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
 
 /**
- * What a file badge in the chat does (FE-66): opens the file in Repository ›
- * Files — a kept tab, the tree opened down to it. Images too; they used to
- * open in a lightbox here (FE-65).
+ * Opens a file badge in the chat in Repository › Files, images included: a
+ * kept tab, with the tree opened down to it.
  *
- * ⚠️ Main finds the file (`worktree.locate`): Claude writes paths relative
- * to the project's folder, to the repository, absolute, or as a bare name.
- *
- * ⚠️ The lightbox stays for what the repository does not hold — an image
- * pasted into this conversation lives outside the folder, and Files cannot
- * open it. Anything else that cannot be found says so, in the same dialog.
+ * - Main finds the file (`worktree.locate`): Claude writes paths relative to
+ *   the project's folder, to the repository, absolute, or as a bare name.
+ * - The lightbox stays for what the repository does not hold. An image pasted
+ *   into this conversation lives outside the folder, and Files cannot open
+ *   it. Anything else that cannot be found says so, in the same dialog.
  */
 export function FileOpenerProvider({
   slug,

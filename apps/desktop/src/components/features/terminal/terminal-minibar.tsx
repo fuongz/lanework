@@ -8,23 +8,23 @@ import { Badge } from "#/components/ui/badge";
 import { useTerminal } from "#/stores/terminal";
 
 /**
- * What the terminal panel folds into when it is hidden: one line at the foot
- * of the content column — "Terminal", and how many this project has — that
- * opens it again.
+ * What the terminal panel folds into when it is hidden.
  *
- * ⚠️ There for a project with NO terminal as well, with no count. It is where
- * the panel went, so it cannot vanish along with the last shell; opening it
- * from here starts one, the same as ⌘`.
+ * One line at the foot of the content column, "Terminal" and how many this
+ * project has, that opens the panel again.
  *
- * ⚠️ A start that failed lands here too, and says why: there is no empty
- * panel left open to carry the error (FE-19).
+ * - Drawn for a project with no terminal as well, with no count. It is where
+ *   the panel went, so it cannot vanish along with the last shell; opening it
+ *   from here starts one, the same as ⌘`.
+ * - A start that failed lands here too, and says why: there is no empty
+ *   panel left open to carry the error.
  */
 export function TerminalMinibar({
   workspace,
   usage,
 }: {
   workspace: string;
-  /** What sits at the bar's right end: Claude's usage strip (FE-53). */
+  /** What sits at the bar's right end: Claude's usage strip. */
   usage?: ReactNode;
 }) {
   const count = useTerminal((state) => state.sessions[workspace]?.length ?? 0);

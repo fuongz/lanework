@@ -82,13 +82,14 @@ function rulesOf(entries: Entry[]): DictationCorrection[] {
 }
 
 /**
- * The fixes applied to what was heard (FE-69/D5), one row each: the words
- * dictation hears, and the word you meant. Saved as you leave a field, add
- * or remove a row; Reset goes back to the defaults, and keeps following them
- * as they change.
+ * The fixes applied to what dictation heard (FE-69/D5), one row each.
  *
- * ⚠️ A blank row stays on screen until it is filled in or removed, but it is
- * never saved — a rule with nothing to match is no rule.
+ * Each row is the words dictation hears and the word you meant. Saved as you
+ * leave a field, add or remove a row. Reset goes back to the defaults, and
+ * keeps following them as they change.
+ *
+ * A blank row stays on screen until filled in or removed, but is never saved:
+ * a rule with nothing to match is no rule.
  */
 function DictionaryEditor() {
   const saved = usePreferences((state) => state.dictationCorrections);

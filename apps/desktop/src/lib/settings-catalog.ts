@@ -15,7 +15,7 @@ import {
 // destinations checked against the real route tree instead of loose strings.
 import type { LinkProps } from "@tanstack/react-router";
 
-/** Icon payload shape from `@hugeicons/core-free-icons` — data, not a component. */
+/** An icon from `@hugeicons/core-free-icons`: data, not a component. */
 type SettingsIcon = typeof Sun01Icon;
 
 interface SettingsItem {
@@ -45,9 +45,9 @@ interface SettingsGroup {
  * Only sections with real content appear (FE-02 S1). A nav item that leads
  * nowhere costs the reader a click to learn nothing.
  *
- * ⚠️ Agents (the hook page), Memory, Instructions and Config files are left
- * out of the nav for now, not removed: their routes still answer. What the
- * Agents page did lives in Harness — `/settings/agents` sends you there.
+ * NOTE: Agents (the hook page), Memory, Instructions and Config files are
+ * left out of the nav for now, not removed: their routes still answer. What
+ * the Agents page did lives in Harness — `/settings/agents` sends you there.
  */
 export const SETTINGS_GROUPS: SettingsGroup[] = [
   {
@@ -161,9 +161,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
 ];
 
 /**
- * Does `query` match any of `text`?
+ * Whether `query` matches any of `text`.
  *
- * Case-insensitive substring, deliberately not fuzzy: with a handful of
+ * A case-insensitive substring, not fuzzy: with a handful of
  * settings, fuzzy matching mostly produces surprises. An empty query matches
  * everything, which is what makes "not searching" the same code path.
  */

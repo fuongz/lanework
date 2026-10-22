@@ -3,9 +3,10 @@ import type { Workspace } from "#/../shared/workspaces";
 import { cn } from "#/lib/utils";
 
 /**
- * What main answered this session, by `id|iconKey`, so a tile drawn again —
- * the switcher reopening, another project picked — has its image on the first
- * frame instead of flashing the letter.
+ * Icons main returned this session, by `id|iconKey`.
+ *
+ * A tile drawn again (the switcher reopening, another project picked) has its
+ * image on the first frame instead of flashing the letter.
  */
 const answers = new Map<string, string | null>();
 
@@ -13,8 +14,10 @@ const iconKeyOf = (workspace: Workspace | null) =>
   workspace?.id ? `${workspace.id}|${workspace.iconKey ?? ""}` : null;
 
 /**
- * A project's icon (BE-18) as a `data:` URL, or null for the letter tile —
- * no GitHub repo, not read yet, or a project with no cloud id.
+ * A project's icon as a `data:` URL.
+ *
+ * @returns null for the letter tile: no GitHub repo, not read yet, or a
+ *   project with no cloud id.
  */
 function useWorkspaceIcon(workspace: Workspace | null): string | null {
   const key = iconKeyOf(workspace);
@@ -52,12 +55,11 @@ function useWorkspaceIcon(workspace: Workspace | null): string | null {
 }
 
 /**
- * A project's colour, derived from its slug.
+ * The colours a project's letter tile is drawn in, picked by its slug.
  *
- * ⚠️ Derived, not stored and not by list position. A colour that came from the
- * index would change the moment somebody creates a project earlier in the
- * alphabet — and the whole point of giving each one a colour is that it is the
- * same tile every time you open the menu.
+ * Derived from the slug, not stored and not by list position. A colour from
+ * the index would change when somebody creates a project earlier in the
+ * alphabet, and the point of a colour is that it is the same tile every time.
  */
 const TILES = [
   "bg-tone-violet",
@@ -76,9 +78,11 @@ function tile(slug: string): string {
 }
 
 /**
- * A project's mark: its GitHub repo owner's avatar (BE-18), or its initial
- * on a colour picked by its slug when there is none. Shared by the project
- * switcher and Settings → Projects, so a project wears one face in both.
+ * A project's mark: its GitHub repo owner's avatar, or else its initial on a
+ * colour picked by its slug.
+ *
+ * Shared by the project switcher and Settings → Projects, so a project wears
+ * one face in both.
  */
 export function ProjectTile({
   workspace,

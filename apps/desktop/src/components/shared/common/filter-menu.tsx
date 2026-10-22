@@ -45,7 +45,7 @@ export interface MenuField {
 const pickedOf = (selected: string | undefined) =>
   new Set((selected ?? "").split(",").filter(Boolean));
 
-/** A toggle applied to a multiple field's selection, in the field's order. */
+/** A multiple field's selection with `value` toggled, in the field's order. */
 export function toggled(
   field: MenuField,
   selected: string | undefined,
@@ -63,19 +63,19 @@ export function toggled(
 /**
  * How many options one list will draw.
  *
- * ⚠️ A cap, not a page. A tag vocabulary is unbounded — a board with two
- * thousand tags would otherwise mount two thousand rows on every keystroke —
- * and the search box is how you reach the ones past it. The list says so when
- * it is holding back.
+ * A cap, not a page. A tag vocabulary is unbounded, so a board with two
+ * thousand tags would otherwise mount two thousand rows on every keystroke.
+ * The search box reaches the ones past it, and the list says when it is
+ * holding back.
  */
 const MAX_OPTIONS = 50;
 
 /**
  * One field's values, searchable.
  *
- * ⚠️ `shouldFilter={false}`: cmdk's own matcher cannot be capped, and a list
- * that filters 2000 rows and then draws 50 has already paid for all 2000. The
- * query is applied here, then the slice.
+ * NOTE: `shouldFilter={false}`. cmdk's own matcher cannot be capped, and a
+ * list that filters 2000 rows and then draws 50 has already paid for all
+ * 2000. The query is applied here, then the slice.
  */
 export function ValuePicker<F extends MenuField>({
   field,
@@ -130,11 +130,10 @@ export function ValuePicker<F extends MenuField>({
             <CommandItem
               key={option.value}
               value={option.value}
-              // ⚠️ `data-checked` rather than a tick of our own. `CommandItem`
-              // already renders the registry's indicator — the same `Tick02Icon`
-              // a `DropdownMenuCheckboxItem` uses — and it only needs to be told
-              // the row is on. A hand-rolled badge here was a second way to draw
-              // the same state, and it did not match the menus beside it.
+              // `data-checked` rather than a tick of our own: `CommandItem`
+              // already renders the registry's indicator, the same
+              // `Tick02Icon` a `DropdownMenuCheckboxItem` uses, so the row
+              // matches the menus beside it.
               data-checked={
                 !picked && selected === option.value ? "true" : undefined
               }
@@ -164,7 +163,7 @@ export function ValuePicker<F extends MenuField>({
             </CommandItem>
           ))}
           {matched.length > shown.length && (
-            // ⚠️ Said out loud. A list that silently stops at 50 makes the search
+            // Said out loud: a list that silently stops at 50 makes the search
             // box look broken to anybody whose value is the 51st.
             <p className="text-muted-foreground px-2.5 py-1.5 text-xs">
               {matched.length - shown.length} more — keep typing.
@@ -177,12 +176,12 @@ export function ValuePicker<F extends MenuField>({
 }
 
 /**
- * The Filter button, and the two panes behind it: the fields, and the open
+ * The Filter button and the two panes behind it: the fields, and the open
  * field's values beside them.
  *
- * NOTE: Shared by the issue list and the pull request list (FE-75), so both
- * filter the same way. Each passes its own fields, what is selected and the
- * icon each value carries.
+ * Shared by the issue list and the pull request list, so both filter the same
+ * way. Each passes its own fields, what is selected and the icon each value
+ * carries.
  */
 export function FilterMenu<F extends MenuField>({
   fields,
@@ -200,7 +199,7 @@ export function FilterMenu<F extends MenuField>({
   onPick: (key: F["key"], value: string | undefined) => void;
 }) {
   const [open, setOpen] = useState(false);
-  /** The one field whose values are showing, beside the list — not instead. */
+  /** The one field whose values are showing, beside the list, not instead. */
   const [openField, setOpenField] = useState<F["key"] | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -208,9 +207,9 @@ export function FilterMenu<F extends MenuField>({
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
     hoverTimer.current = null;
   };
-  // Every timer this component starts is cleared when it goes away. Written
-  // against the REF rather than `cancelHover`, whose identity changes on every
-  // render and would make this a cleanup that runs on each one.
+  // Clears the hover timer on unmount. It reads the ref, not `cancelHover`,
+  // whose identity changes on every render and would make this cleanup run on
+  // each one.
   useEffect(
     () => () => {
       if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -221,11 +220,9 @@ export function FilterMenu<F extends MenuField>({
   /**
    * Open a field's values on hover.
    *
-   * ⚠️ Instant when a submenu is already showing, delayed when none is. Moving
-   * between rows should feel like one menu switching panes; the first open is
-   * the one a pointer merely passing over the list would trigger by accident,
-   * and a menu that flashes open on the way somewhere else is worse than one
-   * that waits a moment.
+   * Instant when a submenu is already showing, delayed when none is. Moving
+   * between rows should feel like one menu switching panes, while a first
+   * open is what a pointer passing over the list would trigger by accident.
    */
   const hover = (key: F["key"]) => {
     cancelHover();
@@ -247,8 +244,8 @@ export function FilterMenu<F extends MenuField>({
       <PopoverTrigger
         render={
           // An icon, to fit the list's narrow header. It is tinted while a
-          // filter is on: a filter is the reason a list looks short, and this
-          // button is the first place anybody looks for why.
+          // filter is on: a filter is why a list looks short, and this button
+          // is the first place anybody looks for the reason.
           <Button
             variant="ghost"
             size="icon"
@@ -268,21 +265,19 @@ export function FilterMenu<F extends MenuField>({
         }
       />
       <PopoverContent variant="menu" align="end" className="p-1">
-        {/* ⚠️ The field list STAYS while its values are open. Swapping the
-            panel for the values hid the other fields behind a back button and
-            cost a click to compare two of them — the whole point of a submenu
-            is that you can still see what you are choosing between. */}
+        {/* The field list stays while its values are open, so you can still
+            see what you are choosing between instead of going back through
+            a button to compare two fields. */}
         <RailHover>
           <div role="menu" aria-label="Filter by" className="flex flex-col">
             {fields.map((entry) => (
               <Popover
                 key={entry.key}
                 open={openField === entry.key}
-                // ⚠️ A press on the row never CLOSES the submenu. Hover already
-                // opened it, and a trigger that toggles would make the click a
-                // person makes to confirm what they are hovering shut the very
-                // panel they were reading. Every other close — outside press,
-                // Escape, picking a value — still lands here.
+                // NOTE: A press on the row never closes the submenu. Hover
+                // already opened it, so a toggling trigger would shut the
+                // panel a person clicks to confirm. Every other close (outside
+                // press, Escape, picking a value) still lands here.
                 onOpenChange={(next, details) => {
                   if (!next && details?.reason === "trigger-press") return;
                   setOpenField(next ? entry.key : null);
@@ -296,11 +291,10 @@ export function FilterMenu<F extends MenuField>({
                       aria-haspopup="menu"
                       onMouseEnter={() => hover(entry.key)}
                       onMouseLeave={cancelHover}
-                      // ⚠️ NOT `onFocus`. Base UI focuses the first row when the
-                      // menu opens, so opening on focus meant one click on
-                      // "Filter" produced two panels — the field list and
-                      // whichever submenu happened to be first. Hover opens it;
-                      // pressing the row (Enter, Space, click) opens it too.
+                      // NOTE: Not `onFocus`. Base UI focuses the first row
+                      // when the menu opens, so opening on focus would turn one
+                      // click on "Filter" into two panels. Hover opens it, and
+                      // so does pressing the row (Enter, Space, click).
                       className={`${RAIL_ROW} relative aria-expanded:bg-foreground/[0.05] flex h-7 items-center gap-2.5 rounded-md px-2 text-left text-[13px]`}
                     >
                       <HugeiconsIcon

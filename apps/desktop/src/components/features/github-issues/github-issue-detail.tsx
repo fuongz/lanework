@@ -22,8 +22,8 @@ import { GitHubIssuesProblemState } from "./github-issue-row.problem";
 /**
  * What "Create card from issue" fills the New issue form with.
  *
- * ⚠️ The issue's link goes first in the body, so the card still points at
- * its source after somebody rewrites the rest. The body is the issue's own
+ * The issue's link goes first in the body, so the card still points at its
+ * source after somebody rewrites the rest. The body is the issue's own
  * markdown; the comments stay on GitHub.
  */
 export function cardPrefill(detail: IssueDetail): {
@@ -91,8 +91,8 @@ function Comment({ comment }: { comment: GitHubIssueComment }) {
 /**
  * The issue page's shape while it loads: header, body, two comments.
  *
- * ⚠️ Drawn under the real header's height, so the page does not jump when
- * the issue lands.
+ * Drawn under the real header's height, so the page does not jump when the
+ * issue lands.
  */
 function GitHubIssueDetailSkeleton() {
   return (
@@ -133,8 +133,8 @@ function GitHubIssueDetailSkeleton() {
  * One GitHub issue, read-only (FE-75/D6a): its body, its comments, and two
  * ways out — to GitHub, or into a card on this board.
  *
- * ⚠️ Nothing here writes to GitHub. "Create card from issue" opens the New
- * issue form filled from the issue; the card is the board's write, made when
+ * Nothing here writes to GitHub. "Create card from issue" opens the New issue
+ * form filled from the issue; the card is the board's write, made when
  * somebody saves that form.
  */
 export function GitHubIssueDetail({
@@ -176,8 +176,8 @@ export function GitHubIssueDetail({
           <Link
             to="/w/$slug/issues/new"
             params={{ slug }}
-            // ⚠️ The New issue route has to read `title` and `body` from its
-            // search for these to reach the form (FE-75).
+            // NOTE: The New issue route has to read `title` and `body` from
+            // its search for these to reach the form.
             search={prefill}
             className="hover:bg-foreground/[0.06] flex h-6 items-center gap-1.5 rounded-md px-2 text-xs transition-colors"
           >

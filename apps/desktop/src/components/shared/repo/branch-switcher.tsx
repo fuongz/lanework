@@ -26,13 +26,13 @@ import { useWorktree } from "#/stores/worktree";
  * The project's current branch, beside the REPOSITORY label, and the way to
  * another one.
  *
- * ⚠️ Read with `for-each-ref` on project change, on window focus and when the
- * menu opens — never a `git status`. A branch name on every screen is worth one
- * cheap read; the file list is not, and stays on the Changes screen.
- *
- * ⚠️ Hidden, not disabled, when the project has no repository. The Changes
- * screen explains why there is none; a greyed-out control beside the label
- * would raise the question in a place with no room to answer it.
+ * - Read with `for-each-ref` on project change, on window focus and when the
+ *   menu opens, never with `git status`. A branch name on every screen is
+ *   worth one cheap read; the file list is not, and stays on the Changes
+ *   screen.
+ * - Hidden, not disabled, when the project has no repository. The Changes
+ *   screen explains why there is none; a greyed-out control beside the label
+ *   would raise the question in a place with no room to answer it.
  */
 export function BranchSwitcher({
   slug,
@@ -40,7 +40,9 @@ export function BranchSwitcher({
 }: {
   slug: string;
   /**
-   * `composer`: the chat composer's top row — a quiet label that opens
+   * Where the switcher sits.
+   *
+   * `composer` is the chat composer's top row: a quiet label that opens
    * upward, since the composer sits at the window's bottom.
    */
   variant?: "rail" | "composer";
@@ -109,8 +111,8 @@ export function BranchSwitcher({
               variant="secondary"
               size="xs"
               aria-label={`Switch branch — currently ${branches.current ?? "detached HEAD"}`}
-              // ⚠️ `shrink` over the button's own `shrink-0`: a long branch name
-              // gives way — truncated — instead of pushing the row wider than
+              // NOTE: `shrink` over the button's own `shrink-0`, so a long
+              // branch name is truncated instead of pushing the row wider than
               // the rail and scrolling it sideways.
               className="max-w-[9.5rem] min-w-0 shrink gap-1 text-[11px]"
             >
@@ -140,8 +142,8 @@ export function BranchSwitcher({
           <CommandList className="max-h-80">
             <CommandEmpty>No branch matches.</CommandEmpty>
             <CommandGroup>
-              {/* One list, locals first (ảnh 19): the current one ticked,
-                  a remote one named without its remote, which is its tag. */}
+              {/* One list, locals first: the current one ticked, a remote
+                  one named without its remote, which is its tag. */}
               {[...branches.local, ...branches.remote].map((name) => {
                 const remote = branches.remote.includes(name)
                   ? name.slice(0, name.indexOf("/"))

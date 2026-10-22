@@ -19,7 +19,7 @@ import type {
   Workspace,
 } from "../../../../shared/workspaces";
 
-/** Strip Electron's IPC wrapper so a user reads the message main actually sent. */
+/** Strip Electron's IPC wrapper, so a user reads the message main sent. */
 function message(cause: unknown, fallback: string): string {
   const raw = cause instanceof Error ? cause.message : fallback;
   return raw.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
@@ -37,15 +37,13 @@ function tally(counts: Record<string, number>, limit = 4): string {
     .join(", ");
 }
 
-/** What the run did, in the one sentence a person actually needs. */
+/** What the run did, in the one sentence a person needs. */
 function runMessage(report: ImportReport): string {
   const parts = Object.entries(report.summary)
     .filter(([, n]) => n > 0)
     .map(([status, n]) => `${n} ${status}`);
-  // ⚠️ A failure reads as a failure ALONE. Prefixing the service's reason with
-  // "Nothing to send." — which is what an empty summary produced — put a
-  // sentence that was false next to the one that mattered, and the false one
-  // came first.
+  // A failure reads as a failure ALONE. An empty summary would otherwise put
+  // a false "Nothing to send." in front of the reason that matters.
   if (report.error)
     return parts.length
       ? `${report.error} Before it stopped: ${parts.join(", ")}.`
@@ -60,19 +58,19 @@ type FolderState =
   | { kind: "missing"; path: string };
 
 /**
- * The folder on this machine whose files still hold this workspace's cards —
- * and the way to put them on the cloud board.
+ * The folder holding this workspace's cards, and the way to put them on the
+ * cloud board.
  *
- * ⚠️ THREE steps, deliberately, and the middle one is not the last: read what
- * would happen, send it, and only then agree to the cutover. The cutover is
- * what puts every local writer into read-only, so it is a separate act taken
- * with the receipts already on screen. One button that migrated AND flipped the
- * switch would change a board's source of truth while somebody was still
- * reading whether it worked.
+ * NOTE: THREE steps, and the middle one is not the last: read what would
+ * happen, send it, and only then agree to the cutover. The cutover puts every
+ * local writer into read-only, so it is a separate act taken with the
+ * receipts already on screen. One button that migrated AND flipped the switch
+ * would change a board's source of truth while somebody was still reading
+ * whether it worked.
  *
- * ⚠️ Nothing here writes, moves or deletes a review file. The old copies stay
- * exactly where they are so a human can compare, which is also why re-running
- * is safe: the cloud keys every card on the file it came from.
+ * Nothing here writes, moves or deletes a review file. The old copies stay
+ * where they are so a human can compare, which is also why re-running is
+ * safe: the cloud keys every card on the file it came from.
  */
 export function LocalFolderPanel({
   workspace,
@@ -83,11 +81,10 @@ export function LocalFolderPanel({
   /**
    * Whether the CLOUD already owns this project's cards.
    *
-   * ⚠️ It used to be enough that this panel only appeared on un-migrated
-   * boards — the gate lived in the screen that rendered it. The panel is
-   * permanently reachable now (FE-08 D14), so the gate has to live in here:
-   * after a cutover the files on disk are a frozen copy, and offering to send
-   * them again points somebody at the version that stopped being true.
+   * NOTE: The panel is always reachable (FE-08 D14), so the gate lives in
+   * here, not in the screen that renders it. After a cutover the files on
+   * disk are a frozen copy, and offering to send them again points somebody
+   * at the version that stopped being true.
    */
   boardMigrated?: boolean;
   /** Called after a cutover, so the board around this panel re-reads itself. */
@@ -109,9 +106,9 @@ export function LocalFolderPanel({
     try {
       const next = await folderApi.state(workspace.slug);
       setState(next);
-      // The preview reads the folder properly — with the board's own parsers —
-      // so it can only be asked for once a folder is linked AND the workspace
-      // has a cloud id to import into.
+      // The preview reads the folder with the board's own parsers, so it can
+      // only be asked for once a folder is linked AND the workspace has a
+      // cloud id to import into.
       setPreview(
         next.kind === "linked" && boardApi && workspaceId
           ? await boardApi.importPreview(workspaceId)
@@ -158,9 +155,9 @@ export function LocalFolderPanel({
   const handedOver = boardMigrated || migratedAt !== null;
 
   return (
-    // ⚠️ No border and no padding of its own: this panel lives inside a dialog
-    // that already draws both, and two frames around one thing reads as a card
-    // that failed to fill its container.
+    // No border and no padding of its own: the dialog around this panel draws
+    // both, and two frames around one thing read as a card that failed to
+    // fill its container.
     <div className="flex w-full flex-col gap-3">
       <div className="flex flex-col gap-1">
         <h3 className="text-[13px] font-medium">
@@ -168,7 +165,7 @@ export function LocalFolderPanel({
         </h3>
         <p className="text-xs text-muted-foreground">
           {state.kind === "none"
-            ? // ⚠️ The account's own path is named when it has one: it is the
+            ? // The account's own path is named when it has one: it is the
               // folder the user is most likely to pick, and saying it turns a
               // file chooser into a confirmation.
               workspace.path
@@ -180,10 +177,9 @@ export function LocalFolderPanel({
         </p>
       </div>
 
-      {/* ⚠️ The other folders are LISTED, not counted and not read. A project
-          can be created from several folders; only the primary holds the cards
-          this panel is about, and a folder that was chosen at creation and then
-          never appears anywhere reads as one the app forgot. */}
+      {/* The other folders are LISTED, not counted and not read. Only the
+          primary holds the cards this panel is about, but a folder chosen at
+          creation that never appears anywhere reads as one the app forgot. */}
       {state.kind === "linked" && state.others.length > 0 && (
         <div className="flex flex-col gap-0.5">
           <p className="text-xs font-medium">Also in this project</p>
@@ -325,7 +321,7 @@ export function LocalFolderPanel({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ⚠️ Destructive, because it is the one action here that cannot be undone
+      {/* Destructive, because it is the one action here that cannot be undone
           from this screen: after it, the files stop being the truth and every
           local writer refuses to touch them. */}
       <AlertDialog
@@ -369,9 +365,8 @@ export function LocalFolderPanel({
 /**
  * What the folder turned out to hold.
  *
- * ⚠️ Every count here comes from the card's front matter and its checklist as
- * the board's own scanner reads them. The one number that is a floor rather
- * than a total (`capped`) is labelled as one.
+ * Every count comes from the cards' front matter. The one number that is a
+ * floor rather than a total (`capped`) is labelled as one.
  */
 function FolderFacts({ summary }: { summary: LocalFolderSummary }) {
   if (summary.looksUnrelated)
@@ -436,10 +431,10 @@ function FolderFacts({ summary }: { summary: LocalFolderSummary }) {
 /**
  * What sending them would do, then what it did.
  *
- * ⚠️ The lossy numbers are named BEFORE the button, not after. `inferredCheckedAt`
- * is the one quantity in a migration that is not a fact — markdown says `- [x]`
- * and never when — and a preview that only counted cards would make the import
- * look lossless.
+ * The lossy numbers are named BEFORE the button, not after.
+ * `inferredCheckedAt` is the one quantity in a migration that is not a fact
+ * (markdown says `- [x]` and never when), and a preview that only counted
+ * cards would make the import look lossless.
  */
 function MigrateLines({
   preview,
@@ -512,7 +507,7 @@ function MigrateLines({
           {runMessage(report)}
         </p>
       )}
-      {/* ⚠️ Surfaced by name, never swallowed. A card the service refused is one
+      {/* Surfaced by name, never swallowed. A card the service refused is one
           a person has to go and look at. */}
       {failures.length > 0 && (
         <p className="text-xs text-destructive">

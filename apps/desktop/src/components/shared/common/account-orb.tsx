@@ -1,7 +1,7 @@
 import { type CSSProperties, useMemo } from "react";
 import { cn } from "#/lib/utils";
 
-/** FNV-1a. Small, stable, and dependency-free — all this needs. */
+/** FNV-1a hash of a string: small, stable and dependency-free. */
 function hash(seed: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < seed.length; i += 1) {
@@ -46,10 +46,9 @@ function orb(seed: string): CSSProperties {
   const base = next() * 360;
 
   const layers = SPOTS.map(([x, y], i) => {
-    // ⚠️ Both stops are the SAME colour, the outer one at alpha 0 — never the
-    // keyword `transparent`. That keyword is transparent BLACK, and fading a
-    // pastel to it drags every blend through grey, which is exactly the muddy
-    // ring this look cannot have.
+    // NOTE: Both stops are the same colour, the outer one at alpha 0, never
+    // the keyword `transparent`. That keyword is transparent black: fading a
+    // pastel to it drags every blend through grey into a muddy ring.
     const hue = base + HUES[i] + (next() * 24 - 12);
     const light = 0.84 + next() * 0.08;
     const chroma = 0.07 + next() * 0.07;
@@ -61,8 +60,8 @@ function orb(seed: string): CSSProperties {
     return `radial-gradient(${size}% ${size}% at ${cx}% ${cy}%, ${color(1)} 0%, ${color(0)} 62%)`;
   });
 
-  // A pale bloom low and centre, the way light sits in the reference: it keeps
-  // the middle from turning into whichever two blooms happen to overlap there.
+  // A pale bloom low and centre keeps the middle from turning into whichever
+  // two blooms happen to overlap there.
   layers.push(
     `radial-gradient(62% 58% at 50% 62%, oklch(0.98 0.015 ${base} / 0.55) 0%, oklch(0.98 0.015 ${base} / 0) 72%)`,
   );
@@ -70,19 +69,19 @@ function orb(seed: string): CSSProperties {
   return {
     backgroundColor: `oklch(0.95 0.02 ${base})`,
     backgroundImage: layers.join(", "),
-    // A hairline of its own, because the palest orbs are nearly the colour of a
-    // light sidebar and would otherwise have no edge at all.
+    // The palest orbs are nearly the colour of a light sidebar and would
+    // otherwise have no edge at all.
     boxShadow: "inset 0 0 0 1px oklch(0 0 0 / 0.07)",
   };
 }
 
 /**
- * The account's mark: a soft gradient orb, generated from who you are.
+ * The account's mark: a soft gradient orb generated from its seed.
  *
- * Same seed, same orb, forever — so it works the way a face does, recognised
- * rather than read. It replaced two characters sliced off the raw `userId`,
- * which looked like initials and was not: an opaque id's first two characters
- * say nothing about the person holding it.
+ * Same seed, same orb, so it is recognised the way a face is rather than
+ * read. It is not two characters of the raw `userId`: those look like
+ * initials, but an opaque id's first characters say nothing about the person
+ * holding it.
  */
 export function AccountOrb({
   seed,

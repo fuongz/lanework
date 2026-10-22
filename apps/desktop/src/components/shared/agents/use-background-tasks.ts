@@ -7,18 +7,21 @@ import { ipcMessage } from "#/lib/ipc-error";
 
 /** How often a running shell's output is read again (FE-42/D3). */
 const OUTPUT_POLL_MS = 1_000;
-/** A conversation writing many times a second asks for its list at most this often. */
+/** The shortest gap between two list reads of one busy conversation. */
 const RELIST_MS = 1_000;
 
 /**
- * The tasks a Claude conversation started in the background (FE-42), running
- * first then newest — read again whenever `cue` changes (its listing's
- * `updatedAt` and counts) and when its own transcript is written: a task's
- * notification is a line in it.
+ * The tasks a Claude conversation started in the background, running first,
+ * then newest.
  *
- * ⚠️ One read in flight at a time, at most one queued behind it, and writes
- * folded to one read a second: a working conversation writes many times a
- * second, and a read that started first must not land after a later one.
+ * Read again whenever `cue` changes (its listing's `updatedAt` and counts)
+ * and when its own transcript is written, since a task's notification is a
+ * line in it.
+ *
+ * NOTE: One read in flight at a time, at most one queued behind it, and
+ * writes folded to one read a second. A working conversation writes many
+ * times a second, and a read that started first must not land after a later
+ * one.
  */
 export function useBackgroundTasks(
   workspace: string | null,
@@ -98,9 +101,10 @@ export function useBackgroundTasks(
 }
 
 /**
- * The end of one background shell's output (FE-42/D5): read once, then every
- * second while it is `running` and the window is visible — a finished task's
- * file no longer grows.
+ * The end of one background shell's output (FE-42/D5).
+ *
+ * Read once, then every second while it is `running` and the window is
+ * visible; a finished task's file no longer grows.
  */
 export function useTaskOutput(
   workspace: string | null,
@@ -140,7 +144,7 @@ export function useTaskOutput(
           reading = false;
         });
     };
-    // ⚠️ Once more when it stops running: its last lines came with the end.
+    // Once more when it stops running: its last lines came with the end.
     read();
     if (!running)
       return () => {

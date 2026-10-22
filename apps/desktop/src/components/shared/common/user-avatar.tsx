@@ -5,13 +5,13 @@ import { cn } from "#/lib/utils";
 /**
  * A person's picture, or their orb when there is no picture to draw.
  *
- * ⚠️ The orb stands in for a FAILED image too, not only a missing one. This
- * window's CSP is `img-src 'self' data:` (see `protocol.ts`), so most remote
- * avatar URLs never load — without the `onError` swap every one of them drew
- * the browser's broken-image glyph.
- *
- * ⚠️ The failure is remembered per URL, not as a flag. A row reused for another
- * person gets a new `src`, and a stale `true` would hide a picture that loads.
+ * - NOTE: The orb stands in for a failed image too, not only a missing one.
+ *   This window's CSP is `img-src 'self' data:` (see `protocol.ts`), so most
+ *   remote avatar URLs never load; without the `onError` swap each would draw
+ *   the browser's broken-image glyph.
+ * - NOTE: The failure is remembered per URL, not as a flag. A row reused for
+ *   another person gets a new `src`, and a stale `true` would hide a picture
+ *   that loads.
  */
 export function UserAvatar({
   src,
@@ -20,7 +20,7 @@ export function UserAvatar({
   className,
 }: {
   src?: string | null;
-  /** What the orb is generated from — a user id, a login, a name. */
+  /** What the orb is generated from: a user id, a login or a name. */
   seed: string;
   /** Hover text; these are often drawn with no name beside them. */
   title?: string;

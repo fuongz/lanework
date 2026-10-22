@@ -33,15 +33,13 @@ function Framed({ slug, children }: { slug: string; children: ReactNode }) {
 
 /**
  * Settings › Instructions: the CLAUDE.md and AGENTS.md files each agent reads
- * for a project, beside the one open (FE-37, moved out of the project rail by
- * FE-51). Read-only.
+ * for a project, beside the one open. Read-only.
  *
- * ⚠️ The open file is in the URL (`instructions/$id`), like a memory is in
- * Memory's: Back returns to the previous one, and an `@import` inside a file
- * is a link to a route. The project rides along as `?project=`.
- *
- * ⚠️ Listed only while the screen is open: finding the files walks the
- * folder and its parents, which no badge is worth.
+ * - The open file is in the URL (`instructions/$id`), as a memory is in
+ *   Memory's: Back returns to the previous one, and an `@import` inside a
+ *   file is a link to a route. The project rides along as `?project=`.
+ * - Listed only while the screen is open: finding the files walks the folder
+ *   and its parents, which no badge is worth.
  */
 export function InstructionsLayout() {
   const slug = useSettingsProject();

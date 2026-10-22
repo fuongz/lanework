@@ -16,18 +16,18 @@ interface EditorTab {
   dirty?: boolean;
   /** A preview tab, replaced by the next file opened: drawn in italics. */
   preview?: boolean;
-  /** Tints the label — a file's git status on the Files screen. */
+  /** Tints the label: a file's git status on the Files screen. */
   labelClassName?: string;
 }
 
 /**
  * An editor's tab strip: the open files, one active, each closed by × or a
- * middle click — Repository › Files (FE-66), and the Settings pages that
- * browse files (Skills, Config files).
+ * middle click.
  *
- * ⚠️ Scrolls sideways WITHOUT a bar (`no-scrollbar`). The app's scrollbar is
- * a classic 10px one, and under a 32px strip it opened a gap that read as a
- * broken layout. So the active tab is scrolled into view here instead, and a
+ * Used by Repository › Files and the Settings pages that browse files
+ * (Skills, Config files). It scrolls sideways WITHOUT a bar (`no-scrollbar`):
+ * the app's 10px classic scrollbar under a 32px strip opens a gap that reads
+ * as a broken layout. So the active tab is scrolled into view here, and a
  * trackpad or Shift+wheel reaches the rest.
  */
 export function EditorTabs({
@@ -67,8 +67,8 @@ export function EditorTabs({
     >
       {tabs.map((tab) => {
         const on = tab.id === active;
-        // The ×: always on the active tab, on hover elsewhere — and a dirty
-        // tab shows its dot instead until hovered.
+        // The ×: always on the active tab, on hover elsewhere. A dirty tab
+        // shows its dot instead until hovered.
         const hideClose = !!tab.dirty || !on;
         return (
           <div

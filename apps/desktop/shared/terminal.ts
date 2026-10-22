@@ -1,26 +1,24 @@
-/**
- * The terminal panel's contract (FE-19): what the renderer may ask of the pty
- * host, and what comes back.
- *
- * ⚠️ The renderer never names a command, a shell or a folder. It names a
- * WORKSPACE, and main resolves the folder a terminal opens in from the links
- * it wrote down itself; the host picks the shell from the environment. A
- * compromised renderer can type into a terminal it was shown, which is what a
- * terminal is for — it cannot start one somewhere else.
- */
+// The terminal panel's contract: what the renderer may ask of the pty host,
+// and what comes back.
+//
+// NOTE: The renderer never names a command, a shell or a folder. It names a
+// workspace, and main resolves the folder a terminal opens in from the links
+// it wrote down itself; the host picks the shell from the environment. A
+// compromised renderer can type into a terminal it was shown, which is what a
+// terminal is for. It cannot start one somewhere else.
 
 /**
  * What a tab is opened as: a plain shell, or a shell with an agent's CLI typed
- * into it (FE-19, the + menu).
+ * into it (the + menu).
  *
- * ⚠️ A NAME, never a command. The renderer picks one of these; the host maps
- * it to the one CLI it stands for, so no command line ever crosses from the
- * page (FE-19/D8).
+ * NOTE: A name, never a command. The renderer picks one of these; the host
+ * maps it to the one CLI it stands for, so no command line ever crosses from
+ * the page (FE-19/D8).
  */
 export const TERMINAL_KINDS = ["shell", "claude", "codex"] as const;
 export type TerminalKind = (typeof TERMINAL_KINDS)[number];
 
-/** The kinds that are an agent's CLI — offered only where this machine has it. */
+/** The kinds that are an agent's CLI, offered where this machine has it. */
 export type TerminalAgent = Exclude<TerminalKind, "shell">;
 export const TERMINAL_AGENTS: readonly TerminalAgent[] = ["claude", "codex"];
 
@@ -34,11 +32,14 @@ export function isTerminalKind(value: unknown): value is TerminalKind {
 /** One terminal, as the panel lists it. */
 export interface TerminalSession {
   id: string;
-  /** The workspace it belongs to: the cloud id, or the slug when there is none. */
+  /**
+   * The workspace it belongs to: the cloud id, or the slug when there is
+   * none.
+   */
   workspace: string;
   /** What it was opened as; an agent tab is still a shell underneath. */
   kind: TerminalKind;
-  /** The shell's name — `zsh`, `bash` — for the tab. */
+  /** The shell's name for the tab: `zsh`, `bash`. */
   shell: string;
   /** Where it started, or null when the project has no folder here (`~`). */
   cwd: string | null;
@@ -48,24 +49,28 @@ export interface TerminalSession {
   /** Set once the shell has exited; the tab stays until it is closed. */
   exit: { code: number; signal: number | null } | null;
   /**
-   * The agent conversation this tab is on NOW (FE-31): the one it resumed
-   * (FE-23), or a new Claude tab's `--session-id` — then kept up to date by
-   * main as the CLI moves (`/clear`, `/resume`, a new Codex's first rollout).
-   * Null for a shell, or a new Codex tab nobody has typed into yet.
+   * The agent conversation this tab is on now.
+   *
+   * The one it resumed, or a new Claude tab's `--session-id`, then kept up to
+   * date by main as the CLI moves (`/clear`, `/resume`, a new Codex's first
+   * rollout). Null for a shell, or a new Codex tab nobody has typed into yet.
    */
   resume: string | null;
   /**
-   * The card this tab was started to work (FE-34): its task id, or its uuid
-   * when it has none. Null for every other tab. Set once, at spawn; which card
-   * the agent is on LATER is `AgentSession.card`, read from its transcript.
+   * The card this tab was started to work: its task id, or its uuid when it
+   * has none.
+   *
+   * Null for every other tab. Set once, at spawn; which card the agent is on
+   * later is {@link AgentSession.card}, read from its transcript.
    */
   card: string | null;
 }
 
 /**
- * How an agent is briefed on the card it was handed (FE-34): `work` it end to
- * end — its decisions are settled — or `review` the open ones with the person
- * first (FE-34/D6, the BE-14 flow), then work it.
+ * How an agent is briefed on the card it was handed.
+ *
+ * `work` it end to end, its decisions settled, or `review` the open ones with
+ * the person first, then work it (FE-34/D6, the BE-14 flow).
  */
 export const CARD_BRIEFS = ["work", "review"] as const;
 export type CardBriefMode = (typeof CARD_BRIEFS)[number];
@@ -73,10 +78,10 @@ export type CardBriefMode = (typeof CARD_BRIEFS)[number];
 /**
  * What the renderer may say about the card a new agent tab is for (FE-34/D3).
  *
- * ⚠️ A card's NAME and a mode, never words for the prompt. The host writes
+ * NOTE: A card's name and a mode, never words for the prompt. The host writes
  * the prompt from a fixed template, and the board comes from main's own
- * knowledge of the workspace — nothing typed into the CLI crosses from the
- * page except an id `isCardRef` accepts.
+ * knowledge of the workspace. Nothing typed into the CLI crosses from the
+ * page except an id {@link isCardRef} accepts.
  */
 export interface CardBrief {
   /** The card's task id (`FE-34`), or its uuid when it has none. */
@@ -90,15 +95,15 @@ const TASK_ID = /^[A-Z]{1,6}-\d{1,5}$/;
  * Whether `value` can be put in an agent's first prompt as a card: a task id
  * or a uuid.
  *
- * ⚠️ The only two shapes, for the reason `isAgentSessionId` has one: the
- * prompt is TYPED into a shell, and letters, digits and dashes are nothing a
- * shell reads as syntax.
+ * NOTE: The only two shapes, for the reason {@link isAgentSessionId} has one:
+ * the prompt is typed into a shell, and letters, digits and dashes are
+ * nothing a shell reads as syntax.
  */
 export function isCardRef(value: unknown): value is string {
   return typeof value === "string" && (TASK_ID.test(value) || UUID.test(value));
 }
 
-/** A board's id — the cloud workspace's — as the host puts it in a prompt. */
+/** Whether `value` is a board's id (the cloud workspace's) for a prompt. */
 export function isBoardId(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
 }
@@ -114,38 +119,43 @@ export function isCardBrief(value: unknown): value is CardBrief {
 }
 
 /**
- * One conversation an agent's CLI kept on disk for a project's folder (FE-23):
- * what the rail's Agents group lists, and what a click resumes.
+ * One conversation an agent's CLI kept on disk for a project's folder.
+ *
+ * What the rail's Agents group lists, and what a click resumes.
  */
 export interface AgentSession {
-  /** The CLI's own conversation id — always a UUID (`isAgentSessionId`). */
+  /** The CLI's own conversation id: a UUID ({@link isAgentSessionId}). */
   id: string;
   agent: TerminalAgent;
   /** What the rail shows: the name given in Lanework, else `cliTitle`. */
   title: string;
   /**
-   * Its title as the CLI named it, or its first prompt (FE-23). Kept beside
-   * `title` so a rename can be undone back to it (FE-24).
+   * Its title as the CLI named it, or its first prompt.
+   *
+   * Kept beside `title` so a rename can be undone back to it.
    */
   cliTitle: string;
   /** When it was last written to, ISO. */
   updatedAt: string;
-  /** When it was pinned, epoch ms, or null (FE-25). */
+  /** When it was pinned, epoch ms, or null. */
   pinnedAt: number | null;
   /**
    * Whether its agent is thinking or working right now: a turn is open in
-   * the transcript (FE-25). Not "was written lately" — opening a
-   * conversation writes to it too.
+   * the transcript.
+   *
+   * Not "was written lately": opening a conversation writes to it too.
    */
   working: boolean;
   /**
-   * The card its agent last named to the Lanework MCP — read only while it is
-   * working, null otherwise or when it never named one (FE-27).
+   * The card its agent last named to the Lanework MCP.
+   *
+   * Read only while it is working; null otherwise, or when it never named
+   * one.
    */
   card: AgentCard | null;
-  /** The agents it spawned, newest first (FE-33); none for most. */
+  /** The agents it spawned, newest first; none for most. */
   subagents: AgentSubagent[];
-  /** How many tasks it started in the background (FE-42); Claude only. */
+  /** How many tasks it started in the background; Claude only. */
   background: BackgroundCount;
 }
 
@@ -164,21 +174,23 @@ export interface ArchivedAgentSession {
   updatedAt: string;
 }
 
-/** A conversation's background tasks, counted for the rail (FE-42). */
+/** A conversation's background tasks, counted for the rail. */
 export interface BackgroundCount {
   running: number;
   total: number;
 }
 
 /**
- * What a background task is (FE-42): a shell `Bash` left running, an agent
- * that runs on its own, or a `Monitor` watching a stream.
+ * What a background task is: a shell `Bash` left running, an agent that runs
+ * on its own, or a `Monitor` watching a stream.
  */
 export type BackgroundTaskKind = "shell" | "agent" | "monitor";
 
 /**
- * Where a background task stands (FE-42). `lost`: its conversation stopped
- * long ago and no notification ever came — the CLI that owned it is gone.
+ * Where a background task stands.
+ *
+ * `lost`: its conversation stopped long ago and no notification ever came;
+ * the CLI that owned it is gone.
  */
 export type BackgroundTaskStatus =
   | "running"
@@ -188,21 +200,25 @@ export type BackgroundTaskStatus =
   | "lost";
 
 /**
- * A task a Claude conversation started in the background (FE-42), read from
- * its transcript: the call, the id its result named, and the
+ * A task a Claude conversation started in the background.
+ *
+ * Read from its transcript: the call, the id its result named, and the
  * `<task-notification>` that closed it, if one came.
  */
 export interface BackgroundTask {
-  /** The CLI's task id — `backgroundTaskId`, or an async agent's `agentId`. */
+  /** The CLI's task id: `backgroundTaskId`, or an async agent's `agentId`. */
   id: string;
   /** The `tool_use` that started it. */
   toolUseId: string;
   kind: BackgroundTaskKind;
   /** What it was started for, as its caller described it. */
   description: string;
-  /** A shell's or monitor's command, cut at `BACKGROUND_COMMAND_MAX`; else null. */
+  /**
+   * A shell's or monitor's command, cut at {@link BACKGROUND_COMMAND_MAX};
+   * else null.
+   */
   command: string | null;
-  /** An agent's sub-agent id (`agent-<id>.jsonl`), for its viewer; else null. */
+  /** An agent's sub-agent id (`agent-<id>.jsonl`) for its viewer, or null. */
   subagentId: string | null;
   status: BackgroundTaskStatus;
   /** A shell's exit code as its notification said it, else null. */
@@ -214,9 +230,10 @@ export interface BackgroundTask {
   /** When its notification came, ISO; null while running or lost. */
   endedAt: string | null;
   /**
-   * The pid leading a running shell's or monitor's process group (FE-56),
-   * when exactly one process is found for it; null otherwise. Always null for
-   * an agent: it runs inside the CLI's own process.
+   * The pid leading a running shell's or monitor's process group.
+   *
+   * Set when one process, and only one, is found for it; null otherwise.
+   * Always null for an agent: it runs inside the CLI's own process.
    */
   pid: number | null;
 }
@@ -224,25 +241,28 @@ export interface BackgroundTask {
 /** The most of a shell's command a task carries, in characters. */
 export const BACKGROUND_COMMAND_MAX = 4 * 1024;
 
-/** The most of a task's output one read sends, in bytes — its end. */
+/** The most of a task's output one read sends, in bytes, from its end. */
 export const BACKGROUND_OUTPUT_MAX = 64 * 1024;
 
 /**
- * The end of a background shell's output (FE-42/D5), escape codes stripped.
+ * The end of a background shell's output, escape codes stripped (FE-42/D5).
+ *
  * `missing`: the CLI's file is gone, or never was where it said.
  */
 export interface BackgroundTaskOutput {
   text: string;
   /** The whole file's size, in bytes. */
   size: number;
-  /** `text` is only the file's last `BACKGROUND_OUTPUT_MAX` bytes. */
+  /** `text` is only the file's last {@link BACKGROUND_OUTPUT_MAX} bytes. */
   truncated: boolean;
   missing: boolean;
 }
 
 /**
- * One process listening on a TCP port inside a project (FE-68): its cwd is
- * in one of the project's folders, or it runs under one of its terminals.
+ * One process listening on a TCP port inside a project.
+ *
+ * Its cwd is in one of the project's folders, or it runs under one of its
+ * terminals.
  */
 export interface ListeningPort {
   port: number;
@@ -262,28 +282,35 @@ export interface ListeningPort {
 }
 
 /**
- * Whether `value` can name a background task: the CLI's ids are short
- * letters and digits. Same rule as a sub-agent id — one file name, no `.`.
+ * Whether `value` can name a background task.
+ *
+ * The CLI's ids are short letters and digits. Same rule as a sub-agent id:
+ * one file name, no `.`.
  */
 export function isBackgroundTaskId(value: unknown): value is string {
   return typeof value === "string" && CLAUDE_SUBAGENT_ID.test(value);
 }
 
 /**
- * An agent a conversation spawned (FE-33): a Claude sub-agent, or a thread a
- * Codex conversation spawned. Shown under its conversation's row.
+ * An agent a conversation spawned: a Claude sub-agent, or a thread a Codex
+ * conversation spawned.
  *
- * ⚠️ Never resumed on its own — a Claude sub-agent is a sidechain of its
- * conversation — so its id is a key for the rail and never reaches a command
- * line. Nested ones are flattened under the conversation at the root
- * (FE-33/D6).
+ * Shown under its conversation's row. Nested ones are flattened under the
+ * conversation at the root (FE-33/D6).
+ *
+ * NOTE: Never resumed on its own (a Claude sub-agent is a sidechain of its
+ * conversation), so its id is a key for the rail and never reaches a command
+ * line.
  */
 export interface AgentSubagent {
-  /** Unique within its conversation: Claude's `agent-<id>`, a Codex thread id. */
+  /**
+   * Unique within its conversation: Claude's `agent-<id>`, a Codex thread
+   * id.
+   */
   id: string;
   /** What it was asked to do, as its spawner described it. */
   title: string;
-  /** Its kind as the CLI names it — `Explore`, `general-purpose` — or null. */
+  /** Its kind as the CLI names it (`Explore`, `general-purpose`), or null. */
   type: string | null;
   /** When it was last written to, ISO. */
   updatedAt: string;
@@ -298,23 +325,28 @@ const CLAUDE_SUBAGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
  * `agent-<id>.jsonl`, the same shape the listing reads off the file's name
  * (FE-35/D10).
  *
- * ⚠️ Letters, digits, `_` and `-` only: never a `.` or a separator, so it is
- * one file name and can climb out of no folder.
+ * NOTE: Letters, digits, `_` and `-` only. Never a `.` or a separator, so it
+ * is one file name and can climb out of no folder.
  */
 export function isClaudeSubagentId(value: unknown): value is string {
   return typeof value === "string" && CLAUDE_SUBAGENT_ID.test(value);
 }
 
 /**
- * One tool call a sub-agent made (FE-35/D3): its name, a line saying what it
- * was called on, and its input as JSON for a closer look. The result is
- * never carried over — only whether it was an error.
+ * One tool call a sub-agent made (FE-35/D3).
+ *
+ * Its name, a line saying what it was called on, and its input as JSON for a
+ * closer look. The result is never carried over, only whether it was an
+ * error.
  */
 export interface SubagentStep {
   tool: string;
-  /** The input it was called on, in brief: a path, a pattern, a command's first line. */
+  /**
+   * The input it was called on, in brief: a path, a pattern, a command's
+   * first line.
+   */
   summary: string;
-  /** Its input, as pretty JSON — cut at `SUBAGENT_INPUT_MAX`. */
+  /** Its input, as pretty JSON, cut at {@link SUBAGENT_INPUT_MAX}. */
   input: string;
   /** Its result said it failed. */
   error: boolean;
@@ -324,13 +356,14 @@ export interface SubagentStep {
 export const SUBAGENT_INPUT_MAX = 8 * 1024;
 
 /**
- * A sub-agent's transcript, read for the viewer (FE-35): what it was asked,
- * the tools it called, and what it reported back.
+ * A sub-agent's transcript, read for the viewer.
+ *
+ * What it was asked, the tools it called, and what it reported back.
  */
 export interface SubagentTranscript {
   /** What it was asked to do, as its spawner described it. */
   title: string;
-  /** Its kind as the CLI names it — `Explore`, `fork` — or null. */
+  /** Its kind as the CLI names it (`Explore`, `fork`), or null. */
   type: string | null;
   /** The model its CLI ran it on, as the CLI names it, or null. */
   model: string | null;
@@ -344,27 +377,27 @@ export interface SubagentTranscript {
   /** What it handed back; null while it works, or when it ended without one. */
   report: string | null;
   /**
-   * The transcript was longer than one read takes (FE-35/D10): its start and
-   * its end were read, and the steps in between are missing.
+   * The transcript was longer than one read takes (FE-35/D10).
+   *
+   * Its start and its end were read, and the steps in between are missing.
    */
   truncated: boolean;
 }
 
-/** What a conversation's edits did to a file, all told (FE-39). */
+/** What a conversation's edits did to a file, all told. */
 export type AgentFileOp = "added" | "modified" | "deleted" | "renamed";
 
 /**
- * One file a conversation edited (FE-39): what the agent view's Files list
- * shows a row for.
+ * One file a conversation edited: a row of the agent view's Files list.
  *
- * ⚠️ Only what the CLI's own FILE TOOLS did — Claude's `Edit`, `Write`,
+ * Only what the CLI's own file tools did: Claude's `Edit`, `Write`,
  * `MultiEdit` and `NotebookEdit`, Codex's `apply_patch`. A file changed
  * through the shell (`sed`, a script, a formatter, codegen) is in no
  * transcript, so its absence here says nothing about whether the agent
  * touched it.
  */
 export interface AgentFileTouch {
-  /** From the repository's top level, `/`-separated — as Changes names it. */
+  /** From the repository's top level, `/`-separated, as Changes names it. */
   path: string;
   op: AgentFileOp;
   /** How many times it was edited, its sub-agents' edits included. */
@@ -373,13 +406,15 @@ export interface AgentFileTouch {
   lastAt: string;
   /**
    * The sub-agent that edited it, when the conversation itself never did
-   * (FE-39/D5): its id, and its kind as the CLI names it — `Explore`,
-   * `general-purpose`, a Codex thread's role — or null.
+   * (FE-39/D5).
+   *
+   * Its id, and its kind as the CLI names it (`Explore`, `general-purpose`, a
+   * Codex thread's role) or null.
    */
   via: { id: string; type: string | null } | null;
 }
 
-/** A conversation's edited files, newest edit first (FE-39). */
+/** A conversation's edited files, newest edit first. */
 export interface AgentFiles {
   files: AgentFileTouch[];
   /**
@@ -401,8 +436,10 @@ export interface AgentFileMark {
 }
 
 /**
- * Which conversations edited each file since HEAD's commit (FE-39/D2, D3) —
- * the marks on Changes. Keyed by `AgentFileTouch.path`, newest edit first.
+ * Which conversations edited each file since HEAD's commit: the marks on
+ * Changes (FE-39/D2, D3).
+ *
+ * Keyed by {@link AgentFileTouch.path}, newest edit first.
  */
 export interface AgentFileMarks {
   files: Record<string, AgentFileMark[]>;
@@ -411,8 +448,10 @@ export interface AgentFileMarks {
 
 /**
  * One conversation's numbers, read from the end of its transcript for the
- * agent view (FE-38). Each is null when the CLI wrote none — never a 0
- * standing in for "not known" (FE-38/D1).
+ * agent view.
+ *
+ * Each is null when the CLI wrote none, never a 0 standing in for "not
+ * known" (FE-38/D1).
  */
 export interface AgentFacts {
   agent: TerminalAgent;
@@ -421,15 +460,17 @@ export interface AgentFacts {
   /** Codex only: the reasoning effort its newest turn ran at. */
   effort: string | null;
   /**
-   * Claude only: what the conversation would have cost at API prices — an
-   * estimate, NOT what a subscription is billed — as Claude last saved it
+   * Claude only: what the conversation would have cost at API prices.
+   *
+   * An estimate, not what a subscription is billed, as Claude last saved it
    * (`cost-state`). Its sub-agents' spend is in it (FE-38/V5).
    */
   costUSD: number | null;
   /**
-   * Claude answered again after it last saved its totals: `costUSD`,
-   * `lines` and `duration` are as of then. Claude saves them when it is
-   * left or quit, not after every turn.
+   * Claude answered again after it last saved its totals.
+   *
+   * `costUSD`, `lines` and `duration` are as of then. Claude saves them when
+   * it is left or quit, not after every turn.
    */
   stale: boolean;
   /**
@@ -438,45 +479,55 @@ export interface AgentFacts {
    */
   tokens: { input: number; output: number; cached: number } | null;
   /**
-   * What its newest turn sent the model, in tokens — and the model's window,
-   * only when the CLI records it: Codex does, Claude does not (FE-38/D2).
+   * What its newest turn sent the model, in tokens, and the model's window.
+   *
+   * The window only when the CLI records it: Codex does, Claude does not
+   * (FE-38/D2).
    */
   context: { tokens: number; window: number | null } | null;
   /** Claude only: lines its edits added and removed. */
   lines: { added: number; removed: number } | null;
   /**
-   * Claude only, in ms: how long its CLI ran (`wall`), and of that how long
-   * it waited on the model and ran tools.
+   * Claude only, in ms: how long its CLI ran (`wall`).
+   *
+   * And of that, how long it waited on the model and ran tools.
    */
   duration: { wall: number; api: number; tools: number } | null;
   /**
-   * Claude's own newest recap of it (`away_summary`) and when it wrote it;
-   * none for Codex, or with recap off in Claude's `/config` (FE-38/D4).
+   * Claude's own newest recap of it (`away_summary`), and when it wrote it.
+   *
+   * None for Codex, or with recap off in Claude's `/config` (FE-38/D4).
    */
   recap: { text: string; at: string | null } | null;
   /**
-   * The read stopped at `AGENT_FACTS_READ_MAX` before the transcript's
-   * start: what it did not reach is null (FE-38/V2).
+   * The read stopped at {@link AGENT_FACTS_READ_MAX} before the transcript's
+   * start.
+   *
+   * What it did not reach is null (FE-38/V2).
    */
   partial: boolean;
 }
 
-/** The most of one transcript a facts read takes, from its end (FE-38). */
+/** The most of one transcript a facts read takes, from its end. */
 export const AGENT_FACTS_READ_MAX = 4 * 1024 * 1024;
 
 /** One agent's totals over a window of days (FE-38/D6). */
 export interface AgentUsageTotals {
-  /** Conversations written to in the window; a Codex thread's spawns are not counted. */
+  /**
+   * Conversations written to in the window; a Codex thread's spawns are not
+   * counted.
+   */
   conversations: number;
-  /** Claude only: the sum of each conversation's `AgentFacts.costUSD`. */
+  /** Claude only: the sum of each conversation's {@link AgentFacts.costUSD}. */
   costUSD: number | null;
   input: number;
   output: number;
 }
 
 /**
- * A project's agent usage over the last 7 and 30 days (FE-38/D6): each
- * conversation written to in the window counts whole.
+ * A project's agent usage over the last 7 and 30 days (FE-38/D6).
+ *
+ * Each conversation written to in the window counts whole.
  */
 export interface AgentUsage {
   windows: {
@@ -491,9 +542,11 @@ export interface AgentUsage {
 export const AGENT_USAGE_DAYS = [7, 30] as const;
 
 /**
- * A conversation's transcript settled a write (FE-38): pushed for EVERY
- * settled write, unlike `AgentActivity`, so a view showing its numbers
- * reads them again. At most one per conversation per settle window.
+ * A conversation's transcript settled a write.
+ *
+ * Pushed for every settled write, unlike {@link AgentActivity}, so a view
+ * showing its numbers reads them again. At most one per conversation per
+ * settle window.
  */
 export interface AgentWrite {
   workspace: string;
@@ -506,7 +559,7 @@ export interface AgentWrite {
 /**
  * A card an agent is on, as its latest Lanework MCP call named it (FE-27/D1).
  *
- * ⚠️ `card` is what the AGENT typed — a task id (`FE-27`) or a card's uuid —
+ * NOTE: `card` is what the agent typed, a task id (`FE-27`) or a card's uuid,
  * so a renderer matches it against both, and only on the board `boardId`
  * names. Read from the agent's own transcript; nothing is asked of the cloud.
  */
@@ -516,30 +569,32 @@ export interface AgentCard {
 }
 
 /**
- * A transcript changed, and this is whether its agent is now working
- * (FE-25): a turn opened or closed.
+ * A transcript changed, and this is whether its agent is now working: a turn
+ * opened or closed.
  *
- * ⚠️ Pushed by main from a file watcher, never polled — the id straight from
- * the file's name, the state from the transcript's end, so marking a row
- * does not re-read the listing.
+ * Pushed by main from a file watcher, never polled. The id comes straight
+ * from the file's name and the state from the transcript's end, so marking a
+ * row does not re-read the listing.
  */
 export interface AgentActivity {
   workspace: string;
   agent: TerminalAgent;
   id: string;
   working: boolean;
-  /** The card it is on, as `AgentSession.card` (FE-27). */
+  /** The card it is on, as {@link AgentSession.card}. */
   card: AgentCard | null;
   /**
    * Set when it is one of `id`'s sub-agents that was written, not `id`
-   * itself (FE-33): `working` is then that sub-agent's, and `card` null.
+   * itself.
+   *
+   * `working` is then that sub-agent's, and `card` null.
    */
   subagent: string | null;
   /** Epoch ms. */
   at: number;
 }
 
-/** One of the Codex account's usage windows, as a rollout reported it (FE-41). */
+/** One of the Codex account's usage windows, as a rollout reported it. */
 export interface CodexQuotaWindow {
   /** How much of it is used, 0–100. */
   usedPercent: number;
@@ -549,7 +604,7 @@ export interface CodexQuotaWindow {
   resetsAt: number;
 }
 
-/** One banked "usage limit reset" Codex granted the account (FE-74). */
+/** One banked "usage limit reset" Codex granted the account. */
 export interface CodexResetCredit {
   /** Codex's id for it: what spending it names. */
   id: string;
@@ -562,14 +617,14 @@ export interface CodexResetCredit {
   expiresAt: number | null;
 }
 
-/** The account's banked resets (FE-74). */
+/** The account's banked resets. */
 export interface CodexResetCredits {
   /** How many can be spent; may exceed `credits` when Codex lists fewer. */
   availableCount: number;
   credits: CodexResetCredit[];
 }
 
-/** What spending a banked reset did, in Codex's own words (FE-74). */
+/** What spending a banked reset did, in Codex's own words. */
 export type CodexResetOutcome =
   | "reset"
   | "nothingToReset"
@@ -577,29 +632,29 @@ export type CodexResetOutcome =
   | "alreadyRedeemed";
 
 /**
- * The Codex account's usage (FE-41/D1, FE-74).
+ * The Codex account's usage (FE-41/D1).
  *
- * ⚠️ The ACCOUNT's, not a project's. Asked of `codex app-server` when it
+ * The account's, not a project's. Asked of `codex app-server` when it
  * answers (`source: "app-server"`), else as the newest Codex turn on this
  * machine reported it in a rollout's last `token_count`, only as fresh as
  * that turn. A window past its `resetsAt` says nothing any more (FE-41/D3).
  */
 export interface CodexQuota {
-  /** The short window — 5 hours today. */
+  /** The short window: 5 hours today. */
   primary: CodexQuotaWindow | null;
-  /** The long one — a week today. */
+  /** The long one: a week today. */
   secondary: CodexQuotaWindow | null;
-  /** The plan as Codex names it — `plus`, `pro` — or null. */
+  /** The plan as Codex names it (`plus`, `pro`), or null. */
   plan: string | null;
   /** When the turn that reported it was, or when Codex was asked; ISO. */
   at: string;
-  /** The banked resets; only the app-server says (FE-74). */
+  /** The banked resets; only the app-server says. */
   resetCredits?: CodexResetCredits | null;
   /** Where the windows came from; absent means a rollout. */
   source?: "app-server" | "rollout";
 }
 
-/** A goal's state, as Codex's own `thread_goals` table allows (FE-41). */
+/** A goal's state, as Codex's own `thread_goals` table allows. */
 export const CODEX_GOAL_STATUSES = [
   "active",
   "paused",
@@ -617,7 +672,10 @@ export function isCodexGoalStatus(value: unknown): value is CodexGoalStatus {
   );
 }
 
-/** The goal a Codex conversation was given (`/goal`), as Codex keeps it (FE-41/D4). */
+/**
+ * The goal a Codex conversation was given (`/goal`), as Codex keeps it
+ * (FE-41/D4).
+ */
 export interface CodexGoal {
   objective: string;
   status: CodexGoalStatus;
@@ -629,7 +687,7 @@ export interface CodexGoal {
   updatedAt: number;
 }
 
-/** A Claude account limit window, without any authentication material (FE-46). */
+/** A Claude account limit window, without any authentication material. */
 export interface ClaudeQuotaWindow {
   /** How much of it is used, 0–100. */
   usedPercent: number;
@@ -640,17 +698,21 @@ export interface ClaudeQuotaWindow {
 }
 
 /**
- * Where Claude usage came from (FE-53): `oauth` is Claude's own usage endpoint,
- * read by main with the CLI's credential; `statusline` is the last
- * `rate_limits` a Claude statusline reported.
+ * Where Claude usage came from.
+ *
+ * `oauth` is Claude's own usage endpoint, read by main with the CLI's
+ * credential; `statusline` is the last `rate_limits` a Claude statusline
+ * reported.
  */
 const CLAUDE_USAGE_SOURCES = ["oauth", "statusline"] as const;
 export type ClaudeUsageSource = (typeof CLAUDE_USAGE_SOURCES)[number];
 
 /**
- * Why the newest fetch did not produce fresh usage (FE-53). The values shown
- * alongside it, if any, are the last known ones.
- * - `expired`: the Claude login has expired — sign in to Claude again.
+ * Why the newest fetch did not produce fresh usage.
+ *
+ * The values shown alongside it, if any, are the last known ones.
+ *
+ * - `expired`: the Claude login has expired; sign in to Claude again.
  * - `unavailable`: there is no Claude login or no source to read.
  * - `failed`: the request or its answer failed (network, rate limit, shape).
  */
@@ -662,7 +724,8 @@ export const CLAUDE_USAGE_ERRORS = [
 export type ClaudeUsageError = (typeof CLAUDE_USAGE_ERRORS)[number];
 
 /**
- * Safe, serialized Claude account usage for the footer (FE-46).
+ * Claude account usage for the footer, safe to send to the renderer.
+ *
  * Only account metadata and usage cross to the renderer: never credentials,
  * raw auth responses, email addresses, or tokens. Missing windows do not
  * imply zero usage; an auth-only result can still identify the plan.
@@ -680,23 +743,24 @@ export interface ClaudeUsage {
   at: string | null;
   /** The cache is older than the freshness threshold; values are last known. */
   stale: boolean;
-  /** Which source the windows came from (FE-53); absent/null when none did. */
+  /** Which source the windows came from; absent or null when none did. */
   source?: ClaudeUsageSource | null;
   /**
-   * When main last tried to fetch usage, epoch ms, success or not (FE-53);
+   * When main last tried to fetch usage, epoch ms, success or not.
+   *
    * `at` stays the time of the last successful fetch.
    */
   fetchedAt?: number | null;
-  /** Why the newest fetch failed (FE-53); absent/null when it succeeded. */
+  /** Why the newest fetch failed; absent or null when it succeeded. */
   error?: ClaudeUsageError | null;
 }
 
-/** What `codexUsage` answers for a workspace (FE-41, FE-46). */
+/** What {@link DesktopTerminalApi.codexUsage} answers for a workspace. */
 export interface CodexUsage {
   quota: CodexQuota | null;
-  /** By thread id — only the workspace's listed Codex conversations'. */
+  /** By thread id; only the workspace's listed Codex conversations'. */
   goals: Record<string, CodexGoal>;
-  /** Claude account metadata and limits, when available (FE-46). */
+  /** Claude account metadata and limits, when available. */
   claude?: ClaudeUsage | null;
 }
 
@@ -710,7 +774,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
  * Whether `value` can be put on a command line as a conversation id.
  *
- * ⚠️ The only shape a resume id may take: it is TYPED into a shell, so
+ * NOTE: The only shape a resume id may take. It is typed into a shell, so
  * anything but hex and dashes would be a way to type something else.
  */
 export function isAgentSessionId(value: unknown): value is string {
@@ -718,7 +782,7 @@ export function isAgentSessionId(value: unknown): value is string {
 }
 
 export const TERMINAL_LIMITS = {
-  /** Tabs per workspace, exited ones included — they still hold a tab. */
+  /** Tabs per workspace, exited ones included: they still hold a tab. */
   perWorkspace: 8,
   /** Columns and rows are clamped to 1…this. */
   maxGeometry: 1000,
@@ -741,13 +805,13 @@ export const terminalChannels = {
   reorder: "terminal:reorder",
   /** Which agent CLIs this machine has, for the + menu. */
   agents: "terminal:agents",
-  /** The agent conversations kept for a workspace's folder (FE-23). */
+  /** The agent conversations kept for a workspace's folder. */
   agentSessions: "terminal:agent-sessions",
   /** Name a conversation in Lanework only (FE-24/D1). */
   agentSessionRename: "terminal:agent-sessions:rename",
-  /** Pin a conversation to the top of the group, or unpin it (FE-25). */
+  /** Pin a conversation to the top of the group, or unpin it. */
   agentSessionPin: "terminal:agent-sessions:pin",
-  /** Delete a conversation's transcript for good (FE-57). */
+  /** Delete a conversation's transcript for good. */
   agentSessionDelete: "terminal:agent-sessions:delete",
   /** Archive a conversation in its CLI's own archive. */
   agentSessionArchive: "terminal:agent-sessions:archive",
@@ -757,37 +821,37 @@ export const terminalChannels = {
   agentSessionUnarchive: "terminal:agent-sessions:unarchive",
   /** Delete an archived conversation for good. */
   agentArchivedDelete: "terminal:agent-sessions:archived-delete",
-  /** One sub-agent's transcript, for the viewer (FE-35). */
+  /** One sub-agent's transcript, for the viewer. */
   agentSubagent: "terminal:agent-subagent",
-  /** A Claude conversation's background tasks (FE-42). */
+  /** A Claude conversation's background tasks. */
   agentBackgroundTasks: "terminal:agent-background-tasks",
   /** The end of one background shell's output (FE-42/D5). */
   agentTaskOutput: "terminal:agent-task-output",
-  /** Stop one running background shell (FE-43). */
+  /** Stop one running background shell. */
   agentStopTask: "terminal:agent-stop-task",
-  /** The TCP ports a project's processes listen on (FE-68). */
+  /** The TCP ports a project's processes listen on. */
   ports: "terminal:ports",
-  /** Stop the process behind one of those ports (FE-68). */
+  /** Stop the process behind one of those ports. */
   stopPort: "terminal:stop-port",
-  /** One conversation's numbers, for the agent view and the rail (FE-38). */
+  /** One conversation's numbers, for the agent view and the rail. */
   agentFacts: "terminal:agent-facts",
   /** A project's agent usage over 7 and 30 days, for Settings (FE-38/D6). */
   agentUsage: "terminal:agent-usage",
-  /** Main → renderer: a conversation's transcript settled a write (FE-38). */
+  /** Main → renderer: a conversation's transcript settled a write. */
   agentWritten: "terminal:agent-written",
   /** The files one conversation edited (FE-39/D1). */
   agentFiles: "terminal:agent-files",
   /** Which conversations edited each changed file, for Changes (FE-39/D2). */
   agentFilesForWorktree: "terminal:agent-files-for-worktree",
-  /** Main → renderer: a transcript was written (FE-25). */
+  /** Main → renderer: a transcript was written. */
   agentActivity: "terminal:agent-activity",
-  /** The Codex account's usage, and its conversations' goals (FE-41). */
+  /** The Codex account's usage, and its conversations' goals. */
   codexUsage: "terminal:codex-usage",
-  /** Fetch Claude account usage now, past the cache (FE-53). */
+  /** Fetch Claude account usage now, past the cache. */
   refreshClaudeUsage: "terminal:refresh-claude-usage",
-  /** Ask Codex for the account's limits and resets now (FE-74). */
+  /** Ask Codex for the account's limits and resets now. */
   refreshCodexUsage: "terminal:refresh-codex-usage",
-  /** Spend one of Codex's banked resets (FE-74). */
+  /** Spend one of Codex's banked resets. */
   consumeCodexReset: "terminal:consume-codex-reset",
   /** Main → renderer: a View-menu command. */
   command: "terminal:command",
@@ -831,15 +895,16 @@ export interface TerminalViewHandlers {
 export interface DesktopTerminalApi {
   list: (workspace: string) => Promise<TerminalSession[]>;
   /**
-   * Start a shell for `workspace`, in its project folder — with an agent's CLI
-   * typed into it for an agent `kind`. The geometry is a first guess; the
-   * view's attach sets the real one before anything is drawn.
+   * Starts a shell for `workspace`, in its project folder.
    *
-   * `resume` names one of `agentSessions(workspace)` to continue (FE-23); main
-   * refuses an id that listing does not have.
+   * An agent `kind` gets its CLI typed into the shell. The geometry is a
+   * first guess; the view's attach sets the real one before anything is
+   * drawn.
    *
-   * `card` starts a NEW agent on a card of this workspace's board (FE-34),
-   * its first prompt written by the host; never together with `resume`.
+   * @param resume One of `agentSessions(workspace)` to continue; main refuses
+   *   an id that listing does not have.
+   * @param card Starts a new agent on a card of this workspace's board, its
+   *   first prompt written by the host. Never together with `resume`.
    */
   spawn: (
     workspace: string,
@@ -855,9 +920,11 @@ export interface DesktopTerminalApi {
    */
   agentSessions: (workspace: string) => Promise<AgentSession[]>;
   /**
-   * Give a conversation a name in Lanework (FE-24). The CLI's files are never
-   * touched; an empty name goes back to the CLI's own title. Answers the new
-   * listing. Main refuses an id that `agentSessions(workspace)` does not have.
+   * Gives a conversation a name in Lanework, and answers the new listing.
+   *
+   * The CLI's files are never touched; an empty name goes back to the CLI's
+   * own title. Main refuses an id that `agentSessions(workspace)` does not
+   * have.
    */
   renameAgentSession: (
     workspace: string,
@@ -865,7 +932,7 @@ export interface DesktopTerminalApi {
     id: string,
     name: string,
   ) => Promise<AgentSession[]>;
-  /** Pin or unpin a conversation (FE-25). Answers the new listing. */
+  /** Pins or unpins a conversation, and answers the new listing. */
   pinAgentSession: (
     workspace: string,
     agent: TerminalAgent,
@@ -873,8 +940,9 @@ export interface DesktopTerminalApi {
     pinned: boolean,
   ) => Promise<AgentSession[]>;
   /**
-   * Delete a conversation's transcript from the CLI's own folder, for good
-   * (FE-57). Refused for one a tab is running. Answers the new listing.
+   * Deletes a conversation's transcript from the CLI's own folder, for good.
+   *
+   * Refused for one a tab is running. Answers the new listing.
    */
   deleteAgentSession: (
     workspace: string,
@@ -882,7 +950,7 @@ export interface DesktopTerminalApi {
     id: string,
   ) => Promise<AgentSession[]>;
   /**
-   * Archive a conversation the CLI's own way.
+   * Archives a conversation the CLI's own way.
    *
    * `codex archive`, or Claude's transcript moved out of its projects folder.
    * Refused for one a tab is running (FE-72/D5). Answers the new listing.
@@ -894,22 +962,23 @@ export interface DesktopTerminalApi {
   ) => Promise<AgentSession[]>;
   /** The conversations archived for `workspace`'s folder, newest first. */
   archivedAgentSessions: (workspace: string) => Promise<ArchivedAgentSession[]>;
-  /** Bring one back; answers the new archived list. */
+  /** Brings one back, and answers the new archived list. */
   unarchiveAgentSession: (
     workspace: string,
     agent: TerminalAgent,
     id: string,
   ) => Promise<ArchivedAgentSession[]>;
-  /** Delete an archived one for good; answers the new archived list. */
+  /** Deletes an archived one for good, and answers the new archived list. */
   deleteArchivedAgentSession: (
     workspace: string,
     agent: TerminalAgent,
     id: string,
   ) => Promise<ArchivedAgentSession[]>;
   /**
-   * One of a conversation's sub-agents, read for the viewer (FE-35). By ids
-   * only: main builds the path inside the CLI's own folder for `workspace`,
-   * and refuses an id of any other shape.
+   * One of a conversation's sub-agents, read for the viewer.
+   *
+   * By ids only: main builds the path inside the CLI's own folder for
+   * `workspace`, and refuses an id of any other shape.
    */
   agentSubagent: (
     workspace: string,
@@ -918,17 +987,20 @@ export interface DesktopTerminalApi {
     sub: string,
   ) => Promise<SubagentTranscript>;
   /**
-   * The tasks Claude conversation `conversation` started in the background,
-   * running first then newest first (FE-42). By ids only, as `agentSubagent`.
+   * The tasks Claude conversation `conversation` started in the background.
+   *
+   * Running first, then newest first. By ids only, as `agentSubagent`.
    */
   agentBackgroundTasks: (
     workspace: string,
     conversation: string,
   ) => Promise<BackgroundTask[]>;
   /**
-   * The end of one background shell's output (FE-42/D5). By ids only: main
-   * takes the path from the conversation's own transcript, and reads it only
-   * inside the CLI's task folder under the temp dir. Poll it while running.
+   * The end of one background shell's output (FE-42/D5).
+   *
+   * By ids only: main takes the path from the conversation's own transcript,
+   * and reads it only inside the CLI's task folder under the temp dir. Poll
+   * it while running.
    */
   agentTaskOutput: (
     workspace: string,
@@ -936,8 +1008,10 @@ export interface DesktopTerminalApi {
     task: string,
   ) => Promise<BackgroundTaskOutput>;
   /**
-   * Stop one background shell by its conversation and task ids (FE-43).
-   * `stopped` counts processes signalled; zero means it was no longer running.
+   * Stops one background shell by its conversation and task ids.
+   *
+   * @returns `stopped` counts processes signalled; zero means it was no
+   *   longer running.
    */
   agentStopTask: (
     workspace: string,
@@ -945,13 +1019,15 @@ export interface DesktopTerminalApi {
     task: string,
   ) => Promise<{ stopped: number }>;
   /**
-   * The TCP ports this project's processes listen on (FE-68), by port. Main
-   * reads the folders and terminals itself; empty off macOS.
+   * The TCP ports this project's processes listen on, by port.
+   *
+   * Main reads the folders and terminals itself; empty off macOS.
    */
   ports: (workspace: string) => Promise<ListeningPort[]>;
   /**
-   * Stop the process listening on a port of this project, and what it runs
-   * (FE-68). Refused unless `pid` still listens there and started at `start`.
+   * Stops the process listening on a port of this project, and what it runs.
+   *
+   * Refused unless `pid` still listens there and started at `start`.
    */
   stopPort: (
     workspace: string,
@@ -960,8 +1036,10 @@ export interface DesktopTerminalApi {
   ) => Promise<{ stopped: number }>;
   /**
    * The files conversation `id` edited with its file tools, its sub-agents'
-   * folded in (FE-39). By ids only, as `agentSubagent`: main builds every
-   * path inside the CLI's own folder for `workspace`.
+   * folded in.
+   *
+   * By ids only, as `agentSubagent`: main builds every path inside the CLI's
+   * own folder for `workspace`.
    */
   agentFiles: (
     workspace: string,
@@ -976,33 +1054,45 @@ export interface DesktopTerminalApi {
   onAgentActivity: (listener: (activity: AgentActivity) => void) => () => void;
   /**
    * The Codex account's usage as its newest turn reported it, and the goals
-   * of `workspace`'s listed Codex conversations (FE-41). By workspace only:
-   * main picks the files and the threads; a page names neither.
+   * of `workspace`'s listed Codex conversations.
+   *
+   * By workspace only: main picks the files and the threads; a page names
+   * neither.
    */
   codexUsage: (workspace: string) => Promise<CodexUsage>;
   /**
-   * Fetch Claude account usage now, skipping the cache (FE-53) — the popover's
-   * refresh button. Takes nothing: main reads the credential itself and only
-   * the safe `ClaudeUsage` comes back, never a token, email or raw body. Null
-   * when there is nothing to show at all; a failed fetch answers the last
-   * known values with `error` set.
+   * Fetches Claude account usage now, skipping the cache: the popover's
+   * refresh button.
+   *
+   * Takes nothing: main reads the credential itself, and only the safe
+   * {@link ClaudeUsage} comes back, never a token, email or raw body.
+   *
+   * @returns Null when there is nothing to show at all. A failed fetch
+   *   answers the last known values with `error` set.
    */
   refreshClaudeUsage: () => Promise<ClaudeUsage | null>;
   /**
-   * Ask `codex app-server` for the account's limits and banked resets (FE-74)
-   * — the popover's opening and its ⟳. `force` asks even when the last
-   * answer is under a minute old. Resolves once asked; read the result with
-   * `codexUsage`.
+   * Asks `codex app-server` for the account's limits and banked resets.
+   *
+   * Called when the popover opens and from its ⟳. Resolves once asked; read
+   * the result with `codexUsage`.
+   *
+   * @param force Asks even when the last answer is under a minute old.
    */
   refreshCodexUsage: (force: boolean) => Promise<void>;
   /**
-   * Spend the banked reset `creditId` (FE-74). ⚠️ Not undoable: only on the
-   * user's confirmed click. Rejects with Codex's message when it fails.
+   * Spends the banked reset `creditId`.
+   *
+   * NOTE: Not undoable. Call it only on the user's confirmed click.
+   *
+   * @throws With Codex's message when it fails.
    */
   consumeCodexReset: (creditId: string) => Promise<CodexResetOutcome>;
   /**
-   * One conversation's numbers (FE-38). By ids only, as `agentSubagent`:
-   * main builds the path inside the CLI's own folder for `workspace`.
+   * One conversation's numbers.
+   *
+   * By ids only, as `agentSubagent`: main builds the path inside the CLI's
+   * own folder for `workspace`.
    */
   agentFacts: (
     workspace: string,
@@ -1010,27 +1100,37 @@ export interface DesktopTerminalApi {
     id: string,
   ) => Promise<AgentFacts>;
   /**
-   * `workspace`'s agent usage over 7 and 30 days (FE-38/D6); null when the
-   * project has no folder here. Reads the end of every recent transcript.
+   * `workspace`'s agent usage over 7 and 30 days (FE-38/D6).
+   *
+   * Reads the end of every recent transcript. Null when the project has no
+   * folder here.
    */
   agentUsage: (workspace: string) => Promise<AgentUsage | null>;
   onAgentWritten: (listener: (write: AgentWrite) => void) => () => void;
   /**
-   * The agent CLIs this machine has, asked of the user's own shell: what the
-   * + menu offers beside a plain terminal. Cached for a little while.
+   * The agent CLIs this machine has, asked of the user's own shell.
+   *
+   * What the + menu offers beside a plain terminal. Cached for a little
+   * while.
    */
   agents: () => Promise<TerminalAgent[]>;
-  /** Stop a shell and drop its tab. */
+  /** Stops a shell and drops its tab. */
   kill: (id: string) => Promise<void>;
   /**
-   * Put a workspace's tabs in this order. Kept by the HOST, so every window
-   * and every reload lists them the same way; ids it does not know are
-   * ignored, and a tab the list leaves out keeps its place at the end.
+   * Puts a workspace's tabs in this order.
+   *
+   * Kept by the host, so every window and every reload lists them the same
+   * way. Ids it does not know are ignored, and a tab the list leaves out
+   * keeps its place at the end.
    */
   reorder: (workspace: string, ids: string[]) => Promise<void>;
   /**
-   * Stream one session into a view. The host resizes to `cols`×`rows` FIRST,
-   * then sends one snapshot, then live output. Returns the detach.
+   * Streams one session into a view.
+   *
+   * The host resizes to `cols`×`rows` first, then sends one snapshot, then
+   * live output.
+   *
+   * @returns The detach.
    */
   attach: (
     id: string,
@@ -1040,8 +1140,10 @@ export interface DesktopTerminalApi {
   ) => () => void;
   input: (id: string, data: string) => void;
   /**
-   * The absolute path of a file dropped on a view. Only the preload can read
-   * it (`webUtils`); a dropped `File` no longer carries `.path`.
+   * The absolute path of a file dropped on a view.
+   *
+   * Only the preload can read it (`webUtils`): a dropped `File` carries no
+   * `.path` in this Electron.
    */
   pathForFile: (file: File) => string;
   resize: (id: string, cols: number, rows: number) => void;
@@ -1050,7 +1152,7 @@ export interface DesktopTerminalApi {
   onCommand: (listener: (command: TerminalCommand) => void) => () => void;
 }
 
-/** Clamp a geometry value the way the host will. */
+/** Clamps a geometry value the way the host will. */
 export function clampGeometry(value: unknown, fallback: number): number {
   const n = typeof value === "number" && Number.isFinite(value) ? value : NaN;
   if (Number.isNaN(n)) return fallback;

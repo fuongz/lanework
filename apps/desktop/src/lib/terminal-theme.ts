@@ -1,14 +1,12 @@
-/**
- * The terminal's colours, read from the app's own tokens (FE-19/D9).
- *
- * ⚠️ Through a canvas, because xterm cannot parse `oklch()` — which is what
- * every token in `styles/app.css` is written in. A 1×1 fill read back as RGB
- * is the browser doing the conversion it already knows how to do.
- *
- * ⚠️ Two ANSI palettes, not one. xterm's defaults are made for a dark ground:
- * on this app's white page, ANSI yellow and white are unreadable. These are
- * VS Code's Dark+ and Light+ terminal palettes, which exist for that reason.
- */
+// The terminal's colours, read from the app's own tokens (FE-19/D9).
+//
+// NOTE: Read through a canvas, because xterm cannot parse `oklch()`, which
+// every token in `styles/app.css` is written in. A 1×1 fill read back as RGB
+// lets the browser do the conversion it already knows.
+//
+// Two ANSI palettes, not one. xterm's defaults are made for a dark ground: on
+// this app's white page, ANSI yellow and white are unreadable. These are VS
+// Code's Dark+ and Light+ terminal palettes, which exist for that reason.
 
 interface TerminalColors {
   background: string;

@@ -29,8 +29,8 @@ function AlertDialogOverlay({
       data-slot="alert-dialog-overlay"
       className={cn(
         // Transitions, not keyframes: a keyframe runs on a fixed timeline, so
-        // cancelling the dialog mid-open restarted instead of reversing. Base UI
-        // drives these with `data-starting-style` / `data-ending-style`.
+        // cancelling the dialog mid-open restarts instead of reversing. Base
+        // UI drives these with `data-starting-style` / `data-ending-style`.
         "fixed inset-0 isolate z-50 bg-black/80 transition-opacity duration-200 ease-out supports-backdrop-filter:backdrop-blur-xs data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-150",
         className,
       )}

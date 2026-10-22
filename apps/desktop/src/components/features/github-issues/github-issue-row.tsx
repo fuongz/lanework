@@ -12,7 +12,7 @@ export { GitHubIssuesProblemState } from "./github-issue-row.problem";
 /**
  * A label's colour as CSS, or null for anything that is not six hex digits.
  *
- * ⚠️ Checked before it reaches `style`. The value is whatever the repo's
+ * NOTE: Checked before it reaches `style`. The value is whatever the repo's
  * owner typed into GitHub, and a string that is not a colour would otherwise
  * be handed to the browser as one.
  */
@@ -23,8 +23,8 @@ function labelColor(label: IssueLabel): string | null {
 /**
  * A GitHub label, drawn as the board's tags are.
  *
- * NOTE: GitHub's colour goes on a dot, not on the chip. Filling the chip with
- * an arbitrary colour and putting the name on top would leave some labels
+ * GitHub's colour goes on a dot, not on the chip. Filling the chip with an
+ * arbitrary colour and putting the name on top would leave some labels
  * unreadable, which is why `LabelChip` does the same.
  */
 function _GitHubLabel({ label }: { label: IssueLabel }) {
@@ -44,8 +44,8 @@ function _GitHubLabel({ label }: { label: IssueLabel }) {
 /**
  * One GitHub issue in the issue list, the shape and spacing of a card's row.
  *
- * ⚠️ A button, not a link. The list decides what selecting it means (the
- * route it opens), so the row cannot name a URL of its own.
+ * A button, not a link. The list decides what selecting it means (the route
+ * it opens), so the row cannot name a URL of its own.
  *
  * @param now When the list was read, so its ages agree with the list's.
  */
@@ -72,8 +72,8 @@ export function GitHubIssueRow({
           selected && "bg-foreground/[0.06]",
         )}
       >
-        {/* NOTE: Two lines, as a card's row draws, so the list's two kinds
-            of row read as one list: where it comes from, then what it is. */}
+        {/* Two lines, as a card's row draws, so the list's two kinds of row
+            read as one list: where it comes from, then what it is. */}
         <span className="text-muted-foreground flex w-full items-center gap-1.5 text-xs">
           <HugeiconsIcon
             icon={GithubIcon}
@@ -111,7 +111,7 @@ export function GitHubIssueRow({
 /**
  * The GitHub group's rows while the first read is in flight.
  *
- * NOTE: The rows only, no group header, sized to `GitHubIssueRow`. The list
+ * The rows only, no group header, sized to {@link GitHubIssueRow}. The list
  * draws the header itself, and it is there before the read answers.
  */
 export function GitHubIssuesSkeleton({ rows = 3 }: { rows?: number }) {

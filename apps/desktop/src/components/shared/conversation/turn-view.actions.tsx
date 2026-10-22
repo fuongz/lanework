@@ -62,7 +62,7 @@ function Action({
   );
 }
 
-/** Copy, with a tick for a moment once it did. */
+/** Copy, with a tick for a moment once it has copied. */
 function CopyAction({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false);
   useEffect(() => {
@@ -81,9 +81,7 @@ function CopyAction({ text, label }: { text: string; label: string }) {
   );
 }
 
-/**
- * The row under a message (D7): its actions and its time, always shown.
- */
+/** The row under a message: its actions and its time, always shown. */
 function Row({
   align,
   time,
@@ -128,7 +126,7 @@ export function UserActions({
   );
 }
 
-/** The Usage tooltip's two lines (ảnh 6). */
+/** The Usage tooltip's two lines. */
 function usageTip(usage: TurnUsage): ReactNode {
   const head = [
     usage.cacheHitPct !== null

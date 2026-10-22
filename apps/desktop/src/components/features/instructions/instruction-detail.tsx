@@ -41,7 +41,7 @@ interface Fact {
   mono?: boolean;
 }
 
-/** The header's second row — Memory's, for the same reasons. */
+/** The header's second row, laid out like Memory's. */
 function Facts({ facts }: { facts: Fact[] }) {
   return (
     <dl
@@ -71,11 +71,12 @@ function Facts({ facts }: { facts: Fact[] }) {
 }
 
 /**
- * One instruction file, read-only (FE-37): what the agent reads of it, its
- * `@imports` as links to the files they name, or the whole file under Raw.
+ * One instruction file, read-only.
  *
- * ⚠️ Read again whenever the listing says the file changed — main reports
- * writes to the folders it lives in (D7) — so what is open is never stale.
+ * Shows what the agent reads of it, its `@imports` as links to the files they
+ * name, or the whole file under Raw. Read again whenever the listing says the
+ * file changed (main reports writes to its folders, FE-37/D7), so what is
+ * open is never stale.
  */
 export function InstructionDetail() {
   const { id } = useParams({ from: ROUTE });
@@ -174,7 +175,7 @@ export function InstructionDetail() {
 
   const link: LinkRenderer = (span) => {
     const target = importOf(span.href, opened.imports);
-    // Any other link in the file stays exactly as written.
+    // Any other link in the file stays as written.
     if (!target) return span.raw;
     const to = target.file ? list?.files[target.file] : undefined;
     // An `@word` that names no file is a mention, not an import.
@@ -269,7 +270,7 @@ export function InstructionDetail() {
             </Alert>
           )}
           {raw ? (
-            // Wide lines scroll inside the box; the pane never scrolls sideways.
+            // Wide lines scroll inside the box, never the pane.
             <pre
               data-testid="instruction-raw"
               className="bg-foreground/[0.04] overflow-x-auto rounded-lg p-3 font-mono text-xs leading-relaxed whitespace-pre"

@@ -1,13 +1,17 @@
-// Checkpoints (BE-17): where an agent stopped on a card, so a different agent
-// can pick it up. Written by the Stop hook and the MCP `checkpoint` tool; read
-// by `get_review` and the desktop. Derived from the server's
+// Checkpoints: where an agent stopped on a card, so a different agent can
+// pick it up. Written by the Stop hook and the MCP `checkpoint` tool; read by
+// `get_review` and the desktop. Derived from the server's
 // `board/checkpoint.ts` and the two routes in `routes/boards.ts`.
 //
-// Both routes take the card as its uuid OR its task id (`BE-17`).
+// Both routes take the card as its uuid or its task id (`BE-17`).
 
 import type { IsoDate } from "./common";
 
-/** A card keeps its newest few; finishing or archiving it clears them all. */
+/**
+ * How many checkpoints a card keeps, newest first.
+ *
+ * Finishing or archiving the card clears them all.
+ */
 export const CHECKPOINTS_KEPT = 5;
 
 /** The most a checkpoint's content may weigh, serialized as JSON. */
@@ -29,18 +33,18 @@ export interface CheckpointGit {
 }
 
 /**
- * `POST /v1/boards/:workspaceId/items/:ref/checkpoints` — 201.
+ * `POST /v1/boards/:workspaceId/items/:ref/checkpoints`, answered with 201.
  *
- * Lenient about length (over-long fields are cut, lists keep their newest
- * entries: 100 files, 30 commands), strict about shape and the 16 KiB total.
+ * Lenient about length: over-long fields are cut, and lists keep their newest
+ * entries (100 files, 30 commands). Strict about shape and the 16 KiB total.
  * 409 on a finished or archived card.
  */
 export interface CheckpointRequest {
   /** Required, up to 6000 characters. */
   summary: string;
-  /** What the agent was asked, in the user's words. Up to 2000. */
+  /** What the agent was asked, in the user's words. Up to 2000 characters. */
   request?: string | null;
-  /** The one thing the next agent should do first. Up to 1000. */
+  /** The one thing the next agent should do first. Up to 1000 characters. */
   nextStep?: string | null;
   /** Repo-relative paths changed. */
   files?: string[];
@@ -77,14 +81,15 @@ export interface CheckpointCreateResponse {
 }
 
 /**
- * The newest checkpoint, with `nextStep` carried forward from an older one
- * when the newest has none — `nextStepFrom` names that older row.
+ * The newest checkpoint, with `nextStep` carried forward from an older one.
+ *
+ * Carried only when the newest has none; `nextStepFrom` names that older row.
  */
 export interface LatestCheckpoint extends Checkpoint {
   nextStepFrom: { id: string; agent: string; createdAt: IsoDate } | null;
 }
 
-/** `GET /v1/boards/:workspaceId/items/:ref/checkpoints` — newest first. */
+/** `GET /v1/boards/:workspaceId/items/:ref/checkpoints`, newest first. */
 export interface CheckpointListResponse {
   checkpoints: Checkpoint[];
   latest: LatestCheckpoint | null;

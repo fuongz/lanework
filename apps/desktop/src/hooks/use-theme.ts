@@ -2,14 +2,15 @@ import { useEffect } from "react";
 import { usePreferences } from "#/stores/preferences";
 
 /**
- * Design tokens hang off a `.dark` class (`@custom-variant dark` in app.css).
+ * Toggle the `.dark` class the design tokens hang off (`@custom-variant dark`
+ * in `app.css`).
  *
- * ⚠️ Transitions are suppressed around the swap. A theme flip changes colour,
- * background, border and shadow on nearly every element at once, so everything
- * carrying a transition on those properties animates together and the switch
- * smears instead of snapping. Worse, only SOME elements have one — the search
- * input, the switch, the buttons — so they lag an otherwise instant repaint by
- * 150ms, which reads as a glitch rather than as motion.
+ * NOTE: Transitions are suppressed around the swap. A theme flip changes
+ * colour, background, border and shadow on nearly every element at once, so
+ * every transition on those properties runs together and the switch smears
+ * instead of snapping. Only some elements have one (the search input, the
+ * switch, the buttons), so they lag an otherwise instant repaint by 150ms,
+ * which reads as a glitch rather than as motion.
  */
 function applyDark(dark: boolean): void {
   const style = document.createElement("style");
@@ -33,14 +34,14 @@ function applyDark(dark: boolean): void {
 }
 
 /**
- * Follow the saved appearance preference — light, dark, or the system's.
+ * Follow the saved appearance preference: light, dark, or the system's.
  *
- * ⚠️ The renderer does NOT resolve "system", and deliberately does not read
- * `prefers-color-scheme`. That media query does NOT follow
+ * NOTE: The renderer does not resolve "system" and does not read
+ * `prefers-color-scheme`. That media query does not follow
  * `nativeTheme.themeSource` in this Electron build: with `themeSource` set to
  * "dark" and `shouldUseDarkColors` true, the renderer's query still reported
- * light. Main resolves the theme and says so — in the return value here, and
- * over `onThemeChange` when the OS changes it later.
+ * light. Main resolves the theme and says so, in the return value of
+ * `setTheme` and over `onThemeChange` when the OS changes it later.
  */
 export function useTheme(): void {
   const theme = usePreferences((state) => state.theme);

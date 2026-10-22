@@ -20,21 +20,18 @@ import { InputGroup, InputGroupAddon } from "#/components/ui/input-group";
 import { useBoard } from "#/stores/board";
 
 /**
- * Name a project into existence, and say which folders it is built from.
+ * The dialog that creates a project from a name and its source folders.
  *
- * ⚠️ ONE implementation, two doors: the switcher — where you go to change
- * projects — and the empty account, where creating one is the only thing to do.
- * Two copies would be two places to keep a refusal message, a disabled state
- * and the folder list in step.
- *
- * ⚠️ It asks for a NAME, not a slug. The service refuses to derive one, so main
- * does it (`slug.ts`); asking a person for `du-an-cua-toi` is asking them to do
- * a computer's job in a field where a typo is permanent.
- *
- * ⚠️ The folders are carried as IDS the chooser minted, never as paths. The
- * path is here to be READ — a list of folders that showed only basenames cannot
- * tell two checkouts of the same repo apart — and main resolves the ids against
- * folders it opened itself, so this window cannot name a folder nobody picked.
+ * - One implementation, two doors: the project switcher and the empty
+ *   account. Two copies would be two places to keep a refusal message, a
+ *   disabled state and the folder list in step.
+ * - It asks for a name, not a slug. The service refuses to derive one, so
+ *   main does it (`slug.ts`); asking a person for `du-an-cua-toi` is asking
+ *   them to do a computer's job in a field where a typo is permanent.
+ * - NOTE: Folders are carried as ids the chooser minted, never as paths. The
+ *   path is shown only to be read (basenames cannot tell two checkouts of one
+ *   repo apart). Main resolves the ids against folders it opened itself, so
+ *   this window cannot name a folder nobody picked.
  */
 export function CreateProjectDialog({
   open,
@@ -54,9 +51,9 @@ export function CreateProjectDialog({
 
   function close(next: boolean) {
     onOpenChange(next);
-    // ⚠️ Cleared on the way OUT, not on the way in. A dialog that reset while
-    // it was still fading away would show the user their own name and folders
-    // being wiped, which reads as the create having failed.
+    // Cleared on the way out, not on the way in. A dialog that reset while it
+    // was still fading away would show the name and folders being wiped,
+    // which reads as the create having failed.
     if (!next) {
       setName("");
       setFolders([]);
@@ -72,10 +69,8 @@ export function CreateProjectDialog({
       typed,
       folders.map((folder) => folder.id),
     ).then((result) => {
-      // ⚠️ Everything typed is KEPT when creation fails. "That key is taken" is
-      // an invitation to edit the name; a dialog that emptied itself would make
-      // somebody pick three folders again to find out what was wrong with one
-      // word.
+      // Everything typed is kept when creation fails. "That key is taken" is
+      // an invitation to edit the name, not to pick three folders again.
       if ("error" in result) {
         setFailed(result.error);
         return;
@@ -96,11 +91,11 @@ export function CreateProjectDialog({
         </DialogHeader>
 
         <form
-          // ⚠️ `min-w-0`, because the dialog is a GRID and a grid item defaults
-          // to `min-width: auto` — a folder path with no spaces in it then
-          // stretches the form past the popup it is drawn inside, and the rows
-          // paint outside the white card. Truncation cannot start until
-          // something is allowed to be narrower than its content.
+          // NOTE: `min-w-0`, because the dialog is a grid and a grid item
+          // defaults to `min-width: auto`. A folder path with no spaces then
+          // stretches the form past the popup and the rows paint outside the
+          // card. Truncation cannot start until something may be narrower
+          // than its content.
           className="flex min-w-0 flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
@@ -116,8 +111,7 @@ export function CreateProjectDialog({
               />
             </InputGroupAddon>
             <Input
-              // ⚠️ The same accessible name the one-field form had. It is what
-              // every test — and anybody who has used this app — reaches for.
+              // NOTE: Tests and users reach for this accessible name; keep it.
               aria-label="New project name"
               data-slot="input-group-control"
               placeholder="Project name"

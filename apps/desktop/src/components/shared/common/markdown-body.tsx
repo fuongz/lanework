@@ -12,28 +12,32 @@ import {
   parseMarkdown,
 } from "#/lib/markdown";
 
-/** What a link is drawn as, by the one reader that follows links (FE-36). */
+/** Draws a link, for the readers that follow links. */
 export type LinkRenderer = (span: LinkSpan) => ReactNode;
 
 /**
- * The body's link renderer. None — every card body — and links are not even
- * parsed: they stay the text they were written as.
+ * The body's link renderer.
+ *
+ * With none (every card body), links are not even parsed: they stay the text
+ * they were written as.
  */
 const LinkContext = createContext<LinkRenderer | null>(null);
 
 /**
- * What a file badge does when clicked: opens the file in Repository › Files
- * (FE-66; an image's badge opened a lightbox before, FE-65). Only the chat
- * provides one — it alone knows the project a path is relative to — so every
- * other reader's badges stay plain.
+ * What a file badge does when clicked: opens the file in Repository › Files.
+ *
+ * Only the chat provides one, since it alone knows the project a path is
+ * relative to, so every other reader's badges stay plain.
  */
 type FileOpener = (path: string) => void;
 export const FileOpenerContext = createContext<FileOpener | null>(null);
 
 /**
- * How the body is drawn. `default` is every card body's; `chat` is the
- * conversation view's (FE-62): bigger type, bordered tables with rounded
- * corners, inline code as pills, and bare `https://…` read as links.
+ * How the body is drawn.
+ *
+ * `default` is every card body's. `chat` is the conversation view's: bigger
+ * type, bordered tables with rounded corners, inline code as pills, and bare
+ * `https://…` read as links.
  */
 type MarkdownVariant = "default" | "chat";
 const VariantContext = createContext<MarkdownVariant>("default");
@@ -50,16 +54,17 @@ const COLOR_SHAPE =
 
 /**
  * A bare hex colour in running text: six or eight digits, standing alone.
- * ⚠️ Not three or four, and not all digits — `#123` and `#204812` are an
- * issue or a pull request far more often than a colour.
+ *
+ * Not three or four, and not all digits: `#123` and `#204812` are an issue or
+ * a pull request far more often than a colour.
  */
 const BARE_HEX = /(?<![\w&#/])#(?:[0-9a-f]{8}|[0-9a-f]{6})(?![\w-])/gi;
 
 /**
  * `text` when it is exactly one CSS colour, else null.
  *
- * ⚠️ The browser has the last word (`CSS.supports`), so `rgb(nope)` stays
- * plain code. Where there is no `CSS` — the prerender — the shape alone.
+ * The browser has the last word (`CSS.supports`), so `rgb(nope)` stays plain
+ * code. Where there is no `CSS` (the prerender), the shape alone decides.
  */
 function cssColor(text: string): string | null {
   const value = text.trim();
@@ -70,17 +75,17 @@ function cssColor(text: string): string | null {
 
 /** A path as code is written: no spaces, no parentheses, no scheme. */
 const PATH_SHAPE = /^[\w@~.+\-/[\]$]+$/;
-/** `file.ts:42`, `file.ts:42-50`, `file.ts:42:7` — a place in the file. */
+/** A place in a file: `file.ts:42`, `file.ts:42-50`, `file.ts:42:7`. */
 const LINE_SUFFIX = /:\d+(?:[-:]\d+)*$/;
 
 /**
- * The file `text` names, when the inline code is one — `permission-card.tsx`,
- * `apps/desktop/src/styles/app.css:152` — else null.
+ * The file `text` names when the inline code is one, else null.
  *
- * ⚠️ The icon set decides, not a dot: it knows `.tsx` is React and
- * `Dockerfile` is Docker, and answers `default` for `window.desktop` and
- * `useBoard.dismiss`. `text` — which it gives `console.log` and `process.env`
- * too — counts only for `.txt`, a dotfile, or a path with a folder in it.
+ * Matches `permission-card.tsx` or `apps/desktop/src/styles/app.css:152`. The
+ * icon set decides, not a dot: it knows `.tsx` is React and `Dockerfile` is
+ * Docker, and answers `default` for `window.desktop` and `useBoard.dismiss`.
+ * Its `text` answer, which `console.log` and `process.env` get too, counts
+ * only for `.txt`, a dotfile, or a path with a folder in it.
  */
 function filePath(text: string): string | null {
   const value = text.trim();
@@ -104,28 +109,27 @@ const CODE_DEFAULT =
   "bg-foreground/[0.06] rounded px-1 py-0.5 font-mono text-[0.85em]";
 
 /**
- * A badge — inline code with an icon before it (a colour, a file).
+ * The classes of a badge: inline code with an icon before it (a colour, a
+ * file).
  *
- * ⚠️ `inline-flex items-center`, the icon `1em` — as tall as the text, on its
- * middle — and the badge `align-middle` in the line. Drawn inline with a
- * `vertical-align` nudge instead, the icon sat below the text and the two
- * never quite lined up. `leading-[1.25]` keeps the pill as tall as a plain
- * code pill: a flex box takes the paragraph's whole line-height otherwise.
- *
- * ⚠️ A badge is one box, so a line never breaks between its icon and its
- * name: it moves to the next line whole. Only a name wider than the column
- * wraps, inside the badge — whose radius is then fixed, not `rounded-full`,
- * which turned a two-line badge into a lozenge.
+ * - `inline-flex items-center`, the icon `1em` (as tall as the text, on its
+ *   middle), and the badge `align-middle` in the line. An inline icon with a
+ *   `vertical-align` nudge sits below the text and never quite lines up.
+ * - `leading-[1.25]` keeps the pill as tall as a plain code pill; a flex box
+ *   otherwise takes the paragraph's whole line-height.
+ * - A badge is one box, so a line never breaks between its icon and its name.
+ *   Only a name wider than the column wraps, inside the badge, so the radius
+ *   is fixed: `rounded-full` turns a two-line badge into a lozenge.
  */
 const badgeClass = (chat: boolean) =>
   `${chat ? "bg-foreground/[0.07] text-[0.82em]" : "bg-foreground/[0.06] text-[0.85em]"} inline-flex max-w-full rounded-[0.85em] py-0.5 pr-1.5 pl-1 align-middle font-mono leading-[1.25]`;
 
 /**
- * A colour value as a badge: a round swatch of the colour itself, then the
- * value as written — the way GitHub draws `#e87e42` in code.
+ * A colour value as a badge: a round swatch of the colour, then the value as
+ * written, the way GitHub draws `#e87e42` in code.
  *
- * ⚠️ The swatch has an inset ring, so white on a white page and black on a
- * dark one still show where the colour is.
+ * The swatch has an inset ring, so white on a white page and black on a dark
+ * one still show where the colour is.
  */
 function ColorBadge({
   value,
@@ -153,7 +157,9 @@ function ColorBadge({
 
 /**
  * A file named in inline code as a badge: its language's icon, then the name
- * as written — the same icon the Changes list and the diff draw for it.
+ * as written.
+ *
+ * The icon is the one the Changes list and the diff draw for the file.
  */
 function FileBadge({
   value,
@@ -167,14 +173,15 @@ function FileBadge({
   const open = useContext(FileOpenerContext);
   const body = (
     <>
-      {/* On the FIRST line's middle — (1.25 − 1) / 2 — which on one line is
-          `items-center`, and on a wrapped path keeps the icon by its start. */}
+      {/* On the first line's middle, (1.25 − 1) / 2: on one line that is
+          `items-center`, and on a wrapped path it keeps the icon by its
+          start. */}
       <FileTypeIcon path={path} className="mt-[0.125em] size-[1em] shrink-0" />
       {/* A long path still wraps, inside the badge. */}
       <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>
     </>
   );
-  // In the chat, the badge opens the file in Repository › Files (FE-66).
+  // In the chat, the badge opens the file in Repository › Files.
   if (open)
     return (
       <button
@@ -219,10 +226,10 @@ function colored(text: string, at: number): ReactNode {
 }
 
 /**
- * Running text in the chat (FE-62): its bare URLs drawn by `link`, its bare
- * hex colours as badges, the rest as written.
+ * Running text in the chat: bare URLs drawn by `link`, bare hex colours as
+ * badges, the rest as written.
  *
- * ⚠️ URLs first: a `#…` inside one is its fragment, not a colour.
+ * NOTE: URLs first, because a `#…` inside one is its fragment, not a colour.
  */
 function prose(text: string, link: LinkRenderer | null): ReactNode {
   if (!link) return colored(text, 0);
@@ -282,8 +289,8 @@ function Spans({ spans }: { spans: Inline[] }) {
             </strong>
           );
         if (span.kind === "em") return <em key={key}>{span.text}</em>;
-        // ⚠️ Bare URLs and bare colours only in the chat (FE-62): a card
-        // body keeps its text exactly as written.
+        // Bare URLs and bare colours only in the chat: a card body keeps its
+        // text as written.
         if (chat)
           return <Fragment key={key}>{prose(span.text, link)}</Fragment>;
         return <Fragment key={key}>{span.text}</Fragment>;
@@ -293,21 +300,22 @@ function Spans({ spans }: { spans: Inline[] }) {
 }
 
 /**
- * One line of markdown's INLINE marks — `**bold**`, `*em*`, `` `code` `` — with
- * no block structure, for short text that sits inside something else: a
- * checklist item, a note under it.
+ * One line of markdown's inline marks, with no block structure.
  *
- * ⚠️ Built from the same parser as `MarkdownBody`, so a decision written
- * `**D1.** use \`foo\`` reads the same in the body and in the checklist.
+ * For short text inside something else, like a checklist item or the note
+ * under it: `**bold**`, `*em*`, `` `code` ``. It uses the same parser as
+ * {@link MarkdownBody}, so a decision written `**D1.** use \`foo\`` reads the
+ * same in the body and in the checklist.
  */
 export function InlineMarkdown({ source }: { source: string }) {
   return <Spans spans={inlines(source)} />;
 }
 
 /**
- * Plain text that keeps its line breaks, with its links — `[text](href)` and
- * bare `https://…` — drawn by `link` (FE-62): what a person typed into the
- * composer, which is not a document and must not be reflowed as one.
+ * Plain text that keeps its line breaks, with its links drawn by `link`.
+ *
+ * For what a person typed into the composer, which is not a document and must
+ * not be reflowed as one. Links are `[text](href)` and bare `https://…`.
  */
 export function LinkedText({
   source,
@@ -326,10 +334,10 @@ export function LinkedText({
 }
 
 /**
- * A card's body, built as elements — never as HTML. See `lib/markdown`.
+ * A card's body, built as elements, never as HTML. See `lib/markdown`.
  *
- * `link` reads `[text](href)` and `[[name]]` as links and draws each one
- * (FE-36); without it they are left as written.
+ * @param link reads `[text](href)` and `[[name]]` as links and draws each
+ *   one; without it they are left as written.
  */
 export function MarkdownBody({
   source,
@@ -340,7 +348,7 @@ export function MarkdownBody({
   source: string;
   link?: LinkRenderer;
   empty?: string;
-  /** `chat` for the conversation view (FE-62); every other reader, unset. */
+  /** `chat` for the conversation view; unset for every other reader. */
   variant?: MarkdownVariant;
 }) {
   if (!source.trim())
@@ -440,10 +448,9 @@ function BlockView({ block }: { block: Block }) {
                 {row.map((cell, index) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: a parsed document is positional and never reorders — the index is the row's identity.
                   <td key={index} className="py-1.5 pr-3 align-top">
-                    {/* ⚠️ Cells carry inline markup too — these tables are the
-                        "files touched" ones, and every path in them is written
-                        in backticks. Rendering the cell raw printed the
-                        backticks and lost the code styling. */}
+                    {/* Cells carry inline markup too: these are the "files
+                        touched" tables, and every path in them is written in
+                        backticks. */}
                     <Spans spans={inlines(cell, { links })} />
                   </td>
                 ))}
@@ -461,8 +468,9 @@ function BlockView({ block }: { block: Block }) {
 }
 
 /**
- * A table in the chat (FE-62): bordered, rounded, a tinted header row — the
- * body's own table, as a card, since a reply's tables are its summaries.
+ * A table in the chat: bordered, rounded, with a tinted header row.
+ *
+ * It is drawn as a card because a reply's tables are its summaries.
  */
 function ChatTable({
   header,
@@ -495,8 +503,8 @@ function ChatTable({
               className="border-border/70 border-b last:border-b-0"
             >
               {row.map((cell, index) => (
-                // ⚠️ `leading-[1.7]`: a cell of code pills that wraps had its
-                // pills touching line to line at the table's 13px.
+                // `leading-[1.7]` keeps a wrapping cell's code pills from
+                // touching line to line at the table's 13px.
                 // biome-ignore lint/suspicious/noArrayIndexKey: a parsed document is positional and never reorders — the index is the row's identity.
                 <td key={index} className="px-3 py-2 align-top leading-[1.7]">
                   <Spans spans={inlines(cell, { links })} />

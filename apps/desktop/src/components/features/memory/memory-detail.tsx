@@ -65,11 +65,11 @@ function Facts({ facts }: { facts: Fact[] }) {
 }
 
 /**
- * One memory, read-only (FE-36): its body as Claude wrote it, without the
- * frontmatter, or the whole file under Raw (D9).
+ * One memory, read-only: its body as Claude wrote it, without the
+ * frontmatter, or the whole file under Raw (FE-36/D9).
  *
- * ⚠️ Read again whenever the listing says the file changed — main reports
- * every write to the folder (D11) — so what is open is never stale.
+ * Read again whenever the listing says the file changed — main reports every
+ * write to the folder (FE-36/D11) — so what is open is never stale.
  */
 export function MemoryDetail() {
   const { file } = useParams({ from: ROUTE });
@@ -190,7 +190,8 @@ export function MemoryDetail() {
             </Alert>
           )}
           {raw ? (
-            // Wide lines scroll inside the box; the pane never scrolls sideways.
+            // Wide lines scroll inside the box; the pane never scrolls
+            // sideways.
             <pre
               data-testid="memory-raw"
               className="bg-foreground/[0.04] overflow-x-auto rounded-lg p-3 font-mono text-xs leading-relaxed whitespace-pre"

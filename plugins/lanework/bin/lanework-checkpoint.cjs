@@ -1872,7 +1872,7 @@ var TOOLS = [
     properties: {
       name: {
         type: "string",
-        description: "Board name the user agreed to, e.g. `hiip/headless-controller`"
+        description: "Board name the user agreed to, e.g. `acme/widgets`"
       },
       repo: REPO,
       slug: {

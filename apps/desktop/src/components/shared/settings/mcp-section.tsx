@@ -59,8 +59,10 @@ const PROJECT_SCOPES = new Set<SetupScope>(["project", "local"]);
 const FOCUS_MIN_AGE_MS = 30_000;
 
 /**
- * What every project gets: `readGlobal`, on opening the page and on window
- * focus once the last read is half a minute old — like `useAgentSetup`.
+ * The agent setup every project gets, from the user's own config.
+ *
+ * Read on opening the page, and on window focus once the last read is half a
+ * minute old, like {@link useAgentSetup}.
  */
 function useGlobalSetup(): { setup: AgentSetup | null; error: string | null } {
   const [state, setState] = useState<{
@@ -101,9 +103,10 @@ function useGlobalSetup(): { setup: AgentSetup | null; error: string | null } {
 }
 
 /**
- * One server, the way Projects › General's agent setup draws a row: name,
- * scope and the file it is in, transport and target on the right — dimmed,
- * with the reason under it, when the agent will not use it.
+ * One server, drawn the way Projects › General's agent setup draws a row.
+ *
+ * Name, scope and the file it is in, with transport and target on the right.
+ * Dimmed, with the reason under it, when the agent will not use it.
  */
 function ServerRow({ server }: { server: SetupMcpServer }) {
   const where = server.plugin ?? server.source;
@@ -119,7 +122,7 @@ function ServerRow({ server }: { server: SetupMcpServer }) {
             server.disabled && "opacity-55",
           )}
         >
-          {/* ⚠️ The name keeps its room and the file gives way, as in
+          {/* The name keeps its room and the file gives way, as in
               SetupRow: a config dir outside `~` is a long absolute path. */}
           <span
             className="max-w-[65%] shrink-0 truncate text-sm font-medium"
@@ -168,7 +171,7 @@ function ServerCard({
   const named = servers.filter((server) =>
     matches(query, server.name, server.target ?? undefined, server.source),
   );
-  // ⚠️ The section matched on its title, not a server: show them all.
+  // The section matched on its title, not a server: show them all.
   const shown = named.length ? named : servers;
   return (
     <SettingsCard>
@@ -321,8 +324,10 @@ function ProjectMcp({ project }: { project: Workspace }) {
 
 /**
  * Settings › MCP and Settings › Projects › MCP: the MCP servers Claude Code
- * and Codex load — every project's from the user's own config, or the ones
- * the picked project adds on top. Read-only, like the rest of agent setup.
+ * and Codex load.
+ *
+ * Every project's from the user's own config, or the ones the picked project
+ * adds on top. Read-only, like the rest of agent setup.
  */
 export function McpSection({ scope }: { scope: Scope }) {
   return scope === "global" ? <GlobalMcp /> : <PickedProjectMcp />;

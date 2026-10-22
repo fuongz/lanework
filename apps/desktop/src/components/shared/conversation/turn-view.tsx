@@ -28,9 +28,11 @@ import { chatLink } from "./turn-view.link-chip";
 import { ToolGroup } from "./turn-view.tool-group";
 
 /**
- * ⚠️ Off-screen turns skip layout and paint (`content-visibility: auto`), and
- * keep their last drawn height (`auto` in `contain-intrinsic-size`), so a
- * conversation of 500 turns scrolls as lightly as one of 5.
+ * Lets off-screen turns skip layout and paint.
+ *
+ * `content-visibility: auto` skips them, and `auto` in
+ * `contain-intrinsic-size` keeps their last drawn height, so a conversation
+ * of 500 turns scrolls as lightly as one of 5.
  */
 const OFFSCREEN =
   "[content-visibility:auto] [contain-intrinsic-size:auto_160px]";
@@ -56,7 +58,7 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
   );
 }
 
-/** What the person wrote (D2): a bubble on the right, attachments above. */
+/** What the person wrote: a bubble on the right, attachments above. */
 export function UserBubble({
   text,
   attachments,
@@ -148,7 +150,7 @@ function AssistantView({
       .filter((block) => block.type === "permission")
       .map((block) => block.request.id),
   );
-  // ⚠️ Questions are not drawn in the turn: they take the composer's place
+  // NOTE: Questions are not drawn in the turn: they take the composer's place
   // (conversation-view), where the answer is typed.
   const waiting = permissions.filter(
     (request) => !answered.has(request.id) && !request.questions,
@@ -227,10 +229,12 @@ function AssistantView({
 }
 
 /**
- * One turn of the chat, memoized (perf): a closed turn never changes, so a
- * new line streaming into the last one does not redraw the 499 before it.
+ * One turn of the chat, memoized.
  *
- * ⚠️ Compared by what can change, not by reference: every read builds new
+ * A closed turn never changes, so a new line streaming into the last one does
+ * not redraw the 499 before it.
+ *
+ * NOTE: Compared by what can change, not by reference: every read builds new
  * objects for the whole transcript.
  */
 export const TurnView = memo(
@@ -251,7 +255,7 @@ export const TurnView = memo(
     conversation: string;
     handlers: TurnHandlers;
     forking: boolean;
-    /** Registers a user turn's element for the TOC (D5). */
+    /** Registers a user turn's element for the TOC. */
     anchor?: (id: string, node: HTMLElement | null) => void;
   }) {
     if (turn.role === "user")
@@ -319,7 +323,7 @@ function UserTurnView({ turn }: { turn: UserTurn }) {
   );
 }
 
-/** A TOC entry (D5): a prompt, its answer's first line, and the next. */
+/** A TOC entry: a prompt, its answer's first line, and the next. */
 export interface PromptLine {
   id: string;
   prompt: string;
@@ -328,7 +332,7 @@ export interface PromptLine {
   more: string;
 }
 
-/** The TOC's line for a prompt and its answer (D5). */
+/** The TOC's lines, one for each prompt and its answer. */
 export function promptLines(turns: Turn[]): PromptLine[] {
   const out: PromptLine[] = [];
   for (let i = 0; i < turns.length; i++) {

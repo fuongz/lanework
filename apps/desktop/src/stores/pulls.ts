@@ -161,18 +161,18 @@ interface PullsState {
    */
   focus: { path: string; at: number } | null;
 
-  /** Read the account and this project's repo, then its pull requests. */
+  /** Reads the account and this project's repo, then its pull requests. */
   open: (slug: string, status: PullStatus) => Promise<void>;
   refresh: () => Promise<void>;
   /**
-   * Ask `gh` again, then re-read this project.
+   * Asks `gh` again, then re-reads this project.
    *
    * The app never signs anybody in. This backs the "Check again" button
    * after somebody installs `gh` or runs `gh auth login` in a terminal.
    */
   check: () => Promise<void>;
   /**
-   * Read a fork's own repo or its parent, for this session only.
+   * Reads a fork's own repo or its parent, for this session only.
    *
    * The list and the open pull request are dropped first: they belong to the
    * other repo, and a number on screen would name a different pull request.
@@ -180,19 +180,19 @@ interface PullsState {
   selectRepo: (side: RepoSide) => Promise<void>;
   openPull: (number: number) => Promise<void>;
   /**
-   * Read the open pull request's commits.
+   * Reads the open pull request's commits.
    *
    * Safe to call again; it re-reads.
    */
   loadCommits: (number: number) => Promise<void>;
   /**
-   * Show one commit's diff, or the whole pull request.
+   * Shows one commit's diff, or the whole pull request.
    *
    * @param sha Null for the whole pull request.
    */
   selectCommit: (sha: string | null) => Promise<void>;
   /**
-   * Read the open pull request's timeline and checks.
+   * Reads the open pull request's timeline and checks.
    *
    * Safe to call on every render of the summary: a read already answered for
    * this pull request is skipped unless `refresh` is set. The tab mounts and
@@ -202,7 +202,7 @@ interface PullsState {
    */
   loadActivity: (number: number, refresh?: boolean) => Promise<void>;
   /**
-   * Leave an ordinary comment.
+   * Leaves an ordinary comment.
    *
    * Re-reads the timeline on success.
    *
@@ -211,7 +211,7 @@ interface PullsState {
   postComment: (number: number, body: string) => Promise<{ error?: string }>;
   toggleFiles: () => void;
   /**
-   * Say outright whether the files panel is open.
+   * Says outright whether the files panel is open.
    *
    * NOTE: Beside `toggleFiles`, not instead of it. Dragging the panel's handle
    * onto the edge reports a state. Feeding that through a toggle inverts
@@ -226,7 +226,7 @@ interface PullsState {
   ) => Promise<{ error?: string }>;
   dismiss: () => void;
   /**
-   * Listen for account changes.
+   * Listens for account changes.
    *
    * @returns The unsubscribe.
    */

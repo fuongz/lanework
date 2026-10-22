@@ -73,7 +73,7 @@ const ENDED: Record<
 const LOST_NOTE =
   "Its conversation ended and no word of it ever came: the CLI that ran it is gone.";
 
-/** Now, again every second while `ticking`: a running task's age moves. */
+/** Now, again every second while `ticking`, so a running task's age moves. */
 function useNow(ticking: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -86,17 +86,16 @@ function useNow(ticking: boolean): number {
 
 /**
  * A background shell (or monitor) of a Claude conversation, read-only, full
- * size in the main view (FE-42/D3): what it runs, where it stands, and the
- * end of its output, followed live while it runs.
+ * size in the main view (FE-42/D3).
  *
- * Running shells and monitors can be stopped after confirmation (FE-43,
- * FE-56); the header shows the pid of a running one's group. The header link
- * opens its parent conversation as the rail's row does: the tab running it,
- * or else its chat.
+ * Shows what it runs, where it stands, and the end of its output, followed
+ * live while it runs. A running one can be stopped after confirmation; the
+ * header shows the pid of its process group. The header link opens its parent
+ * conversation as the rail's row does: the tab running it, or else its chat.
  */
 export function ShellTaskView() {
   const { slug, conversation, task } = useParams({ from: ROUTE });
-  // ⚠️ Keyed by WHICH task: the route stays mounted from one to the next,
+  // NOTE: Keyed by which task: the route stays mounted from one to the next,
   // and the last one's scroll position is not this one's.
   return (
     <ShellTaskPage
@@ -147,8 +146,8 @@ function ShellTaskPage({
   const [copied, copy] = useCopy();
   const pid = task ? pidText(task) : null;
 
-  // ⚠️ Follows the end only while the reader is AT the end: scrolled up to
-  // read something, the next second's lines must not yank them back down.
+  // Follows the end only while the reader is at the end: scrolled up to read
+  // something, the next second's lines must not yank them back down.
   const scroller = useRef<HTMLPreElement>(null);
   const pinned = useRef(true);
   const text = output?.text ?? "";
@@ -230,8 +229,8 @@ function ShellTaskPage({
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
       {stopping.feedback}
-      {/* ⚠️ In the window's title bar (FE-58), as the sub-agent viewer's
-          is: the bar drags the window and clears its controls. */}
+      {/* In the window's title bar, as the sub-agent viewer's is: the bar
+          drags the window and clears its controls. */}
       <WindowTitlebar>
         {running ? (
           <span role="img" aria-label="Running" className="flex shrink-0">
@@ -279,7 +278,7 @@ function ShellTaskPage({
           </Badge>
         )}
         {pid && task?.pid != null && (
-          // FE-56/D3: its process, to find in `ps` or Activity Monitor.
+          // Its process, to find in `ps` or Activity Monitor (FE-56/D3).
           <Button
             variant="ghost"
             size="xs"

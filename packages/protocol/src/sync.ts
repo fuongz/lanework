@@ -1,4 +1,4 @@
-// `/v1/sync/*` — the machine surface for a user's projects. Machine credential
+// `/v1/sync/*`: the machine surface for a user's projects. Machine credential
 // only; `/v1/workspaces` is the session twin and refuses a machine with 401.
 // Derived from the server's `routes/sync.ts`.
 
@@ -13,17 +13,17 @@ export interface SyncProfile {
 
 /** A project as `GET /v1/sync/state` states it. */
 export interface SyncWorkspace {
-  /** The board id — every `/v1/boards/:workspaceId/…` takes this, not the slug. */
+  /** The board id. Every `/v1/boards/:workspaceId/…` takes it, not the slug. */
   id: string;
   slug: string;
   name: string;
   color: string | null;
-  /** The R2 key of the project's icon (BE-18), or null. */
+  /** The R2 key of the project's icon, or null. */
   iconKey: string | null;
   laneworkStyle: boolean;
   baseBranch: string | null;
   addedAt: IsoDate;
-  /** THIS machine's checkout, or null when it has none. */
+  /** This machine's checkout, or null when it has none. */
   path: string | null;
   exposed: boolean;
 }
@@ -35,7 +35,11 @@ export interface SyncRoleBinding {
   model: string;
 }
 
-/** `GET /v1/sync/state` — archived projects are left out, ordered by position. */
+/**
+ * `GET /v1/sync/state`.
+ *
+ * Projects come ordered by position; archived ones are left out.
+ */
 export interface SyncStateResponse {
   profile: SyncProfile | null;
   workspaces: SyncWorkspace[];
@@ -59,7 +63,11 @@ export interface SyncPushWorkspace {
   exposed?: boolean;
 }
 
-/** `POST /v1/sync/state` — upsert up to 500 projects, the profile and role bindings. */
+/**
+ * `POST /v1/sync/state`.
+ *
+ * Upserts up to 500 projects, the profile and the role bindings.
+ */
 export interface SyncStatePushRequest {
   profile?: Partial<SyncProfile>;
   workspaces?: SyncPushWorkspace[];
@@ -71,7 +79,11 @@ export interface SyncStatePushResponse {
   stored: number;
 }
 
-/** `POST /v1/sync/state/workspace` — create a project. 409 `{ error, id }` on a taken slug. */
+/**
+ * `POST /v1/sync/state/workspace`: create a project.
+ *
+ * 409 with {@link SyncWorkspaceSlugTakenError} on a taken slug.
+ */
 export interface SyncWorkspaceCreateRequest {
   /** Lower-case, hyphenated, at most 64 characters. */
   slug: string;
@@ -101,7 +113,7 @@ export interface SyncWorkspaceSlugTakenError {
   id: string;
 }
 
-/** `PATCH /v1/sync/state/workspace/:id` — the id is a UUID, not a slug. */
+/** `PATCH /v1/sync/state/workspace/:id`; the id is a UUID, not a slug. */
 export interface SyncWorkspacePatchRequest {
   name?: string;
   color?: string | null;
@@ -120,7 +132,7 @@ export interface SyncWorkspacePatchResponse {
   };
 }
 
-/** `PUT /v1/sync/state/workspace-order` — every id distinct, all the caller's. */
+/** `PUT /v1/sync/state/workspace-order`: distinct ids, all the caller's. */
 export interface SyncWorkspaceOrderRequest {
   ids: string[];
 }

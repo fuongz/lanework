@@ -1,9 +1,10 @@
-// Run with `bun test apps/desktop/electron/mcp-local`. `node:test`/`node:assert`
-// like the store's tests, so the desktop typecheck needs no Bun types.
+// Run with `bun test apps/desktop/electron/mcp-local`. Uses `node:test` and
+// `node:assert` like the store's tests, so the desktop typecheck needs no Bun
+// types.
 //
 // The end-to-end case spawns the BUILT `dist/electron/mcp-local/server.cjs`
-// under Electron's own Node (`ELECTRON_RUN_AS_NODE=1`), exactly as an agent
-// config launches it — run `bun run build` in apps/desktop first.
+// under Electron's own Node (`ELECTRON_RUN_AS_NODE=1`), as an agent config
+// launches it. Run `bun run build` in apps/desktop first.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";

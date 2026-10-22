@@ -106,10 +106,12 @@ import { syncLocalWorkspace } from "./sync-to-cloud";
 /**
  * The credential this window is allowed to act with, or a refusal.
  *
- * ⚠️ Exported for `../git`, which needs exactly the same gate: its handlers
- * file state per Lanework account, so they have to agree with this file on
- * which account is asking. A second copy of this check is a second place for
- * the answer to drift.
+ * NOTE: Exported for `../git`, which needs the same gate: its handlers file
+ * state per Lanework account, so they have to agree with this file on which
+ * account is asking. A second copy of this check is a second place for the
+ * answer to drift.
+ *
+ * @throws When the window is signed out, or the session changed under it.
  */
 export async function authorizedRecord(): Promise<MachineRecord> {
   const session = await currentSession();
@@ -140,18 +142,18 @@ async function assertSameSession(record: MachineRecord): Promise<void> {
     throw new Error("Your session changed. Try again.");
 }
 
-// ── FE-52: local boards ─────────────────────────────────────────────────────
+// ── Local boards ────────────────────────────────────────────────────────────
 
 /**
  * The "account" local boards file their per-account state under — the saved
  * selection and the folder links — through the same `store.ts` functions the
  * cloud account uses.
  *
- * ⚠️ NOT a credential, and built so it can never act as one: no secret, and an
- * origin (`lanework-local:`) that no `fetch` can reach — a request made with it
- * by mistake fails on the spot instead of reaching the control plane, which is
- * what keeps "local mode sends nothing" (FE-52/V2) true even through code that
- * was written for the cloud. The same record is used signed in and not, so a
+ * NOTE: NOT a credential, and built so it can never act as one: no secret,
+ * and an origin (`lanework-local:`) that no `fetch` can reach. A request made
+ * with it by mistake fails on the spot instead of reaching the control plane,
+ * which keeps "local mode sends nothing" (FE-52/V2) true even through code
+ * written for the cloud. The same record is used signed in and not, so a
  * local board's folder link survives signing in and out.
  */
 const LOCAL_RECORD: MachineRecord = {
@@ -164,13 +166,16 @@ const LOCAL_RECORD: MachineRecord = {
 };
 
 /**
- * Local mode: no credential on disk and "Skip for now" chosen — the rule
- * `currentSession` applies, read from the two files alone.
+ * Whether the app is in local mode: no credential on disk and "Skip for now"
+ * chosen.
  *
- * ⚠️ Not `currentSession()`, deliberately. That probes the control plane when
- * its verdict is stale, and the cloud paths below already pay for one probe
- * in `authorizedRecord`; a second one in front of it moved every cloud read
- * later and let callers racing the first `load` each fetch the list again.
+ * The rule `currentSession` applies, read from the two files alone.
+ *
+ * NOTE: Not `currentSession()`. That probes the control plane when its
+ * verdict is stale, and the cloud paths below already pay for one probe in
+ * {@link authorizedRecord}. A second one in front of it would move every cloud
+ * read later, and let callers racing the first `load` each fetch the list
+ * again.
  */
 async function inLocalMode(): Promise<boolean> {
   return !(await readRecord()) && (await readLocalMode());
@@ -195,8 +200,9 @@ async function localList(): Promise<Workspace[]> {
 /**
  * The local board a board call names, or null when it names a cloud one.
  *
- * ⚠️ Matched by ID only (see `findLocalWorkspace`), and only once the session
- * may use the app at all — a signed-out window reads no board, local or not.
+ * NOTE: Matched by ID only (see `findLocalWorkspace`), and only once the
+ * session may use the app at all: a signed-out window reads no board, local
+ * or not.
  */
 async function localTarget(workspaceId: string): Promise<LocalBoard | null> {
   const board = localBoard(workspaceId);
@@ -208,7 +214,7 @@ async function localTarget(workspaceId: string): Promise<LocalBoard | null> {
 /**
  * Which account a folder link keyed by `slug` is filed under.
  *
- * ⚠️ The folder channels name a workspace by slug alone, and a local board
+ * NOTE: The folder channels name a workspace by slug alone, and a local board
  * and a cloud one can share a slug (a moved board and its cloud copy usually
  * do). The cloud project wins that tie when signed in: it is the one the rest
  * of the app — terminals, pull requests — already resolves that slug to.
@@ -265,9 +271,11 @@ async function loadLocal(id?: string): Promise<WorkspaceSnapshot> {
 const syncing = new Set<string>();
 
 /**
- * FE-52/D7a: move a local board to the signed-in account, then open its cloud
- * copy. The folder link goes with it, so the terminal and the agent setup of
- * the project keep working on the cloud board.
+ * Moves a local board to the signed-in account, then opens its cloud copy
+ * (FE-52/D7a).
+ *
+ * The folder link goes with it, so the terminal and the agent setup of the
+ * project keep working on the cloud board.
  */
 async function syncToCloud(localId: string): Promise<LocalSyncResult> {
   const record = await authorizedRecord();
@@ -306,20 +314,13 @@ async function syncToCloud(localId: string): Promise<LocalSyncResult> {
 }
 
 /**
- * The workspace list, and which one is selected.
- *
- * ⚠️ Selection is by CLOUD WORKSPACE ID, because every board call is
- * `/v1/boards/:workspaceId/…` — remembering the slug instead would mean
- * resolving it to an id on every start, from a list that may not have loaded
- * yet. A `v1` file that still names a slug is resolved once and rewritten.
- */
-/**
  * The list the last `load` read, and the session it was read under.
  *
- * ⚠️ Only SELECTING reuses it (FE-15/D4). Switching projects used to fetch the
- * whole list again just to write down which one was chosen — a round trip per
- * switch for an answer the renderer already had. Every other read still asks
- * the service, and the session key means a different account never sees it.
+ * NOTE: Only SELECTING reuses it (FE-15/D4). Without it, switching projects
+ * fetches the whole list again just to write down which one was chosen — a
+ * round trip per switch for an answer the renderer already has. Every other
+ * read still asks the service, and the session key means a different account
+ * never sees it.
  */
 let lastList: { session: string; workspaces: Workspace[] } | null = null;
 
@@ -327,16 +328,16 @@ const sessionKey = (record: MachineRecord) =>
   [record.apiUrl, record.machineId, record.userId, record.secret].join("\n");
 
 /**
- * The folder a terminal for `key` opens in (FE-19/D7): the workspace's PRIMARY
- * folder on this machine, or null — the home folder — when it has none here or
- * it has moved.
+ * The folder a terminal for `key` opens in (FE-19/D7).
  *
- * ⚠️ Resolved HERE, from the links this process wrote down, never from the
+ * NOTE: Resolved HERE, from the links this process wrote down, never from the
  * renderer. The terminal panel names a workspace and nothing else, so a
  * renderer cannot open a shell in a folder of its choosing.
  *
- * ⚠️ `key` is the cloud id or, for a service that sends none, the slug — the
- * same either-or `load(id)` accepts — while the folder link is keyed by slug.
+ * @param key The cloud id or, for a service that sends none, the slug — the
+ *   same either-or `load(id)` accepts. The folder link is keyed by slug.
+ * @returns The workspace's PRIMARY folder on this machine, or null — the home
+ *   folder — when it has none here or it has moved.
  */
 export async function terminalFolder(key: string): Promise<string | null> {
   const { record, workspace } = await knownWorkspace(key);
@@ -345,9 +346,10 @@ export async function terminalFolder(key: string): Promise<string | null> {
 }
 
 /**
- * Every folder of `key` still on this machine, primary first (FE-68): a
- * port belongs to the project when its process runs inside one of them.
- * Resolved here, like `terminalFolder`, never from the renderer.
+ * Every folder of `key` still on this machine, primary first.
+ *
+ * A port belongs to the project when its process runs inside one of them.
+ * Resolved here, like {@link terminalFolder}, never from the renderer.
  */
 export async function projectFolders(key: string): Promise<string[]> {
   const { record, workspace } = await knownWorkspace(key);
@@ -361,17 +363,19 @@ export async function projectFolders(key: string): Promise<string[]> {
 }
 
 /**
- * The workspace `key` (id or slug) names on this account, from the list this
- * process last read — or a fresh one — and the credential that read it.
+ * The workspace `key` (id or slug) names on this account, and the credential
+ * that read it.
  *
- * ⚠️ Exported for `../readiness` (FE-30), which resolves a slug the same way
- * the terminal does rather than trusting anything the renderer says about it.
+ * Found in the list this process last read, or a fresh one.
+ *
+ * NOTE: Exported for `../readiness`, which resolves a slug the same way the
+ * terminal does rather than trusting anything the renderer says about it.
  */
 export async function knownWorkspace(
   key: string,
 ): Promise<{ record: MachineRecord; workspace: Workspace }> {
-  // FE-52: a local board answers with `LOCAL_RECORD`, whose folder links are
-  // the local ones and whose origin no request can reach.
+  // A local board answers with `LOCAL_RECORD`, whose folder links are the
+  // local ones and whose origin no request can reach.
   if (await inLocalMode()) {
     const local = await localKnown(key, true);
     if (!local) throw new Error("That project is not on this machine.");
@@ -393,7 +397,11 @@ export async function knownWorkspace(
   throw new Error("That project is not on this account.");
 }
 
-/** Account-scoped projects for native surfaces; never reuse another account's list. */
+/**
+ * The account's projects, for native surfaces.
+ *
+ * Never reuses another account's list.
+ */
 export async function menuBarWorkspaces(): Promise<Workspace[]> {
   if (await inLocalMode()) return localList();
   const record = await authorizedRecord();
@@ -404,13 +412,21 @@ export async function menuBarWorkspaces(): Promise<Workspace[]> {
   return [...cloud, ...(await localList())];
 }
 
+/**
+ * The workspace list, and which one is selected.
+ *
+ * NOTE: Selection is by CLOUD WORKSPACE ID, because every board call is
+ * `/v1/boards/:workspaceId/…`. Remembering the slug instead would mean
+ * resolving it to an id on every start, from a list that may not have loaded
+ * yet. A `v1` file that still names a slug is resolved once and rewritten.
+ */
 async function load(id?: string): Promise<WorkspaceSnapshot> {
-  // FE-52: local mode lists the local boards and nothing else — and asks the
-  // control plane nothing.
+  // Local mode lists the local boards and nothing else, and asks the control
+  // plane nothing.
   if (await inLocalMode()) return loadLocal(id);
   const record = await authorizedRecord();
   const session = sessionKey(record);
-  // FE-52/D6a: local boards stay in the list, after the account's own.
+  // Local boards stay in the list, after the account's own (FE-52/D6a).
   const locals = await localList();
   const matches = (entry: Workspace) => entry.id === id || entry.slug === id;
   const known =
@@ -429,10 +445,10 @@ async function load(id?: string): Promise<WorkspaceSnapshot> {
   const saved = await readActive(record);
   await assertSameSession(record);
 
-  // ⚠️ A selector is matched against the id AND the slug. The renderer sends
-  // `id ?? slug`, and against a service that predates the id field every id is
-  // null — matching on the id alone made every Open button answer "this
-  // workspace is no longer available", which is the one sentence that is
+  // NOTE: A selector is matched against the id AND the slug. The renderer
+  // sends `id ?? slug`, and against a service that predates the id field
+  // every id is null. Matching on the id alone would make every Open button
+  // answer "this workspace is no longer available", the one sentence that is
   // certainly false when the row was just listed.
   const selector = id ?? saved?.value;
   const active =
@@ -447,8 +463,8 @@ async function load(id?: string): Promise<WorkspaceSnapshot> {
     throw new Error(
       "This workspace is no longer available. Refresh the list and choose another.",
     );
-  // Write when the caller chose one, when an older shape was just resolved, or
-  // when what was saved no longer exists.
+  // Write when the caller chose one, when an older shape was just resolved,
+  // or when what was saved no longer exists.
   if (id !== undefined || saved?.by === "slug" || (saved !== null && !active))
     await writeActive(record, {
       id: active?.id ?? null,
@@ -458,13 +474,6 @@ async function load(id?: string): Promise<WorkspaceSnapshot> {
   return { workspaces, active };
 }
 
-/**
- * A board, or the last good copy of it with `stale: true`.
- *
- * ⚠️ It never answers with an empty board on failure. That is the whole reason
- * the cache exists: a board that reads as empty invites somebody to start typing
- * a card that already exists, and no error dialog undoes that.
- */
 /** The counts under `query`, and the unfiltered total the rail shows. */
 async function countsFor(
   record: MachineRecord,
@@ -481,16 +490,21 @@ async function countsFor(
 }
 
 /**
- * A board, read one group at a time (FE-17): the counts, and the first page of
- * every group `query` draws — all at once, not one after another.
+ * A board, or the last good copy of it with `stale: true`.
  *
- * ⚠️ The groups are planned from the SAVED copy's lanes when there is one, so
- * they go out alongside the config instead of waiting for it. A lane the config
- * then adds is read right after; one it no longer has is dropped.
+ * Read one group at a time: the counts, and the first page of every group
+ * `query` draws — all at once, not one after another.
  *
- * ⚠️ A service without `/stats` gets the old whole-board read. Its counts can
- * only come from having every card, and the board stays correct against an
- * API that has not been deployed yet.
+ * NOTE: It never answers with an empty board on failure. That is the reason
+ * the cache exists: a board that reads as empty invites somebody to start
+ * typing a card that already exists, and no error dialog undoes that.
+ *
+ * - The groups are planned from the SAVED copy's lanes when there is one, so
+ *   they go out alongside the config instead of waiting for it. A lane the
+ *   config then adds is read right after; one it no longer has is dropped.
+ * - A service without `/stats` gets the whole-board read. Its counts can only
+ *   come from having every card, and the board stays correct against an API
+ *   that has not been deployed yet.
  */
 async function board(
   workspaceId: string,
@@ -502,8 +516,8 @@ async function board(
     const saved = await readBoardCache(record, workspaceId);
     const configRead = fetchBoardConfig(record, workspaceId);
     const countsRead = countsFor(record, workspaceId, query);
-    // Settled into the read below; a failure here must not go unhandled while
-    // the groups are still out.
+    // Settled into the read below; a failure here must not go unhandled
+    // while the groups are still out.
     configRead.catch(() => undefined);
     countsRead.catch(() => undefined);
 
@@ -576,12 +590,13 @@ async function board(
     await writeBoardCache(record, workspaceId, view);
     return view;
   } catch (error) {
-    // ⚠️ Logged even though the caller is answered normally. Serving the cache
+    // Logged even though the caller is answered normally. Serving the cache
     // is the right answer and a SILENT one: "Offline — showing a saved board"
-    // reads identically for a dropped connection, an HTTP 500, a 15s timeout
-    // and a changed session, and this catch is the last place that still knows
-    // which of them it was. The elapsed time is here for the same reason — a
-    // failure at ~15000ms is the request timing out, not the network being off.
+    // reads the same for a dropped connection, an HTTP 500, a 15s timeout and
+    // a changed session, and this catch is the last place that still knows
+    // which of them it was. The elapsed time is here for the same reason: a
+    // failure at ~15000ms is the request timing out, not the network being
+    // off.
     console.error(
       `Board ${workspaceId} fell back to the cache after ${Date.now() - startedAt}ms:`,
       error,
@@ -595,8 +610,11 @@ async function board(
 /**
  * A board query off the wire, checked field by field.
  *
- * ⚠️ Every value ends up in a URL the service parses, so each is held to a key's
- * shape here; an unknown grouping or a field this app never sends is dropped.
+ * NOTE: Every value ends up in a URL the service parses, so each is held to a
+ * short, non-empty string here; an unknown grouping or a field this app never
+ * sends is dropped.
+ *
+ * @throws When the query or one of its filters is malformed.
  */
 function requireQuery(value: unknown): BoardQuery {
   if (value === undefined) return DEFAULT_BOARD_QUERY;
@@ -625,13 +643,13 @@ function requireQuery(value: unknown): BoardQuery {
 /**
  * Whether this workspace has a folder on this machine, and what is in it.
  *
- * ⚠️ A linked folder that has since moved is `missing`, not `none`. Answering
- * "no folder linked" would invite the user to link it again and be told nothing
- * about why the one they chose stopped working.
+ * A linked folder that has since moved is `missing`, not `none`. Answering
+ * "no folder linked" would invite the user to link it again, and tell them
+ * nothing about why the one they chose stopped working.
  */
 async function folderState(slug: string): Promise<LocalFolderState> {
   const record = await folderRecordFor(slug);
-  // ⚠️ The PRIMARY, which is the first. Every surface below this one — the
+  // The PRIMARY, which is the first. Every surface below this one — the
   // migration reader, "open in file manager" — is about one folder, and the
   // list says which one that is.
   const [path, ...others] = (await readFolders(record))[slug] ?? [];
@@ -652,8 +670,8 @@ async function planFor(workspaceId: string): Promise<{
 }> {
   const record = await authorizedRecord();
   const { workspaces } = await load();
-  // ⚠️ Matched on the id OR the slug, because the link is keyed by slug and the
-  // caller addresses a board by id. Looking up one from the other here is what
+  // NOTE: Matched on the id OR the slug, because the link is keyed by slug and
+  // the caller addresses a board by id. Looking up one from the other here
   // keeps the renderer from having to know both.
   const workspace = workspaces.find(
     (entry) => entry.id === workspaceId || entry.slug === workspaceId,
@@ -668,11 +686,11 @@ async function planFor(workspaceId: string): Promise<{
 /**
  * How many cards the board should hold if the last run is what it says.
  *
- * ⚠️ Every record the run ACCOUNTED FOR, not just the new ones: a re-run
+ * NOTE: Every record the run ACCOUNTED FOR, not just the new ones. A re-run
  * reports a card that is already there as `skipped`, so counting `imported`
- * alone makes the second seal of the same project fail by exactly the number of
- * cards that did land. `conflict` and `failed` are excluded for the mirror
- * reason — those are the records the board does not hold.
+ * alone makes the second seal of the same project fail by the number of cards
+ * that did land. `conflict` and `failed` are excluded for the mirror reason:
+ * those are the records the board does not hold.
  */
 function sealableCount(summary: Record<string, number>): number {
   return (
@@ -681,14 +699,16 @@ function sealableCount(summary: Record<string, number>): number {
 }
 
 /**
- * Read an edit off the wire, field by field.
+ * Reads an edit off the wire, field by field.
  *
- * ⚠️ An allow-list, not a shape check. The renderer is a web origin: whatever
- * it sends reaches the board under this machine's credential, so the set of
- * fields a person can change from a window is decided HERE and nowhere else.
- * An unknown key is a refusal rather than something to drop quietly — a caller
- * sending one has a bug, and silently ignoring it hides the bug in a write that
+ * NOTE: An allow-list, not a shape check. The renderer is a web origin:
+ * whatever it sends reaches the board under this machine's credential, so the
+ * set of fields a person can change from a window is decided HERE and nowhere
+ * else. An unknown key is a refusal rather than something to drop quietly: a
+ * caller sending one has a bug, and ignoring it hides the bug in a write that
  * appears to work.
+ *
+ * @throws On an unknown field, or a value a field does not take.
  */
 function parsePatch(value: unknown): BoardCardPatch {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -762,9 +782,9 @@ function parsePatch(value: unknown): BoardCardPatch {
     patch.categoryKey = row.categoryKey as string | null;
   }
   if ("assignees" in row) {
-    // ⚠️ BOTH lists are required, even when only one is changing. The service
-    // replaces the whole set, so accepting `{ users }` alone would clear every
-    // agent assignment as a side effect of naming a person.
+    // NOTE: BOTH lists are required, even when only one is changing. The
+    // service replaces the whole set, so accepting `{ users }` alone would
+    // clear every agent assignment as a side effect of naming a person.
     const value = row.assignees;
     if (!value || typeof value !== "object" || Array.isArray(value))
       throw new Error("An assignment needs users and agents");
@@ -795,9 +815,9 @@ function parsePatch(value: unknown): BoardCardPatch {
     patch.parentId = row.parentId as string | null;
   }
   if ("dueAt" in row) {
-    // ⚠️ Parsed, not just shape-checked. The service takes an instant, and a
-    // string it cannot read comes back as a 400 for a field the user set from a
-    // date picker — which is a bug they can do nothing about.
+    // NOTE: Parsed, not just shape-checked. The service takes an instant, and
+    // a string it cannot read comes back as a 400 for a field the user set
+    // from a date picker — a bug they can do nothing about.
     if (
       !(
         row.dueAt === null ||
@@ -832,12 +852,11 @@ function parsePatch(value: unknown): BoardCardPatch {
 /**
  * A comment body from the renderer.
  *
- * ⚠️ Its own check rather than `requireId`, whose message names a workspace and
- * a card — this argument is a sentence somebody typed, and being told "a card is
- * required" for an empty comment box explains nothing.
- *
- * ⚠️ The cap mirrors the service's `MAX_COMMENT`. Refusing here is the same
- * answer, sooner, and without a round trip that was never going to succeed.
+ * - Its own check rather than `requireId`, whose message names a workspace
+ *   and a card. This argument is a sentence somebody typed, and "a card is
+ *   required" for an empty comment box explains nothing.
+ * - The cap mirrors the service's `MAX_COMMENT`. Refusing here is the same
+ *   answer, sooner, without a round trip that was never going to succeed.
  */
 function commentBody(args: unknown[], expected: number): string {
   if (args.length !== expected) throw new Error("A comment is required");
@@ -851,10 +870,10 @@ function commentBody(args: unknown[], expected: number): string {
 /**
  * A file reference on its way to a card.
  *
- * ⚠️ A REFERENCE, and this channel never reads it. The service stores metadata
- * and hands the string back untouched, so nothing here opens, stats or resolves
- * what the renderer names — which is what keeps this from being a channel that
- * reads any file the renderer can spell.
+ * NOTE: A REFERENCE, and this channel never reads it. The service stores
+ * metadata and hands the string back untouched, so nothing here opens, stats
+ * or resolves what the renderer names. That keeps this from being a channel
+ * that reads any file the renderer can spell.
  */
 function parseAttachmentDraft(value: unknown): BoardAttachmentDraft {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -899,11 +918,11 @@ function parseAttachmentDraft(value: unknown): BoardAttachmentDraft {
 /**
  * A whole checklist on the way to the board.
  *
- * ⚠️ The board's own limits, restated rather than deferred to. The API answers a
- * malformed list with `checklist[7].text is 2311 characters` — a good message,
- * and one that arrives after a round trip that was never going to succeed.
- * Refusing here is the same answer, sooner, and it keeps a renderer bug from
- * looking like a service failure.
+ * The board's own limits, restated rather than deferred to. The API answers a
+ * malformed list with `checklist[7].text is 2311 characters` — a good
+ * message, and one that arrives after a round trip that was never going to
+ * succeed. Refusing here is the same answer, sooner, and it keeps a renderer
+ * bug from looking like a service failure.
  */
 function parseChecklistDraft(value: unknown): BoardChecklistDraft[] {
   if (!Array.isArray(value)) throw new Error("A checklist must be a list");
@@ -933,7 +952,7 @@ function parseChecklistDraft(value: unknown): BoardChecklistDraft[] {
 
     if (typeof row.text !== "string" || !row.text.trim())
       throw new Error(`${at} needs text`);
-    // ⚠️ Two messages, not one. "needs text" for something 2311 characters long
+    // Two messages, not one. "needs text" for something 2311 characters long
     // sends the reader looking for an empty field that is not there.
     if (row.text.trim().length > CHECKLIST_LIMITS.text)
       throw new Error(
@@ -985,8 +1004,8 @@ function parseChecklistDraft(value: unknown): BoardChecklistDraft[] {
         throw new Error(`${at} has an invalid group`);
       draft.group = row.group;
     }
-    // The stream a verify item proves (BE-19), passed through so a save keeps
-    // the tag; the API checks it against the card's streams.
+    // The stream a verify item proves, passed through so a save keeps the
+    // tag; the API checks it against the card's streams.
     if (row.stream !== undefined) {
       if (
         row.stream !== null &&
@@ -1002,11 +1021,13 @@ function parseChecklistDraft(value: unknown): BoardChecklistDraft[] {
 /**
  * The folders a create call names, resolved to paths.
  *
- * ⚠️ An id this run never handed out is a REFUSAL, not a folder to skip. The
- * only way to hold one is to have picked the folder in this app, so an unknown
- * id means the window is asking for something a person never chose — and a
- * project quietly created with fewer folders than the dialog listed is worse
- * than one that was not created at all.
+ * NOTE: An id this run never handed out is a REFUSAL, not a folder to skip.
+ * The only way to hold one is to have picked the folder in this app, so an
+ * unknown id means the window is asking for something a person never chose.
+ * A project quietly created with fewer folders than the dialog listed is
+ * worse than one that was not created at all.
+ *
+ * @throws When an id is malformed or was not handed out by this run.
  */
 function parseFolderIds(value: unknown): string[] {
   if (value === undefined || value === null) return [];
@@ -1050,22 +1071,21 @@ function requireId(args: unknown[], count: number): string[] {
   return args as string[];
 }
 
-/**
- * A card draft off the wire, checked field by field.
- *
- * ⚠️ The caps are the SERVICE's own — title 200, body 120000, keys 40, tags 32 ×
- * 40 — because a renderer that has been tampered with is exactly what this
- * boundary exists for, and a limit invented here would either refuse what the
- * board accepts or forward what it will refuse.
- *
- * ⚠️ Unknown fields are DROPPED rather than forwarded. Only what this app's own
- * composer can set may reach the board through it: passing the object straight
- * through would make this channel a way to set `parentId`, `metadata` or a
- * `source` that no screen in the app can show.
- */
 /** The board's own key shape, mirrored from the service's `board-input.ts`. */
 const KEY = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
+/**
+ * A card draft off the wire, checked field by field.
+ *
+ * - The caps are the SERVICE's own — title 200, body 120000, keys 40, tags
+ *   32 × 40. A tampered renderer is what this boundary exists for, and a
+ *   limit invented here would either refuse what the board accepts or
+ *   forward what it will refuse.
+ * - NOTE: Unknown fields are DROPPED rather than forwarded. Only what this
+ *   app's own composer can set may reach the board through it: passing the
+ *   object straight through would make this channel a way to set `parentId`,
+ *   `metadata` or a `source` that no screen in the app can show.
+ */
 function parseDraft(value: unknown): BoardCardDraft {
   if (!value || typeof value !== "object")
     throw new Error("A card needs a title");
@@ -1152,12 +1172,12 @@ export function registerWorkspaces(devUrl?: string): void {
       )
         throw new Error("A project name is required");
       const name = args[0].trim();
-      // ⚠️ Ids, resolved HERE against folders this app's own chooser handed
-      // out. A create call cannot name a path, so it cannot link a folder the
-      // user never picked — see `folder-chooser.ts`.
+      // NOTE: Ids, resolved HERE against folders this app's own chooser
+      // handed out. A create call cannot name a path, so it cannot link a
+      // folder the user never picked — see `folder-chooser.ts`.
       const paths = parseFolderIds(args[1]);
-      // FE-52: in local mode a new project is a local board — created on this
-      // machine, linked to its folders, and opened, exactly like the cloud one.
+      // In local mode a new project is a local board: created on this
+      // machine, linked to its folders, and opened, like the cloud one.
       if (await inLocalMode()) {
         const created = writeLocal((store) =>
           store.createWorkspace({ name, slug: slugify(name) }),
@@ -1169,22 +1189,23 @@ export function registerWorkspaces(devUrl?: string): void {
       const created = await createWorkspace(record, {
         slug: slugify(name),
         name,
-        // ⚠️ The PRIMARY folder, so the account records where this project
-        // lives on this machine from the moment it exists. Every other surface
-        // reads that back as `workspace.path`; leaving it unset would make a
-        // project created here look, to a second machine, like one nobody has
-        // a checkout of.
+        // NOTE: The PRIMARY folder, so the account records where this project
+        // lives on this machine from the moment it exists. Every other
+        // surface reads that back as `workspace.path`; leaving it unset would
+        // make a project created here look, to a second machine, like one
+        // nobody has a checkout of.
         ...(paths[0] ? { path: paths[0] } : {}),
       });
-      // ⚠️ Linked under the slug the SERVICE answered with, not the one this
-      // app derived. They are the same today and the folder link is keyed by
-      // slug; deriving it twice is how the two would eventually disagree, and a
-      // link under a slug nothing looks up is a folder that vanished.
+      // NOTE: Linked under the slug the SERVICE answered with, not the one
+      // this app derived. They are the same today and the folder link is
+      // keyed by slug; deriving it twice is how the two would eventually
+      // disagree, and a link under a slug nothing looks up is a folder that
+      // vanished.
       if (paths.length) await writeFolders(record, created.slug, paths);
-      // ⚠️ Created AND opened, in one act. A project that appeared in the list
-      // and left the user to click "Open" would be two steps for one intention,
-      // and `load` is what writes the selection down — so this also survives a
-      // relaunch, which is the whole promise of the picker.
+      // Created AND opened, in one act. A project that appeared in the list
+      // and left the user to click "Open" would be two steps for one
+      // intention, and `load` is what writes the selection down — so this
+      // also survives a relaunch, which is the whole promise of the picker.
       return load(created.id);
     },
   );
@@ -1203,19 +1224,19 @@ export function registerWorkspaces(devUrl?: string): void {
         throw new Error("A project and a new name are required");
       const [id, name] = args as [string, string];
       if (await localTarget(id)) {
-        // ⚠️ The NAME only, as on the cloud: the folder link is keyed by slug,
-        // and a rename that moved the slug would strand it.
+        // NOTE: The NAME only, as on the cloud: the folder link is keyed by
+        // slug, and a rename that moved the slug would strand it.
         writeLocal((store) => store.updateWorkspace(id, { name: name.trim() }));
         return load();
       }
       const record = await authorizedRecord();
       await renameWorkspace(record, id, name.trim());
-      // ⚠️ `load()`, NOT `load(id)`. Passing the id would write it down as the
-      // selection, so renaming a project from Settings would quietly open it —
-      // and the one being renamed is usually not the one on screen. Nothing
-      // local needs rewriting either, unlike the delete below: the service will
-      // not change a slug, so the folder link and the saved selection still
-      // name this project.
+      // NOTE: `load()`, NOT `load(id)`. Passing the id would write it down as
+      // the selection, so renaming a project from Settings would quietly open
+      // it — and the one being renamed is usually not the one on screen.
+      // Nothing local needs rewriting either, unlike the delete below: the
+      // service will not change a slug, so the folder link and the saved
+      // selection still name this project.
       return load();
     },
   );
@@ -1232,7 +1253,7 @@ export function registerWorkspaces(devUrl?: string): void {
         !ids.every((id) => typeof id === "string" && id && id.length <= 64)
       )
         throw new Error("A list of project ids is required");
-      // FE-52: local boards have no saved order — they follow the account's
+      // Local boards have no saved order — they follow the account's
       // projects, oldest first — and the service refuses an order naming an
       // id it does not hold, so only the cloud ids are sent.
       if (await inLocalMode()) return load();
@@ -1250,10 +1271,10 @@ export function registerWorkspaces(devUrl?: string): void {
     workspaceChannels.deleteWorkspace,
     devUrl,
     async (args): Promise<WorkspaceSnapshot> => {
-      // ⚠️ BOTH keys, and they are not redundant. The service deletes by cloud
-      // id — a slug is refused with a 400 — while the folder link on this
-      // machine is keyed by slug, and main holds no id→slug map to derive one
-      // from without asking the account a second time.
+      // NOTE: BOTH keys, and they are not redundant. The service deletes by
+      // cloud id — a slug is refused with a 400 — while the folder link on
+      // this machine is keyed by slug, and main holds no id→slug map to
+      // derive one from without asking the account a second time.
       const [id, slug] = requireId(args, 2);
       const local = await localTarget(id);
       if (local) {
@@ -1266,20 +1287,20 @@ export function registerWorkspaces(devUrl?: string): void {
       const record = await authorizedRecord();
       await deleteWorkspace(record, id);
       // `load` re-reads the account and drops a saved selection that no longer
-      // exists, which is exactly the state deleting the open project leaves.
+      // exists, which is the state deleting the open project leaves.
       const snapshot = await load();
-      // ⚠️ Checked BEFORE the local link is dropped, and this is not
+      // NOTE: Checked BEFORE the local link is dropped, and this is not
       // belt-and-braces. A service one release behind still answers the
-      // slug-keyed route, whose validator ACCEPTS a uuid — so it removes nothing
-      // and replies 200. Trusting that would report a success that never
-      // happened and take the folder link with it, leaving a project on the
-      // account that this machine can no longer point at anything.
+      // slug-keyed route, whose validator ACCEPTS a uuid — so it removes
+      // nothing and replies 200. Trusting that would report a success that
+      // never happened and take the folder link with it, leaving a project on
+      // the account that this machine can no longer point at anything.
       if (snapshot.workspaces.some((workspace) => workspace.id === id))
         throw new Error(
           "The service did not delete that project. Update it, then try again.",
         );
-      // ⚠️ The local link goes with it. A folder still linked to a slug the
-      // account no longer has is a row that can never be reached again — and
+      // NOTE: The local link goes with it. A folder still linked to a slug the
+      // account no longer has is a row that can never be reached again, and
       // the next project to take that slug would inherit somebody else's
       // folder.
       await writeFolders(record, slug, null);
@@ -1313,8 +1334,8 @@ export function registerWorkspaces(devUrl?: string): void {
     const local = await localTarget(workspaceId);
     if (local) return local.more();
     const record = await authorizedRecord();
-    // ⚠️ The group is re-derived from the board's lanes rather than trusted as
-    // a URL fragment: a renderer can only ask for a group its query draws.
+    // NOTE: The group is re-derived from the board's lanes rather than trusted
+    // as a URL fragment: a renderer can only ask for a group its query draws.
     const config = await readBoardCache(record, workspaceId);
     const spec = groupSpecs(
       query,
@@ -1370,10 +1391,11 @@ export function registerWorkspaces(devUrl?: string): void {
       )
         throw new Error("A card, an edit and a revision are required");
       const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
-      // ⚠️ Parsed BEFORE the session is resolved. Inline as an argument it ran
-      // after `await authorizedRecord()`, so a malformed edit from a signed-out
-      // window was answered "sign in" — advice that cannot fix it, and which
-      // hides a caller's bug behind a state the caller will eventually leave.
+      // NOTE: Parsed BEFORE the session is resolved. Inline as an argument it
+      // would run after `await authorizedRecord()`, so a malformed edit from a
+      // signed-out window would be answered "sign in" — advice that cannot
+      // fix it, and which hides a caller's bug behind a state the caller will
+      // eventually leave.
       const patch = parsePatch(args[2]);
       const local = await localTarget(workspaceId);
       if (local) return local.update(cardId, patch, args[3]);
@@ -1387,9 +1409,10 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(workspaceChannels.move, devUrl, async (args): Promise<BoardWrite> => {
-    // ⚠️ Four arguments always. `columnKey` is null for a reorder inside one
-    // lane and `placement` is null for an append, and a channel whose argument
-    // count varied would make "is this call well-formed?" unanswerable here.
+    // NOTE: Four arguments always. `columnKey` is null for a reorder inside
+    // one lane and `placement` is null for an append, and a channel whose
+    // argument count varied would make "is this call well-formed?"
+    // unanswerable here.
     if (args.length !== 4)
       throw new Error("A card and a destination are required");
     if (!(args[2] === null || typeof args[2] === "string"))
@@ -1463,7 +1486,7 @@ export function registerWorkspaces(devUrl?: string): void {
       )
         throw new Error("A card, a checklist and a revision are required");
       const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
-      // Shape first, session second — a malformed list is the caller's bug and
+      // Shape first, session second: a malformed list is the caller's bug and
       // must not be reported as "sign in".
       const items = parseChecklistDraft(args[2]);
       const local = await localTarget(workspaceId);
@@ -1481,9 +1504,9 @@ export function registerWorkspaces(devUrl?: string): void {
     workspaceChannels.activity,
     devUrl,
     async (args): Promise<BoardActivityPage> => {
-      // ⚠️ Three arguments always, with `null` for "the first page". The sender
-      // check reads argument COUNT, so a call that sometimes sends two and
-      // sometimes three is one no rule here can state.
+      // NOTE: Three arguments always, with `null` for "the first page". The
+      // sender check reads argument COUNT, so a call that sometimes sends two
+      // and sometimes three is one no rule here can state.
       if (
         args.length !== 3 ||
         !(args[2] === null || typeof args[2] === "string")
@@ -1635,9 +1658,9 @@ export function registerWorkspaces(devUrl?: string): void {
         groups: plan?.inventory.groups ?? 0,
         dropped: plan?.inventory.dropped ?? 0,
         attachments: plan?.inventory.attachments ?? 0,
-        // ⚠️ Null, not 0: the local lifecycle history lives in the board's own
-        // database, which this app does not open. Zero would claim there is no
-        // history to leave behind.
+        // Null, not 0: the local lifecycle history lives in the board's own
+        // database, which this app does not open. Zero would claim there is
+        // no history to leave behind.
         auditEventsLeftBehind: null,
         blocked: plan?.blocked ?? (folder ? null : NO_FOLDER),
         problems: plan?.inventory.problems ?? [],
@@ -1682,9 +1705,9 @@ export function registerWorkspaces(devUrl?: string): void {
           for (const [key, value] of Object.entries(batch.summary))
             summary[key] = (summary[key] ?? 0) + value;
         } catch (error) {
-          // ⚠️ Stop, keep what landed, and SAY so. Nothing is lost by stopping:
-          // records already accepted are keyed on their source ref, so the next
-          // run skips them rather than duplicating them.
+          // Stop, keep what landed, and SAY so. Nothing is lost by stopping:
+          // records already accepted are keyed on their source ref, so the
+          // next run skips them rather than duplicating them.
           failure =
             error instanceof Error ? error.message : "The import stopped.";
           break;
@@ -1759,9 +1782,9 @@ export function registerWorkspaces(devUrl?: string): void {
     devUrl,
     async (args): Promise<PickedFolder[]> => {
       if (args.length) throw new Error("This operation takes no arguments");
-      // ⚠️ Authorized like everything else here even though it writes nothing:
-      // a signed-out window has no business opening a chooser, and a folder
-      // picked before sign-in belongs to no account. Local mode (FE-52) may:
+      // NOTE: Authorized like everything else here even though it writes
+      // nothing: a signed-out window has no business opening a chooser, and a
+      // folder picked before sign-in belongs to no account. Local mode may:
       // its folders are filed under the local board.
       await assertCanUse();
       return chooseFolders("Add source folders");
@@ -1777,10 +1800,10 @@ export function registerWorkspaces(devUrl?: string): void {
       // Cancelling is not a failure and must not clear an existing link: the
       // honest answer is whatever was already true.
       if (!chosen) return folderState(slug);
-      // ⚠️ Written even when the folder turns out to hold no cards. The user
+      // Written even when the folder turns out to hold no cards. The user
       // chose it, and the screen has to be able to say "this folder has no
-      // .agents" about the folder they are looking at — a link this app
-      // silently refused to remember would read as the picker doing nothing.
+      // .agents" about the folder they are looking at; a link this app
+      // refused to remember would read as the picker doing nothing.
       await writeFolders(record, slug, [chosen]);
       return {
         kind: "linked",
@@ -1805,7 +1828,7 @@ export function registerWorkspaces(devUrl?: string): void {
       if (args.length !== 2)
         throw new Error("A workspace and folders are required");
       const [slug] = requireId(args.slice(0, 1), 1);
-      // Shape first, session second — a malformed list is the caller's bug and
+      // Shape first, session second: a malformed list is the caller's bug and
       // must not be reported as "sign in".
       const paths = parseFolderIds(args[1]);
       await writeFolders(await folderRecordFor(slug), slug, paths);
@@ -1827,16 +1850,16 @@ export function registerWorkspaces(devUrl?: string): void {
     async (args): Promise<void> => {
       const [slug] = requireId(args, 1);
       const path = (await readFolders(await folderRecordFor(slug)))[slug]?.[0];
-      // ⚠️ The path comes from this app's own file, never from the renderer. A
-      // channel that opened a path it was handed is a channel that opens
-      // anything the user can read.
+      // NOTE: The path comes from this app's own file, never from the
+      // renderer. A channel that opened a path it was handed is a channel
+      // that opens anything the user can read.
       if (!path) throw new Error("No folder is linked to this workspace.");
       await revealFolder(path);
     },
   );
 
-  // FE-52: the offline MCP server and the Stop hook write the local board from
-  // other processes. Polled only while a window is open to show it.
+  // The offline MCP server and the Stop hook write the local board from other
+  // processes. Polled only while a window is open to show it.
   watchLocalStore(
     (workspaceIds) => broadcast(workspaceChannels.localChanged, workspaceIds),
     { active: () => BrowserWindow.getAllWindows().length > 0 },

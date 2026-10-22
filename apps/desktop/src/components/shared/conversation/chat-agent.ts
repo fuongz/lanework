@@ -2,10 +2,11 @@ import { useSyncExternalStore } from "react";
 import type { ConversationAgent } from "#/../shared/conversation";
 
 /**
- * The CLI of the chat on screen — the conversation's own, or on the new
- * page the one its picked model runs on — for what follows the agent on
- * screen outside the page (the usage strip). Null: no chat, or not known
- * yet.
+ * The CLI of the chat on screen, for what follows it outside the page (the
+ * usage strip).
+ *
+ * The conversation's own CLI, or on the new-conversation page the one its
+ * picked model runs on. Null when there is no chat, or it is not known yet.
  */
 let current: ConversationAgent | null = null;
 const listeners = new Set<() => void>();

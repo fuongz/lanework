@@ -22,17 +22,17 @@ import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import type { BoardConflict } from "../../../../shared/workspaces";
 
-/** How long a notice stands open before it folds into its pill (FE-63/D2a). */
+/** How long a notice stays open before it folds into its pill (FE-63/D2a). */
 const OPEN_MS = 5000;
 const CONFLICT_TITLE = "Someone else changed this card";
 
 /**
- * The service's own words for a lost race, as a sentence — or "" when they
+ * The service's own words for a lost race, as a sentence, or "" when they
  * only repeat the heading.
  *
- * ⚠️ They arrive as the API's 409 `error`, which may be lowercase with no full
+ * They arrive as the API's 409 `error`, which may be lowercase with no full
  * stop ("that card changed since you read it"), and the island runs its own
- * sentence on after them; the app's fallback is the heading itself.
+ * sentence on after them. The app's fallback is the heading itself.
  */
 function conflictLead(message: string): string {
   const said = message.trim();
@@ -47,20 +47,21 @@ const OFFLINE_TEXT = "Showing a saved board. Changes will not save.";
 interface Notice {
   error: string | null;
   conflict: BoardConflict | null;
-  /** Whether a board is on screen: without one, an error is a failed READ. */
+  /** Whether a board is on screen: without one, an error is a failed read. */
   hasView: boolean;
-  /** The board on screen is the saved copy: the service could not be reached. */
+  /** The board on screen is the saved copy: the service was unreachable. */
   offline: boolean;
 }
 
 /**
- * The board's notice, or null: a write that failed or lost a race, or a saved
- * board shown offline, while a project is open.
+ * The board's notice while a project is open: a write that failed or lost a
+ * race, or a saved board shown offline.
  *
- * ⚠️ Only under `/w/$slug` and only once the project resolved — as the banner
- * it replaces was. With no project the layout draws its own full-page error
- * ("Could not open this project"), and the island saying it again over that
- * is the same sentence twice.
+ * Only under `/w/$slug`, and only once the project resolved. With no project
+ * the layout draws its own full-page error ("Could not open this project"),
+ * and the island saying it again over that is the same sentence twice.
+ *
+ * @returns null when there is nothing to say.
  */
 export function useBoardNotice(): Notice | null {
   const { slug } = useParams({ strict: false }) as { slug?: string };
@@ -76,23 +77,21 @@ export function useBoardNotice(): Notice | null {
 }
 
 /**
- * A board notice as an island (FE-63): the black capsule of the harness island
- * (FE-61), in the same place, saying a change did not save or lost a race.
+ * A board notice as an island: the harness island's black capsule, in the
+ * same place, saying a change did not save or lost a race.
  *
- * ⚠️ It ARRIVES OPEN, unlike the harness island — this is the answer to
- * something somebody just did — and folds into its pill after `OPEN_MS`. The
- * pill stays until Dismiss: a failed write that vanished by itself would take
- * the only record of it with it. A pointer over it, or focus in it, holds it
- * open.
- *
- * ⚠️ Offline is a condition of the window, not something that happened once
- * (it was a red bar across the pane): it arrives open like the rest, but its
- * pill has no Dismiss and stays for as long as the board is the saved copy. A
- * failed write or a lost race speaks over it while both are up.
- *
- * ⚠️ Opening by itself never takes focus, and Escape is heard only from inside
- * it: a document-wide Escape for five seconds would close the dialog or the
- * issue somebody was in.
+ * - It arrives open, unlike the harness island, since it answers something
+ *   somebody just did, and folds into its pill after `OPEN_MS`. The pill
+ *   stays until Dismiss: a failed write that vanished by itself would take
+ *   the only record of it along. A pointer over it, or focus in it, holds it
+ *   open.
+ * - Offline is a condition of the window, not something that happened once.
+ *   It arrives open like the rest, but its pill has no Dismiss and stays as
+ *   long as the board is the saved copy. A failed write or a lost race
+ *   speaks over it while both are up.
+ * - NOTE: Opening by itself never takes focus, and Escape is heard only from
+ *   inside it. A document-wide Escape for five seconds would close the
+ *   dialog or the issue somebody was in.
  */
 export function BoardNoticeIsland({ notice }: { notice: Notice | null }) {
   const dismiss = useBoard((state) => state.dismiss);
@@ -120,8 +119,8 @@ export function BoardNoticeIsland({ notice }: { notice: Notice | null }) {
   const hold = () => window.clearTimeout(timer.current);
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
-  // A new notice — a new failure, a new lost race, going offline — arrives
-  // open again.
+  // A new notice (a new failure, a new lost race, going offline) arrives open
+  // again.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `fold` is fresh each render and only reads refs.
   useEffect(() => {
     if (!error && !conflict && !offline) return;
@@ -151,8 +150,8 @@ export function BoardNoticeIsland({ notice }: { notice: Notice | null }) {
       className={ISLAND_HOST}
       style={{ top: ISLAND_HOST_TOP }}
     >
-      {/* ⚠️ Worded apart from what the island shows, so the sentence on
-          screen is found once. */}
+      {/* Worded apart from what the island shows, so the sentence on screen
+          is found once. */}
       <p className="sr-only" role="alert">
         {error ? `Board: ${error}` : ""}
       </p>
@@ -266,8 +265,8 @@ function Glyph({ kind, className }: { kind: Kind; className?: string }) {
 /**
  * The folded capsule, in one line.
  *
- * ⚠️ A lost race speaks for the pill when both are up (FE-63/D4): it is the
- * one that carries somebody else's change, and the panel shows both anyway.
+ * A lost race speaks for the pill when both are up (FE-63/D4): it is the one
+ * that carries somebody else's change, and the panel shows both anyway.
  */
 function Pill({ notice, onOpen }: { notice: Notice; onOpen: () => void }) {
   const kind: Kind = notice.conflict
@@ -340,9 +339,9 @@ function Panel({
       {error && (
         <div className="flex items-start gap-2">
           <Glyph kind="error" className="mt-0.5" />
-          {/* ⚠️ No "That did not save" over the message (FE-63/D3): the
-              message already says what failed, and a READ that failed while a
-              board was on screen got headed as a lost edit. Only with no board
+          {/* No "That did not save" over the message (FE-63/D3): the message
+              already says what failed, and a read that failed while a board
+              is on screen would be headed as a lost edit. Only with no board
               to show is there a heading, because then nothing else says it. */}
           {hasView ? (
             <p className="line-clamp-4 text-[13px] text-white/90">{error}</p>
@@ -367,7 +366,7 @@ function Panel({
           </div>
         </div>
       )}
-      {/* ⚠️ Nothing to dismiss when only offline: it ends when the board does. */}
+      {/* Nothing to dismiss when only offline: it ends when the board does. */}
       {(conflict || error) && (
         <div className="flex justify-end">
           <Button

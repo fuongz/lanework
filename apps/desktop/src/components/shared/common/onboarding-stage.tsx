@@ -10,11 +10,10 @@ export interface Step {
 /**
  * The full-window surface every pre-app screen sits on.
  *
- * ⚠️ `bg-background` on the view itself. Under macOS vibrancy the BODY is
- * deliberately transparent so the native material shows through, and these
- * screens are the ones that run before any app chrome exists — without a
- * surface of their own, near-white text in dark mode sits on whatever happens
- * to be behind the window.
+ * NOTE: `bg-background` on the view itself. Under macOS vibrancy the body is
+ * transparent so the native material shows through, and these screens run
+ * before any app chrome exists. Without a surface of their own, near-white
+ * text in dark mode sits on whatever is behind the window.
  */
 export function OnboardingStage({
   step,
@@ -22,7 +21,7 @@ export function OnboardingStage({
   children,
 }: {
   step?: Step;
-  /** The theme step needs room for three previews side by side; the rest do not. */
+  /** Room for three previews side by side, which only the theme step needs. */
   wide?: boolean;
   children: ReactNode;
 }) {
@@ -32,13 +31,12 @@ export function OnboardingStage({
         className={cn(
           "flex w-full flex-col items-center text-center",
           // Replayed on every step because the caller re-keys this stage: a
-          // hard cut between three screens that share a centred column reads
-          // as a flicker rather than as a move forward.
+          // hard cut between screens that share a centred column reads as a
+          // flicker rather than a move forward.
           "animate-in fade-in-0 slide-in-from-bottom-2 duration-300 ease-out",
-          // `max-w-2xl` is not a round number picked by eye: it is what leaves
-          // the three theme cards the size Settings draws them at (its own
-          // column is `max-w-3xl` inside `px-10`), so the same control is the
-          // same control in both places.
+          // `max-w-2xl` leaves the three theme cards the size Settings draws
+          // them at (its column is `max-w-3xl` inside `px-10`), so the control
+          // looks the same in both places.
           wide ? "max-w-2xl gap-7" : "max-w-xs gap-6",
         )}
       >
@@ -50,12 +48,11 @@ export function OnboardingStage({
 }
 
 /**
- * Where you are in the flow — read-only, like the reference.
+ * Read-only dots that show where you are in the flow.
  *
- * Not buttons: there is no step here worth jumping back to blind, and a dot
- * that looks inert but navigates is a worse affordance than one that simply
- * reports. The count is spelled out for screen readers, which get nothing at
- * all from three circles.
+ * Not buttons: no step here is worth jumping back to blind, and a dot that
+ * looks inert but navigates is a worse affordance than one that reports. The
+ * count is spelled out for screen readers, which get nothing from circles.
  */
 function StepDots({ index, count }: Step) {
   return (

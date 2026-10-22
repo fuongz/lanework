@@ -9,7 +9,7 @@ import { type DiffStyle, useWorktree } from "#/stores/worktree";
 /**
  * The strip above a local diff: how it is drawn, and what it adds up to.
  *
- * ⚠️ Unified by default, with Split one click away — the owner's call, over
+ * Unified by default, with Split one click away: the owner's call, over
  * FE-22/D4's Split. The choice is remembered per viewer (`readStyle`).
  */
 export function DiffToolbar({

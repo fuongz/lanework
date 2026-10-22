@@ -29,8 +29,10 @@ import { ipcMessage } from "#/lib/ipc-error";
 import { useSettingsProject } from "#/stores/settings-project";
 
 /**
- * One open skill, read-only: its frontmatter as written, then its body as
- * markdown — what the agent setup's file dialog shows, in a pane.
+ * One open skill, read-only.
+ *
+ * Its frontmatter as written, then its body as markdown: what the agent
+ * setup's file dialog shows, in a pane.
  */
 function SkillPane({ slug, skill }: { slug: string; skill: SetupDoc }) {
   const [file, setFile] = useState<SetupFile | null>(null);
@@ -138,8 +140,8 @@ const NO_SKILLS =
 function Skills({ project }: { project: Workspace }) {
   // Read again when the project's folder changes, like Projects › General.
   const { setup, error } = useAgentSetup(project.slug, [project.path ?? ""]);
-  // ⚠️ Open tabs by id: an id is stable across reads, so a tab survives the
-  // re-read on window focus — and says so when its skill is gone.
+  // NOTE: Open tabs by id. An id is stable across reads, so a tab survives
+  // the re-read on window focus, and says so when its skill is gone.
   const [tabs, setTabs] = useState<string[]>([]);
   const [active, setActive] = useState<string | null>(null);
 
@@ -242,11 +244,11 @@ function Skills({ project }: { project: Workspace }) {
 }
 
 /**
- * Settings › Projects › Skills: the skills the picked project's own folder
- * brings — `.claude/skills` for Claude Code, `.agents/skills` and
- * `.codex/skills` for Codex — as a tree by folder, beside the open ones in
- * tabs. Read-only: the user's own skills are Settings › Skills, and edited
- * there.
+ * Settings › Projects › Skills: the skills the picked project's folder brings.
+ *
+ * `.claude/skills` for Claude Code, `.agents/skills` and `.codex/skills` for
+ * Codex, as a tree by folder beside the open ones in tabs. Read-only: the
+ * user's own skills live in Settings › Skills, and are edited there.
  */
 export function ProjectSkillsPage() {
   const project = useSettingsProject();

@@ -10,7 +10,7 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 
-/** Why the Instructions screen has nothing to show, or what went wrong (FE-37). */
+/** Why the Instructions screen has nothing to show, or what went wrong. */
 export function InstructionsMessage({
   title,
   description,

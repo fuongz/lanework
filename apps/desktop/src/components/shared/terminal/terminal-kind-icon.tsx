@@ -16,11 +16,11 @@ export const TERMINAL_KIND_LABELS: Record<TerminalKind, string> = {
 /**
  * The mark for a kind of tab: a terminal glyph, or the agent's own.
  *
- * ⚠️ Shared by the + menu and the tab strip, so "which mark is Codex" has one
- * answer (agents-kanban's `ToolIcon` is the same idea).
+ * Shared by the + menu and the tab strip, so "which mark is Codex" has one
+ * answer.
  *
- * ⚠️ Codex is two marks with one visible, by CSS rather than a theme hook:
- * the `.dark` class is on `<html>` before the first paint, and a hook would
+ * NOTE: Codex is two marks with one visible, by CSS rather than a theme hook.
+ * The `.dark` class is on `<html>` before the first paint, and a hook would
  * draw the light mark for one frame on a dark panel.
  */
 export function TerminalKindIcon({

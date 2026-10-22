@@ -1,12 +1,12 @@
-// What a project's agent notes say about the Lanework board (FE-30).
+// What a project's agent notes say about the Lanework board.
 //
 // One source for two readers: the desktop app writes it into a project's
 // AGENTS.md / CLAUDE.md, and the docs site shows it as the snippet to paste.
-// Both import it from here, so the two can no longer drift apart.
+// Both import it from here, so the two cannot drift apart.
 
 export const MCP_URL = "https://mcp.lanework.dev/v1";
 
-/** Present in any lanework config or note; the host, not the full URL. */
+/** The MCP host alone, which any lanework config or note contains. */
 export const MCP_HOST = "mcp.lanework.dev";
 
 export const AGENT_NOTES = `## Lanework board

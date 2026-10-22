@@ -10,8 +10,9 @@ import {
 let asked = false;
 
 /**
- * Every model the picker offers — Codex's as `codex` lists them in its own
- * cache, read by main — re-drawn when that list arrives.
+ * Every model the picker offers, re-drawn when Codex's list arrives.
+ *
+ * Codex's models are the ones `codex` lists in its own cache, read by main.
  */
 export function useModels(): readonly AgentModel[] {
   useEffect(() => {

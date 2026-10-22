@@ -36,14 +36,14 @@ import { useReadiness, useReadinessWatch } from "#/stores/readiness";
 import { ReadinessFixDialog } from "./readiness-fix-dialog";
 import { ReadinessList } from "./readiness-list";
 
-/** One row of the section's card: what it is on the left, the action on the right. */
+/** One row of the section's card: what it is on the left, the action right. */
 export function Row({
   leading,
   label,
   description,
   children,
 }: {
-  /** Drawn before the label — the project's avatar on its own row. */
+  /** Drawn before the label: the project's avatar on its own row. */
   leading?: React.ReactNode;
   label: React.ReactNode;
   description: React.ReactNode;
@@ -66,9 +66,10 @@ export function Row({
 }
 
 /**
- * Every readiness check for one project (FE-30), passed ones included, for ANY
- * project here, not only the open one — the only place readiness is shown:
- * nothing on the board or in the sidebar asks for it.
+ * Every readiness check for one project, passed ones included.
+ *
+ * For any project, not only the open one. This is the only place readiness is
+ * shown: nothing on the board or in the sidebar asks for it.
  */
 function ReadinessSection({
   slug,
@@ -114,16 +115,15 @@ function ReadinessSection({
 }
 
 /**
- * Everything that can be done to ONE project, gathered in one place (FE-14).
+ * Everything that can be done to one project, gathered in one place.
  *
- * ⚠️ The project is the one picked in the Projects heading of the sidebar,
- * which starts as the one that is open. Managing a different project does not
- * mean leaving Settings to open it first.
- *
- * ⚠️ The two irreversible actions sit apart, under "Danger zone", and each has
- * a confirmation that says what goes and what stays. "Remove all issues" asks
- * for the project's key typed out: the button is one click from a board that
- * took months to fill, and a click is not a decision.
+ * - The project is the one picked in the sidebar's Projects heading, which
+ *   starts as the open one. Managing another project does not mean leaving
+ *   Settings to open it first.
+ * - The two irreversible actions sit apart, under "Danger zone", and each
+ *   confirmation says what goes and what stays. "Remove all issues" asks for
+ *   the project's key typed out: the button is one click from a board that
+ *   took months to fill, and a click is not a decision.
  */
 export function SelectedProjectSection({
   workspace,
@@ -143,9 +143,9 @@ export function SelectedProjectSection({
   onImport: (workspace: Workspace) => void;
   onDelete: (workspace: Workspace & { id: string }) => void;
   onFailed: (message: string | null) => void;
-  /** More rows for the project's card — Sync to cloud, for a local one. */
+  /** More rows for the project's card: Sync to cloud, for a local one. */
   extraRows?: React.ReactNode;
-  /** More rows for Danger zone, above its own — the repository's Disconnect. */
+  /** More rows for Danger zone, above its own: the repository's Disconnect. */
   dangerRows?: React.ReactNode;
 }) {
   const busy = useBoard((state) => state.busy);
@@ -172,18 +172,18 @@ export function SelectedProjectSection({
   const id = workspace.id;
   const noId =
     "This project has no cloud ID yet, so it cannot be changed here.";
-  // ⚠️ A count only when it is known: the open board's list read. For any
-  // other project the dialog says "every issue" rather than a number this page
-  // never read.
+  // A count only when it is known, from the open board's list read. For any
+  // other project the dialog says "every issue" rather than a number this
+  // page never read.
   const count =
     active?.slug === workspace.slug && view
       ? (view.total ?? view.cards.length)
       : null;
   const working = busy === `purge:${workspace.slug}`;
 
-  // ⚠️ The same rhythm as `SettingsPage` — `gap-2.5`, then `mt-9` and `gap-3`
-  // per heading — so "Ready for agents" and "Danger zone" read as sections of
-  // the page, spaced exactly like "On this account" below them.
+  // The same rhythm as `SettingsPage` (`gap-2.5`, then `mt-9` and `gap-3` per
+  // heading), so "Ready for agents" and "Danger zone" read as sections of the
+  // page, spaced like "On this account" below them.
   return (
     <div className="flex flex-col gap-2.5">
       <SettingsCard>
@@ -239,9 +239,9 @@ export function SelectedProjectSection({
           label="Import from local"
           description="Bring the folder's review cards onto the board."
         >
-          {/* ⚠️ NOT disabled without a cloud id, unlike Rename and Delete: the
-              panel still reads the folder and says what is in it, which is the
-              one place that answers "where did my cards go?". */}
+          {/* Not disabled without a cloud id, unlike Rename and Delete: the
+              panel still reads the folder and says what is in it, the one
+              place that answers "where did my cards go?". */}
           <Button
             size="lg"
             className={SETTINGS_BUTTON}
@@ -353,9 +353,9 @@ export function SelectedProjectSection({
             <AlertDialogAction
               variant="destructive"
               className="border-0"
-              // ⚠️ Exactly the key, not a case-insensitive match: it is the
-              // same string the service checks, so what enables the button is
-              // what the request will be accepted with.
+              // NOTE: The exact key, not a case-insensitive match. The service
+              // checks the same string, so what enables the button is what the
+              // request will be accepted with.
               disabled={typed !== workspace.slug || !id}
               onClick={() => {
                 if (!id || typed !== workspace.slug) return;

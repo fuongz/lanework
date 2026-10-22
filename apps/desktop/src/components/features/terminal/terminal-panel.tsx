@@ -39,23 +39,21 @@ const DRAG_PX = 6;
 /**
  * The bottom panel: this project's terminals as tabs, and the one shown.
  *
- * ⚠️ Only THIS project's tabs. Every other project's shells keep running in
- * the host while you are away from it — switching projects is a change of
- * which list is drawn, never a change to the shells (FE-19/D4).
- *
- * ⚠️ Hiding the panel hides; it does not close anything. Only the × on a tab
- * stops a shell. Hidden, it folds into `TerminalMinibar`.
- *
- * ⚠️ Never empty: the shell shows this only while the project has a terminal
- * or one is starting (`terminalShown`), and closing the last tab folds it
- * away — so there is no "no terminal" state to draw here.
+ * - Only this project's tabs. Every other project's shells keep running in
+ *   the host while you are away from it: switching projects changes which
+ *   list is drawn, never the shells (FE-19/D4).
+ * - Hiding the panel hides; it does not close anything. Only the × on a tab
+ *   stops a shell. Hidden, it folds into `TerminalMinibar`.
+ * - Never empty. The shell shows this only while the project has a terminal
+ *   or one is starting (`terminalShown`), and closing the last tab folds it
+ *   away, so there is no "no terminal" state to draw here.
  */
 export function TerminalPanel({
   workspace,
   usage,
 }: {
   workspace: string;
-  /** What sits left of + and hide: Claude's usage strip (FE-53). */
+  /** What sits left of + and hide: Claude's usage strip. */
   usage?: ReactNode;
 }) {
   const sessions = useTerminal(
@@ -74,7 +72,7 @@ export function TerminalPanel({
   const active =
     sessions.find((session) => session.id === activeId) ?? sessions.at(-1);
   const full = sessions.length >= TERMINAL_LIMITS.perWorkspace;
-  // ⚠️ Shells only (FE-26/D3). Claude and Codex start from the rail's
+  // Shells only (FE-26/D3). Claude and Codex start from the rail's
   // Agents group and run full size in the main view, not as tabs down here.
   const kinds: TerminalKind[] = ["shell"];
 
@@ -112,16 +110,17 @@ export function TerminalPanel({
       className="bg-background flex h-full min-h-0 flex-col"
     >
       <div className="flex h-8 shrink-0 items-center gap-1 pr-1.5 pl-1">
-        {/* ⚠️ OUTSIDE the list: dnd-kit renders its screen-reader text in
+        {/* NOTE: Outside the list. dnd-kit renders its screen-reader text in
             place, not in a portal, and a div is not a list item. */}
         <DndContext
           sensors={sensors}
           onDragEnd={onDragEnd}
           modifiers={[alongStrip]}
         >
-          {/* ⚠️ The strip's own padding is the room a lifted tab's ring and
-              shadow draw into: `overflow-x-auto` clips BOTH axes, so a tab
-              that filled the strip's height would lose them at the edges. */}
+          {/* NOTE: The strip's own padding is the room a lifted tab's ring
+              and shadow draw into. `overflow-x-auto` clips both axes, so a
+              tab that filled the strip's height would lose them at the
+              edges. */}
           <ul
             ref={stripRef}
             aria-label="Terminals"

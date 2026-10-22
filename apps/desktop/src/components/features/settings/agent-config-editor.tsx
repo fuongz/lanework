@@ -47,16 +47,17 @@ import { ipcMessage } from "#/lib/ipc-error";
 const AGENT_NAMES = { claude: "Claude Code", codex: "Codex" } as const;
 
 /**
- * The open file of Settings → Config files (FE-47/D8): its name and path,
- * Save, Revert and Reveal in Finder above it, the quick settings (D6), the
- * text in a code editor, and whatever went wrong below.
+ * The open file of Settings → Config files (FE-47/D8).
  *
- * ⚠️ The text is held here only while the file is open — never put in a
- * store, never logged — because it may hold tokens (D3).
+ * Its name and path with Save, Revert and Reveal in Finder, the quick
+ * settings, the text in a code editor, and whatever went wrong below.
  *
- * ⚠️ Save sends back the hash the file was read at. Main refuses the write
- * when the file changed on disk since — an agent rewrote it, or another
- * editor did — and this offers Reload rather than overwriting (D4).
+ * NOTE: The text is held here only while the file is open, never put in a
+ * store and never logged, because it may hold tokens (FE-47/D3).
+ *
+ * NOTE: Save sends back the hash the file was read at. Main refuses the write
+ * when the file changed on disk since (an agent or another editor rewrote
+ * it), and this offers Reload rather than overwriting (FE-47/D4).
  */
 export function AgentConfigPane({
   file,
@@ -66,7 +67,7 @@ export function AgentConfigPane({
   file: ConfigFile;
   /** After a Save lands, so the tree shows the new size and time. */
   onSaved: () => void;
-  /** Whether there are edits not saved yet — asked before closing the file. */
+  /** Whether there are unsaved edits, asked before closing the file. */
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const [base, setBase] = useState<ConfigFileContent | null>(null);
@@ -263,8 +264,10 @@ export function AgentConfigPane({
 }
 
 /**
- * Codex's `[features]` as switches (D6): every flag the file sets, and the
- * known ones it does not — shown at Codex's default until one is flipped.
+ * Codex's `[features]` as switches.
+ *
+ * Every flag the file sets, plus the known ones it does not, shown at Codex's
+ * default until flipped.
  */
 function CodexQuickSettings({
   text,
@@ -318,7 +321,7 @@ function CodexQuickSettings({
 
 const NOT_SET = "__not-set__";
 
-/** Claude's `permissions.defaultMode` as a picker (D6). */
+/** Claude's `permissions.defaultMode` as a picker. */
 function ClaudeQuickSettings({
   text,
   onChange,
@@ -372,8 +375,8 @@ function ClaudeQuickSettings({
 /**
  * A config file as text: line numbers, the code font, its grammar.
  *
- * ⚠️ Built once per file, like `MarkdownEditor`: `value` is synced into the
- * document by comparison, so a quick setting or a Revert lands without
+ * NOTE: Built once per file, like `MarkdownEditor`. `value` is synced into
+ * the document by comparison, so a quick setting or a Revert lands without
  * rebuilding the editor and losing its undo history.
  */
 function CodeEditor({
@@ -386,7 +389,7 @@ function CodeEditor({
 }: {
   value: string;
   onChange: (next: string) => void;
-  /** ⌘S. */
+  /** Called on ⌘S. */
   onSave: () => void;
   format: ConfigFormat;
   label: string;
@@ -453,14 +456,16 @@ function CodeEditor({
 }
 
 /**
- * ⚠️ Markdown is edited as plain text here. A skill opens with YAML
- * frontmatter, and the Markdown grammar reads its closing `---` as the
- * underline of a heading — the whole block would be drawn as a title.
+ * The grammar for each config format.
+ *
+ * NOTE: Markdown is edited as plain text. A skill opens with YAML
+ * frontmatter, and the Markdown grammar reads its closing `---` as a heading
+ * underline, so the whole block would be drawn as a title.
  */
 const LANGUAGES: Record<ConfigFormat, () => Extension> = {
   json: () => json(),
-  // ⚠️ legacy-modes types its parsers against `@codemirror/streamparser`, a
-  // twin of the same interface; the parser itself is what `define` takes.
+  // legacy-modes types its parsers against `@codemirror/streamparser`, a twin
+  // of the same interface. The parser itself is what `define` takes.
   toml: () => StreamLanguage.define(toml as unknown as StreamParser<unknown>),
   markdown: () => [],
 };
@@ -478,7 +483,7 @@ const THEME = EditorView.theme({
     lineHeight: "1.6",
     overflow: "auto",
   },
-  // ⚠️ Opaque: the gutter stays put while long lines scroll sideways under
+  // NOTE: Opaque. The gutter stays put while long lines scroll sideways under
   // it, and a transparent one lets the text run over the line numbers.
   ".cm-gutters": {
     paddingInlineStart: "8px",
@@ -501,8 +506,9 @@ const THEME = EditorView.theme({
 });
 
 /**
- * Keys in the brand colour, values in the text colour, tables and literals
- * weighted — the palette's chart tokens are greys, and too faint for code.
+ * Keys in the brand colour, values in the text colour, literals weighted.
+ *
+ * The palette's chart tokens are greys, too faint for code.
  */
 const HIGHLIGHT = HighlightStyle.define([
   { tag: tags.comment, color: "var(--muted-foreground)", fontStyle: "italic" },

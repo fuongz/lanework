@@ -1,4 +1,4 @@
-// The Instructions screen's words and its links (FE-37), kept framework-free.
+// The Instructions screen's words and its links, kept framework-free.
 import {
   type ClaudeInstructionMode,
   findImports,
@@ -65,12 +65,12 @@ export function appearances(
 const IMPORT_HREF = /^#lanework-import-(\d+)$/;
 
 /**
- * `body` with every `@path` import written as a Markdown link to itself
- * (FE-37), for `MarkdownBody` to draw: the same imports `findImports` finds
- * in main, in the same order, so link N is `imports[N]`.
+ * Writes every `@path` import in `body` as a Markdown link, for
+ * `MarkdownBody` to draw.
  *
- * ⚠️ Only imports change: code, and every other `[text](href)` in the file,
- * reach the parser exactly as written.
+ * The imports are the ones `findImports` finds in main, in the same order, so
+ * link N is `imports[N]`. Only imports change: code, and every other
+ * `[text](href)` in the file, reach the parser as written.
  */
 export function linkImports(body: string): string {
   let out = "";
@@ -94,7 +94,7 @@ export function importOf(
   return index === undefined ? null : (imports[Number(index)] ?? null);
 }
 
-/** A folder of the subfolder group (FE-44/D3): its folders, then its files. */
+/** A folder of the subfolder group: its folders, then its files. */
 export interface NestedFolder {
   /** What its row says: one segment, or a chain of them (`apps/desktop`). */
   name: string;

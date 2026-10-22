@@ -1,8 +1,7 @@
-/**
- * The composer's unsent text, kept in localStorage by conversation — or
- * `new:<slug>` for the new-conversation page — so it outlives a switch to
- * another one, or a restart.
- */
+// The composer's unsent text, kept in localStorage by conversation — or
+// `new:<slug>` for the new-conversation page — so it outlives a switch to
+// another one, or a restart.
+
 const PREFIX = "lanework.draft.";
 
 /**
@@ -29,7 +28,7 @@ export function writeDraft(key: string, text: string) {
   }
 }
 
-/** The conversation is deleted: its draft goes with it. */
+/** Drops a deleted conversation's draft, and keeps it from coming back. */
 export function forgetDraft(key: string) {
   forgotten.add(key);
   try {

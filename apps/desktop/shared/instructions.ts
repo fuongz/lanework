@@ -1,10 +1,10 @@
-// What Claude Code and Codex are TOLD about a project (FE-37): the CLAUDE.md
-// and AGENTS.md files each reads, in the order it reads them, shown read-only.
-// Memory (FE-36) is what Claude wrote down for itself; this is the other half.
+// What Claude Code and Codex are TOLD about a project: the CLAUDE.md and
+// AGENTS.md files each reads, in the order it reads them, shown read-only.
+// Memory is what Claude wrote down for itself; this is the other half.
 
 export type InstructionAgent = "claude" | "codex";
 
-/** Where a file sits in an agent's reading order — the label on its row. */
+/** Where a file sits in an agent's reading order: the label on its row. */
 export type InstructionScope =
   | "managed"
   | "user"
@@ -16,14 +16,18 @@ export type InstructionScope =
   | "nested";
 
 /**
- * Whether the agent has it in context: from the start of every conversation,
- * only once it works in a folder or on a matching file, or not at all.
+ * Whether the agent has a file in context.
+ *
+ * From the start of every conversation (`launch`), only once it works in a
+ * folder or on a matching file (`conditional`), or not at all (`skipped`).
  */
 export type InstructionLoad = "launch" | "conditional" | "skipped";
 
 /**
- * How Claude Code picks between CLAUDE.md and AGENTS.md — its **Project
- * instructions** setting (`pluginConfigs["agents-md@builtin"]`).
+ * How Claude Code picks between CLAUDE.md and AGENTS.md.
+ *
+ * Its **Project instructions** setting
+ * (`pluginConfigs["agents-md@builtin"]`).
  */
 export type ClaudeInstructionMode =
   | "claude-md-or-agents-md"
@@ -32,24 +36,24 @@ export type ClaudeInstructionMode =
   | "managed-only";
 
 export interface InstructionFile {
-  /** What the renderer names it by — never a path (FE-37). */
+  /** What the renderer names the file by; never a path. */
   id: string;
-  /** Where it is, absolute: for display only. */
+  /** The absolute path, for display only. */
   path: string;
   /** Its path from the project's folder when it is inside it, else `path`. */
   name: string;
   /** In bytes; 0 when it is missing. */
   size: number;
-  /** Its mtime: what tells a reader it was written again. 0 when missing. */
+  /** Its mtime, which tells a reader it was written again. 0 when missing. */
   mtimeMs: number;
-  /** An import that names a file nobody has written (FE-37). */
+  /** An import that names a file nobody has written. */
   missing: boolean;
-  /** Only Markdown is ever shown; another file is listed by name (FE-37/D6). */
+  /** Only Markdown is shown; another file is listed by name (FE-37/D6). */
   markdown: boolean;
 }
 
 export interface InstructionNode {
-  /** The `InstructionFile` it is, by id. */
+  /** The {@link InstructionFile} it is, by id. */
   file: string;
   scope: InstructionScope;
   load: InstructionLoad;
@@ -85,15 +89,15 @@ export interface InstructionImport {
 
 export interface InstructionContent {
   file: InstructionFile;
-  /** What the agent reads of it: a rule without its frontmatter (FE-37). */
+  /** What the agent reads of the file: a rule without its frontmatter. */
   body: string;
   /** The file as it is. */
   raw: string;
-  /** Each `@path` in `body`, in the order `findImports` finds them. */
+  /** Each `@path` in `body`, in the order {@link findImports} finds them. */
   imports: InstructionImport[];
   /** A rule's `paths`: it loads only on files that match them. */
   paths: string[];
-  /** Longer than one read takes: what is shown is its start. */
+  /** Longer than one read takes, so what is shown is its start. */
   truncated: boolean;
 }
 
@@ -101,7 +105,10 @@ export interface InstructionContent {
 export interface EffectiveSection {
   file: string;
   scope: InstructionScope;
-  /** Its text as the agent gets it; null for a file that is not shown (D6). */
+  /**
+   * Its text as the agent gets it; null for a file that is not shown
+   * (FE-37/D6).
+   */
   text: string | null;
   /** Cut: by the read limit, or by Codex's `project_doc_max_bytes`. */
   truncated: boolean;
@@ -115,7 +122,9 @@ export interface EffectiveInstructions {
 
 /**
  * An id the renderer may name a file by: 16 hex characters, which main mints
- * from a path. Main only ever reads a file its own last listing named.
+ * from a path.
+ *
+ * Main only reads a file its own last listing named.
  */
 const INSTRUCTION_ID = /^[0-9a-f]{16}$/;
 
@@ -136,7 +145,7 @@ interface ImportMatch {
   path: string;
 }
 
-/** Fenced code: ``` or ~~~, which Claude's import parsing skips. */
+/** A code fence, ``` or ~~~; Claude's import parsing skips fenced code. */
 const FENCE = /^\s*(```|~~~)/;
 /** `@path` after a space or at the start of a line; `\ ` keeps a space in it. */
 const IMPORT = /(^|\s)@((?:\\ |[^\s])+)/g;
@@ -144,11 +153,13 @@ const IMPORT = /(^|\s)@((?:\\ |[^\s])+)/g;
 const TRAILING = /[.,;:!?)\]}>'"]+$/;
 
 /**
- * Every `@path` import in `text`, as Claude Code reads them: outside code
- * spans and fenced blocks, never a quoted path (FE-37).
+ * Every `@path` import in `text`, as Claude Code reads them.
  *
- * ⚠️ Shared on purpose: main resolves these and the renderer turns the same
- * ones into links, so the two can never disagree about which `@` is which.
+ * Outside code spans and fenced blocks, and never a quoted path.
+ *
+ * NOTE: Shared by main and the renderer. Main resolves these and the renderer
+ * turns the same ones into links, so the two never disagree about which `@`
+ * is which. A second copy on either side would drift.
  */
 export function findImports(text: string): ImportMatch[] {
   const found: ImportMatch[] = [];
@@ -195,11 +206,13 @@ export interface InstructionChange {
 }
 
 /**
- * ⚠️ Read-only: nothing here writes a file. Every call names a project and,
- * at most, an id from main's own listing of it.
+ * A project's instruction files, read-only.
+ *
+ * NOTE: Nothing here writes a file. Every call names a project and, at most,
+ * an id from main's own listing of it.
  */
 export interface DesktopInstructionsApi {
-  /** The project's instruction files — and, from then on, `onChange` for it. */
+  /** The project's instruction files, and from then on `onChange` for it. */
   list: (workspace: string) => Promise<InstructionList>;
   read: (workspace: string, id: string) => Promise<InstructionContent>;
   effective: (

@@ -1,3 +1,9 @@
+// The editor side of Repository › Files: tabs, the open file's header, and
+// the file itself, read-only (FE-66/D1).
+//
+// `CodeView` with one `file` item rather than `File`: it virtualizes, so a
+// two-megabyte file draws the lines on screen, not forty thousand of them,
+// and it is the same renderer (theme, highlighter, font) the diffs use.
 import {
   Copy01Icon,
   Folder01Icon,
@@ -25,15 +31,6 @@ import type {
   WorktreeFile,
   WorktreeFileStatus,
 } from "../../../../shared/worktree";
-
-/**
- * The editor side of Repository › Files (FE-66): tabs, the open file's header,
- * and the file itself — read-only (FE-66/D1).
- *
- * ⚠️ `CodeView` with one `file` item rather than `File`: it virtualizes, so a
- * two-megabyte file draws the lines on screen, not forty thousand of them, and
- * it is the same renderer — theme, highlighter, font — the diffs use.
- */
 
 const STATUS_LETTER: Record<WorktreeFileStatus, string> = {
   added: "A",
@@ -207,8 +204,8 @@ function FileHeader({
 
 function Code({ path, text }: { path: string; text: string }) {
   const dark = useDark();
-  // ⚠️ `version` has to move when the text does: CodeView compares items by
-  // it, and a refresh that read new text under the same id would be ignored.
+  // NOTE: `version` has to move when the text does. CodeView compares items
+  // by it, and a refresh that read new text under the same id is ignored.
   const version = useRef(0);
   const last = useRef(text);
   if (last.current !== text) {
@@ -223,7 +220,7 @@ function Code({ path, text }: { path: string; text: string }) {
       overflow: "scroll" as const,
       // The header above is this screen's own; the library's would repeat it.
       disableFileHeader: true,
-      // ⚠️ The JS highlighter: the window's CSP blocks the wasm one (see
+      // NOTE: The JS highlighter. The window's CSP blocks the wasm one (see
       // `patch-view.tsx`).
       preferredHighlighter: "shiki-js" as const,
       // A minified bundle is one enormous line; past these it is drawn plain
@@ -259,6 +256,7 @@ function Code({ path, text }: { path: string; text: string }) {
 
 /**
  * An image, whole, on a checkerboard so a transparent PNG still has edges.
+ *
  * Its natural size and weight go underneath, as an editor's preview shows.
  */
 function ImageBody({

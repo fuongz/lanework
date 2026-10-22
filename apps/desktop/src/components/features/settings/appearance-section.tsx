@@ -13,11 +13,10 @@ export function AppearanceSection() {
           title: "Theme",
           keywords:
             "theme dark light system colour color mode appearance preview",
-          // The same control onboarding's second step draws, from
-          // `shared/common/theme-choice`: one drawing of the three choices,
-          // so tweaking it here cannot leave the first-run screen behind.
-          // The preview under it shows the theme AND the code font picked
-          // below (FE-21/D4a), which is why it sits between the two.
+          // The same control onboarding's second step draws, so a change here
+          // cannot leave the first-run screen behind. The preview under it
+          // shows the theme and the code font picked below (FE-21/D4a), which
+          // is why it sits between the two.
           content: (
             <div className="flex flex-col gap-4">
               <ThemeChoice />

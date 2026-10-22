@@ -1,15 +1,12 @@
 import { Skeleton } from "#/components/ui/skeleton";
 
 /**
- * Loading states shaped like the thing that is coming.
+ * The issue list while it loads, shaped like the rows that are coming.
  *
- * NOTE: Sized to the real rows — the issue list's two-line rows under a 32px
- * group header — so the first paint does not jump. A spinner in the middle of
- * an empty pane says "something is happening"; this says what, and it costs
- * the same.
- *
- * NOTE: Each carries a `role="status"` with a real label, because a screen
- * reader gets nothing at all from a grid of grey rectangles.
+ * - Sized to the real rows (two lines under a 32px group header), so the
+ *   first paint does not jump.
+ * - Each skeleton in this file carries a `role="status"` with a real label,
+ *   because a screen reader gets nothing from a grid of grey rectangles.
  */
 export function IssuesListSkeleton() {
   return (
@@ -46,8 +43,8 @@ export function IssuesListSkeleton() {
 /**
  * The card's body while it loads.
  *
- * ⚠️ The document only. The properties rail is a pane of its own on that page —
- * it draws its own frame before the card lands — so a rail drawn in here too
+ * The document only. The properties rail is a pane of its own on that page
+ * and draws its own frame before the card lands, so a rail drawn here too
  * would put two of them side by side.
  */
 export function IssueDetailSkeleton() {
@@ -76,7 +73,7 @@ export function IssueDetailSkeleton() {
   );
 }
 
-/** The rail's four rows, shaped like the `Row` they are about to become. */
+/** The rail's four rows, shaped like the {@link Row}s they will become. */
 export function PropertiesSkeleton() {
   return (
     <div

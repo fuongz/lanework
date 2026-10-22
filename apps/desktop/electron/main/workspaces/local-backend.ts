@@ -1,14 +1,14 @@
 // The board IPCs, served from the local SQLite store instead of the control
-// plane (FE-52). `index.ts` routes a call here when its workspace id names a
-// LOCAL board — in local mode, and signed in too (D6a: local boards stay in
-// the list beside the cloud ones).
+// plane. `index.ts` routes a call here when its workspace id names a local
+// board: in local mode, and signed in too (FE-52/D6a: local boards stay in the
+// list beside the cloud ones).
 //
-// ⚠️ Electron-free and network-free. Nothing in this file may import
-// `fetch`-calling code: V2 is "local mode sends no request to the control
-// plane", and the cheapest way to keep that true is that the local path has
-// nowhere to send one from. It reuses `client.ts`'s PARSERS only — the same
-// `BoardCard` shape the cloud path answers with, so the renderer cannot tell
-// the two apart except by `Workspace.origin`.
+// NOTE: Electron-free and network-free. Nothing here may import code that
+// calls `fetch`. FE-52/V2 is "local mode sends no request to the control
+// plane", and the cheapest way to keep that true is a local path with nowhere
+// to send one from. It reuses only `client.ts`'s parsers, so it answers the
+// same `BoardCard` shape as the cloud path and the renderer tells the two
+// apart only by `Workspace.origin`.
 import { existsSync } from "node:fs";
 import type { Card, CardDetail, LatestCheckpoint } from "@lanework/protocol";
 import {
@@ -47,10 +47,10 @@ let opened: LocalStore | null = null;
 /**
  * The one connection this process holds, opened on first use.
  *
- * ⚠️ `create: false` (every read) does NOT create the file. A signed-in user
- * who never chose local mode must not grow a `data.sqlite` because the app
- * checked whether some board id was a local one — so "no file" answers "no
- * local boards" without opening anything.
+ * NOTE: `create: false` (every read) does not create the file. A signed-in
+ * user who never chose local mode must not grow a `data.sqlite` because the
+ * app checked whether some board id was local, so "no file" answers "no local
+ * boards" without opening anything.
  */
 export function localStore(
   options: { create?: boolean } = {},
@@ -61,14 +61,14 @@ export function localStore(
   return opened;
 }
 
-/** Close the connection (app quit, tests switching homes). */
+/** Close the connection, on app quit or when a test switches homes. */
 export function closeLocalStore(): void {
   opened?.close();
   opened = null;
   seen = null;
 }
 
-/** The store, created if need be — for the writes that start a local board. */
+/** The store, created if need be, for the writes that start a local board. */
 function requireLocalStore(): LocalStore {
   const store = localStore({ create: true });
   if (!store) throw new Error("Could not open the board on this machine.");
@@ -89,8 +89,8 @@ export function toWorkspace(
     path,
     baseBranch: null,
     origin: "local",
-    // ⚠️ Moved only once the upload was SEALED. A cloud id with no `syncedAt`
-    // is a sync that stopped half way: the local board is still the real one.
+    // Moved only once the upload was sealed. A cloud id with no `syncedAt` is
+    // a sync that stopped half way: the local board is still the real one.
     movedTo: workspace.syncedAt ? workspace.cloudId : null,
   };
 }
@@ -100,12 +100,12 @@ export function listLocalWorkspaces(): LocalWorkspace[] {
 }
 
 /**
- * The local board `key` names — by id always, by slug only when asked.
+ * The local board `key` names: by id always, by slug only when asked.
  *
- * ⚠️ Board calls address a workspace by id, and a local id is a UUIDv7 no
- * cloud board shares. A SLUG can be shared — a board and the cloud copy it was
- * moved to usually have the same one — so the slug match is opt-in, for the
- * callers that have nothing else (the folder links, keyed by slug).
+ * NOTE: Board calls address a workspace by id, and a local id is a UUIDv7 no
+ * cloud board shares. A slug can be shared (a board and the cloud copy it
+ * moved to usually have the same one), so the slug match is opt-in, for
+ * callers that have nothing else: the folder links, keyed by slug.
  */
 export function findLocalWorkspace(
   key: string,
@@ -121,13 +121,15 @@ export function findLocalWorkspace(
 
 // ── Refusals ─────────────────────────────────────────────────────────────────
 
-/** FE-52/D10: features that live on the control plane only. */
+/** The refusal for a feature that lives on the control plane (FE-52/D10). */
 const CLOUD_ONLY_SUFFIX =
   "is only on cloud boards. Sync this board to the cloud to use it.";
 
 /**
- * FE-52/D10: refuse a cloud-only feature on a local board. `what` is a noun
- * phrase read as one thing — "Commenting", "Agent presence".
+ * Refuse a cloud-only feature on a local board (FE-52/D10).
+ *
+ * @param what A noun phrase read as one thing: "Commenting", "Agent presence".
+ * @throws Always, with the refusal for `what`.
  */
 export function cloudOnly(what: string): never {
   throw new Error(`${what} ${CLOUD_ONLY_SUFFIX}`);
@@ -142,9 +144,11 @@ export const MOVED_MESSAGE =
 let seen: number | null = null;
 
 /**
- * Run `write`, and if it was the ONLY write since the last look, move the
- * watch past it: the window that made it already has the answer, and a
- * refresh event for its own edit would make it read the board twice.
+ * Run `write`, and move the watch past it when it was the only write since
+ * the last look.
+ *
+ * The window that made the write already has the answer; a refresh event for
+ * its own edit would make it read the board twice.
  */
 function noting<T>(store: LocalStore, write: () => T): T {
   const before = store.dataVersion();
@@ -164,13 +168,16 @@ function changedWorkspaces(store: LocalStore, since: number): string[] {
 }
 
 /**
- * Poll the store's `dataVersion` and call `onChange` when it moves — the
- * offline MCP server and the Stop hook write the same file from other
+ * Poll the store's `dataVersion` and call `onChange` when it moves.
+ *
+ * The offline MCP server and the Stop hook write the same file from other
  * processes, and SQLite tells no one.
  *
- * ⚠️ The ids are the boards with a CARD that changed. A write that touched no
- * card (a board created, renamed or deleted) reports `[]`: "re-read every
- * local thing", which is what the renderer does with an empty list.
+ * NOTE: The ids are the boards with a card that changed. A write that touched
+ * no card (a board created, renamed or deleted) reports `[]`, which the
+ * renderer reads as "re-read every local thing".
+ *
+ * @returns A function that stops the watch.
  */
 export function watchLocalStore(
   onChange: (workspaceIds: string[]) => void,
@@ -272,12 +279,11 @@ function countBy(cards: BoardCard[], key: (card: BoardCard) => string | null) {
 /**
  * One local board, bound to the workspace row it was resolved from.
  *
- * ⚠️ Every write answers a `BoardWrite` exactly as the cloud path does — a
- * stale revision is a `conflict` carrying the card as it stands, never a thrown
- * string — so the renderer's conflict dialog works on both.
- *
- * ⚠️ A board that was moved (D7a) refuses every write. Its cards are on the
- * cloud now; an edit here would be one the cloud never sees.
+ * - Every write answers a {@link BoardWrite} as the cloud path does: a stale
+ *   revision is a `conflict` carrying the card as it stands, never a thrown
+ *   string, so the renderer's conflict dialog works on both.
+ * - NOTE: A board that was moved (FE-52/D7a) refuses every write. Its cards
+ *   are on the cloud; an edit here would be one the cloud never sees.
  */
 export class LocalBoard {
   constructor(
@@ -290,10 +296,12 @@ export class LocalBoard {
   }
 
   /**
-   * The board's tag cap, applied the way the cloud applies it: the first
-   * `max` tags land and the rest are reported as dropped. The store REFUSES
-   * a card over the cap (an agent should hear about it), but a person typing
-   * in the composer gets the cloud's behaviour, so both boards read the same.
+   * The board's tag cap, applied as the cloud applies it: the first `max`
+   * tags land and the rest are reported as dropped.
+   *
+   * The store refuses a card over the cap, so an agent hears about it. A
+   * person typing in the composer gets the cloud's behaviour instead, so both
+   * boards read the same.
    */
   #capTags(tags: string[] | undefined): string[] | undefined {
     if (!tags) return tags;
@@ -338,9 +346,9 @@ export class LocalBoard {
   /**
    * The whole board under `query`, every group complete.
    *
-   * ⚠️ Read in one go — there is no round trip to save — but stated in the
-   * group shape (`groups` with null cursors, `stats`) so the renderer takes the
-   * same path it takes for a paged cloud board and never asks for "more".
+   * Read in one go, as there is no round trip to save, but stated in the
+   * group shape (`groups` with null cursors, `stats`). The renderer takes the
+   * same path as for a paged cloud board and never asks for "more".
    */
   view(query: BoardQuery = DEFAULT_BOARD_QUERY): BoardView {
     const config = this.#config();
@@ -429,8 +437,8 @@ export class LocalBoard {
   /**
    * One write, answered as the cloud answers it.
    *
-   * ⚠️ `conflict` from the store means the card moved past the revision the
-   * person is looking at; the answer carries the card as it is NOW so the
+   * A `conflict` from the store means the card moved past the revision the
+   * person is looking at. The answer carries the card as it is now, so the
    * dialog can show both sides.
    */
   #write(
@@ -487,8 +495,8 @@ export class LocalBoard {
   }
 
   update(cardId: string, patch: BoardCardPatch, revision: number): BoardWrite {
-    // ⚠️ Refused, not dropped: a write that "worked" while silently ignoring
-    // the field somebody changed is the one outcome nobody can see.
+    // NOTE: Refused, not dropped. A write that "worked" while ignoring the
+    // field somebody changed is the one outcome nobody can see.
     if (patch.assignees)
       return { kind: "error", message: `Assigning ${CLOUD_ONLY_SUFFIX}` };
     if (patch.dueAt !== undefined && patch.dueAt !== null)
@@ -570,7 +578,7 @@ export class LocalBoard {
     );
   }
 
-  /** "Delete" — a tombstone, as on the cloud. Already gone is a success. */
+  /** "Delete": a tombstone, as on the cloud. Already gone is a success. */
   archive(cardId: string): void {
     if (this.moved) throw new Error(MOVED_MESSAGE);
     const live = this.store.getWorkItem(cardId, {
