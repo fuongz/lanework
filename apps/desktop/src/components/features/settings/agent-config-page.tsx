@@ -3,9 +3,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConfigFile } from "#/../shared/agent-config";
-import { AgentConfigPane } from "#/components/features/settings/agent-config-editor";
 import { EditorTabs } from "#/components/shared/editor/editor-tabs";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
+import { AgentConfigPane } from "#/components/shared/settings/agent-config-editor";
 import {
   FileBrowserLayout,
   FileBrowserTree,

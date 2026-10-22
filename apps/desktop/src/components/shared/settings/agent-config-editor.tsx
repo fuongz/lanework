@@ -43,6 +43,7 @@ import {
 } from "#/components/ui/select";
 import { Switch } from "#/components/ui/switch";
 import { ipcMessage } from "#/lib/ipc-error";
+import { MARKDOWN_HIGHLIGHT, markdownLanguage } from "#/lib/markdown-language";
 
 const AGENT_NAMES = { claude: "Claude Code", codex: "Codex" } as const;
 
@@ -50,14 +51,8 @@ const AGENT_NAMES = { claude: "Claude Code", codex: "Codex" } as const;
  * The open file of Settings → Config files (FE-47/D8).
  *
  * Its name and path with Save, Revert and Reveal in Finder, the quick
- * settings, the text in a code editor, and whatever went wrong below.
- *
- * NOTE: The text is held here only while the file is open, never put in a
- * store and never logged, because it may hold tokens (FE-47/D3).
- *
- * NOTE: Save sends back the hash the file was read at. Main refuses the write
- * when the file changed on disk since (an agent or another editor rewrote
- * it), and this offers Reload rather than overwriting (FE-47/D4).
+ * settings, the text in a code editor, and whatever went wrong below. The
+ * reading and saving are {@link useConfigFile}'s.
  */
 export function AgentConfigPane({
   file,
@@ -70,75 +65,24 @@ export function AgentConfigPane({
   /** Whether there are unsaved edits, asked before closing the file. */
   onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [base, setBase] = useState<ConfigFileContent | null>(null);
-  const [text, setText] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [conflict, setConflict] = useState(false);
-  const [saved, setSaved] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const {
+    base,
+    text,
+    setText,
+    error,
+    conflict,
+    saved,
+    busy,
+    problem,
+    dirty,
+    load,
+    save,
+    revert,
+    reveal,
+  } = useConfigFile(file, onSaved);
   const id = file.id;
-
-  async function load() {
-    const surface = window.desktop?.agentConfig;
-    if (!surface) return;
-    setError(null);
-    setConflict(false);
-    setSaved(null);
-    try {
-      const content = await surface.read(id);
-      setBase(content);
-      setText(content.text);
-    } catch (failure) {
-      setError(ipcMessage(failure, "Could not open that file."));
-    }
-  }
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: read once per file opened
-  useEffect(() => {
-    setBase(null);
-    setText("");
-    void load();
-  }, [id]);
-
   const format = file.format;
-  const problem = useMemo(() => syntaxError(format, text), [format, text]);
-  const dirty = !!base && text !== base.text;
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
-
-  async function save() {
-    const surface = window.desktop?.agentConfig;
-    if (!base || !surface || problem || !dirty) return;
-    setBusy(true);
-    setError(null);
-    setSaved(null);
-    try {
-      const result = await surface.write(id, text, base.hash);
-      if (result.status === "conflict") setConflict(true);
-      else if (result.status === "invalid") setError(result.error);
-      else {
-        setBase(result.content);
-        setText(result.content.text);
-        setSaved(
-          result.backup
-            ? `Saved. The previous version is at ${result.backup}.`
-            : "Saved.",
-        );
-        onSaved();
-      }
-    } catch (failure) {
-      setError(ipcMessage(failure, "Could not save that file."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function reveal() {
-    try {
-      await window.desktop?.agentConfig.reveal(id);
-    } catch (failure) {
-      setError(ipcMessage(failure, "Could not show that file in Finder."));
-    }
-  }
 
   const title =
     file.kind === "skill"
@@ -171,7 +115,7 @@ export function AgentConfigPane({
           variant="ghost"
           size="sm"
           disabled={!dirty || busy}
-          onClick={() => base && setText(base.text)}
+          onClick={revert}
         >
           Revert
         </Button>
@@ -222,45 +166,180 @@ export function AgentConfigPane({
         <div className="flex-1" />
       )}
 
-      {(problem || conflict || error || (saved && !dirty)) && (
-        <div className="border-border flex shrink-0 flex-col gap-2 border-t px-4 py-2.5">
-          {problem && (
-            <p
-              role="alert"
-              data-testid="agent-config-syntax"
-              className="text-destructive font-mono text-xs"
-            >
-              {problem}
-            </p>
-          )}
-          {conflict && (
-            <Alert variant="destructive">
-              <HugeiconsIcon icon={Alert02Icon} strokeWidth={1.8} />
-              <AlertDescription className="flex items-center justify-between gap-3">
-                <span>
-                  This file changed on disk after you opened it. Reload to see
-                  it — your edits here will be lost.
-                </span>
-                <Button variant="outline" size="sm" onClick={() => void load()}>
-                  Reload
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-          {error && (
-            <p role="alert" className="text-destructive text-[13px]">
-              {error}
-            </p>
-          )}
-          {saved && !dirty && (
-            <p role="status" className="text-muted-foreground text-[13px]">
-              {saved}
-            </p>
-          )}
-        </div>
-      )}
+      <ConfigFileNotes
+        problem={problem}
+        conflict={conflict}
+        error={error}
+        saved={dirty ? null : saved}
+        onReload={() => void load()}
+      />
     </section>
   );
+}
+
+/**
+ * What went wrong with the open file, or that it saved, under its text.
+ *
+ * Nothing at all when there is nothing to say.
+ */
+export function ConfigFileNotes({
+  problem,
+  conflict,
+  error,
+  saved,
+  onReload,
+}: {
+  problem: string | null;
+  conflict: boolean;
+  error: string | null;
+  saved: string | null;
+  onReload: () => void;
+}) {
+  if (!problem && !conflict && !error && !saved) return null;
+  return (
+    <div className="border-border flex shrink-0 flex-col gap-2 border-t px-4 py-2.5">
+      {problem && (
+        <p
+          role="alert"
+          data-testid="agent-config-syntax"
+          className="text-destructive font-mono text-xs"
+        >
+          {problem}
+        </p>
+      )}
+      {conflict && (
+        <Alert variant="destructive">
+          <HugeiconsIcon icon={Alert02Icon} strokeWidth={1.8} />
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>
+              This file changed on disk after you opened it. Reload to see it —
+              your edits here will be lost.
+            </span>
+            <Button variant="outline" size="sm" onClick={onReload}>
+              Reload
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      {error && (
+        <p role="alert" className="text-destructive text-[13px]">
+          {error}
+        </p>
+      )}
+      {saved && (
+        <p role="status" className="text-muted-foreground text-[13px]">
+          {saved}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One config file or skill open for editing: its text as read, the edits,
+ * and Save, Revert and Reveal in Finder.
+ *
+ * NOTE: The text is held here only while the file is open, never put in a
+ * store and never logged, because it may hold tokens (FE-47/D3).
+ *
+ * NOTE: Save sends back the hash the file was read at. Main refuses the write
+ * when the file changed on disk since (an agent or another editor rewrote
+ * it), and this offers Reload rather than overwriting (FE-47/D4).
+ */
+export function useConfigFile(file: ConfigFile | null, onSaved: () => void) {
+  const [base, setBase] = useState<ConfigFileContent | null>(null);
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const id = file?.id ?? null;
+  // A read that lands after another file was opened is dropped.
+  const latest = useRef(id);
+  latest.current = id;
+
+  async function load() {
+    const surface = window.desktop?.agentConfig;
+    if (!surface || !id) return;
+    setError(null);
+    setConflict(false);
+    setSaved(null);
+    try {
+      const content = await surface.read(id);
+      if (latest.current !== id) return;
+      setBase(content);
+      setText(content.text);
+    } catch (failure) {
+      if (latest.current !== id) return;
+      setError(ipcMessage(failure, "Could not open that file."));
+    }
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read once per file opened
+  useEffect(() => {
+    setBase(null);
+    setText("");
+    setError(null);
+    setConflict(false);
+    setSaved(null);
+    void load();
+  }, [id]);
+
+  const format = file?.format ?? "markdown";
+  const problem = useMemo(() => syntaxError(format, text), [format, text]);
+  const dirty = !!base && text !== base.text;
+
+  async function save() {
+    const surface = window.desktop?.agentConfig;
+    if (!base || !id || !surface || problem || !dirty) return;
+    setBusy(true);
+    setError(null);
+    setSaved(null);
+    try {
+      const result = await surface.write(id, text, base.hash);
+      if (result.status === "conflict") setConflict(true);
+      else if (result.status === "invalid") setError(result.error);
+      else {
+        setBase(result.content);
+        setText(result.content.text);
+        setSaved(
+          result.backup
+            ? `Saved. The previous version is at ${result.backup}.`
+            : "Saved.",
+        );
+        onSaved();
+      }
+    } catch (failure) {
+      setError(ipcMessage(failure, "Could not save that file."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reveal() {
+    if (!id) return;
+    try {
+      await window.desktop?.agentConfig.reveal(id);
+    } catch (failure) {
+      setError(ipcMessage(failure, "Could not show that file in Finder."));
+    }
+  }
+
+  return {
+    base,
+    text,
+    setText,
+    error,
+    conflict,
+    saved,
+    busy,
+    problem,
+    dirty,
+    load,
+    save,
+    revert: () => base && setText(base.text),
+    reveal,
+  };
 }
 
 /**
@@ -379,12 +458,14 @@ function ClaudeQuickSettings({
  * the document by comparison, so a quick setting or a Revert lands without
  * rebuilding the editor and losing its undo history.
  */
-function CodeEditor({
+export function CodeEditor({
   value,
   onChange,
   onSave,
   format,
   label,
+  gutter = true,
+  readOnly = false,
   className,
 }: {
   value: string;
@@ -393,6 +474,10 @@ function CodeEditor({
   onSave: () => void;
   format: ConfigFormat;
   label: string;
+  /** Line numbers down the left; off for prose such as a skill. */
+  gutter?: boolean;
+  /** Shown to read and select, not to edit. */
+  readOnly?: boolean;
   className?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -408,9 +493,12 @@ function CodeEditor({
         doc: latest.current.value,
         extensions: [
           history(),
-          lineNumbers(),
+          gutter ? lineNumbers() : PROSE,
+          EditorState.readOnly.of(readOnly),
           LANGUAGES[format](),
-          syntaxHighlighting(HIGHLIGHT),
+          syntaxHighlighting(
+            format === "markdown" ? MARKDOWN_HIGHLIGHT : HIGHLIGHT,
+          ),
           THEME,
           EditorView.contentAttributes.of({
             "aria-label": label,
@@ -440,7 +528,7 @@ function CodeEditor({
       editor.destroy();
       view.current = null;
     };
-  }, [format, label]);
+  }, [format, label, gutter, readOnly]);
 
   useEffect(() => {
     const editor = view.current;
@@ -455,19 +543,13 @@ function CodeEditor({
   return <div ref={host} className={className} />;
 }
 
-/**
- * The grammar for each config format.
- *
- * NOTE: Markdown is edited as plain text. A skill opens with YAML
- * frontmatter, and the Markdown grammar reads its closing `---` as a heading
- * underline, so the whole block would be drawn as a title.
- */
+/** The grammar for each config format. */
 const LANGUAGES: Record<ConfigFormat, () => Extension> = {
   json: () => json(),
   // legacy-modes types its parsers against `@codemirror/streamparser`, a twin
   // of the same interface. The parser itself is what `define` takes.
   toml: () => StreamLanguage.define(toml as unknown as StreamParser<unknown>),
-  markdown: () => [],
+  markdown: markdownLanguage,
 };
 
 const THEME = EditorView.theme({
@@ -504,6 +586,14 @@ const THEME = EditorView.theme({
   },
   ".cm-cursor": { borderLeftColor: "var(--foreground)" },
 });
+
+/** Without a gutter: the text set in from the pane's edges, and wrapped. */
+const PROSE = [
+  EditorView.lineWrapping,
+  EditorView.theme({
+    ".cm-content": { padding: "20px 28px", maxWidth: "88ch" },
+  }),
+];
 
 /**
  * Keys in the brand colour, values in the text colour, literals weighted.

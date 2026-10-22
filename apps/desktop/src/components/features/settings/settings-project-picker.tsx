@@ -77,10 +77,9 @@ export function SettingsProjectPicker() {
               aria-label={`Pick a project — currently ${selected?.name ?? "none"}`}
               // - `-ml-3.5`: the slot keeps 17px clear of the card's edge for a
               //   page's title; the picker's tile sits close to it instead.
-              // - `translate-y-[3px]`: centred in the 44px bar it had 8px above
-              //   and 14px below, since the card starts 6px (`my-1.5`) under
-              //   the bar.
-              className="hover:bg-foreground/[0.05] -ml-3.5 mr-3 flex h-7 translate-y-[3px] min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-md px-1.5 text-left transition-colors duration-150"
+              // Its height is centred with the page's title by the shell's
+              // `.settings-titlebar` (app.css), not here.
+              className="hover:bg-foreground/[0.05] -ml-3.5 mr-3 flex h-7 min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-md px-1.5 text-left transition-colors duration-150"
             >
               <ProjectTile
                 workspace={selected}

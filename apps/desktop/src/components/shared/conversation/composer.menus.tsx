@@ -1,3 +1,4 @@
+import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import {
   Add01Icon,
   ArrowDown01Icon,
@@ -12,7 +13,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import { useMemo, useState } from "react";
+import { type KeyboardEvent, useMemo, useState } from "react";
 import {
   AGENT_LABELS,
   type AgentModel,
@@ -21,6 +22,7 @@ import {
   type ConversationAgent,
   EFFORT_LABELS,
   EFFORTS,
+  type Effort,
   modelName,
   PERMISSION_COPY,
   PERMISSIONS,
@@ -230,7 +232,7 @@ function ModelPanel({
 }
 
 /**
- * The model pill and its menu: Fast, Effort ›, Model ›.
+ * The model pill and its menu: Fast, the effort slider, Model ›.
  *
  * The pill's mark is the model's CLI.
  */
@@ -296,32 +298,10 @@ export function ModelMenu({
             className="pointer-events-none"
           />
         </DropdownMenuItem>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="h-9 rounded-lg px-2.5 text-[13px]">
-            <span className="flex-1">Effort</span>
-            <span className="text-muted-foreground">
-              {EFFORT_LABELS[settings.effort]}
-            </span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-44 p-1.5" sideOffset={6}>
-            <DropdownMenuRadioGroup
-              value={settings.effort}
-              onValueChange={(value) =>
-                onChange({ effort: value as ComposerSettings["effort"] })
-              }
-            >
-              {EFFORTS.map((effort) => (
-                <DropdownMenuRadioItem
-                  key={effort}
-                  value={effort}
-                  className="h-9 rounded-lg px-2.5 text-[13px]"
-                >
-                  {EFFORT_LABELS[effort]}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+        <EffortSlider
+          effort={settings.effort}
+          onChange={(effort) => onChange({ effort })}
+        />
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className="h-9 rounded-lg px-2.5 text-[13px]">
             <span className="flex-1">Model</span>
@@ -343,6 +323,141 @@ export function ModelMenu({
         </DropdownMenuSub>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** The thumb's width, in px: the slider's steps are laid out around it. */
+const THUMB = 10;
+
+/**
+ * From cool to hot: the higher the effort, the further the warmth reaches.
+ *
+ * Fixed rather than the `--tone-*` tokens: those are toned down per theme
+ * for text, and a fill this size wants its full colour in both.
+ */
+const EFFORT_GRADIENT =
+  "linear-gradient(90deg, oklch(0.95 0.015 230), oklch(0.84 0.1 225) 30%, oklch(0.74 0.14 240) 48%, oklch(0.86 0.16 88) 72%, oklch(0.76 0.17 58))";
+
+/**
+ * How the thumb and fill settle on a step: quick out, soft landing. Off while
+ * dragging, where they follow the pointer instead.
+ */
+const SETTLE =
+  "duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-data-[dragging]/effort:duration-0 motion-reduce:duration-0";
+
+/**
+ * Effort as a slider: a track that fills with the gradient up to the thumb,
+ * and a dot for each step still above it.
+ *
+ * - A drag follows the pointer freely, not step by step, and the thumb
+ *   glides to the nearest step on release. Only then does the effort change.
+ * - The arrow keys, Home and End move one step at a time, taken here before
+ *   the slider sees them (its own step is a fine one, for the drag), and
+ *   kept from the menu, whose highlight they would move.
+ */
+function EffortSlider({
+  effort,
+  onChange,
+}: {
+  effort: Effort;
+  onChange: (effort: Effort) => void;
+}) {
+  const at = EFFORTS.indexOf(effort);
+  const last = EFFORTS.length - 1;
+  // Where the thumb is while dragging; null when it rests on `effort`.
+  const [drag, setDrag] = useState<number | null>(null);
+  const position = drag ?? at;
+  const shown = EFFORTS[Math.round(position)] ?? effort;
+
+  function settle(value: number) {
+    setDrag(null);
+    const next = EFFORTS[Math.round(value)];
+    if (next && next !== effort) onChange(next);
+  }
+
+  function onKeyDownCapture(event: KeyboardEvent) {
+    const step: Record<string, number> = {
+      ArrowLeft: at - 1,
+      ArrowDown: at - 1,
+      ArrowRight: at + 1,
+      ArrowUp: at + 1,
+      Home: 0,
+      End: last,
+    };
+    const to = step[event.key];
+    if (to === undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    settle(Math.min(last, Math.max(0, to)));
+  }
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: only steers the slider's and the menu's keys; the slider inside is the control
+    <div
+      className="flex flex-col gap-2 px-2.5 pt-2 pb-2.5"
+      onKeyDownCapture={onKeyDownCapture}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <div className="flex items-center text-[13px]">
+        <span className="flex-1">Effort</span>
+        <span className="text-muted-foreground tabular-nums">
+          {EFFORT_LABELS[shown]}
+        </span>
+      </div>
+      <SliderPrimitive.Root
+        className="group/effort"
+        value={position}
+        min={0}
+        max={last}
+        step={0.001}
+        thumbAlignment="edge"
+        onValueChange={(value) => setDrag(value as number)}
+        onValueCommitted={(value) => settle(value as number)}
+      >
+        <SliderPrimitive.Control className="relative flex h-7 w-full cursor-pointer touch-none items-center select-none">
+          <SliderPrimitive.Track className="bg-foreground/[0.08] @container relative h-full w-full overflow-hidden rounded-full">
+            <div
+              aria-hidden="true"
+              className={cn(
+                "absolute inset-y-0 left-0 overflow-hidden rounded-full transition-[width]",
+                SETTLE,
+              )}
+              style={{
+                width: `calc((100% - ${THUMB}px) * ${position / last} + ${THUMB}px)`,
+              }}
+            >
+              {/* As wide as the track, so the gradient's colours stay put
+                  and the fill only reveals more of them. */}
+              <div
+                className="absolute inset-y-0 left-0 w-[100cqw]"
+                style={{ backgroundImage: EFFORT_GRADIENT }}
+              />
+            </div>
+            {EFFORTS.map((step, i) => (
+              <span
+                key={step}
+                aria-hidden="true"
+                className="bg-foreground/25 absolute top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
+                style={{
+                  left: `calc((100% - ${THUMB}px) * ${i / last} + ${THUMB / 2}px)`,
+                  opacity: i > position + 0.15 ? 1 : 0,
+                  scale: i > position + 0.15 ? 1 : 0.4,
+                }}
+              />
+            ))}
+          </SliderPrimitive.Track>
+          <SliderPrimitive.Thumb
+            aria-label="Effort"
+            getAriaValueText={() => EFFORT_LABELS[shown]}
+            className={cn(
+              "focus-visible:ring-ring/40 block h-5 rounded-full bg-white shadow-sm ring-1 ring-black/10 outline-none transition-[left,inset-inline-start,scale] focus-visible:ring-2 group-data-[dragging]/effort:scale-y-110",
+              SETTLE,
+            )}
+            style={{ width: THUMB }}
+          />
+        </SliderPrimitive.Control>
+      </SliderPrimitive.Root>
+    </div>
   );
 }
 

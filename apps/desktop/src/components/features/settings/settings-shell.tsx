@@ -46,6 +46,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
     // when the app shell went away.
     <div className="bg-sidebar flex h-screen flex-col">
       <WindowTitlebarHost
+        className="settings-titlebar"
         style={{ "--titlebar-split": "15rem" } as CSSProperties}
         // On every page, not only the Projects ones: which project the
         // Projects pages are about is worth seeing from anywhere here.

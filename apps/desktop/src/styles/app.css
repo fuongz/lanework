@@ -571,6 +571,13 @@
     align-items: center;
     min-width: 0;
   }
+  /* Settings' bar: its card starts 6px (`my-1.5`) under the bar, so what
+     sits in it (the project picker, a page's title and search) is centred
+     3px lower, over the space between the bar's top and the card. One offset
+     for the whole slot, so the picker and the title share a line. */
+  .settings-titlebar .window-titlebar-slot {
+    translate: 0 3px;
+  }
   /* Back, forward and the sidebar button, as one group in the title bar, so
      macOS only, beside the controls they belong with. The group's display
      lives here, not in a utility: a `flex` class would outrank this `none`
