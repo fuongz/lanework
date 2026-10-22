@@ -35,7 +35,6 @@ import {
   type Folder,
   INDENT,
   MARK,
-  TWISTIE,
   visibleRows,
 } from "#/components/shared/repo/file-tree";
 import { RestoreDialog } from "#/components/shared/repo/restore-dialog";
@@ -94,16 +93,16 @@ function FileRow({
     // tech can reach, and a click on it would also open the diff.
     <div
       data-active={active || undefined}
-      className="group hover:bg-foreground/[0.04] data-active:bg-foreground/[0.06] flex h-7 min-w-0 items-center gap-2 rounded-md pr-2"
+      className="group hover:bg-foreground/[0.04] data-active:bg-foreground/[0.06] flex h-[22px] min-w-0 items-center gap-1.5 rounded pr-1.5"
     >
       <button
         type="button"
         title={file.path}
         onClick={() => focusFile(file.path)}
         style={{ paddingLeft: pad }}
-        className="focus-visible:ring-accent-brand flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-[13px] outline-none focus-visible:ring-2"
+        className="focus-visible:ring-accent-brand flex h-full min-w-0 flex-1 items-center gap-[5px] rounded text-left text-xs outline-none focus-visible:ring-2"
       >
-        <FileTypeIcon path={file.path} className="size-4 shrink-0" />
+        <FileTypeIcon path={file.path} className="size-3.5 shrink-0" />
         <span
           className={`min-w-0 truncate ${file.status === "deleted" ? "text-muted-foreground line-through" : ""}`}
         >
@@ -137,13 +136,13 @@ function FileRow({
               type="button"
               aria-label={`Discard changes to ${file.path}`}
               onClick={() => onRestore(file)}
-              className="hover:bg-foreground/[0.08] focus-visible:ring-accent-brand flex size-5 shrink-0 items-center justify-center rounded opacity-0 outline-none group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:ring-2"
+              className="hover:bg-foreground/[0.08] focus-visible:ring-accent-brand flex size-[18px] shrink-0 items-center justify-center rounded opacity-0 outline-none group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:ring-2"
             />
           }
         >
           <HugeiconsIcon
             icon={Undo02Icon}
-            className="text-muted-foreground size-3.5"
+            className="text-muted-foreground size-3"
             strokeWidth={1.8}
             aria-hidden="true"
           />
@@ -168,31 +167,28 @@ function FolderRow({
   onToggle: () => void;
 }) {
   return (
-    <div className="hover:bg-foreground/[0.04] flex h-7 min-w-0 items-center gap-2 rounded-md pr-2">
+    <div className="hover:bg-foreground/[0.04] flex h-[22px] min-w-0 items-center gap-1.5 rounded pr-1.5">
       <button
         type="button"
         aria-expanded={!shut}
         aria-label={`${shut ? "Expand" : "Collapse"} ${folder.path}`}
         onClick={onToggle}
         style={{ paddingLeft: pad }}
-        className="focus-visible:ring-accent-brand flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md text-left outline-none focus-visible:ring-2"
+        className="focus-visible:ring-accent-brand flex h-full min-w-0 flex-1 items-center gap-[5px] rounded text-left outline-none focus-visible:ring-2"
       >
-        <HugeiconsIcon
-          icon={shut ? ArrowRight01Icon : ArrowDown01Icon}
-          className="text-muted-foreground size-3 shrink-0"
-          strokeWidth={1.8}
-          aria-hidden="true"
-        />
+        {/* No chevron: open and closed folders already say it, and the
+            folder's icon then lines up with its files' icons, as in
+            Repository › Files (`COMPACT_TREE_STYLE`). */}
         <HugeiconsIcon
           icon={shut ? Folder01Icon : FolderOpenIcon}
-          className="text-muted-foreground size-4 shrink-0"
+          className="text-muted-foreground size-3.5 shrink-0"
           strokeWidth={1.5}
           aria-hidden="true"
         />
         {/* Truncated from the start, like the diff header: the end of a
             compacted chain is the part that says where you are. */}
         <span
-          className="text-muted-foreground min-w-0 flex-1 truncate text-left text-[13px] [direction:rtl]"
+          className="text-muted-foreground min-w-0 flex-1 truncate text-left text-xs [direction:rtl]"
           title={folder.path}
         >
           <bdi>{folder.name}</bdi>
@@ -230,23 +226,20 @@ function Section({
     });
   const tree = useMemo(() => buildTree(files), [files]);
   const rows = useMemo(() => visibleRows(tree, shut), [tree, shut]);
-  // A list of files at the repo's root has no chevrons to line up with, so it
-  // keeps its plain left edge instead of a blank twistie on every row.
-  const flat = tree.every((node) => node.kind === "file");
 
   if (!files.length) return null;
   return (
     <section aria-label={title} className="flex flex-col">
-      <div className="flex h-7 items-center gap-1.5 pr-2">
+      <div className="flex h-[22px] items-center gap-1.5 pr-1.5">
         <button
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="text-muted-foreground hover:text-foreground focus-visible:ring-accent-brand flex min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1 text-left text-xs font-medium outline-none focus-visible:ring-2"
+          className="text-muted-foreground hover:text-foreground focus-visible:ring-accent-brand flex min-w-0 flex-1 items-center gap-1.5 rounded pl-1.5 text-left text-[11px] font-medium outline-none focus-visible:ring-2"
         >
           <HugeiconsIcon
             icon={open ? ArrowDown01Icon : ArrowRight01Icon}
-            className="size-3.5 shrink-0"
+            className="size-3 shrink-0"
             strokeWidth={1.8}
             aria-hidden="true"
           />
@@ -261,7 +254,7 @@ function Section({
             <FolderRow
               key={`folder:${row.folder.path}`}
               folder={row.folder}
-              pad={4 + row.depth * INDENT}
+              pad={6 + row.depth * INDENT}
               shut={shut.has(row.folder.path)}
               onToggle={() => toggle(row.folder.path)}
             />
@@ -269,7 +262,7 @@ function Section({
             <FileRow
               key={row.file.path}
               file={row.file}
-              pad={flat ? 8 : 4 + row.depth * INDENT + TWISTIE}
+              pad={6 + row.depth * INDENT}
               onRestore={onRestore}
             />
           ),
@@ -345,7 +338,7 @@ export function ChangesList({ files }: { files: WorktreeFile[] }) {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The screen's name, counts, the diff's controls, Stage All and
           Refresh are all in the title bar: see `ChangesTitlebar`. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pt-2 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
         <Section
           title="Tracked"
           files={tracked}

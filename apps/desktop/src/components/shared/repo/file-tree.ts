@@ -119,5 +119,3 @@ export function visibleRows<F extends { path: string }>(
 
 /** Pixels of indentation per level of nesting. */
 export const INDENT = 12;
-/** A folder's chevron and the gap after it; a file leaves this blank. */
-export const TWISTIE = 18;

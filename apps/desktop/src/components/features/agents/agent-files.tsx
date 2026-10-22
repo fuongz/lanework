@@ -1,6 +1,4 @@
 import {
-  ArrowDown01Icon,
-  ArrowRight01Icon,
   Clock01Icon,
   File01Icon,
   Folder01Icon,
@@ -25,7 +23,6 @@ import {
   type Folder,
   INDENT,
   MARK,
-  TWISTIE,
   visibleRows,
 } from "#/components/shared/repo/file-tree";
 import { Button } from "#/components/ui/button";
@@ -71,24 +68,19 @@ function FolderRow({
       aria-label={`${shut ? "Expand" : "Collapse"} ${folder.path}`}
       onClick={onToggle}
       style={{ paddingLeft: pad }}
-      className="hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-7 min-w-0 shrink-0 items-center gap-1.5 rounded-md pr-2 text-left outline-none focus-visible:ring-2"
+      className="hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-[22px] min-w-0 shrink-0 items-center gap-[5px] rounded pr-1.5 text-left outline-none focus-visible:ring-2"
     >
-      <HugeiconsIcon
-        icon={shut ? ArrowRight01Icon : ArrowDown01Icon}
-        className="text-muted-foreground size-3 shrink-0"
-        strokeWidth={1.8}
-        aria-hidden="true"
-      />
+      {/* No chevron, as in Changes: the open or closed folder says it. */}
       <HugeiconsIcon
         icon={shut ? Folder01Icon : FolderOpenIcon}
-        className="text-muted-foreground size-4 shrink-0"
+        className="text-muted-foreground size-3.5 shrink-0"
         strokeWidth={1.5}
         aria-hidden="true"
       />
       {/* Truncated from the start, as Changes does: the end of a compacted
           chain is the part that says where you are. */}
       <span
-        className="text-muted-foreground min-w-0 flex-1 truncate text-left text-[13px] [direction:rtl]"
+        className="text-muted-foreground min-w-0 flex-1 truncate text-left text-xs [direction:rtl]"
         title={folder.path}
       >
         <bdi>{folder.name}</bdi>
@@ -126,7 +118,7 @@ function FileRow({
   const mark = changed ? MARK[changed.status] : null;
   const body = (
     <>
-      <FileTypeIcon path={touch.path} className="size-4 shrink-0" />
+      <FileTypeIcon path={touch.path} className="size-3.5 shrink-0" />
       <span
         className={`min-w-0 truncate ${touch.op === "deleted" ? "line-through" : ""}`}
       >
@@ -172,7 +164,7 @@ function FileRow({
     </>
   );
   const row =
-    "flex h-7 min-w-0 shrink-0 items-center gap-2 rounded-md pr-2 text-left text-[13px]";
+    "flex h-[22px] min-w-0 shrink-0 items-center gap-[5px] rounded pr-1.5 text-left text-xs";
   if (!changed)
     return (
       <div
@@ -315,7 +307,6 @@ export function AgentFilesButton({
   const lines = facts ? linesFact(facts) : null;
   const tree = useMemo(() => buildTree(files), [files]);
   const rows = useMemo(() => visibleRows(tree, shut), [tree, shut]);
-  const flat = tree.every((node) => node.kind === "file");
   const now = Date.now();
 
   const toggle = (path: string) =>
@@ -408,7 +399,7 @@ export function AgentFilesButton({
                   <FolderRow
                     key={`folder:${row.folder.path}`}
                     folder={row.folder}
-                    pad={4 + row.depth * INDENT}
+                    pad={6 + row.depth * INDENT}
                     shut={shut.has(row.folder.path)}
                     onToggle={() => toggle(row.folder.path)}
                   />
@@ -417,7 +408,7 @@ export function AgentFilesButton({
                     key={row.file.path}
                     touch={row.file}
                     changed={byPath.get(row.file.path)}
-                    pad={flat ? 8 : 4 + row.depth * INDENT + TWISTIE}
+                    pad={6 + row.depth * INDENT}
                     now={now}
                     onOpen={openDiff}
                   />

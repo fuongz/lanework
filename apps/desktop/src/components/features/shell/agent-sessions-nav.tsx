@@ -7,7 +7,12 @@ import {
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import {
+  useNavigate,
+  useParams,
+  useRouterState,
+  useSearch,
+} from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -26,6 +31,7 @@ import {
 } from "#/components/shared/agents/background-tasks";
 import { factsSummary } from "#/components/shared/agents/conversation-facts";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
+import { useChatAgent } from "#/components/shared/conversation/chat-agent";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
@@ -65,6 +71,7 @@ import {
 } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { NO_CHATS, useChatEngines } from "#/stores/chat-engines";
+import { type NewChat, useNewChats } from "#/stores/new-chats";
 import { useTerminal } from "#/stores/terminal";
 import { AgentSessionSearch } from "./agent-session-search";
 import { CodexGoalBadge } from "./codex-goal-badge";
@@ -343,6 +350,14 @@ export function AgentSessionsNav({
   const archive = useAgentSessions((state) => state.archive);
   const openSubagents = useAgentSessions((state) => state.open);
   const setOpenSubagents = useAgentSessions((state) => state.setOpen);
+  // The new-conversation page, and what it started that is not listed yet.
+  const onNewPage = useRouterState({
+    select: (state) => state.location.pathname === `/w/${slug}/agents/chat/new`,
+  });
+  const chatAgent = useChatAgent();
+  const starting = useNewChats((state) => state.starting[workspace]);
+  const started = useNewChats((state) => state.started);
+  const forgetStarted = useNewChats((state) => state.forget);
   const [expanded, setExpanded] = useState(false);
   const [searching, setSearching] = useState(false);
   /** Conversations whose sub-agents are all shown, past the fold (FE-33/D4). */
@@ -421,6 +436,44 @@ export function AgentSessionsNav({
     };
   }, [load, refreshRunning, workspace]);
 
+  // A started conversation stops standing in once the listing has it.
+  useEffect(() => {
+    const listed = all
+      .map((session) => session.id)
+      .filter((id) => id in started);
+    if (listed.length > 0) forgetStarted(listed);
+  }, [all, started, forgetStarted]);
+
+  // And the listing is read again as its first turn lands, not only on focus
+  // or a terminal change: that is when its transcript (and title) appears.
+  const waiting = Object.values(started).some(
+    (chat) => chat.workspace === workspace,
+  );
+  useEffect(() => {
+    const surface = window.desktop?.conversation;
+    if (!waiting || !surface) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const off = surface.onEvent((event) => {
+      if (
+        (event.type !== "state" &&
+          event.type !== "turn" &&
+          event.type !== "moved") ||
+        event.workspace !== workspace ||
+        !(event.conversation in useNewChats.getState().started) ||
+        timer
+      )
+        return;
+      timer = setTimeout(() => {
+        timer = null;
+        void load(workspace);
+      }, 500);
+    });
+    return () => {
+      off();
+      if (timer) clearTimeout(timer);
+    };
+  }, [waiting, load, workspace]);
+
   // Asked only once there is something to filter (FE-23/D8): the probe starts
   // the pty host and a shell, which a project with no conversation has no
   // reason to pay for.
@@ -470,6 +523,49 @@ export function AgentSessionsNav({
       ),
   );
 
+  /**
+   * Conversations from the new-conversation page with no listed row yet: the
+   * page itself while it is open or its first message is starting, then
+   * each one started, under its first message, until the listing has it.
+   */
+  const pending: {
+    key: string;
+    agent: NewChat["agent"];
+    label: string;
+    working: boolean;
+    current: boolean;
+    open: () => void;
+  }[] = [];
+  if (onNewPage || starting)
+    pending.push({
+      key: "new",
+      agent: starting?.agent ?? chatAgent ?? "claude",
+      label: starting?.text.trim() || "New session",
+      working: Boolean(starting),
+      current: onNewPage,
+      open: () =>
+        void navigate({ to: "/w/$slug/agents/chat/new", params: { slug } }),
+    });
+  for (const [id, chat] of Object.entries(started)) {
+    if (
+      chat.workspace !== workspace ||
+      all.some((session) => session.id === id)
+    )
+      continue;
+    pending.push({
+      key: id,
+      agent: chat.agent,
+      label: chat.text.trim() || "New session",
+      working: true,
+      current: viewing === id && !viewingSub && !viewingTask,
+      open: () =>
+        void navigate({
+          to: "/w/$slug/agents/chat/$conversation",
+          params: { slug, conversation: id },
+        }),
+    });
+  }
+
   if (agents.length === 0) return null;
 
   // A conversation is in one group: Running while its agent is, Agents once
@@ -477,7 +573,8 @@ export function AgentSessionsNav({
   // on screen.
   const inRunning = sessions.filter(isRunning);
   const idle = sessions.filter((session) => !isRunning(session));
-  const hasRunning = fresh.length > 0 || inRunning.length > 0;
+  const hasRunning =
+    pending.length > 0 || fresh.length > 0 || inRunning.length > 0;
   if (!hasRunning && idle.length === 0 && !hasFolder) return null;
 
   const go = (next: TerminalSession | null) => {
@@ -569,6 +666,17 @@ export function AgentSessionsNav({
       [
         "running",
         [
+          ...pending.map((entry) =>
+            slot(
+              entry.key,
+              entry.agent,
+              `Open “${entry.label}”`,
+              `${entry.label} — ${TERMINAL_KIND_LABELS[entry.agent]}, ${entry.working ? "starting" : "new"}`,
+              entry.working ? "working" : null,
+              entry.current,
+              entry.open,
+            ),
+          ),
           ...fresh.map((entry) => {
             const agent = TERMINAL_KIND_LABELS[entry.kind];
             return slot(
@@ -910,6 +1018,29 @@ export function AgentSessionsNav({
               Running
             </span>
           </div>
+          {pending.map((entry) => (
+            <button
+              key={entry.key}
+              type="button"
+              aria-current={entry.current ? "page" : undefined}
+              aria-label={`Open “${entry.label}”`}
+              aria-busy={entry.working || undefined}
+              title={`${entry.label}\n${TERMINAL_KIND_LABELS[entry.agent]}, ${entry.working ? "starting" : "new"}`}
+              onClick={entry.open}
+              className={`${row} w-full text-left ${entry.current ? activeClass : ""}`}
+            >
+              <TerminalKindIcon
+                kind={entry.agent}
+                className="size-3 shrink-0"
+              />
+              <span
+                className={`min-w-0 flex-1 truncate ${entry.working ? "text-shimmer" : "text-muted-foreground"}`}
+              >
+                {entry.label}
+              </span>
+              {entry.working && <WorkingMark />}
+            </button>
+          ))}
           {fresh.map((entry) => {
             const agent = TERMINAL_KIND_LABELS[entry.kind];
             const current = entry.id === terminalId;

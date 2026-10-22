@@ -16,6 +16,7 @@ import {
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { ipcMessage } from "#/lib/ipc-error";
 import { useBoard } from "#/stores/board";
+import { useNewChats } from "#/stores/new-chats";
 
 const ROUTE = "/_app/w/$slug/agents/chat/new" as const;
 
@@ -66,6 +67,10 @@ export function NewConversationView() {
     const surface = window.desktop?.conversation;
     if (!workspace || !surface || !settings) return false;
     setError(null);
+    const { begin, end } = useNewChats.getState();
+    // The rail's row for it, from Enter on: the CLI takes a while to answer
+    // with an id, and longer to write a transcript the rail can list.
+    begin({ workspace, agent: agentOfModel(settings.model), text });
     try {
       const { conversation } = await surface.start({
         workspace,
@@ -73,6 +78,7 @@ export function NewConversationView() {
         attachments,
         settings,
       });
+      end(workspace, conversation);
       handFirstMessage(conversation, {
         text,
         attachments: names.map((entry) => ({
@@ -88,6 +94,7 @@ export function NewConversationView() {
       });
       return true;
     } catch (caught) {
+      end(workspace, null);
       setError(ipcMessage(caught, "Could not start the conversation."));
       return false;
     }

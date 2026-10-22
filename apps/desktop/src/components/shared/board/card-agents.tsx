@@ -122,7 +122,9 @@ function agentKey(agent: CardAgent): string {
 function WorkingMark() {
   return (
     <>
-      <OrbitSpinner className="text-foreground motion-reduce:hidden" />
+      {/* The rail's size (`working-mark.tsx`), so it fills the status
+          icon's 14px slot instead of standing taller than it. */}
+      <OrbitSpinner className="text-foreground size-3 gap-px motion-reduce:hidden" />
       <span
         aria-hidden="true"
         className="bg-tone-emerald hidden size-1.5 rounded-full motion-reduce:block"
@@ -160,7 +162,7 @@ export function CardAgentsMark({
     <Tooltip>
       <TooltipTrigger
         render={<span />}
-        className="relative inline-grid size-4 shrink-0 place-items-center align-middle"
+        className="relative inline-grid size-3.5 shrink-0 place-items-center align-middle"
         data-card-agents={agents.length}
       >
         <WorkingMark />
