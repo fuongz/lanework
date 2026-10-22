@@ -1009,8 +1009,11 @@ async function confirmQuit(): Promise<boolean> {
 }
 
 /**
- * The live Claude tab on `conversation`, if any — so the chat's composer
- * never writes a conversation a tab is writing too (FE-62).
+ * The live agent tab (Claude or Codex) on `conversation`, if any — so the
+ * chat's composer never writes a conversation a tab is writing too (FE-62).
+ *
+ * NOTE: Codex refuses a second writer outright ("thread … already has an
+ * active writer"), so a `codex resume` tab must count as well.
  */
 export async function agentTerminalOn(
   workspace: string,
@@ -1023,7 +1026,7 @@ export async function agentTerminalOn(
   return (
     tabs.find(
       (entry) =>
-        entry.kind === "claude" && !entry.exit && entry.resume === conversation,
+        entry.kind !== "shell" && !entry.exit && entry.resume === conversation,
     )?.id ?? null
   );
 }

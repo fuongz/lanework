@@ -407,11 +407,24 @@ export class CodexEngine {
       sandbox: policy.sandbox,
     };
     if (this.conversation) {
-      await this.request("thread/resume", {
-        ...thread,
-        threadId: this.conversation,
-        excludeTurns: true,
-      });
+      try {
+        await this.request("thread/resume", {
+          ...thread,
+          threadId: this.conversation,
+          excludeTurns: true,
+        });
+      } catch (error) {
+        // NOTE: An app-server that could not open the thread is of no use;
+        // ending it lets the next send start clean.
+        await this.halt();
+        // Another Codex (a terminal outside Lanework, Codex's own app)
+        // writes the thread; only Lanework's tabs are found beforehand.
+        if (/already has an active writer/.test((error as Error).message))
+          throw new Error(
+            "Codex is running this conversation somewhere else. Exit it there to continue here.",
+          );
+        throw error;
+      }
       return;
     }
     const started = await this.request("thread/start", thread);
