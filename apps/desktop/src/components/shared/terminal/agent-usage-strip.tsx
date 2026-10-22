@@ -102,11 +102,16 @@ function resetText(window: UsageWindow, now: number): string {
 /**
  * When a window resets, for "resets …".
  *
- * "at 8:30 PM" today, "Thu at 9:00 AM" on another day, "now" once it is past.
- * The time is in the system's own format, so a 24-hour Mac reads "at 20:30".
+ * "in 42 minutes" within the hour, "at 8:30 PM" later today, "Thu at 9:00 AM"
+ * on another day, "now" once it is past. The time is in the system's own
+ * format, so a 24-hour Mac reads "at 20:30".
  */
 function resetClock(at: number, now: number): string {
   if (at <= now) return "now";
+  // Rounded up: 30 seconds left still reads "in 1 minute", never "in 0".
+  const minutes = Math.ceil((at - now) / 60_000);
+  if (minutes < 60)
+    return `in ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
   // Rounded to the minute: a reset at 20:29:59 reads as 20:30.
   const date = new Date(Math.round(at / 60_000) * 60_000);
   const time = new Intl.DateTimeFormat(undefined, {
