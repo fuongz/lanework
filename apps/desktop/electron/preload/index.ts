@@ -487,13 +487,14 @@ function createTerminal(): DesktopTerminalApi {
         agent,
         id,
       ),
-    agentSubagent: (workspace, agent, conversation, sub) =>
+    agentSubagent: (workspace, agent, conversation, sub, run = null) =>
       ipcRenderer.invoke(
         terminalChannels.agentSubagent,
         workspace,
         agent,
         conversation,
         sub,
+        run,
       ),
     agentBackgroundTasks: (workspace, conversation) =>
       ipcRenderer.invoke(

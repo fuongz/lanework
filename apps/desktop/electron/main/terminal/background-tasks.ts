@@ -1,14 +1,15 @@
 // The tasks a Claude conversation started in the background (FE-42): a shell
-// `Bash` left running, an async agent, a `Monitor`. They are read from the
-// conversation's own transcript, and a shell's output from the file the CLI
-// said it writes to. A running shell or monitor can also be stopped, by its
+// `Bash` left running, an async agent, a `Monitor`, a `Workflow` run (FE-01).
+// They are read from the conversation's own transcript, a shell's output from
+// the file the CLI said it writes to, and a workflow's agents from its run's
+// folder. A running shell or monitor can also be stopped, by its
 // process group.
 //
 // Nothing here imports Electron: main calls it, and specs drive it under
 // Node with isolated task fixtures.
 import { execFile } from "node:child_process";
 import { constants, realpathSync } from "node:fs";
-import { open, realpath, stat } from "node:fs/promises";
+import { open, readdir, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
@@ -22,9 +23,29 @@ import {
   type BackgroundTaskStatus,
   isAgentSessionId,
   isBackgroundTaskId,
+  isClaudeSubagentId,
+  isWorkflowRunId,
+  type WorkflowAgent,
+  type WorkflowPhase,
 } from "../../../shared/terminal";
-import { claudeProjectDir, type Line, STALE_MS, tidy } from "./agent-sessions";
+import {
+  CLAUDE_SUBAGENT_FILE,
+  claudeProjectDir,
+  type Line,
+  readRange,
+  STALE_MS,
+  tidy,
+  transcriptWorking,
+} from "./agent-sessions";
 
+/** The most agents of one workflow run that are listed. */
+const WORKFLOW_AGENT_MAX = 200;
+/** The most of a run's agent files read, newest first: retries included. */
+const WORKFLOW_FILE_MAX = 4 * WORKFLOW_AGENT_MAX;
+/** The most of a run's `journal.jsonl` one read takes, for its order. */
+const JOURNAL_MAX = 256 * 1024;
+/** The most of a workflow agent's `.meta.json` one read takes. */
+const META_MAX = 64 * 1024;
 /** How much of a transcript one read step takes. */
 const STEP = 1024 * 1024;
 /**
@@ -47,6 +68,7 @@ const MARKERS = [
   '"name":"Agent"',
   '"name":"Task"',
   '"name":"Monitor"',
+  '"name":"Workflow"',
   "Successfully stopped task",
   "Successfully killed shell",
 ];
@@ -72,8 +94,10 @@ const ANSI =
 interface Started {
   task: Omit<
     BackgroundTask,
-    "status" | "exitCode" | "summary" | "endedAt" | "pid"
+    "status" | "exitCode" | "summary" | "endedAt" | "pid" | "workflow"
   >;
+  /** A workflow's run, as its answer named it; else null. */
+  run: { runId: string; name: string | null } | null;
   /** The output file the CLI named in its answer; a shell's only. */
   output: string | null;
   /** A shell's or monitor's whole command, uncut: what its process runs. */
@@ -310,6 +334,13 @@ function kindOf(
   result: Record<string, unknown>,
 ): { kind: BackgroundTaskKind; id: string } | null {
   if (
+    result.taskType === "local_workflow" &&
+    typeof result.taskId === "string" &&
+    isBackgroundTaskId(result.taskId) &&
+    isWorkflowRunId(result.runId)
+  )
+    return { kind: "workflow", id: result.taskId };
+  if (
     typeof result.backgroundTaskId === "string" &&
     isBackgroundTaskId(result.backgroundTaskId)
   )
@@ -352,6 +383,7 @@ function visit(parsed: Parsed, line: Line) {
         name === "Agent" ||
         name === "Task" ||
         name === "Monitor" ||
+        name === "Workflow" ||
         input.run_in_background === true
       )
         parsed.calls.set(item.id, {
@@ -397,10 +429,14 @@ function visit(parsed: Parsed, line: Line) {
       if (which) {
         // A `ws` monitor has no command, and so no process.
         const command =
-          which.kind === "agent" ? null : str(call?.input.command);
+          which.kind === "agent" || which.kind === "workflow"
+            ? null
+            : str(call?.input.command);
         const description =
           str(call?.input.description) ??
           str(result.description) ??
+          str(result.summary) ??
+          str(result.workflowName) ??
           (command ? command.split("\n")[0] : null) ??
           which.kind;
         const output =
@@ -419,6 +455,10 @@ function visit(parsed: Parsed, line: Line) {
           },
           output,
           script: command,
+          run:
+            which.kind === "workflow" && isWorkflowRunId(result.runId)
+              ? { runId: result.runId, name: str(result.workflowName) }
+              : null,
         });
       }
       return;
@@ -543,12 +583,206 @@ function tasksOf(parsed: Parsed, transcript: string): BackgroundTask[] {
       summary: notice?.summary ? tidy(notice.summary) : null,
       endedAt:
         status === "running" || status === "lost" ? null : (notice?.at ?? null),
+      workflow: null,
       pid: null,
     });
   }
+  return ordered(out);
+}
+
+/** `tasks`, running first, then newest. */
+function ordered(tasks: BackgroundTask[]): BackgroundTask[] {
   const running = (task: BackgroundTask) => (task.status === "running" ? 0 : 1);
-  return out.sort(
+  return tasks.sort(
     (a, b) => running(a) - running(b) || b.startedAt.localeCompare(a.startedAt),
+  );
+}
+
+/**
+ * Where run `runId` of transcript `transcript` keeps its agents:
+ * `<conversation>/subagents/workflows/<runId>`.
+ */
+export function workflowRunDir(transcript: string, runId: string): string {
+  return join(
+    transcript.replace(/\.jsonl$/, ""),
+    "subagents",
+    "workflows",
+    runId,
+  );
+}
+
+/**
+ * The order the run's `journal.jsonl` started its agents in, with the phase
+ * and label it gave each.
+ *
+ * NOTE: The journal is the CLI's own, undocumented. It only orders the
+ * agents (FE-01/D1): each agent's `.meta.json` says what it is, so a journal
+ * of another shape, or none, still lists them all.
+ */
+async function journalOrder(
+  dir: string,
+): Promise<
+  Map<string, { at: number; phase: string | null; label: string | null }>
+> {
+  const order = new Map<
+    string,
+    { at: number; phase: string | null; label: string | null }
+  >();
+  const text = await readRange(
+    join(dir, "journal.jsonl"),
+    0,
+    JOURNAL_MAX,
+  ).catch(() => "");
+  for (const part of text.split("\n")) {
+    try {
+      const entry = record(JSON.parse(part));
+      const id = entry?.agentId;
+      if (entry?.type !== "started" || !isClaudeSubagentId(id) || order.has(id))
+        continue;
+      order.set(id, {
+        at: order.size,
+        phase: str(entry.phase),
+        label: str(entry.label),
+      });
+    } catch {
+      // Not a line of it, or cut.
+    }
+  }
+  return order;
+}
+
+/**
+ * `task`, a workflow, with its run's agents read from its folder.
+ *
+ * Each agent's label and phase come from its `.meta.json`, and whether it
+ * works from its transcript's end (FE-01/D1). A run its conversation has
+ * gone quiet on is still running while one of its agents was written within
+ * {@link STALE_MS}: the conversation waits on it without a word.
+ *
+ * NOTE: A resumed run (`resumeFromRunId`) writes to the same folder, and
+ * starts each agent that had not finished again under a new id with the
+ * same label. Only the newest agent of a label is kept, where that label
+ * first stood: an agent a past attempt finished stays, one it left behind
+ * gives way to its retry.
+ */
+async function withWorkflow(
+  task: BackgroundTask,
+  started: Started,
+  ended: boolean,
+  transcript: string,
+): Promise<BackgroundTask> {
+  if (!started.run) return task;
+  const dir = workflowRunDir(transcript, started.run.runId);
+  const [names, order] = await Promise.all([
+    readdir(dir).catch(() => [] as string[]),
+    journalOrder(dir),
+  ]);
+  const files = (
+    await Promise.all(
+      names.map(async (name) => {
+        const id = CLAUDE_SUBAGENT_FILE.exec(name)?.[1];
+        if (!id) return null;
+        const file = join(dir, name);
+        const info = await stat(file).catch(() => null);
+        return info?.isFile() ? { id, file, info } : null;
+      }),
+    )
+  )
+    .filter((entry) => entry !== null)
+    // Newest first, for the cap; put back in order below.
+    .sort((a, b) => b.info.birthtimeMs - a.info.birthtimeMs)
+    .slice(0, WORKFLOW_FILE_MAX)
+    .sort(
+      (a, b) =>
+        (order.get(a.id)?.at ?? Number.POSITIVE_INFINITY) -
+          (order.get(b.id)?.at ?? Number.POSITIVE_INFINITY) ||
+        a.info.birthtimeMs - b.info.birthtimeMs,
+    );
+  const read = await Promise.all(
+    files.map(async (entry) => {
+      const meta = record(
+        await readRange(join(dir, `agent-${entry.id}.meta.json`), 0, META_MAX)
+          .then((text) => JSON.parse(text) as unknown)
+          .catch(() => null),
+      );
+      const journaled = order.get(entry.id);
+      return {
+        ...entry,
+        label: tidy(str(meta?.description) ?? journaled?.label ?? entry.id),
+        phase: str(meta?.workflowPhase) ?? journaled?.phase ?? null,
+      };
+    }),
+  );
+  // By label, where it first stood, the newest of it.
+  const kept = new Map<string, (typeof read)[number]>();
+  for (const entry of read) {
+    const key = `${entry.phase ?? ""}\u0000${entry.label}`;
+    const prior = kept.get(key);
+    if (!prior || entry.info.birthtimeMs >= prior.info.birthtimeMs)
+      kept.set(key, entry);
+  }
+  const latest = [...kept.values()].slice(0, WORKFLOW_AGENT_MAX);
+  const newest = Math.max(0, ...files.map((entry) => entry.info.mtimeMs));
+  const status: BackgroundTaskStatus =
+    !ended && task.status === "lost" && Date.now() - newest <= STALE_MS
+      ? "running"
+      : task.status;
+  const phases: WorkflowPhase[] = [];
+  for (const { id, file, info, label, phase } of latest) {
+    const agent: WorkflowAgent = {
+      id,
+      label,
+      // An ended run's agents are done, whatever their last line says.
+      working:
+        status === "running" && (await transcriptWorking(file, "claude", true)),
+      updatedAt: new Date(info.mtimeMs).toISOString(),
+    };
+    const known = phases.find((entry) => entry.name === phase);
+    if (known) known.agents.push(agent);
+    else phases.push({ name: phase, agents: [agent] });
+  }
+  return {
+    ...task,
+    status,
+    workflow: { runId: started.run.runId, name: started.run.name, phases },
+  };
+}
+
+/**
+ * `tasks`, each workflow with its run's agents, running first again.
+ *
+ * A run resumed is started again under a new task id: only the newest task of
+ * each run is kept, so a run is one row whichever attempt it is on.
+ */
+async function withWorkflows(
+  parsed: Parsed,
+  transcript: string,
+  tasks: BackgroundTask[],
+): Promise<BackgroundTask[]> {
+  if (!tasks.some((task) => task.kind === "workflow")) return tasks;
+  const newestOfRun = new Map<string, BackgroundTask>();
+  for (const task of tasks) {
+    const run = parsed.started.get(task.id)?.run?.runId;
+    if (!run) continue;
+    const prior = newestOfRun.get(run);
+    if (!prior || task.startedAt >= prior.startedAt) newestOfRun.set(run, task);
+  }
+  return ordered(
+    await Promise.all(
+      tasks.flatMap<BackgroundTask | Promise<BackgroundTask>>((task) => {
+        const started = parsed.started.get(task.id);
+        if (task.kind !== "workflow" || !started?.run) return [task];
+        if (newestOfRun.get(started.run.runId) !== task) return [];
+        return [
+          withWorkflow(
+            task,
+            started,
+            Boolean(parsed.notices.get(task.id)?.status),
+            transcript,
+          ),
+        ];
+      }),
+    ),
   );
 }
 
@@ -556,7 +790,8 @@ function tasksOf(parsed: Parsed, transcript: string): BackgroundTask[] {
 export async function readTranscriptTasks(
   file: string,
 ): Promise<BackgroundTask[]> {
-  return tasksOf(await parseOnce(file), file);
+  const parsed = await parseOnce(file);
+  return withWorkflows(parsed, file, tasksOf(parsed, file));
 }
 
 /** Conversation `conversation`'s background tasks, without pids. */
@@ -889,7 +1124,9 @@ async function taskLeaders(
   const uid = ownUid();
   const guarded = guardedGroups(procs);
   const running = tasksOf(parsed, transcript).filter(
-    (task) => task.status === "running" && task.kind !== "agent",
+    (task) =>
+      task.status === "running" &&
+      (task.kind === "shell" || task.kind === "monitor"),
   );
   const leaders = new Map<string, number>();
   const taken = new Set(guarded);
@@ -942,8 +1179,18 @@ export async function readBackgroundTasksWithPids(
 ): Promise<BackgroundTask[]> {
   const transcript = claudeTranscriptPath(home, folder, conversation);
   const parsed = await parseOnce(transcript);
-  const tasks = tasksOf(parsed, transcript);
-  if (!tasks.some((task) => task.status === "running" && task.kind !== "agent"))
+  const tasks = await withWorkflows(
+    parsed,
+    transcript,
+    tasksOf(parsed, transcript),
+  );
+  if (
+    !tasks.some(
+      (task) =>
+        task.status === "running" &&
+        (task.kind === "shell" || task.kind === "monitor"),
+    )
+  )
     return tasks;
   try {
     const leaders = await taskLeaders(
@@ -972,7 +1219,7 @@ export async function readBackgroundTasksWithPids(
  *   refuses.
  *
  * @returns How many processes were signalled.
- * @throws when the task is unknown, an agent, not running, or its process
+ * @throws when the task is unknown, an agent or a workflow, not running, or its process
  *   cannot be told.
  */
 export async function stopBackgroundTask(
@@ -987,7 +1234,7 @@ export async function stopBackgroundTask(
   const parsed = await parseOnce(transcript);
   const started = parsed.started.get(task);
   if (!started) throw new Error("That conversation started no such task.");
-  if (started.task.kind === "agent")
+  if (started.task.kind === "agent" || started.task.kind === "workflow")
     throw new Error("Only a shell or a monitor can be stopped.");
   if (
     tasksOf(parsed, transcript).find((item) => item.id === task)?.status !==

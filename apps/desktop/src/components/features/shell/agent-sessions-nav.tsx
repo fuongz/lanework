@@ -21,6 +21,7 @@ import {
   canStop,
   pidText,
   TASK_KIND_ICONS,
+  taskLabel,
   useStopBackgroundTask,
 } from "#/components/shared/agents/background-tasks";
 import { factsSummary } from "#/components/shared/agents/conversation-facts";
@@ -200,7 +201,7 @@ function BackgroundShellRows({
       {stopping.feedback}
       {shells.map((task) => {
         const viewed = viewingTask === task.id;
-        const name = task.description || task.command || task.id;
+        const name = taskLabel(task);
         const pid = pidText(task);
         return (
           <ContextMenu key={task.id}>
@@ -215,7 +216,7 @@ function BackgroundShellRows({
                     })
                   }
                   aria-current={viewed ? "page" : undefined}
-                  aria-label={`${name}, a background ${task.kind} of “${session.title}”. Open its output`}
+                  aria-label={`${name}, a background ${task.kind} of “${session.title}”. ${task.kind === "workflow" ? "Open its agents" : "Open its output"}`}
                   title={`${task.command ?? name}\nBackground ${task.kind}${pid ? ` (${pid})` : ""}, running since ${relativeTime(task.startedAt, now)}`}
                   className={cn(row, SUB_ROW, viewed && active)}
                 />

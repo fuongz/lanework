@@ -9,6 +9,7 @@ import { basename, isAbsolute, join, relative } from "node:path";
 import {
   isAgentSessionId,
   isClaudeSubagentId,
+  isWorkflowRunId,
   SUBAGENT_INPUT_MAX,
   type SubagentStep,
   type SubagentTranscript,
@@ -41,6 +42,8 @@ interface SubagentRequest {
   agent: TerminalAgent;
   conversation: string;
   sub: string;
+  /** The workflow run it is an agent of (FE-01); absent for any other. */
+  run?: string;
 }
 
 /**
@@ -55,9 +58,9 @@ interface SubagentRequest {
  * @throws when any argument is missing or not of its shape.
  */
 export function subagentRequest(args: unknown[]): SubagentRequest {
-  if (args.length !== 4)
+  if (args.length !== 4 && args.length !== 5)
     throw new Error("A workspace, a conversation and a sub-agent are required");
-  const [workspace, agent, conversation, sub] = args;
+  const [workspace, agent, conversation, sub, run = null] = args;
   if (
     typeof workspace !== "string" ||
     !workspace.trim() ||
@@ -73,7 +76,16 @@ export function subagentRequest(args: unknown[]): SubagentRequest {
     !(agent === "claude" ? isClaudeSubagentId(sub) : isAgentSessionId(sub))
   )
     throw new Error("A valid sub-agent is required");
-  return { workspace, agent, conversation, sub };
+  // A workflow's agents are Claude's only, in a folder named by the run.
+  if (run !== null && (agent !== "claude" || !isWorkflowRunId(run)))
+    throw new Error("A valid workflow run is required");
+  return {
+    workspace,
+    agent,
+    conversation,
+    sub,
+    ...(run === null ? {} : { run }),
+  };
 }
 
 /**
@@ -625,7 +637,8 @@ async function codexSubagentFile(
  *
  * NOTE: The ids are checked again here, and the path is built from them
  * inside the CLI's own folder under `home`: Claude's
- * `projects/<folder>/<conversation>/subagents/agent-<sub>.jsonl`, or a
+ * `projects/<folder>/<conversation>/subagents/agent-<sub>.jsonl` (or
+ * `subagents/workflows/<run>/agent-<sub>.jsonl`, a workflow's agent), or a
  * rollout whose own `session_meta` says it is that conversation's thread.
  *
  * @throws when an id is malformed or the sub-agent is not that
@@ -634,9 +647,9 @@ async function codexSubagentFile(
 export async function readSubagentTranscript(
   home: string,
   folder: string,
-  { agent, conversation, sub }: Omit<SubagentRequest, "workspace">,
+  { agent, conversation, sub, run }: Omit<SubagentRequest, "workspace">,
 ): Promise<SubagentTranscript> {
-  subagentRequest(["-", agent, conversation, sub]);
+  subagentRequest(["-", agent, conversation, sub, run ?? null]);
   if (agent === "codex") {
     const file = await codexSubagentFile(home, folder, conversation, sub);
     const { rows, ...read } = await readTranscript(file);
@@ -649,6 +662,7 @@ export async function readSubagentTranscript(
     claudeProjectDir(folder),
     conversation,
     "subagents",
+    ...(run ? ["workflows", run] : []),
   );
   const { rows, ...read } = await readTranscript(
     join(dir, `agent-${sub}.jsonl`),

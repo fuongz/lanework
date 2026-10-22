@@ -1,15 +1,16 @@
 import { create } from "zustand";
 import { forgetDraft } from "#/lib/conversation-draft";
-import type {
-  AgentActivity,
-  AgentCard,
-  AgentSession,
-  AgentSubagent,
-  ClaudeUsage,
-  CodexGoal,
-  CodexQuota,
-  CodexResetOutcome,
-  TerminalAgent,
+import {
+  type AgentActivity,
+  type AgentCard,
+  type AgentSession,
+  type AgentSubagent,
+  type ClaudeUsage,
+  type CodexGoal,
+  type CodexQuota,
+  type CodexResetOutcome,
+  isWorkflowAgentKey,
+  type TerminalAgent,
 } from "../../shared/terminal";
 
 /**
@@ -379,6 +380,9 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       const parent = known.find(
         (entry) => agentKey(entry) === agentKey(activity),
       );
+      // A workflow's agent is listed under its run, never on the rail
+      // (FE-01/D5): nothing here to mark, nothing to list again.
+      if (isWorkflowAgentKey(activity.subagent)) return;
       if (activity.subagent) {
         const key = subagentKey(activity, { id: activity.subagent });
         set((state) =>

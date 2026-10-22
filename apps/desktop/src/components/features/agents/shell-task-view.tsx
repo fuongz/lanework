@@ -5,6 +5,7 @@ import {
   ComputerTerminal01Icon,
   Copy01Icon,
   HelpCircleIcon,
+  Robot02Icon,
   StopCircleIcon,
   Tick02Icon,
   Timer02Icon,
@@ -23,7 +24,10 @@ import {
   canStop,
   pidText,
   TASK_KIND_ICONS,
+  taskLabel,
   useStopBackgroundTask,
+  WorkflowPhases,
+  workflowCounts,
 } from "#/components/shared/agents/background-tasks";
 import {
   durationText,
@@ -85,11 +89,12 @@ function useNow(ticking: boolean): number {
 }
 
 /**
- * A background shell (or monitor) of a Claude conversation, read-only, full
- * size in the main view (FE-42/D3).
+ * A background shell, monitor or workflow of a Claude conversation,
+ * read-only, full size in the main view (FE-42/D3).
  *
  * Shows what it runs, where it stands, and the end of its output, followed
- * live while it runs. A running one can be stopped after confirmation; the
+ * live while it runs. A workflow shows its agents by phase instead, each
+ * opening in the sub-agent viewer (FE-01/D3). A running one can be stopped after confirmation; the
  * header shows the pid of its process group. The header link opens its parent
  * conversation as the rail's row does: the tab running it, or else its chat.
  */
@@ -136,11 +141,13 @@ function ShellTaskPage({
     (entry) => entry.id === taskId,
   );
   const running = task?.status === "running";
+  // A workflow has no output: its agents are its record.
   const { output, error: outputError } = useTaskOutput(
     workspace,
     conversation,
     taskId,
     running,
+    task !== undefined && task.kind !== "workflow",
   );
   const now = useNow(running);
   const [copied, copy] = useCopy();
@@ -173,7 +180,8 @@ function ShellTaskPage({
     });
   };
 
-  const title = task?.description || task?.command || "Background task";
+  const title = task ? taskLabel(task) : "Background task";
+  const counts = task?.workflow ? workflowCounts(task.workflow) : null;
 
   const facts: Fact[] = [];
   if (task) {
@@ -196,6 +204,16 @@ function ShellTaskPage({
             className: "text-foreground",
           },
     );
+    if (counts)
+      facts.push({
+        key: "agents",
+        label: "Agents",
+        icon: Robot02Icon,
+        text:
+          running && counts.working > 0
+            ? `${counts.working} of ${counts.total} working`
+            : `${counts.total} agent${counts.total === 1 ? "" : "s"}`,
+      });
     if (task.exitCode !== null)
       facts.push({
         key: "exit",
@@ -326,6 +344,36 @@ function ShellTaskPage({
             </Empty>
           </div>
         ) : null
+      ) : task.workflow ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
+          {task.description !== title && (
+            <p className="text-muted-foreground text-[13px]">
+              {task.description}
+            </p>
+          )}
+          <section aria-label="Agents" className="flex flex-col gap-1">
+            <h2 className="text-foreground text-[13px] font-medium">Agents</h2>
+            <WorkflowPhases
+              workflow={task.workflow}
+              className="-mx-1.5"
+              onOpen={(agent) =>
+                void navigate({
+                  to: "/w/$slug/agents/sub/$conversation/$sub",
+                  params: { slug, conversation, sub: agent.id },
+                  search: {
+                    agent: "claude",
+                    run: task.workflow?.runId,
+                  },
+                })
+              }
+            />
+          </section>
+          {/* Stopping, resuming or editing a run is the CLI's (FE-01/D7). */}
+          <p className="text-muted-foreground text-xs">
+            To control the run, use{" "}
+            <code className="font-mono">/workflows</code> in Claude Code.
+          </p>
+        </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-5">
           {task.command && (

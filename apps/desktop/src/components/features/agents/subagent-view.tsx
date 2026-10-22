@@ -197,17 +197,18 @@ function Steps({ transcript }: { transcript: SubagentTranscript }) {
  */
 export function SubagentView() {
   const { slug, conversation, sub } = useParams({ from: ROUTE });
-  const { agent } = useSearch({ from: ROUTE });
+  const { agent, run } = useSearch({ from: ROUTE });
   // NOTE: Keyed by which sub-agent: the route stays mounted from one to the
   // next, and the last one's folds (its prompt opened, its calls shown) are
   // not this one's.
   return (
     <SubagentPage
-      key={`${agent}:${conversation}/${sub}`}
+      key={`${agent}:${conversation}/${run ?? ""}/${sub}`}
       slug={slug}
       agent={agent}
       conversation={conversation}
       sub={sub}
+      run={run ?? null}
     />
   );
 }
@@ -217,11 +218,14 @@ function SubagentPage({
   agent,
   conversation,
   sub,
+  run,
 }: {
   slug: string;
   agent: TerminalAgent;
   conversation: string;
   sub: string;
+  /** The workflow run it is an agent of (FE-01), or null. */
+  run: string | null;
 }) {
   const workspace = useWorkspaceKey(slug);
   const navigate = useNavigate();
@@ -230,6 +234,7 @@ function SubagentPage({
     agent,
     conversation,
     sub,
+    run,
   );
   const parent = useAgentSessions((state) =>
     workspace

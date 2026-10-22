@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import type { SubagentTranscript, TerminalAgent } from "#/../shared/terminal";
+import {
+  type SubagentTranscript,
+  type TerminalAgent,
+  workflowAgentKey,
+} from "#/../shared/terminal";
 import { ipcMessage } from "#/lib/ipc-error";
 
 /**
@@ -18,8 +22,12 @@ export function useSubagentTranscript(
   agent: TerminalAgent,
   conversation: string,
   sub: string,
+  /** The workflow run it is an agent of (FE-01), or null. */
+  run: string | null = null,
 ): { transcript: SubagentTranscript | null; error: string | null } {
-  const key = `${workspace}:${agent}:${conversation}/${sub}`;
+  // What its activity names it: a workflow's agent by its run too.
+  const which = run ? workflowAgentKey(run, sub) : sub;
+  const key = `${workspace}:${agent}:${conversation}/${which}`;
   const [state, setState] = useState<{
     key: string;
     transcript: SubagentTranscript | null;
@@ -39,7 +47,7 @@ export function useSubagentTranscript(
       }
       reading = true;
       surface
-        .agentSubagent(workspace, agent, conversation, sub)
+        .agentSubagent(workspace, agent, conversation, sub, run)
         .then((transcript) => {
           if (!gone) setState({ key, transcript, error: null });
         })
@@ -66,7 +74,7 @@ export function useSubagentTranscript(
         activity.workspace === workspace &&
         activity.agent === agent &&
         activity.id === conversation &&
-        activity.subagent === sub
+        activity.subagent === which
       )
         read();
     });
@@ -74,7 +82,7 @@ export function useSubagentTranscript(
       gone = true;
       off();
     };
-  }, [key, workspace, agent, conversation, sub]);
+  }, [key, workspace, agent, conversation, sub, run, which]);
 
   // Another sub-agent's, still on screen from before: none yet.
   return state.key === key

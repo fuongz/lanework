@@ -182,9 +182,10 @@ export interface BackgroundCount {
 
 /**
  * What a background task is: a shell `Bash` left running, an agent that runs
- * on its own, or a `Monitor` watching a stream.
+ * on its own, a `Monitor` watching a stream, or a `Workflow` run of many
+ * agents.
  */
-export type BackgroundTaskKind = "shell" | "agent" | "monitor";
+export type BackgroundTaskKind = "shell" | "agent" | "monitor" | "workflow";
 
 /**
  * Where a background task stands.
@@ -220,6 +221,8 @@ export interface BackgroundTask {
   command: string | null;
   /** An agent's sub-agent id (`agent-<id>.jsonl`) for its viewer, or null. */
   subagentId: string | null;
+  /** A workflow's run and its agents; null for any other kind. */
+  workflow: WorkflowRun | null;
   status: BackgroundTaskStatus;
   /** A shell's exit code as its notification said it, else null. */
   exitCode: number | null;
@@ -236,6 +239,73 @@ export interface BackgroundTask {
    * Always null for an agent: it runs inside the CLI's own process.
    */
   pid: number | null;
+}
+
+/**
+ * A `Workflow` run: a script that starts agents in phases, all in the
+ * background (FE-01).
+ *
+ * Its agents are written to `<conversation>/subagents/workflows/<runId>/`,
+ * never beside the conversation's other sub-agents, so the rail does not list
+ * them (FE-01/D5).
+ */
+export interface WorkflowRun {
+  /** `wf_…`, as the CLI named it ({@link isWorkflowRunId}). */
+  runId: string;
+  /** The script's own name (`enchat-appstore-security-audit`), or null. */
+  name: string | null;
+  /** Its agents by phase, in the order each phase first started one. */
+  phases: WorkflowPhase[];
+}
+
+/** The agents of one phase of a workflow run. */
+export interface WorkflowPhase {
+  /** The phase the script gave them (`Audit`), or null for none. */
+  name: string | null;
+  agents: WorkflowAgent[];
+}
+
+/** One agent a workflow run started. */
+export interface WorkflowAgent {
+  /** The `<id>` of its `agent-<id>.jsonl`. */
+  id: string;
+  /** The label the script gave it (`audit:crypto-e2ee`). */
+  label: string;
+  /**
+   * Whether it is still going: its run is running and its last word is not a
+   * finished answer.
+   */
+  working: boolean;
+  /** When it was last written to, ISO. */
+  updatedAt: string;
+}
+
+const WORKFLOW_RUN_ID = /^wf_[A-Za-z0-9-]{1,64}$/;
+
+/**
+ * Whether `value` can name a workflow run's folder: `wf_` then letters,
+ * digits and `-`.
+ *
+ * NOTE: Never a `.` or a separator, so it is one folder name and can climb
+ * out of no folder.
+ */
+export function isWorkflowRunId(value: unknown): value is string {
+  return typeof value === "string" && WORKFLOW_RUN_ID.test(value);
+}
+
+/**
+ * The `subagent` an {@link AgentActivity} names for a workflow's agent:
+ * `<runId>/<id>`.
+ *
+ * A sub-agent's own id never holds a `/`, so the two never collide.
+ */
+export function workflowAgentKey(runId: string, agent: string): string {
+  return `${runId}/${agent}`;
+}
+
+/** Whether an activity's `subagent` is a workflow's agent's. */
+export function isWorkflowAgentKey(subagent: string | null): boolean {
+  return subagent?.includes("/") ?? false;
 }
 
 /** The most of a shell's command a task carries, in characters. */
@@ -587,7 +657,8 @@ export interface AgentActivity {
    * Set when it is one of `id`'s sub-agents that was written, not `id`
    * itself.
    *
-   * `working` is then that sub-agent's, and `card` null.
+   * `working` is then that sub-agent's, and `card` null. A workflow's agent
+   * is `<runId>/<id>` ({@link workflowAgentKey}).
    */
   subagent: string | null;
   /** Epoch ms. */
@@ -985,6 +1056,8 @@ export interface DesktopTerminalApi {
     agent: TerminalAgent,
     conversation: string,
     sub: string,
+    /** The workflow run it is an agent of (FE-01); Claude only. */
+    run?: string | null,
   ) => Promise<SubagentTranscript>;
   /**
    * The tasks Claude conversation `conversation` started in the background.

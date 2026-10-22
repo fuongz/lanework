@@ -6,7 +6,9 @@ import type { AgentSession, BackgroundTask } from "#/../shared/terminal";
 import {
   backgroundCue,
   TASK_KIND_ICONS,
+  taskLabel,
   taskStatusText,
+  workflowCounts,
 } from "#/components/shared/agents/background-tasks";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
 import { cn } from "#/lib/utils";
@@ -75,12 +77,18 @@ function Capsule({
   title,
   meta,
   rows,
+  running: going,
+  ended = "Completed",
 }: {
   title: string;
   meta: string;
   rows: CapsuleRow[];
+  /** How many are going, when the rows alone do not say; else theirs. */
+  running?: number;
+  /** What it says once none runs: a workflow's own end. */
+  ended?: string;
 }) {
-  const running = rows.filter((row) => row.running).length;
+  const running = going ?? rows.filter((row) => row.running).length;
   const [choice, setChoice] = useState<boolean | null>(null);
   // Open while one runs, unless the reader said otherwise.
   const open = choice ?? running > 0;
@@ -103,8 +111,15 @@ function Capsule({
           {meta}
         </span>
         {running === 0 && (
-          <span className="bg-tone-emerald/12 text-tone-emerald shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium">
-            Completed
+          <span
+            className={cn(
+              "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+              ended === "Completed"
+                ? "bg-tone-emerald/12 text-tone-emerald"
+                : "bg-foreground/[0.06] text-muted-foreground",
+            )}
+          >
+            {ended}
           </span>
         )}
         <HugeiconsIcon
@@ -152,8 +167,9 @@ function Capsule({
  * What the conversation has going besides its own turn, as capsules above the
  * composer.
  *
- * Its sub-agents, background shells and monitors: the ones still running, and
- * those of the current prompt once done. Hidden when there are none.
+ * Its sub-agents, background shells and monitors, and each workflow run with
+ * its agents (FE-01/D3): the ones still running, and those of the current
+ * prompt once done. Hidden when there are none.
  */
 export function JobCapsules({
   slug,
@@ -190,13 +206,18 @@ export function JobCapsules({
         Number(b.working) - Number(a.working) ||
         b.sub.updatedAt.localeCompare(a.sub.updatedAt),
     );
-  // NOTE: An agent task is a sub-agent already listed above, so shells and
-  // monitors only.
-  const jobs = (tasks ?? [])
-    .filter((task) => task.kind !== "agent")
-    .filter((task) => task.status === "running" || recent(task.startedAt));
+  const shown = (tasks ?? []).filter(
+    (task) => task.status === "running" || recent(task.startedAt),
+  );
+  // NOTE: An agent task is a sub-agent already listed above, and a workflow
+  // has a capsule of its own, so shells and monitors only.
+  const jobs = shown.filter(
+    (task) => task.kind === "shell" || task.kind === "monitor",
+  );
+  const workflows = shown.filter((task) => task.workflow !== null);
 
-  if (subagents.length === 0 && jobs.length === 0) return null;
+  if (subagents.length === 0 && jobs.length === 0 && workflows.length === 0)
+    return null;
 
   const openTask = (task: BackgroundTask) =>
     void navigate({
@@ -230,6 +251,46 @@ export function JobCapsules({
           }))}
         />
       )}
+      {workflows.map((task) => {
+        const workflow = task.workflow;
+        if (!workflow) return null;
+        const counts = workflowCounts(workflow);
+        const running = task.status === "running";
+        return (
+          <Capsule
+            key={task.id}
+            title={taskLabel(task)}
+            meta={
+              running && counts.working > 0
+                ? `${counts.working} of ${counts.total} working`
+                : `${counts.total} agent${counts.total === 1 ? "" : "s"}`
+            }
+            // Between two phases no agent works, yet the run goes on.
+            running={running ? Math.max(1, counts.working) : 0}
+            ended={
+              task.status === "completed"
+                ? "Completed"
+                : taskStatusText(task).replace(/^./, (first) =>
+                    first.toUpperCase(),
+                  )
+            }
+            rows={workflow.phases.flatMap((phase) =>
+              phase.agents.map((agent) => ({
+                key: agent.id,
+                label: agent.label,
+                value: agent.working ? "working" : (phase.name ?? "done"),
+                running: agent.working,
+                onOpen: () =>
+                  void navigate({
+                    to: "/w/$slug/agents/sub/$conversation/$sub",
+                    params: { slug, conversation: session.id, sub: agent.id },
+                    search: { agent: "claude", run: workflow.runId },
+                  }),
+              })),
+            )}
+          />
+        );
+      })}
       {jobs.length > 0 && (
         <Capsule
           title="Background jobs"

@@ -4,6 +4,7 @@ import {
   CancelCircleIcon,
   CheckmarkCircle02Icon,
   ComputerTerminal01Icon,
+  Flowchart01Icon,
   HelpCircleIcon,
   Radar01Icon,
   Robot02Icon,
@@ -17,6 +18,8 @@ import type {
   AgentSession,
   BackgroundTask,
   BackgroundTaskKind,
+  WorkflowAgent,
+  WorkflowRun,
 } from "#/../shared/terminal";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
@@ -193,17 +196,19 @@ export const TASK_KIND_ICONS: Record<BackgroundTaskKind, IconSvgElement> = {
   shell: ComputerTerminal01Icon,
   agent: Robot02Icon,
   monitor: Radar01Icon,
+  workflow: Flowchart01Icon,
 };
 
 const KIND_NOUNS: Record<BackgroundTaskKind, [string, string]> = {
   shell: ["shell", "shells"],
   agent: ["agent", "agents"],
   monitor: ["monitor", "monitors"],
+  workflow: ["workflow", "workflows"],
 };
 
 /** `1 shell, 5 agents`: the running ones, by kind, in that order. */
 function runningText(tasks: BackgroundTask[]): string {
-  return (["shell", "agent", "monitor"] as const)
+  return (["shell", "agent", "monitor", "workflow"] as const)
     .map((kind) => {
       const count = tasks.filter(
         (task) => task.kind === kind && task.status === "running",
@@ -233,6 +238,98 @@ export function taskStatusText(task: BackgroundTask): string {
     : task.status;
 }
 
+/** A task's name in a list: a workflow's script name, else what it was for. */
+export function taskLabel(task: BackgroundTask): string {
+  return task.workflow?.name || task.description || task.command || task.id;
+}
+
+/** How many of a workflow run's agents are still working, of how many. */
+export function workflowCounts(workflow: WorkflowRun): {
+  working: number;
+  total: number;
+} {
+  const agents = workflow.phases.flatMap((phase) => phase.agents);
+  return {
+    working: agents.filter((agent) => agent.working).length,
+    total: agents.length,
+  };
+}
+
+/**
+ * A workflow run's agents, by phase (FE-01/D3).
+ *
+ * Each phase is a small heading with how many of its agents are done, then
+ * its agents; each opens in the sub-agent viewer.
+ */
+export function WorkflowPhases({
+  workflow,
+  onOpen,
+  className,
+}: {
+  workflow: WorkflowRun;
+  onOpen: (agent: WorkflowAgent) => void;
+  className?: string;
+}) {
+  if (workflow.phases.length === 0)
+    return (
+      <p className={cn("text-muted-foreground px-1.5 text-xs", className)}>
+        No agent started yet.
+      </p>
+    );
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-1", className)}>
+      {workflow.phases.map((phase) => {
+        const done = phase.agents.filter((agent) => !agent.working).length;
+        return (
+          <section
+            key={phase.name ?? ""}
+            aria-label={phase.name ?? "Agents"}
+            className="flex min-w-0 flex-col"
+          >
+            <h3 className="text-muted-foreground flex h-6 items-baseline gap-1.5 px-1.5 pt-1 text-[11px] font-medium">
+              {phase.name ?? "Agents"}
+              <span className="tabular-nums font-normal">
+                {done}/{phase.agents.length}
+              </span>
+            </h3>
+            {phase.agents.map((agent) => (
+              <button
+                key={agent.id}
+                type="button"
+                onClick={() => onOpen(agent)}
+                aria-label={`${agent.label}, ${agent.working ? "working" : "done"}`}
+                className="hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-7 min-w-0 items-center gap-2 rounded-md px-1.5 text-left text-[13px] outline-none focus-visible:ring-2"
+              >
+                <HugeiconsIcon
+                  icon={Robot02Icon}
+                  className="text-muted-foreground size-3 shrink-0"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate",
+                    agent.working ? "text-shimmer" : "text-muted-foreground",
+                  )}
+                >
+                  {agent.label}
+                </span>
+                {agent.working ? (
+                  <WorkingMark />
+                ) : (
+                  <span className="text-muted-foreground shrink-0 font-mono text-[11px]">
+                    done
+                  </span>
+                )}
+              </button>
+            ))}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 /** The cue to read a conversation's tasks again: its listing moved on. */
 export function backgroundCue(session: AgentSession | undefined): string {
   return session
@@ -250,85 +347,106 @@ function TaskRow({
   task,
   now,
   onOpen,
+  onOpenAgent,
   onStop,
 }: {
   task: BackgroundTask;
   now: number;
   onOpen: (task: BackgroundTask) => void;
+  /** Opens one of a workflow's agents. */
+  onOpenAgent: (task: BackgroundTask, agent: WorkflowAgent) => void;
   onStop?: (task: BackgroundTask) => void;
 }) {
   const running = task.status === "running";
   const opens = task.kind !== "agent" || task.subagentId !== null;
   const status = taskStatusText(task);
   const pid = pidText(task);
+  const label = taskLabel(task);
+  const counts = task.workflow ? workflowCounts(task.workflow) : null;
   return (
-    <div className="group/task flex min-w-0 items-center">
-      <button
-        type="button"
-        disabled={!opens}
-        onClick={() => onOpen(task)}
-        aria-label={`${task.description || task.command || task.id}, ${task.kind}, ${status}`}
-        title={`${task.command ?? task.description}\n${status}${pid ? ` (${pid})` : ""}, started ${relativeTime(task.startedAt, now)}${task.summary ? `\n${task.summary}` : ""}`}
-        className={cn(
-          "hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-[13px] outline-none focus-visible:ring-2 disabled:pointer-events-none",
-          task.status === "lost" && "opacity-50",
-        )}
-      >
-        {/* Its kind stays on the left; running spins on the right. */}
-        <HugeiconsIcon
-          icon={TASK_KIND_ICONS[task.kind]}
-          className="text-muted-foreground size-3 shrink-0"
-          strokeWidth={1.8}
-          aria-hidden="true"
-        />
-        <span
+    <>
+      <div className="group/task flex min-w-0 items-center">
+        <button
+          type="button"
+          disabled={!opens}
+          onClick={() => onOpen(task)}
+          aria-label={`${label}, ${task.kind}, ${status}`}
+          title={`${task.command ?? task.description}\n${status}${pid ? ` (${pid})` : ""}, started ${relativeTime(task.startedAt, now)}${task.summary ? `\n${task.summary}` : ""}`}
           className={cn(
-            "min-w-0 flex-1 truncate",
-            !running && "text-muted-foreground",
+            "hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-[13px] outline-none focus-visible:ring-2 disabled:pointer-events-none",
+            task.status === "lost" && "opacity-50",
           )}
         >
-          {task.description || task.command || task.id}
-        </span>
-        {!running && (
-          // A coloured mark level with the word, so how it ended reads at a
-          // glance.
+          {/* Its kind stays on the left; running spins on the right. */}
+          <HugeiconsIcon
+            icon={TASK_KIND_ICONS[task.kind]}
+            className="text-muted-foreground size-3 shrink-0"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
           <span
             className={cn(
-              "flex shrink-0 items-center gap-1 text-[11px] tabular-nums",
-              STATUS_LOOK[task.status]?.tone ?? "text-muted-foreground",
+              "min-w-0 flex-1 truncate",
+              !running && "text-muted-foreground",
             )}
           >
-            <HugeiconsIcon
-              icon={STATUS_LOOK[task.status]?.icon ?? HelpCircleIcon}
-              className="size-3 shrink-0"
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-            {status}
+            {label}
           </span>
-        )}
-        {running && <WorkingMark />}
-        {pid && (
-          <span className="text-muted-foreground/70 shrink-0 font-mono text-[11px] tabular-nums">
-            {pid}
+          {counts && counts.total > 0 && (
+            <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+              {running
+                ? `${counts.working}/${counts.total} working`
+                : `${counts.total} agent${counts.total === 1 ? "" : "s"}`}
+            </span>
+          )}
+          {!running && (
+            // A coloured mark level with the word, so how it ended reads at a
+            // glance.
+            <span
+              className={cn(
+                "flex shrink-0 items-center gap-1 text-[11px] tabular-nums",
+                STATUS_LOOK[task.status]?.tone ?? "text-muted-foreground",
+              )}
+            >
+              <HugeiconsIcon
+                icon={STATUS_LOOK[task.status]?.icon ?? HelpCircleIcon}
+                className="size-3 shrink-0"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+              {status}
+            </span>
+          )}
+          {running && <WorkingMark />}
+          {pid && (
+            <span className="text-muted-foreground/70 shrink-0 font-mono text-[11px] tabular-nums">
+              {pid}
+            </span>
+          )}
+          <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+            {shortAge(task.endedAt ?? task.startedAt, now)}
           </span>
+        </button>
+        {canStop(task) && onStop && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Stop ${task.description || task.command || task.id}`}
+            className="shrink-0 opacity-0 group-hover/task:opacity-100 group-focus-within/task:opacity-100"
+            onClick={() => onStop(task)}
+          >
+            <HugeiconsIcon icon={StopIcon} strokeWidth={1.8} />
+          </Button>
         )}
-        <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
-          {shortAge(task.endedAt ?? task.startedAt, now)}
-        </span>
-      </button>
-      {canStop(task) && onStop && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Stop ${task.description || task.command || task.id}`}
-          className="shrink-0 opacity-0 group-hover/task:opacity-100 group-focus-within/task:opacity-100"
-          onClick={() => onStop(task)}
-        >
-          <HugeiconsIcon icon={StopIcon} strokeWidth={1.8} />
-        </Button>
+      </div>
+      {task.workflow && (
+        <WorkflowPhases
+          workflow={task.workflow}
+          onOpen={(agent) => onOpenAgent(task, agent)}
+          className="border-foreground/10 ms-3 mb-1 border-l ps-1.5"
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -376,6 +494,16 @@ export function BackgroundTasksButton({
       : `${list.length || session.background.total} task${(list.length || session.background.total) === 1 ? "" : "s"}`;
   const finishedOpen = finishedChoice ?? running.length === 0;
   const now = Date.now();
+
+  const openAgent = (task: BackgroundTask, agent: WorkflowAgent) => {
+    if (!task.workflow) return;
+    setOpen(false);
+    void navigate({
+      to: "/w/$slug/agents/sub/$conversation/$sub",
+      params: { slug, conversation: session.id, sub: agent.id },
+      search: { agent: "claude", run: task.workflow.runId },
+    });
+  };
 
   const openTask = (task: BackgroundTask) => {
     setOpen(false);
@@ -468,6 +596,7 @@ export function BackgroundTasksButton({
                   task={task}
                   now={now}
                   onOpen={openTask}
+                  onOpenAgent={openAgent}
                   onStop={(task) => {
                     setOpen(false);
                     stopping.requestStop(task);
@@ -500,6 +629,7 @@ export function BackgroundTasksButton({
                         task={task}
                         now={now}
                         onOpen={openTask}
+                        onOpenAgent={openAgent}
                       />
                     ))}
                 </>

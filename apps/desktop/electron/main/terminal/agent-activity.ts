@@ -9,7 +9,9 @@ import { basename, join } from "node:path";
 import {
   type AgentCard,
   isAgentSessionId,
+  isWorkflowRunId,
   type TerminalAgent,
+  workflowAgentKey,
 } from "../../../shared/terminal";
 import {
   CLAUDE_SUBAGENT_FILE,
@@ -39,6 +41,12 @@ const TRAILING_ID =
 
 /** `<conversation>/subagents/agent-<id>.jsonl`, under Claude's folder. */
 const CLAUDE_SUBAGENT_PATH = /^([^/\\]+)[/\\]subagents[/\\]([^/\\]+)$/;
+/**
+ * `<conversation>/subagents/workflows/<run>/agent-<id>.jsonl`: a workflow's
+ * agent (FE-01).
+ */
+const CLAUDE_WORKFLOW_AGENT_PATH =
+  /^([^/\\]+)[/\\]subagents[/\\]workflows[/\\]([^/\\]+)[/\\]([^/\\]+)$/;
 
 /**
  * Watch `folder`'s Claude and Codex transcripts under `home`, and call
@@ -194,8 +202,27 @@ export function watchAgentActivity(
         const sub = match?.[2]
           ? CLAUDE_SUBAGENT_FILE.exec(match[2])?.[1]
           : null;
-        if (match?.[1] && sub && isAgentSessionId(match[1]))
+        if (match?.[1] && sub && isAgentSessionId(match[1])) {
           report("claude", match[1], join(claudeDir, String(name)), sub);
+          return;
+        }
+        // A workflow's agent: news of its run's row, keyed `<run>/<id>`.
+        const agent = name
+          ? CLAUDE_WORKFLOW_AGENT_PATH.exec(String(name))
+          : null;
+        const id = agent?.[3] ? CLAUDE_SUBAGENT_FILE.exec(agent[3])?.[1] : null;
+        if (
+          agent?.[1] &&
+          id &&
+          isAgentSessionId(agent[1]) &&
+          isWorkflowRunId(agent[2])
+        )
+          report(
+            "claude",
+            agent[1],
+            join(claudeDir, String(name)),
+            workflowAgentKey(agent[2], id),
+          );
       }),
     );
   } catch {

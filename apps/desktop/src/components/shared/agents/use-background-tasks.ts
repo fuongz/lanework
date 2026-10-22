@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import type {
-  BackgroundTask,
-  BackgroundTaskOutput,
+import {
+  type BackgroundTask,
+  type BackgroundTaskOutput,
+  isWorkflowAgentKey,
 } from "#/../shared/terminal";
 import { ipcMessage } from "#/lib/ipc-error";
 
@@ -16,7 +17,8 @@ const RELIST_MS = 1_000;
  *
  * Read again whenever `cue` changes (its listing's `updatedAt` and counts)
  * and when its own transcript is written, since a task's notification is a
- * line in it.
+ * line in it. A workflow's agent written is a cue too: its conversation sits
+ * still while the run works (FE-01).
  *
  * NOTE: One read in flight at a time, at most one queued behind it, and
  * writes folded to one read a second. A working conversation writes many
@@ -78,7 +80,7 @@ export function useBackgroundTasks(
         activity.workspace !== workspace ||
         activity.agent !== "claude" ||
         activity.id !== conversation ||
-        activity.subagent ||
+        (activity.subagent && !isWorkflowAgentKey(activity.subagent)) ||
         later
       )
         return;
@@ -104,13 +106,15 @@ export function useBackgroundTasks(
  * The end of one background shell's output (FE-42/D5).
  *
  * Read once, then every second while it is `running` and the window is
- * visible; a finished task's file no longer grows.
+ * visible; a finished task's file no longer grows. Not read at all while not
+ * `enabled`: a workflow has no output (FE-01).
  */
 export function useTaskOutput(
   workspace: string | null,
   conversation: string,
   task: string,
   running: boolean,
+  enabled = true,
 ): { output: BackgroundTaskOutput | null; error: string | null } {
   const key = `${workspace}:${conversation}/${task}`;
   const [state, setState] = useState<{
@@ -121,7 +125,7 @@ export function useTaskOutput(
 
   useEffect(() => {
     const surface = window.desktop?.terminal;
-    if (!workspace || !surface) return;
+    if (!workspace || !enabled || !surface) return;
     let gone = false;
     let reading = false;
     const read = () => {
@@ -162,7 +166,7 @@ export function useTaskOutput(
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [key, workspace, conversation, task, running]);
+  }, [key, workspace, conversation, task, running, enabled]);
 
   return state.key === key
     ? { output: state.output, error: state.error }
