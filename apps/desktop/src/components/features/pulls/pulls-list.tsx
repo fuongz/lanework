@@ -171,6 +171,7 @@ function Row({
           </span>
         </div>
         <div className="text-muted-foreground flex items-center gap-1.5 pl-5.5 text-[11px]">
+          <span className="shrink-0 tabular-nums">#{pull.number}</span>
           {pull.author && (
             <>
               <UserAvatar
@@ -367,6 +368,7 @@ export function PullsList() {
       if (!query) return true;
       const needle = query.toLowerCase();
       return (
+        `#${pull.number}`.includes(needle) ||
         pull.title.toLowerCase().includes(needle) ||
         pull.headRef.toLowerCase().includes(needle) ||
         (pull.author?.login.toLowerCase().includes(needle) ?? false) ||
