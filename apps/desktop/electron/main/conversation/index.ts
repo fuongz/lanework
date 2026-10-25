@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { app, shell } from "electron";
 import {
   type AgentModel,
@@ -194,9 +194,10 @@ async function readAny(folder: string, id: string): Promise<Conversation> {
 /**
  * The path a chat badge names, and what its image may be read from.
  *
- * The scope is the workspace's folder and the images attached to the
- * conversation. They are read from its transcript here, never taken from
- * the page.
+ * The scope is the workspace's folder, the images attached to the
+ * conversation, and the files its tool calls read or wrote by absolute path
+ * (a screenshot under `/tmp`). They are read from its transcript here, never
+ * taken from the page; `openableImage` still keeps only images.
  *
  * @throws When the arguments are not a conversation and a valid path.
  */
@@ -220,7 +221,15 @@ async function imageScope(args: unknown[]): Promise<{
   const attachments = (read?.turns ?? []).flatMap((turn) =>
     turn.role === "user"
       ? turn.attachments.flatMap((entry) => (entry.path ? [entry.path] : []))
-      : [],
+      : turn.blocks.flatMap((block) =>
+          block.type === "tools"
+            ? block.calls.flatMap((call) =>
+                call.filePath && isAbsolute(call.filePath)
+                  ? [call.filePath]
+                  : [],
+              )
+            : [],
+        ),
   );
   return {
     path: path.trim(),

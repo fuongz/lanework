@@ -1,8 +1,16 @@
+import { Image01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { createContext, Fragment, type ReactNode, useContext } from "react";
 import {
   FileTypeIcon,
   fileIconToken,
 } from "#/components/shared/diff/diff-icons";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "#/components/ui/context-menu";
 import { Empty, EmptyDescription, EmptyHeader } from "#/components/ui/empty";
 import {
   type Block,
@@ -31,6 +39,16 @@ const LinkContext = createContext<LinkRenderer | null>(null);
  */
 type FileOpener = (path: string) => void;
 export const FileOpenerContext = createContext<FileOpener | null>(null);
+
+/**
+ * Shows an image the chat names in the lightbox, without going through
+ * Repository › Files: an image badge or a tool call's image chip, on
+ * Cmd/Ctrl-click or its context menu. The chat alone provides one, as with {@link FileOpenerContext}.
+ */
+export const ImageViewerContext = createContext<FileOpener | null>(null);
+
+/** A path the lightbox can show, by its extension. */
+const IMAGE_PATH = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
 
 /**
  * How the body is drawn.
@@ -171,6 +189,7 @@ function FileBadge({
   chat: boolean;
 }) {
   const open = useContext(FileOpenerContext);
+  const view = useContext(ImageViewerContext);
   const body = (
     <>
       {/* On the first line's middle, (1.25 − 1) / 2: on one line that is
@@ -181,19 +200,36 @@ function FileBadge({
       <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>
     </>
   );
-  // In the chat, the badge opens the file in Repository › Files.
-  if (open)
-    return (
+  // In the chat, the badge opens the file in Repository › Files; an image's
+  // opens the lightbox instead on Cmd/Ctrl-click, or from its context menu.
+  if (open) {
+    const image = view && IMAGE_PATH.test(path) ? view : null;
+    const button = (
       <button
         type="button"
         data-file={path}
         title={`Open ${path}`}
-        onClick={() => open(path)}
+        onClick={(event) =>
+          image && (event.metaKey || event.ctrlKey) ? image(path) : open(path)
+        }
         className={`${badgeClass(chat)} hover:bg-foreground/[0.12] focus-visible:ring-ring/40 cursor-pointer items-start gap-[0.3em] text-left transition-colors outline-none focus-visible:ring-2`}
       >
         {body}
       </button>
     );
+    if (!image) return button;
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger render={button} />
+        <ContextMenuContent>
+          <ContextMenuItem onClick={() => image(path)}>
+            <HugeiconsIcon icon={Image01Icon} strokeWidth={1.8} />
+            Open image
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  }
   return (
     <code
       data-file={path}

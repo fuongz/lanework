@@ -3,7 +3,7 @@
 //
 // NOTE: The page sends a path as Claude wrote it, so main decides what it may
 // read: a file inside the workspace's folder, or an image attached to this
-// conversation, with an image's extension and at most `IMAGE_MAX` bytes.
+// conversation or read/written by one of its tool calls, with an image's extension and at most `IMAGE_MAX` bytes.
 // Symlinks are resolved first, and a path never `..`s out of either.
 import { readFile, realpath, stat } from "node:fs/promises";
 import {
@@ -34,7 +34,10 @@ const IMAGE_TYPES: Record<string, string> = {
 export interface ImageScope {
   /** The workspace's folder. */
   folder: string;
-  /** Absolute paths of the images attached to the conversation. */
+  /**
+   * Absolute paths the conversation itself holds: images attached to it, and
+   * files its tool calls read or wrote.
+   */
   attachments: readonly string[];
   /** The folder's files, relative to it — for a bare name (`details.png`). */
   files: () => Promise<string[]>;

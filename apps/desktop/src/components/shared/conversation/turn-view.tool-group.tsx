@@ -13,8 +13,15 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
-import { memo, useState } from "react";
+import { type MouseEvent, memo, useContext, useState } from "react";
 import type { ToolCall, ToolKind } from "#/../shared/conversation";
+import { ImageViewerContext } from "#/components/shared/common/markdown-body";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "#/components/ui/context-menu";
 import { ClaudeAiIcon } from "#/components/ui/svgs/claudeAiIcon";
 import {
   baseName,
@@ -46,24 +53,55 @@ const KIND_ICONS: Record<ToolKind, IconSvgElement> = {
 const EASE = "duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]";
 const PANEL = `h-(--collapsible-panel-height) overflow-hidden transition-[height,opacity] ${EASE} data-starting-style:h-0 data-starting-style:opacity-0 data-ending-style:h-0 data-ending-style:opacity-0 motion-reduce:transition-none`;
 
-/** A file the call read or wrote: its icon and its path, mono. */
+/**
+ * A file the call read or wrote: its icon and its path, mono.
+ *
+ * An image's chip opens the lightbox on Cmd/Ctrl-click, or from its context
+ * menu, instead of folding the row; a plain click still folds it.
+ */
 function FileChip({ path }: { path: string }) {
-  return (
+  const view = useContext(ImageViewerContext);
+  const image = isImagePath(path);
+  const chip = (
     <span
       title={path}
       className="bg-foreground/[0.05] inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 font-mono text-[12px]"
     >
       <HugeiconsIcon
-        icon={isImagePath(path) ? Image01Icon : File01Icon}
+        icon={image ? Image01Icon : File01Icon}
         className={cn(
           "size-3.5 shrink-0",
-          isImagePath(path) ? "text-tone-teal" : "text-muted-foreground",
+          image ? "text-tone-teal" : "text-muted-foreground",
         )}
         strokeWidth={1.8}
         aria-hidden="true"
       />
       <span className="truncate">{path}</span>
     </span>
+  );
+  if (!image || !view) return chip;
+  const onClick = (event: MouseEvent) => {
+    if (!event.metaKey && !event.ctrlKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    view(path);
+  };
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger
+        render={<span />}
+        className="inline-flex min-w-0"
+        onClick={onClick}
+      >
+        {chip}
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={() => view(path)}>
+          <HugeiconsIcon icon={Image01Icon} strokeWidth={1.8} />
+          Open image
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

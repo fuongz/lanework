@@ -3,7 +3,10 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import type { ImagePreview } from "#/../shared/conversation";
-import { FileOpenerContext } from "#/components/shared/common/markdown-body";
+import {
+  FileOpenerContext,
+  ImageViewerContext,
+} from "#/components/shared/common/markdown-body";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { Button } from "#/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
@@ -19,6 +22,8 @@ const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
  *
  * - Main finds the file (`worktree.locate`): Claude writes paths relative to
  *   the project's folder, to the repository, absolute, or as a bare name.
+ * - An image chip on a tool call opens the lightbox directly on Cmd/Ctrl-click
+ *   or from its context menu (`ImageViewerContext`).
  * - The lightbox stays for what the repository does not hold. An image pasted
  *   into this conversation lives outside the folder, and Files cannot open
  *   it. Anything else that cannot be found says so, in the same dialog.
@@ -79,6 +84,12 @@ export function FileOpenerProvider({
     [slug, reveal, navigate, lightbox],
   );
 
+  /** Straight to the lightbox, for an image chip's Cmd/Ctrl-click or menu. */
+  const view = useCallback(
+    (path: string) => lightbox(path, ++latest.current),
+    [lightbox],
+  );
+
   const openInApp = () => {
     const surface = window.desktop?.conversation;
     if (!surface || !workspace || !asked || opening) return;
@@ -93,7 +104,9 @@ export function FileOpenerProvider({
   const image = asked !== null && IMAGE_FILE.test(asked);
   return (
     <FileOpenerContext.Provider value={open}>
-      {children}
+      <ImageViewerContext.Provider value={view}>
+        {children}
+      </ImageViewerContext.Provider>
       <Dialog
         open={asked !== null}
         onOpenChange={(next) => {
