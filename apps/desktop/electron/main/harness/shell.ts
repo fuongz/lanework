@@ -9,6 +9,8 @@ export interface ShellOptions {
   shell?: ShellChoice;
   env?: NodeJS.ProcessEnv;
   timeoutMs: number;
+  /** Each piece of stdout as it arrives, for a caller that acts mid-run. */
+  onStdout?: (chunk: string) => void;
 }
 
 interface ShellResult {
@@ -74,6 +76,7 @@ export function runInLoginShell(
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       stdout = keep(stdout + chunk);
+      options.onStdout?.(chunk);
     });
     child.stderr.on("data", (chunk: string) => {
       stderr = keep(stderr + chunk);

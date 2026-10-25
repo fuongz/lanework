@@ -197,7 +197,9 @@ export function registerAgentSetup(devUrl?: string): void {
   handle(laneworkMcpChannels.login, devUrl, (args) => {
     if (args.length !== 1 || !isMcpAgent(args[0]))
       throw new Error('login takes "claude-code" or "codex"');
-    return loginLaneworkMcp(args[0]);
+    return loginLaneworkMcp(args[0], (url) => {
+      void shell.openExternal(url).catch(() => {});
+    });
   });
   // On every launch: entries that are ours follow the mode, and a stdio one
   // gets this build's shim. Read from disk rather than `currentSession()`,
