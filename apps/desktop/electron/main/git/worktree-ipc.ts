@@ -14,6 +14,7 @@ import {
   type FileSide,
   type FileView,
   LAUNCHABLE,
+  opensInDefaultApp,
   type SyncAction,
   type WorktreePatch,
   type WorktreeState,
@@ -23,6 +24,7 @@ import { handle } from "../ipc";
 import { knownWorkspace } from "../workspaces";
 import { readFolders } from "../workspaces/store";
 import {
+  assertReadable,
   branches,
   commit,
   fileText,
@@ -147,6 +149,10 @@ async function repo(
 /**
  * The repository's top level.
  *
+ * For a write the user asked for, and for the Files reads that never run
+ * `git` past finding the top. Anything else the app reads on its own goes
+ * through {@link readable}.
+ *
  * @throws When the folder has no local repository.
  */
 async function top(slug: string, folder = 0): Promise<string> {
@@ -156,10 +162,32 @@ async function top(slug: string, folder = 0): Promise<string> {
   return found.top;
 }
 
-/** The repository's status, or the state that says why there is none. */
+/**
+ * The repository's top level, once its automatic reads are allowed (FE-77,
+ * D6).
+ *
+ * @throws When the folder has no local repository.
+ * @throws {ReadsRefusedError} When the user chose not to let the folder's git
+ *   settings run.
+ */
+async function readable(slug: string, folder = 0): Promise<string> {
+  const path = await top(slug, folder);
+  await assertReadable(path);
+  return path;
+}
+
+/**
+ * The repository's status, or the state that says why there is none.
+ *
+ * NOTE: Read on project open, on focus, and for the rail's badges: the
+ * automatic read the trust prompt exists for. A refusal is thrown, and the
+ * Changes screen shows it as its error; the badge stays empty.
+ */
 async function current(slug: string, folder = 0): Promise<WorktreeState> {
   const found = await repo(slug, folder);
-  return "state" in found ? found.state : status(found.top);
+  if ("state" in found) return found.state;
+  await assertReadable(found.top);
+  return status(found.top);
 }
 
 /**
@@ -180,7 +208,7 @@ export function registerWorktree(devUrl?: string): void {
     worktreeChannels.files,
     devUrl,
     async (args): Promise<FileListing> =>
-      listFiles(await top(slugOf(args[0]), folderOf(args[1]))),
+      listFiles(await readable(slugOf(args[0]), folderOf(args[1]))),
   );
 
   handle(
@@ -207,6 +235,8 @@ export function registerWorktree(devUrl?: string): void {
       const primary = await folderAt(slug, 0);
       const found = await locate(primary);
       if (found.kind !== "ready" || !primary) return null;
+      // A bare name is looked up in `ls-files`: an automatic read.
+      await assertReadable(found.top);
       return locateInRepo(found.top, primary, path);
     },
   );
@@ -214,8 +244,16 @@ export function registerWorktree(devUrl?: string): void {
   // "Open in Default App" from the Files tree's menu.
   //
   // NOTE: Opening an app, a script or an executable RUNS it, and a repository
-  // is full of files an agent wrote. Those are refused here, not only hidden
-  // in the menu. Reveal in Finder is the way to them.
+  // is full of files an agent wrote (FE-77, D8 / SX-04).
+  //
+  // - The path is resolved all the way through: a link is judged by what it
+  //   points at, and one that leaves the repository is refused.
+  // - A directory is refused: an `.app` or a `.workflow` is one, and so is
+  //   any folder macOS treats as a bundle.
+  // - Anything `LAUNCHABLE` names, or with an execute bit, is refused.
+  // - Only a document or media type ({@link opensInDefaultApp}) goes to the
+  //   default app. Anything else (`.fileloc`, `.vbs`, a name with no
+  //   extension) is revealed in Finder instead, where the user decides.
   handle(worktreeChannels.openDefault, devUrl, async (args): Promise<void> => {
     const path = pathOf(args[1]);
     const full = await locateFile(
@@ -224,8 +262,14 @@ export function registerWorktree(devUrl?: string): void {
     );
     if (!full) throw new Error("That file is not there any more.");
     const info = await stat(full);
-    if (LAUNCHABLE.test(full) || (info.isFile() && (info.mode & 0o111) !== 0))
+    if (!info.isFile())
+      throw new Error("Lanework opens files only. Use Reveal in Finder.");
+    if (LAUNCHABLE.test(full) || (info.mode & 0o111) !== 0)
       throw new Error("Lanework does not open files that would run.");
+    if (!opensInDefaultApp(full)) {
+      shell.showItemInFolder(full);
+      return;
+    }
     const failed = await shell.openPath(full);
     if (failed) throw new Error(failed);
   });
@@ -252,7 +296,8 @@ export function registerWorktree(devUrl?: string): void {
   handle(
     worktreeChannels.patch,
     devUrl,
-    async (args): Promise<WorktreePatch> => patch(await top(slugOf(args[0]))),
+    async (args): Promise<WorktreePatch> =>
+      patch(await readable(slugOf(args[0]))),
   );
 
   handle(
@@ -261,7 +306,11 @@ export function registerWorktree(devUrl?: string): void {
     async (args): Promise<string | null> => {
       if (typeof args[1] !== "string" || args[1].length > 4_096)
         throw new Error("That is not a file in this repository.");
-      return fileText(await top(slugOf(args[0])), args[1], sideOf(args[2]));
+      return fileText(
+        await readable(slugOf(args[0])),
+        args[1],
+        sideOf(args[2]),
+      );
     },
   );
 
@@ -336,12 +385,12 @@ export function registerWorktree(devUrl?: string): void {
     const skip = args[1];
     if (typeof skip !== "number" || !Number.isInteger(skip) || skip < 0)
       throw new Error("That is not a page of history.");
-    return log(await top(slugOf(args[0])), skip);
+    return log(await readable(slugOf(args[0])), skip);
   });
 
   handle(worktreeChannels.show, devUrl, async (args): Promise<CommitChange> => {
     if (typeof args[1] !== "string") throw new Error("A commit is required.");
-    return show(await top(slugOf(args[0])), args[1]);
+    return show(await readable(slugOf(args[0])), args[1]);
   });
 
   handle(
@@ -349,7 +398,9 @@ export function registerWorktree(devUrl?: string): void {
     devUrl,
     async (args): Promise<BranchList | null> => {
       const found = await repo(slugOf(args[0]));
-      return "state" in found ? null : branches(found.top);
+      if ("state" in found) return null;
+      await assertReadable(found.top);
+      return branches(found.top);
     },
   );
 

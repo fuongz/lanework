@@ -134,6 +134,22 @@ function env(path: string | null): NodeJS.ProcessEnv {
   out.NO_COLOR = "1";
   out.GH_NO_UPDATE_NOTIFIER = "1";
   out.GH_SPINNER_DISABLED = "1";
+  // NOTE: `gh` runs `git` itself (`gh repo view` in a folder reads its
+  // remotes). Those runs get the read flags `runner.ts` gives the app's own
+  // reads (FE-77, D1): no fsmonitor, no hook, no signature check, no index
+  // write. Appended after any the user's environment already sets.
+  const base = Number.parseInt(out.GIT_CONFIG_COUNT ?? "0", 10) || 0;
+  const forced: [string, string][] = [
+    ["core.fsmonitor", "false"],
+    ["core.hooksPath", "/dev/null"],
+    ["log.showSignature", "false"],
+  ];
+  forced.forEach(([key, value], index) => {
+    out[`GIT_CONFIG_KEY_${base + index}`] = key;
+    out[`GIT_CONFIG_VALUE_${base + index}`] = value;
+  });
+  out.GIT_CONFIG_COUNT = String(base + forced.length);
+  out.GIT_OPTIONAL_LOCKS = "0";
   return out;
 }
 

@@ -3,10 +3,9 @@
 //
 // NOTE: Read-only, and nothing here imports Electron. Main calls it, and a
 // spec drives it under plain Node against a fake home folder.
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { type FSWatcher, watch } from "node:fs";
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { constants, type FSWatcher, watch } from "node:fs";
+import { open, readdir, realpath, stat } from "node:fs/promises";
 import {
   basename,
   dirname,
@@ -17,7 +16,6 @@ import {
   relative,
   resolve,
 } from "node:path";
-import { promisify } from "node:util";
 import {
   type ClaudeInstructionMode,
   type EffectiveInstructions,
@@ -31,12 +29,15 @@ import {
   type InstructionNode,
   type InstructionScope,
 } from "../../../shared/instructions";
-import { readRange } from "../terminal/agent-sessions";
-
-const run = promisify(execFile);
+import { gitReadOut } from "../git/runner";
+import { readsAllowed } from "../git/trust-gate";
 
 /** The most of one file a read takes. Instruction files are a few KB. */
 export const INSTRUCTION_READ_MAX = 256 * 1024;
+/** The most of a settings file a read takes; a larger one is not read. */
+const SETTINGS_MAX = 1024 * 1024;
+/** `~/.claude.json` keeps every project's history, so it runs to megabytes. */
+const CLAUDE_JSON_MAX = 32 * 1024 * 1024;
 /** The most an Effective view gathers, every file together (FE-37/D4). */
 const EFFECTIVE_MAX = 1024 * 1024;
 /** Claude follows imports four hops deep and no further. */
@@ -113,9 +114,59 @@ type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json =>
   !!value && typeof value === "object" && !Array.isArray(value);
 
-async function readJson(path: string): Promise<Json | null> {
+/**
+ * The first `max` bytes of `path`, and its size, if it is a regular file.
+ *
+ * A project commits whatever it likes under `.claude/` (SX-07): a link to
+ * `/dev/zero` would buffer until the heap runs out, and a FIFO would block
+ * the read forever. So the path is stat'ed first and refused unless it is a
+ * regular file, then opened without blocking and checked again on the open
+ * handle, in case it changed in between.
+ *
+ * @throws When the path is missing or not a regular file.
+ */
+async function readHead(
+  path: string,
+  max: number,
+): Promise<{ text: string; size: number }> {
+  if (!(await stat(path)).isFile()) throw new Error("That is not a file.");
+  const handle = await open(
+    path,
+    constants.O_RDONLY | (constants.O_NONBLOCK ?? 0),
+  );
   try {
-    const value: unknown = JSON.parse(await readFile(path, "utf8"));
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error("That is not a file.");
+    const length = Math.min(info.size, max);
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, 0);
+    return {
+      text: buffer.subarray(0, bytesRead).toString("utf8"),
+      size: info.size,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+/** The whole of `path` when it is a regular file of at most `max` bytes. */
+async function readWhole(path: string, max: number): Promise<string | null> {
+  try {
+    const { text, size } = await readHead(path, max);
+    return size > max ? null : text;
+  } catch {
+    return null;
+  }
+}
+
+async function readJson(
+  path: string,
+  max = SETTINGS_MAX,
+): Promise<Json | null> {
+  const text = await readWhole(path, max);
+  if (text === null) return null;
+  try {
+    const value: unknown = JSON.parse(text);
     return isObject(value) ? value : null;
   } catch {
     return null;
@@ -123,7 +174,7 @@ async function readJson(path: string): Promise<Json | null> {
 }
 
 async function readText(path: string): Promise<string | null> {
-  return readFile(path, "utf8").catch(() => null);
+  return readWhole(path, SETTINGS_MAX);
 }
 
 const isFile = (path: string) =>
@@ -149,13 +200,17 @@ function ancestors(folder: string): string[] {
   }
 }
 
-/** The working tree's root, as Codex finds it, or else the folder itself. */
+/**
+ * The working tree's root, as Codex finds it, or else the folder itself.
+ *
+ * NOTE: An automatic read (FE-77/D6): a folder the user has not trusted, or
+ * one with risky git config they declined, reads as if it were no repository.
+ */
 async function projectRoot(folder: string): Promise<string> {
   try {
-    const { stdout } = await run("git", ["rev-parse", "--show-toplevel"], {
-      cwd: folder,
+    if (!(await readsAllowed(folder))) return folder;
+    const stdout = await gitReadOut(folder, ["rev-parse", "--show-toplevel"], {
       timeout: 5_000,
-      windowsHide: true,
       maxBuffer: 64 * 1024,
     });
     const root = stdout.trim();
@@ -338,11 +393,10 @@ class Gatherer {
 
   async text(file: InstructionFile): Promise<string> {
     if (file.missing || !file.markdown) return "";
-    return readRange(
-      file.path,
-      0,
-      Math.min(file.size, INSTRUCTION_READ_MAX),
-    ).catch(() => "");
+    return readHead(file.path, INSTRUCTION_READ_MAX).then(
+      ({ text }) => text,
+      () => "",
+    );
   }
 }
 
@@ -372,7 +426,7 @@ class ClaudeReader {
       readJson(join(claudeHome, "settings.json")),
       readJson(join(folder, ".claude", "settings.json")),
       readJson(join(folder, ".claude", "settings.local.json")),
-      readJson(claudeJson),
+      readJson(claudeJson, CLAUDE_JSON_MAX),
     ]);
     this.mode = claudeMode(user);
     this.excludes = [user, project, local].flatMap((settings) =>
@@ -640,7 +694,8 @@ class ClaudeReader {
  */
 async function blank(file: InstructionFile): Promise<boolean> {
   if (file.missing || file.size === 0) return true;
-  const head = await readRange(file.path, 0, Math.min(file.size, 4096)).catch(
+  const head = await readHead(file.path, Math.min(file.size, 4096)).then(
+    ({ text }) => text,
     () => "",
   );
   return !head.trim();
@@ -916,17 +971,11 @@ export async function readInstruction(
   if (file.missing) throw new Error("There is no file there.");
   if (!file.markdown)
     throw new Error("Only Markdown files are shown here; reveal it instead.");
-  const info = await stat(path);
-  if (!info.isFile()) throw new Error("That is not a file.");
-  const raw = await readRange(
-    path,
-    0,
-    Math.min(info.size, INSTRUCTION_READ_MAX),
-  );
+  const { text: raw, size } = await readHead(path, INSTRUCTION_READ_MAX);
   const rule = ruleLike(tree, id) ? splitRule(raw) : null;
   const body = rule ? rule.body : raw;
   return {
-    file: { ...file, size: info.size },
+    file: { ...file, size },
     body,
     raw,
     paths: rule?.paths ?? [],
@@ -934,7 +983,7 @@ export async function readInstruction(
       const target = instructionId(importTarget(roots.home, path, match.path));
       return { path: match.path, file: tree.paths.has(target) ? target : null };
     }),
-    truncated: info.size > INSTRUCTION_READ_MAX,
+    truncated: size > INSTRUCTION_READ_MAX,
   };
 }
 
@@ -963,7 +1012,8 @@ export async function effectiveInstructions(
           INSTRUCTION_READ_MAX,
           Math.max(EFFECTIVE_MAX - total, 0),
         );
-        const raw = await readRange(path, 0, Math.min(file.size, limit)).catch(
+        const raw = await readHead(path, Math.min(file.size, limit)).then(
+          ({ text }) => text,
           () => "",
         );
         text = entry.scope === "rules" ? splitRule(raw).body : raw;

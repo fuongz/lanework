@@ -38,6 +38,7 @@ import { broadcast, handle } from "../ipc";
 import { onRunningChanged } from "../terminal";
 import { terminalFolder } from "../workspaces";
 import { createAgentCli, createClaudeCli } from "./claude-cli";
+import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { createCodexModels } from "./codex-models";
 import { codexRolloutPath, readCodexConversation } from "./codex-transcript";
 import { createEngines } from "./engine";
@@ -316,6 +317,9 @@ export function registerConversation(
     terminalOn: bridge.terminalOn,
     killTerminal: bridge.kill,
     remember: (id, settings) => void store.remember(id, settings),
+    // FE-77/D3: Claude's trust record, under the test seam's home too.
+    trusted: (folder, env) =>
+      isClaudeTrusted(folder, claudeJsonFor(env, agentHome())),
   });
 
   // The conversations whose engine last answered `terminal`: when a tab

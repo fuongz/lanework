@@ -193,6 +193,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   // What the engine holds back, drawn above the composer instead.
   const queue = (engine.state !== "terminal" && engine.queue) || NOTHING;
   const paused = engine.state !== "terminal" && engine.paused === true;
+  const untrusted = engine.state !== "terminal" && engine.untrusted === true;
   const held = useMemo(() => new Set(queue.map((entry) => entry.id)), [queue]);
   // What was sent from here and is in the transcript now drops away.
   const waiting = sent.filter(
@@ -806,6 +807,13 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
             <p role="alert" className="text-destructive px-1 text-xs">
               {actionError ??
                 (engine.state === "error" ? engine.message : null)}
+            </p>
+          )}
+          {untrusted && (
+            <p role="status" className="text-muted-foreground px-1 text-xs">
+              This chat runs without the project's <code>.claude</code>{" "}
+              settings, because Claude hasn't trusted this folder yet. Open a
+              Claude tab here once and accept its trust prompt.
             </p>
           )}
           {workspace && (

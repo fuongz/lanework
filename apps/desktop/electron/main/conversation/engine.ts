@@ -24,6 +24,7 @@ import {
   type ComposerSettings,
   type ConversationEvent,
   checkSettings,
+  type EngineQueue,
   type EngineState,
   isPermission,
   type Permission,
@@ -33,6 +34,7 @@ import {
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
 import type { ClaudeCli } from "./claude-cli";
+import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { CodexEngine } from "./codex-engine";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { buildTurns, inputText, type Line } from "./transcript";
@@ -53,6 +55,11 @@ interface EngineDeps {
   killTerminal: (terminalId: string) => Promise<void>;
   /** The settings a turn was sent with, remembered for the next read. */
   remember: (conversation: string, settings: ComposerSettings) => void;
+  /**
+   * Whether Claude's own trust record covers `folder` (FE-77/D3); `env` is
+   * the CLI's. Asked at every process start. Defaults to `~/.claude.json`.
+   */
+  trusted?: (folder: string, env: Record<string, string>) => Promise<boolean>;
   spawn?: typeof spawnChild;
   /** How long a control request is waited on. */
   controlTimeoutMs?: number;
@@ -64,12 +71,18 @@ interface EngineDeps {
  * A `fresh` conversation has no transcript yet: the CLI starts it under `id`
  * (`--session-id`) instead of resuming it.
  *
+ * A folder Claude has not recorded as trusted loads user settings only
+ * (FE-77/D3, SX-01): `-p` skips Claude's trust dialog, so the repo's
+ * `.claude/settings*.json` hooks, `env` and `apiKeyHelper` would otherwise
+ * run unasked. A trusted folder's arguments are unchanged.
+ *
  * @throws When the settings are off the lists or `id` is not a session id.
  */
-function engineArgs(
+export function engineArgs(
   id: string,
   value: ComposerSettings,
   fresh = false,
+  trusted = true,
 ): string[] {
   const settings = checkSettings(value);
   if (!settings || !isAgentSessionId(id)) throw new Error("Unknown settings");
@@ -97,6 +110,7 @@ function engineArgs(
   // `fast_mode_state`); an account or model without fast mode ignores it.
   if (settings.fast)
     args.push("--settings", JSON.stringify({ fastMode: true }));
+  if (!trusted) args.push("--setting-sources", "user");
   return args;
 }
 
@@ -184,6 +198,11 @@ class Engine {
   buffer = "";
   /** Resolves when the current child exits. */
   exited: Promise<void> = Promise.resolve();
+  /**
+   * The running process loads user settings only: Claude has no trust on
+   * record for the folder (FE-77/D3). Set again at every start.
+   */
+  untrusted = false;
 
   constructor(
     readonly workspace: string,
@@ -199,7 +218,8 @@ class Engine {
   ) {}
 
   state(): EngineState {
-    const held = this.held.state();
+    const held: EngineQueue = this.held.state();
+    if (this.untrusted && this.child) held.untrusted = true;
     if (this.error && !this.busy)
       return { state: "error", message: this.error, ...held };
     if (this.busy && this.starting) return { state: "starting", ...held };
@@ -276,9 +296,16 @@ class Engine {
   async start(settings: ComposerSettings): Promise<void> {
     const cli = await this.deps.cli();
     const spawn = this.deps.spawn ?? spawnChild;
+    // NOTE: Asked again at every start, never cached: trust given in a
+    // Claude tab counts from the next process on (FE-77/D3).
+    const trusted = await (
+      this.deps.trusted ??
+      ((folder, env) => isClaudeTrusted(folder, claudeJsonFor(env)))
+    )(this.folder, cli.env).catch(() => false);
+    this.untrusted = !trusted;
     const child = spawn(
       cli.file,
-      engineArgs(this.conversation, settings, this.fresh),
+      engineArgs(this.conversation, settings, this.fresh, trusted),
       {
         cwd: this.folder,
         env: cli.env,
@@ -940,6 +967,17 @@ export function createEngines(deps: EngineDeps) {
     permissions(workspace: string, conversation: string): PermissionRequest[] {
       const engine = engines.get(keyOf(workspace, conversation));
       return engine ? [...engine.permissions.values()] : [];
+    },
+
+    /**
+     * The conversation's Claude process runs without the project's settings:
+     * Claude has no trust on record for its folder (FE-77/D3).
+     */
+    untrusted(workspace: string, conversation: string): boolean {
+      const engine = engines.get(keyOf(workspace, conversation));
+      return (
+        engine instanceof Engine && Boolean(engine.child) && engine.untrusted
+      );
     },
 
     async stop(workspace: string, conversation: string): Promise<void> {

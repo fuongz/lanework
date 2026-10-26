@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { constants } from "node:fs";
 import { open, readdir, realpath, rm, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, sep } from "node:path";
 import {
@@ -20,6 +20,16 @@ import {
   type WorktreePatch,
   type WorktreeState,
 } from "../../../shared/worktree";
+import {
+  GitMissingError,
+  gitReadOut as out,
+  gitRead as read,
+  gitWrite as write,
+  gitWriteOut as writeOut,
+} from "./runner";
+import { readsAllowed } from "./trust-gate";
+
+export { GitMissingError };
 
 /**
  * The project's local repository, driven through the `git` CLI.
@@ -30,9 +40,13 @@ import {
  * approved on FE-22 (D1), and they live here so the rule has one exception in
  * one place. A write anywhere else is a bug.
  *
- * - `execFile`, never `exec`: there is no shell, so a path with a space, a
- *   quote or a `;` is an argument, not syntax. Every path comes after `--`, so
+ * - Every call goes through `runner.ts` (FE-77, D1): reads with
+ *   {@link read}, which runs no hook and no fsmonitor, and the writes the user
+ *   asked for with {@link write}. Both pass `--literal-pathspecs`, so a file
+ *   named `*` is that file, never every file. Every path comes after `--`, so
  *   one that starts with a dash is a file, not a flag.
+ * - The IPC layer asks {@link assertReadable} before any read the app makes
+ *   on its own.
  * - Paths are checked against a fresh status before anything acts on them
  *   (`changed`). The renderer can only name a file git just called changed.
  *   That keeps `restore`, the one call that deletes, from deleting anything
@@ -55,69 +69,33 @@ const MAX_UNTRACKED_READS = 200;
 /** The largest file read in full for the viewer. A diff needs no more. */
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
-/** The most output one `git` call may produce before it fails. */
-const MAX_OUTPUT = 32 * 1024 * 1024;
+/**
+ * An automatic read of this folder was refused (FE-77, D6).
+ *
+ * The folder's git config or hooks name programs, and the user answered
+ * "Don't run" (or there was nobody to ask). The renderer shows the message as
+ * the screen's error, the same way it shows any read that failed.
+ */
+export class ReadsRefusedError extends Error {
+  constructor() {
+    super(
+      "Lanework did not read this repository. Its git settings run programs of their own, and you chose not to let them run.",
+    );
+    this.name = "ReadsRefusedError";
+  }
+}
 
 /**
- * Flags every call carries.
+ * Ask before the app reads `folder` with git on its own.
  *
- * - `core.quotepath=false` returns a non-ASCII filename as itself. Octal
- *   escapes would match neither the path on disk nor the path in the patch.
- * - `color.ui=never` and `--no-pager`, because only a parser reads this
- *   output.
+ * Everything the app runs without a click goes through here first: status on
+ * open and focus, the rail's badges, history, diffs, file lists. A write the
+ * user asked for by name is not gated; it keeps the user's hooks.
+ *
+ * @throws {ReadsRefusedError} When the reads are not allowed.
  */
-const BASE = [
-  "-c",
-  "core.quotepath=false",
-  "-c",
-  "color.ui=never",
-  "--no-pager",
-];
-
-class GitMissingError extends Error {}
-
-interface RunResult {
-  stdout: string;
-  code: number;
-}
-
-function run(
-  cwd: string,
-  args: string[],
-  options: { ok?: number[]; timeout?: number; env?: NodeJS.ProcessEnv } = {},
-): Promise<RunResult> {
-  const ok = options.ok ?? [0];
-  return new Promise((resolve, reject) => {
-    execFile(
-      "git",
-      [...BASE, ...args],
-      {
-        cwd,
-        timeout: options.timeout ?? 15_000,
-        maxBuffer: MAX_OUTPUT,
-        windowsHide: true,
-        encoding: "utf8",
-        env: options.env ?? process.env,
-      },
-      (error, stdout, stderr) => {
-        if (!error) return resolve({ stdout, code: 0 });
-        const code = typeof error.code === "number" ? error.code : null;
-        if (error.code === "ENOENT")
-          return reject(new GitMissingError("git is not installed."));
-        if (code !== null && ok.includes(code))
-          return resolve({ stdout, code });
-        // git's own words, trimmed to fit a toast. "Author identity unknown"
-        // or a pre-commit hook's output is the whole explanation. A generic
-        // "commit failed" would send the user to a terminal to find it.
-        const said = (stderr || stdout || error.message).trim();
-        reject(new Error(said.split("\n").slice(-6).join("\n").slice(0, 800)));
-      },
-    );
-  });
-}
-
-async function out(cwd: string, args: string[]): Promise<string> {
-  return (await run(cwd, args)).stdout;
+export async function assertReadable(folder: string): Promise<void> {
+  if (!(await readsAllowed(folder))) throw new ReadsRefusedError();
 }
 
 /**
@@ -149,7 +127,7 @@ export async function locate(
 }
 
 async function hasHead(top: string): Promise<boolean> {
-  const { code } = await run(top, ["rev-parse", "--verify", "-q", "HEAD"], {
+  const { code } = await read(top, ["rev-parse", "--verify", "-q", "HEAD"], {
     ok: [1],
   });
   return code === 0;
@@ -291,9 +269,23 @@ async function inside(top: string, path: string): Promise<string> {
   return join(parent, full.slice(full.lastIndexOf(sep) + 1));
 }
 
-/** A file's text, or null when it is binary, too big, or not there. */
+/**
+ * Open a file to read without waiting on it.
+ *
+ * `O_NONBLOCK`: opening a FIFO for reading would otherwise wait for a writer
+ * forever. The caller's `stat` on the handle then refuses anything that is
+ * not a regular file.
+ */
+function openToRead(full: string) {
+  return open(full, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+}
+
+/**
+ * A file's text, or null when it is binary, too big, not there, or not a
+ * regular file (a FIFO, a device, a directory).
+ */
 async function readText(full: string): Promise<string | null> {
-  const handle = await open(full, "r").catch(() => null);
+  const handle = await openToRead(full).catch(() => null);
   if (!handle) return null;
   try {
     const info = await handle.stat();
@@ -424,7 +416,7 @@ export async function patch(top: string): Promise<WorktreePatch> {
   for (const entry of untracked.slice(0, MAX_UNTRACKED_READS)) {
     // NOTE: Exit 1 is the answer here, not a failure. `--no-index` reports
     // "these differ" the way `diff(1)` does.
-    const { stdout } = await run(
+    const { stdout } = await read(
       top,
       ["diff", "--no-index", "--no-ext-diff", "--", "/dev/null", entry.path],
       { ok: [1] },
@@ -470,7 +462,7 @@ export async function stage(top: string, paths: string[]): Promise<void> {
   const { picked } = await changed(top, paths);
   if (!picked.length) return;
   // `-A` stages a deleted file as a deletion instead of refusing it.
-  await out(top, ["add", "-A", "--", ...withSources(picked)]);
+  await writeOut(top, ["add", "-A", "--", ...withSources(picked)]);
 }
 
 export async function unstage(top: string, paths: string[]): Promise<void> {
@@ -479,8 +471,8 @@ export async function unstage(top: string, paths: string[]): Promise<void> {
   const targets = withSources(picked);
   // A repository with no commit has nothing to restore the index from, so
   // `restore --staged` fails. The file leaves the index instead.
-  if (head) await out(top, ["restore", "--staged", "--", ...targets]);
-  else await out(top, ["rm", "--cached", "-r", "-q", "--", ...targets]);
+  if (head) await writeOut(top, ["restore", "--staged", "--", ...targets]);
+  else await writeOut(top, ["rm", "--cached", "-r", "-q", "--", ...targets]);
 }
 
 /**
@@ -510,7 +502,7 @@ export async function restore(top: string, paths: string[]): Promise<void> {
     } else fromHead.push(entry.path);
   }
   if (fromHead.length)
-    await out(top, [
+    await writeOut(top, [
       "restore",
       "--source=HEAD",
       "--staged",
@@ -519,7 +511,7 @@ export async function restore(top: string, paths: string[]): Promise<void> {
       ...fromHead,
     ]);
   if (dropFromIndex.length)
-    await out(top, ["rm", "--cached", "-f", "-q", "--", ...dropFromIndex]);
+    await writeOut(top, ["rm", "--cached", "-f", "-q", "--", ...dropFromIndex]);
   for (const path of remove)
     await rm(await inside(top, path), { force: true, recursive: false });
 }
@@ -535,7 +527,7 @@ export async function commit(
   // NOTE: A long timeout. A pre-commit hook (a formatter, a type check) runs
   // inside this call. Killing it at fifteen seconds would leave a commit
   // half-made by a hook that did not finish.
-  await run(
+  await write(
     top,
     ["commit", ...(mode === "tracked" ? ["-a"] : []), "-m", message],
     { timeout: 180_000 },
@@ -594,7 +586,7 @@ export async function sync(
   const env = networkEnv();
 
   if (action === "fetch") {
-    await run(top, ["fetch", "--prune", ...(remote ? [remote] : [])], {
+    await write(top, ["fetch", "--prune", ...(remote ? [remote] : [])], {
       timeout: 90_000,
       env,
     });
@@ -605,7 +597,7 @@ export async function sync(
   // the pre-push hook, and killing either halfway leaves the branch between
   // states.
   if (action === "pull" || action === "pull-rebase") {
-    await run(
+    await write(
       top,
       ["pull", action === "pull-rebase" ? "--rebase" : "--no-rebase"],
       { timeout: 180_000, env },
@@ -613,7 +605,7 @@ export async function sync(
     return;
   }
 
-  const branch = await run(
+  const branch = await read(
     top,
     ["symbolic-ref", "--quiet", "--short", "HEAD"],
     {
@@ -621,7 +613,7 @@ export async function sync(
     },
   );
   if (branch.code !== 0) throw new Error("Check out a branch to push it.");
-  const upstream = await run(
+  const upstream = await read(
     top,
     ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     { ok: [128] },
@@ -637,7 +629,7 @@ export async function sync(
           remote ?? (names.includes("origin") ? "origin" : names[0]),
           "HEAD",
         ];
-  await run(top, args, { timeout: 180_000, env });
+  await write(top, args, { timeout: 180_000, env });
 }
 
 /** The most unpushed commits {@link log} marks. Past it, rows go unmarked. */
@@ -747,14 +739,19 @@ export async function fileText(
   path: string,
   side: FileSide,
 ): Promise<string | null> {
-  if (side.kind === "worktree") return readText(await inside(top, path));
+  // NOTE: Resolved all the way through, the final link included (SX-06). A
+  // committed symlink to `~/.ssh/id_ed25519` must not become a way to read it.
+  if (side.kind === "worktree") {
+    const full = await resolved(top, path);
+    return full ? readText(full) : null;
+  }
   const rev = side.rev;
   const base = rev.endsWith("^") ? rev.slice(0, -1) : rev;
   if (base !== "HEAD" && !SHA.test(base))
     throw new Error("That is not a valid commit.");
   if (!path || isAbsolute(path) || path.split("/").includes(".."))
     throw new Error("That file is not in this repository.");
-  const { stdout, code } = await run(top, ["show", `${rev}:${path}`], {
+  const { stdout, code } = await read(top, ["show", `${rev}:${path}`], {
     ok: [128],
   });
   if (code !== 0) return null;
@@ -896,7 +893,7 @@ export async function listDir(top: string, dir: string): Promise<FileListing> {
 export async function viewFile(top: string, path: string): Promise<FileView> {
   const full = await resolved(top, path);
   if (!full) return { kind: "missing" };
-  const handle = await open(full, "r").catch(() => null);
+  const handle = await openToRead(full).catch(() => null);
   if (!handle) return { kind: "missing" };
   try {
     const info = await handle.stat();
@@ -991,7 +988,7 @@ export async function branches(top: string): Promise<BranchList> {
       "refs/heads",
       "refs/remotes",
     ]),
-    run(top, ["symbolic-ref", "--quiet", "--short", "HEAD"], { ok: [1] }),
+    read(top, ["symbolic-ref", "--quiet", "--short", "HEAD"], { ok: [1] }),
   ]);
   const local: string[] = [];
   const remote: string[] = [];
@@ -1027,11 +1024,11 @@ export async function branches(top: string): Promise<BranchList> {
 export async function switchBranch(top: string, name: string): Promise<void> {
   const list = await branches(top);
   if (list.local.includes(name)) {
-    await run(top, ["switch", name], { timeout: 60_000 });
+    await write(top, ["switch", name], { timeout: 60_000 });
     return;
   }
   if (list.remote.includes(name)) {
-    await run(top, ["switch", "--track", name], { timeout: 60_000 });
+    await write(top, ["switch", "--track", name], { timeout: 60_000 });
     return;
   }
   throw new Error(`${name} is not a branch in this repository.`);
@@ -1044,13 +1041,16 @@ export async function switchBranch(top: string, name: string): Promise<void> {
  * is epoch ms, or null with no commit yet. It is the committer's time, not the
  * author's: an amend or a rebase rewrites HEAD now, and what it took in is
  * committed now.
+ *
+ * @throws {ReadsRefusedError} When the folder's automatic reads are refused.
  */
 export async function repoFacts(
   top: string,
 ): Promise<{ headAt: number | null; worktrees: string[] }> {
+  await assertReadable(top);
   const [head, list] = await Promise.all([
-    run(top, ["log", "-1", "--format=%ct", "HEAD"], { ok: [128] }),
-    run(top, ["worktree", "list", "--porcelain", "-z"], { ok: [128, 129] }),
+    read(top, ["log", "-1", "--format=%ct", "HEAD"], { ok: [128] }),
+    read(top, ["worktree", "list", "--porcelain", "-z"], { ok: [128, 129] }),
   ]);
   const seconds = Number(head.code === 0 ? head.stdout.trim() : NaN);
   return {

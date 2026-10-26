@@ -1,5 +1,5 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { basename } from "node:path";
+import { app, BrowserWindow, dialog, type MessageBoxOptions } from "electron";
 import {
   type CommitDiff,
   type FileText,
@@ -40,11 +40,11 @@ import {
   submitReview,
 } from "./client";
 import { GitHubError, gh, ghBlocked, ghJson, relocateGh } from "./gh";
+import type { RepoTrustScan, TrustAnswer, TrustFinding } from "./repo-trust";
+import { gitReadOut } from "./runner";
 import { removeLegacyStore } from "./store";
+import { readsAllowed, setTrustAsker } from "./trust-gate";
 import { registerWorktree } from "./worktree-ipc";
-
-/** `execFile` as a promise, for `git` itself. */
-const run = promisify(execFile);
 
 /**
  * How long a pull-request list stays fresh.
@@ -190,13 +190,15 @@ const detected = new Map<string, { at: number; value: Detected | null }>();
 /** The session's fork/parent choice, by project slug. */
 const sides = new Map<string, RepoSide>();
 
-/** The folder's `origin` URL; null when there is none to read. */
+/**
+ * The folder's `origin` URL; null when there is none to read.
+ *
+ * The caller has already asked {@link readsAllowed}.
+ */
 async function originUrl(folder: string): Promise<string | null> {
   try {
-    const { stdout } = await run("git", ["remote", "get-url", "origin"], {
-      cwd: folder,
+    const stdout = await gitReadOut(folder, ["remote", "get-url", "origin"], {
       timeout: 5_000,
-      windowsHide: true,
       maxBuffer: 64 * 1024,
     });
     return stdout.trim() || null;
@@ -243,12 +245,18 @@ function refFrom(value: unknown): RepoRef | null {
  * - {@link parseRepoRef} checks the shape of every name before it reaches
  *   `gh`.
  *
+ * - NOTE: Both `git remote` and `gh repo view` (which runs `git` itself) read
+ *   the folder on the app's own account, so the folder's trust is asked first
+ *   (FE-77, D6). A refused folder reads as "not a GitHub repository", never
+ *   cached, so trusting it later shows its pull requests.
+ *
  * @returns `sure: false` when `gh` could not be asked, so the answer is a
  *   guess that must not be cached.
  */
 async function detect(
   folder: string,
 ): Promise<{ value: Detected | null; sure: boolean }> {
+  if (!(await readsAllowed(folder))) return { value: null, sure: false };
   const url = await originUrl(folder);
   if (!url) return { value: null, sure: true };
   const host = remoteHost(url);
@@ -499,8 +507,66 @@ const VERDICTS = new Set<ReviewVerdict>([
 /** The repo sides the renderer may pick. */
 const SIDES = new Set<RepoSide>(["self", "parent"]);
 
+/** The most findings the trust prompt lists; the rest are counted. */
+const MAX_LISTED_FINDINGS = 12;
+
+/** One finding as the trust prompt lists it. */
+function findingLine(finding: TrustFinding): string {
+  if (finding.kind === "hook") return `• Hook: ${finding.name}`;
+  const value =
+    finding.value.length > 120
+      ? `${finding.value.slice(0, 117)}...`
+      : finding.value;
+  return `• ${finding.key} = ${value}`;
+}
+
+/**
+ * Ask the user once whether a risky folder's git settings may run (FE-77,
+ * D6).
+ *
+ * "Don't run" is the default and what Escape picks: a dialog dismissed
+ * without reading it must not run anything.
+ *
+ * NOTE: An unpackaged app booted by the test suite cannot answer a native
+ * dialog, and would wait on it forever. There the answer is "Don't run".
+ */
+async function askTrust(
+  folder: string,
+  scan: RepoTrustScan,
+): Promise<TrustAnswer> {
+  if (!app.isPackaged && process.env.LANEWORK_TEST_USER_DATA)
+    return "restricted";
+  const listed = scan.findings.slice(0, MAX_LISTED_FINDINGS).map(findingLine);
+  const more = scan.findings.length - listed.length;
+  if (more > 0) listed.push(`• and ${more} more`);
+  const options: MessageBoxOptions = {
+    type: "warning",
+    buttons: ["Don't run", "Trust this folder"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    message: `Let Lanework read "${basename(folder) || folder}" automatically?`,
+    detail: [
+      folder,
+      "",
+      "This repository's own git settings name programs:",
+      ...listed,
+      "",
+      "Lanework reads a repository by itself to show its changes, history and files. For this folder, those reads would run the programs above.",
+      "",
+      "Choose Trust this folder only if you know where these settings came from. With Don't run, Lanework leaves the folder unread. Commits, pushes and other actions you start still work.",
+    ].join("\n"),
+  };
+  const parent = BrowserWindow.getFocusedWindow();
+  const { response } = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options);
+  return response === 1 ? "trusted" : "restricted";
+}
+
 /** Register the pull-request, issue and worktree IPC handlers. */
 export function registerGit(devUrl?: string): void {
+  setTrustAsker(askTrust);
   registerWorktree(devUrl);
   // Delete what the app stored about GitHub before `gh` made its requests.
   void removeLegacyStore();

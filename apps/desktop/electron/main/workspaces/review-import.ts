@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { folderExists, listCardFiles, REVIEW_ROOT } from "./local-folder";
 import {
@@ -177,6 +178,42 @@ function escapeRegex(value: string): string {
 }
 
 /** Every review file in the repo, read and parsed. */
+/** The largest card file read; a card is a few KB of markdown. */
+const CARD_MAX = 1024 * 1024;
+
+/**
+ * A card file's markdown, or why it was not read.
+ *
+ * NOTE: The folder is the repository's (SX-07). A FIFO would block the read
+ * and a huge file would be buffered whole, so it is stat'ed first, opened
+ * without blocking, and checked again on the open handle.
+ */
+async function readCard(
+  file: string,
+): Promise<{ markdown: string } | { problem: string }> {
+  const unreadable = { problem: "could not be read" };
+  try {
+    if (!(await stat(file)).isFile()) return unreadable;
+    const handle = await open(
+      file,
+      constants.O_RDONLY | (constants.O_NONBLOCK ?? 0),
+    );
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) return unreadable;
+      if (info.size > CARD_MAX)
+        return { problem: `larger than ${CARD_MAX / 1024 / 1024} MB` };
+      const buffer = Buffer.alloc(info.size);
+      const { bytesRead } = await handle.read(buffer, 0, info.size, 0);
+      return { markdown: buffer.subarray(0, bytesRead).toString("utf8") };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return unreadable;
+  }
+}
+
 async function readReviewCards(root: string): Promise<{
   cards: ReviewFileCard[];
   problems: { path: string; reason: string }[];
@@ -194,14 +231,12 @@ async function readReviewCards(root: string): Promise<{
     });
 
   for (const file of files) {
-    const markdown = await readFile(file, "utf8").catch(() => null);
-    if (markdown === null) {
-      problems.push({
-        path: relative(root, file),
-        reason: "could not be read",
-      });
+    const read = await readCard(file);
+    if ("problem" in read) {
+      problems.push({ path: relative(root, file), reason: read.problem });
       continue;
     }
+    const { markdown } = read;
     // NOTE: The board's own rule for "is this a card": a status, a lane
     // folder, or a date folder. Skipping a file the board would show leaves a
     // card behind at the cutover, with nothing reporting the loss.

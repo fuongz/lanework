@@ -306,6 +306,84 @@ export const LAUNCHABLE =
   /\.(app|command|tool|terminal|workflow|action|scpt|applescript|sh|bash|zsh|fish|py|rb|pl|jar|exe|bat|cmd|ps1|msi|pkg|mpkg|dmg|webloc|inetloc|url|desktop)\/?$/i;
 
 /**
+ * The extensions "Open in Default App" hands to the system (FE-77, D8).
+ *
+ * An allowlist, not a denylist: a denylist misses whatever it did not think
+ * of (`.fileloc`, `.vbs`, `.lnk`, the next one). These are documents and
+ * media whose default app shows them. No archive (opening one unpacks it),
+ * no HTML (a browser runs its scripts). Anything else is revealed in Finder.
+ */
+const DOCUMENT_TYPES = new Set([
+  "txt",
+  "md",
+  "markdown",
+  "rtf",
+  "pdf",
+  "csv",
+  "tsv",
+  "json",
+  "yaml",
+  "yml",
+  "toml",
+  "xml",
+  "log",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "tiff",
+  "heic",
+  "ico",
+  "mp3",
+  "wav",
+  "m4a",
+  "aac",
+  "flac",
+  "ogg",
+  "mp4",
+  "mov",
+  "m4v",
+  "webm",
+  "mkv",
+  "avi",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "odt",
+  "ods",
+  "odp",
+  "pages",
+  "numbers",
+  "key",
+  "epub",
+]);
+
+/**
+ * Whether "Open in Default App" may open `path` in its default app.
+ *
+ * By the last extension of the last segment, case-insensitive. A name with
+ * none (`Makefile`, `.env`) is not a document: it is revealed instead.
+ * Main asks this of the resolved path, so a link named `a.pdf` that points at
+ * `a.command` is judged as `a.command`.
+ */
+export function opensInDefaultApp(path: string): boolean {
+  const name =
+    path
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return false;
+  return DOCUMENT_TYPES.has(name.slice(dot + 1).toLowerCase());
+}
+
+/**
  * Line counts per file, read straight off a unified patch.
  *
  * Counted from the patch rather than asked of `--numstat` separately, so the

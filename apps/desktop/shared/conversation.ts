@@ -499,6 +499,12 @@ export interface EngineQueue {
   queue?: QueuedMessage[];
   /** Stopped with messages waiting: they go on Resume, or the next send. */
   paused?: boolean;
+  /**
+   * The running Claude process loads user settings only: Claude has no
+   * trust on record for the folder, so the repo's `.claude` settings stay
+   * off until the user trusts it in a Claude tab (FE-77/D3).
+   */
+  untrusted?: true;
 }
 
 /**

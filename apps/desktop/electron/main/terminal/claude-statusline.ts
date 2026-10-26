@@ -1,11 +1,47 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { appHomeDir } from "../paths";
 import { CLAUDE_USAGE_FILE } from "./claude-usage";
 
+/** The largest settings file read; a larger one leaves the status line be. */
+const SETTINGS_MAX = 1024 * 1024;
+
 /** `text` as one single-quoted shell word. */
 const quote = (text: string) => `'${text.replace(/'/g, "'\\''")}'`;
+
+/**
+ * `file`'s text, or null unless it is a regular file of at most
+ * {@link SETTINGS_MAX} bytes.
+ *
+ * NOTE: This runs in the pty host, which every terminal shares, and the
+ * project's `.claude/settings.json` is whatever the repository committed
+ * (SX-07). A link to `/dev/zero` read whole would exhaust the heap, and a
+ * FIFO would block the host forever. So it is stat'ed first, opened without
+ * blocking, and checked again on the open descriptor before one bounded read.
+ */
+function readSettings(file: string): string | null {
+  if (!statSync(file).isFile()) return null;
+  const fd = openSync(file, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+  try {
+    const info = fstatSync(fd);
+    if (!info.isFile() || info.size > SETTINGS_MAX) return null;
+    const buffer = Buffer.alloc(info.size);
+    const read = readSync(fd, buffer, 0, info.size, 0);
+    return buffer.subarray(0, read).toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
 
 /**
  * The ` --settings …` argument that wraps the user's status line in
@@ -71,8 +107,8 @@ export function claudeStatuslineArgs(
   try {
     for (const file of files) {
       if (!existsSync(file)) continue;
-      const text = readFileSync(file, "utf8");
-      if (text.length > 1024 * 1024) return "";
+      const text = readSettings(file);
+      if (text === null) return "";
       const settings = JSON.parse(text);
       if (!settings || typeof settings !== "object" || Array.isArray(settings))
         return "";

@@ -3,7 +3,6 @@
 //
 // NOTE: Read-only, and nothing here imports Electron. Main calls it, and a
 // spec drives it under plain Node against a fake home folder.
-import { execFile } from "node:child_process";
 import { type FSWatcher, watch } from "node:fs";
 import { readdir, realpath, stat } from "node:fs/promises";
 import {
@@ -14,7 +13,6 @@ import {
   relative,
   resolve,
 } from "node:path";
-import { promisify } from "node:util";
 import {
   isMemoryFile,
   MEMORY_INDEX,
@@ -22,9 +20,9 @@ import {
   type MemoryFile,
   memoryType,
 } from "../../../shared/memory";
+import { gitReadOut } from "../git/runner";
+import { readsAllowed } from "../git/trust-gate";
 import { claudeProjectDir, readRange } from "../terminal/agent-sessions";
-
-const run = promisify(execFile);
 
 /** The most of one memory a read takes. Claude's are a few KB. */
 export const MEMORY_READ_MAX = 256 * 1024;
@@ -44,15 +42,15 @@ const SETTLE_MS = 300;
  * every worktree of one repo shares one memory folder. Outside a repository
  * it is the folder itself. `--git-common-dir` gives the repository's own
  * `.git` from a worktree too, where `--show-toplevel` would give the
- * worktree's. `execFile`, not `exec`, and read-only: `rev-parse` changes
- * nothing.
+ * worktree's. Through the runner's read flags, so no hook or fsmonitor of
+ * the repository runs (FE-77/D1). An automatic read (D6): a folder whose git
+ * config the user has not trusted reads as if it were no repository.
  */
 export async function memoryRoot(folder: string): Promise<string> {
   try {
-    const { stdout } = await run("git", ["rev-parse", "--git-common-dir"], {
-      cwd: folder,
+    if (!(await readsAllowed(folder))) return folder;
+    const stdout = await gitReadOut(folder, ["rev-parse", "--git-common-dir"], {
       timeout: 5_000,
-      windowsHide: true,
       maxBuffer: 64 * 1024,
     });
     const common = resolve(folder, stdout.trim());

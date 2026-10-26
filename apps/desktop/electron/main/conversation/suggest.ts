@@ -1,10 +1,12 @@
 // What `/` and `@` offer in the composer (FE-62/D8): slash commands and
 // skills, or files in the workspace's folder, fuzzy-matched. Nothing here
 // imports Electron.
-import { execFile } from "node:child_process";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readdir, stat } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import type { Suggestion } from "../../../shared/conversation";
+import { gitReadOut } from "../git/runner";
+import { readsAllowed } from "../git/trust-gate";
 
 /** The most suggestions one query returns. */
 const LIMIT = 50;
@@ -71,6 +73,36 @@ function rank(
     .map((entry) => entry.item);
 }
 
+/** How much of a command or skill file is read for its description. */
+const HEAD_BYTES = 16 * 1024;
+
+/**
+ * The first {@link HEAD_BYTES} of `file`, or "" unless it is a regular file.
+ *
+ * A project's `.claude/` is the project's to fill (SX-07): a link to
+ * `/dev/zero` must not be read whole, and a FIFO must not block. Stat'ed
+ * first, opened without blocking, and checked again on the open handle.
+ */
+async function readHead(file: string): Promise<string> {
+  try {
+    if (!(await stat(file)).isFile()) return "";
+    const handle = await open(
+      file,
+      constants.O_RDONLY | (constants.O_NONBLOCK ?? 0),
+    );
+    try {
+      if (!(await handle.stat()).isFile()) return "";
+      const buffer = Buffer.alloc(HEAD_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
+      return buffer.subarray(0, bytesRead).toString("utf8");
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return "";
+  }
+}
+
 /**
  * A markdown file's frontmatter `name`, and its `description` or else its
  * first line of text.
@@ -78,10 +110,7 @@ function rank(
 async function describe(
   file: string,
 ): Promise<{ name: string | null; description: string | null }> {
-  const text = (await readFile(file, "utf8").catch(() => "")).slice(
-    0,
-    16 * 1024,
-  );
+  const text = await readHead(file);
   const front = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? "";
   const field = (key: string) => {
     const value = new RegExp(`^${key}:\\s*(.+)$`, "m").exec(front)?.[1]?.trim();
@@ -171,20 +200,24 @@ export async function suggestCommands(
 /**
  * The folder's tracked and untracked, non-ignored files, as git lists them.
  *
- * @returns null when git cannot list them: not a repo, or git failed.
+ * Through the runner's read flags (FE-77/D1). An automatic read (D6): a
+ * folder whose git config the user has not trusted is walked instead.
+ *
+ * @returns null when git cannot list them: not a repo, git failed, or the
+ *   folder is not trusted for automatic reads.
  */
-function gitFiles(folder: string): Promise<string[] | null> {
-  return new Promise((resolve) => {
-    execFile(
-      "git",
+async function gitFiles(folder: string): Promise<string[] | null> {
+  try {
+    if (!(await readsAllowed(folder))) return null;
+    const stdout = await gitReadOut(
+      folder,
       ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-      { cwd: folder, timeout: 5_000, maxBuffer: 32 * 1024 * 1024 },
-      (error, stdout) => {
-        if (error) return resolve(null);
-        resolve(stdout.split("\0").filter(Boolean).slice(0, FILES_MAX));
-      },
+      { timeout: 5_000, maxBuffer: 32 * 1024 * 1024 },
     );
-  });
+    return stdout.split("\0").filter(Boolean).slice(0, FILES_MAX);
+  } catch {
+    return null;
+  }
 }
 
 /**
