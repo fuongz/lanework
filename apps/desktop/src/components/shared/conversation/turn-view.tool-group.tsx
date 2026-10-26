@@ -15,7 +15,10 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import { type MouseEvent, memo, useContext, useState } from "react";
 import type { ToolCall, ToolKind } from "#/../shared/conversation";
-import { ImageViewerContext } from "#/components/shared/common/markdown-body";
+import {
+  ImageThumb,
+  ImageViewerContext,
+} from "#/components/shared/common/markdown-body";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -52,6 +55,16 @@ const KIND_ICONS: Record<ToolKind, IconSvgElement> = {
  */
 const EASE = "duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]";
 const PANEL = `h-(--collapsible-panel-height) overflow-hidden transition-[height,opacity] ${EASE} data-starting-style:h-0 data-starting-style:opacity-0 data-ending-style:h-0 data-ending-style:opacity-0 motion-reduce:transition-none`;
+
+/**
+ * The image a call made, else null: Codex's `image_gen` saves one and names
+ * it in `filePath`. A read or an edit of an image is not one.
+ */
+function madeImage(call: ToolCall): string | null {
+  return call.kind === "other" && !call.error && isImagePath(call.filePath)
+    ? call.filePath
+    : null;
+}
 
 /**
  * A file the call read or wrote: its icon and its path, mono.
@@ -155,6 +168,7 @@ function CallRow({
   conversation: string;
 }) {
   const running = call.output === null;
+  const image = madeImage(call);
   return (
     <Collapsible.Root
       render={<li />}
@@ -216,6 +230,17 @@ function CallRow({
             </>
           )}
         </div>
+        {/* Below the output's scroll box, so it is never cut by it. */}
+        {image && (
+          <div className="ms-6 mb-1">
+            <ImageThumb
+              path={image}
+              alt={baseName(image)}
+              fallback={null}
+              className="max-h-64"
+            />
+          </div>
+        )}
       </Collapsible.Panel>
     </Collapsible.Root>
   );
@@ -246,6 +271,12 @@ export const ToolGroup = memo(function ToolGroup({
   const [chosen, setChosen] = useState<boolean | null>(null);
   const open = chosen ?? running;
   const failed = calls.some((call) => call.error);
+  // The images the group made stay in sight while it is folded; open, each
+  // one sits in its own call's output instead.
+  const images = calls.flatMap((call) => {
+    const path = madeImage(call);
+    return path ? [path] : [];
+  });
   return (
     <Collapsible.Root
       open={open}
@@ -296,6 +327,19 @@ export const ToolGroup = memo(function ToolGroup({
           <span className="text-destructive shrink-0 text-xs">failed</span>
         )}
       </Collapsible.Trigger>
+      {!open && images.length > 0 && (
+        <div className="ms-[22px] mt-1 flex flex-wrap gap-2">
+          {images.map((path) => (
+            <ImageThumb
+              key={path}
+              path={path}
+              alt={baseName(path)}
+              fallback={null}
+              className="max-h-48"
+            />
+          ))}
+        </div>
+      )}
       <Collapsible.Panel className={PANEL}>
         <ul className="ms-[7px] flex min-w-0 flex-col ps-3">
           {calls.map((call) => (

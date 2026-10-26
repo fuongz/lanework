@@ -1,10 +1,12 @@
 import { LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import type { ImagePreview } from "#/../shared/conversation";
 import {
   FileOpenerContext,
+  type ImageSource,
+  ImageSourceContext,
   ImageViewerContext,
 } from "#/components/shared/common/markdown-body";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
@@ -24,6 +26,9 @@ const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
  *   the project's folder, to the repository, absolute, or as a bare name.
  * - An image chip on a tool call opens the lightbox directly on Cmd/Ctrl-click
  *   or from its context menu (`ImageViewerContext`).
+ * - An image drawn in place (a reply's `![alt](path)`, a generated image)
+ *   is read through main the same way (`ImageSourceContext`), and kept for
+ *   the conversation, so a re-render draws it at once.
  * - The lightbox stays for what the repository does not hold. An image pasted
  *   into this conversation lives outside the folder, and Files cannot open
  *   it. Anything else that cannot be found says so, in the same dialog.
@@ -90,6 +95,36 @@ export function FileOpenerProvider({
     [lightbox],
   );
 
+  /**
+   * Images drawn in place, read once per conversation. A miss is not kept: a
+   * generated image may land on disk after the reply that names it.
+   */
+  const images = useMemo((): ImageSource => {
+    const read = new Map<string, ImagePreview>();
+    const asking = new Map<string, Promise<ImagePreview>>();
+    return {
+      cached: (path) => read.get(path),
+      read: (path) => {
+        const surface = window.desktop?.conversation;
+        if (!surface || !workspace || !IMAGE_FILE.test(path))
+          return Promise.resolve({ found: false, path });
+        let pending = asking.get(path);
+        if (!pending) {
+          pending = surface
+            .image(workspace, conversation, path)
+            .catch((): ImagePreview => ({ found: false, path }))
+            .then((found) => {
+              asking.delete(path);
+              if (found.found) read.set(path, found);
+              return found;
+            });
+          asking.set(path, pending);
+        }
+        return pending;
+      },
+    };
+  }, [workspace, conversation]);
+
   const openInApp = () => {
     const surface = window.desktop?.conversation;
     if (!surface || !workspace || !asked || opening) return;
@@ -105,7 +140,9 @@ export function FileOpenerProvider({
   return (
     <FileOpenerContext.Provider value={open}>
       <ImageViewerContext.Provider value={view}>
-        {children}
+        <ImageSourceContext.Provider value={images}>
+          {children}
+        </ImageSourceContext.Provider>
       </ImageViewerContext.Provider>
       <Dialog
         open={asked !== null}

@@ -1,6 +1,14 @@
 import { Image01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { createContext, Fragment, type ReactNode, useContext } from "react";
+import {
+  createContext,
+  Fragment,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
+import type { ImagePreview } from "#/../shared/conversation";
 import {
   FileTypeIcon,
   fileIconToken,
@@ -14,6 +22,7 @@ import {
 import { Empty, EmptyDescription, EmptyHeader } from "#/components/ui/empty";
 import {
   type Block,
+  type ImageSpan,
   type Inline,
   inlines,
   type LinkSpan,
@@ -47,8 +56,125 @@ export const FileOpenerContext = createContext<FileOpener | null>(null);
  */
 export const ImageViewerContext = createContext<FileOpener | null>(null);
 
+/**
+ * Reads an image the chat names, for drawing it in place: `read` asks main
+ * (which keeps it to the conversation's own images), `cached` answers at once
+ * for one already read, so a re-render never flashes its skeleton again. The
+ * chat alone provides one, as with {@link FileOpenerContext}.
+ */
+export interface ImageSource {
+  read: (path: string) => Promise<ImagePreview>;
+  cached: (path: string) => ImagePreview | undefined;
+}
+export const ImageSourceContext = createContext<ImageSource | null>(null);
+
 /** A path the lightbox can show, by its extension. */
 const IMAGE_PATH = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
+
+/**
+ * An image drawn in place: a skeleton while main reads it, then the image,
+ * which opens the lightbox on click.
+ *
+ * `fallback` is drawn where there is no reader (outside the chat) or the
+ * image cannot be read: gone, out of scope, too big.
+ */
+export function ImageThumb({
+  path,
+  alt,
+  fallback,
+  className,
+}: {
+  path: string;
+  alt: string;
+  fallback: ReactNode;
+  /** The image's size limits, e.g. `max-h-80`. */
+  className?: string;
+}) {
+  const source = useContext(ImageSourceContext);
+  const view = useContext(ImageViewerContext);
+  const [preview, setPreview] = useState<ImagePreview | undefined>(() =>
+    source?.cached(path),
+  );
+  useEffect(() => {
+    if (!source) return;
+    const known = source.cached(path);
+    setPreview(known);
+    if (known) return;
+    let live = true;
+    void source.read(path).then((found) => {
+      if (live) setPreview(found);
+    });
+    return () => {
+      live = false;
+    };
+  }, [source, path]);
+  if (!source || preview?.found === false) return <>{fallback}</>;
+  // Spans, not divs: an image in a reply sits inside a `<p>`.
+  if (!preview)
+    return (
+      <span
+        role="status"
+        aria-label={`Image ${alt || path}`}
+        className="bg-muted block aspect-square w-48 max-w-full animate-pulse rounded-lg"
+      />
+    );
+  const image = (
+    <img
+      src={preview.url}
+      alt={alt}
+      title={path}
+      className={`bg-foreground/[0.03] block max-w-full rounded-lg object-contain ${className ?? "max-h-80"}`}
+    />
+  );
+  if (!view) return image;
+  return (
+    <button
+      type="button"
+      onClick={() => view(path)}
+      title={`Open ${path}`}
+      className="focus-visible:ring-ring/40 block max-w-full cursor-zoom-in rounded-lg outline-none focus-visible:ring-2"
+    >
+      {image}
+    </button>
+  );
+}
+
+/** A local path from an image's `src`, or null for a remote one. */
+function imagePath(src: string): string | null {
+  if (src.startsWith("file://"))
+    try {
+      return decodeURIComponent(new URL(src).pathname);
+    } catch {
+      return null;
+    }
+  return /^[a-z][a-z0-9+.-]*:/i.test(src) ? null : src;
+}
+
+/**
+ * `![alt](src)` in the chat: the image itself, when it is a local image the
+ * conversation may read. Otherwise its file badge, or a link to a remote one.
+ */
+function InlineImage({ span, chat }: { span: ImageSpan; chat: boolean }) {
+  const link = useContext(LinkContext);
+  const path = imagePath(span.src);
+  const asLink = link
+    ? link({
+        kind: "link",
+        text: span.alt || span.src,
+        href: span.src,
+        wiki: false,
+        raw: span.raw,
+      })
+    : span.raw;
+  if (!path || !IMAGE_PATH.test(path)) return <>{asLink}</>;
+  return (
+    <ImageThumb
+      path={path}
+      alt={span.alt}
+      fallback={<FileBadge value={path} path={path} chat={chat} />}
+    />
+  );
+}
 
 /**
  * How the body is drawn.
@@ -296,6 +422,8 @@ function Spans({ spans }: { spans: Inline[] }) {
         const key = `${span.kind}-${index}`;
         if (span.kind === "link")
           return <Fragment key={key}>{link ? link(span) : span.raw}</Fragment>;
+        if (span.kind === "image")
+          return <InlineImage key={key} span={span} chat={chat} />;
         if (span.kind === "code") {
           const color = cssColor(span.text);
           if (color)

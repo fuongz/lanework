@@ -15,7 +15,8 @@ export type Inline =
   | { kind: "code"; text: string }
   | { kind: "strong"; text: string }
   | { kind: "em"; text: string }
-  | LinkSpan;
+  | LinkSpan
+  | ImageSpan;
 
 /**
  * `[text](href)`, or `[[name]]` (`wiki`), read only when asked for.
@@ -30,9 +31,21 @@ export interface LinkSpan {
   raw: string;
 }
 
+/**
+ * `![alt](src)`, read only with links. `raw` is the image as written, for a
+ * reader that does not draw it.
+ */
+export interface ImageSpan {
+  kind: "image";
+  alt: string;
+  src: string;
+  raw: string;
+}
+
 interface MarkdownOptions {
   /**
-   * Reads `[text](href)` and `[[name]]` as links. Off by default: a card
+   * Reads `[text](href)` and `[[name]]` as links, and `![alt](src)` as an
+   * image. Off by default: a card
    * body keeps every link as written.
    */
   links?: boolean;
@@ -59,12 +72,16 @@ const INLINE = new RegExp(
   `(${CODE_SPAN}|\\*\\*[^*]+\\*\\*|\\*[^*\\n]+\\*)`,
   "g",
 );
-/** The same, with links. Code comes first: a link inside it stays code. */
+/**
+ * The same, with links and images. Code comes first: a link inside it stays
+ * code. An image comes before a link, or its `!` would be left as text.
+ */
 const INLINE_LINKS = new RegExp(
-  `(${CODE_SPAN}|\\[\\[[^\\]\\n]+\\]\\]|\\[[^\\]\\n]+\\]\\([^)\\s]+\\)|\\*\\*[^*]+\\*\\*|\\*[^*\\n]+\\*)`,
+  `(${CODE_SPAN}|!\\[[^\\]\\n]*\\]\\([^)\\s]+\\)|\\[\\[[^\\]\\n]+\\]\\]|\\[[^\\]\\n]+\\]\\([^)\\s]+\\)|\\*\\*[^*]+\\*\\*|\\*[^*\\n]+\\*)`,
   "g",
 );
 const LINK = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/;
+const IMAGE = /^!\[([^\]\n]*)\]\(([^)\s]+)\)$/;
 
 /** Splits one line into spans. Unmatched text stays as written. */
 export function inlines(line: string, options: MarkdownOptions = {}): Inline[] {
@@ -75,7 +92,15 @@ export function inlines(line: string, options: MarkdownOptions = {}): Inline[] {
     if (start > at) spans.push({ kind: "text", text: line.slice(at, start) });
     const token = match[0];
     const link = LINK.exec(token);
-    if (token.startsWith("[[")) {
+    const image = IMAGE.exec(token);
+    if (image)
+      spans.push({
+        kind: "image",
+        alt: image[1] ?? "",
+        src: image[2] ?? "",
+        raw: token,
+      });
+    else if (token.startsWith("[[")) {
       const name = token.slice(2, -2).trim();
       spans.push({
         kind: "link",
