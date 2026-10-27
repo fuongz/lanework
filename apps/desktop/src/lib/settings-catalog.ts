@@ -101,11 +101,11 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
           "harness cli agent agents claude code codex version update install usage limit quota handoff checkpoint resume hook push wip lanework mcp sign in",
       },
       {
-        to: "/settings/jev",
-        label: "Jev",
+        to: "/settings/decision",
+        label: "Decision",
         icon: JusticeScale01Icon,
         keywords:
-          "jev judge typesafe openrouter local ollama threshold shadow enforce tier model api key test connection orchestration lead worker",
+          "decision jev judge typesafe openrouter local ollama threshold shadow enforce tier model api key test connection orchestration lead worker",
       },
       {
         to: "/settings/leads",

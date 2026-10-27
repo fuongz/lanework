@@ -103,7 +103,7 @@ function TeamLeadTerms({
       </div>
       {overrides.length > 0 && (
         <div className="flex min-w-0 gap-2">
-          <dt className={term}>Jev overrides</dt>
+          <dt className={term}>Judge overrides</dt>
           <dd className="flex min-w-0 flex-col gap-0.5">
             {overrides.map((entry) => (
               <span

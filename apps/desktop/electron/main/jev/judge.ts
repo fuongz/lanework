@@ -16,6 +16,9 @@ import {
 // - TypeSafe's System One API (`POST /v1/systemone`), which answers a
 //   `choice` question with a probability per option.
 //   (https://docs.typesafe.ai/primitives/choice.md)
+//   Ollama (0.40+) serves the same API for a model whose only capability is
+//   `decision` (e.g. tev1), and refuses chat for it; a local server switches
+//   to it when chat is refused that way.
 //
 // NOTE: The API key goes into the Authorization header and nowhere else.
 // Every error message that leaves this file has it scrubbed out, in case a
@@ -61,6 +64,24 @@ function scrub(message: string, key: string | null): string {
   return key ? message.split(key).join("[key]") : message;
 }
 
+/** An error body's own message (`{error: {message}}` or `{error}`), else the body. */
+function errorDetail(text: string): string {
+  try {
+    const body = JSON.parse(text) as {
+      error?: string | { message?: unknown };
+      message?: unknown;
+    };
+    const message =
+      typeof body.error === "string"
+        ? body.error
+        : (body.error?.message ?? body.message);
+    if (typeof message === "string" && message) return message;
+  } catch {
+    // Not JSON: the body as it came.
+  }
+  return text;
+}
+
 async function post(
   url: string,
   body: unknown,
@@ -94,7 +115,7 @@ async function post(
   }
   const text = await response.text().catch(() => "");
   if (!response.ok) {
-    const detail = text.slice(0, 300).replace(/\s+/g, " ").trim();
+    const detail = errorDetail(text).slice(0, 300).replace(/\s+/g, " ").trim();
     throw new JudgeError(
       scrub(
         `${new URL(url).host} answered ${response.status}${detail ? `: ${detail}` : ""}`,
@@ -282,11 +303,13 @@ interface SystemOneResponse {
   >;
 }
 
-class TypeSafeJudge implements Judge {
+class SystemOneJudge implements Judge {
   constructor(
     private readonly base: string,
     private readonly model: string,
     private readonly key: string | null,
+    /** Who answered, for the error a person reads. */
+    private readonly name: string,
   ) {}
 
   async ask(
@@ -294,7 +317,6 @@ class TypeSafeJudge implements Judge {
     options: string[],
     context: string,
   ): Promise<JudgeAnswer> {
-    if (!this.key) throw new JudgeError("Set the TypeSafe API key first.");
     // `criteria` names the options; a null description is allowed.
     const criteria = Object.fromEntries(
       options.map((option) => [option, null]),
@@ -320,9 +342,50 @@ class TypeSafeJudge implements Judge {
     const answer = response.answers?.answer;
     const choice = answer?.choice;
     if (typeof choice !== "string" || !options.includes(choice))
-      throw new JudgeError("TypeSafe did not answer with one of the options.");
+      throw new JudgeError(
+        `${this.name} did not answer with one of the options.`,
+      );
     const p = Number(answer?.probabilities?.[choice]);
     return { choice, p: clamp(p) };
+  }
+}
+
+/** Local `base|model` pairs known to refuse chat: decision models. */
+const decisionOnly = new Set<string>();
+
+/** Ollama's refusal of chat for a model that has no chat capability. */
+const REFUSES_CHAT = /does not support chat/i;
+
+/**
+ * A local server: chat completions, or System One for a decision model.
+ * The first refusal is remembered, so later questions go straight there.
+ */
+class LocalJudge implements Judge {
+  private readonly chat: OpenAiCompatibleJudge;
+  private readonly decision: SystemOneJudge;
+  private readonly id: string;
+
+  constructor(base: string, model: string, key: string | null) {
+    this.chat = new OpenAiCompatibleJudge(base, model, key);
+    this.decision = new SystemOneJudge(base, model, key, "The local server");
+    this.id = `${base}|${model}`;
+  }
+
+  async ask(
+    question: string,
+    options: string[],
+    context: string,
+  ): Promise<JudgeAnswer> {
+    if (decisionOnly.has(this.id))
+      return this.decision.ask(question, options, context);
+    try {
+      return await this.chat.ask(question, options, context);
+    } catch (error) {
+      if (!(error instanceof JudgeError) || !REFUSES_CHAT.test(error.message))
+        throw error;
+      decisionOnly.add(this.id);
+      return this.decision.ask(question, options, context);
+    }
   }
 }
 
@@ -336,8 +399,14 @@ export function judgeFor(settings: JudgeSettings): Judge {
     case "local":
       if (!endpoint)
         throw new JudgeError("Set the local server's endpoint first.");
-      return new OpenAiCompatibleJudge(endpoint, model, key);
+      return new LocalJudge(endpoint, model, key);
     case "typesafe":
-      return new TypeSafeJudge(endpoint || TYPESAFE_URL, model, key);
+      if (!key) throw new JudgeError("Set the TypeSafe API key first.");
+      return new SystemOneJudge(
+        endpoint || TYPESAFE_URL,
+        model,
+        key,
+        "TypeSafe",
+      );
   }
 }

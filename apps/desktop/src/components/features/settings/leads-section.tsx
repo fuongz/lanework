@@ -372,7 +372,7 @@ export function LeadsSection() {
           label: "Default team lead",
           description: list.defaultId
             ? "The lead a new /orchestrate proposal starts on. You can pick another on the proposal."
-            : "None: a new proposal starts with no preset, on Jev's tiers.",
+            : "None: a new proposal starts with no preset, on the Decision tiers.",
           keywords: "default lead preset proposal orchestrate",
           control: (
             <Select
@@ -1032,19 +1032,19 @@ function LeadEditor({
       ),
     },
     {
-      title: "Jev",
+      title: "Decision",
       rows: JUDGE_POINTS.map((point) => {
         const override = input.jev?.[point];
         return {
           label: POINT_LABELS[point],
           description: override
             ? override.mode === "shadow"
-              ? "Shadow under this lead: Jev answers and logs, the lead decides."
-              : `Enforce under this lead: Jev decides at ${Math.round(
+              ? "Shadow under this lead: the judge answers and logs, the lead decides."
+              : `Enforce under this lead: the judge decides at ${Math.round(
                   override.threshold * 100,
                 )}% or more.`
-            : "Uses the mode and threshold set on the Jev page.",
-          keywords: "jev judge override shadow enforce threshold",
+            : "Uses the mode and threshold set on the Decision page.",
+          keywords: "decision jev judge override shadow enforce threshold",
           control: (
             <>
               <Select
@@ -1054,7 +1054,7 @@ function LeadEditor({
                 }
               >
                 <SelectTrigger
-                  aria-label={`${POINT_LABELS[point]} Jev mode`}
+                  aria-label={`${POINT_LABELS[point]} judge mode`}
                   className="min-w-28"
                 >
                   <SelectValue>
@@ -1071,7 +1071,7 @@ function LeadEditor({
               </Select>
               {override && (
                 <Input
-                  aria-label={`${POINT_LABELS[point]} Jev threshold`}
+                  aria-label={`${POINT_LABELS[point]} judge threshold`}
                   type="number"
                   min={0}
                   max={1}

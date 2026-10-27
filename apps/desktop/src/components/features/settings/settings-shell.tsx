@@ -90,7 +90,11 @@ export function SettingsShell({ children }: { children: ReactNode }) {
         {wide ? (
           <div className={`${CARD} min-w-0 overflow-hidden`}>{children}</div>
         ) : (
-          <div className={`${CARD} overflow-y-auto`}>
+          // NOTE: `relative` so a section's `sr-only` heading (absolute) is
+          // placed in this scroller. Without it the heading's containing
+          // block is the window: a long page grows <html> and the whole
+          // window scrolls past the shell.
+          <div className={`${CARD} relative overflow-y-auto`}>
             <div className="mx-auto max-w-3xl px-10 pt-8 pb-20">{children}</div>
           </div>
         )}

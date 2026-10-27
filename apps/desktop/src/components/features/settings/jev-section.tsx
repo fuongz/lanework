@@ -102,13 +102,16 @@ const SAMPLE = {
     "Worker report: ran `bun run typecheck` (0 errors) and `bun run build` (done in 4.2s). All checks passed.",
 };
 
+/** How long a typed field rests before it saves; a picked option saves at once. */
+const AUTOSAVE_MS = 600;
+
 /** The hosts plain http may reach; `URL.hostname` keeps IPv6's brackets. */
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /** A field that can carry an error: endpoint, model, or a point's threshold. */
 type Field = "endpoint" | "model" | JudgePoint;
 
-/** Top to bottom, so a failed save focuses the first field in the way. */
+/** Every field `validate` may flag, top to bottom. */
 const FIELD_ORDER: Field[] = ["endpoint", "model", ...JUDGE_POINTS];
 
 const fieldId = (field: Field) => `jev-${field}-error`;
@@ -188,12 +191,13 @@ function describeResult(result: JudgeResult) {
       failed: false,
       text: `Answered “${result.choice}”, ${percent(result.p)} sure.`,
     };
-  if (result.source === "off") return { failed: false, text: "Jev is off." };
+  if (result.source === "off")
+    return { failed: false, text: "The judge is off." };
   return { failed: true, text: result.error ?? "The judge failed." };
 }
 
 /**
- * How often Jev's choice matched what was done in the end, over the answers
+ * How often the judge's choice matched what was done in the end, over the answers
  * whose outcome is known. Null when there are none.
  */
 function agreement(log: JudgeLogEntry[]) {
@@ -212,7 +216,7 @@ function FieldError({ id, message }: { id: string; message?: string | null }) {
   return (
     <p
       id={id}
-      className="text-destructive mt-1 max-w-64 text-right text-[12px] leading-snug"
+      className="text-destructive mt-1 max-w-64 text-right text-[12px] leading-snug [overflow-wrap:anywhere]"
     >
       {message}
     </p>
@@ -220,21 +224,26 @@ function FieldError({ id, message }: { id: string; message?: string | null }) {
 }
 
 /**
- * Settings › Agents › Jev: the cheap judge the lead asks before its own
+ * Settings › Agents › Decision: the cheap judge (Jev) the lead asks before its own
  * model (FE-87).
  *
  * NOTE: The key goes to main through `setKey` and never comes back: the page
  * only learns whether one is kept. The field clears once main has it.
  *
- * NOTE: Test connection asks with the SAVED config, so it is off while the
- * page holds unsaved changes. Testing a draft would prove nothing about what
+ * NOTE: There is no Save button. A picked option saves at once; a typed
+ * field saves once it rests for AUTOSAVE_MS, and a pending save is flushed
+ * when the page unmounts. A draft that fails `validate` is not sent: its
+ * errors show and it saves as soon as it is fixed.
+ *
+ * NOTE: Test connection asks with the SAVED config, so it is off while a
+ * change is still saving. Testing a draft would prove nothing about what
  * the lead will use. Its answer is dropped as soon as the config or the key
  * changes, so it never vouches for settings it did not test (FE-91).
  *
  * NOTE: A threshold field holds its own text while it is typed in, so
  * clearing it to type a new number leaves it empty instead of snapping to 0.
- * The text is checked on blur and on Save; a valid number reaches the draft
- * as it is typed (FE-91).
+ * The text is checked on blur and before a save; a valid number reaches the
+ * draft as it is typed (FE-91).
  */
 export function JevSection() {
   const surface = window.desktop?.jev;
@@ -264,6 +273,7 @@ export function JevSection() {
   // only after one of those, never while the user is still typing.
   const [touched, setTouched] = useState<ReadonlySet<Field>>(new Set());
   const [attempted, setAttempted] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // The draft as last rendered, so a broadcast can tell an edit in progress
   // from a page that merely shows the saved config.
@@ -273,7 +283,19 @@ export function JevSection() {
   draftRef.current = draft;
   savedRef.current = saved;
   typedRef.current = typed;
-  const fieldRefs = useRef<Partial<Record<Field, HTMLInputElement | null>>>({});
+  // The autosave waiting out its debounce, and the config it will send.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef<JevConfig | null>(null);
+  const persistRef = useRef<(next: JevConfig) => Promise<void>>(async () => {});
+
+  // Leaving the page mid-debounce still saves what was typed.
+  useEffect(
+    () => () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (pendingRef.current) void persistRef.current(pendingRef.current);
+    },
+    [],
+  );
 
   const resetEdits = useCallback(() => {
     setTyped({});
@@ -299,7 +321,7 @@ export function JevSection() {
       setLog(await surface.log());
       setLogError(null);
     } catch (failure) {
-      setLogError(ipcMessage(failure, "Could not read Jev's log."));
+      setLogError(ipcMessage(failure, "Could not read the judge's log."));
     }
   }, [surface]);
 
@@ -309,7 +331,9 @@ export function JevSection() {
       .get()
       .then(adopt)
       .catch((failure: unknown) =>
-        setLoadError(ipcMessage(failure, "Could not read Jev's settings.")),
+        setLoadError(
+          ipcMessage(failure, "Could not read the decision settings."),
+        ),
       );
     void readLog();
     // Another window saved: take its config, unless this one is mid-edit.
@@ -352,10 +376,6 @@ export function JevSection() {
     setOutcome(null);
   };
 
-  /** Focus a field once the render that shows its error has landed. */
-  const focusField = (field: Field) =>
-    requestAnimationFrame(() => fieldRefs.current[field]?.focus());
-
   async function test() {
     if (!surface) return;
     setTesting(true);
@@ -376,8 +396,8 @@ export function JevSection() {
   if (!surface)
     return (
       <SettingsPage
-        title="Jev"
-        description="Jev runs in the desktop app."
+        title="Decision"
+        description="Decision runs in the desktop app."
         sections={[]}
       />
     );
@@ -385,8 +405,8 @@ export function JevSection() {
   if (!saved || !draft)
     return (
       <SettingsPage
-        title="Jev"
-        description="A cheap judge that answers small questions so the lead's model is asked only when Jev is unsure."
+        title="Decision"
+        description="A cheap judge answers small questions so the lead's model is asked only when the judge is unsure."
         sections={[
           {
             title: "Judge",
@@ -398,7 +418,7 @@ export function JevSection() {
             ) : (
               <SettingsCard>
                 <ListSkeleton
-                  label="Reading Jev's settings"
+                  label="Reading the decision settings"
                   rows={4}
                   icon={false}
                   className="py-3"
@@ -430,47 +450,79 @@ export function JevSection() {
     };
   };
 
-  const update = (change: Partial<JevConfig>) => {
-    setDraft({ ...draft, ...change });
+  /** Save `next` after `delay` ms, replacing a save still waiting. */
+  const schedule = (next: JevConfig, delay: number) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    pendingRef.current = next;
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
+      pendingRef.current = null;
+      void persistRef.current(next);
+    }, delay);
+  };
+
+  const update = (change: Partial<JevConfig>, delay = AUTOSAVE_MS) => {
+    const next = { ...draft, ...change };
+    setDraft(next);
     setOutcome(null);
     setServerErrors({});
     setSaveError(null);
+    schedule(next, delay);
   };
   const setPoint = (
     point: JudgePoint,
     change: Partial<JevConfig["points"][JudgePoint]>,
+    delay?: number,
   ) =>
-    update({
-      points: {
-        ...draft.points,
-        [point]: { ...draft.points[point], ...change },
+    update(
+      {
+        points: {
+          ...draft.points,
+          [point]: { ...draft.points[point], ...change },
+        },
       },
-    });
+      delay,
+    );
   const setTier = (tier: Tier, change: Partial<JevConfig["tiers"][Tier]>) =>
-    update({
-      tiers: { ...draft.tiers, [tier]: { ...draft.tiers[tier], ...change } },
-    });
+    update(
+      {
+        tiers: { ...draft.tiers, [tier]: { ...draft.tiers[tier], ...change } },
+      },
+      0,
+    );
 
-  async function save() {
-    if (!surface || !draft) return;
-    setAttempted(true);
-    const first = FIELD_ORDER.find((field) => issues[field]);
-    if (first) {
-      focusField(first);
+  /**
+   * Send `next` to main. Edits made while it was in flight stay in the draft
+   * (and their own save follows); only a draft still equal to `next` takes
+   * main's normalised copy. Typed text and touched fields are left alone so
+   * a field being typed in never jumps.
+   */
+  async function persist(next: JevConfig) {
+    if (!surface) return;
+    if (FIELD_ORDER.some((field) => validate(next, typedRef.current)[field])) {
+      setAttempted(true);
       return;
     }
-    const failure = await run(
-      () => surface.set(draft),
-      "Could not save.",
-      adopt,
-    );
-    if (!failure) return;
-    const field = fieldOf(failure);
-    if (field) {
-      setServerErrors({ [field]: failure });
-      focusField(field);
-    } else setSaveError(failure);
+    setSaving(true);
+    try {
+      const state = await surface.set(next);
+      setSaved(state);
+      if (draftRef.current && sameConfig(draftRef.current, next))
+        setDraft(state.config);
+      setOutcome(null);
+      setServerErrors({});
+      setSaveError(null);
+    } catch (failure) {
+      const message = ipcMessage(failure, "Could not save.");
+      const field = fieldOf(message);
+      // Shown next to its field; focus stays where the user is typing.
+      if (field) setServerErrors({ [field]: message });
+      else setSaveError(message);
+    } finally {
+      setSaving(false);
+    }
   }
+  persistRef.current = persist;
 
   async function saveKey() {
     if (!surface) return;
@@ -512,7 +564,7 @@ export function JevSection() {
             provider === "off"
               ? "Off: the lead decides everything."
               : provider === "local"
-                ? "An OpenAI-compatible server you run: Ollama, llama.cpp or LM Studio."
+                ? "An OpenAI-compatible server you run: Ollama, llama.cpp or LM Studio. An Ollama decision model (e.g. tev1) works too."
                 : provider === "typesafe"
                   ? "TypeSafe's Jev, a model built to answer with calibrated probabilities."
                   : "Any model on OpenRouter, read through its logprobs.",
@@ -522,12 +574,15 @@ export function JevSection() {
             <Select
               value={provider}
               onValueChange={(value) =>
-                update({
-                  provider: value === "off" ? null : (value as JevProvider),
-                })
+                update(
+                  {
+                    provider: value === "off" ? null : (value as JevProvider),
+                  },
+                  0,
+                )
               }
             >
-              <SelectTrigger aria-label="Jev provider" className="min-w-36">
+              <SelectTrigger aria-label="Judge provider" className="min-w-36">
                 <SelectValue>
                   {(value: ProviderValue) => PROVIDER_LABELS[value]}
                 </SelectValue>
@@ -556,10 +611,7 @@ export function JevSection() {
                 control: (
                   <div className="flex flex-col items-end">
                     <Input
-                      ref={(node) => {
-                        fieldRefs.current.endpoint = node;
-                      }}
-                      aria-label="Jev endpoint"
+                      aria-label="Judge endpoint"
                       aria-required={provider === "local" ? true : undefined}
                       {...fieldAria("endpoint")}
                       className="w-64"
@@ -584,10 +636,7 @@ export function JevSection() {
                 control: (
                   <div className="flex flex-col items-end">
                     <Input
-                      ref={(node) => {
-                        fieldRefs.current.model = node;
-                      }}
-                      aria-label="Jev model"
+                      aria-label="Judge model"
                       aria-required
                       {...fieldAria("model")}
                       className="w-64"
@@ -617,7 +666,7 @@ export function JevSection() {
                   <div className="flex flex-col items-end">
                     <div className="flex items-center gap-2">
                       <Input
-                        aria-label="Jev API key"
+                        aria-label="Judge API key"
                         aria-required={
                           needsKey && !saved.hasKey ? true : undefined
                         }
@@ -672,8 +721,8 @@ export function JevSection() {
         label: POINT_COPY[point].label,
         description: `${POINT_COPY[point].description} ${
           draft.points[point].mode === "shadow"
-            ? "Shadow: Jev answers and logs, the lead still decides."
-            : `Enforce: Jev decides when it is at least ${percent(draft.points[point].threshold)} sure.`
+            ? "Shadow: the judge answers and logs, the lead still decides."
+            : `Enforce: the judge decides when it is at least ${percent(draft.points[point].threshold)} sure.`
         }`,
         keywords: "threshold shadow enforce mode point percent",
         control: (
@@ -682,7 +731,7 @@ export function JevSection() {
               <Select
                 value={draft.points[point].mode}
                 onValueChange={(value) =>
-                  setPoint(point, { mode: value as JudgeMode })
+                  setPoint(point, { mode: value as JudgeMode }, 0)
                 }
               >
                 <SelectTrigger
@@ -703,9 +752,6 @@ export function JevSection() {
               </Select>
               <div className="flex items-center gap-1">
                 <Input
-                  ref={(node) => {
-                    fieldRefs.current[point] = node;
-                  }}
                   aria-label={`${POINT_COPY[point].label} threshold, percent`}
                   {...fieldAria(point)}
                   type="number"
@@ -827,65 +873,39 @@ export function JevSection() {
         };
       }),
     },
-    {
-      title: "Save",
-      hideTitle: true,
-      rows: [
-        {
-          label: dirty ? "Unsaved changes" : "Saved",
-          description: dirty
-            ? "Jev keeps using the saved settings until you save."
-            : "Jev uses these settings from the next question.",
-          keywords: "save apply",
-          control: (
-            <div className="flex flex-col items-end">
-              <div className="flex items-center gap-2">
-                {(dirty || Object.keys(typed).length > 0) && (
-                  <Button
-                    size="lg"
-                    className={SETTINGS_BUTTON}
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => {
-                      setDraft(saved.config);
-                      setOutcome(null);
-                      resetEdits();
-                    }}
+    // No save row: changes save on their own. Only a failure main did not
+    // tie to a field needs a place of its own.
+    ...(saveError
+      ? [
+          {
+            title: "Save",
+            hideTitle: true,
+            rows: [
+              {
+                label: "Not saved",
+                description: "The last change did not save.",
+                keywords: "save",
+                control: (
+                  <p
+                    id="jev-save-error"
+                    role="alert"
+                    className="text-destructive max-w-64 text-right text-[12px] leading-snug [overflow-wrap:anywhere]"
                   >
-                    Discard
-                  </Button>
-                )}
-                <Button
-                  size="lg"
-                  className={SETTINGS_BUTTON}
-                  disabled={busy || (!dirty && Object.keys(typed).length === 0)}
-                  aria-describedby={saveError ? "jev-save-error" : undefined}
-                  onClick={() => void save()}
-                >
-                  Save
-                </Button>
-              </div>
-              {saveError && (
-                <p
-                  id="jev-save-error"
-                  role="alert"
-                  className="text-destructive mt-1 max-w-64 text-right text-[12px] leading-snug"
-                >
-                  {saveError}
-                </p>
-              )}
-            </div>
-          ),
-        },
-      ],
-    },
+                    {saveError}
+                  </p>
+                ),
+              },
+            ],
+          },
+        ]
+      : []),
     {
       title: "Check",
       rows: [
         {
           label: "Test connection",
           description: dirty
-            ? "Save first: the test uses the saved settings."
+            ? "Waits for the change to save: the test uses the saved settings."
             : `Asks “${SAMPLE.question}” about a sample report.`,
           keywords: "test connection try ask sample probability",
           control: (
@@ -894,7 +914,7 @@ export function JevSection() {
                 size="lg"
                 className={SETTINGS_BUTTON}
                 variant="outline"
-                disabled={testing || dirty || !saved.config.provider}
+                disabled={testing || dirty || saving || !saved.config.provider}
                 aria-busy={testing}
                 aria-describedby="jev-test-result"
                 onClick={() => void test()}
@@ -916,7 +936,7 @@ export function JevSection() {
                 role="status"
                 aria-live="polite"
                 className={cn(
-                  "mt-1 max-w-64 text-right text-[12px] leading-snug empty:mt-0",
+                  "mt-1 max-w-64 text-right text-[12px] leading-snug [overflow-wrap:anywhere] empty:mt-0",
                   outcome?.failed
                     ? "text-destructive"
                     : "text-muted-foreground",
@@ -930,7 +950,7 @@ export function JevSection() {
         {
           label: "Agreement with the lead",
           description:
-            "Of the answers the lead settled, how often Jev chose the same.",
+            "Of the answers the lead settled, how often the judge chose the same.",
           keywords: "shadow log agreement accuracy rate calibration",
           control: <AgreementValue log={log} error={logError} />,
         },
@@ -940,8 +960,8 @@ export function JevSection() {
 
   return (
     <SettingsPage
-      title="Jev"
-      description="A cheap judge that answers small questions so the lead's model is asked only when Jev is unsure."
+      title="Decision"
+      description="A cheap judge answers small questions so the lead's model is asked only when the judge is unsure."
       sections={sections}
     />
   );
@@ -961,7 +981,7 @@ function AgreementValue({
         {error}
       </span>
     );
-  if (!log) return <TextSkeleton label="Reading Jev's log" />;
+  if (!log) return <TextSkeleton label="Reading the judge's log" />;
   const rate = agreement(log);
   return (
     <span className="text-muted-foreground text-[13px] tabular-nums">
