@@ -23,6 +23,7 @@ import { appHomeDir } from "../paths";
 import { terminalFolder } from "../workspaces";
 import { listenControl } from "./control-server";
 import { setEngineTap } from "./engine-tap";
+import { teamLeadOf } from "./leads";
 import { Orchestrator } from "./runtime";
 
 export { visibleText } from "./prompts";
@@ -44,6 +45,7 @@ function orchestrator(): Orchestrator {
     broadcast: (event) => broadcast(orchestrationChannels.changed, event),
     cliPath: controlCliPath(),
     endpoint: () => endpoint,
+    teamLead: teamLeadOf,
   });
   created.setJev(jev);
   setEngineTap({

@@ -66,6 +66,7 @@ import {
   type OrchestrationTask,
   type ProposedTask,
   TASKS_MAX,
+  type TeamLead,
   TIERS,
   type Tier,
   type TierModel,
@@ -82,6 +83,7 @@ import {
   workerChanges,
 } from "./git";
 import {
+  ASSIGNMENT_TAG,
   approvedTurn,
   recoveryTurn,
   resumedTurn,
@@ -141,6 +143,11 @@ export interface RuntimeDeps {
   endpoint: () => string | null;
   /** How long Jev is waited on before its answer counts as not decided. */
   jevTimeoutMs?: number;
+  /**
+   * The team lead a proposal names, as the workspace sees it (FE-88); throws
+   * when it is gone or broken. Absent: a proposal naming one is refused.
+   */
+  teamLead?: (workspace: string, id: string) => Promise<TeamLead>;
 }
 
 /** A refusal the lead reads and acts on; retrying the same call cannot help. */
@@ -176,6 +183,12 @@ interface RunRecord {
   tasks: Record<string, TaskPrivate>;
   /** Applied request ids: the call's signature and its answer. */
   receipts: Record<string, { signature: string; result: unknown }>;
+  /**
+   * The team lead the run was approved under, as it was then (FE-88): its
+   * workers, checks and Jev overrides hold for the whole run even when the
+   * file changes. Absent in runs saved before FE-88.
+   */
+  teamLead?: TeamLead | null;
 }
 
 const RECEIPTS_MAX = 512;
@@ -215,6 +228,13 @@ const exists = (path: string) =>
     () => false,
   );
 
+/** The effort a team lead's worker runs at when the task names none. */
+const TIER_EFFORT: Record<Tier, Effort> = {
+  light: "low",
+  standard: "medium",
+  heavy: "high",
+};
+
 /** The tiers' models when Jev has none set. */
 function defaultTiers(lead: ConversationAgent): Record<Tier, TierModel> {
   if (lead === "codex") {
@@ -241,6 +261,20 @@ function outgoing(text: string, settings: ComposerSettings): Outgoing {
     content: [{ type: "text", text }],
     settings,
   };
+}
+
+/**
+ * `text` with the team lead's checks after it (FE-88/D6), in a hidden
+ * assignment block, so the worker reads them and the chat shows only the task.
+ */
+function withChecks(text: string, checks: readonly string[]): string {
+  if (!checks.length) return text;
+  return `${text}
+
+<${ASSIGNMENT_TAG}>
+This run's team lead accepts a report only when it shows each of these checks. Run what applies in your checkout and say, check by check, whether it passed; for one that does not apply to your task, say why:
+${checks.map((check) => `- ${check}`).join("\n")}
+</${ASSIGNMENT_TAG}>`;
 }
 
 const cut = (text: string, max: number) =>
@@ -570,7 +604,29 @@ export class Orchestrator {
 
   // ── Jev ──
 
-  private async ask(request: JudgeRequest): Promise<JudgeResult | null> {
+  /**
+   * Ask Jev one question for `record`'s run.
+   *
+   * The run's team lead may override a point's mode and threshold (FE-88/D7):
+   * Jev still answers and logs as its settings say, and `decided` is then
+   * worked out again from the lead's mode and threshold.
+   */
+  private async ask(
+    record: RunRecord,
+    request: JudgeRequest,
+  ): Promise<JudgeResult | null> {
+    const answer = await this.askJev(request);
+    const override = record.teamLead?.jev?.[request.point];
+    if (!answer || !override || answer.source !== "judge" || !answer.choice)
+      return answer;
+    return {
+      ...answer,
+      mode: override.mode,
+      decided: override.mode === "enforce" && answer.p >= override.threshold,
+    };
+  }
+
+  private async askJev(request: JudgeRequest): Promise<JudgeResult | null> {
     const jev = this.jev;
     if (!jev) return null;
     let timer: NodeJS.Timeout | undefined;
@@ -634,8 +690,9 @@ export class Orchestrator {
   }> {
     const { run } = record;
     const choices = run.choices;
+    const lead = record.teamLead ?? null;
     const allowed = () =>
-      choices.map((choice) => `${choice.agent}:${choice.model}`).join(", ");
+      `${lead ? `(team lead "${lead.name}") ` : ""}${choices.map((choice) => `${choice.agent}:${choice.model}`).join(", ")}`;
     if (input.model) {
       const choice = choices.find(
         (entry) =>
@@ -655,7 +712,7 @@ export class Orchestrator {
     }
     let tier: Tier = "standard";
     if (run.jev) {
-      const answer = await this.ask({
+      const answer = await this.ask(record, {
         point: "model-tier",
         question:
           "Which model tier does this delegated coding task need? light: small, mechanical, well specified. standard: ordinary feature or fix work. heavy: hard design, subtle bugs, wide changes.",
@@ -672,6 +729,27 @@ export class Orchestrator {
       )
         tier = answer.choice as Tier;
       this.settle(answer?.logId, tier);
+    }
+    if (lead) {
+      // A team lead names its workers: the one standing for this tier, else
+      // the one for `standard`, else its first (FE-88/D5).
+      const pool = input.agent
+        ? lead.workers.filter((worker) => worker.agent === input.agent)
+        : lead.workers;
+      const worker =
+        pool.find((entry) => entry.tier === tier) ??
+        pool.find((entry) => entry.tier === "standard") ??
+        pool[0];
+      if (!worker)
+        refuse(
+          `No ${input.agent} model is allowed in this run. Allowed: ${allowed()}`,
+        );
+      return {
+        agent: worker.agent,
+        model: worker.model,
+        effort: input.effort ?? TIER_EFFORT[worker.tier ?? tier],
+        tier,
+      };
     }
     const model = (await this.tiers(run.leadAgent))[tier];
     let agent = model.agent;
@@ -791,7 +869,14 @@ export class Orchestrator {
         : own.turn
           ? `${task.prompt}\n\n${own.turn}`
           : task.prompt;
-      const out = outgoing(workerTurn(text, task.files, own.scratch), settings);
+      const out = outgoing(
+        workerTurn(
+          withChecks(text, record.teamLead?.checks ?? []),
+          task.files,
+          own.scratch,
+        ),
+        settings,
+      );
       own.turn = null;
       this.touch(record, [task.id]);
       let state: EngineState;
@@ -880,7 +965,7 @@ export class Orchestrator {
         let status: "completed" | "failed" = "completed";
         let note: string | null = null;
         if (this.jev && result.trim()) {
-          const answer = await this.ask({
+          const answer = await this.ask(record, {
             point: "report",
             question:
               "Does this worker's final report say the checks it ran passed?",
@@ -1054,7 +1139,7 @@ export class Orchestrator {
       }
     }
     const readOnly = READ_ONLY.has(request.tool);
-    const answer = await this.ask({
+    const answer = await this.ask(record, {
       point: "permission",
       question: readOnly
         ? `A worker asks to use the read-only tool ${request.tool}. Allow it, or ask the lead?`
@@ -1298,13 +1383,34 @@ export class Orchestrator {
     const folder = await this.deps.folderOf(proposal.workspace);
     if (!folder) throw new Error("This project has no folder here.");
     const top = await checkoutTop(folder);
-    const choices: WorkerChoice[] = allModels()
-      .filter((model) => !model.legacy)
-      .map((model) => ({
-        agent: model.agent,
-        model: model.id,
-        label: model.label,
-      }));
+    let teamLead: TeamLead | null = null;
+    if (proposal.teamLead) {
+      if (!this.deps.teamLead)
+        throw new Error("Team leads are not available here. Pick none.");
+      teamLead = await this.deps.teamLead(
+        proposal.workspace,
+        proposal.teamLead,
+      );
+    }
+    // A team lead's workers are the run's only choices (FE-88/D5), so a task
+    // on any other model is refused here and by `delegate` later.
+    const choices: WorkerChoice[] = teamLead
+      ? teamLead.workers.map((worker) => ({
+          agent: worker.agent,
+          model: worker.model,
+          label:
+            allModels().find(
+              (model) =>
+                model.agent === worker.agent && model.id === worker.model,
+            )?.label ?? worker.model,
+        }))
+      : allModels()
+          .filter((model) => !model.legacy)
+          .map((model) => ({
+            agent: model.agent,
+            model: model.id,
+            label: model.label,
+          }));
     let jev = false;
     if (this.jev)
       jev = await this.jev
@@ -1317,9 +1423,13 @@ export class Orchestrator {
       workspace: proposal.workspace,
       lead: proposal.lead,
       leadAgent: proposal.leadAgent,
+      teamLead: proposal.teamLead,
       status: "active",
       reason: null,
-      maxWorkers: proposal.maxWorkers,
+      // The lead's cap, unless the proposal asked for fewer.
+      maxWorkers: teamLead
+        ? Math.min(proposal.maxWorkers, teamLead.maxWorkers)
+        : proposal.maxWorkers,
       choices,
       jev,
       tasks: [],
@@ -1332,6 +1442,7 @@ export class Orchestrator {
       folder: top,
       tasks: {},
       receipts: {},
+      teamLead,
     };
     for (const proposed of proposal.tasks)
       run.tasks.push(await this.taskFrom(record, proposed, now));

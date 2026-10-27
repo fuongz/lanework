@@ -2,10 +2,12 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   agentOfModel,
+  allModels,
   type ComposerSettings,
   DEFAULT_SETTINGS,
   type OutgoingAttachment,
 } from "#/../shared/conversation";
+import type { TeamLead } from "#/../shared/orchestration";
 import { setChatAgent } from "#/components/shared/conversation/chat-agent";
 import { Composer } from "#/components/shared/conversation/composer";
 import {
@@ -84,16 +86,19 @@ function NewConversationPage({ slug }: { slug: string }) {
     text: string,
     attachments: OutgoingAttachment[],
     names: { name: string; image: boolean }[],
+    /** The settings it starts on, when not the ones picked. */
+    override?: ComposerSettings,
   ): Promise<boolean> => {
     const surface = window.desktop?.conversation;
-    if (!workspace || !surface || !settings) return false;
+    const chosen = override ?? settings;
+    if (!workspace || !surface || !chosen) return false;
     setError(null);
     const { begin, end } = useNewChats.getState();
     // The rail's row for it, from Enter on: the CLI takes a while to answer
     // with an id, and longer to write a transcript the rail can list.
     begin({
       workspace,
-      agent: agentOfModel(settings.model),
+      agent: agentOfModel(chosen.model),
       text: orchestrationText(text),
     });
     try {
@@ -101,7 +106,7 @@ function NewConversationPage({ slug }: { slug: string }) {
         workspace,
         text,
         attachments,
-        settings,
+        settings: chosen,
       });
       end(workspace, conversation);
       handSentMessage(JSON.stringify([slug, conversation]), {
@@ -131,22 +136,36 @@ function NewConversationPage({ slug }: { slug: string }) {
 
   // `/orchestrate` as the first message (FE-87): the new conversation is the
   // lead, and its first turn is the planning prompt. The chat it opens draws
-  // the proposal card once the lead answers.
+  // the proposal card once the lead answers. Under a team lead (FE-88) the
+  // conversation starts on the lead's own model and effort, when the app
+  // offers that model; else on the one picked.
   const orchestrate = (
     request: string,
     attachments: OutgoingAttachment[],
     names: { name: string; image: boolean }[],
+    teamLead: TeamLead | null,
   ): Promise<boolean> => {
     if (!settings || !request.trim()) return Promise.resolve(false);
+    const own = teamLead?.lead;
+    const started: ComposerSettings =
+      own && allModels().some((entry) => entry.id === own.model)
+        ? {
+            ...settings,
+            model: own.model,
+            effort: own.effort ?? settings.effort,
+          }
+        : settings;
     return send(
       planningPrompt(
         proposalId(),
         request.trim(),
-        agentOfModel(settings.model),
+        agentOfModel(started.model),
         cwd,
+        teamLead,
       ),
       attachments,
       names,
+      started,
     );
   };
 

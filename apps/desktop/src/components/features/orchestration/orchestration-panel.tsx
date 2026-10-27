@@ -4,7 +4,8 @@ import type {
   OutgoingAttachment,
   Turn,
 } from "#/../shared/conversation";
-import type { OrchestrationRun } from "#/../shared/orchestration";
+import type { OrchestrationRun, TeamLead } from "#/../shared/orchestration";
+import { useTeamLeads } from "#/components/shared/conversation/composer";
 import { useModels } from "#/components/shared/conversation/composer.models";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
@@ -66,15 +67,20 @@ export function useOrchestration({
   // Codex's own model list arrives from main after the first read; a
   // proposal is checked again against it, not against the fallback list.
   const models = useModels();
+  // The team leads (FE-88): a proposal made under one is checked against its
+  // workers, and its card offers only them.
+  const leadsList = useTeamLeads(workspace);
+  const leads = leadsList?.leads;
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-checked when the model list arrives.
   const proposals = useMemo(
-    () => deriveProposals(turns, working),
-    [turns, working, models],
+    () => deriveProposals(turns, working, leads),
+    [turns, working, models, leads],
   );
   // Sent, not yet in the transcript: drawn as planning meanwhile.
   const [pending, setPending] = useState<{
     id: string;
     request: string;
+    teamLead: string | null;
   } | null>(null);
   const landed = pending
     ? proposals.some((proposal) => proposal.id === pending.id)
@@ -88,12 +94,13 @@ export function useOrchestration({
       request: string,
       attachments: OutgoingAttachment[] = [],
       names: { name: string; image: boolean }[] = [],
+      teamLead: TeamLead | null = null,
     ): Promise<boolean> => {
       if (!leadAgent || !request.trim()) return false;
       const id = proposalId();
-      setPending({ id, request });
+      setPending({ id, request, teamLead: teamLead?.id ?? null });
       const ok = await sendRef.current(
-        planningPrompt(id, request.trim(), leadAgent, cwd),
+        planningPrompt(id, request.trim(), leadAgent, cwd, teamLead),
         attachments,
         names,
       );
@@ -106,6 +113,9 @@ export function useOrchestration({
   const repair = useCallback(
     async (proposal: DerivedProposal): Promise<boolean> => {
       if (!leadAgent || proposal.repaired) return false;
+      // A lead removed since: the fix is asked against the whole catalog.
+      const teamLead =
+        leads?.find((entry) => entry.id === proposal.teamLead) ?? null;
       return sendRef.current(
         repairPrompt(
           proposal.id,
@@ -114,12 +124,13 @@ export function useOrchestration({
           cwd,
           proposal.error ?? "The previous proposal was invalid.",
           proposal.response,
+          teamLead,
         ),
         [],
         [],
       );
     },
-    [leadAgent, cwd],
+    [leadAgent, cwd, leads],
   );
 
   // ─── The lead's runs ──────────────────────────────────────────────────────
@@ -174,6 +185,8 @@ export function useOrchestration({
     /** The turns to draw: see {@link visibleTurns}. */
     turns: shown,
     proposals,
+    /** The team leads; null until read. */
+    leads: leads ?? null,
     pending,
     runs,
     orchestrate,
@@ -198,8 +211,10 @@ export function OrchestrationPanel({
   slug: string;
   orchestration: Orchestration;
 }) {
-  const { workspace, lead, leadAgent, proposals, pending, runs } =
+  const { workspace, lead, leadAgent, proposals, pending, runs, leads } =
     orchestration;
+  const teamLeadOf = (id: string | null) =>
+    id ? (leads?.find((entry) => entry.id === id) ?? null) : null;
   const edits = useProposalEdits((state) => state.edits);
   if (!workspace || !leadAgent) return null;
 
@@ -239,6 +254,8 @@ export function OrchestrationPanel({
         lead={lead}
         leadAgent={leadAgent}
         proposal={proposal}
+        teamLead={teamLeadOf(proposal.teamLead)}
+        leadsRead={leads !== null}
         onRepair={orchestration.repair}
         onApproved={orchestration.upsert}
       />,
@@ -262,7 +279,10 @@ export function OrchestrationPanel({
           error: null,
           response: "",
           repaired: false,
+          teamLead: pending.teamLead,
         }}
+        teamLead={teamLeadOf(pending.teamLead)}
+        leadsRead={leads !== null}
         onRepair={orchestration.repair}
         onApproved={orchestration.upsert}
       />,

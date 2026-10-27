@@ -26,7 +26,14 @@ import {
   type SuggestionKind,
 } from "#/../shared/conversation";
 import { insertDictation } from "#/../shared/dictation";
+import type { LeadsList, TeamLead } from "#/../shared/orchestration";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
+import {
+  LEAD_SOURCE_LABELS,
+  leadIcon,
+  splitLead,
+} from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import {
   type PendingAttachment as Pending,
@@ -52,12 +59,31 @@ export interface Unqueued {
   attachments: { name: string; image: boolean; out: OutgoingAttachment }[];
 }
 
-/** A `/` at a line's start, or an `@` after a space: what the caret is in. */
+/** What a suggestion list offers: the CLI's, or the app's team leads. */
+type Kind = SuggestionKind | "lead";
+
+/** One row of the list; a team lead's carries the lead. */
+type Item = Suggestion & { lead?: TeamLead };
+
+/**
+ * A `/` at a line's start, or an `@` after a space: what the caret is in.
+ *
+ * With `leads`, an `@` as `/orchestrate`'s first word asks for a team lead
+ * (FE-88), not a file.
+ */
 function trigger(
   text: string,
   caret: number,
-): { kind: SuggestionKind; query: string; start: number } | null {
+  leads: boolean,
+): { kind: Kind; query: string; start: number } | null {
   const before = text.slice(0, caret);
+  const lead = leads ? /^\s*\/orchestrate[ \t]+@([^\s@]*)$/.exec(before) : null;
+  if (lead)
+    return {
+      kind: "lead",
+      query: lead[1] ?? "",
+      start: caret - (lead[1]?.length ?? 0) - 1,
+    };
   const command = /(^|\n)\/([^\s/]*)$/.exec(before);
   if (command)
     return {
@@ -90,6 +116,62 @@ const ORCHESTRATE: Suggestion = {
 function orchestrateRequest(text: string): string | null {
   const match = /^\/orchestrate(?:\s+([\s\S]*))?$/.exec(text.trim());
   return match ? (match[1] ?? "").trim() : null;
+}
+
+const NO_LEADS: LeadsList = { leads: [], defaultId: null, errors: [] };
+
+/**
+ * The team leads `workspace` sees (FE-88), kept current; null until read.
+ *
+ * No leads surface, or a read that fails, is an empty list: `/orchestrate`
+ * then runs without one, as in FE-87.
+ */
+export function useTeamLeads(
+  workspace: string | null,
+  enabled = true,
+): LeadsList | null {
+  const [list, setList] = useState<LeadsList | null>(null);
+  useEffect(() => {
+    setList(null);
+    if (!enabled) return;
+    const surface = window.desktop?.leads;
+    if (!surface) {
+      setList(NO_LEADS);
+      return;
+    }
+    let gone = false;
+    const read = () =>
+      surface
+        .list(workspace)
+        .then((next) => {
+          if (!gone) setList(next);
+        })
+        .catch(() => {
+          if (!gone) setList((current) => current ?? NO_LEADS);
+        });
+    void read();
+    const off = surface.onChange((event) => {
+      if (event.workspace === null || event.workspace === workspace)
+        void read();
+    });
+    return () => {
+      gone = true;
+      off();
+    };
+  }, [workspace, enabled]);
+  return list;
+}
+
+/** The rows `query` finds among the leads: by id first, then by name. */
+function leadItems(leads: TeamLead[], query: string): Item[] {
+  const q = query.toLowerCase();
+  const byId = leads.filter((lead) => lead.id.startsWith(q));
+  const byName = leads.filter(
+    (lead) => !byId.includes(lead) && lead.name.toLowerCase().includes(q),
+  );
+  return [...byId, ...byName]
+    .slice(0, 12)
+    .map((lead) => ({ value: `@${lead.id}`, detail: lead.name, lead }));
 }
 
 function readBase64(file: File): Promise<string> {
@@ -146,14 +228,16 @@ export const Composer = forwardRef<
     /** ↑ in an empty composer: the last queued message, back to edit. */
     onEditLastQueued?: () => void;
     /**
-     * `/orchestrate <request>` (FE-87): sent here instead of `onSend`, which
-     * the lead's planning turn then goes through. Absent: `/orchestrate` is
-     * neither offered nor caught, and goes as written.
+     * `/orchestrate [@lead] <request>` (FE-87, FE-88): sent here instead of
+     * `onSend`, which the lead's planning turn then goes through. `teamLead`
+     * is the `@` one, else the default one, else null. Absent: `/orchestrate`
+     * is neither offered nor caught, and goes as written.
      */
     onOrchestrate?: (
       request: string,
       attachments: OutgoingAttachment[],
       names: { name: string; image: boolean }[],
+      teamLead: TeamLead | null,
     ) => Promise<boolean>;
   }
 >(function Composer(
@@ -188,12 +272,16 @@ export const Composer = forwardRef<
   } = useComposerDraft(workspace, draftKey);
   const [dragging, setDragging] = useState(false);
   const [suggest, setSuggest] = useState<{
-    kind: SuggestionKind;
+    kind: Kind;
     start: number;
     query: string;
-    items: Suggestion[];
+    items: Item[];
     index: number;
   } | null>(null);
+  // Team leads, read only where `/orchestrate` is handled.
+  const leads = useTeamLeads(workspace, Boolean(onOrchestrate));
+  const leadsRef = useRef(leads);
+  leadsRef.current = leads;
   const area = useRef<HTMLTextAreaElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -308,23 +396,33 @@ export const Composer = forwardRef<
 
   // What `/` or `@` offers, asked again as the query changes.
   const lookup = (value: string, caret: number) => {
-    const found = trigger(value, caret);
+    const found = trigger(value, caret, Boolean(onOrchestrate));
     if (!found) {
       setSuggest(null);
       return;
     }
     const mine = ++asked.current;
+    const kind = found.kind;
+    if (kind === "lead") {
+      // Still being read: the list draws a skeleton until they are.
+      const listed = leadsRef.current;
+      const items = listed ? leadItems(listed.leads, found.query) : [];
+      setSuggest(
+        items.length || !listed ? { ...found, items, index: 0 } : null,
+      );
+      return;
+    }
     const surface = window.desktop?.conversation;
     if (!surface) return;
     // The app's own command, ahead of the CLI's: only where it is handled.
     const own =
       onOrchestrate &&
-      found.kind === "command" &&
+      kind === "command" &&
       ORCHESTRATE.value.slice(1).startsWith(found.query.toLowerCase())
         ? [ORCHESTRATE]
         : [];
     void surface
-      .suggest(workspace, found.kind, found.query)
+      .suggest(workspace, kind, found.query)
       .catch(() => [] as Suggestion[])
       .then((listed) => {
         if (mine !== asked.current) return;
@@ -343,7 +441,15 @@ export const Composer = forwardRef<
       });
   };
 
-  const choose = (item: Suggestion) => {
+  // The leads arrived, or changed, while their list is open: drawn again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only when the leads change.
+  useEffect(() => {
+    if (suggest?.kind !== "lead" || !leads) return;
+    const items = leadItems(leads.leads, suggest.query);
+    setSuggest(items.length ? { ...suggest, items, index: 0 } : null);
+  }, [leads]);
+
+  const choose = (item: Item) => {
     if (!suggest) return;
     const node = area.current;
     const next = `${text.slice(0, suggest.start)}${item.value} ${text.slice(node?.selectionStart ?? text.length)}`;
@@ -403,13 +509,56 @@ export const Composer = forwardRef<
 
   const empty = !text.trim() && attachments.length === 0;
 
+  /**
+   * The team lead `/orchestrate` runs under: the one named with `@`, else the
+   * default one, else none.
+   *
+   * @returns null when an `@` names no lead: the error is said, nothing goes.
+   */
+  const resolveLead = async (
+    named: string | null,
+  ): Promise<{ lead: TeamLead | null } | null> => {
+    let list = leadsRef.current;
+    if (!list) {
+      const surface = window.desktop?.leads;
+      list = surface
+        ? await surface.list(workspace).catch(() => NO_LEADS)
+        : NO_LEADS;
+    }
+    if (named) {
+      const found = list.leads.find((lead) => lead.id === named);
+      if (!found) {
+        setError(
+          `No team lead is called @${named}. Type @ after /orchestrate to pick one.`,
+        );
+        return null;
+      }
+      return { lead: found };
+    }
+    return {
+      lead: list.leads.find((lead) => lead.id === list.defaultId) ?? null,
+    };
+  };
+
   const send = async () => {
     if (empty || isSending()) return;
-    const request = onOrchestrate ? orchestrateRequest(text) : null;
-    if (request === "") {
-      setError("Write what to orchestrate after /orchestrate.");
+    const raw = onOrchestrate ? orchestrateRequest(text) : null;
+    const split = raw === null ? null : splitLead(raw);
+    if (split && !split.request) {
+      setError(
+        split.lead
+          ? `Write what to orchestrate after /orchestrate @${split.lead}.`
+          : "Write what to orchestrate after /orchestrate.",
+      );
       return;
     }
+    let teamLead: TeamLead | null = null;
+    if (split) {
+      const resolved = await resolveLead(split.lead);
+      if (!resolved) return;
+      teamLead = resolved.lead;
+    }
+    const request = split?.request ?? null;
     setSending(true);
     setError(null);
     const sent = text;
@@ -426,7 +575,7 @@ export const Composer = forwardRef<
       }));
       ok =
         request !== null && onOrchestrate
-          ? await onOrchestrate(request, outgoing, names)
+          ? await onOrchestrate(request, outgoing, names, teamLead)
           : await onSend(sent.trim(), outgoing, names);
     } catch {
       setError("Could not send. Your message has been restored.");
@@ -564,30 +713,70 @@ export const Composer = forwardRef<
       {suggest && (
         <div
           role="listbox"
-          aria-label={suggest.kind === "command" ? "Commands" : "Files"}
+          aria-label={
+            suggest.kind === "command"
+              ? "Commands"
+              : suggest.kind === "lead"
+                ? "Team leads"
+                : "Files"
+          }
           className="bg-popover text-popover-foreground ring-foreground/10 absolute right-0 bottom-full left-0 z-20 mb-1.5 max-h-72 overflow-y-auto rounded-xl p-1 shadow-lg ring-1"
         >
-          {suggest.items.map((item, index) => (
-            <button
-              key={item.value}
-              type="button"
-              role="option"
-              aria-selected={index === suggest.index}
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={() => choose(item)}
-              onPointerEnter={() => setSuggest({ ...suggest, index })}
-              className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left"
-            >
-              <span className="shrink-0 font-mono text-[12px]">
-                {item.value}
-              </span>
-              {item.detail && (
-                <span className="text-muted-foreground min-w-0 truncate text-xs">
-                  {item.detail}
+          {suggest.kind === "lead" && !leads && (
+            <ListSkeleton label="Reading the team leads" rows={2} />
+          )}
+          {suggest.items.map((item, index) =>
+            item.lead ? (
+              <button
+                key={item.value}
+                type="button"
+                role="option"
+                aria-selected={index === suggest.index}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => choose(item)}
+                onPointerEnter={() => setSuggest({ ...suggest, index })}
+                className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left"
+              >
+                <HugeiconsIcon
+                  icon={leadIcon(item.lead.icon)}
+                  className="text-muted-foreground size-3.5 shrink-0"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 truncate text-[13px]">
+                  {item.lead.name}
                 </span>
-              )}
-            </button>
-          ))}
+                <span className="text-muted-foreground shrink-0 font-mono text-[11px]">
+                  {item.value}
+                </span>
+                <span className="text-muted-foreground ml-auto shrink-0 text-[11px]">
+                  {leads?.defaultId === item.lead.id
+                    ? `Default, ${LEAD_SOURCE_LABELS[item.lead.source].toLowerCase()}`
+                    : LEAD_SOURCE_LABELS[item.lead.source]}
+                </span>
+              </button>
+            ) : (
+              <button
+                key={item.value}
+                type="button"
+                role="option"
+                aria-selected={index === suggest.index}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => choose(item)}
+                onPointerEnter={() => setSuggest({ ...suggest, index })}
+                className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left"
+              >
+                <span className="shrink-0 font-mono text-[12px]">
+                  {item.value}
+                </span>
+                {item.detail && (
+                  <span className="text-muted-foreground min-w-0 truncate text-xs">
+                    {item.detail}
+                  </span>
+                )}
+              </button>
+            ),
+          )}
         </div>
       )}
 

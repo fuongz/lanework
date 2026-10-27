@@ -13,6 +13,9 @@ import {
   ID_PATTERN,
   type JevMainHandlers,
   jevChannels,
+  type LeadsMainHandlers,
+  leadId,
+  leadsChannels,
   type OrchestrationMainHandlers,
   type OrchestrationProposal,
   orchestrationChannels,
@@ -20,6 +23,7 @@ import {
   parseJevKey,
   parseJudgeRequest,
   parseProposal,
+  parseTeamLead,
 } from "../../shared/orchestration";
 import { installControlCli } from "../control/install";
 import { registerAgentConfig } from "./agent-config";
@@ -39,6 +43,7 @@ import { installMenuBar } from "./menu-bar";
 import { registerNotifications } from "./notifications";
 import { startPullWatcher } from "./notifications/pull-watcher";
 import { orchestrationMain, setJev, startControlServer } from "./orchestration";
+import { leadsMain } from "./orchestration/leads";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { appOrigin, isTrustedUrl } from "./security";
@@ -125,6 +130,35 @@ function registerOrchestration(
     return jev.log();
   });
 }
+
+// ─── Team leads (FE-88) ────────────────────────────────────────────────────
+
+/**
+ * Register `leads.*`, checking every argument here: a saved lead goes through
+ * `parseTeamLead` as `personal`, whatever `source` the page sent.
+ */
+function registerLeads(
+  devUrl: string | undefined,
+  leads: LeadsMainHandlers,
+): void {
+  handle(leadsChannels.list, devUrl, (args) => {
+    arity(args, 1);
+    return leads.list(args[0] === null ? null : ipcSlug(args[0]));
+  });
+  handle(leadsChannels.savePersonal, devUrl, (args) => {
+    arity(args, 1);
+    return leads.savePersonal(parseTeamLead(args[0], "personal"));
+  });
+  handle(leadsChannels.removePersonal, devUrl, (args) => {
+    arity(args, 1);
+    return leads.removePersonal(leadId(args[0]));
+  });
+  handle(leadsChannels.setDefault, devUrl, (args) => {
+    arity(args, 1);
+    return leads.setDefault(args[0] === null ? null : leadId(args[0]));
+  });
+}
+
 let controlServer: ControlServer | null = null;
 
 app.setName("Lanework");
@@ -289,6 +323,7 @@ app
     registerHarness(devUrl);
     registerDictation(devUrl);
     registerOrchestration(devUrl, orchestrationMain, jevMain);
+    registerLeads(devUrl, leadsMain);
     // Rewritten on every launch, like the Stop hook, so it always matches
     // this app's Node and bundle.
     void installControlCli().catch((error: unknown) =>

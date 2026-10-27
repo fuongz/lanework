@@ -172,6 +172,12 @@ export interface OrchestrationRun {
   choices: WorkerChoice[];
   /** Whether Jev's `model-tier` point is asked when `delegate` names no model. */
   jev: boolean;
+  /**
+   * The {@link TeamLead} preset the run was approved with, by id; null when
+   * it ran without one (FE-88). Not to be confused with `lead`, the lead's
+   * conversation.
+   */
+  teamLead: string | null;
   tasks: OrchestrationTask[];
   createdAt: number;
   updatedAt: number;
@@ -221,6 +227,11 @@ export interface OrchestrationProposal {
   title: string;
   summary: string;
   maxWorkers: number;
+  /**
+   * The {@link TeamLead} preset the plan was made with, by id; null for none
+   * (FE-88). `lead` stays the lead's conversation.
+   */
+  teamLead: string | null;
   tasks: ProposedTask[];
   error: string | null;
 }
@@ -731,11 +742,15 @@ export function parseProposal(value: unknown): OrchestrationProposal {
       "title",
       "summary",
       "maxWorkers",
+      "teamLead",
       "tasks",
       "error",
     ],
     "The proposal",
   );
+  // NOTE: Absent reads as null, so a card written before FE-88 still approves.
+  const teamLead =
+    input.teamLead == null ? null : leadId(input.teamLead, "teamLead");
   if (input.version !== 1) fail("Unknown proposal version");
   if (input.status !== "ready") fail("Only a ready proposal can be approved");
   if (typeof input.workspace !== "string" || !input.workspace)
@@ -759,6 +774,7 @@ export function parseProposal(value: unknown): OrchestrationProposal {
     title: text(input.title, "title", TITLE_MAX),
     summary: text(input.summary, "summary", 2000),
     maxWorkers: input.maxWorkers as number,
+    teamLead,
     tasks: parseProposedTasks(input.tasks),
     error: null,
   };
@@ -1027,6 +1043,211 @@ export function parseJevKey(value: unknown): string | null {
   return value.trim();
 }
 
+// ─── Team leads (FE-88) ─────────────────────────────────────────────────────
+//
+// A team lead is a preset for `/orchestrate`: who leads, what it is told,
+// which workers it may hand work to, how many at once, the checks a worker's
+// report must cover, and Jev overrides. The user picks one on the proposal
+// card; the run keeps its id.
+//
+// Three places hold them, and `list` merges them in this order:
+//
+// - `builtin`: shipped with the app, read-only.
+// - `personal`: the user's own, saved from the page, for every project.
+// - `repo`: `.lanework/leads/<id>.md` a project checks in, frontmatter plus
+//   instructions. A repo lead overrides a personal one of the same id, which
+//   overrides a built-in one. One that fails to parse is left
+//   out and reported in {@link LeadsList.errors}, never half-read.
+
+/** What a team lead's id may be: a slug, also its file name in a repo. */
+export const LEAD_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,47}$/;
+/** The longest a team lead's name may be. */
+export const LEAD_NAME_MAX = 60;
+/** The longest a team lead's instructions may be. */
+export const LEAD_INSTRUCTIONS_MAX = 20_000;
+/** The most workers one team lead may list. */
+export const LEAD_WORKERS_MAX = 16;
+/** The most checks one team lead may list. */
+export const LEAD_CHECKS_MAX = 8;
+/** The longest one check may be. */
+export const LEAD_CHECK_MAX = 300;
+
+/** Where a team lead comes from. */
+export const LEAD_SOURCES = ["builtin", "personal", "repo"] as const;
+export type LeadSource = (typeof LEAD_SOURCES)[number];
+
+/**
+ * The icons a team lead may wear: Hugeicons names the app already draws, so
+ * the page maps each to its component without loading any other.
+ */
+export const LEAD_ICONS = [
+  "Robot02Icon",
+  "Brain02Icon",
+  "Flowchart01Icon",
+  "Target02Icon",
+  "Shield01Icon",
+  "MagicWand01Icon",
+  "SparklesIcon",
+  "Wrench01Icon",
+  "Layers01Icon",
+  "Idea01Icon",
+  "FlashIcon",
+  "AiChipIcon",
+] as const;
+export type LeadIcon = (typeof LEAD_ICONS)[number];
+
+/** A worker a team lead may hand work to. */
+export interface TeamLeadWorker {
+  agent: ConversationAgent;
+  model: string;
+  /** Jev's tier this worker stands for; null when it stands for none. */
+  tier: Tier | null;
+}
+
+export interface TeamLead {
+  id: string;
+  name: string;
+  icon: LeadIcon;
+  /** The lead's own CLI, model and effort. */
+  lead: TierModel;
+  /** Told to the lead before the user's request; may be empty. */
+  instructions: string;
+  /** 1-{@link LEAD_WORKERS_MAX} distinct agent/model pairs. */
+  workers: TeamLeadWorker[];
+  /** 1-{@link WORKERS_MAX}. */
+  maxWorkers: number;
+  /** One line each: what a worker's report must show before it is accepted. */
+  checks: string[];
+  /** Points that differ from Jev's settings for runs under this lead; null for none. */
+  jev: Partial<Record<JudgePoint, JudgePointConfig>> | null;
+  source: LeadSource;
+}
+
+/** A team lead as the page saves it: the source is main's to set. */
+export type TeamLeadInput = Omit<TeamLead, "source">;
+
+/** Every team lead a workspace sees, and the repo files that were refused. */
+export interface LeadsList {
+  leads: TeamLead[];
+  /** The one the proposal card starts on; null for none. */
+  defaultId: string | null;
+  /** `file` is repo-relative. */
+  errors: { file: string; error: string }[];
+}
+
+/**
+ * A team lead's id.
+ *
+ * @throws {ControlInputError} When it is not a {@link LEAD_ID_PATTERN} slug.
+ */
+export function leadId(value: unknown, label = "id"): string {
+  if (typeof value !== "string" || !LEAD_ID_PATTERN.test(value))
+    fail(
+      `${label} must be 1-48 lowercase letters, digits or -, starting with a letter or digit`,
+    );
+  return value;
+}
+
+function oneLine(value: unknown, label: string, max: number): string {
+  const line = text(value, label, max);
+  if (/[\r\n]/.test(line)) fail(`${label} must be one line`);
+  return line;
+}
+
+function leadWorkers(value: unknown): TeamLeadWorker[] {
+  if (!Array.isArray(value) || !value.length || value.length > LEAD_WORKERS_MAX)
+    fail(`workers must list 1-${LEAD_WORKERS_MAX} workers`);
+  const workers = value.map((entry, index): TeamLeadWorker => {
+    const label = `Worker ${index + 1}`;
+    const input = strictObject(entry, ["agent", "model", "tier"], label);
+    return {
+      agent: agent(input.agent, `${label}'s agent`),
+      model: model(input.model, `${label}'s model`),
+      tier:
+        input.tier == null ? null : oneOf(input.tier, TIERS, `${label}'s tier`),
+    };
+  });
+  const pairs = new Set(
+    workers.map((worker) => `${worker.agent}/${worker.model}`),
+  );
+  if (pairs.size !== workers.length)
+    fail("workers must not list the same agent and model twice");
+  return workers;
+}
+
+function leadJev(
+  value: unknown,
+): Partial<Record<JudgePoint, JudgePointConfig>> | null {
+  if (value == null) return null;
+  const input = strictObject(value, JUDGE_POINTS, "jev");
+  const out: Partial<Record<JudgePoint, JudgePointConfig>> = {};
+  for (const point of JUDGE_POINTS)
+    if (input[point] !== undefined)
+      out[point] = pointConfig(input[point], `jev's ${point}`);
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * Check a team lead from the page, a repo file or the personal store.
+ *
+ * `source` is the caller's to say: a `source` field in `value` is allowed (a
+ * lead read back from `list`) but never trusted.
+ *
+ * @throws {ControlInputError} On a missing or unknown field, or a bad value.
+ */
+export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
+  const input = strictObject(
+    value,
+    [
+      "id",
+      "name",
+      "icon",
+      "lead",
+      "instructions",
+      "workers",
+      "maxWorkers",
+      "checks",
+      "jev",
+      "source",
+    ],
+    "The team lead",
+  );
+  if (
+    !Number.isInteger(input.maxWorkers) ||
+    (input.maxWorkers as number) < 1 ||
+    (input.maxWorkers as number) > WORKERS_MAX
+  )
+    fail(`maxWorkers must be 1-${WORKERS_MAX}`);
+  if (
+    typeof input.instructions !== "string" ||
+    input.instructions.length > LEAD_INSTRUCTIONS_MAX
+  )
+    fail(
+      `instructions must be a string of at most ${LEAD_INSTRUCTIONS_MAX} characters`,
+    );
+  const checks = input.checks ?? [];
+  if (!Array.isArray(checks) || checks.length > LEAD_CHECKS_MAX)
+    fail(`checks must list at most ${LEAD_CHECKS_MAX} lines`);
+  return {
+    id: leadId(input.id),
+    name: oneLine(input.name, "name", LEAD_NAME_MAX),
+    icon: oneOf(input.icon, LEAD_ICONS, "icon"),
+    lead: tierModel(input.lead, "lead"),
+    instructions: input.instructions.trim(),
+    workers: leadWorkers(input.workers),
+    maxWorkers: input.maxWorkers as number,
+    checks: [
+      ...new Set(
+        checks.map((check, index) =>
+          oneLine(check, `Check ${index + 1}`, LEAD_CHECK_MAX),
+        ),
+      ),
+    ],
+    jev: leadJev(input.jev),
+    source: oneOf(source, LEAD_SOURCES, "source"),
+  };
+}
+
 // ─── IPC ────────────────────────────────────────────────────────────────────
 
 export const orchestrationChannels = {
@@ -1057,6 +1278,26 @@ export const jevChannels = {
   /** Main → renderer: the config or the key changed. */
   changed: "jev:changed",
 } as const;
+
+export const leadsChannels = {
+  /** Built-in, personal and the workspace's repo leads, merged; null: no repo. */
+  list: "leads:list",
+  /** Add or replace one of the user's own leads, by id. */
+  savePersonal: "leads:save-personal",
+  removePersonal: "leads:remove-personal",
+  /** The lead a new proposal starts on, or null for none. */
+  setDefault: "leads:set-default",
+  /** Main → renderer: the leads changed. */
+  changed: "leads:changed",
+} as const;
+
+/**
+ * Main → renderer, on {@link leadsChannels.changed}: which workspace's repo
+ * leads changed, or null when the personal leads or the default did.
+ */
+export interface LeadsEvent {
+  workspace: string | null;
+}
 
 /** Main → renderer, on {@link orchestrationChannels.changed}. */
 export interface OrchestrationEvent {
@@ -1092,6 +1333,21 @@ export interface DesktopJevApi {
   test: (request: JudgeRequest) => Promise<JudgeResult>;
   log: () => Promise<JudgeLogEntry[]>;
   onChange: (listener: (state: JevState) => void) => () => void;
+}
+
+/**
+ * Team leads in the renderer (FE-88).
+ *
+ * The page saves and removes only personal leads; built-in ones ship with the
+ * app and repo ones are files the project checks in. Every call that changes
+ * something answers with the list as it now stands.
+ */
+export interface DesktopLeadsApi {
+  list: (workspace: string | null) => Promise<LeadsList>;
+  savePersonal: (lead: TeamLeadInput) => Promise<LeadsList>;
+  removePersonal: (id: string) => Promise<LeadsList>;
+  setDefault: (id: string | null) => Promise<LeadsList>;
+  onChange: (listener: (event: LeadsEvent) => void) => () => void;
 }
 
 // ─── Main-side seams ────────────────────────────────────────────────────────
@@ -1141,6 +1397,26 @@ export interface JevMainHandlers {
   ask: (request: JudgeRequest) => Promise<JudgeResult>;
   log: () => Promise<JudgeLogEntry[]>;
   settle: (logId: string, outcome: string) => Promise<void>;
+}
+
+/**
+ * What the team lead store hands `main/index.ts` (FE-88).
+ *
+ * Arguments reach these already checked: a saved lead went through
+ * {@link parseTeamLead} as `personal`, an id through {@link leadId}.
+ *
+ * NOTE: A personal lead may reuse a built-in id to override it;
+ * `removePersonal` refuses an id that is not personal, `setDefault` an id no
+ * source holds. `list` answers with
+ * only the built-in and personal leads for a null or unknown `workspace`
+ * (Settings has none). The store, not the page, sends
+ * {@link leadsChannels.changed}.
+ */
+export interface LeadsMainHandlers {
+  list: (workspace: string | null) => Promise<LeadsList>;
+  savePersonal: (lead: TeamLead) => Promise<LeadsList>;
+  removePersonal: (id: string) => Promise<LeadsList>;
+  setDefault: (id: string | null) => Promise<LeadsList>;
 }
 
 /** The loopback control server, as main starts and stops it. */

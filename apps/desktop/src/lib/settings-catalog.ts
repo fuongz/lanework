@@ -11,6 +11,7 @@ import {
   Notification01Icon,
   Sun01Icon,
   UserAccountIcon,
+  UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 // Type-only: `lib/` stays framework-free at runtime, and this keeps the nav's
 // destinations checked against the real route tree instead of loose strings.
@@ -105,6 +106,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: JusticeScale01Icon,
         keywords:
           "jev judge typesafe openrouter local ollama threshold shadow enforce tier model api key test connection orchestration lead worker",
+      },
+      {
+        to: "/settings/leads",
+        label: "Team leads",
+        icon: UserGroupIcon,
+        keywords:
+          "team lead leads preset presets orchestrate orchestration coordinator worker workers max parallel checks instructions built-in personal repo duplicate default icon model effort jev override",
       },
       {
         to: "/settings/skills",

@@ -3,7 +3,6 @@ import {
   ArrowDown01Icon,
   ArrowRight01Icon,
   PlayIcon,
-  Robot02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState } from "react";
@@ -20,9 +19,13 @@ import {
   type OrchestrationRun,
   type ProposedTask,
   parseProposal,
+  type TeamLead,
   WORKERS_MAX,
 } from "#/../shared/orchestration";
-import { ListSkeleton } from "#/components/shared/loading/skeletons";
+import {
+  ListSkeleton,
+  TextSkeleton,
+} from "#/components/shared/loading/skeletons";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
@@ -41,6 +44,8 @@ import {
   catalog,
   DEFAULT_MAX_WORKERS,
   type DerivedProposal,
+  leadIcon,
+  tiersAllowed,
 } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { useProposalEdits } from "./orchestration-panel.store";
@@ -64,18 +69,28 @@ function splitScopes(value: string): string[] {
     .filter(Boolean);
 }
 
-/** A worker's model: one of the catalog's, or its tier's. */
+/**
+ * A worker's model: one of the catalog's, or its tier's.
+ *
+ * Under a team lead, only its workers, and "Auto" only when they carry a
+ * tier (FE-88).
+ */
 function ModelSelect({
   task,
+  teamLead,
   disabled,
   onChange,
 }: {
   task: ProposedTask;
+  teamLead: TeamLead | null;
   disabled: boolean;
   onChange: (patch: Pick<ProposedTask, "agent" | "model">) => void;
 }) {
-  const models = catalog();
-  const agents: ConversationAgent[] = ["claude", "codex"];
+  const models = catalog(teamLead);
+  const auto = tiersAllowed(teamLead);
+  const agents = (["claude", "codex"] as ConversationAgent[]).filter((agent) =>
+    models.some((entry) => entry.agent === agent),
+  );
   return (
     <Select
       value={modelValue(task)}
@@ -116,7 +131,7 @@ function ModelSelect({
         </SelectValue>
       </SelectTrigger>
       <SelectContent alignItemWithTrigger={false} align="end">
-        <SelectItem value={AUTO}>Auto (by tier)</SelectItem>
+        {auto && <SelectItem value={AUTO}>Auto (by tier)</SelectItem>}
         {agents.map((agent) => (
           <SelectGroup key={agent}>
             <SelectLabel>{AGENT_LABELS[agent]}</SelectLabel>
@@ -221,12 +236,14 @@ function TaskRow({
   task,
   index,
   tasks,
+  teamLead,
   editable,
   onChange,
 }: {
   task: ProposedTask;
   index: number;
   tasks: ProposedTask[];
+  teamLead: TeamLead | null;
   editable: boolean;
   onChange: (patch: Partial<ProposedTask>) => void;
 }) {
@@ -259,6 +276,7 @@ function TaskRow({
         </button>
         <ModelSelect
           task={task}
+          teamLead={teamLead}
           disabled={!editable}
           onChange={(patch) => onChange(patch)}
         />
@@ -346,12 +364,17 @@ function TaskRow({
 /**
  * The lead's proposal (FE-87): the tasks it would hand to workers, editable,
  * and nothing runs until Approve.
+ *
+ * Under a team lead (FE-88) it wears the lead's name and icon, offers only
+ * its workers, and caps the parallel workers at its limit.
  */
 export function ProposalCard({
   workspace,
   lead,
   leadAgent,
   proposal,
+  teamLead,
+  leadsRead,
   onRepair,
   onApproved,
 }: {
@@ -359,6 +382,10 @@ export function ProposalCard({
   lead: string;
   leadAgent: ConversationAgent;
   proposal: DerivedProposal;
+  /** The team lead `proposal.teamLead` names; null for none, or not found. */
+  teamLead: TeamLead | null;
+  /** The team leads were read: a named one not found is gone, not coming. */
+  leadsRead: boolean;
   /** Sends the one repair prompt; false when it could not be sent. */
   onRepair: (proposal: DerivedProposal) => Promise<boolean>;
   onApproved: (run: OrchestrationRun) => void;
@@ -371,12 +398,22 @@ export function ProposalCard({
   const [showAll, setShowAll] = useState(false);
 
   const tasks = edits?.tasks ?? proposal.tasks;
-  const maxWorkers = edits?.maxWorkers ?? DEFAULT_MAX_WORKERS;
+  const workersCap = teamLead?.maxWorkers ?? WORKERS_MAX;
+  const maxWorkers = Math.min(
+    edits?.maxWorkers ?? teamLead?.maxWorkers ?? DEFAULT_MAX_WORKERS,
+    workersCap,
+  );
   const approved = Boolean(edits?.runId);
   const cancelled = Boolean(edits?.cancelled) && !approved;
   const planning = proposal.status === "planning";
+  // Its team lead still being read: its workers are not known yet.
+  const leadKnown = !proposal.teamLead || Boolean(teamLead) || leadsRead;
   const editable =
-    proposal.status === "ready" && !approved && !cancelled && !starting;
+    proposal.status === "ready" &&
+    !approved &&
+    !cancelled &&
+    !starting &&
+    leadKnown;
   const visible = showAll ? tasks : tasks.slice(0, FOLDED);
 
   const change = (id: string, next: Partial<ProposedTask>) => {
@@ -398,6 +435,7 @@ export function ProposalCard({
       workspace,
       lead,
       leadAgent,
+      teamLead: proposal.teamLead,
       request: proposal.request,
       status: "ready",
       title: proposal.title,
@@ -450,7 +488,7 @@ export function ProposalCard({
       <header className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
         <span className="bg-foreground/[0.06] text-muted-foreground grid size-8 shrink-0 place-items-center rounded-lg">
           <HugeiconsIcon
-            icon={Robot02Icon}
+            icon={leadIcon(teamLead?.icon)}
             className="size-4"
             strokeWidth={1.8}
             aria-hidden="true"
@@ -461,6 +499,17 @@ export function ProposalCard({
             {title}
           </h2>
           <p className="text-muted-foreground mt-0.5 flex items-center gap-3 text-[11px]">
+            {proposal.teamLead &&
+              (teamLead || leadsRead ? (
+                <span
+                  className="text-foreground/80 min-w-0 truncate font-medium"
+                  title={`Team lead @${proposal.teamLead}`}
+                >
+                  {teamLead?.name ?? `@${proposal.teamLead}`}
+                </span>
+              ) : (
+                <TextSkeleton label="Reading the team lead" className="w-20" />
+              ))}
             <span className="flex min-w-0 items-center gap-1.5">
               <TerminalKindIcon kind={leadAgent} className="size-3 shrink-0" />
               <span className="truncate">Led by {AGENT_LABELS[leadAgent]}</span>
@@ -548,6 +597,7 @@ export function ProposalCard({
               task={task}
               index={tasks.indexOf(task)}
               tasks={tasks}
+              teamLead={teamLead}
               editable={editable}
               onChange={(next) => change(task.id, next)}
             />
@@ -598,7 +648,7 @@ export function ProposalCard({
               aria-labelledby={`workers-${proposal.id}`}
               className="bg-foreground/[0.05] flex items-center gap-0.5 rounded-md p-0.5"
             >
-              {Array.from({ length: WORKERS_MAX }, (_, at) => at + 1).map(
+              {Array.from({ length: workersCap }, (_, at) => at + 1).map(
                 (count) => (
                   // biome-ignore lint/a11y/useSemanticElements: a segmented control, not a column of radio inputs.
                   <button

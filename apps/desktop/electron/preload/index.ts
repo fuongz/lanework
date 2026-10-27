@@ -48,9 +48,12 @@ import {
 } from "../../shared/notifications";
 import {
   type DesktopJevApi,
+  type DesktopLeadsApi,
   type DesktopOrchestrationApi,
   type JevState,
   jevChannels,
+  type LeadsEvent,
+  leadsChannels,
   type OrchestrationEvent,
   orchestrationChannels,
 } from "../../shared/orchestration";
@@ -294,6 +297,19 @@ const jev: DesktopJevApi = {
   test: (request) => ipcRenderer.invoke(jevChannels.test, request),
   log: () => ipcRenderer.invoke(jevChannels.log),
   onChange: (listener) => subscribe<JevState>(jevChannels.changed, listener),
+};
+
+/**
+ * Team lead presets (FE-88): built-in, personal and the workspace's repo
+ * leads. The page writes only personal ones, by id.
+ */
+const leads: DesktopLeadsApi = {
+  list: (workspace) => ipcRenderer.invoke(leadsChannels.list, workspace),
+  savePersonal: (lead) => ipcRenderer.invoke(leadsChannels.savePersonal, lead),
+  removePersonal: (id) => ipcRenderer.invoke(leadsChannels.removePersonal, id),
+  setDefault: (id) => ipcRenderer.invoke(leadsChannels.setDefault, id),
+  onChange: (listener) =>
+    subscribe<LeadsEvent>(leadsChannels.changed, listener),
 };
 
 /** Dictation in the composer: the helper's events, by session. */
@@ -837,5 +853,6 @@ const desktop: DesktopApi = {
   laneworkMcp,
   orchestration,
   jev,
+  leads,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);
