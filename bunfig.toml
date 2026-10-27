@@ -1,0 +1,13 @@
+# INF-06 (GAP-04): install policy, so it no longer depends on the lockfile alone.
+[install]
+# Isolated node_modules (node_modules/.bun/…): a package sees only the
+# dependencies it declares. Stated here rather than inferred from bun.lock.
+linker = "isolated"
+
+# Refuse versions published less than 3 days ago. Worm and account-takeover
+# publishes are usually caught and pulled within that window; a caret range
+# would otherwise resolve to them on the next `bun install` / `bun update`.
+minimumReleaseAge = 259200 # seconds
+
+# Our own workspace package is never fetched from the registry.
+minimumReleaseAgeExcludes = ["@lanework/protocol"]

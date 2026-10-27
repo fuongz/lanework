@@ -38,6 +38,31 @@
   },
   "overrides": [
     {
+      // INF-06 (AC-08/AR-14): the renderer and the code it shares with main
+      // run in a sandboxed browser context. A Node built-in or `electron`
+      // import there typechecks nowhere (the renderer program has no Node
+      // types) and must not reach the bundle either; go through the preload
+      // bridge instead.
+      "includes": ["apps/desktop/src/**", "apps/desktop/shared/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "error"
+          },
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "electron": "Renderer and shared code cannot import electron; use the preload bridge (window.lanework)."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["apps/desktop/src/components/ui/field.tsx"],
       "linter": {
         "rules": {

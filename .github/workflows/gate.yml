@@ -1,0 +1,93 @@
+# INF-06: what a maintainer used to run by hand before merging.
+#
+#   gate     `bun run gate:public`: build, Biome (warnings fail), the layout,
+#            loading and HTML-sink audits, typecheck, and the plugin-bundle
+#            drift check. Branch protection on main requires this job.
+#   secrets  gitleaks over the full history, with .gitleaks.toml.
+#   audit    `bun audit` as a report; fails only on a critical or high
+#            advisory in a package the app ships (.github/scripts/audit-shipped.mjs).
+#
+# CI runs no tests. Playwright and the node:test units run when a maintainer
+# asks for them (`bun run test`, `bun run test:unit`).
+name: gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate
+    # macOS: the app is built for it, and the build compiles the Swift
+    # dictation helper.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # Exactly the bun in package.json `packageManager`. The committed plugin
+      # bundle is byte-compared against a fresh build, and bun's bundler output
+      # changes between releases; build-plugin.mjs refuses any other version.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: bun install --frozen-lockfile
+      - run: bun run gate:public
+
+  secrets:
+    name: secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" gitleaks
+      - name: gitleaks (full history)
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact \
+            --no-banner --exit-code 1 .
+
+  audit:
+    name: audit
+    # macOS, so the installed tree (node-pty's platform packages) is the one
+    # that ships.
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      # Only the tree is needed, not Electron's binary or any other script.
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: bun audit (report, never fails)
+        run: bun audit || true
+      - name: Fail on critical or high in shipped packages
+        run: |
+          bun audit --json > "$RUNNER_TEMP/audit.json" || true
+          node .github/scripts/audit-shipped.mjs "$RUNNER_TEMP/audit.json"

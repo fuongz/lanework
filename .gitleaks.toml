@@ -3,8 +3,25 @@
 [extend]
 useDefault = true
 
+# INF-06 (SR-08): Lanework's own credentials — registration, machine, device
+# and auth-code tokens (packages/protocol/src/common.ts). The default rules
+# only catch them in a few placements. The test fixtures (`lw_mch_test-secret`,
+# `lw_mch_abc`) are shorter than 16 characters after the prefix, so they need
+# no allowlist.
+[[rules]]
+id = "lanework-token"
+description = "Lanework registration, machine, device or auth-code token"
+regex = '''\blw_(?:reg|mch|dev|code)_[A-Za-z0-9_-]{16,}'''
+keywords = ["lw_reg_", "lw_mch_", "lw_dev_", "lw_code_"]
+
 [[allowlists]]
 description = "Fake secret the agent-setup spec plants to prove redact() strips it"
 condition = "AND"
 paths = ['''apps/desktop/tests/agent-setup\.spec\.ts''']
 regexes = ['''fe40plainsecret7d1c''']
+
+[[allowlists]]
+description = "Fake Authorization header the redact unit test builds to prove redact() strips it (FE-78)"
+condition = "AND"
+paths = ['''apps/desktop/electron/hook/redact\.test\.ts''']
+regexes = ['''abcdefgh12345''']

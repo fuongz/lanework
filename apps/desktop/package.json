@@ -14,6 +14,7 @@
     "package": "bun run build && electron-builder --dir",
     "dist": "bun run build && electron-builder",
     "test": "playwright test --project=production",
+    "test:unit": "bun test ./electron",
     "test:dev": "playwright test --project=development",
     "test:packaged": "playwright test --project=packaged",
     "gallery": "playwright test --project=gallery",

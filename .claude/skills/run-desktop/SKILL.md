@@ -36,6 +36,13 @@ What setup does (skip with `--no-setup`):
 
 - Temp `LANEWORK_HOME` and userData. The real `~/.lanew` and login are never
   touched.
+- Temp agent config, always (also with `--no-setup`): `LANEWORK_TEST_AGENT_HOME`,
+  `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `LANEWORK_HOOK_SECRET_FILE` all point
+  under the temp profile, as `apps/desktop/tests/auth-fixtures.ts`
+  `agentConfigEnv` does. The app's `lanework` MCP entry and Stop hook land
+  there, so the real `~/.claude.json`, `~/.claude/settings.json` and Codex
+  config are not rewritten. The flip side: the app sees no real Claude Code
+  or Codex sessions, memory or settings, only the empty temp ones.
 - Welcome → Continue → **Skip for now** (local mode), then creates project
   **Lanework** (slug `lanework`) and links `--folder` (default: this repo)
   through the folder-chooser seam `LANEWORK_TEST_FOLDERS`.

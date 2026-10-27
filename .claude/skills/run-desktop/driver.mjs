@@ -2,7 +2,10 @@
 // stdin line. See SKILL.md for the command list.
 //
 // - Isolated state: a temp LANEWORK_HOME and userData, so the real ~/.lanew
-//   and the real login are never touched.
+//   and the real login are never touched; and a temp agent home,
+//   CLAUDE_CONFIG_DIR and CODEX_HOME, so the real ~/.claude.json, Claude
+//   settings and Codex config (their `lanework` MCP entry, the Stop hook) are
+//   never touched either.
 // - Local mode: onboarding is skipped with "Skip for now", so no account and
 //   no control plane are needed.
 // - Read-only on GitHub by convention: nothing here merges, reviews or
@@ -41,12 +44,26 @@ await mkdir(shots, { recursive: true });
 
 const profile = await mkdtemp(join(tmpdir(), "run-desktop-profile-"));
 const home = await mkdtemp(join(tmpdir(), "run-desktop-home-"));
+// INF-06 (SR-06): the agents' own config lives under the temp profile too. On
+// launch the app files its `lanework` MCP entry (in local mode, a shim into
+// this throwaway store) in ~/.claude.json and the Codex config, and may
+// install the Stop hook. Without these, one driver run would repoint every
+// real Claude Code and Codex session on the machine. Same seams as
+// apps/desktop/tests/auth-fixtures.ts agentConfigEnv.
+const agentHome = join(profile, "agent-home");
+await mkdir(agentHome, { recursive: true });
 const env = Object.fromEntries(
   Object.entries(process.env).filter(([, v]) => v !== undefined),
 );
 Object.assign(env, {
   LANEWORK_TEST_USER_DATA: profile,
   LANEWORK_HOME: home,
+  // `~` for everything the app reads about the agents (dev builds only).
+  LANEWORK_TEST_AGENT_HOME: agentHome,
+  CLAUDE_CONFIG_DIR: join(profile, "claude"),
+  CODEX_HOME: join(profile, "codex"),
+  // The hook's credential: a 0600 file here instead of the login Keychain.
+  LANEWORK_HOOK_SECRET_FILE: join(profile, "hook-secret"),
   // A port nothing listens on: local mode must never need the control plane.
   LANEWORK_API_URL: "http://127.0.0.1:9",
   // Answers the native folder chooser (a test seam, dev builds only).

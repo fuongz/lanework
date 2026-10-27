@@ -1,0 +1,8 @@
+# INF-06 (SR-02): code that runs on users' and contributors' machines once
+# merged: the plugin (its committed hook bundle runs after every Claude Code
+# turn), the project's Claude Code skills and settings, and the hook source.
+# A change here needs the owner's review; branch protection on main requires
+# code-owner review and the `gate` job.
+/plugins/lanework/ @fuongz
+/.claude/ @fuongz
+/apps/desktop/electron/hook/ @fuongz
