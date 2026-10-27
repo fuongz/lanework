@@ -11,6 +11,7 @@ import {
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { modelName } from "#/../shared/conversation";
 import type {
@@ -25,25 +26,14 @@ import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-ico
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { ipcMessage } from "#/lib/ipc-error";
+import { taskLabel, taskTone } from "#/lib/orchestration-status";
 import { cn } from "#/lib/utils";
-import { WorkerTranscript } from "./worker-transcript";
 
 const RUN_LABELS: Record<RunStatus, string> = {
   active: "Running",
   paused: "Paused",
   stopped: "Stopped",
   finished: "Finished",
-};
-
-const TASK_LABELS: Record<TaskStatus, string> = {
-  queued: "Queued",
-  running: "Running",
-  cancelling: "Cancelling",
-  completed: "Done",
-  failed: "Failed",
-  blocked: "Blocked",
-  interrupted: "Interrupted",
-  cancelled: "Cancelled",
 };
 
 /** A task the user may still cancel from the panel. */
@@ -56,7 +46,7 @@ const CANCELLABLE: readonly TaskStatus[] = [
 
 function StatusMark({ task }: { task: OrchestrationTask }) {
   if (task.status === "running" || task.status === "cancelling")
-    return <OrbitSpinner className="text-foreground size-3.5 shrink-0" />;
+    return <OrbitSpinner className={cn("size-3.5 shrink-0", taskTone(task))} />;
   const icon =
     task.status === "completed"
       ? CheckmarkCircle02Icon
@@ -74,16 +64,8 @@ function StatusMark({ task }: { task: OrchestrationTask }) {
       icon={icon}
       strokeWidth={1.8}
       aria-hidden="true"
-      className={cn(
-        "size-3.5 shrink-0",
-        task.status === "completed" && task.accepted && "text-tone-teal",
-        (task.status === "failed" || task.status === "blocked") &&
-          "text-destructive",
-        (task.status === "queued" ||
-          task.status === "cancelled" ||
-          task.status === "interrupted") &&
-          "text-muted-foreground",
-      )}
+      // Its status's colour, the same as its label's and the rail's.
+      className={cn("size-3.5 shrink-0", taskTone(task))}
     />
   );
 }
@@ -117,7 +99,7 @@ export function RunPanel({
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<OrchestrationTask | null>(null);
+  const navigate = useNavigate();
 
   const act = async (
     key: string,
@@ -141,10 +123,6 @@ export function RunPanel({
   const running = run.tasks.filter((task) => task.status === "running").length;
   const waiting = run.tasks.filter((task) => task.needsInput).length;
   const live = run.status === "active" || run.status === "paused";
-  // The task the dialog shows, as the run has it now.
-  const shown = open
-    ? (run.tasks.find((task) => task.id === open.id) ?? open)
-    : null;
 
   return (
     <article
@@ -263,12 +241,20 @@ export function RunPanel({
                 <button
                   type="button"
                   disabled={!task.conversation}
-                  onClick={() => setOpen(task)}
-                  aria-label={`Open ${task.title}'s transcript`}
+                  // Its conversation in the main view, read-only; its title
+                  // bar leads back here.
+                  onClick={() => {
+                    if (task.conversation)
+                      void navigate({
+                        to: "/w/$slug/agents/chat/$conversation",
+                        params: { slug, conversation: task.conversation },
+                      });
+                  }}
+                  aria-label={`Open ${task.title}'s conversation`}
                   title={
                     task.conversation
-                      ? "Open its transcript"
-                      : "Not started yet: no transcript"
+                      ? "Open its conversation"
+                      : "Not started yet: no conversation"
                   }
                   className="flex min-w-0 flex-1 items-start gap-2 text-left disabled:cursor-default"
                 >
@@ -300,8 +286,10 @@ export function RunPanel({
                           {task.tier}
                         </Badge>
                       )}
-                      <span className="text-foreground/80 shrink-0 font-medium">
-                        {TASK_LABELS[task.status]}
+                      <span
+                        className={cn("shrink-0 font-medium", taskTone(task))}
+                      >
+                        {taskLabel(task)}
                       </span>
                     </span>
                     {task.needsInput && (
@@ -352,13 +340,6 @@ export function RunPanel({
           {error}
         </p>
       )}
-
-      <WorkerTranscript
-        slug={slug}
-        workspace={workspace}
-        task={shown}
-        onClose={() => setOpen(null)}
-      />
     </article>
   );
 }

@@ -480,20 +480,32 @@ export function ProposalCard({
     ? proposal.request
     : proposal.title || proposal.request || "Orchestration proposal";
 
+  // Waiting on the user, it reads as an approval like a tool's (the
+  // permission card's tint and buttons); once answered, a plain card.
+  const awaiting =
+    !planning && proposal.status === "ready" && !approved && !cancelled;
+  const line = awaiting ? "border-tone-amber/30" : "border-border";
+
   return (
     <article
       aria-label="Orchestration proposal"
-      className="bg-card border-border overflow-hidden rounded-xl border"
+      className={cn(
+        "overflow-hidden rounded-xl border",
+        awaiting
+          ? "border-tone-amber/40 bg-tone-amber/[0.06]"
+          : "bg-card border-border",
+      )}
     >
-      <header className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
-        <span className="bg-foreground/[0.06] text-muted-foreground grid size-8 shrink-0 place-items-center rounded-lg">
-          <HugeiconsIcon
-            icon={leadIcon(teamLead?.icon)}
-            className="size-4"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        </span>
+      <header className="flex min-w-0 items-start gap-2 px-3 py-2.5">
+        <HugeiconsIcon
+          icon={leadIcon(teamLead?.icon)}
+          className={cn(
+            "mt-0.5 size-4 shrink-0",
+            awaiting ? "text-tone-amber" : "text-muted-foreground",
+          )}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[13px] font-medium" title={title}>
             {title}
@@ -538,31 +550,19 @@ export function ProposalCard({
                 {asking ? "Asking…" : "Ask to fix"}
               </Button>
             )}
-          {!approved && !cancelled && !planning && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={starting}
-              onClick={() => patch(proposal.id, { cancelled: true })}
-            >
-              Cancel
-            </Button>
-          )}
-          {proposal.status === "ready" && !approved && !cancelled && (
-            <Button
-              size="sm"
-              disabled={!editable}
-              onClick={() => void approve()}
-            >
-              <HugeiconsIcon
-                icon={PlayIcon}
-                strokeWidth={2}
-                data-icon="inline-start"
-                aria-hidden="true"
-              />
-              {starting ? "Starting…" : "Approve"}
-            </Button>
-          )}
+          {/* Not ready to approve, yet still the user's to drop. */}
+          {!approved &&
+            !cancelled &&
+            !planning &&
+            proposal.status !== "ready" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => patch(proposal.id, { cancelled: true })}
+              >
+                Cancel
+              </Button>
+            )}
           {cancelled && (
             <Button
               size="sm"
@@ -579,18 +579,23 @@ export function ProposalCard({
         <ListSkeleton
           label="Planning the tasks"
           rows={3}
-          className="border-border border-t"
+          className={cn("border-t", line)}
         />
       )}
 
       {!planning && proposal.summary && !cancelled && (
-        <p className="text-muted-foreground border-border border-t px-3 py-2 text-[12px] leading-relaxed whitespace-pre-wrap">
+        <p
+          className={cn(
+            "text-muted-foreground border-t px-3 py-2 text-[12px] leading-relaxed whitespace-pre-wrap",
+            line,
+          )}
+        >
           {proposal.summary}
         </p>
       )}
 
       {!planning && !cancelled && tasks.length > 0 && (
-        <ul className="border-border border-t py-1">
+        <ul className={cn("border-t py-1", line)}>
           {visible.map((task) => (
             <TaskRow
               key={task.id}
@@ -609,7 +614,10 @@ export function ProposalCard({
           type="button"
           aria-expanded={showAll}
           onClick={() => setShowAll(!showAll)}
-          className="text-muted-foreground hover:text-foreground border-border flex h-8 w-full items-center gap-1.5 border-t px-3 text-left text-[11px]"
+          className={cn(
+            "text-muted-foreground hover:text-foreground flex h-8 w-full items-center gap-1.5 border-t px-3 text-left text-[11px]",
+            line,
+          )}
         >
           <HugeiconsIcon
             icon={showAll ? ArrowDown01Icon : ArrowRight01Icon}
@@ -624,7 +632,10 @@ export function ProposalCard({
       {(error || (proposal.status === "invalid" && !cancelled)) && (
         <div
           role="alert"
-          className="text-destructive border-border flex items-start gap-2 border-t px-3 py-2 text-[12px]"
+          className={cn(
+            "text-destructive flex items-start gap-2 border-t px-3 py-2 text-[12px]",
+            line,
+          )}
         >
           <HugeiconsIcon
             icon={Alert02Icon}
@@ -640,8 +651,39 @@ export function ProposalCard({
       )}
 
       {!planning && !cancelled && proposal.status === "ready" && (
-        <footer className="text-muted-foreground border-border flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-[11px]">
-          <div className="flex items-center gap-1.5">
+        <footer
+          className={cn(
+            "text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-2 border-t px-3 py-2.5 text-[11px]",
+            line,
+          )}
+        >
+          {/* Approve and Cancel where a tool's Allow and Deny are. */}
+          {!approved && (
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                disabled={!editable}
+                onClick={() => void approve()}
+              >
+                <HugeiconsIcon
+                  icon={PlayIcon}
+                  strokeWidth={2}
+                  data-icon="inline-start"
+                  aria-hidden="true"
+                />
+                {starting ? "Starting…" : "Approve"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={starting}
+                onClick={() => patch(proposal.id, { cancelled: true })}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
+          <div className="ml-auto flex items-center gap-1.5">
             <span id={`workers-${proposal.id}`}>Parallel workers</span>
             <div
               role="radiogroup"
@@ -671,7 +713,7 @@ export function ProposalCard({
               )}
             </div>
           </div>
-          <span>
+          <span className="basis-full">
             {approved
               ? "Approved"
               : "Nothing runs until you approve, and each worker gets its own checkout."}
@@ -680,7 +722,12 @@ export function ProposalCard({
       )}
 
       {cancelled && (
-        <p className="text-muted-foreground border-border border-t px-3 py-2 text-[12px]">
+        <p
+          className={cn(
+            "text-muted-foreground border-t px-3 py-2 text-[12px]",
+            line,
+          )}
+        >
           Cancelled. No worker was started.
         </p>
       )}

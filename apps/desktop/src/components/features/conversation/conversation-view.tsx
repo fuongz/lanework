@@ -1,6 +1,7 @@
 import {
   Alert02Icon,
   ArrowDown01Icon,
+  ArrowRight01Icon,
   ComputerTerminal01Icon,
   MessageMultiple01Icon,
 } from "@hugeicons/core-free-icons";
@@ -63,6 +64,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
+import { useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { firstLine } from "#/lib/conversation-format";
 import { ipcMessage } from "#/lib/ipc-error";
@@ -145,6 +147,32 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     setChatAgent(agent);
     return () => setChatAgent(null);
   }, [agent]);
+  // A worker of an orchestration run (FE-87): read-only here, its title bar
+  // leads back to the lead's conversation.
+  const runs = useOrchestrationRuns(workspace);
+  const asWorker = useMemo(() => {
+    for (const run of runs) {
+      const task = run.tasks.find((entry) => entry.conversation === id);
+      if (task) return { run, task };
+    }
+    return null;
+  }, [runs, id]);
+  const leadTitle = useAgentSessions((state) =>
+    asWorker && workspace
+      ? state.byWorkspace[workspace]?.find(
+          (entry) =>
+            entry.agent === asWorker.run.leadAgent &&
+            entry.id === asWorker.run.lead,
+        )?.title
+      : undefined,
+  );
+  const openLead = () => {
+    if (asWorker)
+      void navigate({
+        to: "/w/$slug/agents/chat/$conversation",
+        params: { slug, conversation: asWorker.run.lead },
+      });
+  };
   const listed = useAgentSessions((state) =>
     workspace && agent
       ? state.byWorkspace[workspace]?.find(
@@ -645,6 +673,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   // ─── Drawing ──────────────────────────────────────────────────────────────
   const firstPrompt = shown.find((turn) => turn.role === "user");
   const title =
+    asWorker?.task.title ||
     listed?.title ||
     (firstPrompt?.role === "user" ? firstLine(firstPrompt.text) : "") ||
     `${label} conversation`;
@@ -686,6 +715,29 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
       >
         <WindowTitlebar className="gap-2.5">
+          {/* A worker's breadcrumb: its lead's conversation, then itself. */}
+          {asWorker && (
+            <>
+              <button
+                type="button"
+                onClick={openLead}
+                title={`Back to the lead: ${leadTitle ?? "its conversation"}`}
+                className="text-muted-foreground hover:text-foreground flex max-w-[40%] min-w-0 shrink items-center gap-1.5 text-[13px] transition-colors"
+              >
+                <TerminalKindIcon
+                  kind={asWorker.run.leadAgent}
+                  className="size-[13px] shrink-0"
+                />
+                <span className="truncate">{leadTitle ?? "Lead"}</span>
+              </button>
+              <HugeiconsIcon
+                icon={ArrowRight01Icon}
+                className="text-muted-foreground size-3 shrink-0"
+                strokeWidth={2}
+                aria-hidden="true"
+              />
+            </>
+          )}
           {working ? (
             <span role="img" aria-label="Working" className="flex shrink-0">
               <OrbitSpinner className="text-foreground size-[13px]" />
@@ -703,34 +755,37 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           </h1>
           <span className="ml-auto" />
           {/* The same conversation in a terminal (D3), where the agent view
-              has its Chat: one writer at a time, so not while a turn runs. */}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  // NOTE: aria-disabled, not disabled: a disabled button
-                  // gets no pointer events, and its tooltip says why it is
-                  // off.
-                  aria-disabled={blocked || undefined}
-                  onClick={() => {
-                    if (!blocked) void openTerminal();
-                  }}
-                  className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              has its Chat: one writer at a time, so not while a turn runs.
+              Not for a worker: its lead is the one writer. */}
+          {!asWorker && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    // NOTE: aria-disabled, not disabled: a disabled button
+                    // gets no pointer events, and its tooltip says why it is
+                    // off.
+                    aria-disabled={blocked || undefined}
+                    onClick={() => {
+                      if (!blocked) void openTerminal();
+                    }}
+                    className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                  />
+                }
+              >
+                <HugeiconsIcon
+                  icon={ComputerTerminal01Icon}
+                  strokeWidth={1.8}
+                  data-icon="inline-start"
+                  aria-hidden="true"
                 />
-              }
-            >
-              <HugeiconsIcon
-                icon={ComputerTerminal01Icon}
-                strokeWidth={1.8}
-                data-icon="inline-start"
-                aria-hidden="true"
-              />
-              Terminal
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{terminalTip}</TooltipContent>
-          </Tooltip>
+                Terminal
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{terminalTip}</TooltipContent>
+            </Tooltip>
+          )}
         </WindowTitlebar>
 
         <div className="relative min-h-0 flex-1">
@@ -878,7 +933,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               way the CLI asks it at its own prompt. The composer stays
               mounted under it — hidden, not unmounted — so a draft
               survives. */}
-          {question && (
+          {question && !asWorker && (
             <PermissionCard
               key={question.id}
               request={question}
@@ -886,7 +941,20 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               onAnswer={answer}
             />
           )}
-          {workspace && settings && (
+          {asWorker && (
+            <p className="text-muted-foreground border-border rounded-xl border px-4 py-3 text-[13px]">
+              Read-only. This worker takes its instructions from{" "}
+              <button
+                type="button"
+                onClick={openLead}
+                className="text-foreground underline-offset-2 hover:underline"
+              >
+                its lead
+              </button>
+              , which answers its questions and reviews its work.
+            </p>
+          )}
+          {workspace && settings && !asWorker && (
             <div className={question ? "hidden" : "flex flex-col"}>
               <MessageQueue
                 queue={queue}

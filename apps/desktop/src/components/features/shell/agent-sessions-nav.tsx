@@ -16,6 +16,7 @@ import {
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import type { OrchestrationTask } from "#/../shared/orchestration";
 import type {
   AgentSession,
   AgentSubagent,
@@ -60,8 +61,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
+import { liveRun, useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
 import { relativeTime, shortAge } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
+import {
+  taskLabel as workerLabel,
+  taskTone as workerTone,
+} from "#/lib/orchestration-status";
 import { cn } from "#/lib/utils";
 import { useAgentFacts } from "#/stores/agent-facts";
 import {
@@ -80,6 +86,7 @@ import { RenameAgentDialog } from "./rename-agent-dialog";
 /** Stable empty lists: a selector that allocates one re-renders forever. */
 const NONE: AgentSession[] = [];
 const NO_TERMINALS: TerminalSession[] = [];
+const NO_TASKS: OrchestrationTask[] = [];
 /**
  * Rows before "Show more"; the rest, up to the listing's 20, after it
  * (FE-23/D4).
@@ -321,6 +328,8 @@ export function AgentSessionsNav({
   const refreshRunning = useAgentTerminals((state) => state.refresh);
   // Conversations the chat runs count as Running too, like a live tab.
   const chats = useChatEngines((state) => state.alive[workspace] ?? NO_CHATS);
+  // Orchestration runs (FE-87): a lead's workers nest under its row.
+  const runs = useOrchestrationRuns(workspace);
   const refreshChats = useChatEngines((state) => state.refresh);
   const watchChats = useChatEngines((state) => state.watch);
   const stop = useAgentTerminals((state) => state.stop);
@@ -505,9 +514,22 @@ export function AgentSessionsNav({
     );
   /** The chat's own engine is running `session`. */
   const chatFor = (session: AgentSession) => chats.includes(session.id);
-  /** Running: a live terminal on it, or the chat's engine. */
+  /** The orchestration run `session` leads, while it still holds workers. */
+  const runFor = (session: AgentSession) =>
+    runs.find(
+      (run) =>
+        liveRun(run) &&
+        run.lead === session.id &&
+        run.leadAgent === session.agent,
+    );
+  /**
+   * Running: a live terminal on it, the chat's engine, or a run it leads:
+   * its workers go on while the lead waits between turns.
+   */
   const isRunning = (session: AgentSession) =>
-    Boolean(runningFor(session)) || chatFor(session);
+    Boolean(runningFor(session)) ||
+    chatFor(session) ||
+    Boolean(runFor(session));
 
   /**
    * Agents running a new conversation, started from +, whose transcript is
@@ -731,13 +753,20 @@ export function AgentSessionsNav({
           b.sub.updatedAt.localeCompare(a.sub.updatedAt),
       );
     const going = ordered.filter((entry) => entry.working).length;
+    // Its orchestration run's workers, in the run's order (FE-87).
+    const workers = runFor(session)?.tasks ?? NO_TASKS;
+    const workersGoing = workers.filter(
+      (task) => task.status === "running" || task.status === "cancelling",
+    ).length;
+    const children = subagents.length + workers.length;
+    const childrenGoing = going + workersGoing;
     // Its background tasks still running; only Claude counts them (FE-42/D1).
     const background =
       session.agent === "claude" ? session.background.running : 0;
-    const nested = subagents.length > 0 || background > 0;
+    const nested = children > 0 || background > 0;
     // Unset follows them: open while one is going (FE-33/D2).
     const open =
-      nested && (openSubagents[key] ?? (going > 0 || background > 0));
+      nested && (openSubagents[key] ?? (childrenGoing > 0 || background > 0));
     const all = allSubagents.has(key);
     const shownSubagents = all ? ordered : ordered.slice(0, SUBAGENTS_FOLDED);
     const isPinned = session.pinnedAt !== null;
@@ -825,16 +854,16 @@ export function AgentSessionsNav({
               )}
               {/* How many it spawned; while some are going, how many are,
                 beside a dot that stands for a spinner (FE-33/D7). */}
-              {subagents.length > 0 && (
+              {children > 0 && (
                 <span
                   aria-hidden="true"
                   data-testid="subagent-count"
                   className={`text-muted-foreground flex shrink-0 items-center gap-1 text-xs tabular-nums ${MAKES_ROOM}`}
                 >
-                  {going > 0 && (
+                  {childrenGoing > 0 && (
                     <span className="bg-tone-emerald size-1.5 rounded-full" />
                   )}
-                  {going > 0 ? going : subagents.length}
+                  {childrenGoing > 0 ? childrenGoing : children}
                 </span>
               )}
               {/* A Codex goal that stopped short says so (FE-41/D4). */}
@@ -906,11 +935,21 @@ export function AgentSessionsNav({
               type="button"
               aria-expanded={open}
               aria-label={`${open ? "Hide" : "Show"} ${
-                subagents.length > 0
-                  ? `${subagents.length} sub-agent${subagents.length === 1 ? "" : "s"}`
-                  : `${background} background task${background === 1 ? "" : "s"}`
+                workers.length > 0
+                  ? `${workers.length} worker${workers.length === 1 ? "" : "s"}`
+                  : subagents.length > 0
+                    ? `${subagents.length} sub-agent${subagents.length === 1 ? "" : "s"}`
+                    : `${background} background task${background === 1 ? "" : "s"}`
               }`}
-              title={`${subagents.length} sub-agent${subagents.length === 1 ? "" : "s"}${going > 0 ? `, ${going} working` : ""}${background > 0 ? `\n${background} running in the background` : ""}`}
+              title={[
+                workers.length > 0 &&
+                  `${workers.length} worker${workers.length === 1 ? "" : "s"}${workersGoing > 0 ? `, ${workersGoing} working` : ""}`,
+                subagents.length > 0 &&
+                  `${subagents.length} sub-agent${subagents.length === 1 ? "" : "s"}${going > 0 ? `, ${going} working` : ""}`,
+                background > 0 && `${background} running in the background`,
+              ]
+                .filter(Boolean)
+                .join("\n")}
               onClick={() => setOpenSubagents(session, !open)}
               className="text-muted-foreground hover:text-foreground pointer-events-none absolute inset-y-0 left-0 flex w-7 items-center justify-center opacity-0 transition-opacity group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100"
             >
@@ -971,6 +1010,54 @@ export function AgentSessionsNav({
               </span>
             </button>
           ))}
+        {open &&
+          workers.map((task) => {
+            const busy =
+              task.status === "running" || task.status === "cancelling";
+            const seen =
+              task.conversation !== null &&
+              viewing === task.conversation &&
+              !viewingSub &&
+              !viewingTask;
+            return (
+              // A worker opens its own conversation, read-only: the lead is
+              // the one that talks to it. Not started yet, it has none.
+              <button
+                key={`worker:${task.id}`}
+                type="button"
+                disabled={task.conversation === null}
+                onClick={() => {
+                  if (task.conversation)
+                    void navigate({
+                      to: "/w/$slug/agents/chat/$conversation",
+                      params: { slug, conversation: task.conversation },
+                    });
+                }}
+                aria-current={seen ? "page" : undefined}
+                aria-busy={busy || undefined}
+                aria-label={`${task.title}, a worker of “${session.title}”: ${workerLabel(task)}`}
+                title={`${task.title}\n${TERMINAL_KIND_LABELS[task.agent]} worker, ${workerLabel(task).toLowerCase()}`}
+                className={cn(row, SUB_ROW, seen && activeClass)}
+              >
+                <TerminalKindIcon
+                  kind={task.agent}
+                  className="size-3 shrink-0 opacity-60"
+                />
+                <span
+                  className={`min-w-0 flex-1 truncate ${busy ? "text-shimmer" : seen ? "" : "text-muted-foreground"}`}
+                >
+                  {task.title}
+                </span>
+                {busy ? (
+                  <WorkingMark />
+                ) : (
+                  <span className={cn("shrink-0", workerTone(task))}>
+                    {workerLabel(task)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         {open && ordered.length > SUBAGENTS_FOLDED && (
           <button
             type="button"

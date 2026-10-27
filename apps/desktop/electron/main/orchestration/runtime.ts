@@ -46,6 +46,7 @@ import {
   DEFAULT_SETTINGS,
   type Effort,
   type EngineState,
+  type Permission,
   type PermissionAnswer,
   type PermissionRequest,
   settingsFor,
@@ -858,7 +859,7 @@ export class Orchestrator {
         model: task.model,
         effort: task.effort ?? "medium",
         fast: false,
-        permission: "acceptEdits",
+        permission: this.workerPermission(record),
       } satisfies ComposerSettings);
       if (!settings)
         throw new Error(
@@ -1264,6 +1265,19 @@ export class Orchestrator {
       (await this.deps.folderOf(record.run.workspace).catch(() => null)) ??
       record.folder
     );
+  }
+
+  /**
+   * A worker runs with its lead's permissions: what the user gave the lead,
+   * the lead's workers have too. Full access or Auto carry over; a stricter
+   * lead still lets its workers edit inside their own scope, and every other
+   * request goes to the lead (D8). The write guard holds either way.
+   */
+  private workerPermission(record: RunRecord): Permission {
+    const lead = this.leadSettings(record).permission;
+    return lead === "bypassPermissions" || lead === "auto"
+      ? lead
+      : "acceptEdits";
   }
 
   private leadSettings(record: RunRecord): ComposerSettings {
@@ -1845,7 +1859,7 @@ export class Orchestrator {
           model: task.model,
           effort: task.effort ?? "medium",
           fast: false,
-          permission: "acceptEdits",
+          permission: this.workerPermission(record),
         });
         if (!settings) refuse("The worker's model is not available any more.");
         await this.engines().send(
