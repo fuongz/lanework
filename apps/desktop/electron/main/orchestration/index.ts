@@ -55,6 +55,13 @@ function orchestrator(): Orchestrator {
     result: (result) => created.onResult(result),
   });
   instance = created;
+  // Saved runs are read now, not on the page's first call: until then a
+  // worker's conversation would pass for an ordinary one (FE-90/D8).
+  void created
+    .load()
+    .catch((error: unknown) =>
+      console.error("Unable to read orchestration runs", error),
+    );
   return created;
 }
 
@@ -66,13 +73,14 @@ export function setJev(handlers: JevMainHandlers | null): void {
 
 /**
  * The folder a worker's conversation runs in, or null when it is not a
- * worker's. The chat reads a worker's transcript from there.
+ * worker's. The chat reads a worker's transcript from there, and refuses to
+ * send to one directly.
  */
 export function workerFolderOf(
   workspace: string,
   conversation: string,
 ): string | null {
-  return instance?.workerFolder(workspace, conversation) ?? null;
+  return orchestrator().workerFolder(workspace, conversation);
 }
 
 export const orchestrationMain: OrchestrationMainHandlers = {

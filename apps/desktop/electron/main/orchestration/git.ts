@@ -275,25 +275,107 @@ export interface WorkerCheckout extends WorkerTree {
 }
 
 /**
+ * Where a worker branch's baseline is kept (FE-90/D10):
+ * `lanework/<run>/<task>` → `refs/lanework/baseline/<run>/<task>`. Outside
+ * `refs/heads/`, so no branch list shows it.
+ */
+const baselineRef = (branch: string) =>
+  `refs/lanework/baseline/${branch.replace(/^lanework\//, "")}`;
+
+/** Where a worker's work is kept while it moves onto new files (D4). */
+export const savedRef = (branch: string) =>
+  `refs/lanework/saved/${branch.replace(/^lanework\//, "")}`;
+
+/** The commit `rev` names in `root`, or null when it names none. */
+async function commitOf(root: string, rev: string): Promise<string | null> {
+  const run = await git(
+    root,
+    ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`],
+    [1, 128],
+  );
+  return run.code === 0 ? run.stdout.toString("utf8").trim() : null;
+}
+
+/** Whether `ancestor` is `head` or one of its ancestors. */
+async function isAncestor(
+  root: string,
+  ancestor: string,
+  head: string,
+): Promise<boolean> {
+  const run = await git(
+    root,
+    ["merge-base", "--is-ancestor", ancestor, head],
+    [1, 128],
+  );
+  return run.code === 0;
+}
+
+/**
+ * The baseline of a worker branch that already exists (FE-90/D10): the one
+ * the run kept, else the branch's ref, else its oldest baseline commit (a run
+ * made before the ref was kept). Each must be on the branch's history; null
+ * when none is.
+ *
+ * NOTE: Never the branch's tip: a worker that committed would have its own
+ * commits taken for the lead's files, and they would never merge.
+ */
+async function knownBaseline(
+  root: string,
+  branch: string,
+  known: string | null,
+): Promise<string | null> {
+  const head = `refs/heads/${branch}`;
+  for (const rev of [known, baselineRef(branch)]) {
+    if (!rev) continue;
+    const commit = await commitOf(root, rev);
+    if (commit && (await isAncestor(root, commit, head))) return commit;
+  }
+  const marked = zList(
+    (
+      await git(
+        root,
+        [
+          "rev-list",
+          "--first-parent",
+          "-z",
+          "--grep=^lanework: worker baseline$",
+          head,
+        ],
+        [128],
+      )
+    ).stdout
+      .toString("utf8")
+      .replace(/\n/g, "\0"),
+  );
+  return marked.at(-1) ?? null;
+}
+
+/**
  * Make (or find again) the worktree `path` on `branch`, seeded with the lead
  * checkout's uncommitted files.
  *
- * Reusing an existing worktree keeps a worker's work across an app restart.
+ * Reusing an existing worktree, or a branch whose worktree is gone, keeps a
+ * worker's work across an app restart: its baseline is found again
+ * ({@link knownBaseline}), never taken from where the branch is now.
+ *
+ * @param known The baseline the run kept for it, when it has one.
  */
 export async function createWorktree(
   root: string,
   path: string,
   branch: string,
+  known: string | null = null,
 ): Promise<WorkerCheckout> {
+  await gitText(root, ["check-ref-format", "--branch", branch]);
   if (await lstat(join(path, ".git")).catch(() => null)) {
     const real = await realpath(path);
     const tree = { path: real, gitDir: await worktreeGitDir(root, real) };
-    const baseline = (
-      await treeText(tree, ["rev-parse", "--verify", "HEAD^{commit}"])
-    ).trim();
+    const baseline =
+      (await knownBaseline(root, branch, known)) ??
+      (await treeText(tree, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
+    await gitText(root, ["update-ref", baselineRef(branch), baseline]);
     return { ...tree, baseline };
   }
-  await gitText(root, ["check-ref-format", "--branch", branch]);
   await mkdir(dirname(path), { recursive: true });
   const exists =
     (
@@ -312,6 +394,11 @@ export async function createWorktree(
   const real = await realpath(path);
   try {
     const tree = { path: real, gitDir: await worktreeGitDir(root, real) };
+    const found = exists ? await knownBaseline(root, branch, known) : null;
+    if (found) {
+      await gitText(root, ["update-ref", baselineRef(branch), found]);
+      return { ...tree, baseline: found };
+    }
     if (!exists)
       for (const rel of await uncommitted(root)) await seedOne(root, real, rel);
     await treeText(tree, ["add", "-A"]);
@@ -327,10 +414,112 @@ export async function createWorktree(
     const baseline = (
       await treeText(tree, ["rev-parse", "--verify", "HEAD^{commit}"])
     ).trim();
+    await gitText(root, ["update-ref", baselineRef(branch), baseline]);
     return { ...tree, baseline };
   } catch (error) {
     await removeWorktree(root, real, exists ? null : branch).catch(() => {});
     throw error;
+  }
+}
+
+export interface MovedCheckout extends WorkerCheckout {
+  /** Files whose lines both sides changed: they hold conflict markers. */
+  conflicts: string[];
+}
+
+/**
+ * Move a worker's work onto the lead checkout's files as they are now
+ * (FE-90/D4): after its review conflicted, a retry starts from what it
+ * conflicted with.
+ *
+ * The worker's state is committed and kept at {@link savedRef}; the worktree
+ * and branch are made again at the same path (a CLI files its transcript
+ * under the folder), and its changes since `baseline` are applied three ways.
+ * A file both sides changed keeps conflict markers for the worker to resolve.
+ * Nothing is staged: everything after the new baseline is the worker's.
+ *
+ * When the changes cannot be applied at all, the worktree is put back as it
+ * was, on its saved state with its old baseline, and this throws.
+ */
+export async function moveWorktree(
+  root: string,
+  tree: WorkerTree,
+  branch: string,
+  baseline: string,
+): Promise<MovedCheckout> {
+  await treeText(tree, ["add", "-A"]);
+  await treeText(tree, [
+    ...COMMIT_FLAGS,
+    "commit",
+    "--no-verify",
+    "--allow-empty",
+    "-q",
+    "-m",
+    "lanework: worker state",
+  ]);
+  const saved = (
+    await treeText(tree, ["rev-parse", "--verify", "HEAD^{commit}"])
+  ).trim();
+  const keep = savedRef(branch);
+  await gitText(root, ["update-ref", keep, saved]);
+  const patch = (
+    await git(root, [
+      "diff",
+      "--binary",
+      "--full-index",
+      "--no-renames",
+      baseline,
+      saved,
+    ])
+  ).stdout;
+  await removeWorktree(root, tree.path, branch);
+  const fresh = await createWorktree(root, tree.path, branch);
+  const dir = await mkdtemp(join(tmpdir(), "lanework-move-"));
+  try {
+    const file = join(dir, "work.patch");
+    await writeFile(file, patch, { mode: 0o600 });
+    let conflicts: string[] = [];
+    if (patch.length) {
+      const run = await treeGit(
+        fresh,
+        ["apply", "--3way", "--whitespace=nowarn", file],
+        [1],
+      );
+      conflicts = [
+        ...new Set(
+          zList(
+            await treeText(fresh, [
+              "diff",
+              "--name-only",
+              "-z",
+              "--diff-filter=U",
+            ]),
+          ),
+        ),
+      ];
+      if (run.code !== 0 && !conflicts.length)
+        throw new Error("its changes do not apply to the current files");
+      await treeText(fresh, ["reset", "-q"]);
+    }
+    await gitText(root, ["update-ref", "-d", keep]);
+    return { ...fresh, conflicts };
+  } catch (error) {
+    // Put it back as it was: the saved state, on the old baseline.
+    await removeWorktree(root, fresh.path, branch).catch(() => {});
+    await gitText(root, [
+      "worktree",
+      "add",
+      "-b",
+      branch,
+      "--",
+      tree.path,
+      saved,
+    ]);
+    await gitText(root, ["update-ref", baselineRef(branch), baseline]);
+    await gitText(root, ["update-ref", "-d", keep]).catch(() => "");
+    throw error;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -421,10 +610,16 @@ async function mergeText(
   }
 }
 
-/** What review would do to one file of the main checkout. */
+/** A regular file of the main checkout as the merge read it; null: absent. */
+type Found = { bytes: Buffer; mode: number } | null;
+
+/**
+ * What review would do to one file of the main checkout. `ours` is what the
+ * merge was worked out against: the file must still hold it when written.
+ */
 type Step =
-  | { path: string; write: Buffer; mode: number }
-  | { path: string; remove: true }
+  | { path: string; ours: Found; write: Buffer; mode: number }
+  | { path: string; ours: Found; remove: true }
   | { path: string; keep: true };
 
 export interface MergeResult {
@@ -434,11 +629,58 @@ export interface MergeResult {
   conflicts: { path: string; reason: string }[];
 }
 
+const same = (a: Buffer | null, b: Buffer | null) =>
+  a === null ? b === null : b !== null && a.equals(b);
+
+/** Whether `root`'s file system tells names apart by case alone (L2). */
+async function foldsCase(root: string): Promise<boolean> {
+  const [lower, upper] = await Promise.all([
+    lstat(join(root, ".git")).catch(() => null),
+    lstat(join(root, ".GIT")).catch(() => null),
+  ]);
+  return (
+    !!lower && !!upper && lower.ino === upper.ino && lower.dev === upper.dev
+  );
+}
+
+/** A file the merge changed in the main checkout, changed again. */
+class MovedUnder extends Error {
+  constructor(readonly path: string) {
+    super("it changed in the checkout while merging");
+  }
+}
+
+/** Write `bytes` to `target` through a temp file beside it. */
+async function writeThrough(
+  target: string,
+  bytes: Buffer,
+  mode: number,
+  check?: () => Promise<void>,
+): Promise<void> {
+  await mkdir(dirname(target), { recursive: true });
+  const temp = `${target}.lanework-${randomUUID().slice(0, 8)}`;
+  try {
+    await writeFile(temp, bytes, { mode });
+    await chmod(temp, mode);
+    await check?.();
+    await rename(temp, target);
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
 /**
  * Merge the worker's `changes` into the main checkout, three ways per file.
  *
  * All or nothing: every file is worked out first, and the main checkout is
- * only written when none conflicts.
+ * only written when none conflicts. Each file is compared again with what
+ * the merge read right before it is replaced, so an edit (an autosave) made
+ * meanwhile is never overwritten; that, or any failure while writing, puts
+ * back every file already written (FE-90/D6).
+ *
+ * On a file system that ignores case, a worker's case-only rename is taken
+ * as one: the old name is removed before the new one is written (D10).
  */
 export async function mergeWorker(
   root: string,
@@ -447,24 +689,48 @@ export async function mergeWorker(
   changes: readonly WorkerChange[],
 ): Promise<MergeResult> {
   const realRoot = await realpath(root);
+  const folded = await foldsCase(realRoot);
+  const removed = new Set(
+    changes
+      .filter((change) => change.status === "D")
+      .map((change) => change.path),
+  );
   const steps: Step[] = [];
   const conflicts: MergeResult["conflicts"] = [];
   for (const change of changes) {
     const { path } = change;
     const target = join(realRoot, path);
     // The target must be a plain path in the checkout: no link on the way.
+    // Where case does not count, the name on disk may differ in case alone.
     const resolved = await resolvedPath(target).catch(() => null);
-    if (!resolved || within(realRoot, resolved) !== path) {
+    const rel = resolved ? within(realRoot, resolved) : null;
+    if (
+      rel === null ||
+      (rel !== path && (!folded || rel.toLowerCase() !== path.toLowerCase()))
+    ) {
       conflicts.push({
         path,
         reason: "its path in the checkout goes through a symlink",
       });
       continue;
     }
+    // The file on disk under another case is a different file in git: only
+    // one the worker removes (a case-only rename) may give way to this one.
+    const renamed = rel !== path && change.status !== "D";
+    if (renamed && !removed.has(rel)) {
+      conflicts.push({
+        path,
+        reason: `the checkout has ${rel}, which differs from it only by case`,
+      });
+      continue;
+    }
     const [base, ours, theirs] = await Promise.all([
       atBaseline(tree, baseline, path),
-      readRegular(target),
-      readRegular(join(tree.path, path)),
+      // Under another case on disk: no file has this name any more.
+      rel !== path ? null : readRegular(target),
+      // Gone in git; read under a name that ignores case, the file found
+      // would be the one it was renamed to.
+      change.status === "D" ? null : readRegular(join(tree.path, path)),
     ]);
     if (ours === "special" || theirs === "special") {
       conflicts.push({ path, reason: "it is a symlink or not a regular file" });
@@ -472,11 +738,9 @@ export async function mergeWorker(
     }
     const oursBytes = ours?.bytes ?? null;
     const theirsBytes = theirs?.bytes ?? null;
-    const same = (a: Buffer | null, b: Buffer | null) =>
-      a === null ? b === null : b !== null && a.equals(b);
     if (same(oursBytes, theirsBytes)) {
       if (theirs && ours && theirs.mode !== ours.mode)
-        steps.push({ path, write: theirs.bytes, mode: theirs.mode });
+        steps.push({ path, ours, write: theirs.bytes, mode: theirs.mode });
       else steps.push({ path, keep: true });
       continue;
     }
@@ -484,8 +748,8 @@ export async function mergeWorker(
       // The lead checkout did not touch it: the worker's version wins.
       steps.push(
         theirs
-          ? { path, write: theirs.bytes, mode: theirs.mode }
-          : { path, remove: true },
+          ? { path, ours, write: theirs.bytes, mode: theirs.mode }
+          : { path, ours, remove: true },
       );
       continue;
     }
@@ -509,23 +773,60 @@ export async function mergeWorker(
       conflicts.push({ path, reason: "both sides changed the same lines" });
       continue;
     }
-    steps.push({ path, write: merged, mode: theirs?.mode ?? 0o644 });
+    steps.push({ path, ours, write: merged, mode: theirs?.mode ?? 0o644 });
   }
   if (conflicts.length) return { applied: [], conflicts };
+  // Removals first: a case-only rename frees the name it is written under.
+  const ordered = [
+    ...steps.filter((step) => "remove" in step),
+    ...steps.filter((step) => "write" in step),
+  ];
   const applied: string[] = [];
-  for (const step of steps) {
-    if ("keep" in step) continue;
-    const target = join(realRoot, step.path);
-    if ("remove" in step) {
-      await rm(target, { force: true });
-    } else {
-      await mkdir(dirname(target), { recursive: true });
-      const temp = `${target}.lanework-${randomUUID().slice(0, 8)}`;
-      await writeFile(temp, step.write, { mode: step.mode });
-      await chmod(temp, step.mode);
-      await rename(temp, target);
+  /** What each written file held before, to put back on a failure. */
+  const undo: { target: string; before: Found }[] = [];
+  let at = "";
+  try {
+    for (const step of ordered) {
+      if ("keep" in step) continue;
+      at = step.path;
+      const target = join(realRoot, step.path);
+      const expected = step.ours?.bytes ?? null;
+      let before: Found = null;
+      const unchanged = async () => {
+        const now = await readRegular(target);
+        if (now === "special" || !same(now?.bytes ?? null, expected))
+          throw new MovedUnder(step.path);
+        before = now;
+      };
+      if ("remove" in step) {
+        await unchanged();
+        await rm(target, { force: true });
+      } else {
+        await writeThrough(target, step.write, step.mode, unchanged);
+      }
+      undo.push({ target, before });
+      applied.push(step.path);
     }
-    applied.push(step.path);
+  } catch (error) {
+    for (const entry of undo.reverse()) {
+      const { target, before } = entry;
+      await (before
+        ? writeThrough(target, before.bytes, before.mode)
+        : rm(target, { force: true })
+      ).catch(() => {});
+    }
+    return {
+      applied: [],
+      conflicts: [
+        {
+          path: at,
+          reason:
+            error instanceof MovedUnder
+              ? error.message
+              : `writing it failed (${error instanceof Error ? error.message : String(error)}); every file was put back`,
+        },
+      ],
+    };
   }
   return { applied, conflicts: [] };
 }
@@ -553,5 +854,9 @@ export async function removeWorktree(
   );
   await rm(tree, { recursive: true, force: true }).catch(() => {});
   await git(root, ["worktree", "prune"]).catch(() => null);
-  if (branch) await git(root, ["branch", "-D", branch], [1]).catch(() => null);
+  if (!branch) return;
+  await git(root, ["branch", "-D", branch], [1]).catch(() => null);
+  await git(root, ["update-ref", "-d", baselineRef(branch)], [1]).catch(
+    () => null,
+  );
 }

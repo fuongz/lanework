@@ -157,6 +157,23 @@ function permissionOf(mode: unknown): Permission | null {
   return isPermission(mode) ? mode : null;
 }
 
+/**
+ * The text a `result` line ends its turn with. A failed turn (an API error,
+ * `error_max_turns`, a usage limit) may carry none: what it says instead
+ * (FE-90/D3).
+ */
+function resultText(line: Record<string, unknown>): string {
+  const text = typeof line.result === "string" ? line.result : "";
+  if (line.is_error !== true || text.trim()) return text;
+  const errors = Array.isArray(line.errors)
+    ? line.errors.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  if (errors.length) return errors.join("\n").slice(0, 2_000);
+  return typeof line.subtype === "string" && line.subtype !== "success"
+    ? `The turn failed (${line.subtype}).`
+    : "The turn failed.";
+}
+
 /** A control request of ours the CLI has not answered yet. */
 interface Control {
   resolve: (value: Record<string, unknown>) => void;
@@ -487,7 +504,7 @@ class Engine {
             workspace: this.workspace,
             conversation: this.conversation,
             folder: this.folder,
-            text: typeof line.result === "string" ? line.result : "",
+            text: resultText(line),
             error: line.is_error === true,
           }),
         );
