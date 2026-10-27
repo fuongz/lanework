@@ -12,55 +12,24 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useBlocker, useParams, useSearch } from "@tanstack/react-router";
-import { useEffect, useId, useMemo, useState } from "react";
-import type {
-  BoardAttachment,
-  BoardCard,
-  BoardChecklistItem,
-  BoardMember,
-} from "#/../shared/workspaces";
+import { useEffect, useState } from "react";
+import type { BoardAttachment, BoardCard } from "#/../shared/workspaces";
 import { AssignAgentButton } from "#/components/shared/board/assign-agent";
 import { CardAgentsLine } from "#/components/shared/board/card-agents";
-import {
-  CategoryDot,
-  PriorityIcon,
-  StatusIcon,
-} from "#/components/shared/board/glyphs";
+import { PriorityIcon, StatusIcon } from "#/components/shared/board/glyphs";
 import { DeleteIssueDialog } from "#/components/shared/board/issue-menu";
 import { LabelChip } from "#/components/shared/board/label-chip";
-import { LabelPicker } from "#/components/shared/board/label-picker";
 import { Avatar, memberOf } from "#/components/shared/board/people";
-import {
-  NONE,
-  PRIORITY_LABEL,
-  RAIL,
-  RailValue,
-  Row,
-} from "#/components/shared/board/properties";
 import {
   IssueDetailSkeleton,
   PropertiesSkeleton,
 } from "#/components/shared/board/skeletons";
 import { ErrorState } from "#/components/shared/common/error-state";
-import {
-  InlineMarkdown,
-  MarkdownBody,
-} from "#/components/shared/common/markdown-body";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "#/components/shared/navigation/select";
+import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
-import {
-  TERMINAL_KIND_LABELS,
-  TerminalKindIcon,
-} from "#/components/shared/terminal/terminal-kind-icon";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -72,7 +41,6 @@ import {
   AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
-import { Checkbox } from "#/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -80,26 +48,23 @@ import {
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
 import { Input } from "#/components/ui/input";
-import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group";
-import { Separator } from "#/components/ui/separator";
 import { useCopy } from "#/hooks/use-copy";
-import {
-  categoryOf,
-  columnOf,
-  subIssueProgress,
-  subIssues,
-} from "#/lib/board-view";
+import { columnOf, subIssueProgress, subIssues } from "#/lib/board-view";
 import { fileSize } from "#/lib/file-size";
 import { parseIssueSearch } from "#/lib/issue-search";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
-import { presenceKind } from "#/stores/board-presence";
 import { useIssueView } from "#/stores/issue-view";
 import { useLayout } from "#/stores/layout";
 import { useCloudFeatures } from "#/stores/session";
 import { IssueActivity } from "./issue-activity";
 import { IssueCheckpoint } from "./issue-checkpoint";
-import { IssueStreams, StreamKey } from "./issue-streams";
+import {
+  Checklist,
+  useChecklistDraft,
+  WorkBreakdown,
+} from "./issue-detail.checklist";
+import { Fields } from "./issue-detail.properties";
 
 export function IssueDetail() {
   const { slug, taskId } = useParams({ from: "/_app/w/$slug/issues/$taskId" });
@@ -558,12 +523,6 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
   );
 }
 
-/** The streams, counted against the checklist exactly as the page shows it. */
-function WorkBreakdown({ card }: { card: BoardCard }) {
-  const { items } = useChecklistDraft(card);
-  return <IssueStreams card={card} items={items} />;
-}
-
 /**
  * The files a card refers to.
  *
@@ -719,564 +678,5 @@ function SubIssues({ card, slug }: { card: BoardCard; slug: string }) {
         </ul>
       )}
     </section>
-  );
-}
-
-/**
- * A moment in the rail: the day and the time of day.
- *
- * On a board where a card is created and worked in the same afternoon, the
- * date alone is the one fact you already knew. `dateStyle: "medium"` also
- * drops the 9/7 vs 7/9 ambiguity a numeric date carries between locales.
- */
-function Stamp({ value }: { value: string | null }) {
-  const at = value ? new Date(value) : null;
-  if (!at || Number.isNaN(at.getTime())) return <RailValue>—</RailValue>;
-  return (
-    <RailValue>
-      {/* The rail is 288px wide, so the seconds and the timezone live in the
-          tooltip rather than wrapping the row. */}
-      <time dateTime={at.toISOString()} title={at.toString()}>
-        {at.toLocaleString(undefined, {
-          dateStyle: "medium",
-          timeStyle: "short",
-        })}
-      </time>
-    </RailValue>
-  );
-}
-
-/**
- * Who the card is on.
- *
- * NOTE: `onChange` gets the users only, and the caller must write both lists,
- * because the service replaces the whole set. Sending only `users` clears
- * every agent assignment as a side effect of naming a person, and the agents
- * on a card are how work is dispatched.
- */
-function AssigneeRow({
-  card,
-  members,
-  disabled,
-  onChange,
-}: {
-  card: BoardCard;
-  members: BoardMember[];
-  disabled: boolean;
-  onChange: (users: string[]) => void;
-}) {
-  const users = card.assignees?.users ?? [];
-  const on = new Set(users);
-  const first = memberOf(members, users[0]);
-  // Agents are shown, never edited here (FE-34/D2): an agent is put on a card
-  // by handing it the card, which starts it. A menu entry that only
-  // relabelled the card would claim work nobody is doing.
-  const agents = (card.assignees?.agents ?? []).map((agent) => ({
-    agent,
-    kind: presenceKind(agent),
-  }));
-  const agentNames = agents
-    .map(({ agent, kind }) => (kind ? TERMINAL_KIND_LABELS[kind] : agent))
-    .join(", ");
-  const label =
-    users.length === 0
-      ? agentNames || "Unassigned"
-      : users.length === 1
-        ? (first?.name ?? users[0])
-        : `${first?.name ?? users[0]} +${users.length - 1}`;
-  const agentIcons = agents.map(({ agent, kind }) =>
-    kind ? (
-      <TerminalKindIcon key={agent} kind={kind} className="size-4 shrink-0" />
-    ) : null,
-  );
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        disabled={disabled}
-        className="hover:bg-foreground/[0.06] focus-visible:ring-accent-brand flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-[13px] transition-colors focus-visible:ring-2 disabled:opacity-50"
-      >
-        {users.length === 0 && agents.length > 0 ? (
-          agentIcons
-        ) : (
-          <Avatar member={first} size="sm" />
-        )}
-        <span className="truncate">{label}</span>
-        {users.length > 0 && agents.length > 0 && (
-          <span
-            className="ml-auto flex shrink-0 items-center gap-1"
-            title={agentNames}
-          >
-            {agentIcons}
-            <span className="sr-only">and {agentNames}</span>
-          </span>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56">
-        <DropdownMenuItem closeOnClick={false} onClick={() => onChange([])}>
-          <Avatar size="sm" />
-          Unassigned
-        </DropdownMenuItem>
-        {members.map((member) => (
-          <DropdownMenuItem
-            key={member.userId}
-            // Three people on one card is one task; a menu that shut after
-            // each would make it three.
-            closeOnClick={false}
-            onClick={() =>
-              onChange(
-                on.has(member.userId)
-                  ? users.filter((id) => id !== member.userId)
-                  : [...users, member.userId],
-              )
-            }
-          >
-            <Avatar member={member} size="sm" />
-            <span className="truncate">{member.name}</span>
-            {on.has(member.userId) && (
-              <span className="text-muted-foreground ml-auto text-xs">✓</span>
-            )}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/**
- * The card's properties, in the rail's own shape.
- *
- * - Status, Priority, Assignee, Labels: the order the design draws, and the
- *   order the New issue page follows. The two rails read as one panel to
- *   anyone who creates a card and then opens it, and a field that moves
- *   between them is a field they look for twice.
- * - Category stays, though the design has no such row: it is what mints a
- *   card's task id.
- */
-function Fields({ card }: { card: BoardCard }) {
-  const checklist = useChecklistDraft(card).items;
-  const view = useBoard((state) => state.view);
-  const update = useBoard((state) => state.update);
-  const busy = useBoard((state) => state.busy);
-  const stale = view?.stale ?? false;
-  const writing = stale || busy === card.id;
-  const members = view?.members ?? [];
-  const labels = view?.labels ?? [];
-
-  const save = (patch: Parameters<typeof update>[1]) =>
-    void update(card.id, patch, card.revision);
-
-  return (
-    <>
-      <Row label="Status">
-        <StatusIcon column={columnOf(view?.columns ?? [], card.columnKey)} />
-        <Select
-          value={card.columnKey}
-          onValueChange={(value) =>
-            void useBoard.getState().move(card.id, value)
-          }
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label="Status"
-            disabled={writing}
-            className={RAIL}
-          >
-            <SelectValue>
-              {(value: string) =>
-                columnOf(view?.columns ?? [], value)?.name ?? value
-              }
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {(view?.columns ?? []).map((column) => (
-              <SelectItem key={column.key} value={column.key}>
-                {column.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Row>
-
-      <Row label="Priority">
-        <PriorityIcon priority={card.priority} />
-        <Select
-          value={card.priority ?? NONE}
-          onValueChange={(value) =>
-            save({
-              priority:
-                value === NONE ? null : (value as BoardCard["priority"]),
-            })
-          }
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label="Priority"
-            disabled={writing}
-            className={RAIL}
-          >
-            <SelectValue>
-              {(value: string) => PRIORITY_LABEL[value] ?? value}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NONE}>No priority</SelectItem>
-            <SelectItem value="high">High</SelectItem>
-            <SelectItem value="medium">Medium</SelectItem>
-            <SelectItem value="low">Low</SelectItem>
-          </SelectContent>
-        </Select>
-      </Row>
-
-      <Row label="Assignee">
-        <AssigneeRow
-          card={card}
-          members={members}
-          disabled={writing}
-          onChange={(users) =>
-            save({
-              assignees: { users, agents: card.assignees?.agents ?? [] },
-            })
-          }
-        />
-      </Row>
-
-      <Row label="Labels">
-        {/* Disabled by `stale` only, unlike the menus above it. Bound to
-            `busy` as well, the control goes dead for each round trip, which
-            on a board being edited is most of the time. A second label chosen
-            before the first write lands can still lose the revision race;
-            that is what the conflict banner is for. */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-          {card.tags.map((tag) => (
-            <LabelChip
-              key={tag}
-              tag={tag}
-              labels={labels}
-              onRemove={
-                stale
-                  ? undefined
-                  : () => save({ tags: card.tags.filter((t) => t !== tag) })
-              }
-            />
-          ))}
-          <LabelPicker
-            tags={card.tags}
-            labels={labels}
-            disabled={stale}
-            onChange={(tags) => save({ tags })}
-          />
-        </div>
-      </Row>
-
-      <Row label="Category">
-        <CategoryDot
-          category={categoryOf(view?.categories ?? [], card.categoryKey)}
-        />
-        <Select
-          value={card.categoryKey ?? NONE}
-          onValueChange={(value) =>
-            save({ categoryKey: value === NONE ? null : value })
-          }
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label="Category"
-            disabled={writing}
-            className={RAIL}
-          >
-            <SelectValue>
-              {(value: string) =>
-                value === NONE
-                  ? "No category"
-                  : (categoryOf(view?.categories ?? [], value)?.name ?? value)
-              }
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {/* A sentinel, not `""`: see `NONE`. */}
-            <SelectItem value={NONE}>No category</SelectItem>
-            {(view?.categories ?? []).map((category) => (
-              <SelectItem key={category.key} value={category.key}>
-                {category.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Row>
-
-      {/* Facts, not fields, but read as the same table, so they keep the
-          row. */}
-      <Separator className="my-1.5" />
-      {/* In the rail, not only above the list. The rail is a pane of its
-          own, so this is the one place a card's progress stays on screen
-          while a body that runs for pages is being read. */}
-      {sections(checklist).map(({ section, rows, done }) => (
-        <Row key={section} label={SECTION_NAME[section] ?? section}>
-          <RailValue>
-            {done}/{rows.length}
-          </RailValue>
-        </Row>
-      ))}
-      <Row label="Created">
-        <Stamp value={card.createdAt} />
-      </Row>
-      <Row label="Updated">
-        <Stamp value={card.updatedAt} />
-      </Row>
-      {card.dueAt && (
-        <Row label="Due">
-          <Stamp value={card.dueAt} />
-        </Row>
-      )}
-      {card.estimate !== null && (
-        <Row label="Estimate">
-          <RailValue>{card.estimate}</RailValue>
-        </Row>
-      )}
-    </>
-  );
-}
-
-const SECTION_NAME: Record<string, string> = {
-  decisions: "Decisions",
-  verify: "Verify",
-};
-
-const ROW = "flex items-start gap-2.5 text-[13px] leading-relaxed";
-
-/**
- * The checklist split into its sections, in the order they were written, each
- * carrying how far through it is.
- *
- * One function for the list and the rail's counters. A rail reading `3/7`
- * beside a section headed `4/7` is the kind of disagreement nobody thinks to
- * test for.
- */
-function sections(items: BoardChecklistItem[]) {
-  return [...new Set(items.map((item) => item.section))].map((section) => {
-    const rows = items.filter((item) => item.section === section);
-    return {
-      section,
-      rows,
-      done: rows.filter((item) => item.checked).length,
-    };
-  });
-}
-
-/**
- * The rows in the order they were written, with each "pick ONE" group
- * collapsed into a single run sitting where its first row did.
- *
- * NOTE: Collected by group name, not by adjacency. Rows of one group that are
- * not next to each other are still one choice, and splitting them into two
- * radio groups would let each half hold a ticked option.
- */
-function alternatives(rows: BoardChecklistItem[]) {
-  const runs: { group: string | null; items: BoardChecklistItem[] }[] = [];
-  const seen = new Map<string, number>();
-  for (const item of rows) {
-    const at = item.group ? seen.get(item.group) : undefined;
-    if (at !== undefined) {
-      runs[at].items.push(item);
-      continue;
-    }
-    if (item.group) seen.set(item.group, runs.length);
-    runs.push({ group: item.group, items: [item] });
-  }
-  return runs;
-}
-
-/**
- * The open card's checklist as the person currently has it: the server's
- * ticks with the unsaved draft laid over them, plus which keys differ.
- *
- * Derived on every read, never stored. A box the draft says "on" that a poll
- * shows is already on is not a change any more, and the Save button, the
- * marker and the leave prompt all agree about that without anyone pruning.
- */
-function useChecklistDraft(card: BoardCard | null) {
-  const draft = useBoard((state) => state.draft);
-  return useMemo(() => {
-    const items = card?.checklist ?? [];
-    const dirty = new Set<string>();
-    if (!card || draft?.cardId !== card.id) return { items, dirty };
-    const next = items.map((item) => {
-      const want = draft.checked[item.key];
-      if (want === undefined || want === item.checked) return item;
-      dirty.add(item.key);
-      return { ...item, checked: want };
-    });
-    return { items: next, dirty };
-  }, [card, draft]);
-}
-
-/** One row's text: its key, the decision, and the note under it. */
-function RowLabel({
-  htmlFor,
-  item,
-  unsaved = false,
-}: {
-  htmlFor: string;
-  item: BoardChecklistItem;
-  unsaved?: boolean;
-}) {
-  return (
-    // NOTE: `relative` is load-bearing. The `sr-only` text below is
-    // `position: absolute`, and with no positioned ancestor it is placed
-    // against the page at its row's offset inside the scrolled pane, below the
-    // window's bottom edge. That makes the document taller than the window,
-    // and the whole app scrolls up under a grey band.
-    <label htmlFor={htmlFor} className="relative cursor-pointer">
-      {/* A mark on the row, not only the Save button's count: on a card with
-          thirty boxes, "3 changes" does not say which three. */}
-      {unsaved && (
-        <>
-          <span
-            aria-hidden="true"
-            className="bg-tone-amber mr-1.5 inline-block size-1.5 -translate-y-px rounded-full align-middle"
-            title="Not saved yet"
-          />
-          <span className="sr-only">Not saved yet: </span>
-        </>
-      )}
-      <span className="text-muted-foreground mr-1.5 font-mono text-xs">
-        {item.key}
-      </span>
-      {/* The stream this row proves; untagged rows are the lead's. */}
-      {item.section === "verify" && item.stream && (
-        <span className="mr-1.5 inline-flex align-[1px]">
-          <StreamKey value={item.stream} />
-        </span>
-      )}
-      {/* Rendered, not printed: cards are written in markdown, and a
-          decision that reads `**Tool \`create_board\`**` as literal asterisks
-          and backticks is noise around the one sentence being approved. */}
-      <InlineMarkdown source={item.text} />
-      {item.note && (
-        <span className="text-muted-foreground mt-0.5 block text-xs">
-          {item.note.split("\n").map((line, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: a note's lines are positional and never reorder.
-            <span key={index} className="block">
-              <InlineMarkdown source={line} />
-            </span>
-          ))}
-        </span>
-      )}
-    </label>
-  );
-}
-
-/**
- * The card's checklist, grouped the way it was written.
- *
- * NOTE: Rows sharing a `group` are alternatives (the board's "pick ONE"), so
- * they are a `RadioGroup`, not checkboxes. Independent boxes would let a
- * reader tick two options that contradict each other and believe both were
- * approved.
- */
-function Checklist({ card }: { card: BoardCard }) {
-  const stageTick = useBoard((state) => state.stageTick);
-  const stagePick = useBoard((state) => state.stagePick);
-  const busy = useBoard((state) => state.busy);
-  const view = useBoard((state) => state.view);
-  const uid = useId();
-  const { items, dirty } = useChecklistDraft(card);
-  const stale = view?.stale ?? false;
-  if (!items.length) return null;
-
-  // NOTE: Prefixed, not the bare `item.key`. Every card's checklist starts at
-  // `D1`, and the detail pane is not the only thing on the page: a duplicated
-  // id points a label at whichever box the document happens to hold first.
-  const rowId = (item: BoardChecklistItem) => `${uid}-${item.key}`;
-  // While a save is running every box holds still: a tick made mid-save would
-  // be neither in the request being sent nor safely in the draft after it.
-  const rowBusy = (_item: BoardChecklistItem) =>
-    stale || busy === `${card.id}:checklist`;
-
-  return (
-    <div className="flex flex-col gap-4">
-      {sections(items).map(({ section, rows, done }) => {
-        return (
-          <section key={section} className="flex flex-col gap-1.5">
-            <div className="flex items-baseline gap-2">
-              <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                {SECTION_NAME[section] ?? section}
-              </h2>
-              <span className="text-muted-foreground text-xs tabular-nums">
-                {done}/{rows.length}
-              </span>
-            </div>
-            <ul className="flex flex-col gap-1.5">
-              {alternatives(rows).map((run) => {
-                const [first] = run.items;
-                if (run.group === null)
-                  return (
-                    <li key={first.key} className={ROW}>
-                      <Checkbox
-                        // A tick goes into the draft, not to the server
-                        // (FE-13/D7): decisions are made as a set and sent
-                        // with Save. The row's mark says it is not saved yet,
-                        // so an approval is never shown as saved before it is.
-                        id={rowId(first)}
-                        checked={first.checked}
-                        disabled={rowBusy(first)}
-                        className="mt-0.5"
-                        onCheckedChange={(checked) =>
-                          stageTick(card.id, first.key, checked)
-                        }
-                      />
-                      <RowLabel
-                        htmlFor={rowId(first)}
-                        item={first}
-                        unsaved={dirty.has(first.key)}
-                      />
-                    </li>
-                  );
-                return (
-                  <li key={run.group}>
-                    <RadioGroup
-                      aria-label={run.group}
-                      // NOTE: `null` while nothing is picked, never
-                      // `undefined`. Base UI reads an undefined `value` as
-                      // "uncontrolled", and the group would track a selection
-                      // of its own instead of the one the server confirmed.
-                      value={
-                        run.items.find((item) => item.checked)?.key ?? null
-                      }
-                      disabled={rowBusy(first)}
-                      className="gap-1.5"
-                      onValueChange={(value) =>
-                        stagePick(
-                          card.id,
-                          run.items.map((item) => item.key),
-                          String(value),
-                        )
-                      }
-                    >
-                      {run.items.map((item) => (
-                        <div key={item.key} className={ROW}>
-                          <RadioGroupItem
-                            id={rowId(item)}
-                            value={item.key}
-                            disabled={rowBusy(item)}
-                            className="mt-0.5"
-                          />
-                          <RowLabel
-                            htmlFor={rowId(item)}
-                            item={item}
-                            unsaved={dirty.has(item.key)}
-                          />
-                        </div>
-                      ))}
-                    </RadioGroup>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        );
-      })}
-    </div>
   );
 }

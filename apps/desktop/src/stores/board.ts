@@ -216,11 +216,7 @@ interface BoardState {
    * @returns The failure, ready to show, when it did not delete.
    */
   archiveCard: (cardId: string) => Promise<{ error?: string }>;
-  move: (
-    cardId: string,
-    columnKey: string | null,
-    placement?: { after: string } | { before: string },
-  ) => Promise<void>;
+  move: (cardId: string, columnKey: string | null) => Promise<void>;
   update: (
     cardId: string,
     patch: BoardCardPatch,
@@ -306,30 +302,31 @@ interface BoardState {
 }
 
 /**
- * Re-rank one lane locally, so a dropped card sits where it was dropped.
+ * Re-rank one lane locally, so a moved card shows at the end of its new lane.
  *
  * NOTE: Local ranks are provisional; the server's replace them on the next
  * read. They are padded indices, not a fractional index: two clients that
  * compute real ranks themselves end up picking the same one. That is why
- * `placement` exists and why nothing here is ever sent to the board.
+ * nothing here is ever sent to the board.
+ *
+ * NOTE: The renderer only ever appends (the move-to-column menu). The IPC
+ * contract still takes a `BoardPlacement` neighbour for a drop between cards;
+ * this store does not send one.
  */
 function reorder(
   cards: BoardCard[],
   cardId: string,
   columnKey: string,
-  placement?: { after: string } | { before: string },
 ): BoardCard[] {
   const moving = cards.find((card) => card.id === cardId);
   if (!moving) return cards;
-  const lane = cards
-    .filter((card) => card.columnKey === columnKey && card.id !== cardId)
-    .sort(byRank);
-  const anchor =
-    placement && "after" in placement ? placement.after : placement?.before;
-  const at = anchor ? lane.findIndex((card) => card.id === anchor) : -1;
   const next = { ...moving, columnKey };
-  if (at === -1) lane.push(next);
-  else lane.splice(placement && "after" in placement ? at + 1 : at, 0, next);
+  const lane = [
+    ...cards
+      .filter((card) => card.columnKey === columnKey && card.id !== cardId)
+      .sort(byRank),
+    next,
+  ];
   const ranked = new Map(
     lane.map((card, index) => [card.id, String(index + 1).padStart(6, "0")]),
   );
@@ -840,7 +837,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
    * was and then jumps to where it was dropped reads as broken, not slow. A
    * refusal restores the exact list this started from.
    */
-  move: async (cardId, columnKey, placement) => {
+  move: async (cardId, columnKey) => {
     const workspace = get().active;
     const view = get().view;
     if (!workspace?.id || !view) return;
@@ -848,7 +845,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const card = before.find((entry) => entry.id === cardId);
     if (!card) return;
     const destination = columnKey ?? card.columnKey;
-    const cards = reorder(before, cardId, destination, placement);
+    const cards = reorder(before, cardId, destination);
     // NOTE: A move that moves nothing must not be sent. Putting a card back
     // where it was (on the boundary it already sits against, or into its own
     // lane) leaves the lane as it stands. Sent anyway, the board stamps
@@ -870,7 +867,6 @@ export const useBoard = create<BoardState>()((set, get) => ({
         workspace.id,
         cardId,
         columnKey,
-        placement,
       );
       if (result.kind === "ok") {
         // The properties rail reads detail, independently of the board list.
