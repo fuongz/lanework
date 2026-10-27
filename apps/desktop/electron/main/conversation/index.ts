@@ -50,7 +50,12 @@ import { claudePidsOn } from "./live-claude";
 import { contentOf, isMessageId, sendRequest } from "./outgoing";
 import type { Outgoing } from "./queue";
 import { createSettingsStore } from "./settings-store";
-import { suggestCommands, suggestFiles, workspaceFiles } from "./suggest";
+import {
+  listCommands,
+  rankCommands,
+  suggestFiles,
+  workspaceFiles,
+} from "./suggest";
 import { readConversation, transcriptPath } from "./transcript";
 
 /**
@@ -74,6 +79,46 @@ interface TerminalBridge {
  */
 function agentHome(): string {
   return (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
+}
+
+/** How long a project's `/` commands are reused before they are read again. */
+const COMMANDS_MS = 30_000;
+
+/** The last `/` commands read, by workspace. */
+const commandCache = new Map<
+  string,
+  { at: number; all: Promise<Suggestion[]> }
+>();
+
+/**
+ * Every `/` command `workspace` offers, for each key the composer sends.
+ *
+ * Read once and kept (FE-92): finding the project's folder may wait on the
+ * network, and `/` must open at once. Older than {@link COMMANDS_MS}, the
+ * list kept still answers while a new one is read behind it.
+ */
+function commandsOf(workspace: string): Promise<Suggestion[]> {
+  const read = () =>
+    terminalFolder(workspace).then((folder) =>
+      listCommands(agentHome(), folder),
+    );
+  const cached = commandCache.get(workspace);
+  if (!cached) {
+    const all = read();
+    commandCache.set(workspace, { at: Date.now(), all });
+    all.catch(() => commandCache.delete(workspace));
+    if (commandCache.size > 16)
+      commandCache.delete(commandCache.keys().next().value as string);
+    return all;
+  }
+  if (Date.now() - cached.at > COMMANDS_MS) {
+    cached.at = Date.now();
+    const next = read();
+    next
+      .then(() => commandCache.set(workspace, { at: Date.now(), all: next }))
+      .catch(() => {});
+  }
+  return cached.all;
 }
 
 /**
@@ -664,11 +709,7 @@ export function registerConversation(
       if (typeof query !== "string" || query.length > 200)
         throw new Error("A valid query is required");
       if (kind === "command")
-        return suggestCommands(
-          agentHome(),
-          await terminalFolder(workspace),
-          query,
-        );
+        return rankCommands(await commandsOf(workspace), query);
       if (kind === "file")
         return suggestFiles(await folderOf(workspace), query);
       throw new Error("Unknown kind");

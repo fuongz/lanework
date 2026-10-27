@@ -1,10 +1,15 @@
 import {
   ArrowUp02Icon,
   Cancel01Icon,
+  CommandLineIcon,
+  CubeIcon,
   File01Icon,
+  Folder01Icon,
   Image01Icon,
   Loading03Icon,
+  SlashIcon,
   StopIcon,
+  UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -18,6 +23,7 @@ import {
   useState,
 } from "react";
 import {
+  type CommandSource,
   type ComposerSettings,
   type ConversationAgent,
   type OutgoingAttachment,
@@ -27,6 +33,7 @@ import {
 } from "#/../shared/conversation";
 import { insertDictation } from "#/../shared/dictation";
 import type { LeadsList, TeamLead } from "#/../shared/orchestration";
+import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
 import {
@@ -44,6 +51,11 @@ import {
   DictationButton,
   useDictation,
 } from "./composer.dictation";
+import {
+  ChipEditor,
+  type ChipEditorHandle,
+  type ChipSpec,
+} from "./composer.editor";
 import { AttachMenu, ModelMenu, PermissionMenu } from "./composer.menus";
 
 export interface ComposerHandle {
@@ -107,7 +119,99 @@ let keys = 0;
 const ORCHESTRATE: Suggestion = {
   value: "/orchestrate",
   detail: "Plan workers for a request; nothing runs until you approve",
+  label: "Orchestrate",
+  kind: "command",
+  source: "builtin",
 };
+
+const SOURCE_LABELS: Record<CommandSource, string> = {
+  project: "Project",
+  personal: "Personal",
+  builtin: "Built-in",
+};
+
+/**
+ * The `/` commands and `@` paths seen in a list, by value: what the message
+ * shows as chips (FE-92, FE-93). Filled as lists arrive; a draft's token
+ * nobody has listed yet is asked for once.
+ */
+const known = new Map<string, Suggestion>();
+
+/** The draft tokens already asked for, found or not. */
+const looked = new Set<string>();
+
+function remember(items: Suggestion[]) {
+  for (const item of items) if (item.kind) known.set(item.value, item);
+}
+
+/** A `/` suggestion's icon: the team-lead one for `/orchestrate`. */
+function commandIcon(item: Suggestion) {
+  if (item.value === ORCHESTRATE.value) return UserGroupIcon;
+  if (item.kind === "skill") return CubeIcon;
+  if (item.kind === "builtin") return CommandLineIcon;
+  return SlashIcon;
+}
+
+/** A suggestion's icon in the list: the file's type, a folder, a command's. */
+function SuggestionIcon({
+  item,
+  tinted,
+}: {
+  item: Suggestion;
+  tinted: boolean;
+}) {
+  if (item.kind === "file")
+    return (
+      <FileTypeIcon
+        path={item.value.slice(1)}
+        inherit={!tinted}
+        className="size-3.5 shrink-0"
+      />
+    );
+  return (
+    <HugeiconsIcon
+      icon={item.kind === "folder" ? Folder01Icon : commandIcon(item)}
+      className={cn("size-3.5 shrink-0", tinted && "text-muted-foreground")}
+      strokeWidth={1.8}
+      aria-hidden="true"
+    />
+  );
+}
+
+/** How `item` shows as a chip in the message (FE-93/D3). */
+function chipSpec(item: Suggestion): ChipSpec {
+  const path = item.kind === "file" || item.kind === "folder";
+  return {
+    value: item.value,
+    label: item.label ?? item.value,
+    title: path
+      ? item.value.slice(1)
+      : item.detail
+        ? `${item.value}\n${item.detail}`
+        : item.value,
+    icon: <SuggestionIcon item={item} tinted={false} />,
+    tone: path || item.kind === "skill" ? "primary" : "muted",
+  };
+}
+
+/** `label` with the part `query` matches in weight, as the list shows it. */
+function Matched({ label, query }: { label: string; query: string }) {
+  const needle = query
+    .replace(/[-_:]+/g, " ")
+    .trim()
+    .toLowerCase();
+  const at = needle ? label.toLowerCase().indexOf(needle) : -1;
+  if (at < 0) return <>{label}</>;
+  return (
+    <>
+      {label.slice(0, at)}
+      <span className="font-semibold">
+        {label.slice(at, at + needle.length)}
+      </span>
+      {label.slice(at + needle.length)}
+    </>
+  );
+}
 
 /**
  * `/orchestrate <request>`: the request, or "" when none was written. Null
@@ -282,7 +386,7 @@ export const Composer = forwardRef<
   const leads = useTeamLeads(workspace, Boolean(onOrchestrate));
   const leadsRef = useRef(leads);
   leadsRef.current = leads;
-  const area = useRef<HTMLTextAreaElement>(null);
+  const field = useRef<ChipEditorHandle>(null);
   const root = useRef<HTMLDivElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const asked = useRef(0);
@@ -294,24 +398,66 @@ export const Composer = forwardRef<
    */
   const caret = useRef<number | null>(null);
   useLayoutEffect(() => {
-    const node = area.current;
-    if (caret.current === null || !node) return;
-    node.focus();
-    node.setSelectionRange(caret.current, caret.current);
+    if (caret.current === null || !field.current) return;
+    field.current.select(caret.current);
     caret.current = null;
   });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: on mount only.
   useEffect(() => {
-    const node = area.current;
-    if (!autoFocus || !node) return;
-    node.focus();
     // A restored draft: the caret at its end, where typing left off.
-    node.setSelectionRange(node.value.length, node.value.length);
+    if (autoFocus) field.current?.select(latest.current.length);
   }, []);
 
   const latest = useRef(text);
   latest.current = text;
+
+  // The `/command` that starts the message and each `@path` in it, drawn as
+  // chips (FE-92, FE-93). The text kept and sent stays the whole message.
+  const [chipsVersion, learned] = useState(0);
+  const chipFor = (token: string): ChipSpec | null => {
+    const item =
+      token === ORCHESTRATE.value
+        ? onOrchestrate
+          ? ORCHESTRATE
+          : null
+        : (known.get(token) ?? null);
+    return item ? chipSpec(item) : null;
+  };
+  // The `/` list read ahead, so the first `/` opens it at once (FE-92).
+  useEffect(() => {
+    void window.desktop?.conversation
+      ?.suggest(workspace, "command", "")
+      .then(remember)
+      .catch(() => {});
+  }, [workspace]);
+  // A restored draft's commands and paths nobody has listed yet: each asked
+  // for once.
+  const unknown = [
+    ...(/^\/[^\s/]+(?=\s|$)/.exec(text) ?? []),
+    ...(text.match(/(?<=^|\s)@\S+/g) ?? []),
+  ].filter(
+    (token) =>
+      token !== ORCHESTRATE.value && !known.has(token) && !looked.has(token),
+  );
+  const unknownKey = unknown.join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: asked again only when the unknown tokens change.
+  useEffect(() => {
+    const surface = window.desktop?.conversation;
+    if (!unknown.length || !surface) return;
+    for (const token of unknown.slice(0, 20)) {
+      looked.add(token);
+      const path = token.startsWith("@");
+      void surface
+        .suggest(workspace, path ? "file" : "command", token.slice(1))
+        .then((listed) => {
+          remember(listed.filter((item) => item.value === token));
+          // Each answer redraws: the others may still be on their way.
+          if (known.has(token)) learned((n) => n + 1);
+        })
+        .catch(() => {});
+    }
+  }, [unknownKey, workspace]);
 
   // Dictation: the words heard go in where the caret was when the microphone
   // opened, replacing what was selected — shown live, kept on ✓.
@@ -326,14 +472,13 @@ export const Composer = forwardRef<
   });
   const dictating = dictation.status !== "idle";
   const startDictation = () => {
-    const node = area.current;
-    anchor.current = {
-      start: node?.selectionStart ?? text.length,
-      end: node?.selectionEnd ?? text.length,
+    anchor.current = field.current?.selection() ?? {
+      start: text.length,
+      end: text.length,
     };
     setSuggest(null);
     setError(null);
-    node?.focus();
+    field.current?.focus();
     void dictation.start();
   };
   const toggleDictation = useRef(() => {});
@@ -425,6 +570,7 @@ export const Composer = forwardRef<
       .suggest(workspace, kind, found.query)
       .catch(() => [] as Suggestion[])
       .then((listed) => {
+        remember(listed);
         if (mine !== asked.current) return;
         const items = [
           ...own,
@@ -441,6 +587,16 @@ export const Composer = forwardRef<
       });
   };
 
+  // The row ↑↓ moved to stays in view.
+  const list = useRef<HTMLDivElement>(null);
+  const active = suggest ? suggest.index : -1;
+  useLayoutEffect(() => {
+    if (active < 0) return;
+    list.current
+      ?.querySelectorAll('[role="option"]')
+      [active]?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
   // The leads arrived, or changed, while their list is open: drawn again.
   // biome-ignore lint/correctness/useExhaustiveDependencies: only when the leads change.
   useEffect(() => {
@@ -451,8 +607,9 @@ export const Composer = forwardRef<
 
   const choose = (item: Item) => {
     if (!suggest) return;
-    const node = area.current;
-    const next = `${text.slice(0, suggest.start)}${item.value} ${text.slice(node?.selectionStart ?? text.length)}`;
+    if (suggest.kind !== "lead") remember([item]);
+    const end = field.current?.selection()?.start ?? text.length;
+    const next = `${text.slice(0, suggest.start)}${item.value} ${text.slice(end)}`;
     caret.current = suggest.start + item.value.length + 1;
     setText(next);
     setSuggest(null);
@@ -589,7 +746,7 @@ export const Composer = forwardRef<
     }
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     // While dictating the field is read-only: Esc is ✕ and Enter is ✓. Enter
     // never sends a message nobody has read yet.
     if (dictating) {
@@ -612,12 +769,13 @@ export const Composer = forwardRef<
       !event.nativeEvent.isComposing
     ) {
       event.preventDefault();
-      const node = event.currentTarget;
-      const { selectionStart: start, selectionEnd: end, value } = node;
+      const picked = field.current?.selection();
+      if (!picked) return;
+      const { start, end } = picked;
       if (start === end) {
         if (start === 0) return;
-        const line = value.lastIndexOf("\n", start - 1) + 1;
-        node.setSelectionRange(line < start ? line : start - 1, start);
+        const line = text.lastIndexOf("\n", start - 1) + 1;
+        field.current?.select(line < start ? line : start - 1, start);
       }
       // NOTE: execCommand, not setText: the cut lands on the field's undo
       // stack, so ⌘Z brings it back, and it fires the input onChange reads.
@@ -712,6 +870,7 @@ export const Composer = forwardRef<
     >
       {suggest && (
         <div
+          ref={list}
           role="listbox"
           aria-label={
             suggest.kind === "command"
@@ -720,7 +879,7 @@ export const Composer = forwardRef<
                 ? "Team leads"
                 : "Files"
           }
-          className="bg-popover text-popover-foreground ring-foreground/10 absolute right-0 bottom-full left-0 z-20 mb-1.5 max-h-72 overflow-y-auto rounded-xl p-1 shadow-lg ring-1"
+          className="bg-popover text-popover-foreground ring-foreground/10 absolute right-0 bottom-full left-0 z-20 mb-1.5 max-h-56 overflow-y-auto rounded-xl p-1 shadow-lg ring-1"
         >
           {suggest.kind === "lead" && !leads && (
             <ListSkeleton label="Reading the team leads" rows={2} />
@@ -754,6 +913,36 @@ export const Composer = forwardRef<
                     ? `Default, ${LEAD_SOURCE_LABELS[item.lead.source].toLowerCase()}`
                     : LEAD_SOURCE_LABELS[item.lead.source]}
                 </span>
+              </button>
+            ) : item.kind ? (
+              <button
+                key={item.value}
+                type="button"
+                role="option"
+                aria-selected={index === suggest.index}
+                title={item.value}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => choose(item)}
+                onPointerEnter={() => setSuggest({ ...suggest, index })}
+                className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1 text-left"
+              >
+                <SuggestionIcon item={item} tinted />
+                <span className="shrink-0 text-[13px]">
+                  <Matched
+                    label={item.label ?? item.value}
+                    query={suggest.query}
+                  />
+                </span>
+                {item.detail && (
+                  <span className="text-muted-foreground min-w-0 truncate text-[13px]">
+                    {item.detail}
+                  </span>
+                )}
+                {item.source && (
+                  <span className="text-muted-foreground ml-auto shrink-0 ps-2 text-[11px]">
+                    {SOURCE_LABELS[item.source]}
+                  </span>
+                )}
               </button>
             ) : (
               <button
@@ -836,12 +1025,13 @@ export const Composer = forwardRef<
         </div>
       )}
 
-      <textarea
-        ref={area}
+      <ChipEditor
+        ref={field}
         value={shown}
-        rows={1}
+        chipFor={chipFor}
+        chipsVersion={chipsVersion}
         readOnly={dictating}
-        aria-label="Message Claude"
+        label="Message Claude"
         placeholder={
           dictation.status === "preparing"
             ? "Downloading the speech model…"
@@ -849,9 +1039,9 @@ export const Composer = forwardRef<
               ? "Listening…"
               : "Ask, build, / for commands, @ for references…"
         }
-        onChange={(event) => {
-          setText(event.target.value);
-          lookup(event.target.value, event.target.selectionStart);
+        onChange={(next, at) => {
+          setText(next);
+          lookup(next, at);
         }}
         onKeyDown={onKeyDown}
         onBlur={() => setSuggest(null)}
@@ -862,7 +1052,7 @@ export const Composer = forwardRef<
           void addFiles(files, true);
         }}
         className={cn(
-          "placeholder:text-muted-foreground font-content max-h-60 min-h-11 w-full resize-none bg-transparent py-2 text-[14px] leading-relaxed outline-none [field-sizing:content]",
+          "font-content max-h-60 min-h-11 w-full overflow-y-auto py-2 text-[14px] leading-relaxed",
           dictating && "text-muted-foreground italic",
         )}
       />

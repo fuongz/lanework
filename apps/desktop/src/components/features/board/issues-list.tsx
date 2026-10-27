@@ -84,7 +84,7 @@ function ownedElsewhere(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return (
     target.closest(
-      'input, textarea, select, [contenteditable=""], [contenteditable="true"], .cm-editor, [role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]',
+      'input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], .cm-editor, [role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]',
     ) !== null
   );
 }

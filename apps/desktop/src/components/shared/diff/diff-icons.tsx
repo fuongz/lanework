@@ -196,9 +196,12 @@ export function fileIconToken(path: string): string | undefined {
 export function FileTypeIcon({
   path,
   className,
+  inherit,
 }: {
   path: string;
   className?: string;
+  /** Drawn in the text's colour, not the file type's: a composer chip. */
+  inherit?: boolean;
 }) {
   const icon = resolver.resolveIcon("file-tree-icon-file", path);
   const hue = icon.token === undefined ? undefined : TOKEN_HUE[icon.token];
@@ -207,8 +210,9 @@ export function FileTypeIcon({
       viewBox={icon.viewBox ?? "0 0 16 16"}
       className={className}
       style={{
-        color:
-          hue === undefined
+        color: inherit
+          ? "currentColor"
+          : hue === undefined
             ? "var(--color-muted-foreground)"
             : `var(--file-icon-${hue})`,
       }}

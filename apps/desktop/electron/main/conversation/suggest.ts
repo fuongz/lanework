@@ -3,10 +3,15 @@
 // imports Electron.
 import { constants } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
-import type { Suggestion } from "../../../shared/conversation";
+import { basename, dirname, join, relative } from "node:path";
+import {
+  type CommandSource,
+  commandLabel,
+  type Suggestion,
+} from "../../../shared/conversation";
 import { gitReadOut } from "../git/runner";
 import { readsAllowed } from "../git/trust-gate";
+import { codexHome } from "../handoff/codex";
 
 /** The most suggestions one query returns. */
 const LIMIT = 50;
@@ -20,19 +25,34 @@ const CACHE_MS = 10_000;
 const DESCRIPTION_MAX = 160;
 
 /** Built-in commands that work in a headless session. */
-const BUILT_IN: Suggestion[] = [
-  { value: "/compact", detail: "Compact the conversation, keeping a summary" },
-  { value: "/context", detail: "Show what fills the context window" },
-  { value: "/cost", detail: "Show this session's cost and duration" },
-  { value: "/init", detail: "Write a CLAUDE.md for this codebase" },
-  { value: "/review", detail: "Review a pull request" },
-  {
-    value: "/security-review",
-    detail: "Security review of the pending changes",
-  },
-  { value: "/pr-comments", detail: "Get comments from a GitHub pull request" },
-  { value: "/release-notes", detail: "Show the release notes" },
-];
+const BUILT_IN: Suggestion[] = (
+  [
+    {
+      value: "/compact",
+      detail: "Compact the conversation, keeping a summary",
+    },
+    { value: "/context", detail: "Show what fills the context window" },
+    { value: "/cost", detail: "Show this session's cost and duration" },
+    { value: "/init", detail: "Write a CLAUDE.md for this codebase" },
+    { value: "/review", detail: "Review a pull request" },
+    {
+      value: "/security-review",
+      detail: "Security review of the pending changes",
+    },
+    {
+      value: "/pr-comments",
+      detail: "Get comments from a GitHub pull request",
+    },
+    { value: "/release-notes", detail: "Show the release notes" },
+  ] as const
+).map(
+  (item): Suggestion => ({
+    ...item,
+    label: commandLabel(item.value),
+    kind: "builtin",
+    source: "builtin",
+  }),
+);
 
 /** How well `query` matches `text`: higher is better, null is no match. */
 function fuzzyScore(text: string, query: string): number | null {
@@ -133,7 +153,10 @@ async function describe(
  *
  * A file in a subfolder is `/folder:name`, as the CLI names it.
  */
-async function commandsIn(dir: string): Promise<Suggestion[]> {
+async function commandsIn(
+  dir: string,
+  source: CommandSource,
+): Promise<Suggestion[]> {
   const out: Suggestion[] = [];
   const walk = async (at: string, prefix: string, depth: number) => {
     const entries = await readdir(at, { withFileTypes: true }).catch(() => []);
@@ -142,9 +165,13 @@ async function commandsIn(dir: string): Promise<Suggestion[]> {
         await walk(join(at, entry.name), `${prefix}${entry.name}:`, depth + 1);
       else if (entry.isFile() && entry.name.endsWith(".md")) {
         const { description } = await describe(join(at, entry.name));
+        const value = `/${prefix}${entry.name.slice(0, -3)}`;
         out.push({
-          value: `/${prefix}${entry.name.slice(0, -3)}`,
+          value,
           detail: description,
+          label: commandLabel(value),
+          kind: "command",
+          source,
         });
       }
     }
@@ -153,37 +180,56 @@ async function commandsIn(dir: string): Promise<Suggestion[]> {
   return out;
 }
 
-/** `<dir>/<skill>/SKILL.md` as `/skill`. */
-async function skillsIn(dir: string): Promise<Suggestion[]> {
+/**
+ * `<dir>/<skill>/SKILL.md` as `/skill`.
+ *
+ * A dot folder is skipped: Codex keeps the skills it ships in `.system`.
+ */
+async function skillsIn(
+  dir: string,
+  source: CommandSource,
+): Promise<Suggestion[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
   const out: Suggestion[] = [];
   for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
     if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
     const file = join(dir, entry.name, "SKILL.md");
     if (!(await stat(file).catch(() => null))?.isFile()) continue;
     const { name, description } = await describe(file);
-    out.push({ value: `/${name ?? entry.name}`, detail: description });
+    const value = `/${name ?? entry.name}`;
+    out.push({
+      value,
+      detail: description,
+      label: commandLabel(value),
+      kind: "skill",
+      source,
+    });
   }
   return out;
 }
 
 /**
- * The slash commands and skills that match `query`.
+ * Every slash command and skill, unranked.
  *
- * The project's come first, then the user's, then the built-in ones.
+ * The project's come first, then the user's, then the built-in ones. The
+ * user's are Claude's (`~/.claude`), then Codex's (`~/.agents/skills`, then
+ * `$CODEX_HOME/skills`) (FE-92/D3).
  *
  * @param folder The workspace's folder; null leaves out the project's own.
  */
-export async function suggestCommands(
+export async function listCommands(
   home: string,
   folder: string | null,
-  query: string,
 ): Promise<Suggestion[]> {
   const groups = await Promise.all([
-    folder ? commandsIn(join(folder, ".claude", "commands")) : [],
-    folder ? skillsIn(join(folder, ".claude", "skills")) : [],
-    commandsIn(join(home, ".claude", "commands")),
-    skillsIn(join(home, ".claude", "skills")),
+    folder ? commandsIn(join(folder, ".claude", "commands"), "project") : [],
+    folder ? skillsIn(join(folder, ".claude", "skills"), "project") : [],
+    folder ? skillsIn(join(folder, ".agents", "skills"), "project") : [],
+    commandsIn(join(home, ".claude", "commands"), "personal"),
+    skillsIn(join(home, ".claude", "skills"), "personal"),
+    skillsIn(join(home, ".agents", "skills"), "personal"),
+    skillsIn(join(codexHome(home), "skills"), "personal"),
   ]);
   const seen = new Set<string>();
   const all: Suggestion[] = [];
@@ -193,6 +239,11 @@ export async function suggestCommands(
     seen.add(item.value);
     all.push(item);
   }
+  return all;
+}
+
+/** The commands of {@link listCommands} that match `query`, best first. */
+export function rankCommands(all: Suggestion[], query: string): Suggestion[] {
   const clean = query.replace(/^\//, "");
   return rank(all, clean, (item) => item.value.slice(1));
 }
@@ -267,16 +318,54 @@ export function workspaceFiles(folder: string): Promise<string[]> {
   return files;
 }
 
-/** The workspace's files that match `query`, as `@path`. */
+/** The folders that hold `files`, by file list (FE-93/D2). */
+const folderCache = new WeakMap<string[], string[]>();
+
+function foldersOf(files: string[]): string[] {
+  const cached = folderCache.get(files);
+  if (cached) return cached;
+  const seen = new Set<string>();
+  for (const file of files) {
+    let dir = dirname(file);
+    while (dir !== "." && !seen.has(dir)) {
+      seen.add(dir);
+      dir = dirname(dir);
+    }
+  }
+  const folders = [...seen];
+  folderCache.set(files, folders);
+  return folders;
+}
+
+/**
+ * The workspace's files and folders that match `query`: `@path`, and a
+ * folder as `@path/` (FE-93/D2).
+ */
 export async function suggestFiles(
   folder: string,
   query: string,
 ): Promise<Suggestion[]> {
-  const files = workspaceFiles(folder);
+  const files = await workspaceFiles(folder);
   const clean = query.replace(/^@/, "");
-  const items = (await files).map((path) => ({
-    value: `@${path}`,
-    detail: dirname(path) === "." ? null : dirname(path),
-  }));
-  return rank(items, clean, (item) => item.value.slice(1));
+  const parent = (path: string) =>
+    dirname(path) === "." ? null : dirname(path);
+  const items: Suggestion[] = [
+    ...foldersOf(files).map(
+      (dir): Suggestion => ({
+        value: `@${dir}/`,
+        detail: parent(dir),
+        label: basename(dir),
+        kind: "folder",
+      }),
+    ),
+    ...files.map(
+      (path): Suggestion => ({
+        value: `@${path}`,
+        detail: parent(path),
+        label: basename(path),
+        kind: "file",
+      }),
+    ),
+  ];
+  return rank(items, clean, (item) => item.value.slice(1).replace(/\/$/, ""));
 }

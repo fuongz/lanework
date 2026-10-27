@@ -404,11 +404,62 @@ export const PASTE_MAX = 5 * 1024 * 1024;
 /** What `/` and `@` offer in the composer. */
 export type SuggestionKind = "command" | "file";
 
+/** What an `@` suggestion is (FE-93/D2). */
+export type ReferenceKind = "file" | "folder";
+
+/** What a `/` suggestion is (FE-92): a skill, a command file, or the CLI's own. */
+export type CommandKind = "skill" | "command" | "builtin";
+
+/** Where a `/` suggestion comes from (FE-92): the project, the user, the CLI. */
+export type CommandSource = "project" | "personal" | "builtin";
+
 export interface Suggestion {
   /** What is inserted: `/review`, `@src/app.tsx`. */
   value: string;
   /** One line under it: a command's description, a file's folder. */
   detail: string | null;
+  /**
+   * The name shown: `/better-ui` is "Better UI", `@src/cli.ts` is
+   * "cli.ts".
+   */
+  label?: string;
+  kind?: CommandKind | ReferenceKind;
+  /** A `/` suggestion's. */
+  source?: CommandSource;
+}
+
+/** Words a command's name shows in capitals, not title case. */
+const ACRONYMS = new Set([
+  "ai",
+  "api",
+  "ci",
+  "cli",
+  "css",
+  "html",
+  "json",
+  "mcp",
+  "pr",
+  "sdk",
+  "ui",
+  "url",
+  "ux",
+]);
+
+/**
+ * A command's name as a person reads it: `/better-ui` is "Better UI",
+ * `/frontend:review` is "Frontend Review".
+ */
+export function commandLabel(value: string): string {
+  return value
+    .replace(/^\//, "")
+    .split(/[-_:\s]+/)
+    .filter(Boolean)
+    .map((word) =>
+      ACRONYMS.has(word.toLowerCase())
+        ? word.toUpperCase()
+        : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
 }
 
 export interface SendRequest {
