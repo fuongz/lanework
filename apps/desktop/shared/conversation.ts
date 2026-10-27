@@ -614,22 +614,51 @@ export interface LinkPreview {
   icon: string | null;
 }
 
-/** A link main may open in the browser: a preview URL with no credentials. */
-export function isOpenableUrl(value: unknown): value is string {
-  if (!isPreviewUrl(value)) return false;
-  const url = new URL(value);
-  return !url.username && !url.password;
-}
-
-/** A URL main's fetcher accepts: http(s), at most 2048 characters. */
-export function isPreviewUrl(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > 2048) return false;
+/** An http(s) URL of at most 2048 characters, parsed; null for anything else. */
+function webUrl(value: unknown): URL | null {
+  if (typeof value !== "string" || value.length > 2048) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:";
+    return url.protocol === "https:" || url.protocol === "http:" ? url : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** A link main may open in the browser: http(s), with no credentials. */
+export function isOpenableUrl(value: unknown): value is string {
+  const url = webUrl(value);
+  return url !== null && !url.username && !url.password;
+}
+
+/**
+ * The hosts whose links main previews by itself (FE-79/D4).
+ *
+ * NOTE: An agent's reply is hostile content: a link to any other host would
+ * make main do a DNS lookup and a GET the moment the reply is drawn, a
+ * zero-click channel for whatever the agent read. Links to these hosts carry
+ * no data to a host the agent chose. Matched exactly: no subdomains.
+ */
+export const PREVIEW_HOSTS: ReadonlySet<string> = new Set([
+  "github.com",
+  "www.github.com",
+  "gist.github.com",
+]);
+
+/**
+ * A URL main's fetcher accepts: an openable link on its scheme's default
+ * port, to one of the {@link PREVIEW_HOSTS}.
+ */
+export function isPreviewUrl(value: unknown): value is string {
+  const url = webUrl(value);
+  return (
+    url !== null &&
+    !url.username &&
+    !url.password &&
+    // The URL parser drops a port that is its scheme's default.
+    url.port === "" &&
+    PREVIEW_HOSTS.has(url.hostname.toLowerCase())
+  );
 }
 
 // ─── IPC ────────────────────────────────────────────────────────────────────

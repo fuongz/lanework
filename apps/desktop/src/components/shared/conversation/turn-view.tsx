@@ -24,7 +24,7 @@ import {
 } from "#/lib/conversation-format";
 import { cn } from "#/lib/utils";
 import { AssistantActions, UserActions } from "./turn-view.actions";
-import { chatLink } from "./turn-view.link-chip";
+import { chatLink, liveChatLink } from "./turn-view.link-chip";
 import { ToolGroup } from "./turn-view.tool-group";
 
 /**
@@ -226,7 +226,7 @@ function AssistantView({
               // biome-ignore lint/suspicious/noArrayIndexKey: a turn's blocks only grow at the end — the index is the block's identity.
               key={`text-${index}`}
               source={block.text}
-              link={chatLink}
+              link={turn.open ? liveChatLink : chatLink}
               variant="chat"
               empty=""
             />
