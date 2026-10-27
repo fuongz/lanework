@@ -1,3 +1,27 @@
+import {
+  type BoardLabel,
+  type BoardMember,
+  type ChecklistSection,
+  type ColumnRole,
+  type Priority,
+  STREAM_ROLES,
+  type StreamRole,
+} from "@lanework/protocol";
+
+// The board's vocabulary and the shapes this app takes as the API states them
+// come from @lanework/protocol, the contract the server implements, so a
+// change there is a type error here rather than a silent default.
+export {
+  type BoardLabel,
+  type BoardMember,
+  CHECKLIST_SECTIONS,
+  type ChecklistSection,
+  type ColumnRole,
+  type Priority,
+  STREAM_ROLES,
+  type StreamRole,
+} from "@lanework/protocol";
+
 export interface Workspace {
   /**
    * The cloud workspace id, the key every board call is addressed by.
@@ -69,7 +93,7 @@ export interface WorkspaceSnapshot {
 export interface BoardColumn {
   key: string;
   name: string;
-  role: string | null;
+  role: ColumnRole | null;
   icon: string;
   tone: string;
   position: number;
@@ -82,38 +106,15 @@ export interface BoardCategory {
   tone: string;
 }
 
-/**
- * One entry of the board's label vocabulary: a tag given a name and a colour.
- *
- * NOTE: This is NOT the list of tags in use. A card may carry a tag no label
- * describes, and that board is normal, not broken: the chip is drawn neutral
- * and the tag still filters. Treating the vocabulary as closed would hide
- * tags the service stores.
- */
-export interface BoardLabel {
-  key: string;
-  name: string;
-  tone: string;
-  position: number;
-}
-
-/**
- * Somebody who can see this board, as the config states them.
- *
- * The directory exists because everything else names a person by id (a
- * comment's author, an audit row's actor, a card's assignee), and an id is
- * not a face. `name` falls back to the id itself for an account that no
- * longer exists, which is still what the log says happened.
- *
- * No email, by design: the service does not send one. See `BoardMember` on
- * the API side for why a machine credential must not widen to it.
- */
-export interface BoardMember {
-  userId: string;
-  name: string;
-  image: string | null;
-  role: string;
-}
+// NOTE: `BoardLabel` (re-exported above) is the label VOCABULARY, NOT the list
+// of tags in use. A card may carry a tag no label describes, and that board
+// is normal, not broken: the chip is drawn neutral and the tag still filters.
+// Treating the vocabulary as closed would hide tags the service stores.
+//
+// `BoardMember` (re-exported above) is somebody who can see this board. The
+// directory exists because everything else names a person by id, and an id
+// is not a face. `name` falls back to the id for an account that no longer
+// exists. No email, by design: the service does not send one.
 
 /**
  * Where an agent stopped on a card (BE-17).
@@ -205,20 +206,10 @@ export interface BoardActivityPage {
   cursor: string | null;
 }
 
-/**
- * The two sections a checklist row can belong to.
- *
- * The board's own closed set, not free text: the API refuses a row filed
- * under anything else with "unknown section". Stated here so a caller finds
- * out while typing rather than from a 400.
- */
-export const CHECKLIST_SECTIONS = ["decisions", "verify"] as const;
-export type ChecklistSection = (typeof CHECKLIST_SECTIONS)[number];
-
 /** One checklist row. The server derives `checked` from `checkedAt`. */
 export interface BoardChecklistItem {
   key: string;
-  section: string;
+  section: ChecklistSection;
   text: string;
   checked: boolean;
   checkedAt: string | null;
@@ -296,7 +287,7 @@ export interface BoardCard {
   body: string;
   columnKey: string;
   categoryKey: string | null;
-  priority: "low" | "medium" | "high" | null;
+  priority: Priority | null;
   tags: string[];
   rank: string;
   createdAt: string | null;
@@ -376,15 +367,7 @@ export interface BoardCard {
   dispatch?: BoardDispatch | null;
 }
 
-const STREAM_ROLES = ["research", "implement", "test"] as const;
-export type StreamRole = (typeof STREAM_ROLES)[number];
-
-/**
- * One sub-agent's job on a card.
- *
- * Restates `Stream` in `packages/db/src/board/streams.ts`, because this app
- * never imports the db package.
- */
+/** One sub-agent's job on a card; `Stream` in @lanework/protocol, as parsed. */
 export interface BoardStream {
   key: string;
   title: string;
@@ -547,7 +530,7 @@ export interface BoardChecklistProgress {
 export interface BoardCardPatch {
   title?: string;
   body?: string;
-  priority?: "low" | "medium" | "high" | null;
+  priority?: Priority | null;
   tags?: string[];
   categoryKey?: string | null;
   /**

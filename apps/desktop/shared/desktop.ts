@@ -37,9 +37,8 @@ export type ViewCommand = "toggle-sidebar" | "open-settings";
  * this straight to it, so there is nothing to translate and no fourth state to
  * reconcile.
  */
-export type ThemeSource = "system" | "light" | "dark";
-
-export const THEME_SOURCES: ThemeSource[] = ["system", "light", "dark"];
+export const THEME_SOURCES = ["system", "light", "dark"] as const;
+export type ThemeSource = (typeof THEME_SOURCES)[number];
 
 export function isThemeSource(value: unknown): value is ThemeSource {
   return THEME_SOURCES.includes(value as ThemeSource);

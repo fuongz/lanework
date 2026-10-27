@@ -21,13 +21,8 @@ export type ReadinessId =
  * shown. `~/.claude.json` and Codex's `config.toml` are the user's own and get
  * an instruction instead.
  */
-export type ReadinessFix = "agents-md" | "claude-md" | "mcp-json";
-
-const READINESS_FIXES: readonly ReadinessFix[] = [
-  "agents-md",
-  "claude-md",
-  "mcp-json",
-];
+const READINESS_FIXES = ["agents-md", "claude-md", "mcp-json"] as const;
+export type ReadinessFix = (typeof READINESS_FIXES)[number];
 
 export function isReadinessFix(value: unknown): value is ReadinessFix {
   return READINESS_FIXES.includes(value as ReadinessFix);

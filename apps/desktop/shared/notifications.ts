@@ -2,17 +2,15 @@
 // linked repository — each switched on or off from Settings → Notifications.
 
 /** What can notify. One row each in Settings → Notifications. */
-export type NotificationKind = "sessions" | "pulls";
-
-const NOTIFICATION_KINDS: NotificationKind[] = ["sessions", "pulls"];
+const NOTIFICATION_KINDS = ["sessions", "pulls"] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 /**
  * How a kind is delivered (FE-70/D1). `push` is the OS notification; there is
  * no in-app inbox for an "in-app" choice to mean anything yet.
  */
-export type NotificationDelivery = "push" | "off";
-
-export const NOTIFICATION_DELIVERIES: NotificationDelivery[] = ["push", "off"];
+export const NOTIFICATION_DELIVERIES = ["push", "off"] as const;
+export type NotificationDelivery = (typeof NOTIFICATION_DELIVERIES)[number];
 
 export type NotificationSettings = Record<
   NotificationKind,

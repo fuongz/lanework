@@ -29,6 +29,7 @@ import {
   type InstructionNode,
   type InstructionScope,
 } from "../../../shared/instructions";
+import { splitFrontmatter } from "../frontmatter";
 import { gitReadOut } from "../git/runner";
 import { readsAllowed } from "../git/trust-gate";
 
@@ -228,12 +229,10 @@ async function projectRoot(folder: string): Promise<string> {
  * string. `body` is the rest of the file.
  */
 export function splitRule(text: string): { paths: string[]; body: string } {
-  const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(
-    text.replace(/^\uFEFF/, ""),
-  );
-  if (!match) return { paths: [], body: text };
+  const { frontmatter, body } = splitFrontmatter(text);
+  if (frontmatter === null) return { paths: [], body };
   const paths: string[] = [];
-  const lines = (match[1] ?? "").split(/\r?\n/);
+  const lines = frontmatter.split(/\r?\n/);
   const unquote = (value: string) =>
     value.trim().replace(/^(["'])(.*)\1$/, "$2");
   for (let index = 0; index < lines.length; index++) {
@@ -252,10 +251,7 @@ export function splitRule(text: string): { paths: string[]; body: string } {
       while (/^[ \t]+-[ \t]+/.test(lines[index + 1] ?? ""))
         paths.push(unquote((lines[++index] ?? "").replace(/^[ \t]+-/, "")));
   }
-  return {
-    paths: paths.filter(Boolean),
-    body: text.slice((match.index ?? 0) + match[0].length),
-  };
+  return { paths: paths.filter(Boolean), body };
 }
 
 /**

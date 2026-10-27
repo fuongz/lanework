@@ -69,7 +69,10 @@ import {
   type TerminalViewHandlers,
   terminalChannels,
 } from "../../shared/terminal";
-import { workspaceChannels } from "../../shared/workspaces";
+import {
+  type DesktopWorkspacesApi,
+  workspaceChannels,
+} from "../../shared/workspaces";
 import {
   type DesktopWorktreeApi,
   worktreeChannels,
@@ -662,6 +665,178 @@ function createTerminal(): DesktopTerminalApi {
   };
 }
 
+/**
+ * The workspaces surface: projects, their boards and their linked folders.
+ *
+ * Every board call is addressed by the cloud workspace id, never the slug.
+ */
+const workspaces: DesktopWorkspacesApi = {
+  load: () => ipcRenderer.invoke(workspaceChannels.load),
+  // NOTE: The cloud workspace id, not the slug: every board call is
+  // addressed by it.
+  select: (id) => ipcRenderer.invoke(workspaceChannels.select, id),
+  icon: (workspaceId, iconKey) =>
+    ipcRenderer.invoke(workspaceChannels.icon, workspaceId, iconKey),
+  // The NAME a human typed; main derives the slug the service demands. The
+  // folders are pick IDS, primary first. Main resolves them to paths it
+  // handed out itself, so no path ever travels this way.
+  create: (name, folders) =>
+    ipcRenderer.invoke(workspaceChannels.createWorkspace, name, folders ?? []),
+  // NOTE: By cloud ID, never the slug. A uuid matches the service's slug
+  // shape, so only the service, not anything here, would catch a mix-up.
+  rename: (id, name) =>
+    ipcRenderer.invoke(workspaceChannels.renameWorkspace, id, name),
+  reorder: (ids) =>
+    ipcRenderer.invoke(workspaceChannels.reorderWorkspaces, ids),
+  // NOTE: By ID for the service and by SLUG for this machine, and both must
+  // travel. The machine surface deletes by cloud id (it refuses a slug with
+  // a 400), while the folder link main drops afterwards is keyed by slug.
+  remove: (id, slug) =>
+    ipcRenderer.invoke(workspaceChannels.deleteWorkspace, id, slug),
+  syncToCloud: (localId) =>
+    ipcRenderer.invoke(workspaceChannels.syncToCloud, localId),
+  onLocalChange: (listener) =>
+    subscribe(workspaceChannels.localChanged, listener),
+  board: {
+    load: (workspaceId, query) =>
+      ipcRenderer.invoke(workspaceChannels.board, workspaceId, query),
+    more: (workspaceId, query, group, cursor) =>
+      ipcRenderer.invoke(
+        workspaceChannels.more,
+        workspaceId,
+        query,
+        group,
+        cursor,
+      ),
+    stats: (workspaceId, query) =>
+      ipcRenderer.invoke(workspaceChannels.stats, workspaceId, query),
+    presence: (workspaceId) =>
+      ipcRenderer.invoke(workspaceChannels.presence, workspaceId),
+    checkpoint: (workspaceId, cardId) =>
+      ipcRenderer.invoke(workspaceChannels.checkpoint, workspaceId, cardId),
+    card: (workspaceId, cardId) =>
+      ipcRenderer.invoke(workspaceChannels.card, workspaceId, cardId),
+    lookup: (workspaceId, taskId) =>
+      ipcRenderer.invoke(workspaceChannels.lookup, workspaceId, taskId),
+    search: (workspaceId, query) =>
+      ipcRenderer.invoke(workspaceChannels.search, workspaceId, query),
+    update: (workspaceId, cardId, patch, revision) =>
+      ipcRenderer.invoke(
+        workspaceChannels.update,
+        workspaceId,
+        cardId,
+        patch,
+        revision,
+      ),
+    // NOTE: `placement` is sent as `null` when absent, never omitted. The
+    // handler validates on argument COUNT, and the sender check cannot
+    // state a rule for a call that sends four arguments one time and five
+    // the next.
+    move: (workspaceId, cardId, columnKey, placement) =>
+      ipcRenderer.invoke(
+        workspaceChannels.move,
+        workspaceId,
+        cardId,
+        columnKey,
+        placement ?? null,
+      ),
+    changes: (workspaceId, since) =>
+      ipcRenderer.invoke(workspaceChannels.changes, workspaceId, since),
+    toggle: (workspaceId, cardId, key, checked, revision) =>
+      ipcRenderer.invoke(
+        workspaceChannels.toggle,
+        workspaceId,
+        cardId,
+        key,
+        checked,
+        revision,
+      ),
+    setChecklist: (workspaceId, cardId, items, revision) =>
+      ipcRenderer.invoke(
+        workspaceChannels.setChecklist,
+        workspaceId,
+        cardId,
+        items,
+        revision,
+      ),
+    // NOTE: `cursor` is sent as `null` when absent, never omitted, as `move`
+    // does with placement: the handler validates on argument COUNT.
+    activity: (workspaceId, cardId, cursor) =>
+      ipcRenderer.invoke(
+        workspaceChannels.activity,
+        workspaceId,
+        cardId,
+        cursor ?? null,
+      ),
+    comment: (workspaceId, cardId, body) =>
+      ipcRenderer.invoke(workspaceChannels.comment, workspaceId, cardId, body),
+    editComment: (workspaceId, cardId, commentId, body) =>
+      ipcRenderer.invoke(
+        workspaceChannels.commentEdit,
+        workspaceId,
+        cardId,
+        commentId,
+        body,
+      ),
+    deleteComment: (workspaceId, cardId, commentId) =>
+      ipcRenderer.invoke(
+        workspaceChannels.commentDelete,
+        workspaceId,
+        cardId,
+        commentId,
+      ),
+    subscribe: (workspaceId, cardId, subscribed) =>
+      ipcRenderer.invoke(
+        workspaceChannels.subscribe,
+        workspaceId,
+        cardId,
+        subscribed,
+      ),
+    favorite: (workspaceId, cardId, favorite) =>
+      ipcRenderer.invoke(
+        workspaceChannels.favorite,
+        workspaceId,
+        cardId,
+        favorite,
+      ),
+    // NOTE: A file REFERENCE (a path or a URL), never bytes or a handle.
+    // Main does not open what is named here; the service stores the string.
+    attach: (workspaceId, cardId, file) =>
+      ipcRenderer.invoke(workspaceChannels.attach, workspaceId, cardId, file),
+    detach: (workspaceId, cardId, attachmentId) =>
+      ipcRenderer.invoke(
+        workspaceChannels.detach,
+        workspaceId,
+        cardId,
+        attachmentId,
+      ),
+    create: (workspaceId, draft) =>
+      ipcRenderer.invoke(workspaceChannels.create, workspaceId, draft),
+    archive: (workspaceId, cardId) =>
+      ipcRenderer.invoke(workspaceChannels.archive, workspaceId, cardId),
+    purge: (workspaceId, slug) =>
+      ipcRenderer.invoke(workspaceChannels.purge, workspaceId, slug),
+    importPreview: (workspaceId) =>
+      ipcRenderer.invoke(workspaceChannels.importPreview, workspaceId),
+    importRun: (workspaceId) =>
+      ipcRenderer.invoke(workspaceChannels.importRun, workspaceId),
+    importSeal: (workspaceId) =>
+      ipcRenderer.invoke(workspaceChannels.importSeal, workspaceId),
+  },
+  // NOTE: Keyed by SLUG, not by the workspace id: an older service has no
+  // id, and that is the very screen this surface serves.
+  folder: {
+    state: (slug) => ipcRenderer.invoke(workspaceChannels.folderState, slug),
+    choose: () => ipcRenderer.invoke(workspaceChannels.folderChoose),
+    list: (slug) => ipcRenderer.invoke(workspaceChannels.folderList, slug),
+    link: (slug, folders) =>
+      ipcRenderer.invoke(workspaceChannels.folderLink, slug, folders),
+    pick: (slug) => ipcRenderer.invoke(workspaceChannels.folderPick, slug),
+    forget: (slug) => ipcRenderer.invoke(workspaceChannels.folderForget, slug),
+    reveal: (slug) => ipcRenderer.invoke(workspaceChannels.folderReveal, slug),
+  },
+};
+
 const desktop: DesktopApi = {
   getAppInfo: () => ipcRenderer.invoke(channels.appInfo),
   setTheme: (source) => ipcRenderer.invoke(channels.setTheme, source),
@@ -669,183 +844,7 @@ const desktop: DesktopApi = {
   onViewCommand: (listener) => subscribe(channels.viewCommand, listener),
   zoomFactor: () => webFrame.getZoomFactor(),
   auth,
-  workspaces: {
-    load: () => ipcRenderer.invoke(workspaceChannels.load),
-    // NOTE: The cloud workspace id, not the slug: every board call is
-    // addressed by it.
-    select: (id) => ipcRenderer.invoke(workspaceChannels.select, id),
-    icon: (workspaceId, iconKey) =>
-      ipcRenderer.invoke(workspaceChannels.icon, workspaceId, iconKey),
-    // The NAME a human typed; main derives the slug the service demands. The
-    // folders are pick IDS, primary first. Main resolves them to paths it
-    // handed out itself, so no path ever travels this way.
-    create: (name, folders) =>
-      ipcRenderer.invoke(
-        workspaceChannels.createWorkspace,
-        name,
-        folders ?? [],
-      ),
-    // NOTE: By cloud ID, never the slug. A uuid matches the service's slug
-    // shape, so only the service, not anything here, would catch a mix-up.
-    rename: (id, name) =>
-      ipcRenderer.invoke(workspaceChannels.renameWorkspace, id, name),
-    reorder: (ids) =>
-      ipcRenderer.invoke(workspaceChannels.reorderWorkspaces, ids),
-    // NOTE: By ID for the service and by SLUG for this machine, and both must
-    // travel. The machine surface deletes by cloud id (it refuses a slug with
-    // a 400), while the folder link main drops afterwards is keyed by slug.
-    remove: (id, slug) =>
-      ipcRenderer.invoke(workspaceChannels.deleteWorkspace, id, slug),
-    syncToCloud: (localId) =>
-      ipcRenderer.invoke(workspaceChannels.syncToCloud, localId),
-    onLocalChange: (listener) =>
-      subscribe(workspaceChannels.localChanged, listener),
-    board: {
-      load: (workspaceId, query) =>
-        ipcRenderer.invoke(workspaceChannels.board, workspaceId, query),
-      more: (workspaceId, query, group, cursor) =>
-        ipcRenderer.invoke(
-          workspaceChannels.more,
-          workspaceId,
-          query,
-          group,
-          cursor,
-        ),
-      stats: (workspaceId, query) =>
-        ipcRenderer.invoke(workspaceChannels.stats, workspaceId, query),
-      presence: (workspaceId) =>
-        ipcRenderer.invoke(workspaceChannels.presence, workspaceId),
-      checkpoint: (workspaceId, cardId) =>
-        ipcRenderer.invoke(workspaceChannels.checkpoint, workspaceId, cardId),
-      card: (workspaceId, cardId) =>
-        ipcRenderer.invoke(workspaceChannels.card, workspaceId, cardId),
-      lookup: (workspaceId, taskId) =>
-        ipcRenderer.invoke(workspaceChannels.lookup, workspaceId, taskId),
-      search: (workspaceId, query) =>
-        ipcRenderer.invoke(workspaceChannels.search, workspaceId, query),
-      update: (workspaceId, cardId, patch, revision) =>
-        ipcRenderer.invoke(
-          workspaceChannels.update,
-          workspaceId,
-          cardId,
-          patch,
-          revision,
-        ),
-      // NOTE: `placement` is sent as `null` when absent, never omitted. The
-      // handler validates on argument COUNT, and the sender check cannot
-      // state a rule for a call that sends four arguments one time and five
-      // the next.
-      move: (workspaceId, cardId, columnKey, placement) =>
-        ipcRenderer.invoke(
-          workspaceChannels.move,
-          workspaceId,
-          cardId,
-          columnKey,
-          placement ?? null,
-        ),
-      changes: (workspaceId, since) =>
-        ipcRenderer.invoke(workspaceChannels.changes, workspaceId, since),
-      toggle: (workspaceId, cardId, key, checked, revision) =>
-        ipcRenderer.invoke(
-          workspaceChannels.toggle,
-          workspaceId,
-          cardId,
-          key,
-          checked,
-          revision,
-        ),
-      setChecklist: (workspaceId, cardId, items, revision) =>
-        ipcRenderer.invoke(
-          workspaceChannels.setChecklist,
-          workspaceId,
-          cardId,
-          items,
-          revision,
-        ),
-      // NOTE: `cursor` is sent as `null` when absent, never omitted, as `move`
-      // does with placement: the handler validates on argument COUNT.
-      activity: (workspaceId, cardId, cursor) =>
-        ipcRenderer.invoke(
-          workspaceChannels.activity,
-          workspaceId,
-          cardId,
-          cursor ?? null,
-        ),
-      comment: (workspaceId, cardId, body) =>
-        ipcRenderer.invoke(
-          workspaceChannels.comment,
-          workspaceId,
-          cardId,
-          body,
-        ),
-      editComment: (workspaceId, cardId, commentId, body) =>
-        ipcRenderer.invoke(
-          workspaceChannels.commentEdit,
-          workspaceId,
-          cardId,
-          commentId,
-          body,
-        ),
-      deleteComment: (workspaceId, cardId, commentId) =>
-        ipcRenderer.invoke(
-          workspaceChannels.commentDelete,
-          workspaceId,
-          cardId,
-          commentId,
-        ),
-      subscribe: (workspaceId, cardId, subscribed) =>
-        ipcRenderer.invoke(
-          workspaceChannels.subscribe,
-          workspaceId,
-          cardId,
-          subscribed,
-        ),
-      favorite: (workspaceId, cardId, favorite) =>
-        ipcRenderer.invoke(
-          workspaceChannels.favorite,
-          workspaceId,
-          cardId,
-          favorite,
-        ),
-      // NOTE: A file REFERENCE (a path or a URL), never bytes or a handle.
-      // Main does not open what is named here; the service stores the string.
-      attach: (workspaceId, cardId, file) =>
-        ipcRenderer.invoke(workspaceChannels.attach, workspaceId, cardId, file),
-      detach: (workspaceId, cardId, attachmentId) =>
-        ipcRenderer.invoke(
-          workspaceChannels.detach,
-          workspaceId,
-          cardId,
-          attachmentId,
-        ),
-      create: (workspaceId, draft) =>
-        ipcRenderer.invoke(workspaceChannels.create, workspaceId, draft),
-      archive: (workspaceId, cardId) =>
-        ipcRenderer.invoke(workspaceChannels.archive, workspaceId, cardId),
-      purge: (workspaceId, slug) =>
-        ipcRenderer.invoke(workspaceChannels.purge, workspaceId, slug),
-      importPreview: (workspaceId) =>
-        ipcRenderer.invoke(workspaceChannels.importPreview, workspaceId),
-      importRun: (workspaceId) =>
-        ipcRenderer.invoke(workspaceChannels.importRun, workspaceId),
-      importSeal: (workspaceId) =>
-        ipcRenderer.invoke(workspaceChannels.importSeal, workspaceId),
-    },
-    // NOTE: Keyed by SLUG, not by the workspace id: an older service has no
-    // id, and that is the very screen this surface serves.
-    folder: {
-      state: (slug) => ipcRenderer.invoke(workspaceChannels.folderState, slug),
-      choose: () => ipcRenderer.invoke(workspaceChannels.folderChoose),
-      list: (slug) => ipcRenderer.invoke(workspaceChannels.folderList, slug),
-      link: (slug, folders) =>
-        ipcRenderer.invoke(workspaceChannels.folderLink, slug, folders),
-      pick: (slug) => ipcRenderer.invoke(workspaceChannels.folderPick, slug),
-      forget: (slug) =>
-        ipcRenderer.invoke(workspaceChannels.folderForget, slug),
-      reveal: (slug) =>
-        ipcRenderer.invoke(workspaceChannels.folderReveal, slug),
-    },
-  },
+  workspaces,
   git,
   worktree,
   terminal: createTerminal(),

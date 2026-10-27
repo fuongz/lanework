@@ -25,6 +25,7 @@ import type {
 } from "../../../shared/agent-setup";
 import { redact } from "../../hook/redact";
 import { type AgentHome, CONFIG_MAX_BYTES, readText } from "../agent-home";
+import { splitFrontmatter } from "../frontmatter";
 import { HOOK_MARKER } from "../handoff/claude-settings";
 import {
   outsideStrings,
@@ -179,17 +180,9 @@ async function readHead(
   }
 }
 
-/** A file's `---` frontmatter, without the fences, and the rest. */
-export function splitFrontmatter(source: string): {
-  frontmatter: string | null;
-  body: string;
-} {
-  const text = source.replace(/^﻿/, "");
-  const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
-  return match
-    ? { frontmatter: match[1] ?? "", body: text.slice(match[0].length) }
-    : { frontmatter: null, body: text };
-}
+// The fence split is shared with the memory and instructions readers
+// (FE-82/D6); re-exported for `agent-config`, which reads it from here.
+export { splitFrontmatter };
 
 function unquote(value: string): string {
   if (value.length >= 2 && value.startsWith("'") && value.endsWith("'"))

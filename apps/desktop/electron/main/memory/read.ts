@@ -20,6 +20,7 @@ import {
   type MemoryFile,
   memoryType,
 } from "../../../shared/memory";
+import { splitFrontmatter } from "../frontmatter";
 import { gitReadOut } from "../git/runner";
 import { readsAllowed } from "../git/trust-gate";
 import { claudeProjectDir, readRange } from "../transcripts/jsonl";
@@ -115,18 +116,17 @@ function parseFrontmatter(source: string): Record<string, string> {
 }
 
 /** A file's frontmatter (`---` … `---` at its very top), and the rest. */
-function splitFrontmatter(text: string): {
+function splitMemory(text: string): {
   meta: Record<string, string>;
   body: string;
 } {
-  const source = text.replace(/^﻿/, "");
-  const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(
-    source,
-  );
-  if (!match) return { meta: {}, body: source };
+  const { frontmatter, body } = splitFrontmatter(text);
+  if (frontmatter === null) return { meta: {}, body };
   return {
-    meta: parseFrontmatter(match[1] ?? ""),
-    body: source.slice(match[0].length).replace(/^\s*\n/, ""),
+    meta: parseFrontmatter(frontmatter),
+    // A memory's body starts at its first written line, not the blank one
+    // Claude leaves under the fence.
+    body: body.replace(/^\s*\n/, ""),
   };
 }
 
@@ -224,7 +224,7 @@ export async function listMemory(
         const info = await stat(path);
         if (!info.isFile()) return null;
         const head = await readRange(path, 0, Math.min(info.size, HEAD));
-        return entryOf(file, splitFrontmatter(head).meta, info);
+        return entryOf(file, splitMemory(head).meta, info);
       } catch {
         // Gone since the listing, or a link out of the folder.
         return null;
@@ -264,7 +264,7 @@ export async function readMemory(
   const info = await stat(path);
   if (!info.isFile()) throw new Error("That memory is not a file.");
   const raw = await readRange(path, 0, Math.min(info.size, MEMORY_READ_MAX));
-  const { meta, body } = splitFrontmatter(raw);
+  const { meta, body } = splitMemory(raw);
   return {
     entry: entryOf(file, meta, info),
     meta,

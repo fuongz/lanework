@@ -1,4 +1,4 @@
-import { paths } from "@lanework/protocol";
+import { COLUMN_ROLES, PRIORITIES, paths } from "@lanework/protocol";
 import {
   type BoardActivity,
   type BoardActivityPage,
@@ -23,6 +23,9 @@ import {
   type BoardStats,
   type BoardWrite,
   type CardCheckpoint,
+  CHECKLIST_SECTIONS,
+  type ChecklistSection,
+  type ColumnRole,
   matchesSearch,
   normalizeTag,
   parseDispatch,
@@ -171,7 +174,15 @@ export async function fetchWorkspaces(
 }
 
 const priority = (value: unknown): BoardCard["priority"] =>
-  value === "low" || value === "medium" || value === "high" ? value : null;
+  PRIORITIES.find((entry) => entry === value) ?? null;
+
+/** A checklist row's section; a row filed under none is a decision. */
+const section = (value: unknown): ChecklistSection =>
+  CHECKLIST_SECTIONS.find((entry) => entry === value) ?? "decisions";
+
+/** A lane's role, or null for none or one this app does not know. */
+const columnRole = (value: unknown): ColumnRole | null =>
+  COLUMN_ROLES.find((entry) => entry === value) ?? null;
 
 const strings = (value: unknown): string[] =>
   Array.isArray(value)
@@ -187,7 +198,7 @@ function parseChecklist(value: unknown): BoardChecklistItem[] {
     return [
       {
         key: row.key,
-        section: text(row.section) ? row.section : "decisions",
+        section: section(row.section),
         text: text(row.text) ? row.text : "",
         checked: row.checked === true,
         checkedAt: text(row.checkedAt) ? row.checkedAt : null,
@@ -352,7 +363,7 @@ export function parseBoardConfig(value: unknown): {
         {
           key: row.key,
           name: text(row.name) ? row.name : row.key,
-          role: text(row.role) ? row.role : null,
+          role: columnRole(row.role),
           icon: text(row.icon) ? row.icon : "circle-dashed",
           tone: text(row.tone) ? row.tone : "neutral",
           position: typeof row.position === "number" ? row.position : index,

@@ -1,22 +1,18 @@
 // What Claude Code remembers about a project: the notes it saved for itself
 // in `~/.claude/projects/<repo>/memory/`, shown read-only.
 
-/** The kinds of memory Claude files, and "other" for anything it did not. */
-export type MemoryType =
-  | "user"
-  | "feedback"
-  | "project"
-  | "reference"
-  | "other";
-
-/** Every memory type, in the order the list groups them. */
-export const MEMORY_TYPES: readonly MemoryType[] = [
+/**
+ * Every memory type, in the order the list groups them: the kinds Claude
+ * files, and "other" for anything it did not.
+ */
+export const MEMORY_TYPES = [
   "user",
   "feedback",
   "project",
   "reference",
   "other",
-];
+] as const;
+export type MemoryType = (typeof MEMORY_TYPES)[number];
 
 /** The memory type a frontmatter `type` names; `"other"` when it names none. */
 export function memoryType(value: string | undefined): MemoryType {
