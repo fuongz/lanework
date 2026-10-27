@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { RowBadge } from "#/components/shared/board/row-badge";
 import { RAIL_ROW } from "#/components/shared/navigation/rail-hover";
 import { Skeleton } from "#/components/ui/skeleton";
-import { relativeTime } from "#/lib/board-view";
+import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import type { GitHubIssue, IssueLabel } from "../../../../shared/git";
 

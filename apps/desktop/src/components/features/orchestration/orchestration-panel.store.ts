@@ -7,6 +7,7 @@
 
 import { create } from "zustand";
 import type { ProposedTask } from "#/../shared/orchestration";
+import { readStored, writeStored } from "#/lib/stored";
 
 export interface ProposalEdits {
   /** The tasks as the user edited them; absent: the lead's, untouched. */
@@ -26,7 +27,7 @@ const KEEP = 200;
 
 function load(): Record<string, ProposalEdits> {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = readStored(KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? (parsed as Record<string, ProposalEdits>)
@@ -37,11 +38,8 @@ function load(): Record<string, ProposalEdits> {
 }
 
 function save(edits: Record<string, ProposalEdits>) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(edits));
-  } catch {
-    // A full or unavailable storage only costs the edits.
-  }
+  // A full or unavailable storage only costs the edits.
+  writeStored(KEY, JSON.stringify(edits));
 }
 
 interface EditsState {

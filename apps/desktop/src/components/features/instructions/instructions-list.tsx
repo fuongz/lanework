@@ -20,15 +20,16 @@ import type {
   InstructionNode,
 } from "#/../shared/instructions";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
+import { fileSize } from "#/lib/file-size";
 import {
   AGENT_LABELS,
-  fileSize,
   MODE_LABELS,
   type NestedFolder,
   nestedFolders,
   SCOPE_LABELS,
 } from "#/lib/instructions";
 import { shortPath } from "#/lib/memory";
+import { readStored, writeStored } from "#/lib/stored";
 import { cn } from "#/lib/utils";
 
 /**
@@ -61,7 +62,7 @@ function useCollapsed(slug: string) {
   const key = `lanework:instructions-collapsed:${slug}`;
   const read = useCallback((): Set<string> => {
     try {
-      const raw = localStorage.getItem(key);
+      const raw = readStored(key);
       return new Set(raw ? (JSON.parse(raw) as string[]) : []);
     } catch {
       return new Set();
@@ -77,11 +78,7 @@ function useCollapsed(slug: string) {
         const next = new Set(previous);
         if (isOpen) next.add(id);
         else next.delete(id);
-        try {
-          localStorage.setItem(key, JSON.stringify([...next]));
-        } catch {
-          // Private window or blocked storage: the fold is not remembered.
-        }
+        writeStored(key, JSON.stringify([...next]));
         return next;
       }),
     [key],

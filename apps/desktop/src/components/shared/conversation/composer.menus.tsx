@@ -41,6 +41,7 @@ import {
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
 import { Switch } from "#/components/ui/switch";
+import { readStored, writeStored } from "#/lib/stored";
 import { cn } from "#/lib/utils";
 import { useModels } from "./composer.models";
 
@@ -52,7 +53,7 @@ const FAVORITES_KEY = "lanework.conversation.favorite-models";
 
 function readFavorites(): string[] {
   try {
-    const raw = localStorage.getItem(FAVORITES_KEY);
+    const raw = readStored(FAVORITES_KEY);
     const list: unknown = raw ? JSON.parse(raw) : [];
     return Array.isArray(list)
       ? list.filter((id): id is string => typeof id === "string")
@@ -63,11 +64,8 @@ function readFavorites(): string[] {
 }
 
 function writeFavorites(ids: string[]) {
-  try {
-    localStorage.setItem(FAVORITES_KEY, JSON.stringify(ids));
-  } catch {
-    // A favourite that is not kept is only a convenience lost.
-  }
+  // A favourite that is not kept is only a convenience lost.
+  writeStored(FAVORITES_KEY, JSON.stringify(ids));
 }
 
 const AGENTS: readonly ConversationAgent[] = ["claude", "codex"];

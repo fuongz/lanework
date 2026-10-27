@@ -6,8 +6,8 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  usePersistedLayout,
 } from "#/components/ui/resizable";
+import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { useWorktree } from "#/stores/worktree";
 import { ChangesDiff } from "./changes-diff";
 import { ChangesList, ChangesTitlebar } from "./changes-list";

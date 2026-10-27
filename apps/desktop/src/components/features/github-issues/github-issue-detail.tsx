@@ -9,7 +9,7 @@ import { useEffect } from "react";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { UserAvatar } from "#/components/shared/common/user-avatar";
 import { Skeleton } from "#/components/ui/skeleton";
-import { relativeTime } from "#/lib/board-view";
+import { relativeTime } from "#/lib/relative-time";
 import { pageOf, useGitHubIssues } from "#/stores/github-issues";
 import {
   formatRepoRef,

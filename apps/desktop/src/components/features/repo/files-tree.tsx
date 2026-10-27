@@ -29,7 +29,6 @@ import {
   rollUpFolders,
   treeHostStyle,
 } from "#/components/shared/diff/tree-style";
-import { useDark } from "#/components/shared/diff/use-dark";
 import { Button } from "#/components/ui/button";
 import {
   ContextMenu,
@@ -43,6 +42,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "#/components/ui/input-group";
+import { useDark } from "#/hooks/use-dark";
 import { useFiles } from "#/stores/files";
 import {
   type FileListing,

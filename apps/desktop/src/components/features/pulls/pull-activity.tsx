@@ -8,7 +8,7 @@ import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
-import { shortAge } from "#/lib/board-view";
+import { shortAge } from "#/lib/relative-time";
 import type { PullTimelineItem } from "../../../../shared/git";
 
 /**

@@ -7,7 +7,8 @@ import {
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { InstructionsMessage } from "#/components/shared/instructions/instructions-message";
 import { useSettingsProject } from "#/components/shared/settings/project-picker";
-import { AGENT_LABELS, fileSize, SCOPE_LABELS } from "#/lib/instructions";
+import { fileSize } from "#/lib/file-size";
+import { AGENT_LABELS, SCOPE_LABELS } from "#/lib/instructions";
 import { shortPath } from "#/lib/memory";
 import { useInstructions } from "#/stores/instructions";
 

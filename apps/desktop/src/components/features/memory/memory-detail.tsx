@@ -16,8 +16,8 @@ import { MemoryMessage } from "#/components/shared/memory/memory-message";
 import { useSettingsProject } from "#/components/shared/settings/project-picker";
 import { Alert, AlertDescription } from "#/components/ui/alert";
 import { Button } from "#/components/ui/button";
-import { relativeTime } from "#/lib/board-view";
 import { MEMORY_TYPE_LABELS, memoryLabel, memoryTarget } from "#/lib/memory";
+import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import { memoryEntry, useMemory } from "#/stores/memory";
 

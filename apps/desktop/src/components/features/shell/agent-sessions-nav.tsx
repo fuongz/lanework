@@ -62,12 +62,12 @@ import {
   TooltipTrigger,
 } from "#/components/ui/tooltip";
 import { liveRun, useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
-import { relativeTime, shortAge } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
   taskLabel as workerLabel,
   taskTone as workerTone,
 } from "#/lib/orchestration-status";
+import { relativeTime, shortAge } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import { useAgentFacts } from "#/stores/agent-facts";
 import {
@@ -348,9 +348,7 @@ export function AgentSessionsNav({
     task?: string;
   };
   // The sub-agent viewer's: which CLI's conversation `viewing` is.
-  const { agent: viewingAgent } = useSearch({ strict: false }) as {
-    agent?: string;
-  };
+  const { agent: viewingAgent } = useSearch({ strict: false });
   const onScreen = running.find((entry) => entry.id === terminalId);
   const live = useAgentSessions((state) => state.live);
   const watchActivity = useAgentSessions((state) => state.watchActivity);

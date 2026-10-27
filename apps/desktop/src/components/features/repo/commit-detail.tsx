@@ -11,16 +11,10 @@ import { type LoadSides, PatchView } from "#/components/shared/diff/patch-view";
 import { DocumentSkeleton } from "#/components/shared/loading/skeletons";
 import { RepoMessage } from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
+import { desktopSurface } from "#/server/desktop";
 import { useWorktree } from "#/stores/worktree";
 import type { CommitSummary } from "../../../../shared/worktree";
 import { DiffToolbar } from "./diff-toolbar";
-
-const api = () => {
-  const surface = window.desktop?.worktree;
-  if (!surface)
-    throw new Error("This window is not connected to the desktop app.");
-  return surface;
-};
 
 /** "26 Sep 2026" — a commit's day, in the reader's locale. */
 function day(iso: string): string {
@@ -135,8 +129,14 @@ export function CommitDetail() {
   const loadSides = useCallback<LoadSides>(
     async (oldPath, newPath) => {
       const [oldText, newText] = await Promise.all([
-        api().fileText(slug, oldPath, { kind: "rev", rev: `${sha}^` }),
-        api().fileText(slug, newPath, { kind: "rev", rev: sha }),
+        desktopSurface("worktree").fileText(slug, oldPath, {
+          kind: "rev",
+          rev: `${sha}^`,
+        }),
+        desktopSurface("worktree").fileText(slug, newPath, {
+          kind: "rev",
+          rev: sha,
+        }),
       ]);
       return { oldText: oldText ?? "", newText: newText ?? "" };
     },

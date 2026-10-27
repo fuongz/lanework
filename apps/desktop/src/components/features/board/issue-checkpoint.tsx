@@ -7,9 +7,9 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BoardCard, CardCheckpoint } from "#/../shared/workspaces";
-import { useCopy } from "#/components/shared/common/use-copy";
 import { Button } from "#/components/ui/button";
-import { relativeTime } from "#/lib/board-view";
+import { useCopy } from "#/hooks/use-copy";
+import { relativeTime } from "#/lib/relative-time";
 import { useBoard } from "#/stores/board";
 
 /** How often an open card re-asks where its agent stopped. */

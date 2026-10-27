@@ -10,9 +10,8 @@ import { useEffect, useState } from "react";
  * reliably true. `@pierre/diffs`' own `themeType: 'system'` and
  * `@pierre/trees`' `light-dark()` defaults would both consult the broken query.
  *
- * It lives beside the diff, not in `hooks/`: the diff and the file tree that
- * use it count as ONE area for the layout audit, and a hook with a single
- * owner colocates with that owner.
+ * It lives in `hooks/` because the diff, the file trees and the settings file
+ * browser all use it: several areas, which is what `hooks/` is for.
  */
 export function useDark(): boolean {
   const [dark, setDark] = useState(() =>

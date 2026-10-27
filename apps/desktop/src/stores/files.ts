@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
+import { readStored, writeStored } from "#/lib/stored";
+import { desktopSurface } from "#/server/desktop";
 import type {
   FileListing,
   FileView,
@@ -14,13 +16,6 @@ import type {
  *
  * NOTE: Read-only (FE-66/D1). Nothing here writes to the folder.
  */
-
-const api = () => {
-  const surface = window.desktop?.worktree;
-  if (!surface)
-    throw new Error("This window is not connected to the desktop app.");
-  return surface;
-};
 
 /**
  * One open file.
@@ -53,7 +48,7 @@ const FOLDER_KEY = "lanework:files-folder";
 
 function readSavedFolders(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(FOLDER_KEY);
+    const raw = readStored(FOLDER_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : {};
     return parsed && typeof parsed === "object"
       ? (parsed as Record<string, string>)
@@ -69,15 +64,12 @@ export function savedFolder(slug: string): string | null {
 }
 
 export function saveFolder(slug: string, path: string | null): void {
-  try {
-    const { [slug]: _, ...rest } = readSavedFolders();
-    localStorage.setItem(
-      FOLDER_KEY,
-      JSON.stringify(path ? { ...rest, [slug]: path } : rest),
-    );
-  } catch {
-    // Remembering is a convenience; the switch already happened.
-  }
+  const { [slug]: _, ...rest } = readSavedFolders();
+  // Remembering is a convenience; the switch already happened.
+  writeStored(
+    FOLDER_KEY,
+    JSON.stringify(path ? { ...rest, [slug]: path } : rest),
+  );
 }
 
 /**
@@ -147,7 +139,7 @@ export const useFiles = create<FilesStore>((set, get) => {
   async function readView(slug: string, path: string): Promise<void> {
     const folder = get().folder;
     try {
-      const view = await api().view(slug, path, folder);
+      const view = await desktopSurface("worktree").view(slug, path, folder);
       if (get().slug !== slug || get().folder !== folder) return;
       set((state) => {
         const { [path]: _, ...viewErrors } = state.viewErrors;
@@ -224,7 +216,10 @@ export const useFiles = create<FilesStore>((set, get) => {
         // A non-primary folder answers for itself whether it is a repository
         // at all; the primary's answer is the worktree store's.
         if (folder > 0) {
-          const folderStatus = await api().status(slug, folder);
+          const folderStatus = await desktopSurface("worktree").status(
+            slug,
+            folder,
+          );
           if (mine !== ticket || get().slug !== slug) return;
           set({ folderStatus });
           if (folderStatus.kind !== "ready") {
@@ -237,9 +232,9 @@ export const useFiles = create<FilesStore>((set, get) => {
         // gone since is dropped.
         const dirs = Object.keys(get().loaded);
         const [base, ...again] = await Promise.all([
-          api().files(slug, folder),
+          desktopSurface("worktree").files(slug, folder),
           ...dirs.map((dir) =>
-            api()
+            desktopSurface("worktree")
               .dir(slug, dir, folder)
               .catch(() => null),
           ),
@@ -269,7 +264,7 @@ export const useFiles = create<FilesStore>((set, get) => {
       if (!slug || get().loaded[dir] || reading.has(dir)) return;
       reading.add(dir);
       try {
-        const listing = await api().dir(slug, dir, folder);
+        const listing = await desktopSurface("worktree").dir(slug, dir, folder);
         if (get().slug !== slug || get().folder !== folder) return;
         set((state) => ({ loaded: { ...state.loaded, [dir]: listing } }));
       } catch {

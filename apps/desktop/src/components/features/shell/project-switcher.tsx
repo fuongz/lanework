@@ -12,13 +12,13 @@ import { useEffect, useRef, useState } from "react";
 import type { TerminalSession } from "#/../shared/terminal";
 import type { Workspace } from "#/../shared/workspaces";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
-import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
-import { ProjectTile } from "#/components/shared/common/project-tile";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
+import { CreateProjectDialog } from "#/components/shared/workspaces/create-project-dialog";
+import { ProjectTile } from "#/components/shared/workspaces/project-tile";
 import { RenameProjectDialog } from "#/components/shared/workspaces/rename-project-dialog";
 import { SourceFoldersDialog } from "#/components/shared/workspaces/source-folders-dialog";
 import {

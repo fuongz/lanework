@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import type { PickedFolder, Workspace } from "#/../shared/workspaces";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   PrimaryFolderHint,
   SourceFolders,
-} from "#/components/shared/common/source-folders";
-import { ListSkeleton } from "#/components/shared/loading/skeletons";
+} from "#/components/shared/workspaces/source-folders";
 import { Button } from "#/components/ui/button";
 import {
   Dialog,

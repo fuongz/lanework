@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { create } from "zustand";
+import { findDesktopSurface } from "#/server/desktop";
 import type {
   DesktopHarnessApi,
   HarnessAgent,
@@ -128,7 +129,7 @@ function harnessSurface(): DesktopHarnessApi | undefined {
     if (fake === undefined) fake = makeFake();
     if (fake) return fake;
   }
-  return window.desktop?.harness;
+  return findDesktopSurface("harness");
 }
 
 function makeFake(): DesktopHarnessApi | null {

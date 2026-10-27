@@ -5,6 +5,7 @@ import { ArrowRight01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "cn";
 import type * as React from "react";
+// NOTE: Local edit, see `menu-surface.ts`. A shadcn re-add removes it.
 import { MENU_SURFACE } from "./menu-surface";
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {

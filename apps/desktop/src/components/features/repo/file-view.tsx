@@ -18,13 +18,14 @@ import { cn } from "cn";
 import { type ReactNode, useMemo, useRef, useState } from "react";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
-import { useCopy } from "#/components/shared/common/use-copy";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
-import { useDark } from "#/components/shared/diff/use-dark";
 import { EditorTabs } from "#/components/shared/editor/editor-tabs";
 import { DocumentSkeleton } from "#/components/shared/loading/skeletons";
 import { RepoMessage } from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
+import { useCopy } from "#/hooks/use-copy";
+import { useDark } from "#/hooks/use-dark";
+import { fileSize } from "#/lib/file-size";
 import { isMarkdown, useFiles } from "#/stores/files";
 import { useWorktree } from "#/stores/worktree";
 import type {
@@ -52,12 +53,6 @@ const STATUS_TONE: Record<WorktreeFileStatus, string> = {
 
 function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 export function FileTabs({ changes }: { changes: WorktreeFile[] }) {
@@ -288,7 +283,7 @@ function ImageBody({
             {natural.w} × {natural.h}
           </span>
         )}
-        <span>{formatSize(size)}</span>
+        <span>{fileSize(size)}</span>
       </p>
     </div>
   );
@@ -342,14 +337,14 @@ export function FileView({
     body = (
       <RepoMessage
         title="Binary file"
-        description={`${formatSize(view.size)} — there is no text to show.`}
+        description={`${fileSize(view.size)} — there is no text to show.`}
       />
     );
   else if (view.kind === "too-large")
     body = (
       <RepoMessage
         title="Too large to show"
-        description={`${formatSize(view.size)}. Files over 2 MB open in your editor, not here.`}
+        description={`${fileSize(view.size)}. Files over 2 MB open in your editor, not here.`}
       />
     );
   else if (markdown && rendered)

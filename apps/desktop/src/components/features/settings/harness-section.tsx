@@ -11,7 +11,6 @@ import {
   useHarnessAccounts,
 } from "#/components/shared/agents/harness-account";
 import { HARNESS_NAMES } from "#/components/shared/agents/harness-island";
-import { useCopy } from "#/components/shared/common/use-copy";
 import { TextSkeleton } from "#/components/shared/loading/skeletons";
 import {
   SETTINGS_BUTTON,
@@ -21,20 +20,21 @@ import {
   type SettingsSectionSpec,
   SettingsValue,
 } from "#/components/shared/settings/settings-page";
+import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
+import { UsageBar } from "#/components/shared/terminal/usage-bar";
+import { Button } from "#/components/ui/button";
+import { Switch } from "#/components/ui/switch";
+import { useClock } from "#/hooks/use-clock";
+import { useCopy } from "#/hooks/use-copy";
+import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import {
   claudeView,
   codexView,
-  UsageBar,
   type UsageView,
   updatedText,
-  useClock,
-} from "#/components/shared/terminal/agent-usage-strip";
-import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
-import { Button } from "#/components/ui/button";
-import { Switch } from "#/components/ui/switch";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
-import { relativeTime } from "#/lib/board-view";
+} from "#/lib/agent-usage";
 import { ipcMessage } from "#/lib/ipc-error";
+import { relativeTime } from "#/lib/relative-time";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";

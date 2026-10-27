@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { byRank } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
+import { desktopSurface } from "#/server/desktop";
 import {
   type BoardActivity,
   type BoardCard,
@@ -14,13 +15,6 @@ import {
   DEFAULT_BOARD_QUERY,
   type Workspace,
 } from "../../shared/workspaces";
-
-const api = () => {
-  const surface = window.desktop?.workspaces;
-  if (!surface)
-    throw new Error("This window is not connected to the desktop app.");
-  return surface;
-};
 
 /**
  * Request tickets, one counter per read that can be in flight twice.
@@ -402,7 +396,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const mine = ++ticket.workspaces;
     inflight = (async () => {
       try {
-        const snapshot = await api().load();
+        const snapshot = await desktopSurface("workspaces").load();
         if (mine !== ticket.workspaces) return;
         set({
           ready: true,
@@ -481,7 +475,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
       notFound: null,
     });
     // Remembered on this machine, so the next launch opens the same project.
-    await api()
+    await desktopSurface("workspaces")
       .select(workspace.id ?? workspace.slug)
       .catch(() => undefined);
     if (get().active?.id !== workspace.id) return;
@@ -502,7 +496,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const mine = ++ticket.board;
     set({ loading: true });
     try {
-      const view = await api().board.load(workspace.id, get().query);
+      const view = await desktopSurface("workspaces").board.load(
+        workspace.id,
+        get().query,
+      );
       if (mine !== ticket.board) return;
       set({ view, loading: false, error: null });
       // The board read hands back a head; start the change cursor there so the
@@ -511,7 +508,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
       // scan a page of the feed for one number.
       if (typeof view.head === "number") set({ cursor: view.head });
       else {
-        const changes = await api()
+        const changes = await desktopSurface("workspaces")
           .board.changes(workspace.id, get().cursor)
           .catch(() => null);
         if (changes && mine === ticket.board) set({ cursor: changes.head });
@@ -537,7 +534,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!active?.id || !view || get().loading) return;
     const mine = ticket.board;
     try {
-      const changes = await api().board.changes(active.id, cursor);
+      const changes = await desktopSurface("workspaces").board.changes(
+        active.id,
+        cursor,
+      );
       // NOTE: The project may have changed while this was in flight; its
       // cards must not be merged into the next one's board.
       if (mine !== ticket.board || get().active?.id !== active.id) return;
@@ -592,7 +592,12 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const mine = ticket.board;
     set({ moreLoading: group });
     try {
-      const page = await api().board.more(active.id, query, group, cursor);
+      const page = await desktopSurface("workspaces").board.more(
+        active.id,
+        query,
+        group,
+        cursor,
+      );
       const current = get().view;
       if (mine !== ticket.board || !current || current.query !== view.query)
         return;
@@ -627,7 +632,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!active?.id || !view || view.stats === undefined || view.stats === null)
       return;
     const mine = ticket.board;
-    const counts = await api()
+    const counts = await desktopSurface("workspaces")
       .board.stats(active.id, query)
       .catch(() => null);
     const current = get().view;
@@ -640,7 +645,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
   createProject: async (name, folders) => {
     set({ busy: "project", error: null });
     try {
-      const snapshot = await api().create(name.trim(), folders);
+      const snapshot = await desktopSurface("workspaces").create(
+        name.trim(),
+        folders,
+      );
       set({
         workspaces: snapshot.workspaces,
         active: snapshot.active,
@@ -659,7 +667,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
   renameProject: async (id, name) => {
     set({ busy: `rename:${id}`, error: null });
     try {
-      const snapshot = await api().rename(id, name.trim());
+      const snapshot = await desktopSurface("workspaces").rename(
+        id,
+        name.trim(),
+      );
       set({
         workspaces: snapshot.workspaces,
         active: snapshot.active,
@@ -692,7 +703,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const mine = ++reorders;
     set({ workspaces: next });
     try {
-      const snapshot = await api().reorder(ids as string[]);
+      const snapshot = await desktopSurface("workspaces").reorder(
+        ids as string[],
+      );
       // NOTE: Only the latest move's answer lands. Two quick moves are two
       // writes, and the first one's reply arriving last would put the list
       // back one step.
@@ -717,7 +730,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
   deleteProject: async (id, slug) => {
     set({ busy: `delete:${slug}`, error: null });
     try {
-      const snapshot = await api().remove(id, slug);
+      const snapshot = await desktopSurface("workspaces").remove(id, slug);
       boards.delete(id);
       set({
         workspaces: snapshot.workspaces,
@@ -740,7 +753,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
   purgeIssues: async (id, slug) => {
     set({ busy: `purge:${slug}`, error: null });
     try {
-      const { deleted } = await api().board.purge(id, slug);
+      const { deleted } = await desktopSurface("workspaces").board.purge(
+        id,
+        slug,
+      );
       set({ busy: null });
       // Re-read when it was the open board, rather than emptying `view` here.
       // The lanes, categories and counts come from the service; an empty
@@ -761,7 +777,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
       return { error: "Open a project before adding a card to it." };
     set({ busy: "create", error: null, conflict: null });
     try {
-      const result = await api().board.create(workspace.id, draft);
+      const result = await desktopSurface("workspaces").board.create(
+        workspace.id,
+        draft,
+      );
       if (result.kind !== "ok") {
         set({ error: result.message });
         return { error: result.message };
@@ -795,7 +814,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!workspace?.id) return { error: "This project has no cloud board." };
     set({ busy: cardId, error: null, conflict: null });
     try {
-      await api().board.archive(workspace.id, cardId);
+      await desktopSurface("workspaces").board.archive(workspace.id, cardId);
       // NOTE: The server's word, not a splice: the feed carries the tombstone,
       // `poll` takes it off the board, then the counts are asked again. A
       // client that removed the row itself would be guessing. A whole-board
@@ -847,7 +866,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
       conflict: null,
     });
     try {
-      const result = await api().board.move(
+      const result = await desktopSurface("workspaces").board.move(
         workspace.id,
         cardId,
         columnKey,
@@ -886,7 +905,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!workspace?.id) return;
     set({ busy: cardId, error: null, conflict: null });
     try {
-      const result = await api().board.update(
+      const result = await desktopSurface("workspaces").board.update(
         workspace.id,
         cardId,
         patch,
@@ -922,7 +941,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!workspace?.id) return;
     set({ busy: `${cardId}:${key}`, error: null, conflict: null });
     try {
-      const result = await api().board.toggle(
+      const result = await desktopSurface("workspaces").board.toggle(
         workspace.id,
         cardId,
         key,
@@ -946,7 +965,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!workspace?.id) return;
     set({ busy: `${cardId}:checklist`, error: null, conflict: null });
     try {
-      const result = await api().board.setChecklist(
+      const result = await desktopSurface("workspaces").board.setChecklist(
         workspace.id,
         cardId,
         items,
@@ -985,7 +1004,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
     }));
     set({ busy: `${card.id}:checklist`, error: null, conflict: null });
     try {
-      const result = await api().board.setChecklist(
+      const result = await desktopSurface("workspaces").board.setChecklist(
         workspace.id,
         card.id,
         payload,
@@ -1017,7 +1036,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const workspace = get().active;
     if (!workspace?.id) return null;
     try {
-      return await api().board.card(workspace.id, cardId);
+      return await desktopSurface("workspaces").board.card(
+        workspace.id,
+        cardId,
+      );
     } catch (error) {
       set({ error: ipcMessage(error, "Could not read that card.") });
       return null;
@@ -1082,7 +1104,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
 
     set({ busy: `${detail.id}:checklist`, error: null, conflict: null });
     try {
-      const result = await api().board.setChecklist(
+      const result = await desktopSurface("workspaces").board.setChecklist(
         workspace.id,
         detail.id,
         payload,
@@ -1111,7 +1133,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!workspace?.id || get().detail?.id !== cardId) return;
     const mine = ticket.detail;
     try {
-      const card = await api().board.card(workspace.id, cardId);
+      const card = await desktopSurface("workspaces").board.card(
+        workspace.id,
+        cardId,
+      );
       if (
         mine === ticket.detail &&
         get().active?.id === workspace.id &&
@@ -1135,7 +1160,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const mine = ++ticket.detail;
     set({ detailLoading: true, detailError: null });
     try {
-      const card = await api().board.lookup(workspace.id, taskId);
+      const card = await desktopSurface("workspaces").board.lookup(
+        workspace.id,
+        taskId,
+      );
       if (mine !== ticket.detail) return;
       set({
         detail: card,
@@ -1179,7 +1207,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const mine = ticket.detail;
     set({ activityLoading: true });
     try {
-      const page = await api().board.activity(workspace.id, cardId, cursor);
+      const page = await desktopSurface("workspaces").board.activity(
+        workspace.id,
+        cardId,
+        cursor,
+      );
       if (mine !== ticket.detail || get().detail?.id !== cardId) return;
       set((state) => ({
         activity: {
@@ -1206,7 +1238,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!workspace?.id) return { error: "No project is open." };
     set({ busy: `${cardId}:comment`, error: null });
     try {
-      await api().board.comment(workspace.id, cardId, body);
+      await desktopSurface("workspaces").board.comment(
+        workspace.id,
+        cardId,
+        body,
+      );
       // Re-read rather than appended locally. The service stamps the time and
       // the author; a comment spliced in here would carry this machine's
       // clock, next to audit rows the server ordered by its own.
@@ -1230,7 +1266,12 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!workspace?.id) return { error: "No project is open." };
     set({ busy: `${cardId}:${commentId}`, error: null });
     try {
-      await api().board.editComment(workspace.id, cardId, commentId, body);
+      await desktopSurface("workspaces").board.editComment(
+        workspace.id,
+        cardId,
+        commentId,
+        body,
+      );
       await get().loadActivity(cardId);
       return {};
     } catch (error) {
@@ -1247,7 +1288,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
     if (!workspace?.id) return { error: "No project is open." };
     set({ busy: `${cardId}:${commentId}`, error: null });
     try {
-      await api().board.deleteComment(workspace.id, cardId, commentId);
+      await desktopSurface("workspaces").board.deleteComment(
+        workspace.id,
+        cardId,
+        commentId,
+      );
       await get().loadActivity(cardId);
       await get().refreshDetail(cardId);
       return {};
@@ -1279,7 +1324,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
       );
     flip(subscribed);
     try {
-      const now = await api().board.subscribe(workspace.id, cardId, subscribed);
+      const now = await desktopSurface("workspaces").board.subscribe(
+        workspace.id,
+        cardId,
+        subscribed,
+      );
       flip(now);
       await get().refreshDetail(cardId);
     } catch (error) {
@@ -1301,7 +1350,13 @@ export const useBoard = create<BoardState>()((set, get) => ({
       );
     flip(favorite);
     try {
-      flip(await api().board.favorite(workspace.id, cardId, favorite));
+      flip(
+        await desktopSurface("workspaces").board.favorite(
+          workspace.id,
+          cardId,
+          favorite,
+        ),
+      );
     } catch (error) {
       flip(!favorite);
       set({ error: ipcMessage(error, "That did not save. Try again.") });

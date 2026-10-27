@@ -25,9 +25,10 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  usePersistedLayout,
 } from "#/components/ui/resizable";
 import { Textarea } from "#/components/ui/textarea";
+import { usePersistedLayout } from "#/hooks/use-persisted-layout";
+import type { PullView } from "#/lib/pull-search";
 import { cn } from "#/lib/utils";
 import { useLayout } from "#/stores/layout";
 import { diffSource, usePulls } from "#/stores/pulls";
@@ -50,25 +51,6 @@ function PullsTitlebar() {
       <h1 className={WINDOW_TITLE}>Pull requests</h1>
     </WindowTitlebar>
   );
-}
-
-/**
- * Which half of a pull request is on screen.
- *
- * `summary` is the default and is spelled by absence: the parser returns no
- * `view` for it. A pull request opens on what it is before what changed in
- * it, and `view` in a link means someone chose the code, not that a default
- * got written down.
- */
-type PullView = "summary" | "code";
-interface PullDetailSearch {
-  view?: PullView;
-}
-
-export function parsePullDetailSearch(
-  raw: Record<string, unknown>,
-): PullDetailSearch {
-  return raw.view === "code" ? { view: "code" } : {};
 }
 
 function Verdict({

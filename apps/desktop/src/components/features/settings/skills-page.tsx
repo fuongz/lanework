@@ -38,7 +38,6 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  usePersistedLayout,
 } from "#/components/ui/resizable";
 import { ScrollArea } from "#/components/ui/scroll-area";
 import { Separator } from "#/components/ui/separator";
@@ -47,9 +46,10 @@ import { CodexDark } from "#/components/ui/svgs/codexDark";
 import { CodexLight } from "#/components/ui/svgs/codexLight";
 import { Opencode } from "#/components/ui/svgs/opencode";
 import { OpencodeDark } from "#/components/ui/svgs/opencodeDark";
-import { relativeTime } from "#/lib/board-view";
-import { fileSize } from "#/lib/instructions";
+import { usePersistedLayout } from "#/hooks/use-persisted-layout";
+import { fileSize } from "#/lib/file-size";
 import { ipcMessage } from "#/lib/ipc-error";
+import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 
 const ROUTE = "/settings/skills";
@@ -77,7 +77,7 @@ function rootOf(file: ConfigFile): SkillRoot {
  * previous one.
  */
 export function SkillsPage() {
-  const { file: openId } = useSearch({ strict: false }) as { file?: string };
+  const { file: openId } = useSearch({ strict: false });
   const navigate = useNavigate();
   const [files, setFiles] = useState<ConfigFile[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);

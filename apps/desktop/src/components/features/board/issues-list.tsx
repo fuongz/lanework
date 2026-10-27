@@ -35,10 +35,10 @@ import {
   checklistProgress,
   columnOf,
   groupIssues,
-  relativeTime,
   statusKeys,
 } from "#/lib/board-view";
 import { type IssueSearch, parseIssueSearch } from "#/lib/issue-search";
+import { relativeTime } from "#/lib/relative-time";
 import { useBoard } from "#/stores/board";
 import { listOf, useGitHubIssues } from "#/stores/github-issues";
 import {

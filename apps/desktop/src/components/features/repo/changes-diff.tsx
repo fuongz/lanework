@@ -6,15 +6,9 @@ import { DocumentSkeleton } from "#/components/shared/loading/skeletons";
 import { RestoreDialog } from "#/components/shared/repo/restore-dialog";
 import { StageBox } from "#/components/shared/repo/stage-box";
 import { Button } from "#/components/ui/button";
+import { desktopSurface } from "#/server/desktop";
 import { useWorktree } from "#/stores/worktree";
 import type { WorktreeFile } from "../../../../shared/worktree";
-
-const api = () => {
-  const surface = window.desktop?.worktree;
-  if (!surface)
-    throw new Error("This window is not connected to the desktop app.");
-  return surface;
-};
 
 /**
  * Every current change as one diff, beside the list that steers it.
@@ -55,12 +49,12 @@ export function ChangesDiff({
       const [oldText, newText] = await Promise.all([
         file?.status === "untracked" || file?.status === "added"
           ? Promise.resolve("")
-          : api()
+          : desktopSurface("worktree")
               .fileText(slug, oldPath, { kind: "rev", rev: "HEAD" })
               .then((text) => text ?? ""),
         file?.status === "deleted"
           ? Promise.resolve("")
-          : api()
+          : desktopSurface("worktree")
               .fileText(slug, newPath, { kind: "worktree" })
               .then((text) => text ?? ""),
       ]);

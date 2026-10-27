@@ -32,13 +32,6 @@ export const MODE_LABELS: Record<ClaudeInstructionMode, string> = {
   "managed-only": "Managed instructions only",
 };
 
-/** `2.3 KB`: a size a person reads at a glance. */
-export function fileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 /** Every place a file is read, as its agent and scope, for its header. */
 export function appearances(
   list: InstructionList,

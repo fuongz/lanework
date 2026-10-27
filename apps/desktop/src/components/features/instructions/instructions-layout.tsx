@@ -12,8 +12,8 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  usePersistedLayout,
 } from "#/components/ui/resizable";
+import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { useInstructions, useInstructionsWatch } from "#/stores/instructions";
 import { InstructionsList } from "./instructions-list";
 

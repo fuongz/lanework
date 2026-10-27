@@ -4,8 +4,8 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
 import { ProjectListSkeleton } from "#/components/shared/board/skeletons";
-import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
 import { ErrorState } from "#/components/shared/common/error-state";
+import { CreateProjectDialog } from "#/components/shared/workspaces/create-project-dialog";
 import { Button } from "#/components/ui/button";
 import {
   Empty,

@@ -16,7 +16,7 @@ import {
   TooltipTrigger,
 } from "#/components/ui/tooltip";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
-import { relativeTime } from "#/lib/board-view";
+import { relativeTime } from "#/lib/relative-time";
 import { useAgentSessions, workingOn } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";

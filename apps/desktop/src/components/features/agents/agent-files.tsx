@@ -38,8 +38,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "#/components/ui/popover";
-import { relativeTime, shortAge } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
+import { relativeTime, shortAge } from "#/lib/relative-time";
 import { useWorktree } from "#/stores/worktree";
 import type { WorktreeFile } from "../../../../shared/worktree";
 

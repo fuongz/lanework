@@ -30,7 +30,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
-import { columnOf, relativeTime } from "#/lib/board-view";
+import { columnOf } from "#/lib/board-view";
+import { relativeTime } from "#/lib/relative-time";
 import { useBoard } from "#/stores/board";
 import { useCloudFeatures, useSession } from "#/stores/session";
 

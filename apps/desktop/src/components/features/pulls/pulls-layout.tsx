@@ -5,8 +5,8 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  usePersistedLayout,
 } from "#/components/ui/resizable";
+import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { useLayout } from "#/stores/layout";
 import { usePulls } from "#/stores/pulls";
 import { PullsList } from "./pulls-list";

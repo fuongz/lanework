@@ -6,9 +6,9 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useRef, useState } from "react";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
-import { CreateProjectDialog } from "#/components/shared/common/create-project-dialog";
-import { ProjectTile } from "#/components/shared/common/project-tile";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
+import { CreateProjectDialog } from "#/components/shared/workspaces/create-project-dialog";
+import { ProjectTile } from "#/components/shared/workspaces/project-tile";
 import {
   Popover,
   PopoverContent,

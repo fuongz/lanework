@@ -1,4 +1,5 @@
-// What the pull request URL carries, and how a stranger's link is read.
+// What the pull request URLs carry, the list's and one pull request's, and
+// how a stranger's link is read.
 //
 // NOTE: This lives here, not beside the list it filters, because the route
 // needs it: `validateSearch` runs before any component mounts. A parser
@@ -30,4 +31,23 @@ export function parsePullSearch(raw: Record<string, unknown>): PullSearch {
       ? (status as PullStatus)
       : "open",
   };
+}
+
+/**
+ * Which half of a pull request is on screen.
+ *
+ * `summary` is the default and is spelled by absence: the parser returns no
+ * `view` for it. A pull request opens on what it is before what changed in
+ * it, and `view` in a link means someone chose the code, not that a default
+ * got written down.
+ */
+export type PullView = "summary" | "code";
+export interface PullDetailSearch {
+  view?: PullView;
+}
+
+export function parsePullDetailSearch(
+  raw: Record<string, unknown>,
+): PullDetailSearch {
+  return raw.view === "code" ? { view: "code" } : {};
 }

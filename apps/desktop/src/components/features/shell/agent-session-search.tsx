@@ -12,7 +12,7 @@ import {
   CommandItem,
   CommandList,
 } from "#/components/ui/command";
-import { relativeTime } from "#/lib/board-view";
+import { relativeTime } from "#/lib/relative-time";
 
 /**
  * The Agents group's search: every conversation of this project by title,

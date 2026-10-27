@@ -1,5 +1,5 @@
-// The project order's arithmetic, shared by the project switcher's reorder
-// list (`project-reorder-list.tsx`).
+// The project order's arithmetic, beside its one consumer: the project
+// switcher's reorder list (`project-reorder-list.tsx`).
 
 /** `slugs` with `slug` moved to where `over` is. */
 export function moveSlug(

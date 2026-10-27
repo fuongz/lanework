@@ -1,6 +1,7 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { cn } from "cn";
 import type * as React from "react";
+// NOTE: Local edit, see `menu-surface.ts`. A shadcn re-add removes it.
 import { MENU_SURFACE } from "./menu-surface";
 
 function Popover({ ...props }: PopoverPrimitive.Root.Props) {

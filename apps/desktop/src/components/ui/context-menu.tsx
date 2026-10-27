@@ -2,6 +2,7 @@
 
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { cn } from "cn";
+// NOTE: Local edit, see `menu-surface.ts`. A shadcn re-add removes it.
 import { MENU_SURFACE } from "./menu-surface";
 
 /**

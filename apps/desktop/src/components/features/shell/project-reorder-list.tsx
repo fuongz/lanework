@@ -15,11 +15,11 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { useCallback, useRef, useState } from "react";
 import type { Workspace } from "#/../shared/workspaces";
-import { moveSlug, shiftFor } from "#/components/features/settings/project-row";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
-import { ProjectTile } from "#/components/shared/common/project-tile";
+import { ProjectTile } from "#/components/shared/workspaces/project-tile";
 import { cn } from "#/lib/utils";
 import { isLocalWorkspace } from "#/stores/session";
+import { moveSlug, shiftFor } from "./project-reorder-list.order";
 
 const glide = { duration: 0.2, ease: [0.22, 1, 0.36, 1] } as const;
 

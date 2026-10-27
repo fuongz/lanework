@@ -1,18 +1,13 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
+import { readStored, writeStored } from "#/lib/stored";
+import { desktopSurface } from "#/server/desktop";
 import {
   TERMINAL_LIMITS,
   type TerminalAgent,
   type TerminalKind,
   type TerminalSession,
 } from "../../shared/terminal";
-
-const api = () => {
-  const surface = window.desktop?.terminal;
-  if (!surface)
-    throw new Error("This window is not connected to the desktop app.");
-  return surface;
-};
 
 /**
  * Per-workspace revision of the tab list.
@@ -39,12 +34,8 @@ const DEFAULT_TERMINAL_HEIGHT = 40;
  * is showing.
  */
 function readHeight(): number {
-  try {
-    const saved = Number(window.localStorage.getItem(HEIGHT_KEY));
-    if (Number.isFinite(saved) && saved >= 1 && saved <= 85) return saved;
-  } catch {
-    // No storage: the default below.
-  }
+  const saved = Number(readStored(HEIGHT_KEY));
+  if (Number.isFinite(saved) && saved >= 1 && saved <= 85) return saved;
   return DEFAULT_TERMINAL_HEIGHT;
 }
 
@@ -148,7 +139,7 @@ function applyOrder(workspace: string, ids: string[]) {
       },
     };
   });
-  api()
+  desktopSurface("terminal")
     .reorder(workspace, ids)
     .catch((error: unknown) =>
       useTerminal.setState({
@@ -168,7 +159,7 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
 
   loadAgents: async () => {
     try {
-      const agents = await api().agents();
+      const agents = await desktopSurface("terminal").agents();
       if (agents.join() !== get().agents.join()) set({ agents });
     } catch {
       // Not asked, or not answered: + keeps offering what it did.
@@ -185,11 +176,7 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     if (!Number.isFinite(height) || height < 1 || height > 85) return;
     if (height === get().height) return;
     set({ height });
-    try {
-      window.localStorage.setItem(HEIGHT_KEY, String(height));
-    } catch {
-      // Kept for this session only.
-    }
+    writeStored(HEIGHT_KEY, String(height));
   },
 
   refresh: async (workspace) => {
@@ -198,7 +185,7 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
       // NOTE: Shells only (FE-26/D6). The host runs agents too, but they
       // belong to the main view and `useAgentTerminals` lists them. A Claude
       // started from the rail must never turn up as a tab here.
-      const listed = (await api().list(workspace)).filter(
+      const listed = (await desktopSurface("terminal").list(workspace)).filter(
         (session) => session.kind === "shell",
       );
       if ((revision.get(workspace) ?? 0) !== mine) return;
@@ -233,7 +220,13 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     try {
       // A first guess at the size; the view's attach sets the real one before
       // anything is drawn.
-      const session = await api().spawn(workspace, 80, 24, kind, resume);
+      const session = await desktopSurface("terminal").spawn(
+        workspace,
+        80,
+        24,
+        kind,
+        resume,
+      );
       bump(workspace);
       set((state) => ({
         sessions: {
@@ -275,7 +268,7 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
       };
     });
     try {
-      await api().kill(id);
+      await desktopSurface("terminal").kill(id);
     } catch (error) {
       set({ error: ipcMessage(error, "Could not close that terminal.") });
     }

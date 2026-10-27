@@ -19,6 +19,7 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { ipcMessage } from "#/lib/ipc-error";
+import { readStored, writeStored } from "#/lib/stored";
 
 /**
  * The files open as tabs, per page kind, in the order they were opened.
@@ -29,7 +30,7 @@ function useOpenTabs(kind: "config" | "skill") {
   const key = `lanework:agent-config-tabs:${kind}`;
   const [tabs, setTabs] = useState<string[]>(() => {
     try {
-      const stored: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+      const stored: unknown = JSON.parse(readStored(key) ?? "[]");
       return Array.isArray(stored)
         ? stored.filter((id): id is string => typeof id === "string")
         : [];
@@ -37,13 +38,7 @@ function useOpenTabs(kind: "config" | "skill") {
       return [];
     }
   });
-  useEffect(() => {
-    try {
-      localStorage.setItem(key, JSON.stringify(tabs));
-    } catch {
-      // Tabs are a convenience; a blocked store just forgets them.
-    }
-  }, [key, tabs]);
+  useEffect(() => writeStored(key, JSON.stringify(tabs)), [key, tabs]);
   return [tabs, setTabs] as const;
 }
 
@@ -77,7 +72,7 @@ const PAGES = {
  */
 export function AgentConfigPage({ kind }: { kind: "config" | "skill" }) {
   const page = PAGES[kind];
-  const { file: openId } = useSearch({ strict: false }) as { file?: string };
+  const { file: openId } = useSearch({ strict: false });
   const navigate = useNavigate();
   const [files, setFiles] = useState<ConfigFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);

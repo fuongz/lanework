@@ -16,7 +16,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "#/components/ui/input-group";
-import { relativeTime } from "#/lib/board-view";
+import { relativeTime } from "#/lib/relative-time";
 import { useWorktree } from "#/stores/worktree";
 
 /**

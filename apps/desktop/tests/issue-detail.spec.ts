@@ -226,7 +226,7 @@ test("the issue page carries the card's labels, people, files and sub-issues", a
 
     // A file is metadata and a reference — its size is the part a person reads.
     await expect(page.getByText("Example.pdf")).toBeVisible();
-    await expect(page.getByText(/5\.11 MB/)).toBeVisible();
+    await expect(page.getByText(/5\.1 MB/)).toBeVisible();
 
     // Sub-issues, with the fraction counted off the lane ROLES rather than a
     // lane called "Done".

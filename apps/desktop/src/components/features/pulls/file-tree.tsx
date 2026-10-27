@@ -14,12 +14,12 @@ import {
   rollUpFolders,
   treeHostStyle,
 } from "#/components/shared/diff/tree-style";
-import { useDark } from "#/components/shared/diff/use-dark";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
 } from "#/components/ui/input-group";
+import { useDark } from "#/hooks/use-dark";
 import { diffSource, usePulls } from "#/stores/pulls";
 import type { PullFile, PullFileStatus } from "../../../../shared/git";
 

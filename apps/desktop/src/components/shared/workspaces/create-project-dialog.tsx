@@ -5,7 +5,7 @@ import type { PickedFolder } from "#/../shared/workspaces";
 import {
   PrimaryFolderHint,
   SourceFolders,
-} from "#/components/shared/common/source-folders";
+} from "#/components/shared/workspaces/source-folders";
 import { Button } from "#/components/ui/button";
 import {
   Dialog,

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
+import { desktopSurface } from "#/server/desktop";
 import type {
   CommitDiff,
   GitAccount,
@@ -62,13 +63,6 @@ export function diffSource(
   );
 }
 
-const api = () => {
-  const surface = window.desktop?.git;
-  if (!surface)
-    throw new Error("This window is not connected to the desktop app.");
-  return surface;
-};
-
 /**
  * Request tickets, one per read that can be in flight twice.
  *
@@ -77,7 +71,13 @@ const api = () => {
  * without a ticket the older one can win. Pressing refresh while a slow
  * failure is still running does it.
  */
-const ticket = { pulls: 0, detail: 0, commitDiff: 0, activity: 0 };
+const ticket = {
+  pulls: 0,
+  detail: 0,
+  commits: 0,
+  commitDiff: 0,
+  activity: 0,
+};
 
 interface PullsState {
   /**
@@ -286,8 +286,8 @@ export const usePulls = create<PullsState>((set, get) => ({
     set({ loading: true });
     try {
       const [account, repo] = await Promise.all([
-        api().account(),
-        api().repo(slug),
+        desktopSurface("git").account(),
+        desktopSurface("git").repo(slug),
       ]);
       if (mine !== ticket.pulls) return;
       set({ account, repo, ready: true });
@@ -296,7 +296,7 @@ export const usePulls = create<PullsState>((set, get) => ({
         set({ loading: false, view: null });
         return;
       }
-      const view = await api().pulls(slug, status);
+      const view = await desktopSurface("git").pulls(slug, status);
       if (mine !== ticket.pulls) return;
       set({ view, loading: false, error: null });
     } catch (error) {
@@ -315,7 +315,7 @@ export const usePulls = create<PullsState>((set, get) => ({
     const mine = ++ticket.pulls;
     set({ loading: true });
     try {
-      const view = await api().pulls(slug, status, true);
+      const view = await desktopSurface("git").pulls(slug, status, true);
       if (mine !== ticket.pulls) return;
       set({ view, loading: false, error: null });
     } catch (error) {
@@ -331,7 +331,7 @@ export const usePulls = create<PullsState>((set, get) => ({
     if (get().checking) return;
     set({ checking: true });
     try {
-      const account = await api().check();
+      const account = await desktopSurface("git").check();
       set({ account });
       const { slug, status } = get();
       // The folder is read again too: "Check again" is also the way out of
@@ -349,7 +349,7 @@ export const usePulls = create<PullsState>((set, get) => ({
     if (!slug) return;
     set({ view: null, detail: null, detailError: null, activity: null });
     try {
-      const repo = await api().selectRepo(slug, side);
+      const repo = await desktopSurface("git").selectRepo(slug, side);
       set({ repo });
     } catch (error) {
       set({ error: ipcMessage(error, "Could not switch the repository.") });
@@ -362,10 +362,21 @@ export const usePulls = create<PullsState>((set, get) => ({
     const { slug } = get();
     if (!slug) return;
     const mine = ++ticket.detail;
+    // NOTE: A commit list still being read belongs to the pull request being
+    // left. Moving its ticket drops that answer, and clearing the flag lets
+    // this pull request's own read start instead of being deduped against it.
+    // Without this, PR B's commit menu shows PR A's commits.
+    ++ticket.commits;
     set({ mergeError: null });
-    set({ detailLoading: true, detailError: null });
+    set({
+      detailLoading: true,
+      detailError: null,
+      commits: null,
+      commitsLoading: false,
+      commitsError: null,
+    });
     try {
-      const detail = await api().pull(slug, number);
+      const detail = await desktopSurface("git").pull(slug, number);
       if (mine !== ticket.detail) return;
       // NOTE: Everything about the last pull request goes with it. A commit
       // list and a selected sha belong to one pull request. Left in place,
@@ -374,8 +385,6 @@ export const usePulls = create<PullsState>((set, get) => ({
       set({
         detail,
         detailLoading: false,
-        commits: null,
-        commitsError: null,
         commit: null,
         commitDiff: null,
         commitDiffError: null,
@@ -394,11 +403,14 @@ export const usePulls = create<PullsState>((set, get) => ({
   loadCommits: async (number) => {
     const { slug, commitsLoading } = get();
     if (!slug || commitsLoading) return;
+    const mine = ++ticket.commits;
     set({ commitsLoading: true, commitsError: null });
     try {
-      const commits = await api().commits(slug, number);
+      const commits = await desktopSurface("git").commits(slug, number);
+      if (mine !== ticket.commits) return;
       set({ commits, commitsLoading: false });
     } catch (error) {
+      if (mine !== ticket.commits) return;
       set({
         commitsLoading: false,
         // `commits` is left alone. A failed re-read of a list already on
@@ -433,7 +445,7 @@ export const usePulls = create<PullsState>((set, get) => ({
       focus: null,
     });
     try {
-      const commitDiff = await api().commitDiff(slug, sha);
+      const commitDiff = await desktopSurface("git").commitDiff(slug, sha);
       if (mine !== ticket.commitDiff) return;
       set({ commitDiff, commitDiffLoading: false });
     } catch (error) {
@@ -453,7 +465,7 @@ export const usePulls = create<PullsState>((set, get) => ({
     const mine = ++ticket.activity;
     set({ activityLoading: true, activityError: null });
     try {
-      const next = await api().activity(slug, number);
+      const next = await desktopSurface("git").activity(slug, number);
       if (mine !== ticket.activity) return;
       set({ activity: next, activityLoading: false });
     } catch (error) {
@@ -470,7 +482,7 @@ export const usePulls = create<PullsState>((set, get) => ({
     if (!slug) return { error: "Open a project first." };
     set({ commentBusy: true });
     try {
-      await api().comment(slug, number, body);
+      await desktopSurface("git").comment(slug, number, body);
       // Re-read rather than append. Appending here would mean inventing the
       // comment's id, timestamp and author, on a row that then looks like one
       // the server sent.
@@ -520,7 +532,7 @@ export const usePulls = create<PullsState>((set, get) => ({
       get().account === account;
     set({ mergeBusy: true, mergeError: null });
     try {
-      await api().merge(slug, number, mergeMethod, headSha);
+      await desktopSurface("git").merge(slug, number, mergeMethod, headSha);
     } catch (error) {
       const message = ipcMessage(error, "Could not merge this pull request.");
       set({ mergeBusy: false, ...(current() ? { mergeError: message } : {}) });
@@ -533,8 +545,8 @@ export const usePulls = create<PullsState>((set, get) => ({
       if (current()) {
         const mine = ++ticket.detail;
         const [next, activity] = await Promise.allSettled([
-          api().pull(slug, number),
-          api().activity(slug, number),
+          desktopSurface("git").pull(slug, number),
+          desktopSurface("git").activity(slug, number),
         ]);
         if (
           get().slug === slug &&
@@ -571,7 +583,7 @@ export const usePulls = create<PullsState>((set, get) => ({
       return { error: "Enter a review note first." };
     set({ reviewBusy: verdict });
     try {
-      await api().review(slug, number, verdict, body);
+      await desktopSurface("git").review(slug, number, verdict, body);
       set({ reviewBusy: null });
       // The decision changes what the list says about this row, so the list is
       // re-read rather than patched from a response that carries no row.
@@ -590,7 +602,7 @@ export const usePulls = create<PullsState>((set, get) => ({
   dismiss: () => set({ error: null, detailError: null }),
 
   watch: () => {
-    const offAccount = api().onAccountChange((account) => {
+    const offAccount = desktopSurface("git").onAccountChange((account) => {
       set({ account });
       // A login that just ended takes the list with it: what is on screen
       // was read with it, and leaving it there implies it is still current.

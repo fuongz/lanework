@@ -13,8 +13,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { useDark } from "#/hooks/use-dark";
 import { DiffFileHeader } from "./diff-file-header";
-import { useDark } from "./use-dark";
 
 interface FileCounts {
   additions: number;

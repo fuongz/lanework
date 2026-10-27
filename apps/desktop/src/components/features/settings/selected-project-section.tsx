@@ -7,12 +7,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState } from "react";
 import type { ReadinessFix } from "#/../shared/readiness";
 import type { Workspace } from "#/../shared/workspaces";
-import { ProjectTile } from "#/components/shared/common/project-tile";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   SETTINGS_BUTTON,
   SettingsCard,
 } from "#/components/shared/settings/settings-page";
+import { ProjectTile } from "#/components/shared/workspaces/project-tile";
 import {
   AlertDialog,
   AlertDialogAction,

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
+import { desktopSurface } from "#/server/desktop";
 import type {
   AgentSession,
   CardBrief,
@@ -15,13 +16,6 @@ import type {
  * shell with a CLI typed into it. But they are listed, chosen and limited
  * apart, so opening one never moves the other.
  */
-
-const api = () => {
-  const surface = window.desktop?.terminal;
-  if (!surface)
-    throw new Error("This window is not connected to the desktop app.");
-  return surface;
-};
 
 /**
  * Whether an agent ended rather than failed: `/exit`, or ⌃C twice.
@@ -100,7 +94,7 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
     set({ starting: true, error: null });
     try {
       // A first guess at the size; the view's attach sets the real one.
-      const session = await api().spawn(
+      const session = await desktopSurface("terminal").spawn(
         workspace,
         120,
         36,
@@ -137,7 +131,7 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
     refresh: async (workspace) => {
       const mine = revision.get(workspace) ?? 0;
       try {
-        const all = (await api().list(workspace)).filter(
+        const all = (await desktopSurface("terminal").list(workspace)).filter(
           (session) => session.kind !== "shell",
         );
         if ((revision.get(workspace) ?? 0) !== mine) return;
@@ -147,7 +141,7 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
           (session) => session.exit && endedCleanly(session.exit.code),
         );
         for (const session of ended)
-          void api()
+          void desktopSurface("terminal")
             .kill(session.id)
             .catch(() => {});
         const listed = all.filter((session) => !ended.includes(session));
@@ -190,7 +184,7 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
         },
       }));
       try {
-        await api().kill(id);
+        await desktopSurface("terminal").kill(id);
       } catch (error) {
         set({ error: ipcMessage(error, "Could not stop that agent.") });
       }

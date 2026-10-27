@@ -1,5 +1,5 @@
 // How the rail and the agent view word Codex's goals, with no React.
-// Codex's usage windows are drawn by the terminal bar's usage strip.
+// Codex's usage windows are worded by `lib/agent-usage.ts`.
 import type { CodexGoal, CodexGoalStatus } from "../../shared/terminal";
 
 /** A goal's state in words, short enough for a rail badge. */

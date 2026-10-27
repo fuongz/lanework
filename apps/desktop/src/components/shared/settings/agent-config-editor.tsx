@@ -43,7 +43,10 @@ import {
 } from "#/components/ui/select";
 import { Switch } from "#/components/ui/switch";
 import { ipcMessage } from "#/lib/ipc-error";
-import { MARKDOWN_HIGHLIGHT, markdownLanguage } from "#/lib/markdown-language";
+import {
+  MARKDOWN_HIGHLIGHT,
+  markdownLanguage,
+} from "./agent-config-editor.language";
 
 const AGENT_NAMES = { claude: "Claude Code", codex: "Codex" } as const;
 

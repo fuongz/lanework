@@ -5,8 +5,8 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  usePersistedLayout,
 } from "#/components/ui/resizable";
+import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { useBoard } from "#/stores/board";
 import { usePresencePoll } from "#/stores/board-presence";
 import { useGitHubIssues } from "#/stores/github-issues";

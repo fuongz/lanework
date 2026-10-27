@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { type LoadSides, PatchView } from "#/components/shared/diff/patch-view";
+import { desktopSurface } from "#/server/desktop";
 import { usePulls } from "#/stores/pulls";
 import type { PullFile } from "../../../../shared/git";
 
@@ -14,13 +15,6 @@ import type { PullFile } from "../../../../shared/git";
  * Unified, not split, because this is the third pane of three: two 300px
  * columns are not a readable diff.
  */
-
-const api = () => {
-  const surface = window.desktop?.git;
-  if (!surface)
-    throw new Error("This window is not connected to the desktop app.");
-  return surface;
-};
 
 /**
  * GitHub's per-file `patch` as a patch the parser will accept.
@@ -83,9 +77,9 @@ export function DiffView({
     async (oldPath, newPath) => {
       const [oldFile, newFile] = await Promise.all([
         baseSha
-          ? api().fileText(slug, oldPath, baseSha)
+          ? desktopSurface("git").fileText(slug, oldPath, baseSha)
           : Promise.resolve(null),
-        api().fileText(slug, newPath, headSha),
+        desktopSurface("git").fileText(slug, newPath, headSha),
       ]);
       if (!oldFile || !newFile)
         throw new Error("Those lines cannot be loaded for this file.");

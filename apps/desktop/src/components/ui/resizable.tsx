@@ -2,12 +2,10 @@ import { cn } from "cn";
 import {
   Group,
   type GroupProps,
-  type LayoutStorage,
   Panel,
   type PanelProps,
   Separator,
   type SeparatorProps,
-  useDefaultLayout,
 } from "react-resizable-panels";
 
 // Columns a person can drag.
@@ -75,54 +73,6 @@ function ResizableHandle({ className, ...props }: SeparatorProps) {
       {...props}
     />
   );
-}
-
-/**
- * Storage for column widths that may be unavailable.
- *
- * NOTE: Every read and write is wrapped, and the fallback is an in-memory map
- * rather than `undefined`. Handing the hook nothing makes it reach for
- * `localStorage` itself, which is what just threw. A layout that forgets is
- * an annoyance; an exception during render is a blank window.
- */
-function layoutStorage(): LayoutStorage {
-  const memory = new Map<string, string>();
-  return {
-    getItem: (key) => {
-      try {
-        return window.localStorage.getItem(key);
-      } catch {
-        return memory.get(key) ?? null;
-      }
-    },
-    setItem: (key, value) => {
-      try {
-        window.localStorage.setItem(key, value);
-      } catch {
-        memory.set(key, value);
-      }
-    },
-  };
-}
-
-/**
- * Remembered column widths.
- *
- * - `localStorage`, not the main process: one window's display preference is
- *   not account data and not worth an IPC round trip per drag.
- *   `stores/preferences.ts` keeps renderer preferences the same way.
- * - NOTE: `onlySaveAfterUserInteractions` matters. Without it, collapsing a
- *   panel from a button, or resizing the window, overwrites the width someone
- *   dragged to.
- */
-export function usePersistedLayout(id: string, panelIds: string[]) {
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id,
-    panelIds,
-    storage: layoutStorage(),
-    onlySaveAfterUserInteractions: true,
-  });
-  return { defaultLayout, onLayoutChanged };
 }
 
 export { ResizableHandle, ResizablePanel, ResizablePanelGroup };

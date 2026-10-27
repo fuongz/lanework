@@ -6,7 +6,6 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { SignInButton } from "#/components/shared/auth/local-mode";
-import { useCopy } from "#/components/shared/common/use-copy";
 import {
   SETTINGS_BUTTON,
   SettingsPage,
@@ -23,6 +22,7 @@ import {
   AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
+import { useCopy } from "#/hooks/use-copy";
 import { useSession } from "#/stores/session";
 
 /**

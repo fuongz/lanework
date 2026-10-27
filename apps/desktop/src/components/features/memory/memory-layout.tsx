@@ -14,8 +14,8 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  usePersistedLayout,
 } from "#/components/ui/resizable";
+import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { shortPath } from "#/lib/memory";
 import { memoryCount, useMemory, useMemoryWatch } from "#/stores/memory";
 import { MemoryList } from "./memory-list";

@@ -46,7 +46,6 @@ import {
   InlineMarkdown,
   MarkdownBody,
 } from "#/components/shared/common/markdown-body";
-import { useCopy } from "#/components/shared/common/use-copy";
 import {
   Select,
   SelectContent,
@@ -83,12 +82,14 @@ import {
 import { Input } from "#/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group";
 import { Separator } from "#/components/ui/separator";
+import { useCopy } from "#/hooks/use-copy";
 import {
   categoryOf,
   columnOf,
   subIssueProgress,
   subIssues,
 } from "#/lib/board-view";
+import { fileSize } from "#/lib/file-size";
 import { parseIssueSearch } from "#/lib/issue-search";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
@@ -563,20 +564,6 @@ function WorkBreakdown({ card }: { card: BoardCard }) {
   return <IssueStreams card={card} items={items} />;
 }
 
-/** A file size as a person reads one: `5.11 MB`. */
-function fileSize(bytes: number | null): string | null {
-  if (bytes === null || !Number.isFinite(bytes) || bytes < 0) return null;
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(value < 10 ? 2 : 1)} ${units[unit]}`;
-}
-
 /**
  * The files a card refers to.
  *
@@ -611,7 +598,11 @@ function AttachmentRow({
   copied: boolean;
   onCopy: () => void;
 }) {
-  const size = fileSize(file.sizeBytes);
+  const bytes = file.sizeBytes;
+  const size =
+    bytes === null || !Number.isFinite(bytes) || bytes < 0
+      ? null
+      : fileSize(bytes);
   return (
     <li>
       <button

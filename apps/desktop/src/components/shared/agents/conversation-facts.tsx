@@ -15,7 +15,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "#/components/ui/popover";
-import { relativeTime } from "#/lib/board-view";
+import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import {
   ContextRing,

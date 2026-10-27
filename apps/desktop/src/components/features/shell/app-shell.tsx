@@ -15,17 +15,18 @@ import { TerminalPanel } from "#/components/features/terminal/terminal-panel";
 import { useTerminalSessions } from "#/components/features/terminal/use-terminal-sessions";
 import { HarnessIsland } from "#/components/shared/agents/harness-island";
 import { WindowTitlebarHost } from "#/components/shared/navigation/window-titlebar";
-import { AgentUsageStrip } from "#/components/shared/terminal/agent-usage-strip";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  usePersistedLayout,
 } from "#/components/ui/resizable";
+import { usePersistedLayout } from "#/hooks/use-persisted-layout";
+import { readStored, writeStored } from "#/lib/stored";
 import { useBoard } from "#/stores/board";
 import { useLayout } from "#/stores/layout";
 import { useMcpAuthWatch } from "#/stores/mcp-auth";
 import { terminalShown, useTerminal } from "#/stores/terminal";
+import { AgentUsageStrip } from "./agent-usage-strip";
 import { AppSidebar } from "./app-sidebar";
 import { BoardNoticeIsland, useBoardNotice } from "./board-notice-island";
 import { CommandPalette } from "./command-palette";
@@ -49,12 +50,8 @@ const RAIL_GLIDE_MS = 240;
  * go back to: it would open at its 180px minimum.
  */
 function readRailWidth(): number {
-  try {
-    const saved = Number(window.localStorage.getItem(RAIL_WIDTH_KEY));
-    if (Number.isFinite(saved) && saved >= 180 && saved <= 380) return saved;
-  } catch {
-    // No storage: the default below.
-  }
+  const saved = Number(readStored(RAIL_WIDTH_KEY));
+  if (Number.isFinite(saved) && saved >= 180 && saved <= 380) return saved;
   return RAIL_DEFAULT_PX;
 }
 
@@ -67,20 +64,12 @@ function readRailWidth(): number {
  * mode is never written here: it is a mode for a few minutes, not a choice.
  */
 function readRailHidden(): boolean | null {
-  try {
-    const saved = window.localStorage.getItem(RAIL_HIDDEN_KEY);
-    return saved === "1" ? true : saved === "0" ? false : null;
-  } catch {
-    return null;
-  }
+  const saved = readStored(RAIL_HIDDEN_KEY);
+  return saved === "1" ? true : saved === "0" ? false : null;
 }
 
 function saveRailHidden(hidden: boolean) {
-  try {
-    window.localStorage.setItem(RAIL_HIDDEN_KEY, hidden ? "1" : "0");
-  } catch {
-    // Kept for this session only.
-  }
+  writeStored(RAIL_HIDDEN_KEY, hidden ? "1" : "0");
 }
 
 /**
@@ -365,11 +354,7 @@ export function AppShell() {
           const width = Math.round(panel.getSize().inPixels);
           if (width === railWidth.current) return;
           railWidth.current = width;
-          try {
-            window.localStorage.setItem(RAIL_WIDTH_KEY, String(width));
-          } catch {
-            // Kept for this session only.
-          }
+          writeStored(RAIL_WIDTH_KEY, String(width));
         }}
       >
         {/* Sized in pixels, and `preserve-pixel-size`. A rail is a column of

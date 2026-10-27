@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
+import { desktopSurface } from "#/server/desktop";
 import type {
   GitAccount,
   GitHubIssueDetail,
@@ -130,13 +131,6 @@ const EMPTY_PAGE: GitHubIssuePage = {
 /** The key an issue's page is held under. */
 export const issueKey = (slug: string, number: number) => `${slug}#${number}`;
 
-const api = () => {
-  const surface = window.desktop?.git;
-  if (!surface)
-    throw new Error("This window is not connected to the desktop app.");
-  return surface;
-};
-
 /**
  * Request tickets, one per list and one per page.
  *
@@ -209,8 +203,8 @@ export const useGitHubIssues = create<GitHubIssuesState>((set, get) => {
     patchList(slug, { loading: true });
     try {
       const [account, repo] = await Promise.all([
-        api().account(),
-        api().repo(slug),
+        desktopSurface("git").account(),
+        desktopSurface("git").repo(slug),
       ]);
       if (!current()) return;
       const problem = problemOf(account, repo);
@@ -220,7 +214,7 @@ export const useGitHubIssues = create<GitHubIssuesState>((set, get) => {
         patchList(slug, { view: null, loading: false, problem });
         return;
       }
-      const view = await api().issues(slug, refresh);
+      const view = await desktopSurface("git").issues(slug, refresh);
       if (!current()) return;
       patchList(slug, { view, loading: false, problem: null });
     } catch (error) {
@@ -253,7 +247,7 @@ export const useGitHubIssues = create<GitHubIssuesState>((set, get) => {
       if (get().checking) return;
       set({ checking: true });
       try {
-        await api().check();
+        await desktopSurface("git").check();
         await read(slug, true);
       } catch (error) {
         patchList(slug, {
@@ -273,8 +267,8 @@ export const useGitHubIssues = create<GitHubIssuesState>((set, get) => {
       patchPage(key, { loading: true });
       try {
         const [account, repo] = await Promise.all([
-          api().account(),
-          api().repo(slug),
+          desktopSurface("git").account(),
+          desktopSurface("git").repo(slug),
         ]);
         if (!current()) return;
         const problem = problemOf(account, repo);
@@ -282,7 +276,7 @@ export const useGitHubIssues = create<GitHubIssuesState>((set, get) => {
           patchPage(key, { detail: null, loading: false, problem });
           return;
         }
-        const detail = await api().issue(slug, number);
+        const detail = await desktopSurface("git").issue(slug, number);
         if (!current()) return;
         patchPage(key, { detail, loading: false, problem: null });
       } catch (error) {

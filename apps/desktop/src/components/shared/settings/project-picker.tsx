@@ -19,7 +19,7 @@ import { useBoard } from "#/stores/board";
  * a project, so the screens inside can treat the slug as real.
  */
 export function useSettingsProject(): string {
-  const { project } = useSearch({ strict: false }) as { project?: string };
+  const { project } = useSearch({ strict: false });
   const active = useBoard((state) => state.active?.slug ?? null);
   const ready = useBoard((state) => state.ready);
   const hydrate = useBoard((state) => state.hydrate);

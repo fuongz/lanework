@@ -14,8 +14,8 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  usePersistedLayout,
 } from "#/components/ui/resizable";
+import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { savedFolder, saveFolder, useFiles } from "#/stores/files";
 import { useWorktree } from "#/stores/worktree";
 import type { PickedFolder } from "../../../../shared/workspaces";

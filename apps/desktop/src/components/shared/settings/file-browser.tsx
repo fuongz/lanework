@@ -24,7 +24,6 @@ import {
   FOLDER_ICON_CSS,
   treeHostStyle,
 } from "#/components/shared/diff/tree-style";
-import { useDark } from "#/components/shared/diff/use-dark";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -38,8 +37,9 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  usePersistedLayout,
 } from "#/components/ui/resizable";
+import { useDark } from "#/hooks/use-dark";
+import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { cn } from "#/lib/utils";
 
 /** One file in the tree: its id for the page, and where it sits. */

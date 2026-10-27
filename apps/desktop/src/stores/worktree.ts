@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
+import { readStored, writeStored } from "#/lib/stored";
+import { desktopSurface } from "#/server/desktop";
 import type { AgentFileMarks } from "../../shared/terminal";
 import type {
   BranchList,
@@ -20,13 +22,6 @@ import type {
  * the focus refresh runs.
  */
 
-const api = () => {
-  const surface = window.desktop?.worktree;
-  if (!surface)
-    throw new Error("This window is not connected to the desktop app.");
-  return surface;
-};
-
 export type DiffStyle = "split" | "unified";
 
 const STYLE_KEY = "lanework:diff-style";
@@ -39,11 +34,7 @@ const STYLE_KEY = "lanework:diff-style";
  * column reads the way a commit is read, and Split stays one click away.
  */
 function readStyle(): DiffStyle {
-  try {
-    return localStorage.getItem(STYLE_KEY) === "split" ? "split" : "unified";
-  } catch {
-    return "unified";
-  }
+  return readStored(STYLE_KEY) === "split" ? "split" : "unified";
 }
 
 /**
@@ -235,7 +226,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     }
     const mine = ++ticket.patch;
     try {
-      const patch = await api().patch(slug);
+      const patch = await desktopSurface("worktree").patch(slug);
       if (mine !== ticket.patch) return;
       set({ patch, patchError: null });
     } catch (error) {
@@ -329,7 +320,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       const mine = ++ticket.status;
       set({ loading: true });
       try {
-        const state = await api().status(slug);
+        const state = await desktopSurface("worktree").status(slug);
         if (mine !== ticket.status) return;
         set({ state, loading: false, error: null });
         void get().loadAgentMarks();
@@ -348,7 +339,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       if (get().loading) return;
       const seen = ticket.status;
       try {
-        const state = await api().status(slug);
+        const state = await desktopSurface("worktree").status(slug);
         if (seen !== ticket.status || get().slug !== slug || get().loading)
           return;
         set({ state, error: null });
@@ -361,24 +352,27 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
 
     setDiffStyle: (diffStyle) => {
       set({ diffStyle });
-      try {
-        localStorage.setItem(STYLE_KEY, diffStyle);
-      } catch {
-        // Remembering is a convenience; the toggle already happened.
-      }
+      // Remembering is a convenience; the toggle already happened.
+      writeStored(STYLE_KEY, diffStyle);
     },
 
     setMessage: (message) => set({ message }),
     clearActionError: () => set({ actionError: null }),
 
     stage: async (paths) => {
-      await act("stage", (slug) => api().stage(slug, paths));
+      await act("stage", (slug) =>
+        desktopSurface("worktree").stage(slug, paths),
+      );
     },
     unstage: async (paths) => {
-      await act("unstage", (slug) => api().unstage(slug, paths));
+      await act("unstage", (slug) =>
+        desktopSurface("worktree").unstage(slug, paths),
+      );
     },
     restore: async (paths) => {
-      await act("restore", (slug) => api().restore(slug, paths));
+      await act("restore", (slug) =>
+        desktopSurface("worktree").restore(slug, paths),
+      );
     },
 
     commitChanges: async (mode, fallback) => {
@@ -386,7 +380,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       // is what the button promised; refusing to commit would surprise.
       const message = get().message.trim() || fallback;
       const done = await act("commit", (slug) =>
-        api().commit(slug, message, mode),
+        desktopSurface("worktree").commit(slug, message, mode),
       );
       if (done) {
         set({ message: "" });
@@ -400,7 +394,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
 
     sync: async (action, remote) => {
       const done = await act(action, (slug) =>
-        api().sync(slug, action, remote ?? null),
+        desktopSurface("worktree").sync(slug, action, remote ?? null),
       );
       // A pull brings commits in, and every sync moves the remote refs that
       // say which commits are unpushed; History's first page is read again on
@@ -416,7 +410,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       const mine = ++ticket.history;
       set({ historyLoading: true, historyError: null });
       try {
-        const page = await api().log(slug, 0);
+        const page = await desktopSurface("worktree").log(slug, 0);
         if (mine !== ticket.history) return;
         // A kept list that still starts with this page keeps the pages
         // scrolled in after it: re-reading the first hundred must not cut a
@@ -456,7 +450,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       const mine = ++ticket.history;
       set({ historyLoading: true });
       try {
-        const page = await api().log(slug, history.length);
+        const page = await desktopSurface("worktree").log(slug, history.length);
         if (mine !== ticket.history) return;
         set({
           history: [...history, ...page.commits],
@@ -477,7 +471,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       if (get().commit?.commit.sha !== sha)
         set({ commit: null, commitError: null });
       try {
-        const commit = await api().show(slug, sha);
+        const commit = await desktopSurface("worktree").show(slug, sha);
         if (mine !== ticket.commit) return;
         set({ commit, commitError: null });
       } catch (error) {
@@ -493,7 +487,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       if (get().branches?.slug !== slug && branchCache.has(slug))
         set({ branches: { slug, list: branchCache.get(slug) ?? null } });
       try {
-        const list = await api().branches(slug);
+        const list = await desktopSurface("worktree").branches(slug);
         branchCache.set(slug, list);
         if (mine !== ticket.branches) return;
         set({ branches: { slug, list } });
@@ -509,7 +503,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       if (get().switching) return false;
       set({ switching: name, switchError: null });
       try {
-        const state = await api().switchBranch(slug, name);
+        const state = await desktopSurface("worktree").switchBranch(slug, name);
         set({ switching: null });
         await get().loadBranches(slug);
         // NOTE: Another branch is another working tree and another history.

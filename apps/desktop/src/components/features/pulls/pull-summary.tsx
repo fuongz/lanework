@@ -14,7 +14,7 @@ import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { MergeControl } from "#/components/shared/pulls/merge-control";
 import { Badge } from "#/components/ui/badge";
 import { Skeleton } from "#/components/ui/skeleton";
-import { shortAge } from "#/lib/board-view";
+import { shortAge } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import { usePulls } from "#/stores/pulls";
 import type { PullDetail } from "../../../../shared/git";

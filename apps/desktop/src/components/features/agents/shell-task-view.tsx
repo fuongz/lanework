@@ -38,7 +38,6 @@ import {
   useBackgroundTasks,
   useTaskOutput,
 } from "#/components/shared/agents/use-background-tasks";
-import { useCopy } from "#/components/shared/common/use-copy";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -53,6 +52,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
+import { useCopy } from "#/hooks/use-copy";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";

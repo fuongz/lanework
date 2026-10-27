@@ -35,8 +35,8 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { ScrollArea } from "#/components/ui/scroll-area";
-import { shortAge } from "#/lib/board-view";
 import { PULL_TABS, type PullSearch, type PullTab } from "#/lib/pull-search";
+import { shortAge } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import { canReadPulls, usePulls } from "#/stores/pulls";
 import {

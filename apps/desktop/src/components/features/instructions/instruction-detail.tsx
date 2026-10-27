@@ -17,16 +17,16 @@ import { InstructionsMessage } from "#/components/shared/instructions/instructio
 import { useSettingsProject } from "#/components/shared/settings/project-picker";
 import { Alert, AlertDescription } from "#/components/ui/alert";
 import { Button } from "#/components/ui/button";
-import { relativeTime } from "#/lib/board-view";
+import { fileSize } from "#/lib/file-size";
 import {
   AGENT_LABELS,
   appearances,
-  fileSize,
   importOf,
   linkImports,
   SCOPE_LABELS,
 } from "#/lib/instructions";
 import { shortPath } from "#/lib/memory";
+import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import { useInstructions } from "#/stores/instructions";
 
