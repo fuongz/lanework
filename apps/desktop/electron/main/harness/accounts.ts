@@ -9,25 +9,17 @@
 //   decoded, never verified, never sent anywhere. The token itself, and every
 //   other field of that file, stay here.
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import { app } from "electron";
 import type { HarnessAccount } from "../../../shared/harness";
 import { agentHome } from "../agent-home";
 import { claudeAuth } from "../terminal/agents";
 import { codexAccountOf } from "./codex-account";
 
-/** The agent home: the test's fake home in a dev build, else the real one. */
-function where() {
-  return agentHome(
-    (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir(),
-  );
-}
-
-async function codexAccount(): Promise<HarnessAccount> {
-  const raw = await readFile(join(where().codexDir, "auth.json"), "utf8").catch(
-    () => null,
-  );
+async function codexAccount(home: string): Promise<HarnessAccount> {
+  const raw = await readFile(
+    join(agentHome(home).codexDir, "auth.json"),
+    "utf8",
+  ).catch(() => null);
   if (raw === null) return codexAccountOf(null);
   try {
     return codexAccountOf(JSON.parse(raw));
@@ -47,6 +39,12 @@ async function claudeAccount(): Promise<HarnessAccount> {
   };
 }
 
-export function harnessAccounts(): Promise<HarnessAccount[]> {
-  return Promise.all([claudeAccount(), codexAccount()]);
+/**
+ * Both CLIs' accounts.
+ *
+ * @param home The agents' home folder: the caller applies the test seam
+ *   (`agentHomeDir()`), so this file needs no Electron.
+ */
+export function harnessAccounts(home: string): Promise<HarnessAccount[]> {
+  return Promise.all([claudeAccount(), codexAccount(home)]);
 }

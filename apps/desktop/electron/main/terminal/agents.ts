@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { TERMINAL_AGENTS, type TerminalAgent } from "../../../shared/terminal";
-import { defaultShell, type ShellChoice, shellEnv } from "./sessions";
+import { defaultShell, type ShellChoice, shellEnv } from "./shell-env";
 
 /** How a probe asks the user's shell. */
 interface AgentProbeOptions {

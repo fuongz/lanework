@@ -77,7 +77,7 @@ import {
   WAIT_MAX_SECONDS,
   type WorkerChoice,
 } from "../../../shared/orchestration";
-import { redact } from "../../hook/lanework-checkpoint";
+import { redact } from "../../hook/redact";
 import type { Outgoing } from "../conversation/queue";
 import { JUDGE_TIMEOUT_MS } from "../jev/judge";
 import type { EngineResult, EngineTarget, EngineWrite } from "./engine-tap";

@@ -41,10 +41,11 @@ import {
   type TerminalSession,
   terminalChannels,
 } from "../../../shared/terminal";
+import { codexHome } from "../agent-home";
 import { createAgentCli } from "../conversation/claude-cli";
-import { codexHome } from "../handoff/codex";
 import { assertTrustedSender, broadcast, handle } from "../ipc";
 import { appHomeDir } from "../paths";
+import { agentHomeDir, testAgentHome } from "../test-seams";
 import {
   authorizedRecord,
   knownWorkspace,
@@ -228,7 +229,7 @@ async function cardFor(
  * points it at fixtures instead of reading the developer's own history.
  */
 function agentHome(): string {
-  return (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
+  return agentHomeDir();
 }
 
 /**
@@ -242,7 +243,7 @@ function agentHome(): string {
  * `CODEX_HOME` at a profile folder for the hook (FE-29).
  */
 function codexDirs(): CodexDirs {
-  const test = !app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME;
+  const test = testAgentHome();
   if (test) {
     const dir = join(test, ".codex");
     return { home: dir, sqlite: dir };

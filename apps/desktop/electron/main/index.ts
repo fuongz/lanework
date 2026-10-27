@@ -47,7 +47,12 @@ import { leadsMain } from "./orchestration/leads";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { appOrigin, isTrustedUrl } from "./security";
-import { agentTerminalOn, killTerminal, registerTerminal } from "./terminal";
+import {
+  agentTerminalOn,
+  killTerminal,
+  onRunningChanged,
+  registerTerminal,
+} from "./terminal";
 import { registerWorkspaces } from "./workspaces";
 
 // ─── Orchestration and Jev (FE-87) ─────────────────────────────────────────
@@ -368,6 +373,7 @@ app
         (await agentTerminalOn(workspace, conversation)) ??
         pids.terminalOn(workspace, conversation, ours),
       kill: (id) => (id.startsWith("pid:") ? pids.kill(id) : killTerminal(id)),
+      onRunningChanged,
     });
     registerHandoff(devUrl);
     registerReadiness(devUrl);

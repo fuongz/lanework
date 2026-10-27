@@ -17,13 +17,11 @@
 // on, as Codex defaults, and no approval. It never claims an approval that is
 // not there.
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { codexHome } from "../agent-home";
 
-/** Codex's home: `$CODEX_HOME`, as Codex reads it, or `~/.codex`. */
-export function codexHome(home = homedir()): string {
-  return process.env.CODEX_HOME || join(home, ".codex");
-}
+// Transitional re-export (FE-80): import it from `../agent-home`.
+export { codexHome };
 
 export const codexHooksPath = () => join(codexHome(), "hooks.json");
 export const codexConfigPath = () => join(codexHome(), "config.toml");

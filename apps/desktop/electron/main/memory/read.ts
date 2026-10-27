@@ -22,7 +22,7 @@ import {
 } from "../../../shared/memory";
 import { gitReadOut } from "../git/runner";
 import { readsAllowed } from "../git/trust-gate";
-import { claudeProjectDir, readRange } from "../terminal/agent-sessions";
+import { claudeProjectDir, readRange } from "../transcripts/jsonl";
 
 /** The most of one memory a read takes. Claude's are a few KB. */
 export const MEMORY_READ_MAX = 256 * 1024;

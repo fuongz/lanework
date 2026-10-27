@@ -28,15 +28,18 @@ import {
   type WorkflowAgent,
   type WorkflowPhase,
 } from "../../../shared/terminal";
+import { STALE_MS, transcriptWorking } from "../transcripts/activity";
 import {
   CLAUDE_SUBAGENT_FILE,
   claudeProjectDir,
   type Line,
   readRange,
-  STALE_MS,
   tidy,
-  transcriptWorking,
-} from "./agent-sessions";
+} from "../transcripts/jsonl";
+import { ownUid, type Proc, processTable, visible } from "./process-table";
+
+// Transitional re-exports (FE-80): import these from `./process-table`.
+export { ownUid, type Proc, processTable, visible } from "./process-table";
 
 /** The most agents of one workflow run that are listed. */
 const WORKFLOW_AGENT_MAX = 200;
@@ -917,60 +920,6 @@ async function taskOutputPath(
   return resolved;
 }
 
-/** One row of `ps`: enough to tell a task's process from any other. */
-export interface Proc {
-  pid: number;
-  /** The parent's pid. */
-  ppid: number;
-  /** The process group's id. */
-  pgid: number;
-  uid: number;
-  /** `lstart` as `ps` writes it: with the pid, it tells a reused pid apart. */
-  start: string;
-  /** The whole command line. */
-  args: string;
-}
-
-/** One row of {@link processTable}'s `ps`. */
-const PS_ROW =
-  /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s?(.*)$/;
-
-/** Every process on this machine, in one `ps`. */
-export async function processTable(): Promise<Proc[]> {
-  const { stdout } = await runFile(
-    "ps",
-    ["-axww", "-o", "pid=,ppid=,pgid=,uid=,lstart=,args="],
-    { env: { ...process.env, LC_ALL: "C" }, maxBuffer: 64 * 1024 * 1024 },
-  );
-  return stdout.split("\n").flatMap((line) => {
-    const match = PS_ROW.exec(line);
-    return match
-      ? [
-          {
-            pid: Number(match[1]),
-            ppid: Number(match[2]),
-            pgid: Number(match[3]),
-            uid: Number(match[4]),
-            start: match[5].replace(/\s+/g, " "),
-            args: match[6],
-          },
-        ]
-      : [];
-  });
-}
-
-/**
- * This process's user id.
- *
- * @throws on a platform without Unix process groups.
- */
-export function ownUid(): number {
-  const uid = process.getuid?.();
-  if (uid === undefined)
-    throw new Error("Stopping tasks requires Unix process groups.");
-  return uid;
-}
-
 /**
  * The groups never signalled: the app's own, and every ancestor's.
  *
@@ -1036,20 +985,6 @@ function launches(args: string, conversation: string): boolean {
       word === `--resume=${conversation}` ||
       ((word === "--session-id" || word === "--resume" || word === "-r") &&
         words[at + 1] === conversation),
-  );
-}
-
-/**
- * A command line as `ps` shows it.
- *
- * A control character, escaped or not, is `?`.
- */
-export function visible(text: string): string {
-  return (
-    text
-      .replace(/\\[0-7]{3}/g, "?")
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: they are what it hides.
-      .replace(/[\u0000-\u001f]/g, "?")
   );
 }
 

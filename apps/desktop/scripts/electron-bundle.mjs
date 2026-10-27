@@ -1,7 +1,7 @@
 // What the main-process bundle is, spelled once for `build-electron.mjs` and
 // `dev.mjs` — the two drifting apart is how a dev build works and a release
 // build ships without a file.
-import { cp, mkdir, realpath, rm } from "node:fs/promises";
+import { cp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
@@ -34,7 +34,26 @@ export const electronBuildOptions = {
   outdir: "dist/electron",
   outExtension: { ".js": ".cjs" },
   sourcemap: true,
+  // FE-80 (AM-07): what each output was built from, for the bundle-boundary
+  // gate (`scripts/audit-electron.mjs`). See `writeMetafile`.
+  metafile: true,
 };
+
+/**
+ * Where `writeMetafile` puts the build's metafile.
+ *
+ * NOTE: Beside `dist/electron`, not in it. electron-builder ships everything
+ * under `dist/electron`, and a map of the source tree has no business in a
+ * release.
+ */
+export const METAFILE = "dist/electron-meta.json";
+
+/** Writes an esbuild result's metafile for `scripts/audit-electron.mjs`. */
+export async function writeMetafile(result, path = METAFILE) {
+  if (!result.metafile) return;
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(result.metafile));
+}
 
 const require = createRequire(import.meta.url);
 

@@ -4,9 +4,8 @@
 // from main's own last listing. The paths stay here, so no renderer can point
 // a read at a file of its choosing. No channel writes.
 import { stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import { app, shell } from "electron";
+import { shell } from "electron";
 import {
   type EffectiveInstructions,
   type InstructionAgent,
@@ -17,6 +16,7 @@ import {
   isInstructionId,
 } from "../../../shared/instructions";
 import { broadcast, handle } from "../ipc";
+import { agentHomeDir } from "../test-seams";
 import { terminalFolder } from "../workspaces";
 import {
   effectiveInstructions,
@@ -30,7 +30,7 @@ import {
 
 /** The home `~/` means: the test's fake home in a dev build, else the real. */
 function home(): string {
-  return (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
+  return agentHomeDir();
 }
 
 /** Where each CLI keeps its own files, as each reads its environment. */

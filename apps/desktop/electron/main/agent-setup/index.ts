@@ -10,7 +10,6 @@
 // (`mcp-entry.ts`), and only that entry (FE-52/D8).
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { app, shell } from "electron";
 import {
@@ -30,6 +29,7 @@ import { currentSession } from "../auth";
 import { readLocalMode } from "../auth/local-mode";
 import { readRecord } from "../auth/store";
 import { handle } from "../ipc";
+import { agentHomeDir } from "../test-seams";
 import { terminalFolder } from "../workspaces";
 import { laneworkMcpAuth, loginLaneworkMcp } from "./mcp-auth";
 import {
@@ -49,9 +49,7 @@ import { readAgentSetup, readSetupFile } from "./read";
  * folder: the test's fake one in a dev build.
  */
 function where() {
-  return agentHome(
-    (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir(),
-  );
+  return agentHome(agentHomeDir());
 }
 
 async function read(slug: string): Promise<AgentSetup> {

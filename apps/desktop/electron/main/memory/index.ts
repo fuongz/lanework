@@ -5,9 +5,7 @@
 // down, so no renderer can point a read at a file of its choosing. No channel
 // writes.
 import { stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import { app } from "electron";
 import {
   isMemoryFile,
   type MemoryFile,
@@ -15,6 +13,7 @@ import {
   memoryChannels,
 } from "../../../shared/memory";
 import { broadcast, handle } from "../ipc";
+import { agentHomeDir } from "../test-seams";
 import { terminalFolder } from "../workspaces";
 import { revealFolder } from "../workspaces/folder-chooser";
 import { listMemory, memoryDir, readMemory, watchMemory } from "./read";
@@ -27,9 +26,7 @@ import { listMemory, memoryDir, readMemory, watchMemory } from "./read";
  */
 function claudeHome(): string {
   if (process.env.CLAUDE_CONFIG_DIR) return process.env.CLAUDE_CONFIG_DIR;
-  const home =
-    (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
-  return join(home, ".claude");
+  return join(agentHomeDir(), ".claude");
 }
 
 /** The project's folder here and its memory folder. Nulls without a folder. */

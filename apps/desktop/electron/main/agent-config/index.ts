@@ -2,8 +2,7 @@
 // config, read and written by id. See `files.ts` for how a write is
 // kept safe, and `shared/agent-config.ts` for why the text crosses whole.
 import { stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { app, shell } from "electron";
+import { shell } from "electron";
 import {
   agentConfigChannels,
   type ConfigFileId,
@@ -11,6 +10,7 @@ import {
 } from "../../../shared/agent-config";
 import { agentHome } from "../agent-home";
 import { handle } from "../ipc";
+import { agentHomeDir } from "../test-seams";
 import {
   listConfigFiles,
   readConfigFile,
@@ -21,13 +21,11 @@ import {
 /**
  * The agents' homes.
  *
- * A dev build takes the test's fake one (`LANEWORK_TEST_AGENT_HOME`), as the
- * agent setup view does.
+ * A dev build takes the test's fake one (`agentHomeDir`), as the agent setup
+ * view does.
  */
 function where() {
-  return agentHome(
-    (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir(),
-  );
+  return agentHome(agentHomeDir());
 }
 
 function idArg(value: unknown): ConfigFileId {

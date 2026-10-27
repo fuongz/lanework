@@ -16,7 +16,8 @@ import {
 } from "../../../shared/harness";
 import { TERMINAL_AGENTS } from "../../../shared/terminal";
 import { broadcast, handle } from "../ipc";
-import { defaultShell } from "../terminal/sessions";
+import { defaultShell } from "../terminal/shell-env";
+import { agentHomeDir } from "../test-seams";
 import { writeAtomic } from "../workspaces/store";
 import { harnessAccounts } from "./accounts";
 import { latestVersion } from "./latest";
@@ -284,7 +285,7 @@ export function registerHarness(devUrl?: string): void {
   const ready = loadDismissed();
   handle(harnessChannels.accounts, devUrl, (args) => {
     if (args.length) throw new Error("accounts takes no arguments");
-    return harnessAccounts();
+    return harnessAccounts(agentHomeDir());
   });
   handle(harnessChannels.list, devUrl, async (args) => {
     if (args.length) throw new Error("list takes no arguments");

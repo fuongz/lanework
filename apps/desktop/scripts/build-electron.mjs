@@ -3,8 +3,9 @@ import { buildDictation } from "./build-dictation.mjs";
 import {
   electronBuildOptions,
   stageNativeModules,
+  writeMetafile,
 } from "./electron-bundle.mjs";
 
-await build(electronBuildOptions);
+await writeMetafile(await build(electronBuildOptions));
 await stageNativeModules();
 await buildDictation();

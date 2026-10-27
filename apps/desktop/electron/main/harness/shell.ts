@@ -2,7 +2,11 @@
 // probe does, for the harness checks and updates.
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { defaultShell, type ShellChoice, shellEnv } from "../terminal/sessions";
+import {
+  defaultShell,
+  type ShellChoice,
+  shellEnv,
+} from "../terminal/shell-env";
 
 export interface ShellOptions {
   /** The shell, pinned by tests. Otherwise {@link defaultShell}. */

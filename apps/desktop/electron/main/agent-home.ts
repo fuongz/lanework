@@ -3,12 +3,16 @@
 // the config files.
 //
 // NOTE: Node only, no Electron, so a spec can point every path at a fake
-// home. The dev-build test seam (`LANEWORK_TEST_AGENT_HOME`) needs
-// `app.isPackaged`, so applying it is the caller's job: pass its home in.
+// home. The dev-build test seam needs `app.isPackaged`, so applying it is
+// the caller's job: pass in `agentHomeDir()` from `test-seams.ts`.
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { codexHome } from "./handoff/codex";
+
+/** Codex's home: `$CODEX_HOME`, as Codex reads it, or `~/.codex`. */
+export function codexHome(home = homedir()): string {
+  return process.env.CODEX_HOME || join(home, ".codex");
+}
 
 /**
  * Claude Code's own home.

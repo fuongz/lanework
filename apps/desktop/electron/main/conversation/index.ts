@@ -9,7 +9,6 @@
 // - settings come from the fixed lists.
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { app, shell } from "electron";
 import {
@@ -36,7 +35,7 @@ import {
 import { isAgentSessionId } from "../../../shared/terminal";
 import { broadcast, handle } from "../ipc";
 import { workerFolderOf } from "../orchestration";
-import { onRunningChanged } from "../terminal";
+import { agentHomeDir } from "../test-seams";
 import { terminalFolder } from "../workspaces";
 import { createAgentCli, createClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
@@ -71,14 +70,20 @@ interface TerminalBridge {
     ours: ReadonlySet<number>,
   ) => Promise<string | null>;
   kill: (terminalId: string) => Promise<void>;
+  /**
+   * Calls `listener` whenever a terminal starts or stops, until the returned
+   * function is called. Injected (FE-80, AM-10) so this feature does not
+   * import the terminal's; the pid-file bridge has no terminals to watch.
+   */
+  onRunningChanged?: (listener: () => void) => () => void;
 }
 
 /**
  * Where Claude keeps its conversations, with the terminal's test seam
- * (`LANEWORK_TEST_AGENT_HOME`, unpackaged only).
+ * (`agentHomeDir`, unpackaged only).
  */
 function agentHome(): string {
-  return (!app.isPackaged && process.env.LANEWORK_TEST_AGENT_HOME) || homedir();
+  return agentHomeDir();
 }
 
 /** How long a project's `/` commands are reused before they are read again. */
@@ -384,7 +389,7 @@ export function registerConversation(
     } else paused.delete(id);
     return now;
   };
-  onRunningChanged(() => {
+  bridge.onRunningChanged?.(() => {
     for (const [id, which] of [...paused]) {
       void engines.state(which.workspace, which.conversation).then((engine) => {
         if (engine.state === "terminal") return;

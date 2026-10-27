@@ -8,7 +8,7 @@ import { realpath } from "node:fs/promises";
 import { basename, isAbsolute, relative } from "node:path";
 import { promisify } from "node:util";
 import type { ListeningPort } from "../../../shared/terminal";
-import { ownUid, type Proc, processTable, visible } from "./background-tasks";
+import { ownUid, type Proc, processTable, visible } from "./process-table";
 
 const runFile = promisify(execFile);
 

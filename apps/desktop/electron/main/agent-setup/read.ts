@@ -23,7 +23,7 @@ import type {
   SetupScope,
   SetupTransport,
 } from "../../../shared/agent-setup";
-import { redact } from "../../hook/lanework-checkpoint";
+import { redact } from "../../hook/redact";
 import { type AgentHome, CONFIG_MAX_BYTES, readText } from "../agent-home";
 import { HOOK_MARKER } from "../handoff/claude-settings";
 import {

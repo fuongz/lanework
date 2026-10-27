@@ -13,7 +13,7 @@ import { spawn } from "node:child_process";
 import { access, constants } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { defaultShell, shellEnv } from "../terminal/sessions";
+import { defaultShell, shellEnv } from "../terminal/shell-env";
 
 /** An agent CLI's binary and the environment to run it with. */
 export interface ClaudeCli {
