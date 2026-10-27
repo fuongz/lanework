@@ -35,6 +35,7 @@ import {
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
 import { broadcast, handle } from "../ipc";
+import { workerFolderOf } from "../orchestration";
 import { onRunningChanged } from "../terminal";
 import { terminalFolder } from "../workspaces";
 import { createAgentCli, createClaudeCli } from "./claude-cli";
@@ -360,7 +361,10 @@ export function registerConversation(
       if (args.length !== 2)
         throw new Error("A workspace and a conversation are required");
       const { workspace, conversation } = conversationOf(args);
-      const folder = await folderOf(workspace);
+      // A worker of an orchestration run (FE-87) keeps its transcript under
+      // its own worktree, not the project's folder.
+      const folder =
+        workerFolderOf(workspace, conversation) ?? (await folderOf(workspace));
       const agent = await agentOf(folder, conversation);
       // A conversation started here whose first line the CLI has not
       // written yet: what its engine holds so far.
@@ -420,6 +424,12 @@ export function registerConversation(
       await codexModels();
       if (args.length !== 1) throw new Error("A request is required");
       const request = sendRequest(args[0]);
+      // A worker is the lead's to talk to; a send from here would start a
+      // second engine on its conversation in the project's folder (FE-87).
+      if (workerFolderOf(request.workspace, request.conversation))
+        throw new Error(
+          "This conversation is a worker of an orchestration run. Message it through its lead.",
+        );
       const folder = await folderOf(request.workspace);
       // NOTE: Only a conversation this folder has: its transcript is where
       // the CLI keeps this folder's, under the id it was asked for.

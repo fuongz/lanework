@@ -47,6 +47,14 @@ import {
   notificationChannels,
 } from "../../shared/notifications";
 import {
+  type DesktopJevApi,
+  type DesktopOrchestrationApi,
+  type JevState,
+  jevChannels,
+  type OrchestrationEvent,
+  orchestrationChannels,
+} from "../../shared/orchestration";
+import {
   type DesktopReadinessApi,
   readinessChannels,
 } from "../../shared/readiness";
@@ -241,6 +249,51 @@ const harness: DesktopHarnessApi = {
     ipcRenderer.invoke(harnessChannels.openInTerminal, agent),
   onChanged: (listener) =>
     subscribe<HarnessInfo[]>(harnessChannels.changed, listener),
+};
+
+/**
+ * Orchestration runs (FE-87): a lead spawning workers.
+ *
+ * NOTE: The lead's CLI talks to main's control server, not to this. The page
+ * only reads runs and asks for what the user does: approve, pause, resume,
+ * stop, cancel a task. Every call names a workspace slug and ids.
+ */
+const orchestration: DesktopOrchestrationApi = {
+  runs: (workspace) =>
+    ipcRenderer.invoke(orchestrationChannels.runs, workspace),
+  run: (workspace, runId) =>
+    ipcRenderer.invoke(orchestrationChannels.run, workspace, runId),
+  approve: (proposal) =>
+    ipcRenderer.invoke(orchestrationChannels.approve, proposal),
+  pause: (workspace, runId) =>
+    ipcRenderer.invoke(orchestrationChannels.pause, workspace, runId),
+  resume: (workspace, runId) =>
+    ipcRenderer.invoke(orchestrationChannels.resume, workspace, runId),
+  stop: (workspace, runId) =>
+    ipcRenderer.invoke(orchestrationChannels.stop, workspace, runId),
+  cancelTask: (workspace, runId, taskId) =>
+    ipcRenderer.invoke(
+      orchestrationChannels.cancelTask,
+      workspace,
+      runId,
+      taskId,
+    ),
+  onChange: (listener) =>
+    subscribe<OrchestrationEvent>(orchestrationChannels.changed, listener),
+};
+
+/**
+ * Jev: the judge's settings, a test question, and its log.
+ *
+ * NOTE: The key goes one way, to main. `get` answers only whether one is kept.
+ */
+const jev: DesktopJevApi = {
+  get: () => ipcRenderer.invoke(jevChannels.get),
+  set: (config) => ipcRenderer.invoke(jevChannels.set, config),
+  setKey: (key) => ipcRenderer.invoke(jevChannels.setKey, key),
+  test: (request) => ipcRenderer.invoke(jevChannels.test, request),
+  log: () => ipcRenderer.invoke(jevChannels.log),
+  onChange: (listener) => subscribe<JevState>(jevChannels.changed, listener),
 };
 
 /** Dictation in the composer: the helper's events, by session. */
@@ -782,5 +835,7 @@ const desktop: DesktopApi = {
   agentSetup,
   agentConfig,
   laneworkMcp,
+  orchestration,
+  jev,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

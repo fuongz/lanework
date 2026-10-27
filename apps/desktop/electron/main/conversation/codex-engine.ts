@@ -25,7 +25,7 @@ import { type ChildProcess, spawn as spawnChild } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
   type AskQuestion,
   agentOfModel,
@@ -39,6 +39,7 @@ import {
   type Turn,
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
+import { agentEnv, engineTap, safely } from "../orchestration/engine-tap";
 import type { ClaudeCli } from "./claude-cli";
 import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
@@ -281,11 +282,43 @@ export class CodexEngine {
 
   emit(event: Json & { type: ConversationEvent["type"] }) {
     if (!this.conversation) return;
-    this.deps.emit({
+    const full = {
       ...event,
       workspace: this.workspace,
       conversation: this.conversation,
-    } as ConversationEvent);
+    } as ConversationEvent;
+    this.deps.emit(full);
+    // FE-87: orchestration follows its lead and workers through these too.
+    safely(() => engineTap().event?.(full, this.folder));
+  }
+
+  /** The running turn's last agent message, told when the turn ends. */
+  lastText = "";
+
+  /** Tell orchestration the files a file-change item writes (FE-87). */
+  tellWrites(item: Json): void {
+    const tap = engineTap().write;
+    if (!tap || item.type !== "fileChange") return;
+    const changes = Array.isArray(item.changes) ? (item.changes as Json[]) : [];
+    const paths = changes.flatMap((change) =>
+      typeof change.path === "string" && change.path
+        ? [
+            isAbsolute(change.path)
+              ? change.path
+              : join(this.folder, change.path),
+          ]
+        : [],
+    );
+    if (!paths.length) return;
+    safely(() =>
+      tap({
+        workspace: this.workspace,
+        conversation: this.conversation,
+        folder: this.folder,
+        tool: "apply_patch",
+        paths,
+      }),
+    );
   }
 
   emitState() {
@@ -338,7 +371,13 @@ export class CodexEngine {
     const spawn = this.deps.spawn ?? spawnChild;
     const child = spawn(cli.file, ["app-server"], {
       cwd: this.folder,
-      env: cli.env,
+      // FE-87: a lead's control endpoint, a worker's scratch; never the
+      // control variables for anyone else.
+      env: agentEnv(cli.env, {
+        workspace: this.workspace,
+        conversation: this.conversation,
+        folder: this.folder,
+      }),
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
@@ -499,11 +538,16 @@ export class CodexEngine {
       case "item/started": {
         const item = record(params.item);
         if (typeof item.id === "string") this.items.set(item.id, item);
+        this.tellWrites(item);
         return;
       }
-      case "item/completed":
+      case "item/completed": {
+        const item = record(params.item);
+        if (item.type === "agentMessage" && typeof item.text === "string")
+          this.lastText = item.text;
         this.emit({ type: "moved" });
         return;
+      }
       case "item/agentMessage/delta":
         if (typeof params.delta === "string" && params.delta)
           this.emit({ type: "delta", text: params.delta });
@@ -526,6 +570,18 @@ export class CodexEngine {
             str(record(turn.error).message)?.slice(0, 300) ??
             this.error ??
             "The turn failed.";
+        const failed = turn.status === "failed";
+        const text = this.lastText;
+        this.lastText = "";
+        safely(() =>
+          engineTap().result?.({
+            workspace: this.workspace,
+            conversation: this.conversation,
+            folder: this.folder,
+            text,
+            error: failed,
+          }),
+        );
         this.onTurnEnd();
         return;
       }

@@ -77,6 +77,21 @@ function trigger(
 
 let keys = 0;
 
+/** `/orchestrate`, offered among the `/` commands when the page takes it. */
+const ORCHESTRATE: Suggestion = {
+  value: "/orchestrate",
+  detail: "Plan workers for a request; nothing runs until you approve",
+};
+
+/**
+ * `/orchestrate <request>`: the request, or "" when none was written. Null
+ * for any other message.
+ */
+function orchestrateRequest(text: string): string | null {
+  const match = /^\/orchestrate(?:\s+([\s\S]*))?$/.exec(text.trim());
+  return match ? (match[1] ?? "").trim() : null;
+}
+
 function readBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -130,6 +145,16 @@ export const Composer = forwardRef<
     onStop: () => void;
     /** ↑ in an empty composer: the last queued message, back to edit. */
     onEditLastQueued?: () => void;
+    /**
+     * `/orchestrate <request>` (FE-87): sent here instead of `onSend`, which
+     * the lead's planning turn then goes through. Absent: `/orchestrate` is
+     * neither offered nor caught, and goes as written.
+     */
+    onOrchestrate?: (
+      request: string,
+      attachments: OutgoingAttachment[],
+      names: { name: string; image: boolean }[],
+    ) => Promise<boolean>;
   }
 >(function Composer(
   {
@@ -146,6 +171,7 @@ export const Composer = forwardRef<
     onSend,
     onStop,
     onEditLastQueued,
+    onOrchestrate,
   },
   ref,
 ) {
@@ -290,10 +316,22 @@ export const Composer = forwardRef<
     const mine = ++asked.current;
     const surface = window.desktop?.conversation;
     if (!surface) return;
+    // The app's own command, ahead of the CLI's: only where it is handled.
+    const own =
+      onOrchestrate &&
+      found.kind === "command" &&
+      ORCHESTRATE.value.slice(1).startsWith(found.query.toLowerCase())
+        ? [ORCHESTRATE]
+        : [];
     void surface
       .suggest(workspace, found.kind, found.query)
-      .then((items) => {
+      .catch(() => [] as Suggestion[])
+      .then((listed) => {
         if (mine !== asked.current) return;
+        const items = [
+          ...own,
+          ...listed.filter((item) => item.value !== ORCHESTRATE.value),
+        ];
         setSuggest(
           items.length
             ? { ...found, items: items.slice(0, 12), index: 0 }
@@ -367,6 +405,11 @@ export const Composer = forwardRef<
 
   const send = async () => {
     if (empty || isSending()) return;
+    const request = onOrchestrate ? orchestrateRequest(text) : null;
+    if (request === "") {
+      setError("Write what to orchestrate after /orchestrate.");
+      return;
+    }
     setSending(true);
     setError(null);
     const sent = text;
@@ -376,11 +419,15 @@ export const Composer = forwardRef<
     setSuggest(null);
     let ok = false;
     try {
-      ok = await onSend(
-        sent.trim(),
-        files.map((file) => file.out),
-        files.map((file) => ({ name: file.name, image: file.image })),
-      );
+      const outgoing = files.map((file) => file.out);
+      const names = files.map((file) => ({
+        name: file.name,
+        image: file.image,
+      }));
+      ok =
+        request !== null && onOrchestrate
+          ? await onOrchestrate(request, outgoing, names)
+          : await onSend(sent.trim(), outgoing, names);
     } catch {
       setError("Could not send. Your message has been restored.");
     }

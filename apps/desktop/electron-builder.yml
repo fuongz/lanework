@@ -17,6 +17,8 @@ asarUnpack:
   - "dist/electron/hook/**"
   # FE-52: the offline MCP server, run the same way from ~/.lanew/bin/lanework-mcp.
   - "dist/electron/mcp-local/**"
+  # FE-87: the lead's control CLI, run the same way from ~/.lanew/bin/lanework-control.
+  - "dist/electron/control/**"
   # FE-69: the dictation helper is a native executable, spawned by path.
   - "dist/electron/bin/**"
 # The pty binary is a prebuilt N-API module: it runs under Electron's Node as

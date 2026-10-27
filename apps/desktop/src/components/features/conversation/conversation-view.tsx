@@ -70,6 +70,11 @@ import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useConversationSends } from "#/stores/conversation-sends";
+import {
+  OrchestrationPanel,
+  orchestrationText,
+  useOrchestration,
+} from "../orchestration/orchestration-panel";
 import { FileOpenerProvider } from "./file-opener";
 import { JobCapsules } from "./job-capsules";
 import { MessageQueue } from "./message-queue";
@@ -276,6 +281,18 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       });
   }, [tab, navigate, slug]);
   const working = running || (conversation?.working ?? false);
+  // `/orchestrate` (FE-87): its planning prompt and proposal JSON stay out of
+  // what is drawn; `turns` itself keeps them so sends still match on landing.
+  const orchestration = useOrchestration({
+    workspace,
+    lead: id,
+    leadAgent: agent,
+    turns,
+    working,
+    cwd: conversation?.cwd ?? null,
+    send: (text, attachments, names) => send(text, attachments, names),
+  });
+  const shown = orchestration.turns;
 
   // ─── Scrolling ────────────────────────────────────────────────────────────
   const scroller = useRef<HTMLDivElement>(null);
@@ -284,7 +301,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const [showDown, setShowDown] = useState(false);
   const anchors = useRef(new Map<string, HTMLElement>());
   const [current, setCurrent] = useState<string | null>(null);
-  const entries = useMemo(() => promptLines(turns), [turns]);
+  const entries = useMemo(() => promptLines(shown), [shown]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
@@ -626,7 +643,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   };
 
   // ─── Drawing ──────────────────────────────────────────────────────────────
-  const firstPrompt = turns.find((turn) => turn.role === "user");
+  const firstPrompt = shown.find((turn) => turn.role === "user");
   const title =
     listed?.title ||
     (firstPrompt?.role === "user" ? firstLine(firstPrompt.text) : "") ||
@@ -634,7 +651,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
 
   const lastPromptAt =
     [...turns].reverse().find((turn) => turn.role === "user")?.at ?? null;
-  const last = turns[turns.length - 1];
+  const last = shown[shown.length - 1];
   const lastOpen = last?.role === "assistant" && last.open ? last : null;
   // AskUserQuestion, waiting: drawn in the composer's place, not the turn.
   const question = permissions.find((request) => request.questions) ?? null;
@@ -770,7 +787,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                   workspace={workspace}
                   conversation={id}
                 >
-                  {turns.map((turn) => (
+                  {shown.map((turn) => (
                     <TurnView
                       key={turn.id}
                       turn={turn}
@@ -799,12 +816,16 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                   {waiting.map((entry) => (
                     <UserBubble
                       key={entry.key}
-                      text={entry.text}
+                      text={orchestrationText(entry.text)}
                       attachments={entry.attachments}
                       time={null}
                       pending="Sending…"
                     />
                   ))}
+                  <OrchestrationPanel
+                    slug={slug}
+                    orchestration={orchestration}
+                  />
                 </FileOpenerProvider>
               )}
             </div>
@@ -891,6 +912,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 working={running}
                 queued={queue.length}
                 onSend={send}
+                onOrchestrate={orchestration.orchestrate}
                 onStop={stop}
                 onEditLastQueued={() => {
                   const last = queue.at(-1);

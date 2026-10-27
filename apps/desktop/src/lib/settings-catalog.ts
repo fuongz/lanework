@@ -3,6 +3,7 @@ import {
   CommandLineIcon,
   DashboardSquare02Icon,
   InformationCircleIcon,
+  JusticeScale01Icon,
   KeyboardIcon,
   MagicWand01Icon,
   McpServerIcon,
@@ -97,6 +98,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: CommandLineIcon,
         keywords:
           "harness cli agent agents claude code codex version update install usage limit quota handoff checkpoint resume hook push wip lanework mcp sign in",
+      },
+      {
+        to: "/settings/jev",
+        label: "Jev",
+        icon: JusticeScale01Icon,
+        keywords:
+          "jev judge typesafe openrouter local ollama threshold shadow enforce tier model api key test connection orchestration lead worker",
       },
       {
         to: "/settings/skills",

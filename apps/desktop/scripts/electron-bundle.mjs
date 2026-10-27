@@ -19,6 +19,9 @@ export const electronBuildOptions = {
     // The offline MCP server, on the same Node as the hook. Agent configs run
     // `ELECTRON_RUN_AS_NODE=1 <app> dist/electron/mcp-local/server.cjs`.
     "mcp-local/server": "electron/mcp-local/main.ts",
+    // FE-87: the lead's `lanework-control`, on the same Node, from
+    // ~/.lanew/bin/lanework-control.
+    "control/lanework-control": "electron/control/main.ts",
   },
   bundle: true,
   platform: "node",

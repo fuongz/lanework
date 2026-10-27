@@ -96,8 +96,31 @@ export function tidy(text: string): string {
 function typed(text: unknown): string | null {
   if (typeof text !== "string") return null;
   const clean = text.trim();
-  if (!clean || clean.startsWith("<")) return null;
+  if (!clean) return null;
+  if (clean.startsWith("<lanework_orchestrate")) {
+    // `/orchestrate` (FE-87): the person's request, inside the planning
+    // prompt the app sent for them.
+    const start = clean.lastIndexOf("<user_request>\n");
+    const end = clean.lastIndexOf("\n</user_request>");
+    return start === -1 || end < start
+      ? null
+      : tidy(`/orchestrate ${clean.slice(start + 15, end)}`);
+  }
+  if (clean.startsWith("<")) return null;
   return tidy(clean);
+}
+
+/**
+ * Whether a user line is the CLI's own wrapped text (a local command, hook
+ * output), which never reaches the model as a turn.
+ *
+ * NOTE: Lanework's own envelopes (`<lanework_…>`, FE-87) are tagged too, but
+ * they are turns the model answers.
+ */
+function cliTagged(text: unknown): boolean {
+  if (typeof text !== "string") return false;
+  const start = text.trimStart();
+  return start.startsWith("<") && !start.startsWith("<lanework_");
 }
 
 /** A conversation's key across both CLIs: ids are only unique per agent. */
@@ -170,8 +193,7 @@ export function claudeWorking(tail: Line[]): boolean {
       // NOTE: A local command (`/model`, `/clear`, `!ls`) is written as a
       // user line wrapped in a tag, and never reaches the model: not a turn.
       // The same tell `typed()` uses for a title.
-      if (typeof text === "string" && text.trimStart().startsWith("<"))
-        continue;
+      if (cliTagged(text)) continue;
       return true;
     }
   }
@@ -312,7 +334,7 @@ function localCommand(line: Line): boolean {
             (part) => part?.type === "text",
           )?.text ?? "")
         : "";
-  return typeof text === "string" && text.trimStart().startsWith("<");
+  return cliTagged(text);
 }
 
 /**

@@ -9,6 +9,7 @@ import type { DesktopHarnessApi } from "./harness";
 import type { DesktopInstructionsApi } from "./instructions";
 import type { DesktopMemoryApi } from "./memory";
 import type { DesktopNotificationsApi } from "./notifications";
+import type { DesktopJevApi, DesktopOrchestrationApi } from "./orchestration";
 import type { DesktopReadinessApi } from "./readiness";
 import type { DesktopTerminalApi } from "./terminal";
 import type { DesktopWorkspacesApi } from "./workspaces";
@@ -100,4 +101,8 @@ export interface DesktopApi {
    * (FE-52/D8).
    */
   laneworkMcp: DesktopLaneworkMcpApi;
+  /** A lead conversation's runs of worker agents (FE-87). */
+  orchestration: DesktopOrchestrationApi;
+  /** Jev, the judge for bounded questions on the way (FE-87). */
+  jev: DesktopJevApi;
 }

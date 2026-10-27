@@ -14,6 +14,11 @@ import {
 } from "#/components/shared/navigation/window-titlebar";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { ipcMessage } from "#/lib/ipc-error";
+import {
+  visibleText as orchestrationText,
+  planningPrompt,
+  proposalId,
+} from "#/lib/orchestration-prompt";
 import { useBoard } from "#/stores/board";
 import { handSentMessage } from "#/stores/conversation-sends";
 import { useNewChats } from "#/stores/new-chats";
@@ -48,6 +53,11 @@ function NewConversationPage({ slug }: { slug: string }) {
     if (!found) return slug;
     return found.path?.split(/[\\/]/).filter(Boolean).at(-1) ?? found.name;
   });
+  // Named in a planning prompt so the lead writes project-relative scopes.
+  const cwd = useBoard(
+    (state) =>
+      state.workspaces.find((entry) => entry.slug === slug)?.path ?? null,
+  );
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The usage strip follows the model picked: its CLI's quota.
@@ -81,7 +91,11 @@ function NewConversationPage({ slug }: { slug: string }) {
     const { begin, end } = useNewChats.getState();
     // The rail's row for it, from Enter on: the CLI takes a while to answer
     // with an id, and longer to write a transcript the rail can list.
-    begin({ workspace, agent: agentOfModel(settings.model), text });
+    begin({
+      workspace,
+      agent: agentOfModel(settings.model),
+      text: orchestrationText(text),
+    });
     try {
       const { conversation } = await surface.start({
         workspace,
@@ -113,6 +127,27 @@ function NewConversationPage({ slug }: { slug: string }) {
       setError(ipcMessage(caught, "Could not start the conversation."));
       return false;
     }
+  };
+
+  // `/orchestrate` as the first message (FE-87): the new conversation is the
+  // lead, and its first turn is the planning prompt. The chat it opens draws
+  // the proposal card once the lead answers.
+  const orchestrate = (
+    request: string,
+    attachments: OutgoingAttachment[],
+    names: { name: string; image: boolean }[],
+  ): Promise<boolean> => {
+    if (!settings || !request.trim()) return Promise.resolve(false);
+    return send(
+      planningPrompt(
+        proposalId(),
+        request.trim(),
+        agentOfModel(settings.model),
+        cwd,
+      ),
+      attachments,
+      names,
+    );
   };
 
   return (
@@ -150,6 +185,7 @@ function NewConversationPage({ slug }: { slug: string }) {
               working={false}
               queued={0}
               onSend={send}
+              onOrchestrate={orchestrate}
               onStop={() => {}}
             />
           )}

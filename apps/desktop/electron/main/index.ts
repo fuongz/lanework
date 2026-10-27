@@ -8,6 +8,20 @@ import {
   shell,
 } from "electron";
 import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
+import {
+  type ControlServer,
+  ID_PATTERN,
+  type JevMainHandlers,
+  jevChannels,
+  type OrchestrationMainHandlers,
+  type OrchestrationProposal,
+  orchestrationChannels,
+  parseJevConfig,
+  parseJevKey,
+  parseJudgeRequest,
+  parseProposal,
+} from "../../shared/orchestration";
+import { installControlCli } from "../control/install";
 import { registerAgentConfig } from "./agent-config";
 import { registerAgentSetup } from "./agent-setup";
 import { registerAuth } from "./auth";
@@ -18,16 +32,100 @@ import { registerHandoff } from "./handoff";
 import { registerHarness } from "./harness";
 import { registerInstructions } from "./instructions";
 import { broadcast, handle } from "./ipc";
+import { jevMain } from "./jev";
 import { registerMemory } from "./memory";
 import { installMenu } from "./menu";
 import { installMenuBar } from "./menu-bar";
 import { registerNotifications } from "./notifications";
 import { startPullWatcher } from "./notifications/pull-watcher";
+import { orchestrationMain, setJev, startControlServer } from "./orchestration";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { appOrigin, isTrustedUrl } from "./security";
 import { agentTerminalOn, killTerminal, registerTerminal } from "./terminal";
 import { registerWorkspaces } from "./workspaces";
+
+// ─── Orchestration and Jev (FE-87) ─────────────────────────────────────────
+//
+// The run engine asks Jev its bounded questions; with no provider set, Jev
+// answers `off` and the lead decides everything.
+setJev(jevMain);
+
+/** A slug or id from the page, checked before any handler sees it. */
+function ipcId(value: unknown, label: string): string {
+  if (typeof value !== "string" || !ID_PATTERN.test(value))
+    throw new Error(`${label} must be an id`);
+  return value;
+}
+function ipcSlug(value: unknown): string {
+  if (typeof value !== "string" || !value || value.length > 128)
+    throw new Error("workspace must be a slug");
+  return value;
+}
+function arity(args: unknown[], count: number): void {
+  if (args.length !== count)
+    throw new Error(
+      `This operation takes ${count} argument${count === 1 ? "" : "s"}`,
+    );
+}
+
+/**
+ * Register `orchestration.*` and `jev.*`, checking every argument here, so a
+ * handler only ever sees shapes `shared/orchestration.ts` allows.
+ */
+function registerOrchestration(
+  devUrl: string | undefined,
+  runs: OrchestrationMainHandlers,
+  jev: JevMainHandlers,
+): void {
+  handle(orchestrationChannels.runs, devUrl, (args) => {
+    arity(args, 1);
+    return runs.runs(ipcSlug(args[0]));
+  });
+  handle(orchestrationChannels.run, devUrl, (args) => {
+    arity(args, 2);
+    return runs.run(ipcSlug(args[0]), ipcId(args[1], "runId"));
+  });
+  handle(orchestrationChannels.approve, devUrl, (args) => {
+    arity(args, 1);
+    const proposal: OrchestrationProposal = parseProposal(args[0]);
+    return runs.approve(proposal);
+  });
+  for (const action of ["pause", "resume", "stop"] as const)
+    handle(orchestrationChannels[action], devUrl, (args) => {
+      arity(args, 2);
+      return runs[action](ipcSlug(args[0]), ipcId(args[1], "runId"));
+    });
+  handle(orchestrationChannels.cancelTask, devUrl, (args) => {
+    arity(args, 3);
+    return runs.cancelTask(
+      ipcSlug(args[0]),
+      ipcId(args[1], "runId"),
+      ipcId(args[2], "taskId"),
+    );
+  });
+  handle(jevChannels.get, devUrl, (args) => {
+    arity(args, 0);
+    return jev.get();
+  });
+  handle(jevChannels.set, devUrl, (args) => {
+    arity(args, 1);
+    return jev.set(parseJevConfig(args[0]));
+  });
+  handle(jevChannels.setKey, devUrl, (args) => {
+    arity(args, 1);
+    return jev.setKey(parseJevKey(args[0]));
+  });
+  handle(jevChannels.test, devUrl, (args) => {
+    arity(args, 1);
+    return jev.ask(parseJudgeRequest(args[0]));
+  });
+  handle(jevChannels.log, devUrl, (args) => {
+    arity(args, 0);
+    return jev.log();
+  });
+}
+let controlServer: ControlServer | null = null;
 
 app.setName("Lanework");
 app.setAboutPanelOptions({
@@ -190,6 +288,23 @@ app
     registerAgentConfig(devUrl);
     registerHarness(devUrl);
     registerDictation(devUrl);
+    registerOrchestration(devUrl, orchestrationMain, jevMain);
+    // Rewritten on every launch, like the Stop hook, so it always matches
+    // this app's Node and bundle.
+    void installControlCli().catch((error: unknown) =>
+      console.warn("Unable to install lanework-control", error),
+    );
+    // The lead's CLI reaches runs through this; it listens on loopback only.
+    startControlServer(orchestrationMain.control)
+      .then((server) => {
+        controlServer = server;
+      })
+      .catch((error: unknown) => {
+        console.error(
+          "Unable to start the orchestration control server",
+          error,
+        );
+      });
     // The menu bar and a clicked notification bring the window back the same
     // way. A window made just now has no screen to navigate yet: it opens
     // where it always does.
@@ -217,6 +332,10 @@ app
     console.error(error);
     app.quit();
   });
+app.on("will-quit", () => {
+  void controlServer?.close();
+  controlServer = null;
+});
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });

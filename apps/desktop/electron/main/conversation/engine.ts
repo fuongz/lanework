@@ -33,6 +33,12 @@ import {
   type Turn,
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
+import {
+  agentEnv,
+  engineTap,
+  safely,
+  writtenPaths,
+} from "../orchestration/engine-tap";
 import type { ClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { CodexEngine } from "./codex-engine";
@@ -239,11 +245,15 @@ class Engine {
   }
 
   emit(event: Record<string, unknown> & { type: ConversationEvent["type"] }) {
-    this.deps.emit({
+    const full = {
       ...event,
       workspace: this.workspace,
       conversation: this.conversation,
-    } as ConversationEvent);
+    } as ConversationEvent;
+    this.deps.emit(full);
+    // FE-87: orchestration follows its lead and workers through the same
+    // events the page gets.
+    safely(() => engineTap().event?.(full, this.folder));
   }
 
   /** The last state sent, so an unchanged one is not sent again. */
@@ -308,7 +318,13 @@ class Engine {
       engineArgs(this.conversation, settings, this.fresh, trusted),
       {
         cwd: this.folder,
-        env: cli.env,
+        // FE-87: a lead's control endpoint, a worker's scratch; never the
+        // control variables for anyone else.
+        env: agentEnv(cli.env, {
+          workspace: this.workspace,
+          conversation: this.conversation,
+          folder: this.folder,
+        }),
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
@@ -440,6 +456,9 @@ class Engine {
       }
       case "user":
       case "assistant": {
+        // FE-87: a write is told as soon as the CLI names it, a sub-agent's
+        // too, so a worker's write guard sees it before the tool runs.
+        if (line.type === "assistant") this.tellWrites(line);
         if (line.parent_tool_use_id) return;
         // A message written to the CLI, taken in.
         if (line.isReplay === true) this.inflight.shift();
@@ -463,8 +482,38 @@ class Engine {
         return;
       }
       case "result":
+        safely(() =>
+          engineTap().result?.({
+            workspace: this.workspace,
+            conversation: this.conversation,
+            folder: this.folder,
+            text: typeof line.result === "string" ? line.result : "",
+            error: line.is_error === true,
+          }),
+        );
         this.onResult();
         return;
+    }
+  }
+
+  /** Tell orchestration the files an assistant line's tool calls write. */
+  tellWrites(line: Record<string, unknown>): void {
+    const tap = engineTap().write;
+    if (!tap) return;
+    const message = (line.message ?? {}) as Record<string, unknown>;
+    const content = Array.isArray(message.content) ? message.content : [];
+    for (const block of content) {
+      const paths = writtenPaths(block);
+      if (!paths) continue;
+      safely(() =>
+        tap({
+          workspace: this.workspace,
+          conversation: this.conversation,
+          folder: this.folder,
+          tool: String((block as { name?: unknown }).name),
+          paths,
+        }),
+      );
     }
   }
 
@@ -783,9 +832,32 @@ class Engine {
   }
 }
 
+/** The engines {@link createEngines} made last: orchestration's (FE-87). */
+let shared: Engines | null = null;
+
+/** The app's engines, once the conversation view registered them. */
+export function sharedEngines(): Engines | null {
+  return shared;
+}
+
+export type Engines = ReturnType<typeof createEngines>;
+
 /** Every conversation's engine, by workspace and id. */
-export function createEngines(deps: EngineDeps) {
+export function createEngines(input: EngineDeps) {
   const engines = new Map<string, Engine | CodexEngine>();
+  // The settings each conversation last ran with here, so orchestration can
+  // send its lead a turn on them (FE-87).
+  const lastSettings = new Map<string, ComposerSettings>();
+  const deps: EngineDeps = {
+    ...input,
+    remember: (conversation, settings) => {
+      lastSettings.delete(conversation);
+      lastSettings.set(conversation, settings);
+      if (lastSettings.size > 256)
+        lastSettings.delete(lastSettings.keys().next().value as string);
+      input.remember(conversation, settings);
+    },
+  };
   const codexDeps = () => ({
     cli:
       deps.codexCli ??
@@ -827,9 +899,14 @@ export function createEngines(deps: EngineDeps) {
     );
   }
 
-  return {
+  const api = {
     pids,
     state,
+
+    /** The settings `conversation` last ran with here, or null. */
+    settingsOf(conversation: string): ComposerSettings | null {
+      return lastSettings.get(conversation) ?? null;
+    },
 
     /**
      * Queue `out` behind a running turn, or write it now.
@@ -1108,4 +1185,6 @@ export function createEngines(deps: EngineDeps) {
       }
     },
   };
+  shared = api;
+  return api;
 }

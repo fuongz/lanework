@@ -331,7 +331,9 @@ function buildCodexTurns(rows: readonly Line[], folder: string): Turn[] {
       case "user_message":
         if (!items) {
           const text = (str(payload.message) ?? "").trim();
-          if (!text.startsWith("<")) prompt(`u-${index}`, text, [], at);
+          // Lanework's own envelopes (FE-87) are turns; Codex's tags are not.
+          if (!text.startsWith("<") || text.startsWith("<lanework_"))
+            prompt(`u-${index}`, text, [], at);
         }
         break;
       case "agent_message":

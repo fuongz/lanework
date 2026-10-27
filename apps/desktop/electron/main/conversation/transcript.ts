@@ -289,7 +289,9 @@ function promptOf(
   let text = texts.join("\n\n").trim();
   if (text.startsWith("[Request interrupted")) return null;
   let command = false;
-  if (text.startsWith("<")) {
+  // Lanework's own envelopes (`/orchestrate`, FE-87) are the person's turn;
+  // the chat decides what of them to draw.
+  if (text.startsWith("<") && !text.startsWith("<lanework_")) {
     const named = slashCommand(text);
     if (!named) return null;
     text = named;
