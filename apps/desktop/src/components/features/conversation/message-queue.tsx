@@ -7,6 +7,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { QueuedMessage } from "#/../shared/conversation";
+import { readEnvelope, visibleText } from "#/lib/orchestration-prompt";
 
 /**
  * The messages the engine holds back, drawn on top of the composer.
@@ -14,6 +15,10 @@ import type { QueuedMessage } from "#/../shared/conversation";
  * They could not go into the running turn yet. Each one can be taken back to
  * the composer to edit (✏️, or ↑ there for the last) or dropped. A queue that
  * Stop paused waits for Resume.
+ *
+ * A queued `/orchestrate` is the planning prompt it became: it is labelled as
+ * the user typed it, never as the prompt (FE-91/U1). A repair has nothing the
+ * user typed, so it cannot be taken back to edit, only dropped.
  */
 export function MessageQueue({
   queue,
@@ -78,9 +83,11 @@ export function MessageQueue({
       </div>
       <ul>
         {queue.map((message) => {
+          const said = visibleText(message.text).trim();
           const label =
-            message.text.trim() ||
+            said ||
             `${message.attachments.length} attachment${message.attachments.length === 1 ? "" : "s"}`;
+          const editable = readEnvelope(message.text)?.kind !== "repair";
           return (
             <li
               key={message.id}
@@ -93,7 +100,7 @@ export function MessageQueue({
                 >
                   <span className="truncate">{label}</span>
                   {/* The count behind a paperclip rather than a "·". */}
-                  {message.text.trim() && message.attachments.length > 0 && (
+                  {said && message.attachments.length > 0 && (
                     <span className="text-muted-foreground flex shrink-0 items-center gap-0.5 tabular-nums">
                       <HugeiconsIcon
                         icon={Attachment01Icon}
@@ -112,20 +119,22 @@ export function MessageQueue({
                   </p>
                 )}
               </div>
-              <button
-                type="button"
-                title="Edit queued message"
-                aria-label="Edit queued message"
-                onClick={() => onEdit(message.id)}
-                className="hover:bg-foreground/[0.06] hover:text-foreground grid size-6 shrink-0 place-items-center rounded-md transition-colors"
-              >
-                <HugeiconsIcon
-                  icon={PencilEdit02Icon}
-                  className="size-3.5"
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                />
-              </button>
+              {editable && (
+                <button
+                  type="button"
+                  title="Edit queued message"
+                  aria-label="Edit queued message"
+                  onClick={() => onEdit(message.id)}
+                  className="hover:bg-foreground/[0.06] hover:text-foreground grid size-6 shrink-0 place-items-center rounded-md transition-colors"
+                >
+                  <HugeiconsIcon
+                    icon={PencilEdit02Icon}
+                    className="size-3.5"
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                </button>
+              )}
               <button
                 type="button"
                 title="Remove queued message"

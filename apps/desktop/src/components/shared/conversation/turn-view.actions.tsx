@@ -177,7 +177,7 @@ export function AssistantActions({
   onSave: () => void;
   /** None for a conversation that cannot be forked (Codex's). */
   onFork?: () => void;
-  onReply: () => void;
+  onReply?: () => void;
   forking: boolean;
 }) {
   return (
@@ -192,7 +192,9 @@ export function AssistantActions({
           disabled={forking}
         />
       )}
-      <Action label="Reply" icon={Comment01Icon} onClick={onReply} />
+      {onReply && (
+        <Action label="Reply" icon={Comment01Icon} onClick={onReply} />
+      )}
       {usage && (
         <Action label="Usage" icon={Analytics01Icon} tip={usageTip(usage)} />
       )}

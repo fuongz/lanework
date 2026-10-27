@@ -47,10 +47,19 @@ function save(edits: Record<string, ProposalEdits>) {
 interface EditsState {
   edits: Record<string, ProposalEdits>;
   patch: (id: string, patch: Partial<Omit<ProposalEdits, "at">>) => void;
+  /**
+   * The proposal just approved, by id: whatever draws it next (its run
+   * panel, or the card when the run is gone) takes the focus once, so it
+   * does not fall back to the page (FE-91). Not kept in localStorage.
+   */
+  focus: string | null;
+  setFocus: (id: string | null) => void;
 }
 
 export const useProposalEdits = create<EditsState>((set, get) => ({
   edits: load(),
+  focus: null,
+  setFocus: (focus) => set({ focus }),
   patch: (id, patch) => {
     const edits = {
       ...get().edits,

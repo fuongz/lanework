@@ -1,5 +1,7 @@
 import {
   Alert02Icon,
+  ArrowDown01Icon,
+  ArrowRight01Icon,
   Cancel01Icon,
   CancelCircleIcon,
   CheckmarkCircle02Icon,
@@ -12,7 +14,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { modelName } from "#/../shared/conversation";
 import type {
   NeedsInput,
@@ -23,11 +25,22 @@ import type {
 } from "#/../shared/orchestration";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "#/components/ui/alert-dialog";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { ipcMessage } from "#/lib/ipc-error";
 import { taskLabel, taskTone } from "#/lib/orchestration-status";
 import { cn } from "#/lib/utils";
+import { useProposalEdits } from "./orchestration-panel.store";
 
 const RUN_LABELS: Record<RunStatus, string> = {
   active: "Running",
@@ -43,6 +56,9 @@ const CANCELLABLE: readonly TaskStatus[] = [
   "blocked",
   "interrupted",
 ];
+
+/** An error longer than this, or on several lines, folds behind "Show all". */
+const ERROR_FOLD = 160;
 
 function StatusMark({ task }: { task: OrchestrationTask }) {
   if (task.status === "running" || task.status === "cancelling")
@@ -78,17 +94,92 @@ function needsInputText(needs: NeedsInput): string {
   return `Waiting for the lead to answer${first ? `: ${first.question}` : ""}`;
 }
 
+/** What about a worker is worth saying aloud when it changes. */
+function signal(task: OrchestrationTask): string {
+  return `${task.status}:${task.needsInput?.requestId ?? ""}`;
+}
+
+/**
+ * What changed for the worse since the last read, as one sentence for the
+ * live region (FE-91): a worker failed, was blocked, or waits on the lead.
+ */
+function changes(
+  before: Map<string, string>,
+  run: OrchestrationRun,
+  status: RunStatus | null,
+): string {
+  const lines: string[] = [];
+  for (const task of run.tasks) {
+    const was = before.get(task.id);
+    if (was === signal(task)) continue;
+    const wasStatus = was?.split(":")[0];
+    if (task.status === "failed" && wasStatus !== "failed")
+      lines.push(`${task.title} failed.`);
+    else if (task.status === "blocked" && wasStatus !== "blocked")
+      lines.push(`${task.title} is blocked.`);
+    else if (task.needsInput && was !== signal(task))
+      lines.push(`${task.title} is waiting for the lead.`);
+  }
+  if (status !== null && status !== run.status) {
+    if (run.status === "stopped") lines.push("The run stopped.");
+    else if (run.status === "finished") lines.push("The run finished.");
+    else if (run.status === "paused") lines.push("The run paused.");
+  }
+  return lines.join(" ");
+}
+
+/** A worker's error: two lines, and the rest behind a toggle (FE-91). */
+function WorkerError({ id, error }: { id: string; error: string }) {
+  const [open, setOpen] = useState(false);
+  const long = error.length > ERROR_FOLD || error.includes("\n");
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-0.5">
+      <p
+        id={id}
+        className={cn(
+          "text-destructive min-w-0 text-[11px] break-words select-text",
+          open ? "whitespace-pre-wrap" : "line-clamp-2",
+        )}
+      >
+        {error}
+      </p>
+      {long && (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={id}
+          onClick={() => setOpen(!open)}
+          className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[11px]"
+        >
+          <HugeiconsIcon
+            icon={open ? ArrowDown01Icon : ArrowRight01Icon}
+            className="size-3"
+            strokeWidth={2}
+            aria-hidden="true"
+          />
+          {open ? "Show less" : "Show the whole error"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * A run's workers (FE-87): each one's status, what it waits on, and the
  * controls the user has over the run. A worker opens its transcript,
  * read-only. A task the lead gave wider write scopes than the user approved
  * waits here for Allow, or the cancel button (FE-89/D11).
+ *
+ * Pause sits in the header; Stop, which cannot be undone, sits apart at the
+ * foot and asks first (FE-91). A polite live region says when a worker
+ * fails, is blocked, or waits on the lead.
  */
 export function RunPanel({
   slug,
   workspace,
   run,
   title,
+  focusKey = null,
   onRun,
 }: {
   slug: string;
@@ -96,11 +187,45 @@ export function RunPanel({
   run: OrchestrationRun;
   /** The approved proposal's title; null for a run no card points to. */
   title: string | null;
+  /** The proposal it came from: just approved, the panel takes the focus. */
+  focusKey?: string | null;
   onRun: (run: OrchestrationRun) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
   const navigate = useNavigate();
+  const base = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const focusRequested = useProposalEdits(
+    (state) => focusKey !== null && state.focus === focusKey,
+  );
+  const setFocus = useProposalEdits((state) => state.setFocus);
+
+  // The card it replaces had the focus (its Approve button): it lands here,
+  // not on the page.
+  useEffect(() => {
+    if (!focusRequested) return;
+    setFocus(null);
+    headingRef.current?.focus();
+  }, [focusRequested, setFocus]);
+
+  // Each read compared with the last; the first one only sets the baseline,
+  // so opening a run does not read out what was already so.
+  const seen = useRef<{ tasks: Map<string, string>; status: RunStatus } | null>(
+    null,
+  );
+  useEffect(() => {
+    const before = seen.current;
+    seen.current = {
+      tasks: new Map(run.tasks.map((task) => [task.id, signal(task)])),
+      status: run.status,
+    };
+    if (!before) return;
+    const said = changes(before.tasks, run, before.status);
+    if (said) setAnnouncement(said);
+  }, [run]);
 
   const act = async (
     key: string,
@@ -126,17 +251,37 @@ export function RunPanel({
   const yours = run.tasks.filter(
     (task) => task.status === "queued" && task.scopeApproval?.length,
   ).length;
+  const queued = run.tasks.filter((task) => task.status === "queued").length;
   const live = run.status === "active" || run.status === "paused";
+  // Read when the Stop dialog closes, after the stop's answer has landed.
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const heading = title ?? "Orchestration run";
+  // Done and Accepted read alike; the foot says how they differ once both
+  // can be seen.
+  const someDone = run.tasks.some((task) => task.status === "completed");
 
   return (
     <article
-      aria-label={`Orchestration run — ${title ?? run.id}`}
+      aria-label={`Orchestration run: ${heading}`}
       className="bg-card border-border overflow-hidden rounded-xl border"
     >
+      {/* Said aloud, never drawn: what went wrong since the last read. */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
       <header className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
         <div className="min-w-0 flex-1">
-          <h2 className="flex min-w-0 items-center gap-2 text-[13px] font-medium">
-            <span className="truncate">{title ?? "Orchestration run"}</span>
+          <h2
+            ref={headingRef}
+            // Not in the tab order: the focus is only moved here, from the
+            // card an approval replaced.
+            tabIndex={-1}
+            className="focus-visible:ring-ring/30 flex min-w-0 items-center gap-2 rounded-sm text-[13px] font-medium outline-none focus-visible:ring-2"
+          >
+            <span className="truncate" title={heading}>
+              {heading}
+            </span>
             <Badge
               variant={run.status === "active" ? "secondary" : "outline"}
               className="shrink-0"
@@ -144,7 +289,7 @@ export function RunPanel({
               {RUN_LABELS[run.status]}
             </Badge>
           </h2>
-          {/* Counts set apart by space, not a "·" between them. */}
+          {/* Counts set apart by space, not a separator between them. */}
           <p className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] tabular-nums">
             <span>
               {accepted}/{run.tasks.length} accepted
@@ -161,6 +306,7 @@ export function RunPanel({
             )}
           </p>
         </div>
+        {/* Only Pause or Resume up here: Stop is at the foot, away from it. */}
         {live && surface && (
           <div className="flex shrink-0 items-center gap-1">
             {run.status === "active" ? (
@@ -206,26 +352,6 @@ export function RunPanel({
                 {busy === "resume" ? "Resuming…" : "Resume"}
               </Button>
             )}
-            <Button
-              size="sm"
-              variant="destructive"
-              disabled={busy !== null}
-              onClick={() =>
-                void act(
-                  "stop",
-                  () => surface.stop(workspace, run.id),
-                  "Could not stop the run.",
-                )
-              }
-            >
-              <HugeiconsIcon
-                icon={StopIcon}
-                strokeWidth={2}
-                data-icon="inline-start"
-                aria-hidden="true"
-              />
-              {busy === "stop" ? "Stopping…" : "Stop"}
-            </Button>
           </div>
         )}
       </header>
@@ -245,69 +371,133 @@ export function RunPanel({
               live && task.status === "queued" && task.scopeApproval?.length
                 ? task.scopeApproval
                 : null;
+            const errorId = `${base}-${task.id}-error`;
+            const needsId = `${base}-${task.id}-needs`;
             return (
               <li
                 key={task.id}
-                className="hover:bg-foreground/[0.03] flex min-w-0 items-start gap-2 px-3 py-1.5"
+                className="hover:bg-foreground/[0.03] flex min-w-0 flex-col gap-0.5 px-3 py-1.5"
               >
-                <button
-                  type="button"
-                  disabled={!task.conversation}
-                  // Its conversation in the main view, read-only; its title
-                  // bar leads back here.
-                  onClick={() => {
-                    if (task.conversation)
-                      void navigate({
-                        to: "/w/$slug/agents/chat/$conversation",
-                        params: { slug, conversation: task.conversation },
-                      });
-                  }}
-                  aria-label={`Open ${task.title}'s conversation`}
-                  title={
-                    task.conversation
-                      ? "Open its conversation"
-                      : "Not started yet: no conversation"
-                  }
-                  className="flex min-w-0 flex-1 items-start gap-2 text-left disabled:cursor-default"
-                >
-                  <span className="mt-0.5 flex">
-                    <StatusMark task={task} />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-[13px]">{task.title}</span>
-                      {task.accepted && (
-                        <Badge variant="outline" className="shrink-0">
-                          Accepted
-                        </Badge>
-                      )}
+                <div className="flex min-w-0 items-start gap-2">
+                  <button
+                    type="button"
+                    disabled={!task.conversation}
+                    // Its conversation in the main view, read-only; its title
+                    // bar leads back here.
+                    onClick={() => {
+                      if (task.conversation)
+                        void navigate({
+                          to: "/w/$slug/agents/chat/$conversation",
+                          params: { slug, conversation: task.conversation },
+                        });
+                    }}
+                    aria-label={`Open ${task.title}'s conversation, ${taskLabel(task)}`}
+                    aria-describedby={
+                      [
+                        task.needsInput ? needsId : null,
+                        task.error ? errorId : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" ") || undefined
+                    }
+                    title={
+                      task.conversation
+                        ? `Open ${task.title}`
+                        : `${task.title}: not started yet, no conversation`
+                    }
+                    className="flex min-w-0 flex-1 items-start gap-2 text-left disabled:cursor-default"
+                  >
+                    <span className="mt-0.5 flex">
+                      <StatusMark task={task} />
                     </span>
-                    <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11px]">
-                      <TerminalKindIcon
-                        kind={task.agent}
-                        className="size-3 shrink-0"
-                      />
-                      <span className="truncate">
-                        {modelName(task.model) ?? task.model}
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-[13px]">
+                          {task.title}
+                        </span>
+                        {task.accepted && (
+                          <Badge variant="outline" className="shrink-0">
+                            Accepted
+                          </Badge>
+                        )}
                       </span>
-                      {task.tier && (
-                        <Badge
-                          variant="outline"
-                          className="h-4 shrink-0 px-1.5"
+                      <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11px]">
+                        <TerminalKindIcon
+                          kind={task.agent}
+                          className="size-3 shrink-0"
+                        />
+                        <span className="truncate">
+                          {modelName(task.model) ?? task.model}
+                        </span>
+                        {task.tier && (
+                          <Badge
+                            variant="outline"
+                            className="h-4 shrink-0 px-1.5"
+                          >
+                            {task.tier}
+                          </Badge>
+                        )}
+                        <span
+                          className={cn("shrink-0 font-medium", taskTone(task))}
                         >
-                          {task.tier}
-                        </Badge>
-                      )}
-                      <span
-                        className={cn("shrink-0 font-medium", taskTone(task))}
-                      >
-                        {taskLabel(task)}
+                          {taskLabel(task)}
+                        </span>
                       </span>
                     </span>
+                  </button>
+                  {wider && surface && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      aria-label={`Allow ${task.title} to write ${wider.join(", ")}`}
+                      title="Allow these write scopes, then the worker starts"
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void act(
+                          `scope:${task.id}`,
+                          () =>
+                            surface.approveScope(workspace, run.id, task.id),
+                          "Could not approve the write scope.",
+                        )
+                      }
+                    >
+                      {busy === `scope:${task.id}` ? "Allowing…" : "Allow"}
+                    </Button>
+                  )}
+                  {cancellable && surface && (
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={`Cancel ${task.title}`}
+                      title="Cancel this worker"
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void act(
+                          `cancel:${task.id}`,
+                          () => surface.cancelTask(workspace, run.id, task.id),
+                          "Could not cancel the worker.",
+                        )
+                      }
+                    >
+                      <HugeiconsIcon
+                        icon={Cancel01Icon}
+                        strokeWidth={2}
+                        aria-hidden="true"
+                      />
+                    </Button>
+                  )}
+                </div>
+                {/* Out of the row's button, so the error can be expanded
+                    and selected. */}
+                {(task.needsInput || task.error || wider) && (
+                  <div className="flex min-w-0 flex-col gap-0.5 pl-5.5">
                     {task.needsInput && (
-                      <span className="text-tone-amber line-clamp-2 text-[11px]">
+                      <p
+                        id={needsId}
+                        className="text-tone-amber line-clamp-2 text-[11px]"
+                      >
                         {needsInputText(task.needsInput)}
-                      </span>
+                      </p>
                     )}
                     {task.needsInput?.kind === "permission" &&
                       task.needsInput.input && (
@@ -325,51 +515,9 @@ export function RunPanel({
                       </span>
                     )}
                     {task.error && (
-                      <span className="text-destructive line-clamp-2 text-[11px]">
-                        {task.error}
-                      </span>
+                      <WorkerError id={errorId} error={task.error} />
                     )}
-                  </span>
-                </button>
-                {wider && surface && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    aria-label={`Allow ${task.title} to write ${wider.join(", ")}`}
-                    title="Allow these write scopes, then the worker starts"
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void act(
-                        `scope:${task.id}`,
-                        () => surface.approveScope(workspace, run.id, task.id),
-                        "Could not approve the write scope.",
-                      )
-                    }
-                  >
-                    {busy === `scope:${task.id}` ? "Allowing…" : "Allow"}
-                  </Button>
-                )}
-                {cancellable && surface && (
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={`Cancel ${task.title}`}
-                    title="Cancel this worker"
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void act(
-                        `cancel:${task.id}`,
-                        () => surface.cancelTask(workspace, run.id, task.id),
-                        "Could not cancel the worker.",
-                      )
-                    }
-                  >
-                    <HugeiconsIcon
-                      icon={Cancel01Icon}
-                      strokeWidth={2}
-                      aria-hidden="true"
-                    />
-                  </Button>
+                  </div>
                 )}
               </li>
             );
@@ -384,6 +532,82 @@ export function RunPanel({
         >
           {error}
         </p>
+      )}
+
+      {(someDone || (live && surface)) && (
+        <footer className="text-muted-foreground border-border flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-t px-3 py-2 text-[11px]">
+          {someDone && (
+            <p className="min-w-0 flex-1">
+              <span className="text-tone-emerald font-medium">Done</span>: the
+              worker finished.{" "}
+              <span className="text-tone-teal font-medium">Accepted</span>: the
+              lead reviewed its result and took it.
+            </p>
+          )}
+          {live && surface && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy !== null}
+              onClick={() => setConfirmStop(true)}
+              className="text-destructive hover:text-destructive ml-auto"
+            >
+              <HugeiconsIcon
+                icon={StopIcon}
+                strokeWidth={2}
+                data-icon="inline-start"
+                aria-hidden="true"
+              />
+              {busy === "stop" ? "Stopping…" : "Stop run"}
+            </Button>
+          )}
+        </footer>
+      )}
+
+      {surface && (
+        <AlertDialog open={confirmStop} onOpenChange={setConfirmStop}>
+          <AlertDialogContent
+            // Kept running: back to Stop run. Stopped: that button is gone,
+            // so the title takes the focus rather than the page.
+            finalFocus={() => (liveRef.current ? true : headingRef.current)}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>Stop this run?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {running > 0
+                  ? `${running} running ${running === 1 ? "worker is" : "workers are"} cancelled`
+                  : "No worker is running now"}
+                {queued > 0
+                  ? `, and ${queued} queued ${queued === 1 ? "worker never starts" : "workers never start"}.`
+                  : "."}{" "}
+                The lead's turn stops too. A stopped run cannot be resumed; to
+                hold it for a while, pause it instead.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={busy === "stop"}>
+                Keep running
+              </AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                // `border-0`: without it the popup shows through as a 1px
+                // ring (see account-section.tsx).
+                className="border-0"
+                disabled={busy === "stop"}
+                onClick={async () => {
+                  await act(
+                    "stop",
+                    () => surface.stop(workspace, run.id),
+                    "Could not stop the run.",
+                  );
+                  setConfirmStop(false);
+                }}
+              >
+                {busy === "stop" ? "Stopping…" : "Stop run"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
     </article>
   );

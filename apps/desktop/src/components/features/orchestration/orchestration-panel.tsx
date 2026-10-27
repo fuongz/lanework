@@ -233,6 +233,7 @@ export function OrchestrationPanel({
             workspace={workspace}
             run={run}
             title={proposal.title}
+            focusKey={proposal.id}
             onRun={orchestration.upsert}
           />,
         ];
@@ -256,6 +257,9 @@ export function OrchestrationPanel({
         proposal={proposal}
         teamLead={teamLeadOf(proposal.teamLead)}
         leadsRead={leads !== null}
+        // Approved, the runs read, and its run not among them: said on the
+        // card, not left as a card that only reads "Approved" (FE-91).
+        runMissing={Boolean(runId)}
         onRepair={orchestration.repair}
         onApproved={orchestration.upsert}
       />,

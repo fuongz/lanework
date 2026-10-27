@@ -68,6 +68,7 @@ import { useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { firstLine } from "#/lib/conversation-format";
 import { ipcMessage } from "#/lib/ipc-error";
+import { readEnvelope } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
@@ -465,16 +466,19 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 )
                 .finally(() => setForking(false));
             },
-      onReply: (text) => {
-        const lines = text
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .slice(0, 3);
-        composer.current?.insert(
-          `${lines.map((line) => `> ${line}`).join("\n")}\n\n`,
-        );
-      },
+      // A worker has no composer to reply into (FE-91/U18).
+      onReply: asWorker
+        ? undefined
+        : (text) => {
+            const lines = text
+              .split("\n")
+              .map((line) => line.trim())
+              .filter(Boolean)
+              .slice(0, 3);
+            composer.current?.insert(
+              `${lines.map((line) => `> ${line}`).join("\n")}\n\n`,
+            );
+          },
       onAnswer: answer,
       agent: label,
     }),
@@ -488,6 +492,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       agent,
       label,
       setActionError,
+      asWorker,
     ],
   );
 
@@ -983,7 +988,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 onOrchestrate={orchestration.orchestrate}
                 onStop={stop}
                 onEditLastQueued={() => {
-                  const last = queue.at(-1);
+                  // A queued repair has nothing typed to give back (FE-91).
+                  const last = [...queue]
+                    .reverse()
+                    .find((item) => readEnvelope(item.text)?.kind !== "repair");
                   if (last) editQueued(last.id);
                 }}
               />

@@ -17,6 +17,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   useEffect,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
@@ -39,7 +40,9 @@ import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
 import {
   LEAD_SOURCE_LABELS,
   leadIcon,
+  readEnvelope,
   splitLead,
+  visibleText,
 } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import {
@@ -525,11 +528,16 @@ export const Composer = forwardRef<
       setText(next);
     },
     restore: (taken) => {
+      // A queued `/orchestrate` comes back as it was typed, never as the
+      // planning prompt it became (FE-91/U1); sending it again plans anew. A
+      // repair has nothing typed to give back.
+      const queued =
+        readEnvelope(taken.text)?.kind === "repair"
+          ? ""
+          : visibleText(taken.text);
       // Typed meanwhile: kept, after what was queued before it.
       const current = latest.current;
-      const next = current.trim()
-        ? `${taken.text}\n\n${current}`.trim()
-        : taken.text;
+      const next = current.trim() ? `${queued}\n\n${current}`.trim() : queued;
       caret.current = next.length;
       setText(next);
       setAttachments((previous) => [
@@ -590,6 +598,26 @@ export const Composer = forwardRef<
   // The row ↑↓ moved to stays in view.
   const list = useRef<HTMLDivElement>(null);
   const active = suggest ? suggest.index : -1;
+  const listId = useId();
+  const optionId = (index: number) => `${listId}-option-${index}`;
+  const activeId = suggest?.items[suggest.index]
+    ? optionId(suggest.index)
+    : null;
+  // The field and its list, tied for a screen reader (FE-91/U6): it hears
+  // that the list is open and the row ↑↓ moved to, while the caret stays put.
+  // NOTE: Set on the field's node: ChipEditor draws it and takes no ARIA
+  // props.
+  useLayoutEffect(() => {
+    const node = root.current?.querySelector<HTMLElement>('[role="textbox"]');
+    if (!node) return;
+    const open = Boolean(suggest);
+    node.setAttribute("aria-autocomplete", "list");
+    node.setAttribute("aria-expanded", String(open));
+    if (open) node.setAttribute("aria-controls", listId);
+    else node.removeAttribute("aria-controls");
+    if (activeId) node.setAttribute("aria-activedescendant", activeId);
+    else node.removeAttribute("aria-activedescendant");
+  }, [suggest, listId, activeId]);
   useLayoutEffect(() => {
     if (active < 0) return;
     list.current
@@ -709,15 +737,20 @@ export const Composer = forwardRef<
       );
       return;
     }
+    // Marked as sending before the first await: an Enter repeated while the
+    // team leads are read finds it so, and does not plan twice (FE-91/U14).
+    setSending(true);
+    setError(null);
     let teamLead: TeamLead | null = null;
     if (split) {
-      const resolved = await resolveLead(split.lead);
-      if (!resolved) return;
+      const resolved = await resolveLead(split.lead).catch(() => null);
+      if (!resolved) {
+        setSending(false);
+        return;
+      }
       teamLead = resolved.lead;
     }
     const request = split?.request ?? null;
-    setSending(true);
-    setError(null);
     const sent = text;
     const files = attachments;
     setText("");
@@ -835,7 +868,8 @@ export const Composer = forwardRef<
       !event.nativeEvent.isComposing
     ) {
       event.preventDefault();
-      void send();
+      // A held Enter sends once, not once per repeat.
+      if (!event.repeat) void send();
     }
   };
 
@@ -871,6 +905,7 @@ export const Composer = forwardRef<
       {suggest && (
         <div
           ref={list}
+          id={listId}
           role="listbox"
           aria-label={
             suggest.kind === "command"
@@ -889,6 +924,7 @@ export const Composer = forwardRef<
               <button
                 key={item.value}
                 type="button"
+                id={optionId(index)}
                 role="option"
                 aria-selected={index === suggest.index}
                 onPointerDown={(event) => event.preventDefault()}
@@ -918,6 +954,7 @@ export const Composer = forwardRef<
               <button
                 key={item.value}
                 type="button"
+                id={optionId(index)}
                 role="option"
                 aria-selected={index === suggest.index}
                 title={item.value}
@@ -948,6 +985,7 @@ export const Composer = forwardRef<
               <button
                 key={item.value}
                 type="button"
+                id={optionId(index)}
                 role="option"
                 aria-selected={index === suggest.index}
                 onPointerDown={(event) => event.preventDefault()}

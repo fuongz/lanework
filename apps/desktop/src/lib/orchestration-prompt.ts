@@ -390,6 +390,9 @@ function checkModels(
       return { ...task, agent: worker.agent };
     }
     const found = allModels().find((entry) => entry.id === task.model);
+    // Codex's list moves faster than ours: an unlisted Codex model is kept
+    // and the card warns, rather than locking the proposal (FE-91/U9).
+    if (!found && task.agent === "codex") return task;
     if (!found)
       throw new Error(
         `Task "${task.id}" names model "${task.model}", which is not in the catalog. Use one of: ${models.map((entry) => entry.model).join(", ")}`,

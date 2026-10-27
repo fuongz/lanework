@@ -37,6 +37,53 @@ import { ToolGroup } from "./turn-view.tool-group";
 const OFFSCREEN =
   "[content-visibility:auto] [contain-intrinsic-size:auto_160px]";
 
+/** Where an envelope of the app's starts, its name with it. */
+const ENVELOPE_OPEN = /<(lanework_[A-Za-z_]*)/g;
+/** A close tag, for one whose open tag landed in an earlier line. */
+const ENVELOPE_CLOSE = /<\/(lanework_[A-Za-z_]+)>/;
+/** `<lanework_` still being typed at the very end: `<`, `<lan`, `<lanework`. */
+const PARTIAL_OPEN = /<(?:l(?:a(?:n(?:e(?:w(?:o(?:r(?:k)?)?)?)?)?)?)?)?$/;
+
+/**
+ * `text` without the app's envelopes (`<lanework_proposal>` and every other
+ * `<lanework_…>` block), as it is still being written (FE-91/U2).
+ *
+ * An envelope is hidden from its open tag on, even before its close tag
+ * arrives; with `streaming`, so is a tag whose name is still coming. The
+ * card below the chat draws the proposal, so its JSON never shows.
+ */
+function withoutEnvelopes(text: string, streaming: boolean): string {
+  if (!text.includes("<")) return text;
+  let out = "";
+  let from = 0;
+  ENVELOPE_OPEN.lastIndex = 0;
+  for (;;) {
+    const open = ENVELOPE_OPEN.exec(text);
+    if (!open) break;
+    out += text.slice(from, open.index);
+    const close = `</${open[1]}>`;
+    const end = text.indexOf(close, open.index);
+    // Not closed yet: hidden to the end.
+    if (end === -1) return out.trimEnd();
+    from = end + close.length;
+    ENVELOPE_OPEN.lastIndex = from;
+  }
+  out += text.slice(from);
+  return streaming ? out.replace(PARTIAL_OPEN, "") : out;
+}
+
+/**
+ * The streamed text, without what is still inside an envelope whose open tag
+ * landed before it: up to its close tag, the delta is the envelope's.
+ */
+function deltaAfterOpen(delta: string, before: string): string {
+  const close = ENVELOPE_CLOSE.exec(delta);
+  if (!close || before.includes(`<${close[1]}`)) return delta;
+  const head = delta.slice(0, close.index);
+  if (head.includes(`<${close[1]}`)) return delta;
+  return delta.slice(close.index + close[0].length);
+}
+
 function AttachmentChip({ attachment }: { attachment: Attachment }) {
   const image = attachment.mediaType.startsWith("image/");
   return (
@@ -116,7 +163,8 @@ export interface TurnHandlers {
   agent?: string;
   /** None for a conversation that cannot be forked (Codex's). */
   onFork?: () => void;
-  onReply: (text: string) => void;
+  /** None where there is no composer to reply into (a worker's view). */
+  onReply?: (text: string) => void;
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
 }
 
@@ -137,13 +185,23 @@ function AssistantView({
   handlers: TurnHandlers;
   forking: boolean;
 }) {
-  // Streamed text joins the turn's last text, or starts a new one.
-  const blocks = turn.blocks.slice();
+  // Streamed text joins the turn's last text, or starts a new one. The app's
+  // envelopes never show, not even half-streamed (FE-91/U2).
+  const blocks = turn.blocks.map((block) =>
+    block.type === "text" && block.text.includes("<lanework_")
+      ? { ...block, text: withoutEnvelopes(block.text, false) }
+      : block,
+  );
   if (delta) {
     const last = blocks[blocks.length - 1];
+    const before = last?.type === "text" ? last.text : "";
+    const joined = withoutEnvelopes(
+      before + deltaAfterOpen(delta, before),
+      true,
+    );
     if (last?.type === "text")
-      blocks[blocks.length - 1] = { type: "text", text: last.text + delta };
-    else blocks.push({ type: "text", text: delta });
+      blocks[blocks.length - 1] = { type: "text", text: joined };
+    else blocks.push({ type: "text", text: joined });
   }
   const answered = new Set(
     blocks
@@ -221,7 +279,9 @@ function AssistantView({
           forking={forking}
           onSave={() => downloadMarkdown(text, fileNameFor(text, "note"))}
           onFork={handlers.onFork}
-          onReply={() => handlers.onReply(text)}
+          onReply={
+            handlers.onReply ? () => handlers.onReply?.(text) : undefined
+          }
         />
       )}
     </div>
