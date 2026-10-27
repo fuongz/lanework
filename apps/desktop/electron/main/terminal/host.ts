@@ -35,14 +35,20 @@ type Request = { reqId: number } & (
 );
 
 /**
- * Whether this is a test run: only a spec sets `LANEWORK_TEST_USER_DATA`.
+ * Whether this is a test run: only a spec sets `LANEWORK_TEST_USER_DATA`, and
+ * only an unpackaged build counts. Main forks this host with
+ * `--lanework-unpackaged` when `app.isPackaged` is false (`UNPACKAGED_HOST_ARG`
+ * in `index.ts`); a utility process cannot ask `app` itself.
  *
  * NOTE: The test switches are honoured only then: which agent CLIs "exist",
  * and what their tabs type. A spec then neither depends on the machine having
- * Claude nor launches it. `LANEWORK_*` never reaches a shell either way
- * (`shellEnv`).
+ * Claude nor launches it. A packaged app that inherited stray `LANEWORK_*`
+ * variables from a dev shell runs the real CLIs (INF-05). `LANEWORK_*` never
+ * reaches a shell either way (`shellEnv`).
  */
-const testing = Boolean(process.env.LANEWORK_TEST_USER_DATA);
+const testing =
+  process.argv.includes("--lanework-unpackaged") &&
+  Boolean(process.env.LANEWORK_TEST_USER_DATA);
 /** The stand-in command a test run gives `agent`, if any. */
 const binOverride = (agent: TerminalAgent) =>
   testing ? process.env[`LANEWORK_${agent.toUpperCase()}_BIN`] : undefined;

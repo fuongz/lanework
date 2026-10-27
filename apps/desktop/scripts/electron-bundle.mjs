@@ -44,11 +44,15 @@ const require = createRequire(import.meta.url);
  *
  * It copies the JS shim and this platform's prebuilt binary.
  *
- * NOTE: The copy is dereferenced and not left to electron-builder. `files` is
- * `dist/**` only, and bun's install is a store of symlinks that a packager
- * cannot be trusted to follow. What is in `dist` is what ships and what the
- * tests boot. `asarUnpack` then keeps the binary and `spawn-helper` outside
- * the archive, where they can be loaded and executed.
+ * NOTE: The copy is dereferenced and not left to electron-builder. bun's
+ * install is a store of symlinks that a packager cannot be trusted to follow.
+ * electron-builder also copies every production `dependencies` entry's
+ * node_modules into app.asar on top of `files`, so the desktop package.json
+ * has none (INF-05): node-pty is a devDependency, and this copy is the only
+ * one that ships. app.asar then holds `dist/` and package.json, and what is in
+ * `dist` is what ships and what the tests boot. `asarUnpack` keeps the binary
+ * and `spawn-helper` outside the archive, where they can be loaded and
+ * executed.
  *
  * This platform's package only. A build for another OS or CPU is made on that
  * machine, the way the prebuilds themselves are.

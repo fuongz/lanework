@@ -13,14 +13,18 @@
 // - A file that exists but is not a JSON object is refused, not "repaired".
 //   The user may be halfway through editing it, and overwriting it would
 //   destroy their work.
-// - The write is atomic (temp file + rename), so a crash mid-write cannot
-//   leave Claude Code with half a settings file.
+// - The write goes through `config-file.ts` (INF-05): atomic (temp file +
+//   rename), so a crash mid-write cannot leave Claude Code with half a
+//   settings file; through a symlink to the file it names; with the file's own
+//   mode; and never over a change Claude Code made since the read. Then the
+//   file is read and changed again, once.
 //
 // Pure apart from `readSettings` / `writeSettings`, and free of Electron, so
 // the merge rules are tested directly (`tests/handoff-settings.spec.ts`).
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { updateConfigFile } from "../config-file";
 
 /** The text in our hook's command, and in no one else's. */
 export const HOOK_MARKER = "lanework-checkpoint";
@@ -205,12 +209,38 @@ export async function readSettings(
   return parseSettings(text);
 }
 
+const settingsText = (settings: Json) =>
+  `${JSON.stringify(settings, null, 2)}\n`;
+
+/** Replace the whole settings file with `settings`. */
 export async function writeSettings(
   settings: Json,
   path = claudeSettingsPath(),
 ): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temp = `${path}.lanework-${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
-  await rename(temp, path);
+  await updateConfigFile(path, () => settingsText(settings));
+}
+
+/**
+ * Change the settings file: `change` gets what it holds now and returns the
+ * new settings, or null to leave the file as it is.
+ *
+ * Run again, once, on what the file holds then, when another tool wrote it in
+ * between.
+ *
+ * @returns Whether the file was written.
+ * @throws When the file is not a JSON object; it is never overwritten.
+ */
+export function updateSettings(
+  change: (settings: Json) => Json | null,
+  path = claudeSettingsPath(),
+): Promise<boolean> {
+  return updateConfigFile(path, (text) => {
+    const read = parseSettings(text);
+    if (!read.ok)
+      throw new Error(
+        `${path} is not valid JSON. Fix or remove it, then try again — Lanework will not overwrite it.`,
+      );
+    const next = change(read.settings);
+    return next === null ? null : settingsText(next);
+  });
 }

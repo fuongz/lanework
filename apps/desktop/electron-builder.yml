@@ -3,6 +3,12 @@ productName: Lanework
 asar: true
 directories:
   output: release
+# INF-05 (SR-04): with `files` and no runtime `dependencies` in package.json,
+# app.asar holds dist/ and package.json and nothing else. electron-builder
+# copies every production dependency's node_modules on top of `files`, so a
+# package the renderer needs goes in devDependencies (Vite bundles it), and
+# node-pty, the one module main loads unbundled, is staged into dist/ by
+# scripts/electron-bundle.mjs.
 files:
   - dist/electron/**/*
   - dist/client/**/*
@@ -24,6 +30,28 @@ asarUnpack:
 # The pty binary is a prebuilt N-API module: it runs under Electron's Node as
 # is, and there is nothing here for electron-rebuild to compile.
 npmRebuild: false
+# INF-05 (SW-01): Electron fuses, flipped in the binary at package time.
+electronFuses:
+  # Stays on: the Stop hook, the statusline, the offline MCP server and
+  # lanework-control all run as `ELECTRON_RUN_AS_NODE=1 <Lanework> <script>`
+  # from the agents' configs. Turning it off needs them moved off the app
+  # binary first (out of scope for INF-05).
+  runAsNode: true
+  # NODE_OPTIONS / NODE_EXTRA_CA_CERTS would let any process that starts the
+  # app preload code into it under Lanework's signature.
+  enableNodeOptionsEnvironmentVariable: false
+  # Off for release builds. `bun run package` overrides it back on
+  # (electron-builder.package.yml), because test:packaged attaches over
+  # --inspect.
+  enableNodeCliInspectArguments: false
+  # app.asar is checked against the hash electron-builder records in
+  # Info.plist, and only app.asar is loaded: no loose app/ folder next to it.
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  # The renderer is served from app://, never file://.
+  grantFileProtocolExtraPrivileges: false
+# INF-05 (SW-05): writes <name>.dmg.sha256 next to each DMG.
+artifactBuildCompleted: ./scripts/dmg-checksum.mjs
 mac:
   icon: build/icon.icns
   # Ad hoc ("-"), not unsigned: macOS delivers no notifications from an app
@@ -31,6 +59,11 @@ mac:
   identity: "-"
   category: public.app-category.productivity
   target: dmg
+  # INF-05 (SW-05): explicit entitlements rather than electron-builder's
+  # default, which also grants allow-unsigned-executable-memory. The inherit
+  # plist covers the Electron helpers and the dictation helper's microphone.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
   # FE-69: the dictation helper opens the microphone and runs Apple's speech
   # recognition; macOS asks in Lanework's name and needs these strings to.
   extendInfo:

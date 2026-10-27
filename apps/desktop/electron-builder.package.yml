@@ -1,0 +1,7 @@
+# INF-05 (SW-01): `bun run package` only. `test:packaged` drives the unpacked
+# app through Playwright, which attaches over `--inspect`, so this build keeps
+# the nodeCliInspect fuse on. Release builds (`dist`, `mise run app:dmg`) read
+# electron-builder.yml alone and ship with it off.
+extends: ./electron-builder.yml
+electronFuses:
+  enableNodeCliInspectArguments: true

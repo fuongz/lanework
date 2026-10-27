@@ -9,17 +9,7 @@
 // an id: one of a fixed list, or a skill, whose folder name `parseSkillId`
 // has already held to a single segment with no `..` and no leading dot (D9).
 import { createHash } from "node:crypto";
-import {
-  copyFile,
-  mkdir,
-  readdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { copyFile, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
 import {
   CONFIG_EDIT_MAX,
@@ -37,6 +27,7 @@ import {
 import { syntaxError } from "../../../shared/agent-config-text";
 import type { AgentHome } from "../agent-home";
 import { frontmatterFields, splitFrontmatter } from "../agent-setup/read";
+import { configTarget, replaceConfigFile } from "../config-file";
 import { HOOK_MARKER } from "../handoff/claude-settings";
 
 interface Spec {
@@ -117,16 +108,6 @@ export function pathOf(id: ConfigFileId, where: AgentHome): string {
   const spec = SPECS[id as FixedConfigId];
   if (!spec) throw new Error("That is not a config file.");
   return spec.path(where);
-}
-
-/**
- * The file a write lands in.
- *
- * It follows a symlink to what it points at, so a dotfiles link stays a link.
- * A file not there yet is its own target.
- */
-async function targetOf(path: string): Promise<string> {
-  return realpath(path).catch(() => path);
 }
 
 function shown(path: string, home: string): string {
@@ -319,7 +300,7 @@ async function write(
 ): Promise<ConfigWriteResult> {
   if (Buffer.byteLength(text, "utf8") > CONFIG_EDIT_MAX)
     return { status: "invalid", error: "That is too big for a config file." };
-  const target = await targetOf(path);
+  const target = await configTarget(path);
   const before = await current(target);
   if ((before ? sha256(before) : "") !== baseHash)
     return { status: "conflict" };
@@ -329,21 +310,11 @@ async function write(
   const error = syntaxError(formatOf(id), text);
   if (error) return { status: "invalid", error };
 
-  const info = before ? await stat(target) : null;
   const backup = before ? await backUp(target, now) : null;
-  await mkdir(dirname(target), { recursive: true });
-  const temp = `${target}.lanework-${process.pid}.tmp`;
-  try {
-    // The file's own mode: a config holding tokens is often 0600.
-    await writeFile(temp, text, {
-      encoding: "utf8",
-      mode: info ? info.mode & 0o777 : 0o644,
-    });
-    await rename(temp, target);
-  } catch (error) {
-    await rm(temp, { force: true });
-    throw error;
-  }
+  // The file's own mode (a config holding tokens is often 0600), through a
+  // temp file and a rename; refused when the file changed since `before`.
+  if (!(await replaceConfigFile(target, text, before)))
+    return { status: "conflict" };
   return {
     status: "ok",
     content: await readConfigFile(id, where),

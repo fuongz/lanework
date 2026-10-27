@@ -7,13 +7,17 @@
 // is Codex's whole configuration.
 // - Everything but the `lanework` entry passes through untouched.
 // - A file we cannot safely rewrite is refused.
-// - Every write is atomic (temp file + rename).
+// - Every write goes through `config-file.ts` (INF-05): atomic, through a
+//   symlink, with the file's mode, and never over a change the agent made
+//   since the read (read and changed again, once).
+// - The stdio shim is written only from a stable install (INF-05, GAP-02):
+//   see {@link shimRefusal}.
 //
 // Electron-free, so a spec can drive it against a fake home. The paths come
 // from `agentHome`, which follows `$CLAUDE_CONFIG_DIR` and `$CODEX_HOME` (the
 // variables every test launch sets); the app home follows `LANEWORK_HOME`.
 import { existsSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { MCP_HOST, MCP_URL } from "../../../shared/agent-notes";
@@ -24,6 +28,7 @@ import type {
   LaneworkMcpStatus,
 } from "../../../shared/auth";
 import { type AgentHome, agentHome } from "../agent-home";
+import { updateConfigFile } from "../config-file";
 import { shellQuote } from "../handoff/claude-settings";
 import { appHomeDir } from "../paths";
 
@@ -46,6 +51,95 @@ let resolveHome: () => AgentHome = () => agentHome(homedir());
 /** Point {@link resolveHome} at another home. */
 export function setMcpHome(resolver: () => AgentHome): void {
   resolveHome = resolver;
+}
+
+// ── Where the app runs from (INF-05, GAP-02) ─────────────────────────────────
+
+/** What decides whether this copy of the app may write the agents' shims. */
+export interface InstallFacts {
+  /** `app.isPackaged`. */
+  packaged: boolean;
+  /** `process.execPath`: the binary every shim would `exec`. */
+  execPath: string;
+  platform: NodeJS.Platform;
+  /** The user's home, for `~/Applications`. */
+  home: string;
+  /** `LANEWORK_HOME` is set: a dev or test run with its own app home. */
+  appHomeOverride: boolean;
+  /** `$APPIMAGE` is set: a Linux AppImage, run from a temporary mount. */
+  appImage: boolean;
+}
+
+/** Why this copy of the app may not write shims. */
+export type ShimRefusal = "dev" | "not-installed" | "appimage";
+
+/**
+ * Whether this copy of the app may write or repoint the shims the agents run
+ * (`~/.lanew/hooks/lanework-checkpoint`, `~/.lanew/bin/lanework-mcp`), and
+ * the entries that name them.
+ *
+ * A shim `exec`s the binary of whichever copy wrote it, so it must be a copy
+ * that stays where it is:
+ * - Packaged, on macOS: in `/Applications` or `~/Applications`. Never a DMG
+ *   volume (`/Volumes/…`) or an App Translocation path, which disappear when
+ *   the app quits.
+ * - Packaged, on Linux: never an AppImage. Its FUSE mount under /tmp is gone
+ *   once the app quits, and another local user could create that path.
+ * - Packaged anywhere: never from a temp folder.
+ * - Unpackaged (`bun run dev`, the test suite): only with `LANEWORK_HOME`
+ *   set, so a dev build never repoints the installed app's shims.
+ *
+ * @returns Null when it may, else why not.
+ */
+export function shimRefusal(facts: InstallFacts): ShimRefusal | null {
+  if (!facts.packaged) return facts.appHomeOverride ? null : "dev";
+  const path = facts.execPath;
+  if (
+    facts.platform === "linux" &&
+    (facts.appImage || path.includes("/.mount_"))
+  )
+    return "appimage";
+  const temp = [tmpdir(), "/tmp", "/private/tmp", "/var/folders"];
+  if (temp.some((dir) => path.startsWith(`${dir}${sep}`)))
+    return "not-installed";
+  if (facts.platform === "darwin") {
+    if (path.startsWith("/Volumes/") || path.includes("/AppTranslocation/"))
+      return "not-installed";
+    const folders = ["/Applications/", `${join(facts.home, "Applications")}/`];
+    if (!folders.some((folder) => path.startsWith(folder)))
+      return "not-installed";
+  }
+  return null;
+}
+
+/** What Settings shows when a switch is refused for `refusal`. */
+export function shimRefusalMessage(refusal: ShimRefusal): string {
+  switch (refusal) {
+    case "dev":
+      return "A development build does not install agent hooks or the offline MCP server. Set LANEWORK_HOME to a scratch folder to try them.";
+    case "appimage":
+      return "The AppImage runs from a temporary mount, so it cannot install agent hooks or the offline MCP server.";
+    case "not-installed":
+      return "Move Lanework to the Applications folder first. A copy run from a disk image or another folder cannot install agent hooks or the offline MCP server.";
+  }
+}
+
+/**
+ * The facts {@link shimRefusal} judges, from main.
+ *
+ * Null under plain Node (the specs), where no app runs and nothing is
+ * refused. Main sets it before anything syncs (`handoff/index.ts`).
+ */
+let installFacts: (() => InstallFacts) | null = null;
+
+/** Let main tell this module where the app runs from. */
+export function setInstallFacts(facts: () => InstallFacts): void {
+  installFacts = facts;
+}
+
+/** Why this copy may not write shims right now, or null. */
+export function currentShimRefusal(): ShimRefusal | null {
+  return installFacts ? shimRefusal(installFacts()) : null;
 }
 
 /** `~/.lanew/bin/lanework-mcp` — what a stdio entry runs. */
@@ -92,10 +186,16 @@ export function buildMcpShim(options: {
   ].join("\n");
 }
 
-/** Write the shim {@link buildMcpShim} builds and return its path. */
+/**
+ * Write the shim {@link buildMcpShim} builds and return its path.
+ *
+ * @throws When this copy of the app may not write it ({@link shimRefusal}).
+ */
 async function writeMcpShim(
   execPath: string = process.execPath,
 ): Promise<string> {
+  const refusal = currentShimRefusal();
+  if (refusal) throw new Error(shimRefusalMessage(refusal));
   const path = mcpShimPath();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(
@@ -303,17 +403,14 @@ async function readOptional(path: string): Promise<string | null> {
   });
 }
 
-/**
- * Write `text` through a temp file and a rename.
- *
- * A reader never sees a half-written config.
- */
-async function writeAtomic(path: string, text: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temp = `${path}.lanework-${process.pid}.tmp`;
-  await writeFile(temp, text, { encoding: "utf8", mode: 0o600 });
-  await rename(temp, path);
-}
+/** A config file that did not exist yet is created owner-only. */
+const NEW_CONFIG_MODE = 0o600;
+
+/** The not-valid-JSON refusal for `~/.claude.json`. */
+const notJson = (path: string) =>
+  new Error(
+    `${path} is not valid JSON. Fix or remove it, then try again — Lanework will not overwrite it.`,
+  );
 
 /**
  * The JSON object in `text`.
@@ -381,21 +478,25 @@ export async function installLaneworkMcp(
   mode: LaneworkMcpMode,
 ): Promise<void> {
   const path = configPathOf(agent);
-  const text = await readOptional(path);
+  if (agent === "claude-code" && !parseObject(await readOptional(path)))
+    throw notJson(path);
   if (mode === "local") await writeMcpShim();
   if (agent === "codex") {
-    const next = withCodexMcp(text ?? "", mode);
-    if (next !== text) await writeAtomic(path, next);
+    await updateConfigFile(
+      path,
+      (text) => withCodexMcp(text ?? "", mode),
+      NEW_CONFIG_MODE,
+    );
     return;
   }
-  const json = parseObject(text);
-  if (!json)
-    throw new Error(
-      `${path} is not valid JSON. Fix or remove it, then try again — Lanework will not overwrite it.`,
-    );
-  await writeAtomic(
+  await updateConfigFile(
     path,
-    `${JSON.stringify(withClaudeMcp(json, mode), null, 2)}\n`,
+    (text) => {
+      const json = parseObject(text);
+      if (!json) throw notJson(path);
+      return `${JSON.stringify(withClaudeMcp(json, mode), null, 2)}\n`;
+    },
+    NEW_CONFIG_MODE,
   );
 }
 
@@ -408,21 +509,19 @@ export async function removeLaneworkMcp(
   agent: LaneworkMcpAgent,
 ): Promise<void> {
   const path = configPathOf(agent);
-  const text = await readOptional(path);
-  if (text === null) return;
   if (agent === "codex") {
-    const next = withoutCodexMcp(text);
-    if (next !== text) await writeAtomic(path, next);
+    await updateConfigFile(path, (text) =>
+      text === null ? null : withoutCodexMcp(text),
+    );
     return;
   }
-  const json = parseObject(text);
-  if (!json)
-    throw new Error(
-      `${path} is not valid JSON. Fix or remove it, then try again — Lanework will not overwrite it.`,
-    );
-  const next = withoutClaudeMcp(json);
-  if (next !== json)
-    await writeAtomic(path, `${JSON.stringify(next, null, 2)}\n`);
+  await updateConfigFile(path, (text) => {
+    if (text === null) return null;
+    const json = parseObject(text);
+    if (!json) throw notJson(path);
+    const next = withoutClaudeMcp(json);
+    return next === json ? null : `${JSON.stringify(next, null, 2)}\n`;
+  });
 }
 
 /** The entry a principal's session wants, or null when it wants none. */
@@ -448,6 +547,9 @@ export async function syncLaneworkMcp(
 ): Promise<void> {
   const mode = modeFor(kind);
   if (!mode) return;
+  // A copy that may not write the shim leaves stdio entries as they are: the
+  // installed app repoints them on its next launch (INF-05, GAP-02).
+  if (mode === "local" && currentShimRefusal()) return;
   const agents = ["claude-code", "codex"] as const;
   const statuses = await Promise.all(
     agents.map((agent) => entryStatus(agent).catch(() => null)),

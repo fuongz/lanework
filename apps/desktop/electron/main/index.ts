@@ -191,6 +191,52 @@ if (devUrl && new URL(devUrl).origin !== "http://127.0.0.1:5175")
   throw new Error("Unexpected development origin");
 if (!app.isPackaged && process.env.LANEWORK_TEST_USER_DATA)
   app.setPath("userData", process.env.LANEWORK_TEST_USER_DATA);
+/**
+ * INF-05 (SR-07/SW-04): the production CSP (`protocol.ts`) on the Vite dev
+ * origin too, so dev renders the same hostile content (PR bodies,
+ * transcripts, comments) behind the same barrier. Dev only: a packaged app
+ * has no `devUrl` and is served from `app:`, where `protocol.ts` sets it.
+ *
+ * What it adds for Vite and React Refresh, and nothing more:
+ * - `'unsafe-inline'` scripts: the Refresh preamble and the TanStack Start
+ *   shell are inline, and their bytes change with every edit, so production's
+ *   per-script hashes cannot be computed here.
+ * - The HMR websocket on the dev origin in `connect-src`.
+ */
+function applyDevCsp(devUrl: string): void {
+  const origin = new URL(devUrl);
+  const policy = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    `connect-src 'self' ws://${origin.host}`,
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'none'",
+  ].join("; ");
+  session.defaultSession.webRequest.onHeadersReceived(
+    { urls: [`${origin.origin}/*`] },
+    (details, callback) => {
+      if (
+        details.resourceType !== "mainFrame" &&
+        details.resourceType !== "subFrame"
+      ) {
+        callback({});
+        return;
+      }
+      const headers = { ...details.responseHeaders };
+      for (const name of Object.keys(headers))
+        if (name.toLowerCase() === "content-security-policy")
+          delete headers[name];
+      headers["Content-Security-Policy"] = [policy];
+      callback({ responseHeaders: headers });
+    },
+  );
+}
 function createWindow() {
   const window = new BrowserWindow({
     width: 1120,
@@ -284,6 +330,7 @@ app
       allowed(permission),
     );
     registerAppProtocol(join(__dirname, "../../client"));
+    if (devUrl) applyDevCsp(devUrl);
     handle(channels.appInfo, devUrl, (args): AppInfo => {
       if (args.length) throw new Error("This operation takes no arguments");
       return {

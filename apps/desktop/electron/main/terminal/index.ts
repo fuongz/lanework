@@ -101,6 +101,11 @@ import { listPorts, stopPort } from "./ports";
 import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
 
 let host: UtilityProcess | null = null;
+/**
+ * The argument an unpackaged build forks the pty host with. `host.ts` spells
+ * the same string: it cannot import this module, which is main-only.
+ */
+const UNPACKAGED_HOST_ARG = "--lanework-unpackaged";
 let nextRequest = 1;
 const runningListeners = new Set<() => void>();
 export function onRunningChanged(listener: () => void): () => void {
@@ -126,7 +131,10 @@ const waiting = new Map<
  */
 function ensureHost(): UtilityProcess {
   if (host) return host;
-  const child = utilityProcess.fork(join(__dirname, "pty-host.cjs"), [], {
+  // INF-05 (SW-06): the host cannot ask `app.isPackaged` itself, so main
+  // tells it. Only an unpackaged host honours the test seams.
+  const args = app.isPackaged ? [] : [UNPACKAGED_HOST_ARG];
+  const child = utilityProcess.fork(join(__dirname, "pty-host.cjs"), args, {
     serviceName: "Lanework Terminal",
     stdio: "inherit",
   });

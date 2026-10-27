@@ -4,6 +4,7 @@
 // its token: it runs subcommands and reads what they print.
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
+import { app } from "electron";
 import { commandPath } from "../harness/rules";
 import { runInLoginShell } from "../harness/shell";
 
@@ -63,12 +64,14 @@ const MARK_END = "__lanework_gh_end__";
  *   `gh` is not on it. So the user's login shell is asked, like the agent
  *   probe in `terminal/agents.ts` does.
  * - `LANEWORK_GH_PATH` pins the binary, so a test can put a fake `gh` in.
+ *   Unpackaged builds only (INF-05): a packaged app that inherited a stray
+ *   variable from a dev shell would otherwise run another `gh` silently.
  * - A shell that finds nothing falls back to a bare `gh` on this process's
  *   PATH. If that is missing too, `execFile` fails with ENOENT and the
  *   caller reports `missing`.
  */
 async function locate(): Promise<GhCommand> {
-  const pinned = process.env.LANEWORK_GH_PATH;
+  const pinned = app.isPackaged ? undefined : process.env.LANEWORK_GH_PATH;
   if (pinned) return { file: pinned, path: null };
   if (process.platform === "win32") return { file: "gh", path: null };
 

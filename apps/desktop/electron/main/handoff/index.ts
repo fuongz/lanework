@@ -11,6 +11,11 @@
 // move when the app is updated or moved, so the script is rewritten on every
 // launch (`syncHandoff`). The commands in the CLIs' files never change, and
 // that keeps Codex's one-time approval valid.
+//
+// NOTE: Only a stable install writes that script (INF-05, GAP-02): see
+// `shimRefusal` in `agent-setup/mcp-entry.ts`. A copy run from a DMG, an App
+// Translocation path, an AppImage mount or a dev checkout would point every
+// agent session at a binary that is gone once it quits.
 import {
   chmod,
   mkdir,
@@ -28,6 +33,12 @@ import {
   type HookAgent,
   handoffChannels,
 } from "../../../shared/handoff";
+import {
+  currentShimRefusal,
+  type InstallFacts,
+  setInstallFacts,
+  shimRefusalMessage,
+} from "../agent-setup/mcp-entry";
 import { resolveApi } from "../auth/client";
 import { readLocalMode } from "../auth/local-mode";
 import { type MachineRecord, readRecord } from "../auth/store";
@@ -40,9 +51,9 @@ import {
   findHook,
   findHookPosition,
   readSettings,
+  updateSettings,
   withHook,
   withoutHook,
-  writeSettings,
 } from "./claude-settings";
 import {
   codexConfigPath,
@@ -57,6 +68,20 @@ import {
   secretStoreAvailable,
   writeHookSecret,
 } from "./secret";
+
+/** Where this copy of the app runs from, for `shimRefusal`. */
+function installFacts(): InstallFacts {
+  return {
+    packaged: app.isPackaged,
+    execPath: process.execPath,
+    platform: process.platform,
+    home: homedir(),
+    appHomeOverride: Boolean(process.env.LANEWORK_HOME),
+    appImage: Boolean(process.env.APPIMAGE),
+  };
+}
+// At load, before `registerAuth` or `registerAgentSetup` sync anything.
+setInstallFacts(installFacts);
 
 /** Where the hook keeps its per-session state. The hook names it too. */
 const HOOK_STATE_DIR = join(homedir(), ".cache", "lanework", "checkpoint");
@@ -207,6 +232,8 @@ async function handoffStatus(): Promise<HandoffStatus> {
 async function enable(agent: HookAgent): Promise<HandoffStatus> {
   if (!secretStoreAvailable())
     throw new Error("Handing work between agents needs macOS for now.");
+  const refusal = currentShimRefusal();
+  if (refusal) throw new Error(shimRefusalMessage(refusal));
   const record = await readRecord();
   // In local mode the hook needs no credential: it writes the checkpoint to
   // the local store for a repo linked to a local board (FE-52/D9).
@@ -223,8 +250,13 @@ async function enable(agent: HookAgent): Promise<HandoffStatus> {
   // NOTE: Rewritten only when the command differs. For Codex a new command
   // needs a new approval, so re-enabling an entry that is already right must
   // leave the file, and the approval, as they are.
-  if (findHook(read.settings) !== commandFor(agent))
-    await writeSettings(withHook(read.settings, commandFor(agent)), path);
+  await updateSettings(
+    (settings) =>
+      findHook(settings) === commandFor(agent)
+        ? null
+        : withHook(settings, commandFor(agent)),
+    path,
+  );
   const config = await readConfig();
   await writeConfig({
     ...config,
@@ -237,7 +269,11 @@ async function disable(agent: HookAgent): Promise<HandoffStatus> {
   const path = settingsPathFor(agent);
   const read = await readSettings(path);
   if (read.ok && findHook(read.settings) !== null)
-    await writeSettings(withoutHook(read.settings), path);
+    await updateSettings(
+      (settings) =>
+        findHook(settings) === null ? null : withoutHook(settings),
+      path,
+    );
   const config = await readConfig();
   const installed = { ...config.installed, [agent]: false };
   await writeConfig({ ...config, installed });
@@ -365,6 +401,9 @@ export async function forgetBoardsCache(): Promise<void> {
  */
 export async function syncHandoff(): Promise<void> {
   if (!secretStoreAvailable()) return;
+  // Not a stable install: the installed copy keeps the shim pointed at itself
+  // (INF-05, GAP-02).
+  if (currentShimRefusal()) return;
   const config = await readConfig();
   const present: HookAgent[] = [];
   for (const agent of ["claude-code", "codex"] as const) {
@@ -384,7 +423,13 @@ export async function syncHandoff(): Promise<void> {
     if (!mine && !legacy) continue;
     present.push(agent);
     if (legacy)
-      await writeSettings(withHook(read.settings, commandFor(agent)), path);
+      await updateSettings(
+        (settings) =>
+          findHook(settings)?.includes("ELECTRON_RUN_AS_NODE=1")
+            ? withHook(settings, commandFor(agent))
+            : null,
+        path,
+      );
   }
   if (!present.length) return;
   const record = await readRecord();
@@ -401,7 +446,40 @@ export async function syncHandoff(): Promise<void> {
 const isAgent = (value: unknown): value is HookAgent =>
   value === "claude-code" || value === "codex";
 
+/**
+ * Offer to move a packaged macOS app that runs from anywhere but an
+ * Applications folder (INF-05, GAP-02): a DMG, Downloads, a translocated
+ * copy. From there it installs no agent hooks or offline MCP server.
+ *
+ * NOTE: Not under a test run, which launches the packaged build from
+ * `release/` and cannot answer a dialog.
+ */
+async function offerMoveToApplications(): Promise<void> {
+  if (
+    process.platform !== "darwin" ||
+    !app.isPackaged ||
+    process.env.LANEWORK_TEST_USER_DATA ||
+    app.isInApplicationsFolder()
+  )
+    return;
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    buttons: ["Move to Applications", "Not Now"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+    message: "Move Lanework to the Applications folder?",
+    detail:
+      "Lanework is running from outside Applications, so it cannot install the checkpoint hook or the offline MCP server for Claude Code and Codex. Moving it fixes that; Lanework restarts from there.",
+  });
+  // Moves, then relaunches from Applications; quits this copy on success.
+  if (response === 0) app.moveToApplicationsFolder();
+}
+
 export function registerHandoff(devUrl?: string): void {
+  void offerMoveToApplications().catch((error: unknown) =>
+    console.warn("could not move Lanework to Applications", error),
+  );
   handle(handoffChannels.status, devUrl, (args) => {
     if (args.length) throw new Error("This operation takes no arguments");
     return handoffStatus();
