@@ -249,7 +249,7 @@ function CallRow({
 /**
  * Consecutive tool calls folded into one row.
  *
- * The row reads `Edited links.mjs · Ran 3 commands · Read 3 files`. Closed by
+ * The row reads `Edited links.mjs, ran 3 commands, read 3 files`. Closed by
  * default; open while it is the group still running, until the person
  * decides otherwise.
  */

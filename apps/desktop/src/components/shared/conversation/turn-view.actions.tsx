@@ -8,7 +8,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import { type ReactNode, useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import type { TurnUsage } from "#/../shared/conversation";
 import {
   Tooltip,
@@ -101,7 +101,10 @@ function Row({
       <div className="flex items-center gap-0.5">{children}</div>
       {time && (
         <span className="text-muted-foreground flex items-center gap-1.5 px-1 text-xs tabular-nums">
-          {align === "start" && <span aria-hidden="true">·</span>}
+          {/* A hairline sets the time apart from the actions, not a "·". */}
+          {align === "start" && (
+            <span aria-hidden="true" className="bg-border h-3 w-px" />
+          )}
           {time}
         </span>
       )}
@@ -138,10 +141,22 @@ function usageTip(usage: TurnUsage): ReactNode {
   ].filter((part) => part !== null);
   return (
     <>
-      {head.length > 0 && <span>{head.join(" · ")}</span>}
-      <span className="opacity-60">
-        {compact(usage.input)} input · {compact(usage.output)} output ·{" "}
-        {compact(usage.cached)} cached
+      {/* Figures set apart by space; the " " between them is for reading
+          the text out, flex draws none of it. */}
+      {head.length > 0 && (
+        <span className="flex gap-3">
+          {head.map((part, index) => (
+            <Fragment key={part}>
+              {index > 0 && " "}
+              <span>{part}</span>
+            </Fragment>
+          ))}
+        </span>
+      )}
+      <span className="flex gap-3 opacity-60">
+        <span>{compact(usage.input)} input</span>{" "}
+        <span>{compact(usage.output)} output</span>{" "}
+        <span>{compact(usage.cached)} cached</span>
       </span>
     </>
   );

@@ -582,7 +582,7 @@ test("V5: a Claude conversation opens as a chat, sends a prompt and switches to 
 
     // The folded group: one row, closed; a click opens its calls.
     const group = chat.getByRole("button", {
-      name: "Read login.spec.ts · Ran a command",
+      name: "Read login.spec.ts, ran a command",
     });
     await expect(group).toHaveAttribute("aria-expanded", "false");
     await expect(
@@ -647,7 +647,7 @@ test("V5: a Claude conversation opens as a chat, sends a prompt and switches to 
     await tableTurn.hover();
     await tableTurn.getByRole("button", { name: "Usage" }).hover();
     await expect(page.getByText(/Cache hit \d+%/)).toBeVisible();
-    await expect(page.getByText(/input · .* output · .* cached/)).toBeVisible();
+    await expect(page.getByText(/input .* output .* cached/)).toBeVisible();
     await page.screenshot({ path: join(SHOTS, "usage-tooltip.png") });
     await page.mouse.move(10, 10);
     await setTheme(app, page, "light");

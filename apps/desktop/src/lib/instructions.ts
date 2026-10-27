@@ -39,7 +39,7 @@ export function fileSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** Every place a file is read, as `agent · scope`, for its header. */
+/** Every place a file is read, as its agent and scope, for its header. */
 export function appearances(
   list: InstructionList,
   id: string,

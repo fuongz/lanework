@@ -922,7 +922,7 @@ async function setup(token: string | undefined): Promise<void> {
     method: "POST",
     body: JSON.stringify({
       token,
-      name: `${hostname()} · checkpoint hook`,
+      name: `${hostname()} (checkpoint hook)`,
       hostname: hostname(),
       os: platform(),
       arch: arch(),

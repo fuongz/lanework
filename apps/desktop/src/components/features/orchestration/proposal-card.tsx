@@ -460,16 +460,20 @@ export function ProposalCard({
           <h2 className="truncate text-[13px] font-medium" title={title}>
             {title}
           </h2>
-          <p className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-[11px]">
-            <TerminalKindIcon kind={leadAgent} className="size-3 shrink-0" />
-            <span className="truncate">
-              Lead · {AGENT_LABELS[leadAgent]}
-              {planning
-                ? " · planning the tasks"
-                : tasks.length > 0
-                  ? ` · ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`
-                  : ""}
+          <p className="text-muted-foreground mt-0.5 flex items-center gap-3 text-[11px]">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <TerminalKindIcon kind={leadAgent} className="size-3 shrink-0" />
+              <span className="truncate">Led by {AGENT_LABELS[leadAgent]}</span>
             </span>
+            {planning ? (
+              <span className="shrink-0">Planning the tasks</span>
+            ) : (
+              tasks.length > 0 && (
+                <span className="shrink-0 tabular-nums">
+                  {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
+                </span>
+              )
+            )}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -620,7 +624,7 @@ export function ProposalCard({
           <span>
             {approved
               ? "Approved"
-              : "Nothing runs until you approve · each worker gets its own checkout"}
+              : "Nothing runs until you approve, and each worker gets its own checkout."}
           </span>
         </footer>
       )}

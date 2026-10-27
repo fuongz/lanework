@@ -1,4 +1,5 @@
 import {
+  Attachment01Icon,
   Delete02Icon,
   PauseIcon,
   PencilEdit02Icon,
@@ -86,12 +87,22 @@ export function MessageQueue({
               className="border-border/60 flex min-h-7 items-center gap-1 border-t"
             >
               <div className="min-w-0 flex-1 py-1">
-                <p className="text-foreground/80 truncate" title={label}>
-                  {label}
+                <p
+                  className="text-foreground/80 flex min-w-0 items-center gap-2"
+                  title={label}
+                >
+                  <span className="truncate">{label}</span>
+                  {/* The count behind a paperclip rather than a "·". */}
                   {message.text.trim() && message.attachments.length > 0 && (
-                    <span className="text-muted-foreground">
-                      {" "}
-                      · {message.attachments.length} attached
+                    <span className="text-muted-foreground flex shrink-0 items-center gap-0.5 tabular-nums">
+                      <HugeiconsIcon
+                        icon={Attachment01Icon}
+                        className="size-3"
+                        strokeWidth={1.8}
+                        aria-hidden="true"
+                      />
+                      {message.attachments.length}
+                      <span className="sr-only">attached</span>
                     </span>
                   )}
                 </p>

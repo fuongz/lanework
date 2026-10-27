@@ -70,7 +70,7 @@ function check(slug: string, view: PullsView): void {
     if (!fresh || pull.authored) continue;
     void notify({
       kind: "pulls",
-      title: `New pull request · ${formatRepoRef(view.repo)}`,
+      title: `New pull request in ${formatRepoRef(view.repo)}`,
       body: `#${pull.number} ${pull.title}${pull.author ? ` — ${pull.author.login}` : ""}`,
       target: { kind: "pull", slug, number: pull.number },
       onScreen: [`/w/${encodeURIComponent(slug)}/issues/pulls`],

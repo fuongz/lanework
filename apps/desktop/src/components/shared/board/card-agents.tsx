@@ -178,7 +178,7 @@ export function CardAgentsMark({
 }
 
 /**
- * Issue detail's "Claude · working" line in the header (FE-27/D4).
+ * Issue detail's "Claude working" line in the header (FE-27/D4).
  *
  * One button per agent on this machine; a click opens that agent full size,
  * in the tab already resuming it or a new one. An agent the service saw is

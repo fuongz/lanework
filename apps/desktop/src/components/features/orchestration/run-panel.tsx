@@ -162,10 +162,18 @@ export function RunPanel({
               {RUN_LABELS[run.status]}
             </Badge>
           </h2>
-          <p className="text-muted-foreground mt-0.5 text-[11px]">
-            {accepted}/{run.tasks.length} accepted · {running} running ·{" "}
-            {run.maxWorkers} at once
-            {waiting > 0 ? ` · ${waiting} waiting for the lead` : ""}
+          {/* Counts set apart by space, not a "·" between them. */}
+          <p className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] tabular-nums">
+            <span>
+              {accepted}/{run.tasks.length} accepted
+            </span>
+            <span>{running} running</span>
+            <span>{run.maxWorkers} at once</span>
+            {waiting > 0 && (
+              <span className="text-tone-amber">
+                {waiting} waiting for the lead
+              </span>
+            )}
           </p>
         </div>
         {live && surface && (
@@ -283,7 +291,16 @@ export function RunPanel({
                       />
                       <span className="truncate">
                         {modelName(task.model) ?? task.model}
-                        {task.tier ? ` · ${task.tier}` : ""} ·{" "}
+                      </span>
+                      {task.tier && (
+                        <Badge
+                          variant="outline"
+                          className="h-4 shrink-0 px-1.5"
+                        >
+                          {task.tier}
+                        </Badge>
+                      )}
+                      <span className="text-foreground/80 shrink-0 font-medium">
                         {TASK_LABELS[task.status]}
                       </span>
                     </span>

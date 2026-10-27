@@ -3248,7 +3248,7 @@ test("FE-53: refresh asks main through IPC, spins while it waits, and an error k
       "Claude usage: 5h 3% used, weekly 0% used",
     );
     await expect(page.getByTestId("claude-usage-updated")).toHaveText(
-      "Updated 5h ago · last known",
+      "Updated 5h ago (last known)",
     );
     await expect(page.getByTestId("claude-usage-error")).toHaveText(
       "Your Claude sign-in has expired. Sign in to Claude again. Showing the last known usage.",

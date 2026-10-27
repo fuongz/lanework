@@ -209,7 +209,7 @@ export function PortsStrip({ workspace }: { workspace: string }) {
                   row.via === "terminal" ? "from a terminal" : null,
                 ]
                   .filter(Boolean)
-                  .join(" · ")}
+                  .join("\n")}
                 className="group/port hover:bg-foreground/[0.04] focus-within:bg-foreground/[0.04] flex h-8 items-center gap-2.5 rounded-md px-2 transition-colors"
               >
                 <span

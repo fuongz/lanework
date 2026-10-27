@@ -93,8 +93,9 @@ const plural = (n: number, one: string, many: string) =>
   n === 1 ? one : `${n} ${many}`;
 
 /**
- * A folded group's title (D6): `Edited links.mjs · Ran 3 commands · Read 3
- * files`, its kinds in the order they were first called.
+ * A folded group's title (D6): `Edited links.mjs, ran 3 commands, read 3
+ * files`, its kinds in the order they were first called. A sentence, not a
+ * list joined by "·".
  */
 export function groupTitle(calls: ToolCall[]): string {
   const byKind = new Map<ToolKind, ToolCall[]>();
@@ -142,7 +143,11 @@ export function groupTitle(calls: ToolCall[]): string {
         );
     }
   }
-  return parts.join(" · ");
+  return parts
+    .map((part, index) =>
+      index === 0 ? part : part.charAt(0).toLowerCase() + part.slice(1),
+    )
+    .join(", ");
 }
 
 /** `mcp__lanework__get_review` → `get_review`. */

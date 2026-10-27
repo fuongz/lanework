@@ -870,7 +870,7 @@ export async function runningProjects(): Promise<RunningProject[]> {
             ? "Working"
             : "Open";
       return {
-        label: `${name} — ${status} · PID ${entry.pid}`,
+        label: `${name} — ${status}, PID ${entry.pid}`,
         href:
           entry.kind === "shell"
             ? `${prefix}/issues`

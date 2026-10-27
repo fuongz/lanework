@@ -147,7 +147,7 @@ function toolOf(
         ...base,
         tool: `mcp__${server}__${tool}`,
         kind: "mcp",
-        summary: tidy(`${server} · ${tool}`),
+        summary: tidy(`${server}: ${tool}`),
         input: inputText(item.arguments),
         output: cut(output),
         error: item.status === "failed" || Boolean(item.error),

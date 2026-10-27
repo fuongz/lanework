@@ -65,8 +65,11 @@ export function FolderSwitcher({
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate">
                     {folder.name}
+                    {/* Set apart by weight and size, not a "·". */}
                     {at === 0 && (
-                      <span className="text-muted-foreground"> · Primary</span>
+                      <span className="text-muted-foreground ml-2 text-[11px] font-medium">
+                        Primary
+                      </span>
                     )}
                   </span>
                   <span className="text-muted-foreground truncate text-[11px]">

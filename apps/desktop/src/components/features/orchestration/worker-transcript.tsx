@@ -1,4 +1,4 @@
-import { Alert02Icon } from "@hugeicons/core-free-icons";
+import { Alert02Icon, GitBranchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -151,10 +151,21 @@ export function WorkerTranscript({
               <TerminalKindIcon kind={task.agent} className="size-3.5" />
               <span className="truncate">{task.title}</span>
             </DialogTitle>
-            <DialogDescription>
-              {modelName(task.model) ?? task.model}
-              {task.branch ? ` · ${task.branch}` : ""} · read-only: the lead
-              talks to this worker.
+            {/* The branch behind its mark rather than a "·". */}
+            <DialogDescription className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+              <span>{modelName(task.model) ?? task.model}</span>
+              {task.branch && (
+                <span className="flex min-w-0 items-center gap-1">
+                  <HugeiconsIcon
+                    icon={GitBranchIcon}
+                    className="size-3.5 shrink-0"
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                  <span className="truncate">{task.branch}</span>
+                </span>
+              )}
+              <span>Read-only: the lead talks to this worker.</span>
             </DialogDescription>
           </DialogHeader>
         )}

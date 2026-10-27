@@ -282,9 +282,13 @@ function ImageBody({
         }
         className="max-h-full min-h-0 max-w-full rounded-md object-contain [background:repeating-conic-gradient(var(--color-muted)_0_25%,transparent_0_50%)_0_0/16px_16px]"
       />
-      <p className="text-muted-foreground shrink-0 text-xs tabular-nums">
-        {natural ? `${natural.w} × ${natural.h} · ` : ""}
-        {formatSize(size)}
+      <p className="text-muted-foreground flex shrink-0 gap-3 text-xs tabular-nums">
+        {natural && (
+          <span>
+            {natural.w} × {natural.h}
+          </span>
+        )}
+        <span>{formatSize(size)}</span>
       </p>
     </div>
   );

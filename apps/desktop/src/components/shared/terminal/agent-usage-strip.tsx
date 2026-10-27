@@ -361,7 +361,7 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
         title={
           view.error ??
           (session
-            ? `${short} usage · ${resetText(session, now)}`
+            ? `${short} usage\n${resetText(session, now)}`
             : `${short} usage`)
         }
         className="text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground aria-expanded:bg-foreground/[0.04] aria-expanded:text-foreground flex h-6 min-w-0 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs whitespace-nowrap tabular-nums transition-colors"
@@ -507,7 +507,7 @@ function UsageDetails({
         data-testid={`${view.agent}-usage-updated`}
       >
         {updatedText(view.at, now)}
-        {view.stale && hasWindows ? " · last known" : ""}
+        {view.stale && hasWindows ? " (last known)" : ""}
       </p>
       {view.error && (
         <p
