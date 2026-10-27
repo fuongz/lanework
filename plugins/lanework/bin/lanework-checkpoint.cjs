@@ -39,14 +39,14 @@ var __export = (target, all) => {
 // apps/desktop/electron/hook/lanework-checkpoint.ts
 var exports_lanework_checkpoint = {};
 __export(exports_lanework_checkpoint, {
-  stripUserinfo: () => stripUserinfo,
-  snapshot: () => snapshot,
-  redact: () => redact,
-  isSecretFile: () => isSecretFile,
-  digestCodex: () => digestCodex,
-  digest: () => digest,
+  buildBody: () => buildBody,
   checkedApi: () => checkedApi,
-  buildBody: () => buildBody
+  digest: () => digest,
+  digestCodex: () => digestCodex,
+  isSecretFile: () => isSecretFile,
+  redact: () => redact,
+  snapshot: () => snapshot,
+  stripUserinfo: () => stripUserinfo
 });
 module.exports = __toCommonJS(exports_lanework_checkpoint);
 var import_node_child_process3 = require("node:child_process");
@@ -865,8 +865,8 @@ function streamWaves(streams) {
   }
   return waves;
 }
-function list(paths2) {
-  return paths2.length > 0 ? paths2.map((path) => `- \`${path}\``).join(`
+function list(paths) {
+  return paths.length > 0 ? paths.map((path) => `- \`${path}\``).join(`
 `) : "- (none)";
 }
 function buildDispatch(card, streams, checklist) {
@@ -1006,16 +1006,16 @@ function normalizeCheckpoint(request) {
     invalid(`a checkpoint weighs at most ${CHECKPOINT_MAX_BYTES} bytes`);
   return content;
 }
-function keepCheckpoints(list2) {
-  return list2.slice(0, CHECKPOINTS_KEPT);
+function keepCheckpoints(list) {
+  return list.slice(0, CHECKPOINTS_KEPT);
 }
-function latestCheckpoint(list2) {
-  const newest = list2[0];
+function latestCheckpoint(list) {
+  const newest = list[0];
   if (!newest)
     return null;
   if (newest.nextStep)
     return { ...newest, nextStepFrom: null };
-  const older = list2.slice(1).find((entry) => entry.nextStep);
+  const older = list.slice(1).find((entry) => entry.nextStep);
   if (!older)
     return { ...newest, nextStepFrom: null };
   return {
@@ -1256,9 +1256,9 @@ class LocalStore {
     return this.#all("SELECT * FROM workspace WHERE repo_url = ? AND deleted_at IS NULL ORDER BY created_at, id", repo).map(toWorkspace);
   }
   boardSummaries(remote) {
-    const list2 = remote === undefined ? this.listWorkspaces() : this.findWorkspacesByRepo(remote);
+    const list = remote === undefined ? this.listWorkspaces() : this.findWorkspacesByRepo(remote);
     const head = this.dataVersion();
-    return list2.map((workspace) => ({
+    return list.map((workspace) => ({
       workspaceId: workspace.id,
       name: workspace.name,
       role: "owner",
@@ -1603,18 +1603,18 @@ class LocalStore {
         machineId: writer.machineId ?? null,
         createdAt: this.#now()
       };
-      const list2 = keepCheckpoints([
+      const list = keepCheckpoints([
         checkpoint,
         ...parseJson(row.checkpoint, [])
       ]);
-      this.#run("UPDATE work_item SET checkpoint = ?, change_seq = ? WHERE id = ?", JSON.stringify(list2), this.#seq, row.id);
+      this.#run("UPDATE work_item SET checkpoint = ?, change_seq = ? WHERE id = ?", JSON.stringify(list), this.#seq, row.id);
       return checkpoint;
     });
   }
   listCheckpoints(ref, options = {}) {
     const row = this.#resolve(ref, options);
-    const checkpoints2 = parseJson(row.checkpoint, []);
-    return { checkpoints: checkpoints2, latest: latestCheckpoint(checkpoints2) };
+    const checkpoints = parseJson(row.checkpoint, []);
+    return { checkpoints, latest: latestCheckpoint(checkpoints) };
   }
 }
 function checkConfig(config) {
@@ -1744,10 +1744,10 @@ function checkParam(path, param, value) {
     case "object[]": {
       if (!Array.isArray(value))
         fail("a list");
-      const list2 = value;
-      if (param.minItems && list2.length < param.minItems)
+      const list = value;
+      if (param.minItems && list.length < param.minItems)
         fail(`a list of at least ${param.minItems}`);
-      return list2.map((entry, index) => {
+      return list.map((entry, index) => {
         if (!isObject(entry))
           fail(`a list of objects (item ${index})`);
         return checkShape(param, entry, `${path}[${index}].`);
@@ -1917,20 +1917,20 @@ var TOOLS = [
     run(args, { store }) {
       const remote = str2(args.repo);
       if (remote === undefined) {
-        const boards3 = store.boardSummaries();
+        const boards = store.boardSummaries();
         return {
-          boards: boards3,
-          next: boards3.length === 0 ? "No boards yet. Ask the user whether to create one for this repo (create_board)." : "Ask the user which board this repo belongs to; never pick one by its name."
+          boards,
+          next: boards.length === 0 ? "No boards yet. Ask the user whether to create one for this repo (create_board)." : "Ask the user which board this repo belongs to; never pick one by its name."
         };
       }
       const repo = normalizeRepo(remote);
       if (!repo)
         fail("invalid", `not a git remote: ${remote}`);
-      const boards2 = store.boardSummaries(remote);
+      const boards = store.boardSummaries(remote);
       return {
         repo,
-        boards: boards2,
-        next: boards2.length === 1 ? "Use this board." : boards2.length === 0 ? "No board is linked to this repo. Call list_boards without repo and ask the user which board it belongs to, or whether to create a new one; then link_repo or create_board." : "Several boards are linked to this repo. Ask the user which one."
+        boards,
+        next: boards.length === 1 ? "Use this board." : boards.length === 0 ? "No board is linked to this repo. Call list_boards without repo and ask the user which board it belongs to, or whether to create a new one; then link_repo or create_board." : "Several boards are linked to this repo. Ask the user which one."
       };
     }
   },
@@ -2178,11 +2178,11 @@ var TOOLS = [
       const retag = args.checklist_streams;
       let checklist;
       if (retag && Object.keys(retag).length > 0) {
-        const keys = new Set(current.checklist.map((item2) => item2.key));
+        const keys = new Set(current.checklist.map((item) => item.key));
         const unknown = Object.keys(retag).filter((key) => !keys.has(key));
         if (unknown.length > 0)
           fail("not_found", `checklist item ${unknown.join(", ")} not found`);
-        checklist = asInput(current.checklist).map((item2) => item2.key && (item2.key in retag) ? { ...item2, stream: retag[item2.key] ?? null } : item2);
+        checklist = asInput(current.checklist).map((item) => item.key && (item.key in retag) ? { ...item, stream: retag[item.key] ?? null } : item);
       }
       const streams = args.streams;
       if (streams)
@@ -2265,27 +2265,27 @@ var TOOLS = [
       const current = cardOf(store, board, args.card);
       const picks = args.picks;
       const items = asInput(current.checklist);
-      const byKey = new Map(items.map((item2) => [item2.key, item2]));
+      const byKey = new Map(items.map((item) => [item.key, item]));
       const missing = picks.filter((pick) => !byKey.has(pick.key));
       if (missing.length > 0)
         fail("not_found", `checklist item ${missing.map((pick) => pick.key).join(", ")} not found`);
       const tickedGroups = new Map;
       for (const pick of picks) {
-        const item2 = byKey.get(pick.key);
-        item2.checked = pick.checked;
+        const item = byKey.get(pick.key);
+        item.checked = pick.checked;
         if (pick.note !== undefined)
-          item2.note = pick.note || null;
-        if (pick.checked && item2.group) {
-          const other = tickedGroups.get(item2.group);
+          item.note = pick.note || null;
+        if (pick.checked && item.group) {
+          const other = tickedGroups.get(item.group);
           if (other)
-            fail("invalid", `${other} and ${pick.key} are options of the same pick-ONE group "${item2.group}"; pick one`);
-          tickedGroups.set(item2.group, pick.key);
+            fail("invalid", `${other} and ${pick.key} are options of the same pick-ONE group "${item.group}"; pick one`);
+          tickedGroups.set(item.group, pick.key);
         }
       }
       for (const [group, key] of tickedGroups)
-        for (const item2 of items)
-          if (item2.group === group && item2.key !== key)
-            item2.checked = false;
+        for (const item of items)
+          if (item.group === group && item.key !== key)
+            item.checked = false;
       const item = store.updateWorkItem(current.id, { checklist: items }, {
         workspace: board.id,
         ifRevision: typeof args.revision === "number" ? args.revision : current.revision
@@ -2576,7 +2576,7 @@ function handleLine(session, line) {
     ];
   }
   if (Array.isArray(parsed)) {
-    const answers = parsed.map((message) => session.handle(message)).filter((answer2) => answer2 !== null);
+    const answers = parsed.map((message) => session.handle(message)).filter((answer) => answer !== null);
     return answers.length > 0 ? [JSON.stringify(answers)] : [];
   }
   const answer = session.handle(parsed);
@@ -2948,8 +2948,8 @@ function localBoardFor(remote, path = localStorePath()) {
     return null;
   const store = openLocalStore({ path });
   try {
-    const boards2 = store.findWorkspacesByRepo(remote).filter((workspace) => !workspace.cloudId);
-    const board = boards2.length === 1 ? boards2[0] : undefined;
+    const boards = store.findWorkspacesByRepo(remote).filter((workspace) => !workspace.cloudId);
+    const board = boards.length === 1 ? boards[0] : undefined;
     if (!board) {
       store.close();
       return null;
@@ -3140,10 +3140,10 @@ function repoPath(path, root) {
 function humanText(content) {
   const raw = typeof content === "string" ? content : Array.isArray(content) ? content.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text).join(`
 `) : "";
-  const text2 = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
-  if (!text2 || text2.startsWith("<"))
+  const text = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+  if (!text || text.startsWith("<"))
     return null;
-  return text2;
+  return text;
 }
 function resultText(content) {
   if (typeof content === "string")
@@ -3304,23 +3304,23 @@ function digestCodex(transcript, root, lastMessage) {
   const scriptFiles = [];
   const scriptCommands = [];
   const calls = new Map;
-  const touch = (list2, path) => {
+  const touch = (list, path) => {
     const rel = repoPath(path.trim().replace(/^file:\/\//, ""), root);
     if (!rel)
       return;
-    const at = list2.indexOf(rel);
+    const at = list.indexOf(rel);
     if (at !== -1)
-      list2.splice(at, 1);
-    list2.push(rel);
+      list.splice(at, 1);
+    list.push(rel);
   };
-  const typed = (text2) => {
-    if (!text2 || text2.startsWith("<") || text2.startsWith("# AGENTS.md"))
+  const typed = (text) => {
+    if (!text || text.startsWith("<") || text.startsWith("# AGENTS.md"))
       return;
-    request = text2;
+    request = text;
     if (replies.length)
       previousReplies = replies;
     replies = [];
-    for (const m of text2.match(TASK_ID) ?? [])
+    for (const m of text.match(TASK_ID) ?? [])
       if (!NOT_TASK_ID.test(m))
         typedTaskId = m;
   };
@@ -3341,9 +3341,9 @@ function digestCodex(transcript, root, lastMessage) {
       if (item.type === "UserMessage")
         typed(texts(item.content));
       else if (item.type === "AgentMessage") {
-        const text2 = texts(item.content);
-        if (text2)
-          replies.push(text2);
+        const text = texts(item.content);
+        if (text)
+          replies.push(text);
       } else if (item.type === "CommandExecution") {
         const argv = Array.isArray(item.command) ? item.command : [];
         const script = String(argv[argv.length - 1] ?? "");
@@ -3477,12 +3477,12 @@ async function boardFor(remote, secret) {
     log(`board lookup ${res.status} for ${remote}`);
     return null;
   }
-  const { boards: boards2 } = await res.json();
-  if (boards2.length !== 1) {
-    log(`${boards2.length} boards linked to ${remote}; not guessing`);
+  const { boards } = await res.json();
+  if (boards.length !== 1) {
+    log(`${boards.length} boards linked to ${remote}; not guessing`);
     return null;
   }
-  const id = boards2[0]?.workspaceId ?? null;
+  const id = boards[0]?.workspaceId ?? null;
   if (id)
     writeJson(BOARDS_FILE, { ...cache, [key]: { id, at: Date.now() } });
   return id;
@@ -3544,14 +3544,14 @@ function snapshot(root, taskId, untracked = PUSH_WIP_UNTRACKED) {
     if (tree === git(root, ["rev-parse", "HEAD^{tree}"])) {
       return { wipRef: null, wipSha: null };
     }
-    let refused2;
+    let refused;
     try {
-      refused2 = refusal(root, env);
+      refused = refusal(root, env);
     } catch (error) {
-      refused2 = `it could not be checked for secrets (${String(error)})`;
+      refused = `it could not be checked for secrets (${String(error)})`;
     }
-    if (refused2) {
-      log(`wip for ${taskId} not pushed: ${refused2}`);
+    if (refused) {
+      log(`wip for ${taskId} not pushed: ${refused}`);
       return { wipRef: null, wipSha: null };
     }
     const sha = git(root, ["commit-tree", tree, "-p", "HEAD", "-m", `lanework wip ${taskId}`], {
@@ -3633,9 +3633,9 @@ async function checkpointTo(local, d, input, root, remote) {
     return;
   }
   const head = tryGit(root, ["rev-parse", "HEAD"]);
-  const status2 = tryGit(root, ["status", "--porcelain"]) ?? "";
+  const status = tryGit(root, ["status", "--porcelain"]) ?? "";
   const diff = tryGit(root, ["diff", "HEAD"]) ?? "";
-  const code = sha256([d.taskId, head, status2, sha256(diff)].join("\x00"));
+  const code = sha256([d.taskId, head, status, sha256(diff)].join("\x00"));
   const stateFile = import_node_path6.join(STATE_DIR, `session-${sha256(input.session_id ?? "")}.json`);
   const last = readJson(stateFile, null);
   if (last && last.code === code && Date.now() - last.at < THIN_MS)

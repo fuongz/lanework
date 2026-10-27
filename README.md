@@ -6,7 +6,7 @@ UI preset: **`b1D0eCA6`**, Base UI / Mira, neutral, Inter, Hugeicons, with
 
 ## Run
 
-Use Node.js 24 LTS and exactly Bun 1.3.11, the version `packageManager` pins
+Use Node.js 24 LTS and exactly Bun 1.4.4, the version `packageManager` pins
 (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ```sh

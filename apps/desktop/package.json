@@ -14,7 +14,7 @@
     "package": "bun run build && electron-builder --dir --config electron-builder.package.yml",
     "dist": "bun run build && electron-builder",
     "test": "playwright test --project=production",
-    "test:unit": "bun test ./electron",
+    "test:unit": "node scripts/test-unit.mjs",
     "test:dev": "playwright test --project=development",
     "test:packaged": "playwright test --project=packaged",
     "gallery": "playwright test --project=gallery",

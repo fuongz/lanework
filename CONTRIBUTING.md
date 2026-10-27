@@ -14,11 +14,11 @@ only change what lives in this repository.
 
 ## Run the desktop app
 
-Use Node.js 24 LTS and **exactly Bun 1.3.11**, the version `packageManager`
+Use Node.js 24 LTS and **exactly Bun 1.4.4**, the version `packageManager`
 in `package.json` pins. The committed plugin bundle is compared byte for byte
 with a fresh build, and bun's bundler output changes between releases, so
 `build:plugin` and the gate refuse any other bun. With mise:
-`mise use bun@1.3.11`.
+`mise use bun@1.4.4`.
 
 ```sh
 bun install --frozen-lockfile

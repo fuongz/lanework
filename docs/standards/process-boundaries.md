@@ -120,7 +120,7 @@ Not gated.
 
 - An **Electron-free unit** is a colocated `*.test.ts` beside the file it
   tests, written against `node:test` and `node:assert` and run by
-  `bun run test:unit` (`bun test ./electron`).
+  `bun run test:unit` (`scripts/test-unit.mjs`, one `bun test` per file).
 - Anything that **boots the app** is a Playwright spec in
   `apps/desktop/tests/*.spec.ts`, run by `bun run test` after
   `bun run build`. A spec that boots the app sets `LANEWORK_HOME`.

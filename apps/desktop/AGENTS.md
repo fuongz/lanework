@@ -55,7 +55,7 @@ Details: [process boundaries](../../docs/standards/process-boundaries.md),
 | Production is a static Start SPA over `app://lanework`; no server functions without a reviewed design. | Not gated | [README](../../README.md#runtime-boundaries) |
 | Dev uses port 5175; change Vite, Electron's origin check and the dev launcher together. | Not gated | [README](../../README.md#run) |
 | TypeScript is strict (`tsconfig.base.json`); renderer and Electron typecheck separately. | `typecheck` | `tsconfig.json`, `tsconfig.node.json` |
-| The committed plugin bundle matches a fresh build on Bun 1.3.11. | `build-plugin.mjs --check` | Root AGENTS.md |
+| The committed plugin bundle matches a fresh build on Bun 1.4.4. | `build-plugin.mjs --check` | Root AGENTS.md |
 | Never commit generated route trees, build output, test profiles or installers. | Not gated | — |
 
 ## Tests
