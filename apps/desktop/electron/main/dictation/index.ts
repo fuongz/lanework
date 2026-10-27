@@ -5,12 +5,16 @@
 // window's permission handler keeps refusing `media`, and the microphone is
 // open only while a helper runs. One runs at a time: a new start cancels the
 // old one, and the app's quit kills it.
+//
+// NOTE: A start needs a focused window, and main stops any dictation after
+// `SESSION_MAX_MS` (FE-81/D2): a script in the renderer cannot open the
+// microphone behind the person's back, nor keep it open.
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { release } from "node:os";
 import { join, sep } from "node:path";
 import { createInterface } from "node:readline";
-import { app } from "electron";
+import { app, BrowserWindow } from "electron";
 import {
   type DictationEvent,
   dictationChannels,
@@ -46,6 +50,16 @@ function supported(): boolean {
     existsSync(helperPath())
   );
 }
+
+/** The longest one dictation runs before main stops it (FE-81/D2). */
+const SESSION_MAX_MS = 120_000;
+
+/**
+ * How long a stopped helper has to report its words before it is killed.
+ *
+ * Only the cap's own stop waits on it.
+ */
+const STOP_GRACE_MS = 10_000;
 
 /** The one helper running, and the session it serves. */
 let running: { session: number; child: ChildProcess } | null = null;
@@ -88,6 +102,20 @@ function start(locale: string, hints: string[]): number {
   });
   running = { session, child };
   let reported = false;
+  // The cap: stop, so the words so far still arrive. A helper that does not
+  // finish soon after is killed, and its exit still ends the session in the
+  // renderer.
+  let grace: ReturnType<typeof setTimeout> | undefined;
+  const cap = setTimeout(() => {
+    end(session, "stop");
+    grace = setTimeout(() => {
+      if (running?.session === session) child.kill();
+    }, STOP_GRACE_MS);
+  }, SESSION_MAX_MS);
+  const clearCap = () => {
+    clearTimeout(cap);
+    clearTimeout(grace);
+  };
   // stdio is "pipe", so stdout is always there.
   createInterface({ input: child.stdout as NodeJS.ReadableStream }).on(
     "line",
@@ -127,10 +155,12 @@ function start(locale: string, hints: string[]): number {
     },
   );
   child.on("error", (error) => {
+    clearCap();
     reported = true;
     send({ session, type: "error", code: "spawn", message: error.message });
   });
   child.on("exit", () => {
+    clearCap();
     const cancelled = running?.session !== session;
     if (!cancelled) running = null;
     // A helper that dies without a word, a crash, still ends the session.
@@ -150,6 +180,8 @@ export function registerDictation(devUrl: string | undefined): void {
   handle(dictationChannels.supported, devUrl, () => supported());
   handle(dictationChannels.start, devUrl, ([locale, hints]) => {
     if (!supported()) throw new Error("Dictation is not available on this Mac");
+    if (!BrowserWindow.getFocusedWindow())
+      throw new Error("Dictation starts only in a focused window");
     if (!isDictationLocale(locale))
       throw new Error("Unknown dictation language");
     if (!Array.isArray(hints) || hints.length > HINT_MAX)
