@@ -11,6 +11,7 @@ interface ConversationState {
   conversation: Conversation | null;
   error: string | null;
   engine: EngineState;
+  engineLoaded: boolean;
   /**
    * Text streamed for the open turn since the last read (D1): drawn after
    * its last text, dropped as soon as a read brings the line itself.
@@ -32,6 +33,7 @@ interface Inner {
   conversation: Conversation | null;
   error: string | null;
   engine: EngineState;
+  engineLoaded: boolean;
   delta: string;
   permissions: PermissionRequest[];
 }
@@ -42,6 +44,7 @@ const empty = (key: string): Inner => ({
   conversation: null,
   error: null,
   engine: IDLE,
+  engineLoaded: false,
   delta: "",
   permissions: [],
 });
@@ -125,7 +128,9 @@ export function useConversation(
       .then((engine) => {
         if (!gone)
           setState((previous) =>
-            previous.key === key ? { ...previous, engine } : previous,
+            previous.key === key
+              ? { ...previous, engine, engineLoaded: true }
+              : previous,
           );
       })
       .catch(() => {});
@@ -171,6 +176,7 @@ export function useConversation(
               ? {
                   ...previous,
                   engine: event.engine,
+                  engineLoaded: true,
                   // A turn that ended streams no more.
                   delta: event.engine.state === "running" ? previous.delta : "",
                   permissions:
@@ -261,6 +267,7 @@ export function useConversation(
     conversation: mine.conversation,
     error: mine.error,
     engine: mine.engine,
+    engineLoaded: mine.engineLoaded,
     delta: mine.delta,
     permissions: mine.permissions,
     setEngine,

@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   agentOfModel,
   type ComposerSettings,
@@ -8,7 +8,6 @@ import {
 } from "#/../shared/conversation";
 import { setChatAgent } from "#/components/shared/conversation/chat-agent";
 import { Composer } from "#/components/shared/conversation/composer";
-import { handFirstMessage } from "#/components/shared/conversation/first-message";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -16,6 +15,7 @@ import {
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { ipcMessage } from "#/lib/ipc-error";
 import { useBoard } from "#/stores/board";
+import { handSentMessage } from "#/stores/conversation-sends";
 import { useNewChats } from "#/stores/new-chats";
 
 const ROUTE = "/_app/w/$slug/agents/chat/new" as const;
@@ -29,8 +29,19 @@ const ROUTE = "/_app/w/$slug/agents/chat/new" as const;
  */
 export function NewConversationView() {
   const { slug } = useParams({ from: ROUTE });
+  return <NewConversationPage key={slug} slug={slug} />;
+}
+
+function NewConversationPage({ slug }: { slug: string }) {
   const workspace = useWorkspaceKey(slug);
   const navigate = useNavigate();
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   // The checkout's folder name, as the person knows the project on disk.
   const name = useBoard((state) => {
     const found = state.workspaces.find((entry) => entry.slug === slug);
@@ -79,7 +90,10 @@ export function NewConversationView() {
         settings,
       });
       end(workspace, conversation);
-      handFirstMessage(conversation, {
+      handSentMessage(JSON.stringify([slug, conversation]), {
+        key: "first",
+        expect: 1,
+        after: 0,
         text,
         attachments: names.map((entry) => ({
           name: entry.name,
@@ -87,11 +101,12 @@ export function NewConversationView() {
           path: null,
         })),
       });
-      void navigate({
-        to: "/w/$slug/agents/chat/$conversation",
-        params: { slug, conversation },
-        replace: true,
-      });
+      if (mounted.current)
+        void navigate({
+          to: "/w/$slug/agents/chat/$conversation",
+          params: { slug, conversation },
+          replace: true,
+        });
       return true;
     } catch (caught) {
       end(workspace, null);

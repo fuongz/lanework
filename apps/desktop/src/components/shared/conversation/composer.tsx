@@ -27,8 +27,11 @@ import {
 } from "#/../shared/conversation";
 import { insertDictation } from "#/../shared/dictation";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
-import { readDraft, writeDraft } from "#/lib/conversation-draft";
 import { cn } from "#/lib/utils";
+import {
+  type PendingAttachment as Pending,
+  useComposerDraft,
+} from "#/stores/conversation-sends";
 import {
   DictationBar,
   DictationButton,
@@ -47,13 +50,6 @@ export interface ComposerHandle {
 export interface Unqueued {
   text: string;
   attachments: { name: string; image: boolean; out: OutgoingAttachment }[];
-}
-
-interface Pending {
-  key: string;
-  name: string;
-  image: boolean;
-  out: OutgoingAttachment;
 }
 
 /** A `/` at a line's start, or an `@` after a space: what the caret is in. */
@@ -80,9 +76,6 @@ function trigger(
 }
 
 let keys = 0;
-
-/** How long typing rests before the draft is written down. */
-const DRAFT_DELAY = 300;
 
 function readBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -156,10 +149,17 @@ export const Composer = forwardRef<
   },
   ref,
 ) {
-  const [text, setText] = useState(() => (draftKey ? readDraft(draftKey) : ""));
-  const [attachments, setAttachments] = useState<Pending[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  const {
+    text,
+    setText,
+    attachments,
+    setAttachments,
+    error,
+    setError,
+    sending,
+    setSending,
+    isSending,
+  } = useComposerDraft(workspace, draftKey);
   const [dragging, setDragging] = useState(false);
   const [suggest, setSuggest] = useState<{
     kind: SuggestionKind;
@@ -196,19 +196,8 @@ export const Composer = forwardRef<
     node.setSelectionRange(node.value.length, node.value.length);
   }, []);
 
-  // The draft is written once typing rests — and at once on the way out, so a
-  // switch inside the delay keeps the last keys too.
   const latest = useRef(text);
   latest.current = text;
-  useEffect(() => {
-    if (!draftKey) return;
-    const timer = setTimeout(() => writeDraft(draftKey, text), DRAFT_DELAY);
-    return () => clearTimeout(timer);
-  }, [draftKey, text]);
-  useEffect(() => {
-    if (!draftKey) return;
-    return () => writeDraft(draftKey, latest.current);
-  }, [draftKey]);
 
   // Dictation: the words heard go in where the caret was when the microphone
   // opened, replacing what was selected — shown live, kept on ✓.
@@ -377,7 +366,7 @@ export const Composer = forwardRef<
   const empty = !text.trim() && attachments.length === 0;
 
   const send = async () => {
-    if (empty || sending) return;
+    if (empty || isSending()) return;
     setSending(true);
     setError(null);
     const sent = text;
@@ -385,16 +374,22 @@ export const Composer = forwardRef<
     setText("");
     setAttachments([]);
     setSuggest(null);
-    const ok = await onSend(
-      sent.trim(),
-      files.map((file) => file.out),
-      files.map((file) => ({ name: file.name, image: file.image })),
-    );
+    let ok = false;
+    try {
+      ok = await onSend(
+        sent.trim(),
+        files.map((file) => file.out),
+        files.map((file) => ({ name: file.name, image: file.image })),
+      );
+    } catch {
+      setError("Could not send. Your message has been restored.");
+    }
     setSending(false);
     if (!ok) {
       // Nothing was sent: the words come back, not lost.
-      setText((current) => current || sent);
-      setAttachments((current) => (current.length ? current : files));
+      setError("Could not send. Your message has been restored.");
+      setText((current) => (current ? `${sent}\n\n${current}` : sent));
+      setAttachments((current) => [...files, ...current]);
     }
   };
 
@@ -494,7 +489,7 @@ export const Composer = forwardRef<
     if (!error) return;
     const timer = setTimeout(() => setError(null), 6000);
     return () => clearTimeout(timer);
-  }, [error]);
+  }, [error, setError]);
 
   const stopping = working && empty;
 

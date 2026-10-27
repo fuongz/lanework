@@ -17,7 +17,6 @@ import {
 import {
   AGENT_LABELS,
   type AssistantTurn,
-  type Attachment,
   type ComposerSettings,
   DEFAULT_SETTINGS,
   type OutgoingAttachment,
@@ -37,7 +36,6 @@ import {
   type ComposerHandle,
   type Unqueued,
 } from "#/components/shared/conversation/composer";
-import { takeFirstMessage } from "#/components/shared/conversation/first-message";
 import {
   promptLines,
   type TurnHandlers,
@@ -71,6 +69,7 @@ import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
+import { useConversationSends } from "#/stores/conversation-sends";
 import { FileOpenerProvider } from "./file-opener";
 import { JobCapsules } from "./job-capsules";
 import { MessageQueue } from "./message-queue";
@@ -82,19 +81,6 @@ const ROUTE = "/_app/w/$slug/agents/chat/$conversation" as const;
 const NO_PERMISSIONS: PermissionRequest[] = [];
 /** Closer than this to the end and the view sticks to it as text streams. */
 const BOTTOM_SLACK = 48;
-
-/** A message sent from here that the transcript does not have yet. */
-interface Sent {
-  key: string;
-  text: string;
-  attachments: Attachment[];
-  /**
-   * User turns the transcript must reach for this one to be in it.
-   *
-   * `null` while the engine holds it back: it is counted once it goes.
-   */
-  expect: number | null;
-}
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
 const NOTHING: QueuedMessage[] = [];
@@ -126,14 +112,27 @@ export function ConversationView() {
   const { slug, conversation } = useParams({ from: ROUTE });
   // NOTE: Keyed by WHICH conversation: the route stays mounted from one to the
   // next, and the last one's scroll, draft and folds are not this one's.
-  return <ConversationPage key={conversation} slug={slug} id={conversation} />;
+  return (
+    <ConversationPage
+      key={`${slug}:${conversation}`}
+      slug={slug}
+      id={conversation}
+    />
+  );
 }
 
 function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const workspace = useWorkspaceKey(slug);
   const navigate = useNavigate();
-  const { conversation, error, engine, delta, permissions, setEngine } =
-    useConversation(workspace, id);
+  const {
+    conversation,
+    error,
+    engine,
+    engineLoaded,
+    delta,
+    permissions,
+    setEngine,
+  } = useConversation(workspace, id);
   // The CLI whose conversation it is — Claude Code or Codex — once read.
   const agent = conversation?.agent ?? null;
   const label = AGENT_LABELS[agent ?? "claude"];
@@ -154,11 +153,12 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
   // A conversation just started from the new page: its first message,
   // until the transcript has it.
-  const [sent, setSent] = useState<Sent[]>(() => {
-    const first = takeFirstMessage(id);
-    return first ? [{ key: "first", ...first, expect: 1 }] : [];
-  });
-  const [actionError, setActionError] = useState<string | null>(null);
+  const {
+    sent,
+    setSent,
+    error: actionError,
+    setError: setActionError,
+  } = useConversationSends(JSON.stringify([slug, id]));
   const [forking, setForking] = useState(false);
   const [switching, setSwitching] = useState(false);
   const composer = useRef<ComposerHandle>(null);
@@ -189,7 +189,11 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   }, [loaded, own, settings, agent]);
 
   const turns = conversation?.turns ?? [];
-  const users = turns.filter((turn) => turn.role === "user").length;
+  const userTurns = useMemo(
+    () => conversation?.turns.filter((turn) => turn.role === "user") ?? [],
+    [conversation],
+  );
+  const users = userTurns.length;
   // What the engine holds back, drawn above the composer instead.
   const queue = (engine.state !== "terminal" && engine.queue) || NOTHING;
   const paused = engine.state !== "terminal" && engine.paused === true;
@@ -208,36 +212,50 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           )
         : previous,
     );
-  }, [users]);
+  }, [users, setSent]);
 
   const usersRef = useRef(users);
   usersRef.current = users;
   const heldRef = useRef(held);
   heldRef.current = held;
+  const userTurnsRef = useRef(userTurns);
+  userTurnsRef.current = userTurns;
   /** Queued messages being taken back out: not gone to the CLI. */
   const taking = useRef(new Set<string>());
   /** Held messages the engine let go: in flight now, landing in order. */
   const release = useCallback(() => {
+    if (!engineLoaded || !loaded) return;
     setSent((previous) => {
       const now = usersRef.current;
       let flying = previous.filter(
         (entry) => entry.expect !== null && now < entry.expect,
       ).length;
       let changed = false;
-      const next = previous.map((entry) => {
+      const next = previous.flatMap((entry) => {
         if (
           entry.expect !== null ||
           heldRef.current.has(entry.key) ||
           taking.current.has(entry.key)
         )
-          return entry;
+          return [entry];
         changed = true;
+        // A queued turn may already have landed while this page was closed.
+        if (
+          userTurnsRef.current
+            .slice(entry.after)
+            .some(
+              (turn) =>
+                turn.text === entry.text &&
+                turn.attachments.length === entry.attachments.length,
+            )
+        )
+          return [];
         flying++;
-        return { ...entry, expect: now + flying };
+        return [{ ...entry, expect: now + flying }];
       });
       return changed ? next : previous;
     });
-  }, []);
+  }, [engineLoaded, loaded, setSent]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: on a change of what is held.
   useEffect(release, [held, release]);
 
@@ -376,7 +394,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         setActionError(ipcMessage(caught, "Could not answer the request."));
       }
     },
-    [workspace, id],
+    [workspace, id, setActionError],
   );
 
   const handlers = useMemo<TurnHandlers>(
@@ -415,7 +433,17 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       onAnswer: answer,
       agent: label,
     }),
-    [workspace, id, forking, navigate, slug, answer, agent, label],
+    [
+      workspace,
+      id,
+      forking,
+      navigate,
+      slug,
+      answer,
+      agent,
+      label,
+      setActionError,
+    ],
   );
 
   const send = async (
@@ -432,6 +460,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       {
         key,
         text,
+        after: users,
         attachments: names.map((entry) => ({
           name: entry.name,
           mediaType: entry.image ? "image/*" : "text/plain",
