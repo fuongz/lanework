@@ -81,7 +81,8 @@ function needsInputText(needs: NeedsInput): string {
 /**
  * A run's workers (FE-87): each one's status, what it waits on, and the
  * controls the user has over the run. A worker opens its transcript,
- * read-only.
+ * read-only. A task the lead gave wider write scopes than the user approved
+ * waits here for Allow, or the cancel button (FE-89/D11).
  */
 export function RunPanel({
   slug,
@@ -122,6 +123,9 @@ export function RunPanel({
   const accepted = run.tasks.filter((task) => task.accepted).length;
   const running = run.tasks.filter((task) => task.status === "running").length;
   const waiting = run.tasks.filter((task) => task.needsInput).length;
+  const yours = run.tasks.filter(
+    (task) => task.status === "queued" && task.scopeApproval?.length,
+  ).length;
   const live = run.status === "active" || run.status === "paused";
 
   return (
@@ -151,6 +155,9 @@ export function RunPanel({
               <span className="text-tone-amber">
                 {waiting} waiting for the lead
               </span>
+            )}
+            {yours > 0 && (
+              <span className="text-tone-amber">{yours} waiting for you</span>
             )}
           </p>
         </div>
@@ -233,6 +240,11 @@ export function RunPanel({
         <ul aria-label="Workers" className="border-border border-t py-1">
           {run.tasks.map((task) => {
             const cancellable = live && CANCELLABLE.includes(task.status);
+            // The lead asked for more than the user approved (FE-89/D11).
+            const wider =
+              live && task.status === "queued" && task.scopeApproval?.length
+                ? task.scopeApproval
+                : null;
             return (
               <li
                 key={task.id}
@@ -297,6 +309,21 @@ export function RunPanel({
                         {needsInputText(task.needsInput)}
                       </span>
                     )}
+                    {task.needsInput?.kind === "permission" &&
+                      task.needsInput.input && (
+                        <span
+                          className="text-muted-foreground line-clamp-3 font-mono text-[11px] break-all whitespace-pre-wrap"
+                          title={task.needsInput.input}
+                        >
+                          {task.needsInput.input}
+                        </span>
+                      )}
+                    {wider && (
+                      <span className="text-tone-amber text-[11px] break-words">
+                        The lead wants it to write beyond what you approved:{" "}
+                        <span className="font-mono">{wider.join(", ")}</span>
+                      </span>
+                    )}
                     {task.error && (
                       <span className="text-destructive line-clamp-2 text-[11px]">
                         {task.error}
@@ -304,6 +331,24 @@ export function RunPanel({
                     )}
                   </span>
                 </button>
+                {wider && surface && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    aria-label={`Allow ${task.title} to write ${wider.join(", ")}`}
+                    title="Allow these write scopes, then the worker starts"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void act(
+                        `scope:${task.id}`,
+                        () => surface.approveScope(workspace, run.id, task.id),
+                        "Could not approve the write scope.",
+                      )
+                    }
+                  >
+                    {busy === `scope:${task.id}` ? "Allowing…" : "Allow"}
+                  </Button>
+                )}
                 {cancellable && surface && (
                   <Button
                     size="icon-sm"

@@ -14,6 +14,14 @@
 // fsmonitor, no signature program. The baseline commit is the app's own
 // bookkeeping on a scratch branch, never the user's history.
 //
+// NOTE: A worker can write its worktree's `.git` file. Git follows it, so a
+// worker that pointed it at a folder of its own (with a clean filter in its
+// config) would run code in this process on the next `git add` (FE-89/D8).
+// So every call on a worktree names its git dir and work tree explicitly
+// (`WorkerTree`): the admin dir main found under the main checkout's
+// `.git/worktrees/` when it made the worktree. Before each one, the `.git`
+// file must still point there, or the call throws `WorktreePointerError`.
+//
 // Nothing here imports Electron.
 
 import { execFile } from "node:child_process";
@@ -29,12 +37,11 @@ import {
   realpath,
   rename,
   rm,
-  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { MAX_OUTPUT, READ_FLAGS } from "../git/runner";
 import { resolvedPath, within } from "./scopes";
 
@@ -51,6 +58,23 @@ const COMMIT_FLAGS = [
 interface Run {
   stdout: Buffer;
   code: number;
+}
+
+/** The app's env, without anything that would point git elsewhere. */
+function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+  for (const name of [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+  ])
+    delete env[name];
+  return env;
 }
 
 /**
@@ -74,7 +98,7 @@ function git(
         maxBuffer: MAX_OUTPUT,
         windowsHide: true,
         encoding: "buffer",
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        env: gitEnv(),
       },
       (error, stdout, stderr) => {
         if (!error) return resolve({ stdout, code: 0 });
@@ -90,6 +114,97 @@ function git(
 
 async function gitText(cwd: string, args: string[]): Promise<string> {
   return (await git(cwd, args)).stdout.toString("utf8");
+}
+
+/** A worker's worktree, and the git dir main computed for it. */
+export interface WorkerTree {
+  /** The worktree's folder, resolved. */
+  path: string;
+  /** Its admin dir under the main checkout's `.git/worktrees/`, resolved. */
+  gitDir: string;
+}
+
+/** The worktree's `.git` file no longer points at its own admin dir. */
+export class WorktreePointerError extends Error {
+  override name = "WorktreePointerError";
+}
+
+/** Where a `.git` file points, resolved; null when it is not a plain one. */
+async function pointerOf(tree: string): Promise<string | null> {
+  const dotGit = join(tree, ".git");
+  const info = await lstat(dotGit).catch(() => null);
+  if (!info?.isFile() || info.size > 4096) return null;
+  const match = /^gitdir: (.+?)\s*$/.exec(await readFile(dotGit, "utf8"));
+  if (!match?.[1]) return null;
+  return realpath(resolve(tree, match[1])).catch(() => null);
+}
+
+/**
+ * The admin dir of the worktree `tree` of `root`, checked: `tree/.git`
+ * points at a folder directly in `root`'s `.git/worktrees/`, and that folder
+ * points back at `tree/.git`.
+ *
+ * Called when main made the worktree, or found one a run made before it
+ * kept the git dir; afterwards {@link checkPointer} compares with it.
+ *
+ * @throws {WorktreePointerError} On anything else.
+ */
+export async function worktreeGitDir(
+  root: string,
+  tree: string,
+): Promise<string> {
+  const realTree = await realpath(tree);
+  const common = await realpath(
+    resolve(
+      root,
+      (await gitText(root, ["rev-parse", "--git-common-dir"])).trim(),
+    ),
+  );
+  const target = await pointerOf(realTree);
+  const back = target
+    ? await readFile(join(target, "gitdir"), "utf8")
+        .then((text) => realpath(resolve(target, text.trim())))
+        .catch(() => null)
+    : null;
+  if (
+    !target ||
+    dirname(target) !== join(common, "worktrees") ||
+    back !== join(realTree, ".git")
+  )
+    throw new WorktreePointerError(
+      "The worker's checkout no longer points at its own git data: its .git file was changed. Nothing in it is read or merged.",
+    );
+  return target;
+}
+
+/**
+ * Throw unless `tree.path/.git` still points at `tree.gitDir`.
+ *
+ * @throws {WorktreePointerError}
+ */
+export async function checkPointer(tree: WorkerTree): Promise<void> {
+  if ((await pointerOf(tree.path)) !== tree.gitDir)
+    throw new WorktreePointerError(
+      "The worker's checkout no longer points at its own git data: its .git file was changed. Nothing in it is read or merged.",
+    );
+}
+
+/** `git` on a worker's worktree, with the git dir and work tree named. */
+async function treeGit(
+  tree: WorkerTree,
+  args: string[],
+  ok: number[] = [0],
+): Promise<Run> {
+  await checkPointer(tree);
+  return git(
+    tree.path,
+    [`--git-dir=${tree.gitDir}`, `--work-tree=${tree.path}`, ...args],
+    ok,
+  );
+}
+
+async function treeText(tree: WorkerTree, args: string[]): Promise<string> {
+  return (await treeGit(tree, args)).stdout.toString("utf8");
 }
 
 /** NUL-separated output, empty entries dropped. */
@@ -154,9 +269,7 @@ async function seedOne(root: string, tree: string, rel: string): Promise<void> {
   await chmod(to, info.mode & 0o777);
 }
 
-export interface WorkerCheckout {
-  /** The worktree's folder, resolved. */
-  path: string;
+export interface WorkerCheckout extends WorkerTree {
   /** The commit the worker started from. */
   baseline: string;
 }
@@ -172,12 +285,13 @@ export async function createWorktree(
   path: string,
   branch: string,
 ): Promise<WorkerCheckout> {
-  if (await stat(join(path, ".git")).catch(() => null)) {
+  if (await lstat(join(path, ".git")).catch(() => null)) {
     const real = await realpath(path);
+    const tree = { path: real, gitDir: await worktreeGitDir(root, real) };
     const baseline = (
-      await gitText(real, ["rev-parse", "--verify", "HEAD^{commit}"])
+      await treeText(tree, ["rev-parse", "--verify", "HEAD^{commit}"])
     ).trim();
-    return { path: real, baseline };
+    return { ...tree, baseline };
   }
   await gitText(root, ["check-ref-format", "--branch", branch]);
   await mkdir(dirname(path), { recursive: true });
@@ -197,10 +311,11 @@ export async function createWorktree(
   );
   const real = await realpath(path);
   try {
+    const tree = { path: real, gitDir: await worktreeGitDir(root, real) };
     if (!exists)
       for (const rel of await uncommitted(root)) await seedOne(root, real, rel);
-    await gitText(real, ["add", "-A"]);
-    await gitText(real, [
+    await treeText(tree, ["add", "-A"]);
+    await treeText(tree, [
       ...COMMIT_FLAGS,
       "commit",
       "--no-verify",
@@ -210,9 +325,9 @@ export async function createWorktree(
       "lanework: worker baseline",
     ]);
     const baseline = (
-      await gitText(real, ["rev-parse", "--verify", "HEAD^{commit}"])
+      await treeText(tree, ["rev-parse", "--verify", "HEAD^{commit}"])
     ).trim();
-    return { path: real, baseline };
+    return { ...tree, baseline };
   } catch (error) {
     await removeWorktree(root, real, exists ? null : branch).catch(() => {});
     throw error;
@@ -231,11 +346,11 @@ export interface WorkerChange {
  * or new, ignored files aside.
  */
 export async function workerChanges(
-  tree: string,
+  tree: WorkerTree,
   baseline: string,
 ): Promise<WorkerChange[]> {
-  await gitText(tree, ["add", "-A"]);
-  const out = await gitText(tree, [
+  await treeText(tree, ["add", "-A"]);
+  const out = await treeText(tree, [
     "diff",
     "--cached",
     "--name-status",
@@ -255,11 +370,11 @@ export async function workerChanges(
 
 /** A file's bytes at `baseline`, or null when it did not exist there. */
 async function atBaseline(
-  tree: string,
+  tree: WorkerTree,
   baseline: string,
   path: string,
 ): Promise<Buffer | null> {
-  const run = await git(
+  const run = await treeGit(
     tree,
     ["cat-file", "blob", `${baseline}:${path}`],
     [128],
@@ -327,7 +442,7 @@ export interface MergeResult {
  */
 export async function mergeWorker(
   root: string,
-  tree: string,
+  tree: WorkerTree,
   baseline: string,
   changes: readonly WorkerChange[],
 ): Promise<MergeResult> {
@@ -349,7 +464,7 @@ export async function mergeWorker(
     const [base, ours, theirs] = await Promise.all([
       atBaseline(tree, baseline, path),
       readRegular(target),
-      readRegular(join(tree, path)),
+      readRegular(join(tree.path, path)),
     ]);
     if (ours === "special" || theirs === "special") {
       conflicts.push({ path, reason: "it is a symlink or not a regular file" });
@@ -417,7 +532,7 @@ export async function mergeWorker(
 
 /** Whether the worker changed anything since its baseline. */
 export async function hasChanges(
-  tree: string,
+  tree: WorkerTree,
   baseline: string,
 ): Promise<boolean> {
   return (await workerChanges(tree, baseline)).length > 0;

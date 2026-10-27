@@ -23,6 +23,37 @@ export function inScopes(scopes: readonly string[], path: string): boolean {
   return scopes.some((scope) => inScope(scope, path));
 }
 
+/**
+ * Paths that configure an agent, an editor or a git hook (FE-89/D7): a file
+ * here runs code the next time someone opens the project, so a worker may
+ * write one only when its scope names it. They match at any depth.
+ */
+export const AGENT_CONFIG_PATHS = [
+  ".claude",
+  ".codex",
+  ".mcp.json",
+  ".vscode",
+  ".husky",
+  ".lanework",
+] as const;
+
+/** Whether `path` (project-relative, `/`-separated) is or is under one. */
+export function isAgentConfig(path: string): boolean {
+  return path
+    .split("/")
+    .some((part) => (AGENT_CONFIG_PATHS as readonly string[]).includes(part));
+}
+
+/**
+ * Whether a worker with `scopes` may change `path`: inside a scope, and,
+ * for an agent config path, inside a scope that is not `.` and itself names
+ * the config path (`.claude`, `.claude/settings.json`, `pkg/.husky`).
+ */
+export function mayWrite(scopes: readonly string[], path: string): boolean {
+  if (!isAgentConfig(path)) return inScopes(scopes, path);
+  return scopes.some((scope) => isAgentConfig(scope) && inScope(scope, path));
+}
+
 /** Whether two tasks' scopes share any file. */
 export function scopesOverlap(
   a: readonly string[],
@@ -102,7 +133,33 @@ export async function checkWrite(
   if (rel === null) return { ok: false, path: resolved };
   if (rel === "." || rel === ".git" || rel.startsWith(".git/"))
     return { ok: false, path: rel };
-  return inScopes(scopes, rel)
+  return mayWrite(scopes, rel)
     ? { ok: true, where: "scope" }
     : { ok: false, path: rel };
+}
+
+/**
+ * Whether a path a read-only tool names is inside the worker's worktree or
+ * scratch folder (FE-89/D6). Only then may Jev allow the read on its own;
+ * a read anywhere else goes to the lead.
+ *
+ * @param path Absolute, or relative to `root`; null: the tool's default,
+ *   its working directory, which is `root`.
+ */
+export async function readsInside(
+  root: string,
+  scratch: string | null,
+  path: string | null,
+): Promise<boolean> {
+  if (path === null) return true;
+  const absolute = isAbsolute(path) ? path : join(root, path);
+  let resolved: string;
+  try {
+    resolved = await resolvedPath(absolute);
+  } catch {
+    return false;
+  }
+  if (scratch && within(scratch, resolved) !== null) return true;
+  const rel = within(root, resolved);
+  return rel !== null && rel !== ".git" && !rel.startsWith(".git/");
 }

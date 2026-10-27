@@ -5,9 +5,11 @@
 // - `repo`: `.lanework/leads/<id>.md` in the workspace's folder, frontmatter
 //   then the instructions as markdown.
 //
-// Same id: repo beats personal beats builtin (D2a). A repo file that fails to
-// read or parse is left out and reported with its repo-relative path; the
-// others still load.
+// A personal lead may override a built-in one of its id. A repo lead is
+// `repo:<id>` (FE-89/D3), so a file a project checks in never stands in for
+// a lead the user trusts, and it may not carry `jev` (D1). A repo file that
+// fails to read or parse is left out and reported with its repo-relative
+// path; the others still load.
 //
 // NOTE: A workspace is resolved to its folder here, through `folderOf`, never
 // from a path the page sent. Repo files are read only when they are plain
@@ -32,7 +34,9 @@ import {
   type LeadsList,
   type LeadsMainHandlers,
   leadId,
+  leadRef,
   parseTeamLead,
+  REPO_LEAD_PREFIX,
   type TeamLead,
 } from "../../../../shared/orchestration";
 import { BUILTIN_LEADS } from "./builtin";
@@ -94,7 +98,11 @@ async function readRepoLead(path: string, stem: string): Promise<TeamLead> {
     );
   if ("source" in frontmatter)
     throw new Error("source is not a frontmatter key");
-  if (frontmatter.id != null && frontmatter.id !== stem)
+  if (
+    frontmatter.id != null &&
+    frontmatter.id !== stem &&
+    frontmatter.id !== `${REPO_LEAD_PREFIX}${stem}`
+  )
     throw new Error(
       `id "${String(frontmatter.id)}" does not match the file name "${stem}.md"`,
     );
@@ -140,7 +148,7 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
       }
       let defaultId: string | null = null;
       try {
-        defaultId = parsed.defaultId == null ? null : leadId(parsed.defaultId);
+        defaultId = parsed.defaultId == null ? null : leadRef(parsed.defaultId);
       } catch {
         defaultId = null;
       }
@@ -222,9 +230,13 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
 
     async resolve(workspace, id) {
       const { leads, errors } = await list(workspace);
-      const broken = errors.find(
-        (entry) => entry.file === `${REPO_LEADS_DIR}/${id}.md`,
-      );
+      const broken = id.startsWith(REPO_LEAD_PREFIX)
+        ? errors.find(
+            (entry) =>
+              entry.file ===
+              `${REPO_LEADS_DIR}/${id.slice(REPO_LEAD_PREFIX.length)}.md`,
+          )
+        : undefined;
       if (broken)
         throw new Error(
           `Team lead "${id}" in ${broken.file} does not parse: ${broken.error}`,
@@ -275,7 +287,7 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
       serial(async () => {
         const file = await readPersonal();
         if (id !== null) {
-          leadId(id);
+          leadRef(id);
           const known =
             BUILTIN_LEADS.some((entry) => entry.id === id) ||
             file.leads.some((entry) => entry.id === id) ||

@@ -59,9 +59,14 @@ const ACTION_HELP: Record<ControlAction, string> = {
             and "dependsOn" are optional. With no "model", Jev picks a tier
             (light, standard, heavy) when it is on and sure, otherwise the
             standard tier runs it. "dependsOn" holds taskIds that must be
-            reviewed (accepted) before this one starts.`,
+            reviewed (accepted) before this one starts. A scope beyond what
+            the user approved, or naming agent config (.claude, .codex,
+            .mcp.json, .vscode, .husky, .lanework), waits for the user to
+            allow it on the run's panel: the task shows "scopeApproval".`,
   get: `  get       {"taskId":"..."}
-            One task, with its latest result.`,
+            One task, with its latest result. A tool approval it waits on
+            shows in "needsInput" with the tool's "input" (the command, path
+            or URL, secrets redacted): decide on that, not on "summary".`,
   wait: `  wait      {"timeoutSeconds":20}
             Block until a task changes, or until the timeout (0-${WAIT_MAX_SECONDS}).
             "changed" lists the taskIds that moved; it is empty on a timeout
@@ -82,7 +87,8 @@ const ACTION_HELP: Record<ControlAction, string> = {
             session, worktree and history.`,
   retry: `  retry     {"taskId":"...","text":"...","files":["src/feature"]}
             Retry a stopped worker with corrected write scopes. Use it only
-            when the extra files are really needed.`,
+            when the extra files are really needed. Scopes beyond what the
+            user approved wait for them, as with delegate.`,
   cancel: `  cancel    {"taskId":"..."}
             Cancel a task, running or still queued.`,
   review: `  review    {"taskId":"..."}

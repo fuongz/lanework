@@ -316,8 +316,8 @@ export function JevSection() {
                 label: "Endpoint",
                 description:
                   provider === "local"
-                    ? "Required: the server's base URL, ending in /v1."
-                    : "Leave empty for the provider's own.",
+                    ? "Required: the server's base URL, ending in /v1. Plain http only on this Mac."
+                    : "Leave empty for the provider's own. Changing it forgets the key.",
                 keywords: "endpoint url base server",
                 control: (
                   <Input
@@ -348,9 +348,9 @@ export function JevSection() {
               {
                 label: "API key",
                 description: saved.hasKey
-                  ? "Kept encrypted on this Mac. It never reaches an agent or a log."
+                  ? "Kept encrypted on this Mac for this provider and endpoint only. It never reaches an agent or a log."
                   : needsKey
-                    ? "Required. Kept encrypted on this Mac, never shown again."
+                    ? "Required. Kept encrypted on this Mac for the saved provider and endpoint, never shown again."
                     : "Optional for a local server.",
                 keywords: "api key token secret keychain",
                 control: (

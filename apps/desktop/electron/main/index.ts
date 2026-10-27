@@ -109,6 +109,14 @@ function registerOrchestration(
       ipcId(args[2], "taskId"),
     );
   });
+  handle(orchestrationChannels.approveScope, devUrl, (args) => {
+    arity(args, 3);
+    return runs.approveScope(
+      ipcSlug(args[0]),
+      ipcId(args[1], "runId"),
+      ipcId(args[2], "taskId"),
+    );
+  });
   handle(jevChannels.get, devUrl, (args) => {
     arity(args, 0);
     return jev.get();

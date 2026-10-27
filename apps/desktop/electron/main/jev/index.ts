@@ -13,6 +13,7 @@ import { JudgeError, judgeFor } from "./judge";
 import {
   appendLog,
   hasKey,
+  keyCarriesOver,
   readConfig,
   readKey,
   readLog,
@@ -33,8 +34,8 @@ import {
 // broadcast, returned, logged, or put in any process's env.
 
 async function state(): Promise<JevState> {
-  const [config, key] = await Promise.all([readConfig(), hasKey()]);
-  return { config, hasKey: key };
+  const config = await readConfig();
+  return { config, hasKey: await hasKey(config) };
 }
 
 async function changed(): Promise<JevState> {
@@ -71,7 +72,7 @@ async function ask(request: JudgeRequest): Promise<JudgeResult> {
         provider: config.provider,
         endpoint: config.endpoint,
         model: config.model,
-        key: await readKey(),
+        key: await readKey(config),
       });
       const answer = await judge.ask(
         request.question,
@@ -124,11 +125,15 @@ async function ask(request: JudgeRequest): Promise<JudgeResult> {
 export const jevMain: JevMainHandlers = {
   get: state,
   set: async (config) => {
+    // Another provider or endpoint origin: the key was not typed for it
+    // (FE-89/D10). Forget it before the new config can be read.
+    if (!keyCarriesOver(await readConfig(), config))
+      await writeKey(null, config);
     await writeConfig(config);
     return changed();
   },
   setKey: async (key) => {
-    await writeKey(key);
+    await writeKey(key, await readConfig());
     return changed();
   },
   ask,

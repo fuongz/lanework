@@ -15,10 +15,13 @@ import {
   modelName,
 } from "#/../shared/conversation";
 import {
+  JUDGE_POINTS,
+  type JudgePoint,
   type OrchestrationProposal,
   type OrchestrationRun,
   type ProposedTask,
   parseProposal,
+  REPO_LEAD_PREFIX,
   type TeamLead,
   WORKERS_MAX,
 } from "#/../shared/orchestration";
@@ -44,11 +47,91 @@ import {
   catalog,
   DEFAULT_MAX_WORKERS,
   type DerivedProposal,
+  LEAD_SOURCE_LABELS,
   leadIcon,
   tiersAllowed,
 } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { useProposalEdits } from "./orchestration-panel.store";
+
+const POINT_LABELS: Record<JudgePoint, string> = {
+  "model-tier": "Model tier",
+  permission: "Permissions",
+  report: "Worker reports",
+};
+
+/**
+ * What the team lead brings to the run, before the user approves it
+ * (FE-89/D5): where it comes from, every Jev point it overrides, and the
+ * checks each worker is told to run.
+ */
+function TeamLeadTerms({
+  lead,
+  className,
+}: {
+  lead: TeamLead;
+  className: string;
+}) {
+  const overrides = JUDGE_POINTS.flatMap((point) => {
+    const config = lead.jev?.[point];
+    return config ? [{ point, ...config }] : [];
+  });
+  const term = "text-muted-foreground w-28 shrink-0";
+  return (
+    <dl
+      aria-label="Team lead terms"
+      className={cn(
+        "flex flex-col gap-1.5 border-t px-3 py-2 text-[12px]",
+        className,
+      )}
+    >
+      <div className="flex min-w-0 gap-2">
+        <dt className={term}>Team lead from</dt>
+        <dd className="min-w-0 break-words">
+          {LEAD_SOURCE_LABELS[lead.source]}
+          {lead.source === "repo" && (
+            <span className="text-muted-foreground font-mono">
+              {" "}
+              .lanework/leads/{lead.id.slice(REPO_LEAD_PREFIX.length)}.md
+            </span>
+          )}
+        </dd>
+      </div>
+      {overrides.length > 0 && (
+        <div className="flex min-w-0 gap-2">
+          <dt className={term}>Jev overrides</dt>
+          <dd className="flex min-w-0 flex-col gap-0.5">
+            {overrides.map((entry) => (
+              <span
+                key={entry.point}
+                className={cn(entry.mode === "enforce" && "text-tone-amber")}
+              >
+                {POINT_LABELS[entry.point]}:{" "}
+                {entry.mode === "enforce"
+                  ? `acts on its own at ${Math.round(entry.threshold * 100)}% sure or more`
+                  : "shadow, never acts"}
+              </span>
+            ))}
+          </dd>
+        </div>
+      )}
+      {lead.checks.length > 0 && (
+        <div className="flex min-w-0 gap-2">
+          <dt className={term}>Checks to report</dt>
+          <dd className="min-w-0">
+            <ul className="flex flex-col gap-0.5">
+              {lead.checks.map((check) => (
+                <li key={check} className="break-words">
+                  {check}
+                </li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+      )}
+    </dl>
+  );
+}
 
 /** The model select's value for a task left to its tier. */
 const AUTO = "auto";
@@ -592,6 +675,10 @@ export function ProposalCard({
         >
           {proposal.summary}
         </p>
+      )}
+
+      {!planning && !cancelled && teamLead && (
+        <TeamLeadTerms lead={teamLead} className={line} />
       )}
 
       {!planning && !cancelled && tasks.length > 0 && (

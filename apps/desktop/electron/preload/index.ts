@@ -259,7 +259,7 @@ const harness: DesktopHarnessApi = {
  *
  * NOTE: The lead's CLI talks to main's control server, not to this. The page
  * only reads runs and asks for what the user does: approve, pause, resume,
- * stop, cancel a task. Every call names a workspace slug and ids.
+ * stop, cancel a task, approve a task's wider write scope. Every call names a workspace slug and ids.
  */
 const orchestration: DesktopOrchestrationApi = {
   runs: (workspace) =>
@@ -277,6 +277,13 @@ const orchestration: DesktopOrchestrationApi = {
   cancelTask: (workspace, runId, taskId) =>
     ipcRenderer.invoke(
       orchestrationChannels.cancelTask,
+      workspace,
+      runId,
+      taskId,
+    ),
+  approveScope: (workspace, runId, taskId) =>
+    ipcRenderer.invoke(
+      orchestrationChannels.approveScope,
       workspace,
       runId,
       taskId,

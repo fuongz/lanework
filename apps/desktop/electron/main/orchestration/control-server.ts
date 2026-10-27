@@ -6,6 +6,11 @@
 //   input is looked at. Whether the lead is in a turn is the run's to check.
 // - A call that takes too long answers with its request id: the CLI retries
 //   with that same id, and the run applies it at most once.
+// - A client has READ_TIMEOUT_MS from connecting to its newline, however
+//   slowly it sends (FE-89/D9): a socket that dribbles a byte at a time is
+//   closed at the deadline, not kept alive by each byte. The lines still
+//   being read share PENDING_BYTES_MAX, so a few large slow ones cannot hold
+//   the app's memory either.
 //
 // Nothing here imports Electron.
 
@@ -21,12 +26,14 @@ import {
 } from "../../../shared/orchestration";
 import { ControlRefusal } from "./runtime";
 
-/** How long a client has to send its line. */
+/** How long a client has, from connecting, to send its whole line. */
 const READ_TIMEOUT_MS = 5_000;
 /** How long a call may take before the CLI is told to retry it. */
 const CALL_TIMEOUT_MS = 35_000;
 /** Connections handled at once; more are refused. */
-const PENDING_MAX = 24;
+const CONNECTIONS_MAX = 24;
+/** The most bytes of request lines held at once, over every connection. */
+const PENDING_BYTES_MAX = 2 * CONTROL_INPUT_MAX;
 
 const UNAUTHORIZED = "Connection revoked or unauthorized";
 
@@ -114,10 +121,12 @@ async function answer(
 export function listenControl(
   options: ControlServerOptions,
 ): Promise<ControlServer> {
-  let pending = 0;
+  let connections = 0;
+  /** Bytes buffered by connections still sending their line. */
+  let pendingBytes = 0;
   let endpoint: string | null = null;
   const server = createServer((socket) => {
-    if (pending >= PENDING_MAX) {
+    if (connections >= CONNECTIONS_MAX) {
       reply(socket, {
         ok: false,
         error: "Too many control calls at once; retry in a moment.",
@@ -125,50 +134,59 @@ export function listenControl(
       });
       return;
     }
-    pending++;
+    connections++;
+    let taken = false;
+    // An absolute deadline: unlike `socket.setTimeout`, data does not reset it.
+    const deadline = setTimeout(() => {
+      if (!taken) socket.destroy();
+    }, READ_TIMEOUT_MS);
+    let chunks: Buffer[] = [];
+    /** What this connection adds to `pendingBytes` now. */
+    let held = 0;
+    const release = () => {
+      pendingBytes -= held;
+      held = 0;
+      chunks = [];
+    };
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
-      pending--;
+      connections--;
+      clearTimeout(deadline);
+      release();
     };
     socket.once("close", finish);
     socket.once("error", () => {
       finish();
       socket.destroy();
     });
-    let buffer = "";
-    let taken = false;
-    socket.setTimeout(READ_TIMEOUT_MS, () => {
-      if (!taken) socket.destroy();
-    });
-    socket.setEncoding("utf8");
-    socket.on("data", (chunk: string) => {
-      if (taken) return;
-      buffer += chunk;
-      const at = buffer.indexOf("\n");
-      if (at < 0) {
-        if (buffer.length > CONTROL_INPUT_MAX) {
-          taken = true;
-          reply(socket, {
-            ok: false,
-            error: `The request is larger than ${CONTROL_INPUT_MAX} bytes`,
-            retryable: false,
-          });
-        }
-        return;
-      }
+    const refuse = (error: string, retryable: boolean) => {
       taken = true;
-      socket.setTimeout(0);
-      const line = buffer.slice(0, at);
-      if (line.length > CONTROL_INPUT_MAX) {
-        reply(socket, {
-          ok: false,
-          error: `The request is larger than ${CONTROL_INPUT_MAX} bytes`,
-          retryable: false,
-        });
+      clearTimeout(deadline);
+      release();
+      reply(socket, { ok: false, error, retryable });
+    };
+    socket.on("data", (chunk: Buffer) => {
+      if (taken) return;
+      const at = chunk.indexOf(0x0a);
+      const part = at < 0 ? chunk : chunk.subarray(0, at);
+      if (held + part.length > CONTROL_INPUT_MAX) {
+        refuse(`The request is larger than ${CONTROL_INPUT_MAX} bytes`, false);
         return;
       }
+      if (pendingBytes + part.length > PENDING_BYTES_MAX) {
+        refuse("Too many control calls at once; retry in a moment.", true);
+        return;
+      }
+      chunks.push(part);
+      held += part.length;
+      pendingBytes += part.length;
+      if (at < 0) return;
+      taken = true;
+      clearTimeout(deadline);
+      const line = Buffer.concat(chunks).toString("utf8");
+      release();
       void answer(line, options).then(
         (response) => {
           if (!socket.destroyed) reply(socket, response);

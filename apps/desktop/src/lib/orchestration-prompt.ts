@@ -33,7 +33,7 @@ import {
   type Turn,
 } from "#/../shared/conversation";
 import {
-  LEAD_ID_PATTERN,
+  LEAD_REF_PATTERN,
   type LeadIcon,
   type ProposedTask,
   parseProposedTasks,
@@ -51,7 +51,7 @@ const SUMMARY_MAX = 2000;
 const OPEN = "<lanework_orchestrate";
 const CLOSE = "</lanework_orchestrate>";
 const ENVELOPE =
-  /^<lanework_orchestrate id="([A-Za-z0-9_-]{1,64})" kind="(plan|repair)"(?: lead="([a-z0-9][a-z0-9-]{0,47})")?>\n([\s\S]*)\n<\/lanework_orchestrate>$/;
+  /^<lanework_orchestrate id="([A-Za-z0-9_-]{1,64})" kind="(plan|repair)"(?: lead="((?:repo:)?[a-z0-9][a-z0-9-]{0,47})")?>\n([\s\S]*)\n<\/lanework_orchestrate>$/;
 const PROPOSAL_TAG =
   /<lanework_proposal>\s*([\s\S]*?)\s*<\/lanework_proposal>/g;
 /** A proposal block still being streamed: from its tag to the end. */
@@ -99,8 +99,8 @@ export const LEAD_SOURCE_LABELS: Record<TeamLead["source"], string> = {
 /**
  * `/orchestrate [@lead] <request>`, split.
  *
- * `lead` is the first token's id when it is `@` and a slug; the request is
- * what follows. A first token that is `@` and no slug (`@src/app.tsx`) is
+ * `lead` is the first token's id when it is `@` and a slug (`repo:<slug>`
+ * for a project's own); the request is what follows. A first token that is `@` and no slug (`@src/app.tsx`) is
  * the request's, not a lead.
  */
 export function splitLead(request: string): {
@@ -108,7 +108,7 @@ export function splitLead(request: string): {
   request: string;
 } {
   const match = /^@(\S+)(?:\s+([\s\S]*))?$/.exec(request.trim());
-  if (!match || !LEAD_ID_PATTERN.test(match[1] ?? ""))
+  if (!match || !LEAD_REF_PATTERN.test(match[1] ?? ""))
     return { lead: null, request: request.trim() };
   return { lead: match[1] ?? null, request: (match[2] ?? "").trim() };
 }

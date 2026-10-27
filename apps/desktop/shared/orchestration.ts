@@ -36,6 +36,8 @@ export const TASKS_MAX = 40;
 export const WORKERS_MAX = 4;
 /** The most write scopes one task may claim. */
 export const FILES_MAX = 64;
+/** The longest a waiting tool's input may be in `needsInput`. */
+export const NEEDS_INPUT_MAX = 4_000;
 /** The longest a title may be. */
 export const TITLE_MAX = 160;
 /** The longest a worker's instructions, or a steer/message, may be. */
@@ -113,6 +115,13 @@ export type NeedsInput =
       requestId: string;
       tool: string;
       summary: string;
+      /**
+       * The tool's input as the worker sent it (the command, the path, the
+       * URL), secrets redacted and cut at {@link NEEDS_INPUT_MAX}, so the
+       * lead and Jev decide on what would run, not on a description (D13).
+       * Absent on a request recorded before it was kept.
+       */
+      input?: string;
     }
   | {
       kind: "question";
@@ -149,6 +158,13 @@ export interface OrchestrationTask {
   result: string;
   error: string | null;
   needsInput: NeedsInput | null;
+  /**
+   * Write scopes the lead asked for (`delegate`, `retry`) beyond what the
+   * user approved, or naming an agent config path: the task stays queued
+   * until the user approves them on the run's panel, or cancels it (D11).
+   * Null or absent: nothing waits on the user.
+   */
+  scopeApproval?: string[] | null;
   /** The worker's conversation id, once it has started. */
   conversation: string | null;
   /** The worker's branch in its own worktree, once it has one. */
@@ -750,7 +766,7 @@ export function parseProposal(value: unknown): OrchestrationProposal {
   );
   // NOTE: Absent reads as null, so a card written before FE-88 still approves.
   const teamLead =
-    input.teamLead == null ? null : leadId(input.teamLead, "teamLead");
+    input.teamLead == null ? null : leadRef(input.teamLead, "teamLead");
   if (input.version !== 1) fail("Unknown proposal version");
   if (input.status !== "ready") fail("Only a ready proposal can be approved");
   if (typeof input.workspace !== "string" || !input.workspace)
@@ -953,8 +969,44 @@ function endpoint(value: unknown): string {
     fail("endpoint must be an http(s) URL");
   if (url.username || url.password)
     fail("endpoint must not carry credentials; set the API key instead");
+  // Plain http sends the API key in clear: only to this machine (D10).
+  if (url.protocol === "http:" && !LOOPBACK_HOSTS.has(url.hostname))
+    fail(
+      "endpoint must use https, or http only on this machine (localhost, 127.0.0.1, ::1)",
+    );
   return trimmed.replace(/\/+$/, "");
 }
+
+/** The hosts plain http may reach: `URL.hostname` keeps IPv6's brackets. */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * The origin Jev's key is sent to: the endpoint's, or the provider's own
+ * when it is empty. Null when Jev is off.
+ *
+ * NOTE: The key is kept for one provider and one origin (D10). Changing
+ * either forgets it, so a key typed for OpenRouter never reaches a server
+ * the endpoint field was later pointed at.
+ */
+export function jevKeyOrigin(
+  config: Pick<JevConfig, "provider" | "endpoint">,
+): string | null {
+  if (!config.provider) return null;
+  const base = config.endpoint || JEV_DEFAULT_ENDPOINTS[config.provider];
+  if (!base) return null;
+  try {
+    return new URL(base).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** Each provider's own API base; `local` has none. */
+export const JEV_DEFAULT_ENDPOINTS: Record<JevProvider, string> = {
+  openrouter: "https://openrouter.ai/api/v1",
+  typesafe: "https://api.typesafe.ai",
+  local: "",
+};
 
 /**
  * Check a Jev config from the renderer or from disk.
@@ -1055,12 +1107,21 @@ export function parseJevKey(value: unknown): string | null {
 // - `builtin`: shipped with the app, read-only.
 // - `personal`: the user's own, saved from the page, for every project.
 // - `repo`: `.lanework/leads/<id>.md` a project checks in, frontmatter plus
-//   instructions. A repo lead overrides a personal one of the same id, which
-//   overrides a built-in one. One that fails to parse is left
-//   out and reported in {@link LeadsList.errors}, never half-read.
+//   instructions. Its id is `repo:<id>` (D3), so it never shadows a built-in
+//   or personal lead, and it may not override Jev (D1). One that fails to
+//   parse is left out and reported in {@link LeadsList.errors}, never
+//   half-read. A personal lead still overrides a built-in one of its id.
 
 /** What a team lead's id may be: a slug, also its file name in a repo. */
 export const LEAD_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,47}$/;
+/**
+ * What names a team lead anywhere (D3): a built-in or personal lead's id, or
+ * `repo:` and a repo file's stem. A repo lead lives in its own namespace, so
+ * a file a project checks in never stands in for a lead the user trusts.
+ */
+export const LEAD_REF_PATTERN = /^(?:repo:)?[a-z0-9][a-z0-9-]{0,47}$/;
+/** What a repo lead's id starts with. */
+export const REPO_LEAD_PREFIX = "repo:";
 /** The longest a team lead's name may be. */
 export const LEAD_NAME_MAX = 60;
 /** The longest a team lead's instructions may be. */
@@ -1118,7 +1179,10 @@ export interface TeamLead {
   maxWorkers: number;
   /** One line each: what a worker's report must show before it is accepted. */
   checks: string[];
-  /** Points that differ from Jev's settings for runs under this lead; null for none. */
+  /**
+   * Points that differ from Jev's settings for runs under this lead; null for
+   * none. Always null for a `repo` lead (D1).
+   */
   jev: Partial<Record<JudgePoint, JudgePointConfig>> | null;
   source: LeadSource;
 }
@@ -1144,6 +1208,19 @@ export function leadId(value: unknown, label = "id"): string {
   if (typeof value !== "string" || !LEAD_ID_PATTERN.test(value))
     fail(
       `${label} must be 1-48 lowercase letters, digits or -, starting with a letter or digit`,
+    );
+  return value;
+}
+
+/**
+ * A reference to a team lead: a built-in or personal id, or `repo:<stem>`.
+ *
+ * @throws {ControlInputError} When it is not a {@link LEAD_REF_PATTERN} ref.
+ */
+export function leadRef(value: unknown, label = "id"): string {
+  if (typeof value !== "string" || !LEAD_REF_PATTERN.test(value))
+    fail(
+      `${label} must be a team lead's id, or repo: and the id of one in .lanework/leads`,
     );
   return value;
 }
@@ -1228,8 +1305,23 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
   const checks = input.checks ?? [];
   if (!Array.isArray(checks) || checks.length > LEAD_CHECKS_MAX)
     fail(`checks must list at most ${LEAD_CHECKS_MAX} lines`);
+  // A project's file may not loosen Jev for the person who opens it (D1):
+  // only a lead the user wrote, or one shipped with the app, overrides it.
+  if (source === "repo" && input.jev != null)
+    fail(
+      "jev is not allowed in a project's team lead. Set Jev overrides on a personal lead instead",
+    );
+  // A repo lead's id is always `repo:<stem>` (D3), whatever the file said.
+  const id =
+    source === "repo"
+      ? `${REPO_LEAD_PREFIX}${leadId(
+          typeof input.id === "string" && input.id.startsWith(REPO_LEAD_PREFIX)
+            ? input.id.slice(REPO_LEAD_PREFIX.length)
+            : input.id,
+        )}`
+      : leadId(input.id);
   return {
-    id: leadId(input.id),
+    id,
     name: oneLine(input.name, "name", LEAD_NAME_MAX),
     icon: oneOf(input.icon, LEAD_ICONS, "icon"),
     lead: tierModel(input.lead, "lead"),
@@ -1262,6 +1354,8 @@ export const orchestrationChannels = {
   stop: "orchestration:stop",
   /** The user cancels one task from the run's panel. */
   cancelTask: "orchestration:cancel-task",
+  /** The user approves the wider write scopes a queued task waits on (D11). */
+  approveScope: "orchestration:approve-scope",
   /** Main → renderer: a run changed. */
   changed: "orchestration:changed",
 } as const;
@@ -1322,6 +1416,11 @@ export interface DesktopOrchestrationApi {
     runId: string,
     taskId: string,
   ) => Promise<OrchestrationRun>;
+  approveScope: (
+    workspace: string,
+    runId: string,
+    taskId: string,
+  ) => Promise<OrchestrationRun>;
   onChange: (listener: (event: OrchestrationEvent) => void) => () => void;
 }
 
@@ -1368,6 +1467,16 @@ export interface OrchestrationMainHandlers {
   resume: (workspace: string, runId: string) => Promise<OrchestrationRun>;
   stop: (workspace: string, runId: string) => Promise<OrchestrationRun>;
   cancelTask: (
+    workspace: string,
+    runId: string,
+    taskId: string,
+  ) => Promise<OrchestrationRun>;
+  /**
+   * The user approves the write scopes `taskId` waits on
+   * ({@link OrchestrationTask.scopeApproval}); they join the run's approved
+   * scopes and the task may start.
+   */
+  approveScope: (
     workspace: string,
     runId: string,
     taskId: string,

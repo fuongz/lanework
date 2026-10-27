@@ -84,6 +84,8 @@ export const orchestrationMain: OrchestrationMainHandlers = {
   stop: (workspace, runId) => orchestrator().stop(workspace, runId),
   cancelTask: (workspace, runId, taskId) =>
     orchestrator().cancelTask(workspace, runId, taskId),
+  approveScope: (workspace, runId, taskId) =>
+    orchestrator().approveScope(workspace, runId, taskId),
   control: (runId, call, requestId) =>
     orchestrator().control(runId, call, requestId),
 };
