@@ -13,7 +13,7 @@ export const claudeRowName = (title: string) => `Open “${title}”`;
 
 /**
  * Resume a Claude conversation in a terminal the way a person now does
- * (FE-62/D3): its rail row opens the chat, whose Terminal button hands the
+ * (FE-62/D3): its rail row opens the chat, whose title-bar Terminal button hands the
  * conversation to a pty — the running one, if a tab already has it. Resolves
  * once the xterm is on screen. `within` narrows where the row is found.
  *
@@ -29,10 +29,10 @@ export async function resumeClaudeInTerminal(
     .getByRole("button", { name: claudeRowName(title), exact: true })
     .click();
   const region = page.getByRole("region", { name: `Claude — ${title}` });
-  const terminal = region.getByRole("button", {
-    name: "Terminal",
-    exact: true,
-  });
+  // The chat's header sits in the window title bar (FE-58), outside its region.
+  const terminal = page
+    .locator('[data-slot="window-titlebar"]')
+    .getByRole("button", { name: "Terminal", exact: true });
   await expect(terminal).toBeVisible();
   // Off (aria-disabled) while a turn runs: a click then does nothing.
   await expect(terminal).not.toHaveAttribute("aria-disabled", "true");

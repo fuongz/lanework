@@ -55,6 +55,10 @@ import {
  */
 const titlebar = (page: Page) => page.locator('[data-slot="window-titlebar"]');
 
+/** A card's row in the Issues list (FE-75), found by its title. */
+const issueRow = (page: Page, title: string) =>
+  page.getByRole("listitem").filter({ hasText: title });
+
 /**
  * A conversation's rail row, either agent's: Codex's resumes it, Claude's
  * opens its chat (FE-62/D3). Not "Open new … session", a nameless agent's.
@@ -2196,9 +2200,9 @@ test("a card an agent is working on carries its spinner, on the board and in the
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    await page.getByRole("button", { name: "Board", exact: true }).click();
-    const lane = page.getByLabel("To-Do column").getByRole("listitem");
-    await expect(lane).toHaveCount(2);
+    const working = issueRow(page, "Show who is working");
+    await expect(working).toHaveCount(1);
+    await expect(issueRow(page, "Nobody on this one")).toHaveCount(1);
     const marks = page.locator("[data-card-agents]");
     await expect(marks).toHaveCount(0);
 
@@ -2224,15 +2228,15 @@ test("a card an agent is working on carries its spinner, on the board and in the
           },
         }),
     );
-    await expect(lane.nth(0).locator("[data-card-agents]")).toHaveCount(1);
+    await expect(working.locator("[data-card-agents]")).toHaveCount(1);
     await expect(marks).toHaveCount(1);
-    // In the status icon's place, and said in the lane Select's name.
-    await expect(
-      lane.nth(0).getByRole("combobox", { name: /^Move Show who is working/ }),
-    ).toHaveAccessibleName(/Claude working: Flaky login test/);
+    // In the status icon's place, and said in the row link's name.
+    await expect(working.getByRole("link")).toHaveAccessibleName(
+      /Claude working: Flaky login test/,
+    );
 
     // The issue says who, and a click opens that agent.
-    await lane.nth(0).getByRole("link").click();
+    await working.getByRole("link").click();
     await expect(
       page.getByRole("button", {
         name: "Open Claude working: Flaky login test",
@@ -2341,24 +2345,21 @@ test("an agent on another machine marks its card too, and this machine's own is 
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    await page.getByRole("button", { name: "Board", exact: true }).click();
-    const lane = page.getByLabel("To-Do column").getByRole("listitem");
-    await expect(lane).toHaveCount(2);
+    const decio = issueRow(page, "Decio is on this one");
+    const mine = issueRow(page, "Show who is working");
 
     // Decio's agent: the same spinner, and the name says whose.
-    await expect(lane.nth(1).locator('[data-card-agents="1"]')).toHaveCount(1);
-    await expect(
-      lane.nth(1).getByRole("combobox", { name: /^Move Decio is on this one/ }),
-    ).toHaveAccessibleName(/Claude on Decio, (just now|now)/);
+    await expect(decio.locator('[data-card-agents="1"]')).toHaveCount(1);
+    await expect(decio.getByRole("link")).toHaveAccessibleName(
+      /Claude on Decio, (just now|now)/,
+    );
 
     // FE-01: the local session, once — not again as the service's copy.
-    await expect(lane.nth(0).locator('[data-card-agents="1"]')).toHaveCount(1);
-    await expect(
-      lane.nth(0).getByRole("combobox", { name: /^Move Show who is working/ }),
-    ).not.toHaveAccessibleName(/Viewer/);
+    await expect(mine.locator('[data-card-agents="1"]')).toHaveCount(1);
+    await expect(mine.getByRole("link")).not.toHaveAccessibleName(/Viewer/);
 
     // In the issue, Decio's agent is listed but is not something to open.
-    await lane.nth(1).getByRole("link").click();
+    await decio.getByRole("link").click();
     const cloud = page.locator('[data-card-agent="cloud"]');
     await expect(cloud).toHaveCount(1);
     await expect(cloud).toContainText("Decio");
@@ -2449,12 +2450,12 @@ async function bootHanding(cards: StubCard[]) {
   });
   const page = await app.firstWindow();
   await switchTo(page, "Alpha");
-  await page.getByRole("button", { name: "Board", exact: true }).click();
   return { plane, profile, app, page };
 }
 
-const lane = (page: Page) =>
-  page.getByLabel("To-Do column").getByRole("listitem");
+/** A card's row in the Issues list, by the title `handCard` gives it. */
+const handRow = (page: Page, taskId: string) =>
+  issueRow(page, `Work for ${taskId}`);
 const agentView = (page: Page, agent: "Claude" | "Codex") =>
   page.getByRole("region", { name: new RegExp(`^${agent} — `) });
 const toBoard = (page: Page) =>
@@ -2482,20 +2483,24 @@ test("FE-34: a settled card starts its agent at once; an open one is approved as
     handCard("card-49", "FE-49", "X", [], { columnKey: "done" }),
   ]);
   try {
-    // Finished work is handed to nobody: no Assign in its menu.
-    await page
-      .getByLabel("Done column")
-      .getByRole("listitem")
-      .click({ button: "right" });
+    // Finished work is handed to nobody: no Assign in its menu. The list
+    // leaves Done out until the status filter asks for it (FE-75).
+    const issues = page.url();
+    const finished = new URL(issues);
+    finished.searchParams.set("status", "done");
+    await page.goto(finished.toString());
+    await handRow(page, "FE-49").click({ button: "right" });
     await expect(page.getByRole("menuitem", { name: "Delete…" })).toBeVisible();
     await expect(
       page.getByRole("menuitem", { name: /^Assign to/ }),
     ).toHaveCount(0);
     await page.keyboard.press("Escape");
+    await page.goto(issues);
 
     // Settled: the header's menu starts Claude straight away, no question.
-    await expect(lane(page)).toHaveCount(2);
-    await lane(page).nth(0).getByRole("link").click();
+    await expect(handRow(page, "FE-41")).toHaveCount(1);
+    await expect(handRow(page, "FE-42")).toHaveCount(1);
+    await handRow(page, "FE-41").getByRole("link").click();
     await page.getByRole("button", { name: "Assign to agent" }).click();
     // (Codex's two theme marks carry their own `<title>` text.)
     await expect(page.getByRole("menuitem")).toHaveText([/Claude$/, /Codex$/]);
@@ -2513,7 +2518,7 @@ test("FE-34: a settled card starts its agent at once; an open one is approved as
 
     // Open: the right-click menu asks first, and Cancel sends nothing.
     await toBoard(page);
-    await lane(page).nth(1).click({ button: "right" });
+    await handRow(page, "FE-42").click({ button: "right" });
     await page.getByRole("menuitem", { name: "Assign to Claude" }).click();
     const dialog = page.getByRole("alertdialog");
     await expect(dialog).toContainText("Hand FE-42 to Claude?");
@@ -2530,7 +2535,7 @@ test("FE-34: a settled card starts its agent at once; an open one is approved as
 
     // Confirmed: ONE write ticks exactly the listed boxes, with a note — and
     // only then does Codex start, briefed to work the card.
-    await lane(page).nth(1).click({ button: "right" });
+    await handRow(page, "FE-42").click({ button: "right" });
     await page.getByRole("menuitem", { name: "Assign to Codex" }).click();
     await page
       .getByRole("alertdialog")
@@ -2559,12 +2564,12 @@ test("FE-34: a settled card starts its agent at once; an open one is approved as
 
     // D8: a card whose agent is still running is opened, not handed out again.
     await toBoard(page);
-    await lane(page).nth(0).click({ button: "right" });
+    await handRow(page, "FE-41").click({ button: "right" });
     await expect(
       page.getByRole("menuitem", { name: /^Assign to/ }),
     ).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await lane(page).nth(0).getByRole("link").click();
+    await handRow(page, "FE-41").getByRole("link").click();
     await page.getByRole("button", { name: "Open session" }).click();
     await expect(
       agentView(page, "Claude").locator(".xterm-rows"),
@@ -2584,7 +2589,7 @@ test("FE-34: a group with no recommendation can only be reviewed in session — 
     ]),
   ]);
   try {
-    await lane(page).nth(0).click({ button: "right" });
+    await handRow(page, "FE-43").click({ button: "right" });
     await page.getByRole("menuitem", { name: "Assign to Claude" }).click();
     const dialog = page.getByRole("alertdialog");
     await expect(dialog).toContainText("entry has no recommended option");
