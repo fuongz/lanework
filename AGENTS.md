@@ -248,12 +248,8 @@ recur.
 
 ## Loading states use skeletons
 
-A pane, list, panel or value that is still being read draws a **skeleton**
-shaped like what is coming (`apps/desktop/src/components/shared/loading/skeletons.tsx`,
-`role="status"` plus a label). It never draws a "Reading…" / "Loading…"
-sentence. Button labels while their action runs are the exception. Full rule:
-`docs/standards/loading-states.md`. `bun run lint` enforces it through
-`scripts/audit-loading.mjs`.
+Moved to [apps/desktop/AGENTS.md](apps/desktop/AGENTS.md), the index of every
+desktop rule and the gate that enforces it (DOC-01).
 
 ## Verification before done
 

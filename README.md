@@ -6,7 +6,8 @@ UI preset: **`b1D0eCA6`**, Base UI / Mira, neutral, Inter, Hugeicons, with
 
 ## Run
 
-Use Node.js 24 LTS and Bun 1.3.11 or newer.
+Use Node.js 24 LTS and exactly Bun 1.3.11, the version `packageManager` pins
+(see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ```sh
 bun install --frozen-lockfile
@@ -31,10 +32,11 @@ changing the Electron renderer origin.
 | `bun run dev` | Desktop development with HMR on port 5175 |
 | `bun run build` | Build the SPA shell, assets, main and preload |
 | `bun run typecheck` | Check renderer and Electron TypeScript separately |
-| `bun run lint` | Biome and frontend layout audit |
+| `bun run lint` | Biome (a warning fails) and the layout, loading-state and HTML-sink audits |
 | `bun run format` | Apply formatting and safe lint fixes |
-| `bun run gate` | Build → lint/layout → typecheck |
-| `bun run test` | Production Electron smoke test and security unit tests |
+| `bun run gate` | Build → Electron bundle audit → lint → typecheck → plugin bundle check |
+| `bun run test` | Playwright specs against the production build |
+| `bun run test:unit` | Electron-free `*.test.ts` units under `apps/desktop/electron` |
 | `bun run test:packaged` | Smoke-test the unpacked macOS app (run package first) |
 | `bun run test:dev` | Verify UI HMR and main/preload restart |
 | `bun run package` | Build an unpacked desktop application for the host OS |
@@ -54,34 +56,52 @@ On Apple Silicon the unpacked app is typically
 ```text
 apps/desktop/
 ├── electron/
-│   ├── main/
-│   │   ├── index.ts         # App/window lifecycle, permissions, IPC handlers
+│   ├── main/                # Electron main process
+│   │   ├── index.ts         # App/window lifecycle, CSP, permissions, registers every feature
+│   │   ├── menu.ts          # Application menu
+│   │   ├── ipc.ts           # handle(): sender-checked IPC registration
+│   │   ├── ipc-args.ts      # Typed IPC argument checks
 │   │   ├── protocol.ts      # app:// static assets and SPA fallback
-│   │   └── security.ts      # Origin and asset-path validation
-│   └── preload/index.ts    # Narrow contextBridge API
-├── shared/desktop.ts       # IPC channel names and serializable contracts
+│   │   ├── security.ts      # Origin and asset-path validation
+│   │   ├── paths.ts         # The app home (~/.lanew or LANEWORK_HOME)
+│   │   ├── config-file.ts   # Atomic writes to other tools' config files
+│   │   ├── http-body.ts     # Size-capped response bodies
+│   │   ├── auth/, workspaces/, git/, terminal/, conversation/, …
+│   │   │                    # One folder per feature; index.ts registers its IPC
+│   │   └── terminal/host.ts # The pty host, a separate utility process
+│   ├── preload/index.ts     # contextBridge: one typed window.desktop
+│   ├── hook/                # Agents' Stop hook (plain Node, also the plugin's source)
+│   ├── mcp-local/           # Offline MCP server (plain Node)
+│   ├── local-store/         # SQLite store for local boards
+│   ├── control/             # lanework-control, the orchestration lead's CLI
+│   └── statusline/          # Claude Code status line script
+├── shared/                  # Contracts, channel names, pure functions (main + renderer)
 ├── src/
-│   ├── routes/             # URL declarations; export Route only
+│   ├── routes/              # URL declarations; export Route only
 │   ├── components/
-│   │   ├── ui/             # shadcn CLI-owned components
-│   │   ├── shared/         # Components with 2+ importers, grouped by domain
-│   │   └── features/       # Single-consumer views, grouped by feature
-│   ├── stores/             # Zustand UI preferences and selectors
-│   ├── hooks/              # Hooks used across feature areas
-│   ├── lib/                # Pure, platform-independent utilities
-│   ├── styles/app.css      # Preset tokens, font and Tailwind sources
-│   └── router.tsx          # TanStack router configuration
-├── scripts/                # Build and development process orchestration
-├── tests/                  # Desktop, security and HMR verification
-├── vite.config.ts          # TanStack Start SPA pipeline
-├── tsconfig.json           # Renderer TypeScript
-├── tsconfig.node.json      # Main/preload and test TypeScript
-└── electron-builder.yml    # Packaging configuration
+│   │   ├── ui/              # shadcn CLI-owned components
+│   │   ├── shared/          # Components with 2+ importers, grouped by domain
+│   │   └── features/        # Single-consumer views, grouped by feature
+│   ├── hooks/               # Hooks used across feature areas
+│   ├── stores/              # Zustand stores and selectors
+│   ├── server/desktop.ts    # The renderer's seam in front of window.desktop
+│   ├── lib/                 # Framework-free utilities
+│   └── styles/app.css       # Preset tokens, font and Tailwind sources
+├── native/dictation/        # Swift dictation helper (macOS)
+├── scripts/                 # Build, bundle and dev orchestration
+├── tests/                   # Playwright specs that boot the app
+├── build/                   # Icons and macOS entitlements
+└── electron-builder.yml     # Packaging, fuses and asar unpacking
+packages/protocol/           # @lanework/protocol: types shared with the control plane
+plugins/lanework/            # Claude Code plugin; bin/ holds the committed hook bundle
+scripts/                     # Gate audits and the plugin build
+docs/standards/              # Layout, loading-state and process-boundary standards
 ```
 
-Root-level `scripts/audit-layout.mjs` checks the renderer conventions described
-in [the layout standard](docs/standards/frontend-app-layout.md). Empty feature
-layers are placeholders, not a requirement to add unused abstractions.
+Every desktop rule, and the gate that enforces it, is indexed in
+[apps/desktop/AGENTS.md](apps/desktop/AGENTS.md). The renderer layout is
+[the layout standard](docs/standards/frontend-app-layout.md); what each process
+may import is [the process-boundaries standard](docs/standards/process-boundaries.md).
 
 ## Runtime boundaries
 
@@ -92,30 +112,41 @@ Its Vite plugin builds an SPA shell. Electron serves only `dist/client` over
 There is no production localhost HTTP server, SSR service or server function
 endpoint. Native operations belong in main-process IPC handlers.
 
-The root uses `ClientOnly` so the same prerendered shell can open any desktop
-route without hydrating navigation or persisted preferences against the wrong
-initial page. Zustand persists only the compact-layout preference and rehydrates
-after mounting. Native app information is fetched through the preload API and
-kept in the Settings view, rather than copied into a global store.
-
 Electron enables `sandbox`, `contextIsolation` and `webSecurity`, with
 `nodeIntegration` disabled. Preload bundles to CommonJS for the sandbox and
-exposes only `desktop.getAppInfo()`. IPC validates the owning top frame, origin
-and argument count. New windows, off-origin navigation and permission requests
-are denied. The custom protocol rejects path traversal and missing assets;
-missing routes receive the shell. CSP permits the exact hashes of Start's
-inline bootstrap scripts; inline styles remain enabled for UI components.
+exposes one typed object, `window.desktop` (`DesktopApi` in
+`shared/desktop.ts`), with one surface per domain. Every IPC handler checks
+its sender with `assertTrustedSender()` (`electron/main/ipc.ts`), almost always
+through `handle()`: only the top frame of an app window on a trusted origin
+is accepted. New windows, off-origin navigation and permission
+requests are denied. The custom protocol rejects path traversal and missing
+assets; missing routes receive the shell. CSP permits the exact hashes of
+Start's inline bootstrap scripts; inline styles remain enabled for UI
+components.
 
-All current app dependencies are build-time dependencies because main/preload
-and renderer code are bundled. If a future native Node module must remain
-external, put it in `dependencies`, externalize it in the Electron build and
-verify its packaged binary for each supported architecture.
+Besides main, preload and the renderer, the build has outputs that run
+elsewhere: the pty host (a utility process), and the Stop hook, status line,
+offline MCP server and `lanework-control`, which the agents' configs run under
+the app's plain Node (`ELECTRON_RUN_AS_NODE`). Those never import `electron`,
+and `scripts/audit-electron.mjs` checks what each bundle really contains.
+
+The app ships no runtime `dependencies`: main, preload and renderer are
+bundled, and node-pty, the one module main loads unbundled, is staged into
+`dist/` by `scripts/electron-bundle.mjs`. Packaged builds flip Electron fuses
+(no `NODE_OPTIONS`, no `--inspect`, asar integrity, app only from asar); see
+`electron-builder.yml`.
 
 ## Adding code
 
-- Renderer modules must not import Electron, Node builtins or main/preload code.
-- Add native actions to `shared/desktop.ts`, expose one method per action from
-  preload, and validate both sender and payload in main.
+- Renderer modules must not import Electron, Node builtins or main/preload
+  code; Biome fails the gate if they do.
+- A native action: add its channel to the domain's `<domain>Channels` in
+  `shared/<domain>.ts` and its method to that domain's surface on
+  `DesktopApi`, implement it in preload, and register the handler with
+  `handle()` in `electron/main/<domain>/index.ts`, checking the payload
+  (`ipc-args.ts`). A new domain registers from `electron/main/index.ts`. The
+  renderer calls it through `desktopSurface()` in `src/server/desktop.ts`.
+- Other features import a feature's named service files, not its `index.ts`.
 - Keep feature state local until it needs to outlive a component. Use Zustand
   selectors instead of subscribing to an entire store.
 - Use the `#/` alias, declared in package imports and mirrored in TypeScript.
@@ -128,20 +159,39 @@ verify its packaged binary for each supported architecture.
 
 The registry currently imports `cn` from its own package. The app's `lib/utils`
 re-exports it for handwritten code. Root Biome exceptions are scoped to upstream
-Field/Label wrappers whose ARIA props and error-list rendering are intentional.
+Field/Label/InputGroup wrappers whose ARIA props and error-list rendering are
+intentional.
 
 ## Verification and distribution
 
-The production smoke test opens the built Electron application, calls IPC,
-changes a preference, reloads `/settings`, then closes and reopens the app to
-verify persistence. Security tests cover origins and traversal paths. The
-development test proves that UI updates preserve the page and native-source
-edits restart Electron. Test artifacts are stored in `.agents/artifacts/`.
+`bun run gate` runs on every pull request (`.github/workflows/gate.yml`), with
+a gitleaks scan and a `bun audit` of shipped packages. CI runs no tests.
+Electron-free units are colocated `*.test.ts` files (`bun run test:unit`);
+Playwright specs in `apps/desktop/tests/` boot the built app
+(`bun run test`, after `bun run build`). Test artifacts are stored in
+`.agents/artifacts/`.
 
-The initial scaffold is verified on macOS Apple Silicon. Windows and Linux
-targets are configured but require testing on those platforms. Signing,
-notarization, custom application icons and automatic updates are not configured.
-Local packaging is intended for development, not a signed public release.
+Only macOS Apple Silicon is verified. The macOS build is ad hoc signed, not
+notarized, with explicit entitlements (`build/entitlements.mac*.plist`); each
+DMG gets a `.sha256` next to it. Automatic updates are not configured. Local
+packaging is intended for development, not a signed public release.
+
+Windows (`nsis`) and Linux (`AppImage`) targets are configured but must not
+ship until these are fixed:
+
+- **SX-02 (Windows):** `git` and `gh` are looked up by name with the
+  repository as `cwd`, so a `git.exe` or `gh.exe` committed to a repo would
+  run (`electron/main/git/runner.ts`, `git/gh.ts`).
+- **SW-02 (Windows):** "Open in Default App" refuses a denylist of launchable
+  extensions (`LAUNCHABLE` in `shared/worktree.ts`) that misses Windows
+  script-host, shortcut and HTML-application types, and the exec-bit check
+  does nothing there.
+- **GAP-02 (Linux AppImage):** an AppImage runs from a temporary mount, so it
+  refuses to install the agent hook and offline MCP shims
+  (`shimRefusal` in `electron/main/agent-setup/mcp-entry.ts`); those features
+  need a non-AppImage Linux target.
+- **SW-07 (Windows, Linux):** there is no single-instance lock, so a second
+  launch runs a second main process over the same `~/.lanew` state.
 
 ## Sources and design decisions
 
