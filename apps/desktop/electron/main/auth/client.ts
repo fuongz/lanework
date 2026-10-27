@@ -8,19 +8,22 @@ import {
   type CliTokenRequest,
   type CliTokenResponse,
   DEFAULT_API_ORIGIN,
+  isMachineSecret,
   type MachineFacts,
   type MachineMeResponse,
   paths,
 } from "@lanework/protocol";
 import type { AccountOwner, Verdict } from "../../../shared/auth";
+import { AUTH_BODY_CAP, readCappedJson } from "../http-body";
 import { externalUrlOn, looksLikeUserCode } from "./redirect";
 import type { MachineRecord } from "./store";
 
 /**
  * The control plane this install talks to.
  *
- * `https`, never `http`: this origin receives a PKCE verifier and hands back a
- * machine credential, so the transport is part of the security of the flow.
+ * `https`, never `http` (loopback aside): this origin receives a PKCE verifier
+ * and hands back a machine credential, so the transport is part of the
+ * security of the flow ({@link isAllowedApiUrl}).
  *
  * Overridable because local development needs to point at a stub or a
  * `wrangler dev`, and because self-hosting the control plane is a legitimate
@@ -29,12 +32,51 @@ import type { MachineRecord } from "./store";
  */
 const DEFAULT_API = DEFAULT_API_ORIGIN;
 
-/** The control-plane origin in force, with no trailing slash. Never empty. */
+/** Hosts an `http:` control plane may use: this machine, and nothing else. */
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]", "localhost"]);
+
+/**
+ * Whether `value` may be a control-plane origin (FE-78/D6).
+ *
+ * `https:` anywhere, or `http:` on loopback only, for a local stub or a
+ * `wrangler dev`. A URL carrying a user name or password is refused too: the
+ * credential would ride along on every request.
+ */
+export function isAllowedApiUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.username || url.password) return false;
+  if (url.protocol === "https:") return true;
+  return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
+}
+
+/** Origins already reported as refused, so a bad value logs once, not per call. */
+const refusedApis = new Set<string>();
+
+/**
+ * The control-plane origin in force, with no trailing slash. Never empty.
+ *
+ * A candidate that is not {@link isAllowedApiUrl} (plain `http` to another
+ * host, or not a URL) falls back to the default and is logged (FE-78/D6). The
+ * origin receives a PKCE verifier and the machine credential, so a mistyped
+ * or planted `LANEWORK_API_URL` must not send them in the clear.
+ */
 export function resolveApi(apiUrl?: string | null): string {
-  return (apiUrl || process.env.LANEWORK_API_URL || DEFAULT_API).replace(
-    /\/+$/,
-    "",
-  );
+  const candidate = (apiUrl || process.env.LANEWORK_API_URL || DEFAULT_API)
+    .trim()
+    .replace(/\/+$/, "");
+  if (isAllowedApiUrl(candidate)) return candidate;
+  if (!refusedApis.has(candidate)) {
+    refusedApis.add(candidate);
+    console.warn(
+      `Ignoring control-plane URL ${JSON.stringify(candidate)}: it must be https, or http on 127.0.0.1, ::1 or localhost, with no user name or password. Using ${DEFAULT_API}.`,
+    );
+  }
+  return DEFAULT_API;
 }
 
 /**
@@ -131,7 +173,9 @@ async function postJson<Res>(
     if (signal?.aborted) throw cause;
     throw new UnreachableError(api, cause);
   }
-  const data = await res.json().catch(() => ({}));
+  // Capped (FE-78/D8): an answer to sign-in is a few hundred bytes, and a
+  // hostile origin must not be able to stream gigabytes into main.
+  const data = await readCappedJson(res, AUTH_BODY_CAP).catch(() => ({}));
   return {
     status: res.status,
     ok: res.ok,
@@ -296,8 +340,15 @@ export async function redeem(
   );
 
   const machineId = str(data.machineId, 64);
-  const secret = str(data.secret, 200);
+  // Only a well-formed machine secret is accepted (FE-78/D1): it is stored,
+  // sent as a bearer token and written into a `security -i` line for the
+  // hook, so a value the protocol does not describe never gets that far.
+  const secret = isMachineSecret(data.secret) ? data.secret : null;
   if (ok && machineId && secret) return { state: "issued", machineId, secret };
+  if (ok && machineId && data.secret !== undefined && !secret)
+    throw new Error(
+      `${api} issued a credential this app does not recognise. Nothing was stored; try signing in again.`,
+    );
 
   switch (data.error as CliTokenErrorCode | undefined) {
     case "authorization_pending":
@@ -399,9 +450,9 @@ export async function probe(record: MachineRecord): Promise<{
     let userId = record.userId;
     let owner = record.owner;
     if (res.ok) {
-      const data = (await res
-        .json()
-        .catch(() => ({}))) as Unchecked<MachineMeResponse>;
+      const data = (await readCappedJson(res, AUTH_BODY_CAP).catch(
+        () => ({}),
+      )) as Unchecked<MachineMeResponse>;
       userId = str(data.userId, 64) ?? userId;
       // Kept when the response omits it, rather than cleared. A control plane
       // older than this field is a working control plane, and blanking a name

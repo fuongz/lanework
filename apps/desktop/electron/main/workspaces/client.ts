@@ -1,3 +1,4 @@
+import { paths } from "@lanework/protocol";
 import {
   type BoardActivity,
   type BoardActivityPage,
@@ -31,6 +32,12 @@ import {
 } from "../../../shared/workspaces";
 import { resolveApi } from "../auth/client";
 import type { MachineRecord } from "../auth/store";
+import {
+  BodyTooLargeError,
+  ICON_BODY_CAP,
+  readCappedBytes,
+  readCappedJson,
+} from "../http-body";
 
 /** Whether `value` is a string with something besides whitespace on it. */
 function text(value: unknown): value is string {
@@ -134,14 +141,16 @@ async function call(
 }
 
 /**
- * A response's JSON body.
+ * A response's JSON body, at most `JSON_BODY_CAP` bytes of it (FE-78/D8).
  *
- * @throws when the body is not JSON.
+ * @throws when the body is too large or not JSON.
  */
 async function body(response: Response): Promise<unknown> {
   try {
-    return await response.json();
-  } catch {
+    return await readCappedJson(response);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError)
+      throw new Error("The service sent a response too large to read.");
     throw new Error("The service returned an invalid response. Try again.");
   }
 }
@@ -153,7 +162,7 @@ export async function fetchWorkspaces(
   // NOTE: `/v1/sync/state`, the MACHINE surface. `/v1/workspaces` is
   // `sessionAuth` end to end and answers this app's credential with 401 by
   // design.
-  const response = await call(record, "/v1/sync/state");
+  const response = await call(record, paths.syncState());
   if (!response.ok)
     throw new Error(
       `Could not load your workspaces (HTTP ${response.status}). Try again.`,
@@ -430,9 +439,10 @@ export async function fetchCards(
   for (let page = 0; page < 8000 / PAGE; page++) {
     const response = await call(
       record,
-      `/v1/boards/${workspaceId}/items?limit=${PAGE}${
-        cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
-      }`,
+      paths.items(
+        workspaceId,
+        `limit=${PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+      ),
     );
     if (!response.ok)
       throw new Error(
@@ -466,10 +476,7 @@ export async function searchCards(
   query: string,
 ): Promise<BoardCard[]> {
   const params = new URLSearchParams({ q: query, limit: "20" });
-  const response = await call(
-    record,
-    `/v1/boards/${workspaceId}/items?${params.toString()}`,
-  );
+  const response = await call(record, paths.items(workspaceId, params));
   if (!response.ok)
     throw new Error(`Could not search this board (HTTP ${response.status}).`);
   const payload = (await body(response)) as { items?: unknown[] };
@@ -547,10 +554,7 @@ export async function fetchGroup(
   const params = new URLSearchParams(group.params);
   params.set("limit", String(group.limit));
   if (cursor) params.set("cursor", cursor);
-  const response = await call(
-    record,
-    `/v1/boards/${workspaceId}/items?${params.toString()}`,
-  );
+  const response = await call(record, paths.items(workspaceId, params));
   if (!response.ok)
     throw new Error(
       `Could not load this board (HTTP ${response.status}). Try again.`,
@@ -600,11 +604,7 @@ export async function fetchStats(
   if (filters.category) params.set("category", filters.category);
   if (filters.priority) params.set("priority", filters.priority);
   if (filters.tag) params.set("tag", filters.tag);
-  const query = params.toString();
-  const response = await call(
-    record,
-    `/v1/boards/${workspaceId}/stats${query ? `?${query}` : ""}`,
-  );
+  const response = await call(record, paths.boardStats(workspaceId, params));
   if (response.status === 404) {
     // NOTE: 404 is ALSO what an unknown board answers. That board's own reads
     // fail right after this and say so; here it only means "no counts".
@@ -642,7 +642,7 @@ export async function fetchCheckpoint(
 ): Promise<CardCheckpoint | null> {
   const response = await call(
     record,
-    `/v1/boards/${workspaceId}/items/${encodeURIComponent(cardId)}/checkpoints`,
+    paths.itemCheckpoints(workspaceId, cardId),
   );
   if (response.status === 404) return null;
   if (!response.ok)
@@ -700,7 +700,7 @@ export async function fetchPresence(
   record: MachineRecord,
   workspaceId: string,
 ): Promise<BoardPresence[]> {
-  const response = await call(record, `/v1/boards/${workspaceId}/presence`);
+  const response = await call(record, paths.boardPresence(workspaceId));
   if (response.status === 404) return [];
   if (!response.ok)
     throw new Error(
@@ -735,7 +735,7 @@ export async function fetchBoardConfig(
   record: MachineRecord,
   workspaceId: string,
 ): Promise<ReturnType<typeof parseBoardConfig>> {
-  const response = await call(record, `/v1/boards/${workspaceId}/config`);
+  const response = await call(record, paths.boardConfig(workspaceId));
   if (!response.ok)
     throw new Error(
       `Could not load this board (HTTP ${response.status}). Try again.`,
@@ -834,7 +834,7 @@ export async function moveCard(
   placement?: BoardPlacement,
 ): Promise<BoardWrite> {
   return readWrite(
-    await call(record, `/v1/boards/${workspaceId}/items/${cardId}/move`, {
+    await call(record, paths.itemMove(workspaceId, cardId), {
       method: "POST",
       body: JSON.stringify({
         // NOTE: The key is OMITTED rather than sent as null for a reorder.
@@ -863,7 +863,7 @@ export async function updateCard(
   revision: number,
 ): Promise<BoardWrite> {
   return readWrite(
-    await call(record, `/v1/boards/${workspaceId}/items/${cardId}`, {
+    await call(record, paths.item(workspaceId, cardId), {
       method: "PATCH",
       headers: { "if-match": String(revision) },
       body: JSON.stringify(patch),
@@ -878,10 +878,7 @@ export async function fetchCard(
   workspaceId: string,
   cardId: string,
 ): Promise<BoardCard> {
-  const response = await call(
-    record,
-    `/v1/boards/${workspaceId}/items/${cardId}`,
-  );
+  const response = await call(record, paths.item(workspaceId, cardId));
   if (!response.ok)
     throw new Error(
       `Could not load this card (HTTP ${response.status}). Try again.`,
@@ -906,7 +903,7 @@ export async function lookupCard(
 ): Promise<BoardCard | null> {
   const response = await call(
     record,
-    `/v1/boards/${workspaceId}/lookup?taskId=${encodeURIComponent(taskId)}`,
+    paths.boardLookup(workspaceId, { taskId }),
   );
   if (response.status === 404) return null;
   if (!response.ok)
@@ -933,7 +930,7 @@ export async function fetchChanges(
 ): Promise<BoardChanges> {
   const response = await call(
     record,
-    `/v1/boards/${workspaceId}/changes?since=${since}&limit=${PAGE}`,
+    paths.boardChanges(workspaceId, since, PAGE),
   );
   if (!response.ok)
     throw new Error(
@@ -982,18 +979,14 @@ export async function toggleChecklistItem(
   revision: number,
 ): Promise<BoardWrite> {
   return readWrite(
-    await call(
-      record,
-      `/v1/boards/${workspaceId}/items/${cardId}/checklist/${encodeURIComponent(key)}`,
-      {
-        method: "PATCH",
-        // NOTE: Sent even though this endpoint treats it as optional: the user
-        // is looking at a specific revision of this card, and a tick that
-        // lands on a newer one is a decision they did not make.
-        headers: { "if-match": String(revision) },
-        body: JSON.stringify({ checked }),
-      },
-    ),
+    await call(record, paths.itemChecklistItem(workspaceId, cardId, key), {
+      method: "PATCH",
+      // NOTE: Sent even though this endpoint treats it as optional: the user
+      // is looking at a specific revision of this card, and a tick that
+      // lands on a newer one is a decision they did not make.
+      headers: { "if-match": String(revision) },
+      body: JSON.stringify({ checked }),
+    }),
   );
 }
 
@@ -1012,7 +1005,7 @@ export async function replaceChecklist(
   revision: number,
 ): Promise<BoardWrite> {
   return readWrite(
-    await call(record, `/v1/boards/${workspaceId}/items/${cardId}/checklist`, {
+    await call(record, paths.itemChecklist(workspaceId, cardId), {
       method: "PUT",
       headers: { "if-match": String(revision) },
       body: JSON.stringify({ items }),
@@ -1038,7 +1031,7 @@ export async function createCard(
   draft: BoardCardDraft,
 ): Promise<BoardWrite> {
   return readWrite(
-    await call(record, `/v1/boards/${workspaceId}/items`, {
+    await call(record, paths.items(workspaceId), {
       method: "POST",
       body: JSON.stringify({
         title: draft.title,
@@ -1114,9 +1107,11 @@ export async function fetchActivity(
 ): Promise<BoardActivityPage> {
   const response = await call(
     record,
-    `/v1/boards/${workspaceId}/items/${cardId}/activity${
-      cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""
-    }`,
+    paths.itemActivity(
+      workspaceId,
+      cardId,
+      cursor ? `cursor=${encodeURIComponent(cursor)}` : undefined,
+    ),
   );
   if (!response.ok)
     throw new Error(
@@ -1148,11 +1143,10 @@ export async function createComment(
   cardId: string,
   text_: string,
 ): Promise<{ id: string }> {
-  const response = await call(
-    record,
-    `/v1/boards/${workspaceId}/items/${cardId}/comments`,
-    { method: "POST", body: JSON.stringify({ body: text_ }) },
-  );
+  const response = await call(record, paths.itemComments(workspaceId, cardId), {
+    method: "POST",
+    body: JSON.stringify({ body: text_ }),
+  });
   if (!response.ok)
     throw new Error(
       `Could not post that comment (HTTP ${response.status}). Try again.`,
@@ -1178,7 +1172,7 @@ export async function editComment(
 ): Promise<void> {
   const response = await call(
     record,
-    `/v1/boards/${workspaceId}/items/${cardId}/comments/${commentId}`,
+    paths.itemComment(workspaceId, cardId, commentId),
     { method: "PATCH", body: JSON.stringify({ body: text_ }) },
   );
   if (response.status === 403)
@@ -1205,7 +1199,7 @@ export async function deleteComment(
 ): Promise<void> {
   const response = await call(
     record,
-    `/v1/boards/${workspaceId}/items/${cardId}/comments/${commentId}`,
+    paths.itemComment(workspaceId, cardId, commentId),
     { method: "DELETE" },
   );
   if (response.status === 403)
@@ -1236,7 +1230,9 @@ async function setFlag(
 ): Promise<boolean> {
   const response = await call(
     record,
-    `/v1/boards/${workspaceId}/items/${cardId}/${path}`,
+    path === "subscription"
+      ? paths.itemSubscription(workspaceId, cardId)
+      : paths.itemFavorite(workspaceId, cardId),
     { method: on ? "PUT" : "DELETE" },
   );
   if (!response.ok)
@@ -1296,7 +1292,7 @@ export async function attachFile(
 ): Promise<BoardAttachment> {
   const response = await call(
     record,
-    `/v1/boards/${workspaceId}/items/${cardId}/attachments`,
+    paths.itemAttachments(workspaceId, cardId),
     {
       method: "POST",
       body: JSON.stringify({
@@ -1329,7 +1325,7 @@ export async function detachFile(
 ): Promise<void> {
   const response = await call(
     record,
-    `/v1/boards/${workspaceId}/items/${cardId}/attachments/${attachmentId}`,
+    paths.itemAttachment(workspaceId, cardId, attachmentId),
     { method: "DELETE" },
   );
   if (!response.ok)
@@ -1354,7 +1350,7 @@ export async function purgeIssues(
   workspaceId: string,
   slug: string,
 ): Promise<{ deleted: number }> {
-  const response = await call(record, `/v1/boards/${workspaceId}/purge`, {
+  const response = await call(record, paths.boardPurge(workspaceId), {
     method: "POST",
     body: JSON.stringify({ confirm: slug }),
   });
@@ -1395,11 +1391,9 @@ export async function archiveCard(
   workspaceId: string,
   cardId: string,
 ): Promise<void> {
-  const response = await call(
-    record,
-    `/v1/boards/${workspaceId}/items/${cardId}`,
-    { method: "DELETE" },
-  );
+  const response = await call(record, paths.item(workspaceId, cardId), {
+    method: "DELETE",
+  });
   if (response.status === 404)
     throw new Error("That card is no longer on this board.");
   if (!response.ok)
@@ -1436,7 +1430,7 @@ export async function createWorkspace(
   record: MachineRecord,
   input: { slug: string; name: string; path?: string },
 ): Promise<Workspace & { id: string }> {
-  const response = await call(record, "/v1/sync/state/workspace", {
+  const response = await call(record, paths.syncWorkspace(), {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -1503,11 +1497,10 @@ export async function renameWorkspace(
   id: string,
   name: string,
 ): Promise<void> {
-  const response = await call(
-    record,
-    `/v1/sync/state/workspace/${encodeURIComponent(id)}`,
-    { method: "PATCH", body: JSON.stringify({ name }) },
-  );
+  const response = await call(record, paths.syncWorkspaceById(id), {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
   if (response.status === 404)
     throw new Error(
       "That project is no longer on your account. Refresh to see what is left.",
@@ -1532,7 +1525,7 @@ export async function reorderWorkspaces(
   record: MachineRecord,
   ids: string[],
 ): Promise<void> {
-  const response = await call(record, "/v1/sync/state/workspace-order", {
+  const response = await call(record, paths.syncWorkspaceOrder(), {
     method: "PUT",
     body: JSON.stringify({ ids }),
   });
@@ -1578,11 +1571,9 @@ export async function deleteWorkspace(
   record: MachineRecord,
   id: string,
 ): Promise<void> {
-  const response = await call(
-    record,
-    `/v1/sync/state/workspace/${encodeURIComponent(id)}`,
-    { method: "DELETE" },
-  );
+  const response = await call(record, paths.syncWorkspaceById(id), {
+    method: "DELETE",
+  });
   if (response.status === 404)
     throw new Error(
       "This Lanework service cannot delete projects yet. Update it, then try again.",
@@ -1605,7 +1596,7 @@ export async function putBoardConfig(
   workspaceId: string,
   config: unknown,
 ): Promise<void> {
-  const response = await call(record, `/v1/boards/${workspaceId}/config`, {
+  const response = await call(record, paths.boardConfig(workspaceId), {
     method: "PUT",
     body: JSON.stringify(config),
   });
@@ -1636,7 +1627,7 @@ export async function importRecords(
   }[];
   summary: Record<string, number>;
 }> {
-  const response = await call(record, `/v1/boards/${workspaceId}/import`, {
+  const response = await call(record, paths.boardImport(workspaceId), {
     method: "POST",
     body: JSON.stringify({ records }),
   });
@@ -1694,7 +1685,7 @@ export async function sealBoardMigration(
   items: number,
   manifest: string,
 ): Promise<{ migratedAt: string | null; error?: string }> {
-  const response = await call(record, `/v1/boards/${workspaceId}/migrated`, {
+  const response = await call(record, paths.boardMigrated(workspaceId), {
     method: "POST",
     body: JSON.stringify({ items, manifest }),
   });
@@ -1737,7 +1728,7 @@ export async function fetchIcon(
   workspaceId: string,
   held: string | null,
 ): Promise<IconAnswer> {
-  const response = await call(record, `/v1/boards/${workspaceId}/icon`, {
+  const response = await call(record, paths.boardIcon(workspaceId), {
     headers: held ? { "if-none-match": `"${held}"` } : {},
   });
   if (response.status === 304) return { kind: "same" };
@@ -1755,10 +1746,12 @@ export async function fetchIcon(
     await response.body?.cancel().catch(() => {});
     return { kind: "none" };
   }
+  // FE-78/D8: an icon is a small image. A body past the cap is refused, not
+  // stored base64 in the cache.
   return {
     kind: "new",
     key,
     type,
-    bytes: Buffer.from(await response.arrayBuffer()),
+    bytes: Buffer.from(await readCappedBytes(response, ICON_BODY_CAP)),
   };
 }

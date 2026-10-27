@@ -592,14 +592,20 @@ const MAX_BLOB_BYTES = 2 * 1024 * 1024;
  *
  * @throws {@link GitHubError} for a failure that is not about the file, such
  *   as being signed out.
+ * @throws When a segment of `path` is `.` or `..` (FE-78/D7).
  */
 export async function fetchFileText(
   ref: RepoRef,
   path: string,
   sha: string,
 ): Promise<FileText | null> {
-  const endpoint = `repos/${ref.owner}/${ref.repo}/contents/${path
-    .split("/")
+  const segments = path.split("/");
+  // NOTE: `encodeURIComponent` leaves dots alone, and the API collapses a dot
+  // segment: `contents/../../..` would climb out of the repo's contents and
+  // GET any endpoint with this user's GitHub token. No file in a diff has one.
+  if (segments.some((segment) => segment === "." || segment === ".."))
+    throw new Error("That file path is not one this app can read.");
+  const endpoint = `repos/${ref.owner}/${ref.repo}/contents/${segments
     .map(encodeURIComponent)
     .join("/")}?ref=${encodeURIComponent(sha)}`;
   try {

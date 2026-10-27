@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
   BoardConfig,
@@ -980,10 +980,20 @@ function checkConfig(config: LocalBoardConfig): void {
  *
  * It creates the file and its folder when absent, and opens it in WAL mode
  * with a busy timeout, migrated to the current schema.
+ *
+ * NOTE (FE-78/D8): A new folder is created 0700 and a new file 0600, so other
+ * users on the machine cannot read the boards. SQLite gives the WAL and
+ * shared-memory files the main file's mode. An existing folder or file keeps
+ * the mode it has.
  */
 export function openLocalStore(options: OpenOptions = {}): LocalStore {
   const path = options.path ?? localStorePath();
-  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
+  if (path !== ":memory:") {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    // An empty file is a valid empty database; creating it here is what lets
+    // the mode be set before SQLite writes anything into it.
+    if (!existsSync(path)) closeSync(openSync(path, "a", 0o600));
+  }
   const db = openDatabase(path);
   try {
     // busy_timeout first: switching to WAL itself needs a lock another

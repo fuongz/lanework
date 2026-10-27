@@ -149,6 +149,24 @@ export function AccountSection() {
                   "machine ID",
                 ),
               },
+              // Only when it is true: an encrypted credential is the normal
+              // case and earns no row (FE-78/D11). Absent reads as encrypted.
+              ...(session?.credentialEncrypted === false
+                ? [
+                    {
+                      label: "Credential",
+                      description:
+                        "The OS keychain isn't available, so this machine's sign-in is saved as plain text. Anyone who can read your files can use it.",
+                      keywords:
+                        "credential token secret keychain encrypted unencrypted plain text storage security",
+                      control: (
+                        <span className="text-[13px] text-amber-600 dark:text-amber-400">
+                          Stored unencrypted on this machine
+                        </span>
+                      ),
+                    },
+                  ]
+                : []),
             ],
           },
           {

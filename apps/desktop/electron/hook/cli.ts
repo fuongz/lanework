@@ -6,6 +6,7 @@
 //   lanework status              signed in? hook config? last checkpoint?
 //   lanework logout              revoke this machine and forget it
 //   lanework config push-wip on|off
+//   lanework config push-wip-untracked on|off
 //   lanework mcp                 the offline board's MCP server, on stdio
 //
 // NOTE: Sign-in reuses the control plane's `lanework login` flow (its contract
@@ -51,7 +52,13 @@ import {
  */
 export const pluginConfigPath = () => join(configDir(), "hook.json");
 
-type PluginConfig = { pushWip?: boolean };
+/**
+ * What the hook reads from the plugin's settings file.
+ *
+ * `pushWipUntracked` adds new files to the WIP snapshot; it means nothing
+ * without `pushWip` (FE-78/D9).
+ */
+type PluginConfig = { pushWip?: boolean; pushWipUntracked?: boolean };
 
 function readConfig(): PluginConfig {
   try {
@@ -139,7 +146,7 @@ function save(api: string, issued: MachineCredential) {
   writeSecret(api, issued.secret);
   if (readSecret(api) !== issued.secret)
     throw new Error("Signed in, but the credential could not be read back.");
-  return `Signed in as machine ${issued.machineId}. Saved to ${credentialLocation()}.\n${outcome()}`;
+  return `Signed in as machine ${issued.machineId}. Saved to ${credentialLocation(api)}.\n${outcome()}`;
 }
 
 /**
@@ -195,6 +202,7 @@ export async function waitForDeviceLogin(
       appendFileSync(
         join(stateDir, "hook.log"),
         `${new Date().toISOString()} device sign-in: ${line}\n`,
+        { mode: 0o600 },
       );
     } catch {
       // Nowhere left to report to.
@@ -312,8 +320,9 @@ export async function status(
     [
       `API:              ${api}`,
       `Signed in:        ${signedIn}`,
-      `Credential:       ${credentialLocation()}`,
+      `Credential:       ${credentialLocation(api)}`,
       `Push unfinished:  ${readConfig().pushWip ? "on" : "off"} (lanework config push-wip on|off)`,
+      `  with new files: ${readConfig().pushWipUntracked ? "on" : "off"} (lanework config push-wip-untracked on|off)`,
       `Last checkpoint:  ${last}`,
       ...(desktopHook
         ? [
@@ -325,24 +334,45 @@ export async function status(
   );
 }
 
+/** What `lanework config <key> on|off` sets, and what the hook then does. */
+const CONFIG_KEYS = {
+  "push-wip": {
+    field: "pushWip",
+    on: "The hook will also push uncommitted changes to tracked files to refs/lanework/wip/<task id>. New files go too only with `lanework config push-wip-untracked on`. Anyone who can read the remote can fetch that ref.",
+    off: "The hook will not push code.",
+  },
+  "push-wip-untracked": {
+    field: "pushWipUntracked",
+    on: "When it pushes unfinished work, the hook will also include new files that are not ignored. Anyone who can read the remote can fetch that ref. A snapshot that looks like it holds a secret (an .env or key file, or a token in an added line) is never pushed.",
+    off: "When it pushes unfinished work, the hook will include changes to tracked files only.",
+  },
+} as const;
+
 export function config(
   key: string | undefined,
   value: string | undefined,
 ): void {
-  if (key !== "push-wip" || (value !== "on" && value !== "off")) {
-    console.error("usage: lanework config push-wip on|off");
+  const entry =
+    key && Object.hasOwn(CONFIG_KEYS, key)
+      ? CONFIG_KEYS[key as keyof typeof CONFIG_KEYS]
+      : null;
+  if (!entry || (value !== "on" && value !== "off")) {
+    console.error(
+      "usage: lanework config push-wip on|off\n       lanework config push-wip-untracked on|off",
+    );
     process.exitCode = 1;
     return;
   }
-  const next = { ...readConfig(), pushWip: value === "on" };
+  const next: PluginConfig = { ...readConfig(), [entry.field]: value === "on" };
   mkdirSync(configDir(), { recursive: true, mode: 0o700 });
   writeFileSync(pluginConfigPath(), `${JSON.stringify(next, null, 2)}\n`, {
     mode: 0o600,
   });
+  const said = value === "on" ? entry.on : entry.off;
   console.log(
-    value === "on"
-      ? "The hook will also push uncommitted work to refs/lanework/wip/<task id>."
-      : "The hook will not push code.",
+    entry.field === "pushWipUntracked" && value === "on" && !next.pushWip
+      ? `${said}\nNothing is pushed until \`lanework config push-wip on\`.`
+      : said,
   );
 }
 

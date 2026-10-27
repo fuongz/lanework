@@ -22,8 +22,7 @@
 // lists, the id is a UUID Codex itself named, and images are files main
 // wrote.
 import { type ChildProcess, spawn as spawnChild } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import {
@@ -148,8 +147,9 @@ async function inputOf(
   const input: Json[] = text ? [{ type: "text", text, text_elements: [] }] : [];
   const blocks = content.filter((block) => block.type === "image");
   if (blocks.length === 0) return { input, dir: null };
-  const dir = join(tmpdir(), "lanework-codex", randomUUID());
-  await mkdir(dir, { recursive: true, mode: 0o700 });
+  // A fresh 0700 folder of its own, never a shared, predictable parent
+  // another user could create first (FE-78/D8).
+  const dir = await mkdtemp(join(tmpdir(), "lanework-codex-"));
   for (const [at, block] of blocks.entries()) {
     if (block.type !== "image") continue;
     const ext = EXT[block.source.media_type] ?? "png";

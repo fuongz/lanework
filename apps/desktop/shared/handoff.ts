@@ -54,6 +54,8 @@ export interface HandoffStatus {
   credential: boolean;
   /** The hook also pushes the uncommitted tree. Off by default (FE-28/D3). */
   pushWip: boolean;
+  /** The pushed snapshot also takes new, non-ignored files (FE-78/D9). */
+  pushWipUntracked: boolean;
   /** The newest checkpoint the hook recorded on this machine, if any. */
   last: { taskId: string; at: string } | null;
   claude: AgentHookStatus;
@@ -67,6 +69,7 @@ export const handoffChannels = {
   enable: "handoff:enable",
   disable: "handoff:disable",
   setPushWip: "handoff:push-wip",
+  setPushWipUntracked: "handoff:push-wip-untracked",
 } as const;
 
 export interface DesktopHandoffApi {
@@ -77,4 +80,6 @@ export interface DesktopHandoffApi {
   disable: (agent: HookAgent) => Promise<HandoffStatus>;
   /** For both CLIs: a setting the hook reads, not part of its command. */
   setPushWip: (on: boolean) => Promise<HandoffStatus>;
+  /** Asks first; needs push-wip on. */
+  setPushWipUntracked: (on: boolean) => Promise<HandoffStatus>;
 }

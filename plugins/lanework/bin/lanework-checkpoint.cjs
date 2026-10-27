@@ -40,14 +40,17 @@ var __export = (target, all) => {
 var exports_lanework_checkpoint = {};
 __export(exports_lanework_checkpoint, {
   buildBody: () => buildBody,
+  checkedApi: () => checkedApi,
   digest: () => digest,
   digestCodex: () => digestCodex,
+  isSecretFile: () => isSecretFile,
   redact: () => redact,
-  snapshot: () => snapshot
+  snapshot: () => snapshot,
+  stripUserinfo: () => stripUserinfo
 });
 module.exports = __toCommonJS(exports_lanework_checkpoint);
 var import_node_child_process3 = require("node:child_process");
-var import_node_crypto3 = require("node:crypto");
+var import_node_crypto4 = require("node:crypto");
 var import_node_fs5 = require("node:fs");
 var import_node_os6 = require("node:os");
 var import_node_path6 = require("node:path");
@@ -71,8 +74,16 @@ var TOKEN_PREFIXES = {
   device: "lw_dev_",
   code: "lw_code_"
 };
+var MACHINE_SECRET_PATTERN = new RegExp(`^${TOKEN_PREFIXES.machine}[A-Za-z0-9_-]{16,190}$`);
+function isMachineSecret(value) {
+  return typeof value === "string" && MACHINE_SECRET_PATTERN.test(value);
+}
 // packages/protocol/src/endpoints.ts
-var seg = encodeURIComponent;
+function seg(value) {
+  if (value === "" || value === "." || value === "..")
+    throw new Error(`Refusing the path segment ${JSON.stringify(value)}.`);
+  return encodeURIComponent(value);
+}
 var paths = {
   health: () => "/v1/health",
   cliAuth: () => "/v1/cli/auth",
@@ -126,6 +137,57 @@ var import_node_path5 = require("node:path");
 // apps/desktop/electron/main/auth/client.ts
 var import_node_os = require("node:os");
 
+// apps/desktop/electron/main/http-body.ts
+var JSON_BODY_CAP = 8 * 1024 * 1024;
+var ICON_BODY_CAP = 1024 * 1024;
+var AUTH_BODY_CAP = 64 * 1024;
+var PROBE_BODY_CAP = 64 * 1024;
+
+class BodyTooLargeError extends Error {
+  maxBytes;
+  constructor(maxBytes) {
+    super(`The response was larger than ${maxBytes} bytes.`);
+    this.maxBytes = maxBytes;
+    this.name = "BodyTooLargeError";
+  }
+}
+async function readCappedBytes(response, maxBytes) {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw new BodyTooLargeError(maxBytes);
+  }
+  if (!response.body)
+    return new Uint8Array(0);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;; ) {
+    const { done, value } = await reader.read();
+    if (done)
+      break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new BodyTooLargeError(maxBytes);
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+async function readCapped(response, maxBytes) {
+  return new TextDecoder().decode(await readCappedBytes(response, maxBytes));
+}
+async function readCappedJson(response, maxBytes = JSON_BODY_CAP) {
+  return JSON.parse(await readCapped(response, maxBytes));
+}
+
 // apps/desktop/electron/main/auth/redirect.ts
 var CALLBACK_PATH = LOOPBACK_CALLBACK_PATH;
 function externalUrlOn(raw, origin) {
@@ -157,6 +219,8 @@ function looksLikeUserCode(value) {
 }
 
 // apps/desktop/electron/main/auth/client.ts
+var LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]", "localhost"]);
+var refusedApis = new Set;
 function machineFacts(name) {
   const host = import_node_os.hostname();
   return {
@@ -196,7 +260,7 @@ async function postJson(api, path, body, signal) {
       throw cause;
     throw new UnreachableError(api, cause);
   }
-  const data = await res.json().catch(() => ({}));
+  const data = await readCappedJson(res, AUTH_BODY_CAP).catch(() => ({}));
   return {
     status: res.status,
     ok: res.ok,
@@ -255,9 +319,11 @@ async function redeem(api, grant, verifier, signal) {
     code_verifier: verifier
   }, signal);
   const machineId = str(data.machineId, 64);
-  const secret = str(data.secret, 200);
+  const secret = isMachineSecret(data.secret) ? data.secret : null;
   if (ok && machineId && secret)
     return { state: "issued", machineId, secret };
+  if (ok && machineId && data.secret !== undefined && !secret)
+    throw new Error(`${api} issued a credential this app does not recognise. Nothing was stored; try signing in again.`);
   switch (data.error) {
     case "authorization_pending":
       return { state: "pending" };
@@ -1566,8 +1632,11 @@ function checkConfig(config) {
 }
 function openLocalStore(options = {}) {
   const path = options.path ?? localStorePath();
-  if (path !== ":memory:")
-    import_node_fs.mkdirSync(import_node_path3.dirname(path), { recursive: true });
+  if (path !== ":memory:") {
+    import_node_fs.mkdirSync(import_node_path3.dirname(path), { recursive: true, mode: 448 });
+    if (!import_node_fs.existsSync(path))
+      import_node_fs.closeSync(import_node_fs.openSync(path, "a", 384));
+  }
   const db = openDatabase(path);
   try {
     db.exec(`PRAGMA busy_timeout = ${Math.max(0, options.busyTimeoutMs ?? 5000)}`);
@@ -2568,23 +2637,50 @@ function runLocalMcpServer(options = {}) {
 }
 // apps/desktop/electron/hook/credential.ts
 var import_node_child_process = require("node:child_process");
+var import_node_crypto3 = require("node:crypto");
 var import_node_fs2 = require("node:fs");
 var import_node_os4 = require("node:os");
 var import_node_path4 = require("node:path");
 var KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
+var SECURITY = "/usr/bin/security";
 function configDir() {
   return import_node_path4.join(process.env.XDG_CONFIG_HOME || import_node_path4.join(import_node_os4.homedir(), ".config"), "lanework");
 }
-function secretFile() {
+function originOf(api) {
+  try {
+    return new URL(api).origin;
+  } catch {
+    return api;
+  }
+}
+function secretFile(api) {
   if (process.env.LANEWORK_HOOK_SECRET_FILE)
     return process.env.LANEWORK_HOOK_SECRET_FILE;
-  return process.platform === "darwin" ? null : import_node_path4.join(configDir(), "credential");
+  if (process.platform === "darwin")
+    return null;
+  const origin = originOf(api);
+  if (origin === DEFAULT_API_ORIGIN)
+    return import_node_path4.join(configDir(), "credential");
+  const key = import_node_crypto3.createHash("sha256").update(origin).digest("hex").slice(0, 16);
+  return import_node_path4.join(configDir(), `credential-${key}`);
 }
-function credentialLocation() {
-  return secretFile() ?? `macOS Keychain (${KEYCHAIN_SERVICE})`;
+function credentialLocation(api) {
+  return secretFile(api) ?? `macOS Keychain (${KEYCHAIN_SERVICE})`;
+}
+function unsafe(value) {
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (char === '"' || char === "\\" || code < 32 || code === 127)
+      return true;
+  }
+  return false;
+}
+function assertSafe(what, value) {
+  if (!value || unsafe(value))
+    throw new Error(`Refusing to store a ${what} with unsafe characters.`);
 }
 function readSecret(api) {
-  const file = secretFile();
+  const file = secretFile(api);
   if (file) {
     try {
       return import_node_fs2.readFileSync(file, "utf8").trim() || null;
@@ -2593,13 +2689,14 @@ function readSecret(api) {
     }
   }
   try {
-    return import_node_child_process.execFileSync("security", ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    return import_node_child_process.execFileSync(SECURITY, ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
     return null;
   }
 }
 function writeSecret(api, secret) {
-  const file = secretFile();
+  assertSafe("credential", secret);
+  const file = secretFile(api);
   if (file) {
     import_node_fs2.mkdirSync(import_node_path4.dirname(file), { recursive: true, mode: 448 });
     import_node_fs2.writeFileSync(file, `${secret}
@@ -2607,20 +2704,21 @@ function writeSecret(api, secret) {
     import_node_fs2.chmodSync(file, 384);
     return;
   }
-  import_node_child_process.execFileSync("security", ["-i"], {
+  assertSafe("API address", api);
+  import_node_child_process.execFileSync(SECURITY, ["-i"], {
     input: `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "${api}" -w "${secret}"
 `,
     stdio: ["pipe", "ignore", "inherit"]
   });
 }
 function deleteSecret(api) {
-  const file = secretFile();
+  const file = secretFile(api);
   if (file) {
     import_node_fs2.rmSync(file, { force: true });
     return;
   }
   try {
-    import_node_child_process.execFileSync("security", ["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api], { stdio: "ignore" });
+    import_node_child_process.execFileSync(SECURITY, ["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api], { stdio: "ignore" });
   } catch {}
 }
 
@@ -2675,7 +2773,7 @@ function save(api, issued) {
   writeSecret(api, issued.secret);
   if (readSecret(api) !== issued.secret)
     throw new Error("Signed in, but the credential could not be read back.");
-  return `Signed in as machine ${issued.machineId}. Saved to ${credentialLocation()}.
+  return `Signed in as machine ${issued.machineId}. Saved to ${credentialLocation(api)}.
 ${outcome()}`;
 }
 async function startDeviceLogin(api, stateDir) {
@@ -2707,7 +2805,7 @@ async function waitForDeviceLogin(file, stateDir) {
     try {
       import_node_fs3.mkdirSync(stateDir, { recursive: true, mode: 448 });
       import_node_fs3.appendFileSync(import_node_path5.join(stateDir, "hook.log"), `${new Date().toISOString()} device sign-in: ${line}
-`);
+`, { mode: 384 });
     } catch {}
   };
   let pending;
@@ -2788,8 +2886,9 @@ async function status(api, stateDir, desktopHook) {
   console.log([
     `API:              ${api}`,
     `Signed in:        ${signedIn}`,
-    `Credential:       ${credentialLocation()}`,
+    `Credential:       ${credentialLocation(api)}`,
     `Push unfinished:  ${readConfig().pushWip ? "on" : "off"} (lanework config push-wip on|off)`,
+    `  with new files: ${readConfig().pushWipUntracked ? "on" : "off"} (lanework config push-wip-untracked on|off)`,
     `Last checkpoint:  ${last}`,
     ...desktopHook ? [
       "Desktop app:      its hook is installed, so this plugin's hook stays quiet (one checkpoint per turn)"
@@ -2798,19 +2897,35 @@ async function status(api, stateDir, desktopHook) {
   ].join(`
 `));
 }
+var CONFIG_KEYS = {
+  "push-wip": {
+    field: "pushWip",
+    on: "The hook will also push uncommitted changes to tracked files to refs/lanework/wip/<task id>. New files go too only with `lanework config push-wip-untracked on`. Anyone who can read the remote can fetch that ref.",
+    off: "The hook will not push code."
+  },
+  "push-wip-untracked": {
+    field: "pushWipUntracked",
+    on: "When it pushes unfinished work, the hook will also include new files that are not ignored. Anyone who can read the remote can fetch that ref. A snapshot that looks like it holds a secret (an .env or key file, or a token in an added line) is never pushed.",
+    off: "When it pushes unfinished work, the hook will include changes to tracked files only."
+  }
+};
 function config(key, value) {
-  if (key !== "push-wip" || value !== "on" && value !== "off") {
-    console.error("usage: lanework config push-wip on|off");
+  const entry = key && Object.hasOwn(CONFIG_KEYS, key) ? CONFIG_KEYS[key] : null;
+  if (!entry || value !== "on" && value !== "off") {
+    console.error(`usage: lanework config push-wip on|off
+       lanework config push-wip-untracked on|off`);
     process.exitCode = 1;
     return;
   }
-  const next = { ...readConfig(), pushWip: value === "on" };
+  const next = { ...readConfig(), [entry.field]: value === "on" };
   import_node_fs3.mkdirSync(configDir(), { recursive: true, mode: 448 });
   import_node_fs3.writeFileSync(pluginConfigPath(), `${JSON.stringify(next, null, 2)}
 `, {
     mode: 384
   });
-  console.log(value === "on" ? "The hook will also push uncommitted work to refs/lanework/wip/<task id>." : "The hook will not push code.");
+  const said = value === "on" ? entry.on : entry.off;
+  console.log(entry.field === "pushWipUntracked" && value === "on" && !next.pushWip ? `${said}
+Nothing is pushed until \`lanework config push-wip on\`.` : said);
 }
 function desktopHookInstalled() {
   const settings = import_node_path5.join(process.env.CLAUDE_CONFIG_DIR || import_node_path5.join(import_node_os5.homedir(), ".claude"), "settings.json");
@@ -2852,6 +2967,67 @@ function writeLocalCheckpoint(board, taskId, body, agent) {
   }).id;
 }
 
+// apps/desktop/electron/hook/redact.ts
+var R = "[REDACTED]";
+var SECRET_FLAG = /(--(?:password|passwd|pass|token|api-key|apikey|secret|client-secret|access-token|auth-token)(?:=|\s+))(["']?)(?!-)(?!\[REDACTED)[^\s"']+/gi;
+var RULES = [
+  [
+    /-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?(?:-----END \1-----|$)/g,
+    "[REDACTED $1]"
+  ],
+  [/\blw_(?:reg|mch|dev|code)_[A-Za-z0-9_-]+/g, R],
+  [/\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{10,}/g, R],
+  [/\bwhsec_[A-Za-z0-9]{16,}/g, R],
+  [
+    /\b(?:sk|pk|rk)-(?:ant-|proj-|live-|test-|svcacct-|admin-)?[A-Za-z0-9_-]{16,}/g,
+    R
+  ],
+  [/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, R],
+  [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, R],
+  [/\bgl(?:pat|dt|rt|ptt|cbt|imt|oas|soat|ft|agent)-[A-Za-z0-9_-]{16,}/g, R],
+  [/\bnpm_[A-Za-z0-9]{20,}/g, R],
+  [/\bhf_[A-Za-z0-9]{20,}/g, R],
+  [/\bpypi-[A-Za-z0-9_-]{30,}/g, R],
+  [/\bxox[abposre]-[A-Za-z0-9-]{10,}/g, R],
+  [/\bxapp-[A-Za-z0-9-]{10,}/g, R],
+  [/\bhooks\.slack\.com\/services\/[A-Za-z0-9/_-]+/g, `hooks.slack.com/${R}`],
+  [/\b(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\b/g, R],
+  [/\bAIza[0-9A-Za-z_-]{30,}/g, R],
+  [/\bya29\.[A-Za-z0-9_-]{20,}/g, R],
+  [
+    /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+    "[REDACTED jwt]"
+  ],
+  [/\b(Bearer|Basic)\s+(?!\[REDACTED)[A-Za-z0-9._~+/=-]{12,}/gi, `$1 ${R}`],
+  [
+    /(\bAuthorization\s*[:=]\s*["']?(?:[A-Za-z]+\s+)?)(?!\[REDACTED)[^\s"',;]{8,}/gi,
+    `$1${R}`
+  ],
+  [/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, `$1${R}@`],
+  [/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/:@]{16,}@/gi, `$1${R}@`],
+  [/((?:^|\s)(?:-u|--user)(?:=|\s*))(["']?)[^\s"':]+:[^\s"']+/g, `$1$2${R}`],
+  [
+    /(\b(?:docker|podman|nerdctl|helm)\s+(?:registry\s+)?login\b[^\n]*?\s-p\s*)(["']?)(?!-)[^\s"']+/g,
+    `$1$2${R}`
+  ],
+  [/(\bsshpass\s+(?:-\w+\s+)*?-p\s*)(["']?)(?!-)[^\s"']+/g, `$1$2${R}`],
+  [
+    /(\b(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^\n]*?\s-p)(["']?)(?![\s"'-])[^\s"']+/g,
+    `$1$2${R}`
+  ],
+  [SECRET_FLAG, `$1$2${R}`],
+  [
+    /\b([A-Za-z0-9_]*(?:api[_-]?key|secret|passw(?:or)?d|passphrase|token|credential|private[_-]?key|access[_-]?key|auth[_-]?key)[A-Za-z0-9_]*)(["']?\s*[:=]\s*["']?)(?!\[REDACTED)[^\s"',;]{6,}/gi,
+    `$1$2${R}`
+  ]
+];
+function redact(input) {
+  let out = input;
+  for (const [pattern, replacement] of RULES)
+    out = out.replace(pattern, replacement);
+  return out;
+}
+
 // apps/desktop/electron/hook/lanework-checkpoint.ts
 function parseArgs(argv) {
   const flags = new Map;
@@ -2869,7 +3045,22 @@ function parseArgs(argv) {
   return { flags, positional };
 }
 var ARGS = parseArgs(process.argv.slice(2));
-var API = ((typeof ARGS.flags.get("api") === "string" ? ARGS.flags.get("api") : "") || process.env.LANEWORK_API_URL || DEFAULT_API_ORIGIN).replace(/\/$/, "");
+var LOOPBACK = new Set(["127.0.0.1", "[::1]", "localhost"]);
+function checkedApi(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  const ok = url.protocol === "https:" || url.protocol === "http:" && LOOPBACK.has(url.hostname);
+  if (!ok)
+    return null;
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+}
+var API_ASKED = (typeof ARGS.flags.get("api") === "string" ? ARGS.flags.get("api") : "") || process.env.LANEWORK_API_URL || DEFAULT_API_ORIGIN;
+var API_REFUSED = checkedApi(API_ASKED) === null;
+var API = checkedApi(API_ASKED) ?? DEFAULT_API_ORIGIN;
 function hookConfig() {
   const file = process.env.LANEWORK_HOOK_CONFIG || (ARGS.flags.has("plugin") ? pluginConfigPath() : null);
   if (!file)
@@ -2880,7 +3071,9 @@ function hookConfig() {
     return {};
   }
 }
-var PUSH_WIP = ARGS.flags.has("push-wip") || hookConfig().pushWip === true;
+var HOOK_CONFIG = hookConfig();
+var PUSH_WIP = ARGS.flags.has("push-wip") || HOOK_CONFIG.pushWip === true;
+var PUSH_WIP_UNTRACKED = ARGS.flags.has("push-wip-untracked") || HOOK_CONFIG.pushWipUntracked === true;
 var AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : "claude-code";
 var AGENT_NAME = AGENT === "codex" ? "Codex" : "Claude Code";
 var STATE_DIR = import_node_path6.join(import_node_os6.homedir(), ".cache", "lanework", "checkpoint");
@@ -2891,10 +3084,17 @@ var HTTP_TIMEOUT_MS = 1e4;
 function log(message) {
   try {
     import_node_fs5.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-    if (import_node_fs5.existsSync(LOG) && import_node_fs5.statSync(LOG).size > 512 * 1024)
-      import_node_fs5.rmSync(LOG);
-    import_node_fs5.appendFileSync(LOG, `${new Date().toISOString()} ${message}
-`);
+    if (import_node_fs5.existsSync(LOG)) {
+      const { size, mode } = import_node_fs5.statSync(LOG);
+      if (size > 512 * 1024)
+        import_node_fs5.rmSync(LOG);
+      else if (mode & 63)
+        import_node_fs5.chmodSync(LOG, 384);
+    }
+    import_node_fs5.appendFileSync(LOG, `${new Date().toISOString()} ${redact(message)}
+`, {
+      mode: 384
+    });
   } catch {}
 }
 function git(cwd, args, env) {
@@ -2913,7 +3113,7 @@ function tryGit(cwd, args) {
     return null;
   }
 }
-var sha256 = (s) => import_node_crypto3.createHash("sha256").update(s).digest("hex");
+var sha256 = (s) => import_node_crypto4.createHash("sha256").update(s).digest("hex");
 function clip2(s, max) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
@@ -2928,8 +3128,14 @@ function writeJson(file, value) {
   import_node_fs5.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
   import_node_fs5.writeFileSync(file, JSON.stringify(value), { mode: 384 });
 }
-function redact(input) {
-  return input.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED private key]").replace(/\blw_(?:reg|mch|dev|code)_[A-Za-z0-9_-]+/g, "[REDACTED]").replace(/\b(?:sk|pk|rk)-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{16,}/g, "[REDACTED]").replace(/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, "[REDACTED]").replace(/\bgithub_pat_[A-Za-z0-9_]{20,}/g, "[REDACTED]").replace(/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, "[REDACTED]").replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[REDACTED]").replace(/\bAIza[0-9A-Za-z_-]{30,}/g, "[REDACTED]").replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[REDACTED jwt]").replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi, "$1 [REDACTED]").replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, "$1[REDACTED]@").replace(/\b([A-Za-z0-9_]*(?:api[_-]?key|secret|passw(?:or)?d|token|credential|private[_-]?key)[A-Za-z0-9_]*)(["']?\s*[:=]\s*["']?)[^\s"',;]{6,}/gi, "$1$2[REDACTED]");
+function repoPath(path, root) {
+  const trimmed = path.trim();
+  if (!trimmed)
+    return null;
+  const rel = import_node_path6.isAbsolute(trimmed) ? import_node_path6.relative(root, trimmed) : trimmed;
+  if (!rel || import_node_path6.isAbsolute(rel) || rel.startsWith("..") || rel.startsWith("~"))
+    return null;
+  return rel;
 }
 function humanText(content) {
   const raw = typeof content === "string" ? content : Array.isArray(content) ? content.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text).join(`
@@ -3013,8 +3219,8 @@ function digest(transcript, root) {
         if (["Edit", "Write", "NotebookEdit"].includes(b.name)) {
           const path = input.file_path ?? input.notebook_path;
           if (typeof path === "string") {
-            const rel = path.startsWith(root) ? import_node_path6.relative(root, path) : path;
-            if (!rel.startsWith("..")) {
+            const rel = repoPath(path, root);
+            if (rel) {
               const at = files.indexOf(rel);
               if (at !== -1)
                 files.splice(at, 1);
@@ -3099,9 +3305,8 @@ function digestCodex(transcript, root, lastMessage) {
   const scriptCommands = [];
   const calls = new Map;
   const touch = (list, path) => {
-    const trimmed = path.trim().replace(/^file:\/\//, "");
-    const rel = trimmed.startsWith(root) ? import_node_path6.relative(root, trimmed) : trimmed;
-    if (!rel || rel.startsWith(".."))
+    const rel = repoPath(path.trim().replace(/^file:\/\//, ""), root);
+    if (!rel)
       return;
     const at = list.indexOf(rel);
     if (at !== -1)
@@ -3221,11 +3426,52 @@ async function http(path, init = {}) {
     }
   });
 }
+function stripUserinfo(remote) {
+  const value = remote.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      if (!url.username && !url.password)
+        return value;
+      url.username = "";
+      url.password = "";
+      return url.toString();
+    } catch {
+      return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
+    }
+  }
+  return value;
+}
+var BOARD_TTL_MS = 60 * 60 * 1000;
+var BOARDS_FILE = import_node_path6.join(STATE_DIR, "boards.json");
+function boardKey(remote, secret) {
+  return [API, sha256(secret).slice(0, 12), remote].join(" ");
+}
+function readBoards() {
+  const cache = readJson(BOARDS_FILE, {});
+  const fresh = {};
+  const now = Date.now();
+  for (const [key, entry] of Object.entries(cache)) {
+    const e = entry;
+    if (e && typeof e.id === "string" && typeof e.at === "number" && now - e.at < BOARD_TTL_MS)
+      fresh[key] = { id: e.id, at: e.at };
+  }
+  return fresh;
+}
+function evictBoard(remote, secret) {
+  const cache = readBoards();
+  const key = boardKey(remote, secret);
+  if (!(key in cache))
+    return;
+  delete cache[key];
+  writeJson(BOARDS_FILE, cache);
+}
 async function boardFor(remote, secret) {
-  const cacheFile = import_node_path6.join(STATE_DIR, "boards.json");
-  const cache = readJson(cacheFile, {});
-  if (cache[remote])
-    return cache[remote];
+  const cache = readBoards();
+  const key = boardKey(remote, secret);
+  const hit = cache[key];
+  if (hit)
+    return hit.id;
   const res = await http(paths.boardsForRepo(remote), { secret });
   if (!res.ok) {
     log(`board lookup ${res.status} for ${remote}`);
@@ -3238,17 +3484,74 @@ async function boardFor(remote, secret) {
   }
   const id = boards[0]?.workspaceId ?? null;
   if (id)
-    writeJson(cacheFile, { ...cache, [remote]: id });
+    writeJson(BOARDS_FILE, { ...cache, [key]: { id, at: Date.now() } });
   return id;
 }
-function snapshot(root, taskId) {
-  const index = import_node_path6.join(import_node_os6.tmpdir(), `lanework-wip-${process.pid}.index`);
+var SECRET_FILES = [
+  /^\.env(?!\.(?:example|sample|template|dist|defaults)$)(?:\..*)?$/,
+  /\.(?:pem|key|p12|pfx|jks|keystore|kdbx|ppk|asc|gpg)$/,
+  /^id_(?:rsa|dsa|ecdsa|ed25519)(?:[._-].*)?$/,
+  /\.tfstate(?:\..*)?$/,
+  /\.tfvars(?:\.json)?$/,
+  /^service[-_]?account.*\.json$/,
+  /^credentials.*\.json$/,
+  /^client_secret.*\.json$/,
+  /^(?:\.envrc|\.npmrc|\.pypirc|\.netrc|_netrc|\.git-credentials|\.htpasswd|\.pgpass|\.dockercfg|\.s3cfg|\.boto)$/
+];
+function isSecretFile(path) {
+  const name = import_node_path6.basename(path).toLowerCase();
+  return SECRET_FILES.some((pattern) => pattern.test(name));
+}
+function refusal(root, env) {
+  const changed = git(root, ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT", "HEAD"], env).split("\x00").filter(Boolean);
+  const file = changed.find(isSecretFile);
+  if (file)
+    return `${file} looks like a secrets file`;
+  const patch = import_node_child_process3.execFileSync("git", [
+    "diff",
+    "--cached",
+    "-U0",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--diff-filter=ACMRT",
+    "HEAD"
+  ], {
+    cwd: root,
+    env: { ...process.env, ...env },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: PUSH_TIMEOUT_MS
+  });
+  let current = "";
+  for (const line of patch.split(`
+`)) {
+    if (line.startsWith("+++ ")) {
+      current = line.slice(4).replace(/^b\//, "");
+    } else if (line.startsWith("+") && redact(line) !== line) {
+      return `an added line in ${current} looks like a secret`;
+    }
+  }
+  return null;
+}
+function snapshot(root, taskId, untracked = PUSH_WIP_UNTRACKED) {
+  const index = import_node_path6.resolve(root, git(root, ["rev-parse", "--git-path", `lanework-wip-${process.pid}.index`]));
   try {
     const env = { GIT_INDEX_FILE: index };
     git(root, ["read-tree", "HEAD"], env);
-    git(root, ["add", "-A"], env);
+    git(root, ["add", untracked ? "-A" : "-u"], env);
     const tree = git(root, ["write-tree"], env);
     if (tree === git(root, ["rev-parse", "HEAD^{tree}"])) {
+      return { wipRef: null, wipSha: null };
+    }
+    let refused;
+    try {
+      refused = refusal(root, env);
+    } catch (error) {
+      refused = `it could not be checked for secrets (${String(error)})`;
+    }
+    if (refused) {
+      log(`wip for ${taskId} not pushed: ${refused}`);
       return { wipRef: null, wipSha: null };
     }
     const sha = git(root, ["commit-tree", tree, "-p", "HEAD", "-m", `lanework wip ${taskId}`], {
@@ -3301,9 +3604,10 @@ async function work(inputFile) {
   if (!transcriptPath)
     return;
   const root = tryGit(input.cwd, ["rev-parse", "--show-toplevel"]);
-  const remote = root && tryGit(root, ["remote", "get-url", "origin"]);
-  if (!root || !remote)
+  const origin = root && tryGit(root, ["remote", "get-url", "origin"]);
+  if (!root || !origin)
     return;
+  const remote = stripUserinfo(origin);
   const transcript = import_node_fs5.readFileSync(transcriptPath, "utf8");
   const d = AGENT === "codex" ? digestCodex(transcript, root, input.last_assistant_message ?? null) : digest(transcript, root);
   if (!d.taskId) {
@@ -3366,6 +3670,8 @@ async function checkpointTo(local, d, input, root, remote) {
       body: JSON.stringify(body)
     });
     if (!res.ok) {
+      if ([403, 404, 409].includes(res.status))
+        evictBoard(remote, secret);
       log(`checkpoint for ${d.taskId}: ${res.status} ${clip2(await res.text(), 300)}`);
       return;
     }
@@ -3400,16 +3706,26 @@ async function setup(token) {
     process.exit(1);
   }
   const { machineId, secret } = await res.json();
+  if (!isMachineSecret(secret)) {
+    console.error("registration failed: the server sent no valid credential");
+    process.exit(1);
+  }
   writeSecret(API, secret);
   if (readSecret2() !== secret) {
     console.error("the credential could not be read back");
     process.exit(1);
   }
-  console.log(`enrolled as machine ${machineId}; credential saved to ${credentialLocation()}. Revoke it at ${API}/setup.`);
+  console.log(`enrolled as machine ${machineId}; credential saved to ${credentialLocation(API)}. Revoke it at ${API}/setup.`);
 }
 var SELF = process.argv[1] ?? "";
 async function main() {
   const [mode, arg, value] = ARGS.positional;
+  if (API_REFUSED && mode) {
+    const note = `refused API ${stripUserinfo(API_ASKED)}: only https, or http on 127.0.0.1, ::1 or localhost; using ${API}`;
+    log(note);
+    if (mode !== "worker" && mode !== "mcp")
+      console.error(note);
+  }
   if (mode === "setup")
     return setup(arg);
   if (mode === "mcp") {

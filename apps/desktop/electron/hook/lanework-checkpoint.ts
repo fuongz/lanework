@@ -12,8 +12,11 @@
 //   bun apps/desktop/electron/hook/lanework-checkpoint.ts setup <lw_reg_…>
 //
 // Flags, set by whoever installs it: `--api <url>` (default
-// https://api.lanework.dev) and `--push-wip`, the opt-in (FE-28/D3) to push
-// the uncommitted tree to `refs/lanework/wip/<task-id>`.
+// https://api.lanework.dev; only https, or http on a loopback host), and
+// `--push-wip`, the opt-in (FE-28/D3) to push uncommitted changes to tracked
+// files to `refs/lanework/wip/<task-id>`. New files go too only with a second
+// opt-in, `--push-wip-untracked` (FE-78/D9). Both can also come from the
+// settings file; see `hookConfig()`.
 //
 // A repo linked to a board on this machine's local board (the SQLite file the
 // app and the offline MCP share, never moved to the cloud) gets its
@@ -35,6 +38,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -43,14 +47,15 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { arch, homedir, hostname, platform, tmpdir } from "node:os";
-import { basename, join, relative } from "node:path";
+import { arch, homedir, hostname, platform } from "node:os";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import {
   AGENT_HEADER,
   type BoardsForRepoResponse,
   type CheckpointGit,
   type CheckpointRequest,
   DEFAULT_API_ORIGIN,
+  isMachineSecret,
   type MachineRegisterRequest,
   type MachineRegisterResponse,
   paths,
@@ -76,6 +81,10 @@ import {
   localBoardFor,
   writeLocalCheckpoint,
 } from "./local-board";
+import { redact } from "./redact";
+
+// `main/agent-setup/read.ts` and the tests import it from here.
+export { redact };
 
 /** `--flag value` / `--flag` anywhere; everything else is positional. */
 function parseArgs(argv: string[]) {
@@ -95,34 +104,75 @@ function parseArgs(argv: string[]) {
 }
 
 const ARGS = parseArgs(process.argv.slice(2));
-const API = (
+
+/** Hosts plain http may talk to: this machine only. */
+const LOOPBACK = new Set(["127.0.0.1", "[::1]", "localhost"]);
+
+/**
+ * The API base `raw` names, if the hook may send the credential there.
+ *
+ * Only https, or http on a loopback host (a local control plane). Userinfo,
+ * a query and a fragment are dropped (FE-78/D6).
+ *
+ * @returns Null for anything else.
+ */
+export function checkedApi(raw: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  const ok =
+    url.protocol === "https:" ||
+    (url.protocol === "http:" && LOOPBACK.has(url.hostname));
+  if (!ok) return null;
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+}
+
+const API_ASKED =
   (typeof ARGS.flags.get("api") === "string"
     ? (ARGS.flags.get("api") as string)
     : "") ||
   process.env.LANEWORK_API_URL ||
-  DEFAULT_API_ORIGIN
-).replace(/\/$/, "");
+  DEFAULT_API_ORIGIN;
+/** Set when the API asked for was refused; `main()` reports it. */
+const API_REFUSED = checkedApi(API_ASKED) === null;
+const API = checkedApi(API_ASKED) ?? DEFAULT_API_ORIGIN;
+
+/** The settings the app (or `lanework config`) changes. */
+type HookConfig = { pushWip?: boolean; pushWipUntracked?: boolean };
+
 /**
  * Read the settings the app changes without touching the hook's command.
  *
  * Codex approves a hook by the hash of its command, so a switch flipped in
  * Settings must not change the command it approved (FE-29/D3).
  */
-function hookConfig(): { pushWip?: boolean } {
+function hookConfig(): HookConfig {
   // The app's shim names its file; the plugin keeps one in ~/.config/lanework.
   const file =
     process.env.LANEWORK_HOOK_CONFIG ||
     (ARGS.flags.has("plugin") ? pluginConfigPath() : null);
   if (!file) return {};
   try {
-    return JSON.parse(readFileSync(file, "utf8")) as { pushWip?: boolean };
+    return JSON.parse(readFileSync(file, "utf8")) as HookConfig;
   } catch {
     return {};
   }
 }
 
+const HOOK_CONFIG = hookConfig();
 /** Whether to push unfinished code to the remote: opt-in (FE-28/D3). */
-const PUSH_WIP = ARGS.flags.has("push-wip") || hookConfig().pushWip === true;
+const PUSH_WIP = ARGS.flags.has("push-wip") || HOOK_CONFIG.pushWip === true;
+/**
+ * Whether that push includes new files: a second opt-in (FE-78/D9).
+ *
+ * `--push-wip-untracked`, or `"pushWipUntracked": true` in the same settings
+ * file as `pushWip`. Without it the snapshot holds tracked files only.
+ */
+const PUSH_WIP_UNTRACKED =
+  ARGS.flags.has("push-wip-untracked") || HOOK_CONFIG.pushWipUntracked === true;
 /** Which CLI ran this turn: `claude-code` or `codex`. */
 const AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : "claude-code";
 const AGENT_NAME = AGENT === "codex" ? "Codex" : "Claude Code";
@@ -135,11 +185,18 @@ const HTTP_TIMEOUT_MS = 10_000;
 
 // ── Small utilities ─────────────────────────────────────────────────────────
 
+/** A line in hook.log: redacted, in a file only this user can read. */
 function log(message: string): void {
   try {
     mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
-    if (existsSync(LOG) && statSync(LOG).size > 512 * 1024) rmSync(LOG);
-    appendFileSync(LOG, `${new Date().toISOString()} ${message}\n`);
+    if (existsSync(LOG)) {
+      const { size, mode } = statSync(LOG);
+      if (size > 512 * 1024) rmSync(LOG);
+      else if (mode & 0o077) chmodSync(LOG, 0o600);
+    }
+    appendFileSync(LOG, `${new Date().toISOString()} ${redact(message)}\n`, {
+      mode: 0o600,
+    });
   } catch {
     // Logging is the last resort; there is nowhere left to report to.
   }
@@ -182,48 +239,19 @@ function writeJson(file: string, value: unknown): void {
   writeFileSync(file, JSON.stringify(value), { mode: 0o600 });
 }
 
-// ── Redaction ───────────────────────────────────────────────────────────────
-
 /**
- * Strip anything that looks like a credential.
+ * A touched file as the card shows it: relative to the repo.
  *
- * NOTE: It is greedy. A false positive costs a word in a summary, a false
- * negative puts a key on a server. Exported for the hook's own test.
+ * @returns Null for a path outside the repo, which would tell the server
+ *   about the rest of the disk (FE-78/D3).
  */
-export function redact(input: string): string {
-  return (
-    input
-      .replace(
-        /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
-        "[REDACTED private key]",
-      )
-      // lanework's own tokens, then the common vendors'.
-      .replace(/\blw_(?:reg|mch|dev|code)_[A-Za-z0-9_-]+/g, "[REDACTED]")
-      .replace(
-        /\b(?:sk|pk|rk)-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{16,}/g,
-        "[REDACTED]",
-      )
-      .replace(/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, "[REDACTED]")
-      .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}/g, "[REDACTED]")
-      .replace(/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, "[REDACTED]")
-      .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[REDACTED]")
-      .replace(/\bAIza[0-9A-Za-z_-]{30,}/g, "[REDACTED]")
-      .replace(
-        /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
-        "[REDACTED jwt]",
-      )
-      .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi, "$1 [REDACTED]")
-      // `user:password@host` in URLs.
-      .replace(
-        /(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi,
-        "$1[REDACTED]@",
-      )
-      // KEY=value / "secret": "value" style assignments.
-      .replace(
-        /\b([A-Za-z0-9_]*(?:api[_-]?key|secret|passw(?:or)?d|token|credential|private[_-]?key)[A-Za-z0-9_]*)(["']?\s*[:=]\s*["']?)[^\s"',;]{6,}/gi,
-        "$1$2[REDACTED]",
-      )
-  );
+function repoPath(path: string, root: string): string | null {
+  const trimmed = path.trim();
+  if (!trimmed) return null;
+  const rel = isAbsolute(trimmed) ? relative(root, trimmed) : trimmed;
+  if (!rel || isAbsolute(rel) || rel.startsWith("..") || rel.startsWith("~"))
+    return null;
+  return rel;
 }
 
 // ── Transcript ──────────────────────────────────────────────────────────────
@@ -364,8 +392,8 @@ export function digest(transcript: string, root: string): Digest {
         if (["Edit", "Write", "NotebookEdit"].includes(b.name)) {
           const path = input.file_path ?? input.notebook_path;
           if (typeof path === "string") {
-            const rel = path.startsWith(root) ? relative(root, path) : path;
-            if (!rel.startsWith("..")) {
+            const rel = repoPath(path, root);
+            if (rel) {
               // Most recently touched last, each path once.
               const at = files.indexOf(rel);
               if (at !== -1) files.splice(at, 1);
@@ -521,9 +549,8 @@ export function digestCodex(
   const calls = new Map<string, string>();
 
   const touch = (list: string[], path: string) => {
-    const trimmed = path.trim().replace(/^file:\/\//, "");
-    const rel = trimmed.startsWith(root) ? relative(root, trimmed) : trimmed;
-    if (!rel || rel.startsWith("..")) return;
+    const rel = repoPath(path.trim().replace(/^file:\/\//, ""), root);
+    if (!rel) return;
     const at = list.indexOf(rel);
     if (at !== -1) list.splice(at, 1);
     list.push(rel);
@@ -651,13 +678,82 @@ async function http(
   });
 }
 
+/**
+ * `remote` without the userinfo a remote URL can carry (`https://<PAT>@…`).
+ *
+ * It is what the board lookup, hook.log and boards.json see, never the raw
+ * URL (FE-78/D2). An scp-like remote (`git@host:owner/repo`) is left as it
+ * is: its user is an ssh login, never a password or a token.
+ */
+export function stripUserinfo(remote: string): string {
+  const value = remote.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      // Untouched when there is nothing to strip: the same spelling as ever.
+      if (!url.username && !url.password) return value;
+      url.username = "";
+      url.password = "";
+      return url.toString();
+    } catch {
+      // Not a URL after all: cut what sits between `://` and the last `@`
+      // before the host.
+      return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
+    }
+  }
+  return value;
+}
+
+/** How long a board found for a repo is trusted without asking again. */
+const BOARD_TTL_MS = 60 * 60 * 1000;
+const BOARDS_FILE = join(STATE_DIR, "boards.json");
+type BoardCache = Record<string, { id: string; at: number }>;
+
+/**
+ * The boards.json key for `remote` (already stripped).
+ *
+ * The API and a hash of the credential are part of it, so another API or
+ * another sign-in never reuses a board found for this one (FE-78/D5).
+ */
+function boardKey(remote: string, secret: string): string {
+  return [API, sha256(secret).slice(0, 12), remote].join(" ");
+}
+
+function readBoards(): BoardCache {
+  const cache = readJson<Record<string, unknown>>(BOARDS_FILE, {});
+  const fresh: BoardCache = {};
+  const now = Date.now();
+  for (const [key, entry] of Object.entries(cache)) {
+    // Entries from before FE-78 are bare ids: dropped, never trusted.
+    const e = entry as { id?: unknown; at?: unknown } | null;
+    if (
+      e &&
+      typeof e.id === "string" &&
+      typeof e.at === "number" &&
+      now - e.at < BOARD_TTL_MS
+    )
+      fresh[key] = { id: e.id, at: e.at };
+  }
+  return fresh;
+}
+
+/** Forget the board found for `remote`: the server no longer agrees. */
+function evictBoard(remote: string, secret: string): void {
+  const cache = readBoards();
+  const key = boardKey(remote, secret);
+  if (!(key in cache)) return;
+  delete cache[key];
+  writeJson(BOARDS_FILE, cache);
+}
+
 async function boardFor(
   remote: string,
   secret: string,
 ): Promise<string | null> {
-  const cacheFile = join(STATE_DIR, "boards.json");
-  const cache = readJson<Record<string, string>>(cacheFile, {});
-  if (cache[remote]) return cache[remote];
+  const cache = readBoards();
+  const key = boardKey(remote, secret);
+  const hit = cache[key];
+  if (hit) return hit.id;
   const res = await http(paths.boardsForRepo(remote), { secret });
   if (!res.ok) {
     log(`board lookup ${res.status} for ${remote}`);
@@ -670,34 +766,128 @@ async function boardFor(
     return null;
   }
   const id = boards[0]?.workspaceId ?? null;
-  if (id) writeJson(cacheFile, { ...cache, [remote]: id });
+  if (id) writeJson(BOARDS_FILE, { ...cache, [key]: { id, at: Date.now() } });
   return id;
 }
 
 // ── Git: where the code is (BE-17/D1) ───────────────────────────────────────
 
 /**
+ * File names that hold secrets by convention: never in a WIP snapshot.
+ *
+ * Matched against the base name, case-insensitively. `.env.example` and its
+ * kin are templates, not secrets.
+ */
+const SECRET_FILES = [
+  /^\.env(?!\.(?:example|sample|template|dist|defaults)$)(?:\..*)?$/,
+  /\.(?:pem|key|p12|pfx|jks|keystore|kdbx|ppk|asc|gpg)$/,
+  /^id_(?:rsa|dsa|ecdsa|ed25519)(?:[._-].*)?$/,
+  /\.tfstate(?:\..*)?$/,
+  /\.tfvars(?:\.json)?$/,
+  /^service[-_]?account.*\.json$/,
+  /^credentials.*\.json$/,
+  /^client_secret.*\.json$/,
+  /^(?:\.envrc|\.npmrc|\.pypirc|\.netrc|_netrc|\.git-credentials|\.htpasswd|\.pgpass|\.dockercfg|\.s3cfg|\.boto)$/,
+];
+
+/** Whether `path` (repo-relative) names a file that holds secrets. */
+export function isSecretFile(path: string): boolean {
+  const name = basename(path).toLowerCase();
+  return SECRET_FILES.some((pattern) => pattern.test(name));
+}
+
+/**
+ * Why the snapshot in `index` must not leave the machine, or null.
+ *
+ * It looks at every path that differs from `HEAD` and at every line the
+ * snapshot adds: a secret-looking file name, or a line `redact()` would
+ * change, keeps the whole snapshot home (FE-78/D9).
+ */
+function refusal(root: string, env: NodeJS.ProcessEnv): string | null {
+  const changed = git(
+    root,
+    ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT", "HEAD"],
+    env,
+  )
+    .split("\0")
+    .filter(Boolean);
+  const file = changed.find(isSecretFile);
+  if (file) return `${file} looks like a secrets file`;
+  // NOTE: Only the lines it adds. A secret already in HEAD is not this
+  // push's to leak, and a test fixture untouched this turn must not block
+  // every snapshot.
+  const patch = execFileSync(
+    "git",
+    [
+      "diff",
+      "--cached",
+      "-U0",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--diff-filter=ACMRT",
+      "HEAD",
+    ],
+    {
+      cwd: root,
+      env: { ...process.env, ...env },
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: PUSH_TIMEOUT_MS,
+    },
+  );
+  let current = "";
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+++ ")) {
+      current = line.slice(4).replace(/^b\//, "");
+    } else if (line.startsWith("+") && redact(line) !== line) {
+      return `an added line in ${current} looks like a secret`;
+    }
+  }
+  return null;
+}
+
+/**
  * Snapshot the working tree as a commit on no branch, and push it.
  *
- * The snapshot holds tracked changes and untracked files that are not
- * ignored. It goes to `refs/lanework/wip/<id>`, force-pushed: it is a baton,
- * only the latest matters.
+ * The snapshot holds changes to tracked files; untracked files that are not
+ * ignored only with `--push-wip-untracked` (FE-78/D9). It goes to
+ * `refs/lanework/wip/<id>`, force-pushed: it is a baton, only the latest
+ * matters. A snapshot that looks like it holds a secret is not pushed at all.
  *
- * NOTE: It uses a private index (`GIT_INDEX_FILE`), so the user's staging
- * area is never touched, and a commit no branch points at, so history is
- * never touched either.
+ * NOTE: It uses a private index (`GIT_INDEX_FILE`) inside the repo's own git
+ * dir, so the user's staging area is never touched and no other user on the
+ * machine can swap it, and a commit no branch points at, so history is never
+ * touched either.
  *
- * @returns No ref and no sha when the tree matches `HEAD`; a sha but no ref
- *   when the push failed.
+ * @returns No ref and no sha when the tree matches `HEAD` or the snapshot was
+ *   refused; a sha but no ref when the push failed.
  */
-export function snapshot(root: string, taskId: string): Wip {
-  const index = join(tmpdir(), `lanework-wip-${process.pid}.index`);
+export function snapshot(
+  root: string,
+  taskId: string,
+  untracked: boolean = PUSH_WIP_UNTRACKED,
+): Wip {
+  const index = resolve(
+    root,
+    git(root, ["rev-parse", "--git-path", `lanework-wip-${process.pid}.index`]),
+  );
   try {
     const env = { GIT_INDEX_FILE: index };
     git(root, ["read-tree", "HEAD"], env);
-    git(root, ["add", "-A"], env);
+    git(root, ["add", untracked ? "-A" : "-u"], env);
     const tree = git(root, ["write-tree"], env);
     if (tree === git(root, ["rev-parse", "HEAD^{tree}"])) {
+      return { wipRef: null, wipSha: null };
+    }
+    let refused: string | null;
+    try {
+      refused = refusal(root, env);
+    } catch (error) {
+      refused = `it could not be checked for secrets (${String(error)})`;
+    }
+    if (refused) {
+      log(`wip for ${taskId} not pushed: ${refused}`);
       return { wipRef: null, wipSha: null };
     }
     const sha = git(
@@ -793,8 +983,10 @@ async function work(inputFile: string): Promise<void> {
   if (!transcriptPath) return;
 
   const root = tryGit(input.cwd, ["rev-parse", "--show-toplevel"]);
-  const remote = root && tryGit(root, ["remote", "get-url", "origin"]);
-  if (!root || !remote) return;
+  const origin = root && tryGit(root, ["remote", "get-url", "origin"]);
+  if (!root || !origin) return;
+  // Never the raw URL: it can carry a token (FE-78/D2).
+  const remote = stripUserinfo(origin);
 
   const transcript = readFileSync(transcriptPath, "utf8");
   const d =
@@ -886,6 +1078,10 @@ async function checkpointTo(
       body: JSON.stringify(body),
     });
     if (!res.ok) {
+      // The board found for this repo is gone, or no longer this machine's:
+      // look it up again next turn (FE-78/D5).
+      if ([403, 404, 409].includes(res.status))
+        evictBoard(remote, secret as string);
       log(
         `checkpoint for ${d.taskId}: ${res.status} ${clip(await res.text(), 300)}`,
       );
@@ -933,13 +1129,19 @@ async function setup(token: string | undefined): Promise<void> {
     process.exit(1);
   }
   const { machineId, secret } = (await res.json()) as MachineRegisterResponse;
+  // Whatever answered is not trusted to hand back something safe to store
+  // (FE-78/D1).
+  if (!isMachineSecret(secret)) {
+    console.error("registration failed: the server sent no valid credential");
+    process.exit(1);
+  }
   writeSecret(API, secret);
   if (readSecret() !== secret) {
     console.error("the credential could not be read back");
     process.exit(1);
   }
   console.log(
-    `enrolled as machine ${machineId}; credential saved to ${credentialLocation()}. Revoke it at ${API}/setup.`,
+    `enrolled as machine ${machineId}; credential saved to ${credentialLocation(API)}. Revoke it at ${API}/setup.`,
   );
 }
 
@@ -950,6 +1152,13 @@ const SELF = process.argv[1] ?? "";
 
 async function main(): Promise<void> {
   const [mode, arg, value] = ARGS.positional;
+  // The hook proper hands off to a worker, which says it once per turn.
+  if (API_REFUSED && mode) {
+    // Never sent a credential to it; said where someone will look.
+    const note = `refused API ${stripUserinfo(API_ASKED)}: only https, or http on 127.0.0.1, ::1 or localhost; using ${API}`;
+    log(note);
+    if (mode !== "worker" && mode !== "mcp") console.error(note);
+  }
   if (mode === "setup") return setup(arg);
   // `lanework mcp`, the offline board's MCP server on stdio. It comes before
   // anything that could print: stdout is the protocol from here on.

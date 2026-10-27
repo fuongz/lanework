@@ -12,7 +12,11 @@ import {
 } from "../../../shared/auth";
 import { can } from "../../../shared/policy";
 import { syncLaneworkMcp } from "../agent-setup/mcp-entry";
-import { forgetHookCredential, syncHandoff } from "../handoff";
+import {
+  forgetBoardsCache,
+  forgetHookCredential,
+  syncHandoff,
+} from "../handoff";
 import { broadcast, handle } from "../ipc";
 import * as api from "./client";
 import { readLocalMode, writeLocalMode } from "./local-mode";
@@ -23,6 +27,7 @@ import {
   clearRecord,
   type MachineRecord,
   readRecord,
+  readStoredRecord,
   writeRecord,
 } from "./store";
 
@@ -103,7 +108,8 @@ function principalOf(
  * network.
  */
 export async function currentSession(): Promise<RedactedSession> {
-  const record = await readRecord();
+  const stored = await readStoredRecord();
+  const record = stored?.record ?? null;
   const apiUrl = api.resolveApi(record?.apiUrl);
   // FE-52/D5: no credential and "Skip for now" chosen means the local board.
   // Nothing here probes: a local session never asks the control plane anything.
@@ -122,6 +128,8 @@ export async function currentSession(): Promise<RedactedSession> {
     apiUrl,
     verdict,
     checkedAt: checkedAt ? new Date(checkedAt).toISOString() : null,
+    // FE-78/D11: said only when it is false, so Settings can warn.
+    ...(stored?.encrypted === false ? { credentialEncrypted: false } : {}),
   };
 }
 
@@ -136,6 +144,7 @@ function sessionKey(session: RedactedSession): string {
   return JSON.stringify({
     principal: session.principal,
     verdict: session.verdict,
+    credentialEncrypted: session.credentialEncrypted,
   });
 }
 
@@ -359,6 +368,7 @@ async function signOut(): Promise<RedactedSession> {
   // store; choosing "Skip for now" again brings them back.
   if (session.principal.kind === "local") {
     await writeLocalMode(false);
+    await forgetBoardsCache();
     return publish();
   }
 
@@ -367,8 +377,10 @@ async function signOut(): Promise<RedactedSession> {
     await api.revokeSelf(record);
 
   await clearRecord();
-  // The Stop hook's copy of the credential goes with it.
+  // The Stop hook's copy of the credential goes with it, and so does its
+  // repo → board cache (FE-78/D5): it names boards of the account signing out.
   if (record) await forgetHookCredential(record.apiUrl);
+  await forgetBoardsCache();
   api.resetVerdict();
   return publish();
 }
@@ -394,6 +406,9 @@ async function enterLocalMode(): Promise<RedactedSession> {
     if (record) await forgetHookCredential(record.apiUrl);
     api.resetVerdict();
   }
+  // FE-78/D5: the hook's repo → board cache names cloud boards; in local mode
+  // a repo resolves to a local board instead.
+  await forgetBoardsCache();
   await writeLocalMode(true);
   return publish();
 }

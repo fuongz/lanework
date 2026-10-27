@@ -173,6 +173,8 @@ const handoff: DesktopHandoffApi = {
   enable: (agent) => ipcRenderer.invoke(handoffChannels.enable, agent),
   disable: (agent) => ipcRenderer.invoke(handoffChannels.disable, agent),
   setPushWip: (on) => ipcRenderer.invoke(handoffChannels.setPushWip, on),
+  setPushWipUntracked: (on) =>
+    ipcRenderer.invoke(handoffChannels.setPushWipUntracked, on),
 };
 
 /**

@@ -545,9 +545,13 @@ export function HarnessSection() {
       rows: [
         {
           label: "Also push unfinished code to GitHub",
+          // Tracked changes only: new files can be keys or scratch notes that
+          // were never meant to leave the machine (FE-78/D9). And the ref is
+          // as readable as the remote, which the old copy did not say.
           description:
-            "Pushes uncommitted work to refs/lanework/wip/<task id>. Your branches are untouched.",
-          keywords: "push wip ref uncommitted code git remote cloud",
+            "Pushes uncommitted changes to files git already tracks to refs/lanework/wip/<task id>. New files stay on this machine. Anyone who can read the remote can fetch that ref. Your branches are untouched.",
+          keywords:
+            "push wip ref uncommitted code git remote cloud tracked untracked new files fetch",
           control: (
             <Switch
               aria-label="Also push unfinished code to GitHub"
@@ -556,7 +560,37 @@ export function HarnessSection() {
               onCheckedChange={(checked) =>
                 surface &&
                 void run(
-                  () => surface.setPushWip(checked),
+                  // Main asks to confirm before turning this on (FE-78/D4),
+                  // and the user may cancel. Read the state back rather than
+                  // trusting the switch's new position.
+                  async () => {
+                    await surface.setPushWip(checked);
+                    return surface.status();
+                  },
+                  "Could not change this.",
+                )
+              }
+            />
+          ),
+        },
+        {
+          label: "Include new files",
+          description:
+            "Also pushes new files git does not ignore. A key or .env file that .gitignore misses would go too; the hook skips a push when it spots one.",
+          keywords: "push wip untracked new files include secrets",
+          control: (
+            <Switch
+              aria-label="Include new files in the pushed work"
+              checked={status?.pushWipUntracked ?? false}
+              disabled={!surface || busy || !status?.pushWip}
+              onCheckedChange={(checked) =>
+                surface &&
+                void run(
+                  // Main asks first (FE-78/D9); read the answer back.
+                  async () => {
+                    await surface.setPushWipUntracked(checked);
+                    return surface.status();
+                  },
                   "Could not change this.",
                 )
               }

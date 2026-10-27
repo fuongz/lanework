@@ -43,13 +43,42 @@ function credentialFile(): string {
 }
 
 /**
- * The stored credential, or `null` when this install has never signed in.
+ * Whether `safeStorage` really encrypts on this machine (FE-78/D11).
  *
- * Anything unreadable (missing, malformed, undecryptable) reads as `null`. A
- * credential we cannot use is no better than one we do not have, and treating
- * the two alike keeps every caller on one path.
+ * On Linux with no keyring Electron reports encryption as available but uses
+ * its `basic_text` backend, a fixed key compiled into every copy of Chromium.
+ * That is plaintext with extra steps, so it counts as unavailable, and the
+ * credential is stored as `enc: false` where Settings can say so.
  */
-export async function readRecord(): Promise<MachineRecord | null> {
+export function encryptionAvailable(): boolean {
+  if (!safeStorage.isEncryptionAvailable()) return false;
+  if (process.platform === "linux") {
+    try {
+      if (safeStorage.getSelectedStorageBackend() === "basic_text")
+        return false;
+    } catch {
+      // Older Electron, or called before `ready`: trust the first answer.
+    }
+  }
+  return true;
+}
+
+/** A stored credential and how it is kept on disk. */
+export interface StoredRecord {
+  record: MachineRecord;
+  /** False when `auth.json` holds the secret in plaintext. */
+  encrypted: boolean;
+}
+
+/**
+ * The stored credential and whether it is encrypted, or `null` when this
+ * install has never signed in.
+ *
+ * A plaintext record (written while encryption was unavailable) is
+ * re-encrypted in place the first time it is read with encryption available
+ * (FE-78/D11), and then reads as encrypted.
+ */
+export async function readStoredRecord(): Promise<StoredRecord | null> {
   const raw = await readFile(credentialFile(), "utf8").catch(() => null);
   if (raw === null) return null;
 
@@ -76,7 +105,7 @@ export async function readRecord(): Promise<MachineRecord | null> {
     secret = data.secret;
   }
 
-  return {
+  const record: MachineRecord = {
     machineId: data.machineId,
     secret,
     apiUrl: data.apiUrl,
@@ -84,6 +113,41 @@ export async function readRecord(): Promise<MachineRecord | null> {
     userId: data.userId ?? null,
     owner: data.owner ?? null,
   };
+  if (data.enc) return { record, encrypted: true };
+  return { record, encrypted: await reencrypt(raw, record) };
+}
+
+/**
+ * The stored credential, or `null` when this install has never signed in.
+ *
+ * Anything unreadable (missing, malformed, undecryptable) reads as `null`. A
+ * credential we cannot use is no better than one we do not have, and treating
+ * the two alike keeps every caller on one path.
+ */
+export async function readRecord(): Promise<MachineRecord | null> {
+  return (await readStoredRecord())?.record ?? null;
+}
+
+/**
+ * Rewrite a plaintext record encrypted, once encryption is available.
+ *
+ * NOTE: Only when `auth.json` still holds exactly what was read. A sign-out
+ * that deleted the file in between must not have the credential written back.
+ *
+ * @returns Whether the record is now encrypted on disk.
+ */
+async function reencrypt(raw: string, record: MachineRecord): Promise<boolean> {
+  if (!encryptionAvailable()) return false;
+  try {
+    const now = await readFile(credentialFile(), "utf8").catch(() => null);
+    if (now !== raw) return false;
+    await writeRecord(record);
+    return true;
+  } catch {
+    // Best effort: the plaintext record still works, and the next read
+    // tries again.
+    return false;
+  }
 }
 
 /**
@@ -107,7 +171,7 @@ export async function writeRecord(record: MachineRecord): Promise<string> {
     userId: record.userId,
     owner: record.owner,
   };
-  const stored: Stored = safeStorage.isEncryptionAvailable()
+  const stored: Stored = encryptionAvailable()
     ? {
         ...base,
         enc: true,

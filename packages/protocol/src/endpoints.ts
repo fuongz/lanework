@@ -76,7 +76,21 @@ import type {
   SyncWorkspacePatchResponse,
 } from "./sync";
 
-const seg = encodeURIComponent;
+/**
+ * One URI-encoded path segment.
+ *
+ * `encodeURIComponent` leaves `.` alone, so `"."` and `".."` would reach the
+ * URL as dot segments and a URL parser would collapse them: `items/..` names
+ * the parent collection, not an item. An empty segment collapses the same
+ * way. All three are refused rather than sent (FE-78/D7).
+ *
+ * @throws When the segment is empty, `.` or `..`.
+ */
+export function seg(value: string): string {
+  if (value === "" || value === "." || value === "..")
+    throw new Error(`Refusing the path segment ${JSON.stringify(value)}.`);
+  return encodeURIComponent(value);
+}
 
 /**
  * Paths, relative to the API origin.

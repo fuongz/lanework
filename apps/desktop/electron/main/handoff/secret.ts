@@ -5,6 +5,19 @@
 //
 // NOTE: The secret reaches `security` on stdin (`security -i`), never in argv,
 // where every process on the machine can read it from the process list.
+// `security -i` parses that line as a command line of its own, so a quote, a
+// backslash or a newline inside a value would end the argument and start
+// another command. Every value is checked before it is written into the line
+// (FE-78/D1, SS-03), and `security` is called by its absolute path so a
+// `security` earlier on PATH cannot stand in for it.
+//
+// NOTE (FE-78/SS-07): The item is added with no `-T` access list, so
+// `/usr/bin/security`, which created it, can read it back without a prompt.
+// That is deliberate: the hook runs `security find-generic-password` in a
+// headless Stop hook, where a Keychain prompt would block the agent's turn or
+// be dismissed unseen. The cost is that any process running as this user can
+// read the hook's copy the same way. It is the same machine credential the
+// app holds, revocable from `/setup`, and sign-out deletes this copy.
 //
 // `LANEWORK_HOOK_SECRET_FILE` swaps the Keychain for a 0600 file. The hook
 // honours the same variable, and it is what lets the tests run without
@@ -16,7 +29,20 @@ import { dirname } from "node:path";
 /** The Keychain item the hook reads. `lanework-checkpoint.ts` names it too. */
 const KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
 
+const SECURITY_BIN = "/usr/bin/security";
+
 const secretFile = () => process.env.LANEWORK_HOOK_SECRET_FILE || null;
+
+/**
+ * Whether `value` can sit inside a double-quoted `security -i` argument.
+ *
+ * Refuses an empty value, a double quote, a backslash and every control
+ * character (newline included), which are what end or escape an argument.
+ */
+export function safeForSecurityLine(value: string): boolean {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are exactly what this refuses
+  return value.length > 0 && !/["\\\u0000-\u001f\u007f]/.test(value);
+}
 
 /** Whether this machine has somewhere to keep the hook's credential. */
 export function secretStoreAvailable(): boolean {
@@ -26,7 +52,7 @@ export function secretStoreAvailable(): boolean {
 function security(args: string[], input?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
-      "security",
+      SECURITY_BIN,
       args,
       { timeout: 10_000 },
       (error, stdout) => (error ? reject(error) : resolve(stdout.trim())),
@@ -58,6 +84,10 @@ export async function writeHookSecret(
   account: string,
   secret: string,
 ): Promise<void> {
+  if (!safeForSecurityLine(secret))
+    throw new Error("Refusing to store a credential that is not well formed.");
+  if (!safeForSecurityLine(account))
+    throw new Error("Refusing to store a credential for a malformed API URL.");
   const file = secretFile();
   if (file) {
     await mkdir(dirname(file), { recursive: true });
@@ -65,8 +95,8 @@ export async function writeHookSecret(
     await chmod(file, 0o600);
     return;
   }
-  // Double quotes are safe: the secret is URL-safe base64 and the account a
-  // URL, so neither holds a quote.
+  // Double quotes are safe: both values were checked above to hold no quote,
+  // no backslash and no control character.
   await security(
     ["-i"],
     `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "${account}" -w "${secret}"\n`,

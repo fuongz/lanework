@@ -115,8 +115,11 @@ import { syncLocalWorkspace } from "./sync-to-cloud";
  */
 export async function authorizedRecord(): Promise<MachineRecord> {
   const session = await currentSession();
+  // FE-78/D7: the policy's own answer, so main enforces the rule the renderer
+  // reads. The `kind` test only narrows the type for the reads below; with
+  // `cloud:use` true for a `machine` alone, it never refuses on its own.
   if (
-    !can(session.principal, "app:use") ||
+    !can(session.principal, "cloud:use") ||
     session.principal.kind !== "machine"
   )
     throw new Error("Sign in to load your workspaces.");
@@ -1060,11 +1063,24 @@ function parsePlacement(value: unknown): BoardPlacement | undefined {
   return keys[0] === "after" ? { after: id } : { before: id };
 }
 
+/**
+ * `count` ids off the wire, each 1-200 characters.
+ *
+ * NOTE: `.` and `..` are refused as well as blanks (FE-78/D7). These become
+ * path segments of a request sent with this machine's credential, and a URL
+ * parser collapses a dot segment: `items/..` would address a different route
+ * than the one the handler means.
+ */
 function requireId(args: unknown[], count: number): string[] {
   if (
     args.length !== count ||
     !args.every(
-      (arg) => typeof arg === "string" && arg.trim() && arg.length <= 200,
+      (arg) =>
+        typeof arg === "string" &&
+        arg.trim() &&
+        arg.length <= 200 &&
+        arg !== "." &&
+        arg !== "..",
     )
   )
     throw new Error("A valid workspace and card are required");
@@ -1317,8 +1333,16 @@ export function registerWorkspaces(devUrl?: string): void {
     return board(workspaceId, query);
   });
   handle(workspaceChannels.search, devUrl, async (args) => {
-    const [workspaceId, query] = requireId(args, 2);
-    if (query.trim().length < 2 || query.length > 100)
+    // The query is typing, not an id: `..` is a search like any other, so
+    // only the workspace goes through `requireId`.
+    if (args.length !== 2) throw new Error("A valid workspace is required");
+    const [workspaceId] = requireId(args.slice(0, 1), 1);
+    const query = args[1];
+    if (
+      typeof query !== "string" ||
+      query.trim().length < 2 ||
+      query.length > 100
+    )
       throw new Error("A search is 2 to 100 characters");
     const local = await localTarget(workspaceId);
     if (local) return local.search(query.trim());
@@ -1622,12 +1646,15 @@ export function registerWorkspaces(devUrl?: string): void {
     workspaceChannels.create,
     devUrl,
     async (args): Promise<BoardWrite> => {
-      if (args.length !== 2 || typeof args[0] !== "string" || !args[0].trim())
+      if (args.length !== 2)
         throw new Error("A workspace and a title are required");
+      // FE-78/D7: the same 200-character, no-dot-segment check as every other
+      // handler; this one used to take any non-blank string.
+      const [workspaceId] = requireId(args.slice(0, 1), 1);
       const draft = parseDraft(args[1]);
-      const local = await localTarget(args[0]);
+      const local = await localTarget(workspaceId);
       if (local) return local.create(draft);
-      return createCard(await authorizedRecord(), args[0], draft);
+      return createCard(await authorizedRecord(), workspaceId, draft);
     },
   );
   handle(

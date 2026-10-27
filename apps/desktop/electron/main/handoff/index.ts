@@ -11,9 +11,17 @@
 // move when the app is updated or moved, so the script is rewritten on every
 // launch (`syncHandoff`). The commands in the CLIs' files never change, and
 // that keeps Codex's one-time approval valid.
-import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
+import { app, BrowserWindow, dialog, type MessageBoxOptions } from "electron";
 import {
   type AgentHookStatus,
   type HandoffStatus,
@@ -61,12 +69,14 @@ const configPath = () => join(hooksDir(), "config.json");
  * What the app remembers about the hooks, beside them.
  *
  * - `pushWip` is read by the hook itself (FE-29/D3: a setting, not a flag in
- *   an approved command).
+ *   an approved command). `pushWipUntracked` adds new, non-ignored files to
+ *   that snapshot (FE-78/D9); without it only tracked changes go.
  * - `installed` is what makes "another tool removed ours" (FE-29/D8)
  *   knowable. Without it, removed and never added look alike.
  */
 type HookConfig = {
   pushWip: boolean;
+  pushWipUntracked: boolean;
   installed: Partial<Record<HookAgent, boolean>>;
 };
 
@@ -76,6 +86,7 @@ async function readConfig(): Promise<HookConfig> {
     .catch(() => ({}) as Partial<HookConfig>);
   return {
     pushWip: raw.pushWip === true,
+    pushWipUntracked: raw.pushWipUntracked === true,
     installed:
       raw.installed && typeof raw.installed === "object" ? raw.installed : {},
   };
@@ -178,6 +189,7 @@ async function handoffStatus(): Promise<HandoffStatus> {
     signedIn: record !== null,
     credential: !!record && stored === record.secret,
     pushWip: config.pushWip,
+    pushWipUntracked: config.pushWipUntracked,
     last: await lastCheckpoint(),
     claude,
     codex: {
@@ -237,11 +249,83 @@ async function disable(agent: HookAgent): Promise<HandoffStatus> {
   return handoffStatus();
 }
 
+/**
+ * Ask before the hook starts pushing uncommitted work (FE-78/D4).
+ *
+ * The switch publishes code the person has not committed, to a ref on their
+ * remote, on every agent turn, so turning it on is said out loud once.
+ *
+ * NOTE: An unpackaged app booted by the test suite cannot answer a native
+ * dialog and would wait on it forever; there the answer is yes, so the
+ * settings spec still exercises the switch. A packaged app always asks.
+ *
+ * @returns Whether the person chose to turn it on.
+ */
+async function confirmPushWip(): Promise<boolean> {
+  if (!app.isPackaged && process.env.LANEWORK_TEST_USER_DATA) return true;
+  const options: MessageBoxOptions = {
+    type: "warning",
+    buttons: ["Cancel", "Push work in progress"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    message: "Push uncommitted work to your git remote?",
+    detail: [
+      "After each agent turn, the checkpoint hook snapshots the repository's uncommitted work and force-pushes it to refs/lanework/wip/<task-id> on origin. Your branch, index and history are not touched.",
+      "",
+      'The snapshot includes changes to files git already tracks. New files stay on this machine unless you also turn on "Include new files".',
+      "",
+      "Anyone who can read that remote can fetch the ref and see that work, even before you commit it.",
+    ].join("\n"),
+  };
+  const parent = BrowserWindow.getFocusedWindow();
+  const { response } = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options);
+  return response === 1;
+}
+
 async function setPushWip(on: boolean): Promise<HandoffStatus> {
   const config = await readConfig();
   if (!config.installed["claude-code"] && !config.installed.codex)
     throw new Error("Turn on handing work between agents first.");
-  await writeConfig({ ...config, pushWip: on });
+  // Cancel leaves the switch off; the status says so and the UI follows it.
+  if (on && !config.pushWip && !(await confirmPushWip()))
+    return handoffStatus();
+  await writeConfig({ ...(await readConfig()), pushWip: on });
+  return handoffStatus();
+}
+
+/** Ask before new files join the pushed snapshot (FE-78/D9). */
+async function confirmPushWipUntracked(): Promise<boolean> {
+  if (!app.isPackaged && process.env.LANEWORK_TEST_USER_DATA) return true;
+  const options: MessageBoxOptions = {
+    type: "warning",
+    buttons: ["Cancel", "Include new files"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    message: "Also push new files?",
+    detail: [
+      "New files that git does not ignore join the snapshot pushed to refs/lanework/wip/<task-id>. A .env.local or a key file that .gitignore misses would go too.",
+      "",
+      "The hook skips a push when a file name looks like a secret or an added line holds one, but it cannot catch every secret.",
+    ].join("\n"),
+  };
+  const parent = BrowserWindow.getFocusedWindow();
+  const { response } = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options);
+  return response === 1;
+}
+
+async function setPushWipUntracked(on: boolean): Promise<HandoffStatus> {
+  const config = await readConfig();
+  if (!config.pushWip)
+    throw new Error("Turn on pushing work in progress first.");
+  if (on && !config.pushWipUntracked && !(await confirmPushWipUntracked()))
+    return handoffStatus();
+  await writeConfig({ ...(await readConfig()), pushWipUntracked: on });
   return handoffStatus();
 }
 
@@ -253,6 +337,19 @@ async function setPushWip(on: boolean): Promise<HandoffStatus> {
  */
 export async function forgetHookCredential(apiUrl: string): Promise<void> {
   await deleteHookSecret(resolveApi(apiUrl)).catch(() => undefined);
+}
+
+/**
+ * Delete the hook's repo → board cache (FE-78/D5, SS-05).
+ *
+ * The hook caches which board a repo's remote resolves to and never asks
+ * again, so after a sign-out (or a switch to local mode) it would keep
+ * writing checkpoints to boards of the account that left. Called on both.
+ */
+export async function forgetBoardsCache(): Promise<void> {
+  await rm(join(HOOK_STATE_DIR, "boards.json"), { force: true }).catch(
+    () => undefined,
+  );
 }
 
 /**
@@ -323,6 +420,11 @@ export function registerHandoff(devUrl?: string): void {
     if (args.length !== 1 || typeof args[0] !== "boolean")
       throw new Error("push-wip takes one boolean");
     return setPushWip(args[0]);
+  });
+  handle(handoffChannels.setPushWipUntracked, devUrl, (args) => {
+    if (args.length !== 1 || typeof args[0] !== "boolean")
+      throw new Error("push-wip-untracked takes one boolean");
+    return setPushWipUntracked(args[0]);
   });
   void syncHandoff().catch((error: unknown) =>
     console.warn("could not bring the agent hooks up to date", error),

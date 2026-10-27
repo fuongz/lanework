@@ -61,6 +61,12 @@ export interface RedactedSession {
   /** `null` means nobody has asked yet, which is not "unreachable". */
   verdict: Verdict | null;
   checkedAt: string | null;
+  /**
+   * Whether the stored credential is encrypted at rest (OS keychain through
+   * `safeStorage`). `false` lets Settings › Account say "stored unencrypted
+   * on this machine" (FE-78/D11). Absent means encrypted, or nothing stored.
+   */
+  credentialEncrypted?: boolean;
 }
 
 export type SignInMode = "loopback" | "device";
