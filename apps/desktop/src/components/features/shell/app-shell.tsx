@@ -395,49 +395,53 @@ export function AppShell() {
               rail. So it survives every navigation and never covers the
               project switcher (FE-18/D4). Hidden, it folds into the bar below
               the group and stops no shell. */}
-          {/* `overflow-hidden` clips the page, the terminal and its bar to
-              the card's corners; each still scrolls on its own. */}
-          <div className="bg-background my-1.5 mr-1.5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-edge">
-            <div className="min-h-0 flex-1">
-              <ResizablePanelGroup
-                id="lanework:terminal"
-                orientation="vertical"
-                onLayoutChanged={(layout, { isUserInteraction }) => {
-                  if (!isUserInteraction) return;
-                  const height = layout.terminal ?? 0;
-                  // Dragged shut past its minimum: that is a hide, and the
-                  // bar takes over. Any other drag is the height to keep.
-                  if (height < 1) {
-                    if (workspaceKey) setTerminalOpen(workspaceKey, false);
-                  } else setTerminalHeight(height);
-                }}
-              >
-                <ResizablePanel id="content" minSize="20%">
-                  <main className="bg-background flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                    <Outlet />
-                  </main>
-                </ResizablePanel>
-                <ResizableHandle
-                  aria-label="Resize terminal"
-                  className={terminalShowing ? undefined : "hidden"}
-                />
-                <ResizablePanel
-                  id="terminal"
-                  panelRef={terminalRef}
-                  defaultSize="0%"
-                  minSize="96px"
-                  maxSize="85%"
-                  collapsible
-                  collapsedSize="0px"
+          {/* The card holds the page and the terminal; the folded terminal's
+              bar sits under it, outside, as the window's status bar.
+              `overflow-hidden` clips the page and the terminal to the
+              card's corners; each still scrolls on its own. */}
+          <div className="my-1.5 mr-1.5 flex min-h-0 flex-1 flex-col gap-1">
+            <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-edge">
+              <div className="min-h-0 flex-1">
+                <ResizablePanelGroup
+                  id="lanework:terminal"
+                  orientation="vertical"
+                  onLayoutChanged={(layout, { isUserInteraction }) => {
+                    if (!isUserInteraction) return;
+                    const height = layout.terminal ?? 0;
+                    // Dragged shut past its minimum: that is a hide, and the
+                    // bar takes over. Any other drag is the height to keep.
+                    if (height < 1) {
+                      if (workspaceKey) setTerminalOpen(workspaceKey, false);
+                    } else setTerminalHeight(height);
+                  }}
                 >
-                  {terminalShowing && workspaceKey && (
-                    <TerminalPanel
-                      workspace={workspaceKey}
-                      usage={<BarStrips workspace={workspaceKey} />}
-                    />
-                  )}
-                </ResizablePanel>
-              </ResizablePanelGroup>
+                  <ResizablePanel id="content" minSize="20%">
+                    <main className="bg-background flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                      <Outlet />
+                    </main>
+                  </ResizablePanel>
+                  <ResizableHandle
+                    aria-label="Resize terminal"
+                    className={terminalShowing ? undefined : "hidden"}
+                  />
+                  <ResizablePanel
+                    id="terminal"
+                    panelRef={terminalRef}
+                    defaultSize="0%"
+                    minSize="96px"
+                    maxSize="85%"
+                    collapsible
+                    collapsedSize="0px"
+                  >
+                    {terminalShowing && workspaceKey && (
+                      <TerminalPanel
+                        workspace={workspaceKey}
+                        usage={<BarStrips workspace={workspaceKey} />}
+                      />
+                    )}
+                  </ResizablePanel>
+                </ResizablePanelGroup>
+              </div>
             </div>
             {!terminalShowing && workspaceKey && (
               <TerminalMinibar

@@ -85,6 +85,17 @@
   opacity: 0.45;
 }
 
+/* The error screen's mark, drifting a few pixels (route-error.tsx). */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
 /* A working agent's title (with OrbitSpinner): a band of the full ink
    sweeping through muted text. Only with motion allowed: reduced motion
    keeps the text as it is, readable, rather than a still gradient. */

@@ -65,9 +65,11 @@ export function TocRail({
               aria-hidden="true"
               className={cn(
                 "h-[1.5px] rounded-full transition-[width,background-color] duration-150 motion-reduce:transition-none",
+                // Hovered or focused, a tick reads as the current one: long
+                // and in full ink, so the eye knows where a click lands.
                 active
                   ? "bg-foreground w-[18px]"
-                  : "bg-foreground/25 group-hover/tick:bg-foreground/60 group-focus-visible/tick:bg-foreground/60 w-3",
+                  : "bg-foreground/25 group-hover/tick:bg-foreground group-focus-visible/tick:bg-foreground w-3 group-hover/tick:w-[18px] group-focus-visible/tick:w-[18px]",
               )}
             />
           </button>

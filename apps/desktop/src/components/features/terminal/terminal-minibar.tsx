@@ -32,7 +32,9 @@ export function TerminalMinibar({
   const toggle = useTerminal((state) => state.toggle);
 
   return (
-    <div className="border-panel-rule bg-background flex h-8 shrink-0 items-center gap-2 border-t px-2">
+    // Under the content's card, on the window's own ground: a status bar,
+    // not part of the page.
+    <div className="flex h-7 shrink-0 items-center gap-2 px-1">
       <button
         type="button"
         title="Show terminal (⌘`)"

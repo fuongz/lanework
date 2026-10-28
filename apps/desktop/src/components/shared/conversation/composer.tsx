@@ -1012,61 +1012,48 @@ export const Composer = forwardRef<
         </div>
       )}
 
-      <div className="text-muted-foreground flex h-6 min-w-0 items-center gap-4 text-[13px]">
+      <div className="text-muted-foreground flex min-h-6 min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
         {/* The checkout's branch — where the next turn runs — and the way to
-            another one. */}
+            another one. Attached files follow it on the same line. */}
         <BranchSwitcher slug={slug} variant="composer" />
-        <span className="ml-auto" />
-        {working && (
-          <span role="status" aria-label="Working" className="flex">
-            <HugeiconsIcon
-              icon={Loading03Icon}
-              className="size-4 animate-spin motion-reduce:animate-none"
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-          </span>
-        )}
-        {corner}
-      </div>
-
-      {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {attachments.map((file) => (
-            <span
-              key={file.key}
-              className="bg-foreground/[0.06] flex max-w-60 items-center gap-1.5 rounded-md py-1 ps-2 pe-1 text-xs"
-            >
-              <HugeiconsIcon
-                icon={file.image ? Image01Icon : File01Icon}
-                className={cn(
-                  "size-3.5 shrink-0",
-                  file.image ? "text-tone-teal" : "text-muted-foreground",
-                )}
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
-              <span className="truncate">{file.name}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${file.name}`}
-                onClick={() =>
-                  setAttachments((previous) =>
-                    previous.filter((entry) => entry.key !== file.key),
-                  )
-                }
-                className="text-muted-foreground hover:text-foreground flex size-4 items-center justify-center rounded transition-colors"
+        {attachments.length > 0 && (
+          <div className="flex min-w-0 flex-wrap gap-1.5">
+            {attachments.map((file) => (
+              <span
+                key={file.key}
+                className="bg-foreground/[0.06] text-foreground flex h-6 max-w-60 items-center gap-1.5 rounded-md ps-2 pe-1 text-xs"
               >
                 <HugeiconsIcon
-                  icon={Cancel01Icon}
-                  className="size-3"
-                  strokeWidth={2}
+                  icon={file.image ? Image01Icon : File01Icon}
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    file.image ? "text-tone-teal" : "text-muted-foreground",
+                  )}
+                  strokeWidth={1.8}
+                  aria-hidden="true"
                 />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
+                <span className="truncate">{file.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${file.name}`}
+                  onClick={() =>
+                    setAttachments((previous) =>
+                      previous.filter((entry) => entry.key !== file.key),
+                    )
+                  }
+                  className="text-muted-foreground hover:text-foreground flex size-4 items-center justify-center rounded transition-colors"
+                >
+                  <HugeiconsIcon
+                    icon={Cancel01Icon}
+                    className="size-3"
+                    strokeWidth={2}
+                  />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
 
       <ChipEditor
         ref={field}
@@ -1133,6 +1120,18 @@ export const Composer = forwardRef<
           </>
         )}
         <span className="ml-auto" />
+        {/* Working, and the context ring, beside the voice button. */}
+        {working && !dictating && (
+          <span role="status" aria-label="Working" className="flex">
+            <HugeiconsIcon
+              icon={Loading03Icon}
+              className="size-4 animate-spin motion-reduce:animate-none"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+          </span>
+        )}
+        {!dictating && corner}
         {dictating ? (
           <DictationBar
             status={dictation.status}

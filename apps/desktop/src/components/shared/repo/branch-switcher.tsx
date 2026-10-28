@@ -90,7 +90,7 @@ export function BranchSwitcher({
             <button
               type="button"
               aria-label={`Switch branch — currently ${branches.current ?? "detached HEAD"}`}
-              className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] aria-expanded:bg-foreground/[0.06] aria-expanded:text-foreground focus-visible:ring-ring/30 -mx-1.5 flex h-6 max-w-64 min-w-0 items-center gap-1.5 rounded-md px-1.5 text-[13px] transition-colors outline-none focus-visible:ring-2"
+              className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] aria-expanded:bg-foreground/[0.06] aria-expanded:text-foreground focus-visible:ring-ring/30 -mr-[3px] -ml-[5px] flex h-6 max-w-64 min-w-0 items-center gap-1.5 rounded-md pr-[3px] pl-[5px] text-[13px] transition-colors outline-none focus-visible:ring-2"
             >
               <HugeiconsIcon
                 icon={GitBranchIcon}
