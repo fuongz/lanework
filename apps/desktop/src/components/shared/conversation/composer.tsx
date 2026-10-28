@@ -193,7 +193,12 @@ function chipSpec(item: Suggestion): ChipSpec {
         ? `${item.value}\n${item.detail}`
         : item.value,
     icon: <SuggestionIcon item={item} tinted={false} />,
-    tone: path || item.kind === "skill" ? "primary" : "muted",
+    tone:
+      item.value === ORCHESTRATE.value
+        ? "violet"
+        : path || item.kind === "skill"
+          ? "primary"
+          : "muted",
   };
 }
 
@@ -714,7 +719,7 @@ export const Composer = forwardRef<
       const found = list.leads.find((lead) => lead.id === named);
       if (!found) {
         setError(
-          `No team lead is called @${named}. Type @ after /orchestrate to pick one.`,
+          `No conductor is called @${named}. Type @ after /orchestrate to pick one.`,
         );
         return null;
       }
@@ -911,13 +916,13 @@ export const Composer = forwardRef<
             suggest.kind === "command"
               ? "Commands"
               : suggest.kind === "lead"
-                ? "Team leads"
+                ? "Conductors"
                 : "Files"
           }
           className="bg-popover text-popover-foreground ring-foreground/10 absolute right-0 bottom-full left-0 z-20 mb-1.5 max-h-56 overflow-y-auto rounded-xl p-1 shadow-lg ring-1"
         >
           {suggest.kind === "lead" && !leads && (
-            <ListSkeleton label="Reading the team leads" rows={2} />
+            <ListSkeleton label="Reading the conductors" rows={2} />
           )}
           {suggest.items.map((item, index) =>
             item.lead ? (

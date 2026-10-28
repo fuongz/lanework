@@ -56,12 +56,19 @@ export function SettingsPage({
   title,
   description,
   sections,
+  searchable = true,
+  compact = false,
 }: {
   title: string;
   description: string;
   sections: SettingsSectionSpec[];
+  /** False outside Settings (a dialog): the search box does not narrow it. */
+  searchable?: boolean;
+  /** A dialog's density (FE-95): smaller type, tighter rows and gaps. */
+  compact?: boolean;
 }) {
-  const query = useSettingsSearch((state) => state.query);
+  const stored = useSettingsSearch((state) => state.query);
+  const query = searchable ? stored : "";
 
   const visible = sections
     .map((section) => ({
@@ -79,9 +86,21 @@ export function SettingsPage({
     );
 
   return (
-    <div className="flex flex-col gap-2.5">
-      <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
-      <p className="text-muted-foreground text-sm leading-relaxed">
+    <div className={cn("flex flex-col", compact ? "gap-1" : "gap-2.5")}>
+      <h1
+        className={cn(
+          "font-medium tracking-tight",
+          compact ? "text-base" : "text-2xl",
+        )}
+      >
+        {title}
+      </h1>
+      <p
+        className={cn(
+          "text-muted-foreground leading-relaxed",
+          compact ? "text-xs" : "text-sm",
+        )}
+      >
         {description}
       </p>
 
@@ -91,10 +110,18 @@ export function SettingsPage({
         </p>
       ) : (
         visible.map((section) => (
-          <section key={section.title} className="mt-9 flex flex-col gap-3">
+          <section
+            key={section.title}
+            className={cn(
+              "flex flex-col",
+              compact ? "mt-5 gap-2" : "mt-9 gap-3",
+            )}
+          >
             <h2
               className={cn(
-                "text-[15px] font-medium",
+                compact
+                  ? "text-muted-foreground text-xs font-medium"
+                  : "text-[15px] font-medium",
                 section.hideTitle && "sr-only",
                 section.destructive && "text-destructive",
               )}
@@ -106,12 +133,32 @@ export function SettingsPage({
                 {section.rows.map((row) => (
                   <div
                     key={row.label}
-                    className="flex items-center justify-between gap-8 px-4 py-3.5"
+                    className={cn(
+                      "flex items-center justify-between gap-8",
+                      compact ? "px-3.5 py-2.5" : "px-4 py-3.5",
+                    )}
                   >
-                    <div className="flex min-w-0 flex-col gap-1">
-                      <span className="text-sm font-medium">{row.label}</span>
+                    <div
+                      className={cn(
+                        "flex min-w-0 flex-col",
+                        compact ? "gap-0.5" : "gap-1",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "font-medium",
+                          compact ? "text-[13px]" : "text-sm",
+                        )}
+                      >
+                        {row.label}
+                      </span>
                       {row.description ? (
-                        <span className="text-muted-foreground text-[13px] leading-relaxed">
+                        <span
+                          className={cn(
+                            "text-muted-foreground leading-relaxed",
+                            compact ? "text-xs" : "text-[13px]",
+                          )}
+                        >
                           {row.description}
                         </span>
                       ) : null}

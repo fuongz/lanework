@@ -2,7 +2,6 @@ import {
   Alert02Icon,
   ArrowDown01Icon,
   ArrowRight01Icon,
-  ComputerTerminal01Icon,
   MessageMultiple01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -22,13 +21,12 @@ import {
   DEFAULT_SETTINGS,
   type OutgoingAttachment,
   type PermissionAnswer,
-  type PermissionRequest,
   type QueuedMessage,
   settingsFor,
 } from "#/../shared/conversation";
 import type { AgentSession } from "#/../shared/terminal";
+import { PermissionCard } from "#/components/features/conversation/permission-card";
 import { ContextButton } from "#/components/shared/agents/conversation-facts";
-import { PermissionCard } from "#/components/shared/agents/permission-card";
 import { useConversationFacts } from "#/components/shared/agents/use-agent-facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import { setChatAgent } from "#/components/shared/conversation/chat-agent";
@@ -38,6 +36,7 @@ import {
   type Unqueued,
 } from "#/components/shared/conversation/composer";
 import {
+  ConductorNames,
   promptLines,
   type TurnHandlers,
   TurnView,
@@ -50,7 +49,6 @@ import {
 } from "#/components/shared/navigation/window-titlebar";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { Alert, AlertDescription } from "#/components/ui/alert";
-import { Button } from "#/components/ui/button";
 import {
   Empty,
   EmptyDescription,
@@ -58,24 +56,27 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "#/components/ui/tooltip";
+import { TooltipProvider } from "#/components/ui/tooltip";
 import { useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { firstLine } from "#/lib/conversation-format";
 import { ipcMessage } from "#/lib/ipc-error";
-import { readEnvelope } from "#/lib/orchestration-prompt";
+import {
+  conductorTurn,
+  lastConductorContext,
+  leadIcon,
+  readConductorEnvelope,
+  readEnvelope,
+} from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
-import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useConversationSends } from "#/stores/conversation-sends";
+import { useNewChats } from "#/stores/new-chats";
 import {
+  AwaitingProposal,
   OrchestrationPanel,
   orchestrationText,
+  useAwaitingProposal,
   useOrchestration,
 } from "../orchestration/orchestration-panel";
 import { FileOpenerProvider } from "./file-opener";
@@ -85,8 +86,14 @@ import { TocRail } from "./toc-rail";
 import { useConversation } from "./use-conversation";
 
 const ROUTE = "/_app/w/$slug/agents/chat/$conversation" as const;
+
+/**
+ * The mark before the chat's title: the title's line height, nudged down a
+ * pixel, so it sits on the middle of the lower-case text it leads rather
+ * than of the line box.
+ */
+const TITLE_MARK = "flex h-5 shrink-0 translate-y-px items-center";
 /** Stable empties: a memoized turn compares these by reference. */
-const NO_PERMISSIONS: PermissionRequest[] = [];
 /** Closer than this to the end and the view sticks to it as text streams. */
 const BOTTOM_SLACK = 48;
 
@@ -181,7 +188,6 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         )
       : undefined,
   );
-  const resume = useAgentTerminals((state) => state.resume);
   const facts = useConversationFacts(workspace, agent ?? "claude", id);
 
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
@@ -194,7 +200,6 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     setError: setActionError,
   } = useConversationSends(JSON.stringify([slug, id]));
   const [forking, setForking] = useState(false);
-  const [switching, setSwitching] = useState(false);
   const composer = useRef<ComposerHandle>(null);
 
   // Settings are the conversation's own (D9): what it last ran with here,
@@ -322,6 +327,38 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     send: (text, attachments, names) => send(text, attachments, names),
   });
   const shown = orchestration.turns;
+  const awaiting = useAwaitingProposal(orchestration);
+  // The conductor this conversation belongs to (FE-95), once both the
+  // listing (or the start that is ahead of it) and the leads are read.
+  const startedFor = useNewChats((state) => state.started[id]?.conductor);
+  const conductorId = listed?.conductor ?? startedFor ?? null;
+  const conductor = conductorId
+    ? (orchestration.leads?.find((entry) => entry.id === conductorId) ?? null)
+    : null;
+  // `@id` in a prompt shows the conductor's name (FE-95).
+  const conductorNames = useMemo(
+    () =>
+      new Map(
+        (orchestration.leads ?? []).map((lead) => [
+          lead.id,
+          { name: lead.name, icon: lead.icon },
+        ]),
+      ),
+    [orchestration.leads],
+  );
+  // In a conductor's conversation, `/orchestrate` plans as that conductor.
+  const orchestrate: typeof orchestration.orchestrate = (
+    request,
+    attachments,
+    names,
+    teamLead,
+  ) =>
+    orchestration.orchestrate(
+      request,
+      attachments,
+      names,
+      teamLead ?? conductor,
+    );
 
   // ─── Scrolling ────────────────────────────────────────────────────────────
   const scroller = useRef<HTMLDivElement>(null);
@@ -497,13 +534,28 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   );
 
   const send = async (
-    text: string,
+    typed: string,
     attachments: OutgoingAttachment[],
     names: { name: string; image: boolean }[],
   ): Promise<boolean> => {
     const surface = window.desktop?.conversation;
     if (!workspace || !surface || !settings) return false;
     setActionError(null);
+    // A conductor's message carries who it is (FE-95); a planning or repair
+    // prompt already names its lead.
+    const text =
+      conductor &&
+      agent &&
+      !readEnvelope(typed) &&
+      !readConductorEnvelope(typed)
+        ? conductorTurn(
+            typed,
+            conductor,
+            agent,
+            conversation?.cwd ?? null,
+            lastConductorContext(turns),
+          )
+        : typed;
     const key = `s${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     setSent((previous) => [
       ...previous,
@@ -630,55 +682,25 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       );
   };
 
-  const session: AgentSession = listed ?? {
+  const _session: AgentSession = listed ?? {
     id,
     agent: agent ?? "claude",
     title: "",
     cliTitle: "",
     updatedAt: new Date().toISOString(),
     pinnedAt: null,
+    conductor: null,
     working: false,
     card: null,
     subagents: [],
     background: { running: 0, total: 0 },
   };
 
-  /** Hands the conversation to a terminal (D3): one writer at a time. */
-  const openTerminal = async () => {
-    if (!workspace) return;
-    if (engine.state === "terminal") {
-      if (tab)
-        void navigate({
-          to: "/w/$slug/agents/$terminalId",
-          params: { slug, terminalId: tab },
-        });
-      else
-        setActionError(
-          `${label} is running this conversation in another terminal.`,
-        );
-      return;
-    }
-    setSwitching(true);
-    setActionError(null);
-    try {
-      await window.desktop?.conversation.release(workspace, id);
-      const next = await resume(workspace, session);
-      if (next)
-        void navigate({
-          to: "/w/$slug/agents/$terminalId",
-          params: { slug, terminalId: next.id },
-        });
-    } catch (caught) {
-      setActionError(ipcMessage(caught, "Could not open a terminal."));
-    } finally {
-      setSwitching(false);
-    }
-  };
-
   // ─── Drawing ──────────────────────────────────────────────────────────────
   const firstPrompt = shown.find((turn) => turn.role === "user");
   const title =
     asWorker?.task.title ||
+    conductor?.name ||
     listed?.title ||
     (firstPrompt?.role === "user" ? firstLine(firstPrompt.text) : "") ||
     `${label} conversation`;
@@ -687,11 +709,13 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     [...turns].reverse().find((turn) => turn.role === "user")?.at ?? null;
   const last = shown[shown.length - 1];
   const lastOpen = last?.role === "assistant" && last.open ? last : null;
-  // AskUserQuestion, waiting: drawn in the composer's place, not the turn.
-  const question = permissions.find((request) => request.questions) ?? null;
-  // Streamed text or a permission before the turn has a line of its own.
+  // What waits on the user, drawn in the composer's place, not the turn: a
+  // question (AskUserQuestion) or a tool's permission, as the CLI asks both
+  // at its own prompt.
+  const asking = permissions;
+  // Streamed text before the turn has a line of its own.
   const stream: AssistantTurn | null =
-    !lastOpen && (delta || permissions.some((request) => !request.questions))
+    !lastOpen && delta
       ? {
           role: "assistant",
           id: "__stream",
@@ -703,15 +727,6 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           open: true,
         }
       : null;
-
-  // NOTE: Only the chat's OWN engine holds the Terminal button and the
-  // composer. A transcript left mid-turn by a CLI that was killed or crashed
-  // still reads as working for a while, but nothing is writing it — and a
-  // live CLI anywhere answers `terminal`, not this.
-  const blocked = !workspace || switching || running;
-  const terminalTip = running
-    ? "Wait for the turn to end, or stop it"
-    : "Continue this conversation in a terminal";
 
   return (
     <TooltipProvider delay={200}>
@@ -744,53 +759,32 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
             </>
           )}
           {working ? (
-            <span role="img" aria-label="Working" className="flex shrink-0">
+            <span role="img" aria-label="Working" className={TITLE_MARK}>
               <OrbitSpinner className="text-foreground size-[13px]" />
+            </span>
+          ) : conductor ? (
+            <span className={TITLE_MARK}>
+              <HugeiconsIcon
+                icon={leadIcon(conductor.icon)}
+                className="size-[13px]"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
             </span>
           ) : (
             agent && (
-              <TerminalKindIcon kind={agent} className="size-[13px] shrink-0" />
+              <span className={TITLE_MARK}>
+                <TerminalKindIcon kind={agent} className="size-[13px]" />
+              </span>
             )
           )}
           <h1
-            className={cn(WINDOW_TITLE, working && "text-shimmer")}
+            className={cn(WINDOW_TITLE, "leading-5", working && "text-shimmer")}
             title={title}
           >
             {title}
           </h1>
           <span className="ml-auto" />
-          {/* The same conversation in a terminal (D3), where the agent view
-              has its Chat: one writer at a time, so not while a turn runs.
-              Not for a worker: its lead is the one writer. */}
-          {!asWorker && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    // NOTE: aria-disabled, not disabled: a disabled button
-                    // gets no pointer events, and its tooltip says why it is
-                    // off.
-                    aria-disabled={blocked || undefined}
-                    onClick={() => {
-                      if (!blocked) void openTerminal();
-                    }}
-                    className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-                  />
-                }
-              >
-                <HugeiconsIcon
-                  icon={ComputerTerminal01Icon}
-                  strokeWidth={1.8}
-                  data-icon="inline-start"
-                  aria-hidden="true"
-                />
-                Terminal
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{terminalTip}</TooltipContent>
-            </Tooltip>
-          )}
         </WindowTitlebar>
 
         <div className="relative min-h-0 flex-1">
@@ -842,51 +836,49 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                   </EmptyHeader>
                 </Empty>
               ) : (
-                <FileOpenerProvider
-                  slug={slug}
-                  workspace={workspace}
-                  conversation={id}
-                >
-                  {shown.map((turn) => (
-                    <TurnView
-                      key={turn.id}
-                      turn={turn}
-                      delta={turn === lastOpen ? delta : ""}
-                      permissions={
-                        turn === lastOpen ? permissions : NO_PERMISSIONS
-                      }
-                      slug={slug}
-                      conversation={id}
-                      handlers={handlers}
-                      forking={forking}
-                      anchor={anchor}
-                    />
-                  ))}
-                  {stream && (
-                    <TurnView
-                      turn={stream}
-                      delta={delta}
-                      permissions={permissions}
-                      slug={slug}
-                      conversation={id}
-                      handlers={handlers}
-                      forking={forking}
-                    />
-                  )}
-                  {waiting.map((entry) => (
-                    <UserBubble
-                      key={entry.key}
-                      text={orchestrationText(entry.text)}
-                      attachments={entry.attachments}
-                      time={null}
-                      pending="Sending…"
-                    />
-                  ))}
-                  <OrchestrationPanel
+                <ConductorNames.Provider value={conductorNames}>
+                  <FileOpenerProvider
                     slug={slug}
-                    orchestration={orchestration}
-                  />
-                </FileOpenerProvider>
+                    workspace={workspace}
+                    conversation={id}
+                  >
+                    {shown.map((turn) => (
+                      <TurnView
+                        key={turn.id}
+                        turn={turn}
+                        delta={turn === lastOpen ? delta : ""}
+                        slug={slug}
+                        conversation={id}
+                        handlers={handlers}
+                        forking={forking}
+                        anchor={anchor}
+                      />
+                    ))}
+                    {stream && (
+                      <TurnView
+                        turn={stream}
+                        delta={delta}
+                        slug={slug}
+                        conversation={id}
+                        handlers={handlers}
+                        forking={forking}
+                      />
+                    )}
+                    {waiting.map((entry) => (
+                      <UserBubble
+                        key={entry.key}
+                        text={orchestrationText(entry.text)}
+                        attachments={entry.attachments}
+                        time={null}
+                        pending="Sending…"
+                      />
+                    ))}
+                    <OrchestrationPanel
+                      slug={slug}
+                      orchestration={orchestration}
+                    />
+                  </FileOpenerProvider>
+                </ConductorNames.Provider>
               )}
             </div>
           </div>
@@ -938,14 +930,27 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               way the CLI asks it at its own prompt. The composer stays
               mounted under it — hidden, not unmounted — so a draft
               survives. */}
-          {question && !asWorker && (
-            <PermissionCard
-              key={question.id}
-              request={question}
-              agent={label}
-              onAnswer={answer}
-            />
+          {/* A proposal waiting for Approve stands here too, above the
+              prompt, so it is never scrolled away (FE-95). */}
+          {awaiting && !asWorker && (
+            <div className="max-h-[50vh] overflow-y-auto rounded-xl shadow-xs">
+              <AwaitingProposal
+                orchestration={orchestration}
+                proposal={awaiting}
+              />
+            </div>
           )}
+          {!asWorker &&
+            asking.map((request) => (
+              // The composer's shadow: it stands where the prompt is.
+              <div key={request.id} className="rounded-xl shadow-xs">
+                <PermissionCard
+                  request={request}
+                  agent={label}
+                  onAnswer={answer}
+                />
+              </div>
+            ))}
           {asWorker && (
             <p className="text-muted-foreground border-border rounded-xl border px-4 py-3 text-[13px]">
               Read-only. This worker takes its instructions from{" "}
@@ -960,7 +965,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
             </p>
           )}
           {workspace && settings && !asWorker && (
-            <div className={question ? "hidden" : "flex flex-col"}>
+            <div className={asking.length ? "hidden" : "flex flex-col"}>
               <MessageQueue
                 queue={queue}
                 paused={paused}
@@ -985,7 +990,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 working={running}
                 queued={queue.length}
                 onSend={send}
-                onOrchestrate={orchestration.orchestrate}
+                onOrchestrate={orchestrate}
                 onStop={stop}
                 onEditLastQueued={() => {
                   // A queued repair has nothing typed to give back (FE-91).

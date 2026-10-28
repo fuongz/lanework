@@ -32,9 +32,11 @@ import {
   type Suggestion,
   setCodexModels,
 } from "../../../shared/conversation";
+import { LEAD_REF_PATTERN } from "../../../shared/orchestration";
 import { isAgentSessionId } from "../../../shared/terminal";
 import { broadcast, handle } from "../ipc";
 import { workerFolderOf } from "../orchestration";
+import { bindConductorConversation } from "../terminal";
 import { agentHomeDir } from "../test-seams";
 import { terminalFolder } from "../workspaces";
 import { createAgentCli, createClaudeCli } from "./claude-cli";
@@ -446,24 +448,41 @@ export function registerConversation(
       // NOTE: The id is main's own, never the page's, so a new one cannot
       // name a conversation that already exists.
       const conversation = randomUUID();
-      const request = sendRequest({
-        ...((args[0] ?? {}) as object),
-        conversation,
-      });
+      const raw = (args[0] ?? {}) as { conductor?: unknown };
+      const request = sendRequest({ ...raw, conversation });
+      // The conductor whose own conversation this starts (FE-95).
+      const conductor = raw.conductor ?? null;
+      if (
+        conductor !== null &&
+        (typeof conductor !== "string" || !LEAD_REF_PATTERN.test(conductor))
+      )
+        throw new Error("A valid conductor is required");
       if (!request.text.trim() && request.attachments.length === 0)
         throw new Error("Write something first.");
       const folder = await folderOf(request.workspace);
       const out = await outgoingOf(request);
       // The model picks the CLI: Codex names its conversation itself.
-      if (agentOfModel(request.settings.model) === "codex")
-        return engines.startCodex(request.workspace, folder, out);
-      const engine = await engines.start(
-        request.workspace,
-        conversation,
-        folder,
-        out,
-      );
-      return { conversation, engine };
+      const agent = agentOfModel(request.settings.model);
+      const started =
+        agent === "codex"
+          ? await engines.startCodex(request.workspace, folder, out)
+          : {
+              conversation,
+              engine: await engines.start(
+                request.workspace,
+                conversation,
+                folder,
+                out,
+              ),
+            };
+      if (conductor)
+        await bindConductorConversation(
+          request.workspace,
+          agent,
+          started.conversation,
+          conductor,
+        );
+      return started;
     },
   );
 

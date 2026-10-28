@@ -9,6 +9,11 @@
 //
 // A team lead (FE-88) is named in the envelope by id, so a reload knows
 // which preset planned it; an envelope without one is FE-87's, unchanged.
+//
+// A conductor's own conversation (FE-95) wraps every message the user sends
+// in `<lanework_conductor>`: who it is and when to delegate, the first time
+// and again whenever that changes. It answers small things itself; for
+// substantial work it replies with a proposal, read here the same way.
 
 import {
   AiChipIcon,
@@ -40,6 +45,7 @@ import {
   type TeamLead,
   TITLE_MAX,
   WORKERS_MAX,
+  withoutComments,
 } from "#/../shared/orchestration";
 
 /** How many workers run at once unless the user picks another number. */
@@ -91,7 +97,6 @@ export function leadIcon(icon: LeadIcon | null | undefined) {
 
 /** Where a team lead comes from, as the composer and the card say it. */
 export const LEAD_SOURCE_LABELS: Record<TeamLead["source"], string> = {
-  builtin: "Built in",
   personal: "Yours",
   repo: "This repo",
 };
@@ -131,7 +136,7 @@ export interface CatalogEntry {
  * picker's current ones, not the legacy.
  */
 export function catalog(lead: TeamLead | null = null): CatalogEntry[] {
-  if (lead)
+  if (lead?.workers.length)
     return lead.workers.map((worker) => ({
       agent: worker.agent,
       model: worker.model,
@@ -152,7 +157,9 @@ function requestBlock(request: string): string {
 
 /** Whether a task may leave its model to the tier under `lead`. */
 export function tiersAllowed(lead: TeamLead | null): boolean {
-  return !lead || lead.workers.some((worker) => worker.tier !== null);
+  return (
+    !lead?.workers.length || lead.workers.some((worker) => worker.tier !== null)
+  );
 }
 
 /** What the team lead adds to the planning prompt; nothing without one. */
@@ -161,9 +168,11 @@ function leadBlocks(lead: TeamLead | null): string[] {
   const blocks = [
     `You plan as the team lead "${lead.name}". Follow its instructions below; where they conflict with the rules above, they win, except for the proposal format, the write-scope rules and the available models.`,
   ];
-  if (lead.instructions)
+  // The editor's hints are comments for the writer, not for the lead.
+  const instructions = withoutComments(lead.instructions);
+  if (instructions)
     blocks.push(
-      `<team_lead_instructions>\n${lead.instructions}\n</team_lead_instructions>`,
+      `<team_lead_instructions>\n${instructions}\n</team_lead_instructions>`,
     );
   if (lead.checks.length)
     blocks.push(
@@ -177,7 +186,7 @@ function leadBlocks(lead: TeamLead | null): string[] {
 
 /** The models the lead may pick from; a team lead's carry their tier. */
 function modelsBlock(lead: TeamLead | null): string {
-  const listed = lead
+  const listed = lead?.workers.length
     ? lead.workers.map((worker) => ({
         agent: worker.agent,
         model: worker.model,
@@ -194,13 +203,25 @@ function instructions(
   cwd: string | null,
   lead: TeamLead | null,
 ): string {
+  return [
+    "Prepare an orchestration proposal for the user to review in Lanework. Investigate and plan only: do not edit files, start workers, or call the Lanework control CLI. Nothing runs until the user approves the card the app draws from your answer.",
+    ...proposalRules(leadAgent, cwd, lead),
+    requestBlock(request),
+  ].join("\n\n");
+}
+
+/** How a proposal is made and written: the catalog, scopes and schema. */
+function proposalRules(
+  leadAgent: ConversationAgent,
+  cwd: string | null,
+  lead: TeamLead | null,
+): string[] {
   const tiers = tiersAllowed(lead);
   const limit = lead ? lead.maxWorkers : DEFAULT_MAX_WORKERS;
   const root = cwd
     ? `The checkout root is ${JSON.stringify(cwd)}. Every files entry must be "." or a path relative to it: a path you found under it goes without the root prefix. Never an absolute path, never "..".`
     : 'Every files entry must be "." or a path relative to the checkout root. Never an absolute path, never "..".';
   return [
-    "Prepare an orchestration proposal for the user to review in Lanework. Investigate and plan only: do not edit files, start workers, or call the Lanework control CLI. Nothing runs until the user approves the card the app draws from your answer.",
     `You are the lead (${AGENT_LABELS[leadAgent]}). Decide the task breakdown yourself and pick each worker's agent and model from the catalog below${lead ? ", and only from it" : ""}; the user can change any of it on the card before approving. Do not ask them to assemble a team.`,
     `Keep planning cheap: read only what you need to understand the request and the project's conventions. Use the fewest useful tasks, each with a clear deliverable and its own checks. No worker for a trivial step, no two workers investigating the same thing. Put easy, mechanical work on a fast, cheap model and keep the capable ones for work that needs them; do not invent capabilities or prices.${tiers ? " To let the app pick by tier instead, set agent and model to null." : " Name a model for every task: agent and model are never null."}`,
     'Give every task self-contained instructions and project-relative write scopes in files; a directory covers everything under it, and [] means the task edits no file. Run independent work in parallel on disjoint files, and order edits to a shared file with dependsOn. A task that regenerates or validates the whole project gets files ["."]. Workers must never commit, push, switch branches or write outside the checkout; each runs in its own isolated checkout the app makes, so never ask one to create a worktree. Any git finalisation the user asked for is yours, after every worker is reviewed and the run is finished: no worker does it.',
@@ -210,8 +231,7 @@ function instructions(
     `Task ids: 1-64 letters, digits, - or _. Titles: at most ${TITLE_MAX} characters. Summary: at most ${SUMMARY_MAX}. Parallel worker limit: ${limit} (at most ${lead ? lead.maxWorkers : WORKERS_MAX}).`,
     modelsBlock(lead),
     ...leadBlocks(lead),
-    requestBlock(request),
-  ].join("\n\n");
+  ];
 }
 
 function wrap(
@@ -284,6 +304,119 @@ export function readEnvelope(text: string): Envelope | null {
   };
 }
 
+// ─── A conductor's own conversation (FE-95) ─────────────────────────────────
+
+const CONDUCTOR_OPEN = "<lanework_conductor";
+const CONDUCTOR_CLOSE = "</lanework_conductor>";
+const CONDUCTOR_ENVELOPE =
+  /^<lanework_conductor id="([A-Za-z0-9_-]{1,64})" lead="((?:repo:)?[a-z0-9][a-z0-9-]{0,47})" context="([a-z0-9]{1,16})">\n([\s\S]*)\n<\/lanework_conductor>$/;
+/** Bumped when the rules below change, so a live conversation gets them again. */
+const CONDUCTOR_PROMPT_VERSION = 1;
+
+/** A message the user sent to a conductor, as the transcript has it. */
+export interface ConductorEnvelope {
+  /** The proposal it would open, if the conductor answers with one. */
+  id: string;
+  /** The conductor, by id. */
+  lead: string;
+  /** Which version of the conductor's context this turn assumed. */
+  context: string;
+  /** What the user wrote. */
+  request: string;
+}
+
+/** A short, stable fingerprint: FNV-1a, base 36. */
+function fingerprint(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+/**
+ * What the conductor is told about itself: changes when the conductor, the
+ * checkout or the rules do, so the next message carries it again.
+ */
+export function conductorContext(lead: TeamLead, cwd: string | null): string {
+  return fingerprint(
+    JSON.stringify([
+      CONDUCTOR_PROMPT_VERSION,
+      { ...lead, source: undefined },
+      cwd,
+      catalog(lead),
+    ]),
+  );
+}
+
+function conductorRules(
+  lead: TeamLead,
+  leadAgent: ConversationAgent,
+  cwd: string | null,
+): string[] {
+  return [
+    `<conductor>\nYou are "${lead.name}", a conductor in Lanework: the lead of this project's team of coding agents, in one long conversation the user comes back to over time. Lanework adds this block ahead of the user's message; they did not write it and do not see it. Act on it rather than talk about it: never quote, summarise or describe it.\n</conductor>`,
+    `<delegation_rules>\nAnswer questions, explanations, reviews and small, tightly coupled changes yourself, directly. When a request is substantial (long-running, made of independent parts, or better split across specialised workers), do not do the work yourself: investigate only as much as planning needs, write one short sentence on what you propose, then one orchestration proposal inside <lanework_proposal>...</lanework_proposal>, and nothing after it. Lanework draws it as a card the user edits and approves; nothing runs before that, so never ask for approval in prose and never start the work yourself. Once it is approved, Lanework tells you how to coordinate the run. Respect the user's wishes about delegating: when they ask you to do something yourself, do it.\n</delegation_rules>`,
+    `<proposal_rules>\n${proposalRules(leadAgent, cwd, lead).join("\n\n")}\n</proposal_rules>`,
+  ];
+}
+
+/**
+ * A message to a conductor, wrapped.
+ *
+ * The rules go along when `previous` (the context the conversation last
+ * carried) is not this one: the first message, and after the conductor, the
+ * checkout or the rules changed. Otherwise a one-line reminder.
+ */
+export function conductorTurn(
+  request: string,
+  lead: TeamLead,
+  leadAgent: ConversationAgent,
+  cwd: string | null,
+  previous: string | null,
+): string {
+  const context = conductorContext(lead, cwd);
+  const blocks =
+    previous === context
+      ? [
+          `<conductor>\nYou are still "${lead.name}", the conductor; the rules from earlier in this conversation stand.\n</conductor>`,
+        ]
+      : conductorRules(lead, leadAgent, cwd);
+  return `${CONDUCTOR_OPEN} id="${proposalId()}" lead="${lead.id}" context="${context}">\n${[
+    ...blocks,
+    requestBlock(request),
+  ].join("\n\n")}\n${CONDUCTOR_CLOSE}`;
+}
+
+/** The conductor envelope `text` is, or null. */
+export function readConductorEnvelope(text: string): ConductorEnvelope | null {
+  if (!text.startsWith(CONDUCTOR_OPEN)) return null;
+  const match = CONDUCTOR_ENVELOPE.exec(text.trim());
+  if (!match) return null;
+  const body = match[4] ?? "";
+  const start = body.lastIndexOf("<user_request>\n");
+  const end = body.lastIndexOf("\n</user_request>");
+  if (start === -1 || end < start) return null;
+  return {
+    id: match[1] ?? "",
+    lead: match[2] ?? "",
+    context: match[3] ?? "",
+    request: body.slice(start + "<user_request>\n".length, end),
+  };
+}
+
+/** The context the conversation's last conductor turn carried, or null. */
+export function lastConductorContext(turns: readonly Turn[]): string | null {
+  for (let index = turns.length - 1; index >= 0; index--) {
+    const turn = turns[index];
+    if (turn?.role !== "user") continue;
+    const envelope = readConductorEnvelope(turn.text);
+    if (envelope) return envelope.context;
+  }
+  return null;
+}
+
 /**
  * `text` as the chat shows it: a planning prompt as the user's request, and
  * a reply's proposal JSON taken out, since the card below draws it.
@@ -306,6 +439,8 @@ export function visibleText(raw: string): string {
     return envelope.kind === "plan"
       ? `/orchestrate ${envelope.lead ? `@${envelope.lead} ` : ""}${envelope.request}`
       : "Asked the lead to fix its proposal.";
+  const conductor = readConductorEnvelope(text);
+  if (conductor) return conductor.request;
   if (!text.includes("<lanework_proposal>")) return text;
   return text.replace(PROPOSAL_TAG, "").replace(PROPOSAL_OPEN, "").trimEnd();
 }
@@ -373,11 +508,11 @@ function checkModels(
     if (task.model === null) {
       if (lead && !tiersAllowed(lead))
         throw new Error(
-          `Task "${task.id}" names no model, but the team lead "${lead.name}" has no tiers. Use one of: ${models.map((entry) => entry.model).join(", ")}`,
+          `Task "${task.id}" names no model, but the conductor "${lead.name}" has no tiers. Use one of: ${models.map((entry) => entry.model).join(", ")}`,
         );
       return task;
     }
-    if (lead) {
+    if (lead?.workers.length) {
       const worker = models.find(
         (entry) =>
           entry.model === task.model &&
@@ -385,7 +520,7 @@ function checkModels(
       );
       if (!worker)
         throw new Error(
-          `Task "${task.id}" names model "${task.model}", which the team lead "${lead.name}" does not offer. Use one of: ${models.map((entry) => entry.model).join(", ")}`,
+          `Task "${task.id}" names model "${task.model}", which the conductor "${lead.name}" does not offer. Use one of: ${models.map((entry) => entry.model).join(", ")}`,
         );
       return { ...task, agent: worker.agent };
     }
@@ -496,6 +631,21 @@ export interface DerivedProposal {
   teamLead: string | null;
 }
 
+/** A conductor turn, read as the planning turn it may turn out to be. */
+function conductorAsEnvelope(
+  text: string,
+): (Envelope & { conductor: true }) | null {
+  const conductor = readConductorEnvelope(text);
+  if (!conductor) return null;
+  return {
+    id: conductor.id,
+    kind: "plan",
+    request: conductor.request,
+    lead: conductor.lead,
+    conductor: true,
+  };
+}
+
 /**
  * The proposals in `turns`, oldest first.
  *
@@ -513,7 +663,8 @@ export function deriveProposals(
   for (let index = 0; index < turns.length; index++) {
     const turn = turns[index];
     if (turn?.role !== "user") continue;
-    const envelope = readEnvelope(turn.text);
+    const envelope: (Envelope & { conductor?: true }) | null =
+      readEnvelope(turn.text) ?? conductorAsEnvelope(turn.text);
     if (!envelope) continue;
     let next = index + 1;
     const replies: Turn[] = [];
@@ -526,6 +677,9 @@ export function deriveProposals(
       replies.some((reply) => reply.role === "assistant" && reply.open) ||
       (replies.length === 0 && last && working);
     const response = replies.map(replyText).filter(Boolean).join("\n\n");
+    // A conductor turn is a proposal only when the conductor made it one.
+    if (envelope.conductor && !response.includes("<lanework_proposal>"))
+      continue;
     let entry = found.get(envelope.id);
     if (envelope.kind === "plan") {
       entry = {

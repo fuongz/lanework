@@ -77,6 +77,8 @@ interface TerminalState {
   spawning: boolean;
   /** The agent CLIs this machine has, as last asked: what + offers. */
   agents: TerminalAgent[];
+  /** The CLIs were asked for once, answered or not: the rail stops waiting. */
+  agentsAsked: boolean;
   loadAgents: () => Promise<void>;
   setOpen: (workspace: string, open: boolean) => void;
   refresh: (workspace: string) => Promise<void>;
@@ -156,6 +158,7 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
   error: null,
   spawning: false,
   agents: [],
+  agentsAsked: false,
 
   loadAgents: async () => {
     try {
@@ -163,6 +166,8 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
       if (agents.join() !== get().agents.join()) set({ agents });
     } catch {
       // Not asked, or not answered: + keeps offering what it did.
+    } finally {
+      if (!get().agentsAsked) set({ agentsAsked: true });
     }
   },
 

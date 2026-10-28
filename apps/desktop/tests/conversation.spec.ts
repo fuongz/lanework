@@ -693,10 +693,11 @@ test("V5: a Claude conversation opens as a chat, sends a prompt and switches to 
     await page.screenshot({ path: join(SHOTS, "chat-after-send.png") });
 
     // ─── Terminal, and back to the chat ─────────────────────────────────────
-    const terminal = chat.getByRole("button", {
-      name: "Terminal",
-      exact: true,
-    });
+    // The chat's Terminal button lives in the rail row's menu now.
+    await page
+      .getByRole("button", { name: claudeRowName(TITLE), exact: true })
+      .click({ button: "right" });
+    const terminal = page.getByRole("menuitem", { name: "Open in terminal" });
     await expect(terminal).not.toHaveAttribute("aria-disabled", "true");
     await terminal.click();
     await expect(page).toHaveURL(/\/agents\/(?!chat\/)[^/]+$/);

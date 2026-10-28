@@ -40,6 +40,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
+import { useOpenInTerminal } from "#/hooks/use-open-in-terminal";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
   taskLabel as workerLabel,
@@ -324,6 +325,7 @@ export function SessionRow({
   const archive = useAgentSessions((state) => state.archive);
   const stop = useAgentTerminals((state) => state.stop);
   const refreshChats = useChatEngines((state) => state.refresh);
+  const openInTerminal = useOpenInTerminal(slug, workspace);
   // Known once its row was hovered, or its agent viewed (FE-38/D5). The
   // tooltip line, not the facts: a view open on an agent reads its facts on
   // every write, and the row redraws only when the line changes.
@@ -516,6 +518,18 @@ export function SessionRow({
               }
             >
               Archive
+            </ContextMenuItem>
+            {/* The chat's Terminal button, moved here: the same
+                conversation in a terminal, not while a turn runs (D3). */}
+            <ContextMenuItem
+              disabled={working && !tab}
+              onClick={() =>
+                void openInTerminal(session).then(
+                  (error) => error && onArchiveError(error),
+                )
+              }
+            >
+              {tab ? "Show terminal" : "Open in terminal"}
             </ContextMenuItem>
             {onStop && <StopItem onStop={onStop} />}
             <ContextMenuSeparator />

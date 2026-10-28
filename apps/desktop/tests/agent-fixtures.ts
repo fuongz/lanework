@@ -13,9 +13,10 @@ export const claudeRowName = (title: string) => `Open “${title}”`;
 
 /**
  * Resume a Claude conversation in a terminal the way a person now does
- * (FE-62/D3): its rail row opens the chat, whose title-bar Terminal button hands the
- * conversation to a pty — the running one, if a tab already has it. Resolves
- * once the xterm is on screen. `within` narrows where the row is found.
+ * (FE-62/D3): its rail row's context menu, Open in terminal (the chat's
+ * title-bar button moved there), hands the conversation to a pty — the
+ * running one, if a tab already has it. Resolves once the xterm is on
+ * screen. `within` narrows where the row is found.
  *
  * ⚠️ The chat's section and the terminal's region share the name
  * `Claude — <title>`: only the xterm inside tells them apart.
@@ -25,16 +26,18 @@ export async function resumeClaudeInTerminal(
   title: string,
   within: Page | Locator = page,
 ): Promise<Locator> {
-  await within
-    .getByRole("button", { name: claudeRowName(title), exact: true })
-    .click();
+  const row = within.getByRole("button", {
+    name: claudeRowName(title),
+    exact: true,
+  });
+  await row.click();
   const region = page.getByRole("region", { name: `Claude — ${title}` });
-  // The chat's header sits in the window title bar (FE-58), outside its region.
-  const terminal = page
-    .locator('[data-slot="window-titlebar"]')
-    .getByRole("button", { name: "Terminal", exact: true });
+  await row.click({ button: "right" });
+  const terminal = page.getByRole("menuitem", {
+    name: /^(Open in terminal|Show terminal)$/,
+  });
   await expect(terminal).toBeVisible();
-  // Off (aria-disabled) while a turn runs: a click then does nothing.
+  // Off while a turn runs: one writer at a time.
   await expect(terminal).not.toHaveAttribute("aria-disabled", "true");
   await terminal.click();
   const xterm = region.locator(".xterm");

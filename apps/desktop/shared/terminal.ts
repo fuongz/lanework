@@ -140,6 +140,12 @@ export interface AgentSession {
   /** When it was pinned, epoch ms, or null. */
   pinnedAt: number | null;
   /**
+   * The conductor (a team lead, by id) whose own conversation this is in
+   * this project (FE-95), or null. The rail lists it under Conductors, not
+   * under Agents.
+   */
+  conductor: string | null;
+  /**
    * Whether its agent is thinking or working right now: a turn is open in
    * the transcript.
    *
@@ -882,6 +888,8 @@ export const terminalChannels = {
   agentSessionRename: "terminal:agent-sessions:rename",
   /** Pin a conversation to the top of the group, or unpin it. */
   agentSessionPin: "terminal:agent-sessions:pin",
+  /** Let a conversation go from its conductor (FE-95): Reset. */
+  agentSessionConductor: "terminal:agent-sessions:conductor",
   /** Delete a conversation's transcript for good. */
   agentSessionDelete: "terminal:agent-sessions:delete",
   /** Archive a conversation in its CLI's own archive. */
@@ -1009,6 +1017,15 @@ export interface DesktopTerminalApi {
     agent: TerminalAgent,
     id: string,
     pinned: boolean,
+  ) => Promise<AgentSession[]>;
+  /**
+   * Lets a conversation go from its conductor (FE-95), and answers the new
+   * listing. Binding is main's own, on `conversation.start`.
+   */
+  releaseAgentSessionConductor: (
+    workspace: string,
+    agent: TerminalAgent,
+    id: string,
   ) => Promise<AgentSession[]>;
   /**
    * Deletes a conversation's transcript from the CLI's own folder, for good.

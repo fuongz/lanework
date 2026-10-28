@@ -237,29 +237,51 @@ export function ModelMenu({
   agent = null,
   onChange,
   disabled,
+  side = "top",
+  fast = true,
+  auto,
+  effortSet = true,
+  ghost = false,
+  className,
 }: {
   settings: ComposerSettings;
   /** Only this CLI's models; null offers both. */
   agent?: ConversationAgent | null;
   onChange: (next: Partial<ComposerSettings>) => void;
   disabled?: boolean;
+  /** Where the menu opens: above the composer, below a settings row. */
+  side?: "top" | "bottom";
+  /** Offer Fast; off where it is not kept (a conductor, FE-95). */
+  fast?: boolean;
+  /**
+   * An "Auto (by tier)" entry, for a proposal's task: `active` when no
+   * model is named and the run picks one by tier.
+   */
+  auto?: { active: boolean; onPick: () => void };
+  /** False while the effort is the default: the pill says so. */
+  effortSet?: boolean;
+  /** No fill until hovered: for a row in a list, not a composer's bar. */
+  ghost?: boolean;
+  className?: string;
 }) {
   // Re-drawn when Codex's list arrives: its labels come with it.
   useModels();
-  const name = modelName(settings.model) ?? settings.model;
+  const automatic = auto?.active ?? false;
+  const name = automatic
+    ? "Auto"
+    : (modelName(settings.model) ?? settings.model);
   const kind = agentOfModel(settings.model);
+  const effortLabel = effortSet ? EFFORT_LABELS[settings.effort] : "Default";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         disabled={disabled}
-        aria-label={`Model: ${name}, effort ${EFFORT_LABELS[settings.effort]}${settings.fast ? ", fast" : ""}`}
-        className={PILL}
+        aria-label={`Model: ${name}, effort ${effortLabel}${settings.fast ? ", fast" : ""}`}
+        className={cn(PILL, ghost && "bg-transparent", className)}
       >
-        <TerminalKindIcon kind={kind} className="size-3.5" />
+        {!automatic && <TerminalKindIcon kind={kind} className="size-3.5" />}
         <span>{name}</span>
-        <span className="text-muted-foreground">
-          {EFFORT_LABELS[settings.effort]}
-        </span>
+        <span className="text-muted-foreground">{effortLabel}</span>
         {settings.fast && (
           <HugeiconsIcon
             icon={FlashIcon}
@@ -276,28 +298,41 @@ export function ModelMenu({
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        side="top"
-        align="start"
+        side={side}
+        align={side === "top" ? "start" : "end"}
         sideOffset={6}
         className="w-60 p-1.5"
       >
-        <DropdownMenuItem
-          closeOnClick={false}
-          onClick={() => onChange({ fast: !settings.fast })}
-          className="h-9 rounded-lg px-2.5 text-[13px]"
-        >
-          <span className="flex-1">Fast</span>
-          <Switch
-            checked={settings.fast}
-            tabIndex={-1}
-            aria-hidden="true"
-            className="pointer-events-none"
-          />
-        </DropdownMenuItem>
+        {fast && (
+          <DropdownMenuItem
+            closeOnClick={false}
+            onClick={() => onChange({ fast: !settings.fast })}
+            className="h-9 rounded-lg px-2.5 text-[13px]"
+          >
+            <span className="flex-1">Fast</span>
+            <Switch
+              checked={settings.fast}
+              tabIndex={-1}
+              aria-hidden="true"
+              className="pointer-events-none"
+            />
+          </DropdownMenuItem>
+        )}
         <EffortSlider
           effort={settings.effort}
           onChange={(effort) => onChange({ effort })}
         />
+        {auto && (
+          <DropdownMenuItem
+            onClick={auto.onPick}
+            className={cn(
+              "h-9 rounded-lg px-2.5 text-[13px]",
+              automatic && "bg-foreground/[0.08]",
+            )}
+          >
+            <span className="flex-1">Auto (by tier)</span>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className="h-9 rounded-lg px-2.5 text-[13px]">
             <span className="flex-1">Model</span>
@@ -490,10 +525,13 @@ export function PermissionMenu({
   permission,
   onChange,
   disabled,
+  side = "top",
 }: {
   permission: Permission;
   onChange: (permission: Permission) => void;
   disabled?: boolean;
+  /** Where the menu opens: above the composer, below a settings row. */
+  side?: "top" | "bottom";
 }) {
   const copy = PERMISSION_COPY;
   return (
@@ -513,8 +551,8 @@ export function PermissionMenu({
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        side="top"
-        align="start"
+        side={side}
+        align={side === "top" ? "start" : "end"}
         sideOffset={6}
         // A gap between the rows: the picked one is tinted, and so is the one
         // under the pointer. Touching, the two would read as one block.

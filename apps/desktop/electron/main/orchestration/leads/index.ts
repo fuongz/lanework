@@ -2,7 +2,8 @@
 //
 // `main/index.ts` registers `leadsMain` for the page; the run engine asks
 // `teamLeadOf` for the lead a proposal names when the user approves it.
-// Personal leads and the default live in `<userData>/leads/personal.json`.
+// Personal leads and the default live in `<userData>/leads/personal.json`,
+// one set per project (FE-95).
 
 import { join } from "node:path";
 import { app } from "electron";
@@ -37,7 +38,7 @@ export function teamLeadOf(workspace: string, id: string): Promise<TeamLead> {
 
 export const leadsMain: LeadsMainHandlers = {
   list: (workspace) => store().list(workspace),
-  savePersonal: (lead) => store().savePersonal(lead),
-  removePersonal: (id) => store().removePersonal(id),
-  setDefault: (id) => store().setDefault(id),
+  savePersonal: (workspace, lead) => store().savePersonal(workspace, lead),
+  removePersonal: (workspace, id) => store().removePersonal(workspace, id),
+  setDefault: (workspace, id) => store().setDefault(workspace, id),
 };

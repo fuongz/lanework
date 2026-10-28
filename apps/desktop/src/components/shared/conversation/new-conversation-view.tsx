@@ -1,3 +1,4 @@
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -17,9 +18,12 @@ import {
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
+  conductorTurn,
+  leadIcon,
   visibleText as orchestrationText,
   planningPrompt,
   proposalId,
+  readEnvelope,
 } from "#/lib/orchestration-prompt";
 import { useBoard } from "#/stores/board";
 import { handSentMessage } from "#/stores/conversation-sends";
@@ -39,7 +43,18 @@ export function NewConversationView() {
   return <NewConversationPage key={slug} slug={slug} />;
 }
 
-function NewConversationPage({ slug }: { slug: string }) {
+/**
+ * The page, for a project and, on a conductor's row (FE-95), that conductor:
+ * then its title, its model, effort and permission, every message wrapped as
+ * a conductor turn, and the conversation started as the conductor's own.
+ */
+export function NewConversationPage({
+  slug,
+  conductor = null,
+}: {
+  slug: string;
+  conductor?: TeamLead | null;
+}) {
   const workspace = useWorkspaceKey(slug);
   const navigate = useNavigate();
   const mounted = useRef(false);
@@ -75,12 +90,15 @@ function NewConversationPage({ slug }: { slug: string }) {
     void (surface ? surface.lastSettings() : Promise.resolve(DEFAULT_SETTINGS))
       .catch(() => DEFAULT_SETTINGS)
       .then((last) => {
-        if (!gone) setSettings((current) => current ?? last);
+        if (!gone)
+          setSettings(
+            (current) => current ?? conductorSettings(last, conductor),
+          );
       });
     return () => {
       gone = true;
     };
-  }, []);
+  }, [conductor]);
 
   const send = async (
     text: string,
@@ -93,27 +111,35 @@ function NewConversationPage({ slug }: { slug: string }) {
     const chosen = override ?? settings;
     if (!workspace || !surface || !chosen) return false;
     setError(null);
+    // A conductor's message carries who it is; a planning prompt already
+    // names it.
+    const outgoing =
+      conductor && !readEnvelope(text)
+        ? conductorTurn(text, conductor, agentOfModel(chosen.model), cwd, null)
+        : text;
     const { begin, end } = useNewChats.getState();
     // The rail's row for it, from Enter on: the CLI takes a while to answer
     // with an id, and longer to write a transcript the rail can list.
     begin({
       workspace,
       agent: agentOfModel(chosen.model),
-      text: orchestrationText(text),
+      text: orchestrationText(outgoing),
+      ...(conductor ? { conductor: conductor.id } : {}),
     });
     try {
       const { conversation } = await surface.start({
         workspace,
-        text,
+        text: outgoing,
         attachments,
         settings: chosen,
+        ...(conductor ? { conductor: conductor.id } : {}),
       });
       end(workspace, conversation);
       handSentMessage(JSON.stringify([slug, conversation]), {
         key: "first",
         expect: 1,
         after: 0,
-        text,
+        text: outgoing,
         attachments: names.map((entry) => ({
           name: entry.name,
           mediaType: entry.image ? "image/*" : "text/plain",
@@ -143,9 +169,11 @@ function NewConversationPage({ slug }: { slug: string }) {
     request: string,
     attachments: OutgoingAttachment[],
     names: { name: string; image: boolean }[],
-    teamLead: TeamLead | null,
+    picked: TeamLead | null,
   ): Promise<boolean> => {
     if (!settings || !request.trim()) return Promise.resolve(false);
+    // In a conductor's conversation, `/orchestrate` plans as that conductor.
+    const teamLead = picked ?? conductor;
     const own = teamLead?.lead;
     const started: ComposerSettings =
       own && allModels().some((entry) => entry.id === own.model)
@@ -171,18 +199,30 @@ function NewConversationPage({ slug }: { slug: string }) {
 
   return (
     <section
-      aria-label="New conversation"
+      aria-label={conductor ? conductor.name : "New conversation"}
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
     >
       <WindowTitlebar className="gap-2.5">
-        <h1 className={WINDOW_TITLE}>New conversation</h1>
+        {conductor && (
+          <HugeiconsIcon
+            icon={leadIcon(conductor.icon)}
+            className="text-muted-foreground size-4 shrink-0"
+            strokeWidth={1.5}
+            aria-hidden="true"
+          />
+        )}
+        <h1 className={WINDOW_TITLE}>
+          {conductor ? conductor.name : "New conversation"}
+        </h1>
       </WindowTitlebar>
 
       {/* A little under the middle, where the eye lands on an empty page. */}
       <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-8 pt-[30vh] pb-10">
         <div className="flex w-full max-w-[760px] min-w-0 flex-col gap-4">
           <h2 className="px-1 text-[22px] font-medium tracking-tight text-balance">
-            What should we work on in {name}?
+            {conductor
+              ? `What should ${conductor.name} take on in ${name}?`
+              : `What should we work on in ${name}?`}
           </h2>
           {error && (
             <p role="alert" className="text-destructive px-1 text-xs">
@@ -192,7 +232,9 @@ function NewConversationPage({ slug }: { slug: string }) {
           {workspace && settings && (
             <Composer
               slug={slug}
-              draftKey={`new:${slug}`}
+              draftKey={
+                conductor ? `conductor:${slug}:${conductor.id}` : `new:${slug}`
+              }
               autoFocus
               workspace={workspace}
               settings={settings}
@@ -212,4 +254,23 @@ function NewConversationPage({ slug }: { slug: string }) {
       </div>
     </section>
   );
+}
+
+/**
+ * The settings a conductor's conversation starts on: its own model and
+ * effort when the app offers that model, and its permission; the rest as
+ * last picked.
+ */
+function conductorSettings(
+  last: ComposerSettings,
+  conductor: TeamLead | null,
+): ComposerSettings {
+  if (!conductor) return last;
+  const own = conductor.lead;
+  const offered = allModels().some((entry) => entry.id === own.model);
+  return {
+    ...last,
+    ...(offered ? { model: own.model, effort: own.effort ?? last.effort } : {}),
+    permission: conductor.permission ?? last.permission,
+  };
 }

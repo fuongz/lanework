@@ -17,6 +17,8 @@ interface State {
   heading: boolean;
   /** The rest of this line is a frontmatter value. */
   value: boolean;
+  /** Inside an HTML comment that has not closed yet. */
+  comment: boolean;
 }
 
 const TOKENS: Record<string, Tag> = {
@@ -30,6 +32,7 @@ const TOKENS: Record<string, Tag> = {
   link: tags.link,
   url: tags.url,
   quote: tags.quote,
+  comment: tags.comment,
 };
 
 const markdown = StreamLanguage.define<State>({
@@ -39,6 +42,7 @@ const markdown = StreamLanguage.define<State>({
     fence: false,
     heading: false,
     value: false,
+    comment: false,
   }),
   copyState: (state) => ({ ...state }),
   blankLine: (state) => {
@@ -95,6 +99,19 @@ const markdown = StreamLanguage.define<State>({
       if (stream.match(/^\s*(?:[-*+]|\d+[.)])(?=\s)/)) return "mark";
     }
 
+    // An HTML comment, as a template's hints are: up to its close, which may
+    // be lines away.
+    if (state.comment || stream.match("<!--")) {
+      state.comment = true;
+      while (!stream.eol()) {
+        if (stream.match("-->")) {
+          state.comment = false;
+          break;
+        }
+        stream.next();
+      }
+      return "comment";
+    }
     if (stream.match(/^`[^`]*`/)) return "code";
     if (stream.match(/^(\*\*|__)(?=\S)(.+?)\1/)) return "strong";
     if (stream.match(/^(\*|_)(?=\S)([^*_]+?)\1/)) return "emphasis";
@@ -133,4 +150,6 @@ export const MARKDOWN_HIGHLIGHT = HighlightStyle.define([
   { tag: tags.link, color: "var(--accent-brand)" },
   { tag: tags.url, color: "var(--muted-foreground)" },
   { tag: tags.quote, color: "var(--muted-foreground)", fontStyle: "italic" },
+  // HTML comments: notes for the writer, such as a template's hints.
+  { tag: tags.comment, color: "var(--muted-foreground)" },
 ]);

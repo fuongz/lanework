@@ -1,10 +1,12 @@
 // What Lanework adds to an agent conversation (FE-24, FE-25): a name of its
-// own and a pin. Kept in the app's home, never in the CLI's files.
+// own, a pin, and the conductor it belongs to (FE-95). Kept in the app's
+// home, never in the CLI's files.
 //
 // Nothing here imports Electron: main passes the file, and a spec drives it
 // under plain Node against a temporary one.
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { LEAD_REF_PATTERN } from "../../../shared/orchestration";
 import { AGENT_NAME_MAX, type AgentSession } from "../../../shared/terminal";
 import { agentKey } from "./agent-sessions";
 
@@ -14,6 +16,11 @@ interface AgentMark {
   name?: string;
   /** Epoch ms it was pinned; absent means not pinned. */
   pinnedAt?: number;
+  /**
+   * The conductor whose own conversation this is, and the workspace it is
+   * that in: one per conductor per workspace (FE-95). Absent means none.
+   */
+  conductor?: { id: string; workspace: string };
 }
 
 /** Every mark, by `agent:id`. */
@@ -41,8 +48,15 @@ export async function readAgentMarks(file: string): Promise<AgentMarks> {
       if (typeof mark?.name === "string" && mark.name) next.name = mark.name;
       if (typeof mark?.pinnedAt === "number" && Number.isFinite(mark.pinnedAt))
         next.pinnedAt = mark.pinnedAt;
-      if (next.name !== undefined || next.pinnedAt !== undefined)
-        out[key] = next;
+      const conductor = mark?.conductor;
+      if (
+        typeof conductor?.id === "string" &&
+        LEAD_REF_PATTERN.test(conductor.id) &&
+        typeof conductor.workspace === "string" &&
+        conductor.workspace
+      )
+        next.conductor = { id: conductor.id, workspace: conductor.workspace };
+      if (!isEmpty(next)) out[key] = next;
     }
     return out;
   } catch {
@@ -92,19 +106,67 @@ export async function updateAgentMark(
   change: (mark: AgentMark) => AgentMark,
 ): Promise<void> {
   const marks = await readAgentMarks(file);
-  const next = change({ ...marks[key] });
-  if (!next.name) delete next.name;
-  if (next.pinnedAt === undefined) delete next.pinnedAt;
-  if (next.name === undefined && next.pinnedAt === undefined) delete marks[key];
+  const next = tidy(change({ ...marks[key] }));
+  if (isEmpty(next)) delete marks[key];
   else marks[key] = next;
   await writeAgentMarks(file, marks);
 }
 
-/** The `agent:id`s that must stay listed however old they are: the pinned. */
+/** A mark without its emptied fields. */
+function tidy(mark: AgentMark): AgentMark {
+  const next = { ...mark };
+  if (!next.name) delete next.name;
+  if (next.pinnedAt === undefined) delete next.pinnedAt;
+  if (!next.conductor) delete next.conductor;
+  return next;
+}
+
+function isEmpty(mark: AgentMark): boolean {
+  return (
+    mark.name === undefined &&
+    mark.pinnedAt === undefined &&
+    mark.conductor === undefined
+  );
+}
+
+/**
+ * Make `key` the conductor's own conversation in `workspace`, and let go the
+ * one it had there before (FE-95): one per conductor per workspace.
+ */
+export async function bindConductor(
+  file: string,
+  key: string,
+  conductor: { id: string; workspace: string },
+): Promise<void> {
+  if (!LEAD_REF_PATTERN.test(conductor.id))
+    throw new Error("A valid conductor is required");
+  const marks = await readAgentMarks(file);
+  for (const [other, mark] of Object.entries(marks)) {
+    if (
+      other === key ||
+      mark.conductor?.id !== conductor.id ||
+      mark.conductor.workspace !== conductor.workspace
+    )
+      continue;
+    const next = tidy({ ...mark, conductor: undefined });
+    if (isEmpty(next)) delete marks[other];
+    else marks[other] = next;
+  }
+  marks[key] = { ...marks[key], conductor: { ...conductor } };
+  await writeAgentMarks(file, marks);
+}
+
+/**
+ * The `agent:id`s that must stay listed however old they are: the pinned,
+ * and every conductor's own conversation.
+ */
 export function keptKeys(marks: AgentMarks): Set<string> {
   return new Set(
     Object.entries(marks)
-      .filter(([, mark]) => mark.pinnedAt !== undefined)
+      .filter(
+        ([, mark]) =>
+          mark.pinnedAt !== undefined || mark.conductor !== undefined,
+      )
       .map(([key]) => key),
   );
 }
@@ -120,6 +182,7 @@ export function applyAgentMarks(
       ...session,
       title: mark?.name ?? session.cliTitle,
       pinnedAt: mark?.pinnedAt ?? null,
+      conductor: mark?.conductor?.id ?? null,
     };
   });
 }

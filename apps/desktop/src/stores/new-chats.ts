@@ -15,6 +15,8 @@ export interface NewChat {
   agent: ConversationAgent;
   /** The first message, which stands in for its title. */
   text: string;
+  /** The conductor whose own conversation it is (FE-95): not an Agents row. */
+  conductor?: string;
 }
 
 interface NewChatsState {

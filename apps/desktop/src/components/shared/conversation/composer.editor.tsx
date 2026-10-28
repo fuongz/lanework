@@ -33,8 +33,11 @@ export interface ChipSpec {
   /** The hover text: its full path, or its description. */
   title: string;
   icon: ReactNode;
-  /** `muted` for a command that is not a skill (FE-93/D3). */
-  tone: "primary" | "muted";
+  /**
+   * `muted` for a command that is not a skill (FE-93/D3); `violet` for
+   * /orchestrate, which hands the request to workers (FE-95).
+   */
+  tone: "primary" | "muted" | "violet";
 }
 
 type Segment = { text: string } | { chip: ChipSpec };
@@ -256,7 +259,9 @@ export const ChipEditor = forwardRef<
           "mx-px inline-flex items-baseline gap-1 align-baseline font-medium select-all",
           part.chip.tone === "primary"
             ? "text-primary"
-            : "text-muted-foreground",
+            : part.chip.tone === "violet"
+              ? "text-tone-violet"
+              : "text-muted-foreground",
         );
         made.push({ node: span, spec: part.chip, key: ++chipKeys });
         return span;

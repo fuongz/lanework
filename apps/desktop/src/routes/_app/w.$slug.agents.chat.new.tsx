@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { NewConversationView } from "#/components/features/conversation/new-conversation-view";
+import { NewConversationView } from "#/components/shared/conversation/new-conversation-view";
 
 /**
  * The page that starts a new conversation.

@@ -158,17 +158,24 @@ function registerLeads(
     arity(args, 1);
     return leads.list(args[0] === null ? null : ipcSlug(args[0]));
   });
+  // A conductor is a project's own (FE-95): every write names the project.
   handle(leadsChannels.savePersonal, devUrl, (args) => {
-    arity(args, 1);
-    return leads.savePersonal(parseTeamLead(args[0], "personal"));
+    arity(args, 2);
+    return leads.savePersonal(
+      ipcSlug(args[0]),
+      parseTeamLead(args[1], "personal"),
+    );
   });
   handle(leadsChannels.removePersonal, devUrl, (args) => {
-    arity(args, 1);
-    return leads.removePersonal(leadId(args[0]));
+    arity(args, 2);
+    return leads.removePersonal(ipcSlug(args[0]), leadId(args[1]));
   });
   handle(leadsChannels.setDefault, devUrl, (args) => {
-    arity(args, 1);
-    return leads.setDefault(args[0] === null ? null : leadId(args[0]));
+    arity(args, 2);
+    return leads.setDefault(
+      ipcSlug(args[0]),
+      args[1] === null ? null : leadId(args[1]),
+    );
   });
 }
 

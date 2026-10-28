@@ -968,9 +968,10 @@ export class Orchestrator {
         this.settle(answer?.logId, tier);
       }
     }
-    if (lead) {
+    if (lead?.workers.length) {
       // A team lead names its workers: the one standing for this tier, else
-      // the one for `standard`, else its first (FE-88/D5).
+      // the one for `standard`, else its first (FE-88/D5). One that names
+      // none picks like a run without a lead (FE-95).
       const pool = input.agent
         ? lead.workers.filter((worker) => worker.agent === input.agent)
         : lead.workers;
@@ -1947,8 +1948,9 @@ export class Orchestrator {
       );
     }
     // A team lead's workers are the run's only choices (FE-88/D5), so a task
-    // on any other model is refused here and by `delegate` later.
-    const choices: WorkerChoice[] = teamLead
+    // on any other model is refused here and by `delegate` later. A lead with
+    // none may use any model, as a run without one does (FE-95).
+    const choices: WorkerChoice[] = teamLead?.workers.length
       ? teamLead.workers.map((worker) => ({
           agent: worker.agent,
           model: worker.model,

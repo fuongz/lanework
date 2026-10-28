@@ -317,9 +317,12 @@ const jev: DesktopJevApi = {
  */
 const leads: DesktopLeadsApi = {
   list: (workspace) => ipcRenderer.invoke(leadsChannels.list, workspace),
-  savePersonal: (lead) => ipcRenderer.invoke(leadsChannels.savePersonal, lead),
-  removePersonal: (id) => ipcRenderer.invoke(leadsChannels.removePersonal, id),
-  setDefault: (id) => ipcRenderer.invoke(leadsChannels.setDefault, id),
+  savePersonal: (workspace, lead) =>
+    ipcRenderer.invoke(leadsChannels.savePersonal, workspace, lead),
+  removePersonal: (workspace, id) =>
+    ipcRenderer.invoke(leadsChannels.removePersonal, workspace, id),
+  setDefault: (workspace, id) =>
+    ipcRenderer.invoke(leadsChannels.setDefault, workspace, id),
   onChange: (listener) =>
     subscribe<LeadsEvent>(leadsChannels.changed, listener),
 };
@@ -543,6 +546,13 @@ function createTerminal(): DesktopTerminalApi {
         agent,
         id,
         pinned,
+      ),
+    releaseAgentSessionConductor: (workspace, agent, id) =>
+      ipcRenderer.invoke(
+        terminalChannels.agentSessionConductor,
+        workspace,
+        agent,
+        id,
       ),
     deleteAgentSession: (workspace, agent, id) =>
       ipcRenderer.invoke(

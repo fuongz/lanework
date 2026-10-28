@@ -8,10 +8,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   AGENT_LABELS,
+  agentOfModel,
   type ConversationAgent,
-  EFFORT_LABELS,
-  EFFORTS,
-  type Effort,
+  DEFAULT_SETTINGS,
   modelName,
 } from "#/../shared/conversation";
 import {
@@ -29,22 +28,13 @@ import {
   TITLE_MAX,
   WORKERS_MAX,
 } from "#/../shared/orchestration";
+import { ModelMenu } from "#/components/shared/conversation/composer.menus";
 import {
   ListSkeleton,
   TextSkeleton,
 } from "#/components/shared/loading/skeletons";
-import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "#/components/ui/select";
 import { Textarea } from "#/components/ui/textarea";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
@@ -81,26 +71,32 @@ function TeamLeadTerms({
     return config ? [{ point, ...config }] : [];
   });
   const term = "text-muted-foreground w-28 shrink-0";
+  // Only what changes how the run behaves: a personal conductor with no
+  // overrides and no checks has nothing to say here.
+  if (lead.source !== "repo" && !overrides.length && !lead.checks.length)
+    return null;
   return (
     <dl
-      aria-label="Team lead terms"
+      aria-label="Conductor terms"
       className={cn(
         "flex flex-col gap-1.5 border-t px-3 py-2 text-[12px]",
         className,
       )}
     >
-      <div className="flex min-w-0 gap-2">
-        <dt className={term}>Team lead from</dt>
-        <dd className="min-w-0 break-words">
-          {LEAD_SOURCE_LABELS[lead.source]}
-          {lead.source === "repo" && (
-            <span className="text-muted-foreground font-mono">
-              {" "}
-              .lanework/leads/{lead.id.slice(REPO_LEAD_PREFIX.length)}.md
-            </span>
-          )}
-        </dd>
-      </div>
+      {lead.source === "repo" && (
+        <div className="flex min-w-0 gap-2">
+          <dt className={term}>Conductor from</dt>
+          <dd className="min-w-0 break-words">
+            {LEAD_SOURCE_LABELS[lead.source]}
+            {lead.source === "repo" && (
+              <span className="text-muted-foreground font-mono">
+                {" "}
+                .lanework/leads/{lead.id.slice(REPO_LEAD_PREFIX.length)}.md
+              </span>
+            )}
+          </dd>
+        </div>
+      )}
       {overrides.length > 0 && (
         <div className="flex min-w-0 gap-2">
           <dt className={term}>Judge overrides</dt>
@@ -108,7 +104,7 @@ function TeamLeadTerms({
             {overrides.map((entry) => (
               <span
                 key={entry.point}
-                className={cn(entry.mode === "enforce" && "text-tone-amber")}
+                className={cn(entry.mode === "enforce" && "text-foreground")}
               >
                 {POINT_LABELS[entry.point]}:{" "}
                 {entry.mode === "enforce"
@@ -140,11 +136,11 @@ function TeamLeadTerms({
 /** The model select's value for a task left to its tier. */
 const AUTO = "auto";
 /** The effort select's value for the model's own default. */
-const DEFAULT_EFFORT = "default";
+const _DEFAULT_EFFORT = "default";
 /** Tasks drawn before "Show more". */
 const FOLDED = 4;
 
-function modelValue(task: ProposedTask): string {
+function _modelValue(task: ProposedTask): string {
   return task.model ? `${task.agent ?? "claude"}:${task.model}` : AUTO;
 }
 
@@ -260,154 +256,6 @@ function unlisted(task: ProposedTask, teamLead: TeamLead | null): boolean {
   );
 }
 
-function ModelSelect({
-  task,
-  teamLead,
-  disabled,
-  describedBy,
-  onChange,
-}: {
-  task: ProposedTask;
-  teamLead: TeamLead | null;
-  disabled: boolean;
-  /** The warning line, when the model is not in the list. */
-  describedBy?: string;
-  onChange: (patch: Pick<ProposedTask, "agent" | "model">) => void;
-}) {
-  const models = catalog(teamLead);
-  const auto = tiersAllowed(teamLead);
-  const agents = (["claude", "codex"] as ConversationAgent[]).filter((agent) =>
-    models.some((entry) => entry.agent === agent),
-  );
-  const missing = unlisted(task, teamLead);
-  return (
-    <Select
-      value={modelValue(task)}
-      disabled={disabled}
-      onValueChange={(next) => {
-        if (next === AUTO || typeof next !== "string") {
-          onChange({ agent: null, model: null });
-          return;
-        }
-        const at = next.indexOf(":");
-        onChange({
-          agent: next.slice(0, at) as ConversationAgent,
-          model: next.slice(at + 1),
-        });
-      }}
-    >
-      <SelectTrigger
-        size="sm"
-        aria-label={`Model for ${task.title}`}
-        aria-describedby={missing ? describedBy : undefined}
-        className={cn("max-w-48", missing && "border-tone-amber/50")}
-      >
-        <SelectValue>
-          {(value: string) =>
-            value === AUTO ? (
-              "Auto (by tier)"
-            ) : (
-              <>
-                {missing ? (
-                  <HugeiconsIcon
-                    icon={Alert02Icon}
-                    className="text-tone-amber size-3"
-                    strokeWidth={2}
-                    aria-hidden="true"
-                  />
-                ) : (
-                  <TerminalKindIcon
-                    kind={(task.agent ?? "claude") as ConversationAgent}
-                    className="size-3"
-                  />
-                )}
-                <span className="truncate">
-                  {modelName(task.model) ?? task.model}
-                </span>
-              </>
-            )
-          }
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent alignItemWithTrigger={false} align="end">
-        {missing && task.model && (
-          <SelectGroup>
-            <SelectLabel>Not in the list</SelectLabel>
-            <SelectItem value={modelValue(task)}>
-              <HugeiconsIcon
-                icon={Alert02Icon}
-                className="text-tone-amber size-3"
-                strokeWidth={2}
-                aria-hidden="true"
-              />
-              {modelName(task.model) ?? task.model}
-            </SelectItem>
-          </SelectGroup>
-        )}
-        {auto && <SelectItem value={AUTO}>Auto (by tier)</SelectItem>}
-        {agents.map((agent) => (
-          <SelectGroup key={agent}>
-            <SelectLabel>{AGENT_LABELS[agent]}</SelectLabel>
-            {models
-              .filter((entry) => entry.agent === agent)
-              .map((entry) => (
-                <SelectItem
-                  key={entry.model}
-                  value={`${entry.agent}:${entry.model}`}
-                >
-                  <TerminalKindIcon kind={entry.agent} className="size-3" />
-                  {entry.label}
-                </SelectItem>
-              ))}
-          </SelectGroup>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
-function EffortSelect({
-  task,
-  disabled,
-  onChange,
-}: {
-  task: ProposedTask;
-  disabled: boolean;
-  onChange: (effort: Effort | null) => void;
-}) {
-  return (
-    <Select
-      value={task.effort ?? DEFAULT_EFFORT}
-      disabled={disabled}
-      onValueChange={(next) =>
-        onChange(
-          next === DEFAULT_EFFORT || typeof next !== "string"
-            ? null
-            : (next as Effort),
-        )
-      }
-    >
-      <SelectTrigger size="sm" aria-label={`Effort for ${task.title}`}>
-        <SelectValue>
-          {(value: string) =>
-            value === DEFAULT_EFFORT
-              ? "Default effort"
-              : EFFORT_LABELS[value as Effort]
-          }
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent alignItemWithTrigger={false} align="end">
-        <SelectItem value={DEFAULT_EFFORT}>Default effort</SelectItem>
-        {EFFORTS.map((effort) => (
-          <SelectItem key={effort} value={effort}>
-            {EFFORT_LABELS[effort]}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
 /**
  * Write scopes as one comma-separated line.
  *
@@ -486,7 +334,7 @@ function TaskRow({
   const label = "text-muted-foreground mb-1 block text-[11px]";
   return (
     <li className="flex flex-col">
-      <div className="hover:bg-foreground/[0.03] flex min-h-9 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1">
+      <div className="hover:bg-foreground/[0.02] flex min-h-8 min-w-0 items-center gap-1 px-2 py-0.5">
         <button
           type="button"
           aria-expanded={open}
@@ -504,7 +352,7 @@ function TaskRow({
           <span className="text-muted-foreground shrink-0 font-mono text-[11px]">
             {index + 1}
           </span>
-          <span className="truncate text-[13px]" title={task.title}>
+          <span className="truncate text-[12px]" title={task.title}>
             {task.title}
           </span>
           {invalid && (
@@ -516,23 +364,42 @@ function TaskRow({
             />
           )}
         </button>
-        <ModelSelect
-          task={task}
-          teamLead={teamLead}
+        {/* The composer's own model pill (FE-95): model and effort in one,
+            with Auto when the run may pick by tier. */}
+        <ModelMenu
+          side="bottom"
+          fast={false}
+          ghost
           disabled={!editable}
-          describedBy={warning}
-          onChange={(patch) => onChange(patch)}
-        />
-        <EffortSelect
-          task={task}
-          disabled={!editable}
-          onChange={(effort) => onChange({ effort })}
+          className="h-7 shrink-0 text-xs"
+          settings={{
+            ...DEFAULT_SETTINGS,
+            model: task.model ?? DEFAULT_SETTINGS.model,
+            effort: task.effort ?? DEFAULT_SETTINGS.effort,
+          }}
+          effortSet={task.effort !== null}
+          auto={
+            tiersAllowed(teamLead)
+              ? {
+                  active: !task.model,
+                  onPick: () => onChange({ agent: null, model: null }),
+                }
+              : undefined
+          }
+          onChange={(next) =>
+            onChange({
+              ...(next.model
+                ? { model: next.model, agent: agentOfModel(next.model) }
+                : {}),
+              ...(next.effort ? { effort: next.effort } : {}),
+            })
+          }
         />
       </div>
       {missing && task.model && (
         <p
           id={warning}
-          className="text-tone-amber flex items-start gap-1.5 px-3 pb-1.5 pl-9 text-[11px]"
+          className="text-muted-foreground flex items-start gap-1.5 px-3 pb-1.5 pl-9 text-[11px]"
         >
           {/* Said, not blocked: Approve still tries it; main has the last word. */}
           {modelName(task.model) ?? task.model} is not in{" "}
@@ -635,6 +502,43 @@ function TaskRow({
         </div>
       )}
     </li>
+  );
+}
+
+/** Where the proposal stands, as one small badge. */
+function ProposalStatus({
+  planning,
+  approved,
+  cancelled,
+  invalid,
+}: {
+  planning: boolean;
+  approved: boolean;
+  cancelled: boolean;
+  invalid: boolean;
+}) {
+  const [label, tone] = planning
+    ? ["Planning", "text-muted-foreground text-shimmer"]
+    : approved
+      ? ["Approved", "text-tone-emerald"]
+      : cancelled
+        ? ["Cancelled", "text-muted-foreground"]
+        : invalid
+          ? ["Needs a fix", "text-destructive"]
+          : ["Waiting for you", "text-tone-violet"];
+  const waiting = !planning && !approved && !cancelled && !invalid;
+  return (
+    <span
+      className={cn("flex items-center gap-1.5 text-[11px] font-medium", tone)}
+    >
+      {waiting && (
+        <span
+          aria-hidden="true"
+          className="bg-tone-violet size-1.5 animate-pulse rounded-full motion-reduce:animate-none"
+        />
+      )}
+      {label}
+    </span>
   );
 }
 
@@ -831,69 +735,71 @@ export function ProposalCard({
 
   // Waiting on the user, it reads as an approval like a tool's (the
   // permission card's tint and buttons); once answered, a plain card.
-  const awaiting =
+  const _awaiting =
     !planning && proposal.status === "ready" && !approved && !cancelled;
-  const line = awaiting ? "border-tone-amber/30" : "border-border";
+  const line = "border-border";
+  const [summaryOpen, setSummaryOpen] = useState(false);
   // Approved, its run gone: only that is said, not the tasks it ran.
   const gone = approved && runMissing;
 
   return (
     <article
       aria-label="Orchestration proposal"
-      className={cn(
-        "overflow-hidden rounded-xl border",
-        awaiting
-          ? "border-tone-amber/40 bg-tone-amber/[0.06]"
-          : "bg-card border-border",
-      )}
+      className="bg-card border-border overflow-hidden rounded-xl border"
     >
-      <header className="flex min-w-0 items-start gap-2 px-3 py-2.5">
-        <HugeiconsIcon
-          icon={leadIcon(teamLead?.icon)}
-          className={cn(
-            "mt-0.5 size-4 shrink-0",
-            awaiting ? "text-tone-amber" : "text-muted-foreground",
-          )}
-          strokeWidth={1.8}
-          aria-hidden="true"
-        />
+      <header className="flex min-w-0 items-start gap-3 px-3 py-3">
+        {/* The conductor's mark, in Orchestrate's violet: who proposes. */}
+        <span className="bg-tone-violet/10 text-tone-violet grid size-8 shrink-0 place-items-center rounded-lg">
+          <HugeiconsIcon
+            icon={leadIcon(teamLead?.icon)}
+            className="size-4"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        </span>
         <div className="min-w-0 flex-1">
+          <p className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">
+            {proposal.teamLead ? (
+              teamLead || leadsRead ? (
+                <span
+                  className="min-w-0 truncate"
+                  title={`Conductor @${proposal.teamLead}`}
+                >
+                  <span className="text-foreground/80 font-medium">
+                    {teamLead?.name ?? `@${proposal.teamLead}`}
+                  </span>{" "}
+                  proposes
+                </span>
+              ) : (
+                <TextSkeleton label="Reading the conductor" className="w-20" />
+              )
+            ) : (
+              <span>Proposal</span>
+            )}
+          </p>
           <h2
             ref={headingRef}
             // Not in the tab order: the focus is only moved here, after a
             // cancel is undone or an approval leaves no run to show.
             tabIndex={-1}
-            className="focus-visible:ring-ring/30 truncate rounded-sm text-[13px] font-medium outline-none focus-visible:ring-2"
+            className="focus-visible:ring-ring/30 mt-0.5 line-clamp-2 rounded-sm text-[14px] leading-snug font-medium text-balance outline-none focus-visible:ring-2"
             title={title}
           >
             {title}
           </h2>
-          <p className="text-muted-foreground mt-0.5 flex items-center gap-3 text-[11px]">
-            {proposal.teamLead &&
-              (teamLead || leadsRead ? (
-                <span
-                  className="text-foreground/80 min-w-0 truncate font-medium"
-                  title={`Team lead @${proposal.teamLead}`}
-                >
-                  {teamLead?.name ?? `@${proposal.teamLead}`}
-                </span>
-              ) : (
-                <TextSkeleton label="Reading the team lead" className="w-20" />
-              ))}
-            <span className="flex min-w-0 items-center gap-1.5">
-              <TerminalKindIcon kind={leadAgent} className="size-3 shrink-0" />
-              <span className="truncate">Led by {AGENT_LABELS[leadAgent]}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
+          <ProposalStatus
+            planning={planning}
+            approved={approved}
+            cancelled={cancelled}
+            invalid={proposal.status === "invalid"}
+          />
+          {!planning && tasks.length > 0 && (
+            <span className="bg-foreground/[0.05] text-muted-foreground rounded-md px-1.5 py-0.5 text-[11px] tabular-nums">
+              {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
             </span>
-            {planning ? (
-              <span className="shrink-0">Planning the tasks</span>
-            ) : (
-              tasks.length > 0 && (
-                <span className="shrink-0 tabular-nums">
-                  {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
-                </span>
-              )
-            )}
-          </p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {proposal.status === "invalid" &&
@@ -962,14 +868,26 @@ export function ProposalCard({
       )}
 
       {!planning && !gone && proposal.summary && !cancelled && (
-        <p
-          className={cn(
-            "text-muted-foreground border-t px-3 py-2 text-[12px] leading-relaxed whitespace-pre-wrap",
-            line,
+        <div className={cn("border-t px-3 py-2", line)}>
+          <p
+            className={cn(
+              "text-muted-foreground text-[12px] leading-relaxed whitespace-pre-wrap",
+              !summaryOpen && "line-clamp-3",
+            )}
+          >
+            {proposal.summary}
+          </p>
+          {proposal.summary.length > 240 && (
+            <button
+              type="button"
+              aria-expanded={summaryOpen}
+              onClick={() => setSummaryOpen(!summaryOpen)}
+              className="text-muted-foreground hover:text-foreground mt-1 text-[11px] font-medium"
+            >
+              {summaryOpen ? "Show less" : "Show more"}
+            </button>
           )}
-        >
-          {proposal.summary}
-        </p>
+        </div>
       )}
 
       {!planning && !gone && !cancelled && teamLead && (
@@ -977,7 +895,7 @@ export function ProposalCard({
       )}
 
       {!planning && !gone && !cancelled && tasks.length > 0 && (
-        <ul className={cn("border-t py-1", line)}>
+        <ul className={cn("divide-border divide-y border-t", line)}>
           {visible.map((task) => (
             <TaskRow
               key={task.id}
@@ -1037,37 +955,16 @@ export function ProposalCard({
       {!planning && !gone && !cancelled && proposal.status === "ready" && (
         <footer
           className={cn(
-            "text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-2 border-t px-3 py-2.5 text-[11px]",
+            "text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-2 border-t px-3 py-2 text-[11px]",
             line,
           )}
         >
-          {/* Approve and Cancel where a tool's Allow and Deny are. */}
-          {!approved && (
-            <div className="flex items-center gap-1.5">
-              <Button
-                size="sm"
-                disabled={!editable}
-                onClick={() => void approve()}
-              >
-                <HugeiconsIcon
-                  icon={PlayIcon}
-                  strokeWidth={2}
-                  data-icon="inline-start"
-                  aria-hidden="true"
-                />
-                {starting ? "Starting…" : "Approve"}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={starting}
-                onClick={cancel}
-              >
-                Cancel
-              </Button>
-            </div>
-          )}
-          <div className="ml-auto flex items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate">
+            {approved
+              ? "Approved"
+              : "Nothing runs until you approve. Each worker gets its own checkout."}
+          </span>
+          <div className="flex items-center gap-1.5">
             <span id={`workers-${proposal.id}`}>Parallel workers</span>
             <div
               role="radiogroup"
@@ -1097,11 +994,31 @@ export function ProposalCard({
               )}
             </div>
           </div>
-          <span className="basis-full">
-            {approved
-              ? "Approved"
-              : "Nothing runs until you approve, and each worker gets its own checkout."}
-          </span>
+          {!approved && (
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={starting}
+                onClick={cancel}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={!editable}
+                onClick={() => void approve()}
+              >
+                <HugeiconsIcon
+                  icon={PlayIcon}
+                  strokeWidth={2}
+                  data-icon="inline-start"
+                  aria-hidden="true"
+                />
+                {starting ? "Starting…" : "Approve"}
+              </Button>
+            </div>
+          )}
         </footer>
       )}
 

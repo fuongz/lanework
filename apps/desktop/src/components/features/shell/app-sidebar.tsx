@@ -10,6 +10,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef } from "react";
+import { ConductorsNav } from "#/components/features/conductors/conductors-nav";
 import { LocalModeRail } from "#/components/shared/auth/local-mode";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
@@ -233,14 +234,24 @@ export function AppSidebar({
         projectSwitcher={<ProjectSwitcher compact />}
         agents={
           workspaceKey && slug ? (
-            <AgentSessionsNav
-              workspace={workspaceKey}
-              slug={slug}
-              hasFolder={hasFolder}
-              row={ROW}
-              active={ACTIVE.className}
-              mini
-            />
+            <>
+              <ConductorsNav
+                workspace={workspaceKey}
+                slug={slug}
+                hasFolder={hasFolder}
+                row={ROW}
+                active={ACTIVE.className}
+                mini
+              />
+              <AgentSessionsNav
+                workspace={workspaceKey}
+                slug={slug}
+                hasFolder={hasFolder}
+                row={ROW}
+                active={ACTIVE.className}
+                mini
+              />
+            </>
           ) : null
         }
         onExpand={() => onExpand?.()}
@@ -421,6 +432,17 @@ export function AppSidebar({
               </Link>
             </RefreshMenu>
           </nav>
+        )}
+        {/* Conductors (FE-95/D2): under Repository, above Pinned and
+            Running. */}
+        {workspaceKey && slug && (
+          <ConductorsNav
+            workspace={workspaceKey}
+            slug={slug}
+            hasFolder={hasFolder}
+            row={ROW}
+            active={ACTIVE.className}
+          />
         )}
         {workspaceKey && slug && (
           <AgentSessionsNav

@@ -475,8 +475,15 @@ export interface SendRequest {
   settings: ComposerSettings;
 }
 
-/** A new conversation's first message: main names the conversation. */
-export type StartRequest = Omit<SendRequest, "conversation">;
+/**
+ * A new conversation's first message: main names the conversation.
+ *
+ * `conductor` makes it that conductor's own conversation in this project
+ * (FE-95), replacing the one it had.
+ */
+export type StartRequest = Omit<SendRequest, "conversation"> & {
+  conductor?: string;
+};
 
 /**
  * The CLI asked to use a tool (`control_request` / `can_use_tool`) and waits.

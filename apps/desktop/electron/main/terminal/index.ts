@@ -64,6 +64,7 @@ import {
 } from "./agent-files";
 import {
   applyAgentMarks,
+  bindConductor,
   cleanAgentName,
   keptKeys,
   readAgentMarks,
@@ -245,6 +246,28 @@ async function runCodex(args: string[]): Promise<void> {
 /** The file of Lanework's names and pins for agent conversations. */
 function agentMarksFile(): string {
   return join(appHomeDir(), "agent-sessions.json");
+}
+
+/**
+ * Make a conversation main just started a conductor's own in `workspace`
+ * (FE-95).
+ *
+ * NOTE: Not through `markable`: a conversation this new has no transcript
+ * the listing could show yet. The id is main's (`conversation.start`), never
+ * the page's.
+ */
+export async function bindConductorConversation(
+  workspace: string,
+  agent: TerminalAgent,
+  id: string,
+  conductor: string,
+): Promise<void> {
+  if (!isAgentSessionId(id))
+    throw new Error("A valid conversation is required");
+  await bindConductor(agentMarksFile(), agentKey({ agent, id }), {
+    id: conductor,
+    workspace,
+  });
 }
 
 /**
@@ -862,6 +885,20 @@ export function registerTerminal(devUrl?: string): void {
       await updateAgentMark(agentMarksFile(), mark, (current) => ({
         ...current,
         pinnedAt: pinned ? (current.pinnedAt ?? Date.now()) : undefined,
+      }));
+      return agentSessionsOf(workspace);
+    },
+  );
+  handle(
+    terminalChannels.agentSessionConductor,
+    devUrl,
+    async (args): Promise<AgentSession[]> => {
+      if (args.length !== 3)
+        throw new Error("A workspace and a conversation are required");
+      const { workspace, key: mark } = await markable(args);
+      await updateAgentMark(agentMarksFile(), mark, (current) => ({
+        ...current,
+        conductor: undefined,
       }));
       return agentSessionsOf(workspace);
     },

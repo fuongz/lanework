@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import type { AgentSession } from "#/../shared/terminal";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
@@ -80,6 +81,23 @@ export function AgentSessionsNav({
   active: string;
 }) {
   const rail = useAgentRail(workspace, slug, hasFolder);
+  // Its conversations are still being read: the group's shape, so the rail
+  // does not jump when they land.
+  if (rail.loading && hasFolder && !mini)
+    return (
+      <nav aria-label="Agents" className="flex flex-col gap-0.5">
+        <div className="flex min-w-0 items-center pt-4 pr-1 pb-1">
+          <span className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
+            Agents
+          </span>
+        </div>
+        <ListSkeleton
+          label="Reading the conversations"
+          rows={4}
+          className="px-0 py-0"
+        />
+      </nav>
+    );
   if (!rail.visible) return null;
   if (mini)
     return (

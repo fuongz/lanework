@@ -198,6 +198,50 @@ export function useOrchestration({
 export type Orchestration = ReturnType<typeof useOrchestration>;
 
 /**
+ * The newest proposal while it waits for Approve: ready, not approved, not
+ * cancelled. The conversation draws it above the prompt (FE-95), and the
+ * panel leaves it out.
+ */
+export function useAwaitingProposal(
+  orchestration: Orchestration,
+): DerivedProposal | null {
+  const edits = useProposalEdits((state) => state.edits);
+  const latest = orchestration.proposals.at(-1);
+  if (latest?.status !== "ready") return null;
+  const edit = edits[latest.id];
+  return edit?.runId || edit?.cancelled ? null : latest;
+}
+
+/** The waiting proposal's card, for the place above the prompt. */
+export function AwaitingProposal({
+  orchestration,
+  proposal,
+}: {
+  orchestration: Orchestration;
+  proposal: DerivedProposal;
+}) {
+  const { workspace, lead, leadAgent, leads } = orchestration;
+  if (!workspace || !leadAgent) return null;
+  return (
+    <ProposalCard
+      workspace={workspace}
+      lead={lead}
+      leadAgent={leadAgent}
+      proposal={proposal}
+      teamLead={
+        proposal.teamLead
+          ? (leads?.find((entry) => entry.id === proposal.teamLead) ?? null)
+          : null
+      }
+      leadsRead={leads !== null}
+      runMissing={false}
+      onRepair={orchestration.repair}
+      onApproved={orchestration.upsert}
+    />
+  );
+}
+
+/**
  * The lead's proposal cards and runs, drawn after its transcript.
  *
  * The newest proposal is drawn as a card until it is approved; an approved
@@ -216,6 +260,7 @@ export function OrchestrationPanel({
   const teamLeadOf = (id: string | null) =>
     id ? (leads?.find((entry) => entry.id === id) ?? null) : null;
   const edits = useProposalEdits((state) => state.edits);
+  const awaiting = useAwaitingProposal(orchestration);
   if (!workspace || !leadAgent) return null;
 
   const latest = proposals.at(-1);
@@ -248,6 +293,8 @@ export function OrchestrationPanel({
         ];
     }
     if (proposal !== latest && !runId) return [];
+    // Drawn above the prompt while it waits for Approve.
+    if (proposal === awaiting) return [];
     return [
       <ProposalCard
         key={proposal.id}

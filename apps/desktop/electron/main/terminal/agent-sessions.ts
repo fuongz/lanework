@@ -414,6 +414,7 @@ export async function claudeSession(
       lastActivity(head, "claude") ??
       info.mtime.toISOString(),
     pinnedAt: null,
+    conductor: null,
     working,
     // Read only for a working one: an idle agent is on no card (FE-27/D1).
     card: working ? await transcriptCard(file, info.size) : null,
@@ -674,6 +675,7 @@ async function codexSessions(
           lastActivity(head, "codex") ??
           info.mtime.toISOString(),
         pinnedAt: null,
+        conductor: null,
         working,
         card: working ? await transcriptCard(file, info.size) : null,
         subagents: spawned.get(meta.id) ?? [],

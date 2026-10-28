@@ -20,7 +20,13 @@
 // file is imported by the preload and the renderer, so it must not import
 // Node or Electron.
 
-import { type ConversationAgent, EFFORTS, type Effort } from "./conversation";
+import {
+  type ConversationAgent,
+  EFFORTS,
+  type Effort,
+  PERMISSIONS,
+  type Permission,
+} from "./conversation";
 
 // ─── Limits ─────────────────────────────────────────────────────────────────
 
@@ -1102,15 +1108,14 @@ export function parseJevKey(value: unknown): string | null {
 // report must cover, and Jev overrides. The user picks one on the proposal
 // card; the run keeps its id.
 //
-// Three places hold them, and `list` merges them in this order:
+// Two places hold them, and `list` merges them in this order (none ships
+// with the app since FE-95):
 //
-// - `builtin`: shipped with the app, read-only.
-// - `personal`: the user's own, saved from the page, for every project.
+// - `personal`: the user's own, saved from the rail, for every project.
 // - `repo`: `.lanework/leads/<id>.md` a project checks in, frontmatter plus
-//   instructions. Its id is `repo:<id>` (D3), so it never shadows a built-in
-//   or personal lead, and it may not override Jev (D1). One that fails to
-//   parse is left out and reported in {@link LeadsList.errors}, never
-//   half-read. A personal lead still overrides a built-in one of its id.
+//   instructions. Its id is `repo:<id>` (D3), so it never shadows a personal
+//   lead, and it may not override Jev (D1). One that fails to parse is left
+//   out and reported in {@link LeadsList.errors}, never half-read.
 
 /** What a team lead's id may be: a slug, also its file name in a repo. */
 export const LEAD_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,47}$/;
@@ -1134,7 +1139,7 @@ export const LEAD_CHECKS_MAX = 8;
 export const LEAD_CHECK_MAX = 300;
 
 /** Where a team lead comes from. */
-export const LEAD_SOURCES = ["builtin", "personal", "repo"] as const;
+export const LEAD_SOURCES = ["personal", "repo"] as const;
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 
 /**
@@ -1173,7 +1178,11 @@ export interface TeamLead {
   lead: TierModel;
   /** Told to the lead before the user's request; may be empty. */
   instructions: string;
-  /** 1-{@link LEAD_WORKERS_MAX} distinct agent/model pairs. */
+  /**
+   * 0-{@link LEAD_WORKERS_MAX} distinct agent/model pairs. None (FE-95): it
+   * picks from every model the app offers, as a run without a lead does, and
+   * the Decision judge picks the tier when one is set.
+   */
   workers: TeamLeadWorker[];
   /** 1-{@link WORKERS_MAX}. */
   maxWorkers: number;
@@ -1184,7 +1193,67 @@ export interface TeamLead {
    * none. Always null for a `repo` lead (D1).
    */
   jev: Partial<Record<JudgePoint, JudgePointConfig>> | null;
+  /**
+   * What its own conversation may do without asking (FE-95); null for the
+   * composer's default. Always null for a `repo` lead, as `jev` is.
+   */
+  permission: Permission | null;
   source: LeadSource;
+}
+
+/**
+ * What a new conductor starts with, and keeps: the rail's dialog has no
+ * page for them (FE-95). No workers, so it picks from every model and the
+ * Decision judge picks the tier; three at once; no required checks.
+ */
+export const CONDUCTOR_DEFAULTS = {
+  workers: [] as readonly TeamLeadWorker[],
+  maxWorkers: 3,
+  checks: [] as readonly string[],
+} as const;
+
+/**
+ * A new conductor's instructions: the sections agent instructions usually
+ * have, each with a hint for the person writing them (FE-95). The hints are
+ * HTML comments, left out of what the conductor is told
+ * (`withoutComments`), so an unfilled section costs nothing.
+ */
+export const CONDUCTOR_INSTRUCTIONS = `## Role
+<!-- What it leads, and what a good outcome looks like. -->
+
+## Approach
+<!-- How it splits work, what it does itself, what it hands to workers. -->
+
+## Rules
+<!-- Hard limits: files it must not touch, commands it must not run. -->
+
+## Done means
+<!-- What must be true before it reports back: checks, tests, a summary. -->
+`;
+
+/**
+ * `text` without its HTML comments, and without the headings left with
+ * nothing under them: an unfilled template reads as no instructions.
+ */
+export function withoutComments(text: string): string {
+  const lines = text.replace(/<!--[\s\S]*?-->/g, "").split("\n");
+  const kept = lines.filter((line, index) => {
+    if (!/^#{1,6}\s/.test(line)) return true;
+    // A heading stays when something other than blank lines comes before the
+    // next heading of the same or a higher level, or the end.
+    const level = /^#+/.exec(line)?.[0].length ?? 1;
+    for (const next of lines.slice(index + 1)) {
+      const heading = /^(#{1,6})\s/.exec(next);
+      if (heading && (heading[1]?.length ?? 1) <= level) return false;
+      if (next.trim() && !heading) return true;
+      if (heading) return true;
+    }
+    return false;
+  });
+  return kept
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** A team lead as the page saves it: the source is main's to set. */
@@ -1232,8 +1301,8 @@ function oneLine(value: unknown, label: string, max: number): string {
 }
 
 function leadWorkers(value: unknown): TeamLeadWorker[] {
-  if (!Array.isArray(value) || !value.length || value.length > LEAD_WORKERS_MAX)
-    fail(`workers must list 1-${LEAD_WORKERS_MAX} workers`);
+  if (!Array.isArray(value) || value.length > LEAD_WORKERS_MAX)
+    fail(`workers must list at most ${LEAD_WORKERS_MAX} workers`);
   const workers = value.map((entry, index): TeamLeadWorker => {
     const label = `Worker ${index + 1}`;
     const input = strictObject(entry, ["agent", "model", "tier"], label);
@@ -1285,6 +1354,7 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
       "maxWorkers",
       "checks",
       "jev",
+      "permission",
       "source",
     ],
     "The team lead",
@@ -1311,6 +1381,11 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
     fail(
       "jev is not allowed in a project's team lead. Set Jev overrides on a personal lead instead",
     );
+  // Nor grant its conversation more than the user picks (FE-95).
+  if (source === "repo" && input.permission != null)
+    fail(
+      "permission is not allowed in a project's conductor. Set it on a personal one instead",
+    );
   // A repo lead's id is always `repo:<stem>` (D3), whatever the file said.
   const id =
     source === "repo"
@@ -1336,6 +1411,10 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
       ),
     ],
     jev: leadJev(input.jev),
+    permission:
+      input.permission == null
+        ? null
+        : oneOf(input.permission, PERMISSIONS, "permission"),
     source: oneOf(source, LEAD_SOURCES, "source"),
   };
 }
@@ -1443,9 +1522,10 @@ export interface DesktopJevApi {
  */
 export interface DesktopLeadsApi {
   list: (workspace: string | null) => Promise<LeadsList>;
-  savePersonal: (lead: TeamLeadInput) => Promise<LeadsList>;
-  removePersonal: (id: string) => Promise<LeadsList>;
-  setDefault: (id: string | null) => Promise<LeadsList>;
+  /** Conductors are the project's own (FE-95): every write names it. */
+  savePersonal: (workspace: string, lead: TeamLeadInput) => Promise<LeadsList>;
+  removePersonal: (workspace: string, id: string) => Promise<LeadsList>;
+  setDefault: (workspace: string, id: string | null) => Promise<LeadsList>;
   onChange: (listener: (event: LeadsEvent) => void) => () => void;
 }
 
@@ -1523,9 +1603,9 @@ export interface JevMainHandlers {
  */
 export interface LeadsMainHandlers {
   list: (workspace: string | null) => Promise<LeadsList>;
-  savePersonal: (lead: TeamLead) => Promise<LeadsList>;
-  removePersonal: (id: string) => Promise<LeadsList>;
-  setDefault: (id: string | null) => Promise<LeadsList>;
+  savePersonal: (workspace: string, lead: TeamLead) => Promise<LeadsList>;
+  removePersonal: (workspace: string, id: string) => Promise<LeadsList>;
+  setDefault: (workspace: string, id: string | null) => Promise<LeadsList>;
 }
 
 /** The loopback control server, as main starts and stops it. */

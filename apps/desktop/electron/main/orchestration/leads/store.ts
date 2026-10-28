@@ -1,12 +1,15 @@
-// Team leads in main (FE-88): the three sources, merged.
+// Conductors (team leads) in main (FE-88, FE-95): the two sources, merged.
+// None ships with the app any more (FE-95): the user makes their own.
 //
-// - `builtin`: {@link BUILTIN_LEADS}, shipped with the app.
-// - `personal`: the user's own, in `<dir>/personal.json` with the default id.
+// - `personal`: the user's own, in `<dir>/personal.json`, one set per
+//   project with its default (FE-95): a conductor follows its project, and
+//   another project starts without it. A version-1 file (one set for every
+//   project) is handed to ONE project, the first one listed after the
+//   upgrade, and is gone from then on: never shown in two.
 // - `repo`: `.lanework/leads/<id>.md` in the workspace's folder, frontmatter
 //   then the instructions as markdown.
 //
-// A personal lead may override a built-in one of its id. A repo lead is
-// `repo:<id>` (FE-89/D3), so a file a project checks in never stands in for
+// A repo lead is `repo:<id>` (FE-89/D3), so a file a project checks in never stands in for
 // a lead the user trusts, and it may not carry `jev` (D1). A repo file that
 // fails to read or parse is left out and reported with its repo-relative
 // path; the others still load.
@@ -39,7 +42,6 @@ import {
   REPO_LEAD_PREFIX,
   type TeamLead,
 } from "../../../../shared/orchestration";
-import { BUILTIN_LEADS } from "./builtin";
 import { splitFrontmatter } from "./frontmatter";
 
 /** Where a project keeps its leads, relative to its folder. */
@@ -68,10 +70,50 @@ export interface LeadStore extends LeadsMainHandlers {
   resolve: (workspace: string, id: string) => Promise<TeamLead>;
 }
 
-interface PersonalFile {
-  version: 1;
+/** One project's own conductors, and its default. */
+interface Bucket {
   leads: TeamLead[];
   defaultId: string | null;
+}
+
+interface PersonalFile {
+  version: 2;
+  /** By workspace key. */
+  workspaces: Record<string, Bucket>;
+  /**
+   * Version 1's set, until the first project listed takes it. Ignored once
+   * any project has a set of its own.
+   */
+  legacy: Bucket | null;
+}
+
+const emptyBucket = (): Bucket => ({ leads: [], defaultId: null });
+
+/** One stored set, every entry checked; an unreadable one is left out. */
+function parseBucket(value: unknown): Bucket {
+  const raw = (value ?? {}) as { leads?: unknown; defaultId?: unknown };
+  const leads: TeamLead[] = [];
+  for (const entry of Array.isArray(raw.leads) ? raw.leads : []) {
+    try {
+      const lead = parseTeamLead(entry, "personal");
+      if (!leads.some((other) => other.id === lead.id)) leads.push(lead);
+    } catch {
+      // One unreadable entry does not cost the others.
+    }
+  }
+  let defaultId: string | null = null;
+  try {
+    defaultId = raw.defaultId == null ? null : leadRef(raw.defaultId);
+  } catch {
+    defaultId = null;
+  }
+  return { leads, defaultId };
+}
+
+/** `workspace`'s own set, or none. */
+function bucketOf(file: PersonalFile, workspace: string | null): Bucket {
+  if (!workspace) return emptyBucket();
+  return file.workspaces[workspace] ?? emptyBucket();
 }
 
 const messageOf = (error: unknown) =>
@@ -112,6 +154,7 @@ async function readRepoLead(path: string, stem: string): Promise<TeamLead> {
       id: stem,
       checks: frontmatter.checks ?? [],
       jev: frontmatter.jev ?? null,
+      permission: frontmatter.permission ?? null,
       instructions: body,
     },
     "repo",
@@ -133,26 +176,32 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
 
   async function readPersonal(): Promise<PersonalFile> {
     const raw = await readFile(personalPath, "utf8").catch(() => null);
-    const empty: PersonalFile = { version: 1, leads: [], defaultId: null };
+    const empty: PersonalFile = { version: 2, workspaces: {}, legacy: null };
     if (raw === null) return empty;
     try {
-      const parsed = JSON.parse(raw) as Partial<PersonalFile>;
-      const leads: TeamLead[] = [];
-      for (const entry of Array.isArray(parsed.leads) ? parsed.leads : []) {
-        try {
-          const lead = parseTeamLead(entry, "personal");
-          if (!leads.some((other) => other.id === lead.id)) leads.push(lead);
-        } catch {
-          // One unreadable entry does not cost the others.
-        }
+      const parsed = JSON.parse(raw) as {
+        version?: unknown;
+        workspaces?: unknown;
+        legacy?: unknown;
+      };
+      if (parsed.version !== 2) {
+        // Version 1: one set for every project, kept as the legacy one.
+        const legacy = parseBucket(parsed);
+        return {
+          version: 2,
+          workspaces: {},
+          legacy: legacy.leads.length ? legacy : null,
+        };
       }
-      let defaultId: string | null = null;
-      try {
-        defaultId = parsed.defaultId == null ? null : leadRef(parsed.defaultId);
-      } catch {
-        defaultId = null;
-      }
-      return { version: 1, leads, defaultId };
+      const workspaces: Record<string, Bucket> = {};
+      if (parsed.workspaces && typeof parsed.workspaces === "object")
+        for (const [key, value] of Object.entries(parsed.workspaces))
+          workspaces[key] = parseBucket(value);
+      return {
+        version: 2,
+        workspaces,
+        legacy: parsed.legacy ? parseBucket(parsed.legacy) : null,
+      };
     } catch {
       return empty;
     }
@@ -203,13 +252,20 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
   }
 
   async function list(workspace: string | null): Promise<LeadsList> {
-    const [personal, repo] = await Promise.all([
+    const [file, repo] = await Promise.all([
       readPersonal(),
       readRepo(workspace),
     ]);
+    // Version 1's set goes to the first project listed, and to no other.
+    if (workspace && file.legacy) {
+      if (!Object.keys(file.workspaces).length)
+        await serial(() => adoptLegacy(workspace));
+      else await serial(dropLegacy);
+      return list(workspace);
+    }
+    const personal = bucketOf(file, workspace);
     // A Map keeps the first place an id took, and the last value set there.
     const merged = new Map<string, TeamLead>();
-    for (const lead of BUILTIN_LEADS) merged.set(lead.id, lead);
     for (const lead of personal.leads) merged.set(lead.id, lead);
     for (const lead of repo.leads) merged.set(lead.id, lead);
     const defaultId =
@@ -223,7 +279,39 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
     };
   }
 
-  const changed = () => deps.broadcast({ workspace: null });
+  const changed = (workspace: string) => deps.broadcast({ workspace });
+
+  /** Give version 1's set to `workspace`, unless a project has one. */
+  async function adoptLegacy(workspace: string): Promise<void> {
+    const file = await readPersonal();
+    if (!file.legacy) return;
+    if (!Object.keys(file.workspaces).length)
+      file.workspaces[workspace] = file.legacy;
+    file.legacy = null;
+    await writePersonal(file);
+  }
+
+  async function dropLegacy(): Promise<void> {
+    const file = await readPersonal();
+    if (!file.legacy) return;
+    file.legacy = null;
+    await writePersonal(file);
+  }
+
+  /** Change `workspace`'s own set, written as its own from then on. */
+  async function updateBucket(
+    workspace: string,
+    change: (bucket: Bucket) => void,
+  ): Promise<void> {
+    const file = await readPersonal();
+    const bucket = bucketOf(file, workspace);
+    change(bucket);
+    file.workspaces[workspace] = bucket;
+    // A project has a set of its own now: version 1's is no one else's.
+    file.legacy = null;
+    await writePersonal(file);
+    changed(workspace);
+  }
 
   return {
     list,
@@ -249,54 +337,44 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
       return lead;
     },
 
-    savePersonal: (input) =>
-      serial(async () => {
-        const lead = parseTeamLead(input, "personal");
-        const file = await readPersonal();
-        const at = file.leads.findIndex((entry) => entry.id === lead.id);
-        if (at === -1 && file.leads.length >= PERSONAL_LEADS_MAX)
-          throw new Error(
-            `You can keep at most ${PERSONAL_LEADS_MAX} team leads of your own. Remove one first.`,
-          );
-        if (at === -1) file.leads.push(lead);
-        else file.leads[at] = lead;
-        await writePersonal(file);
-        changed();
-      }).then(() => list(null)),
+    savePersonal: (workspace, input) =>
+      serial(() =>
+        updateBucket(workspace, (bucket) => {
+          const lead = parseTeamLead(input, "personal");
+          const at = bucket.leads.findIndex((entry) => entry.id === lead.id);
+          if (at === -1 && bucket.leads.length >= PERSONAL_LEADS_MAX)
+            throw new Error(
+              `A project keeps at most ${PERSONAL_LEADS_MAX} conductors of your own. Remove one first.`,
+            );
+          if (at === -1) bucket.leads.push(lead);
+          else bucket.leads[at] = lead;
+        }),
+      ).then(() => list(workspace)),
 
-    removePersonal: (id) =>
-      serial(async () => {
-        leadId(id);
-        const file = await readPersonal();
-        if (!file.leads.some((entry) => entry.id === id))
-          throw new Error(
-            BUILTIN_LEADS.some((entry) => entry.id === id)
-              ? `"${id}" ships with the app and cannot be removed.`
-              : `"${id}" is not one of your team leads.`,
-          );
-        file.leads = file.leads.filter((entry) => entry.id !== id);
-        const stillKnown =
-          BUILTIN_LEADS.some((entry) => entry.id === id) ||
-          [...repoIds.values()].some((ids) => ids.has(id));
-        if (file.defaultId === id && !stillKnown) file.defaultId = null;
-        await writePersonal(file);
-        changed();
-      }).then(() => list(null)),
+    removePersonal: (workspace, id) =>
+      serial(() =>
+        updateBucket(workspace, (bucket) => {
+          leadId(id);
+          if (!bucket.leads.some((entry) => entry.id === id))
+            throw new Error(`"${id}" is not one of this project's conductors.`);
+          bucket.leads = bucket.leads.filter((entry) => entry.id !== id);
+          const stillKnown = repoIds.get(workspace)?.has(id) ?? false;
+          if (bucket.defaultId === id && !stillKnown) bucket.defaultId = null;
+        }),
+      ).then(() => list(workspace)),
 
-    setDefault: (id) =>
-      serial(async () => {
-        const file = await readPersonal();
-        if (id !== null) {
-          leadRef(id);
-          const known =
-            BUILTIN_LEADS.some((entry) => entry.id === id) ||
-            file.leads.some((entry) => entry.id === id) ||
-            [...repoIds.values()].some((ids) => ids.has(id));
-          if (!known) throw new Error(`No team lead "${id}" to start on.`);
-        }
-        file.defaultId = id;
-        await writePersonal(file);
-        changed();
-      }).then(() => list(null)),
+    setDefault: (workspace, id) =>
+      serial(() =>
+        updateBucket(workspace, (bucket) => {
+          if (id !== null) {
+            leadRef(id);
+            const known =
+              bucket.leads.some((entry) => entry.id === id) ||
+              (repoIds.get(workspace)?.has(id) ?? false);
+            if (!known) throw new Error(`No conductor "${id}" to start on.`);
+          }
+          bucket.defaultId = id;
+        }),
+      ).then(() => list(workspace)),
   };
 }

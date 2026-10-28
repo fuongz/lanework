@@ -2,6 +2,7 @@ import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 import type { AgentSession, TerminalSession } from "#/../shared/terminal";
 import { useChatAgent } from "#/components/shared/conversation/chat-agent";
+import { useTeamLeads } from "#/components/shared/conversation/composer";
 import { liveRun, useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
@@ -43,6 +44,13 @@ export function useAgentRail(
   hasFolder: boolean,
 ) {
   const all = useAgentSessions((state) => state.byWorkspace[workspace] ?? NONE);
+  // Not listed yet, or the CLIs not asked for: the rail draws its groups'
+  // skeleton, not nothing.
+  const listing = useAgentSessions(
+    (state) => state.byWorkspace[workspace] === undefined,
+  );
+  const asked = useTerminal((state) => state.agentsAsked);
+  const loading = listing || !asked;
   const load = useAgentSessions((state) => state.load);
   const agents = useTerminal((state) => state.agents);
   const loadAgents = useTerminal((state) => state.loadAgents);
@@ -153,10 +161,20 @@ export function useAgentRail(
     if (any) void loadAgents();
   }, [any, loadAgents]);
 
-  const sessions = useMemo(
-    () => all.filter((session) => agents.includes(session.agent)),
-    [all, agents],
-  );
+  // A conductor's own conversation is its row under Conductors, not here
+  // (FE-95/D13): Reset brings it back, and so does its conductor going away
+  // (deleted, or its repo file removed). Until the list is read it stays out,
+  // so it never flashes here first.
+  const leads = useTeamLeads(workspace);
+  const sessions = useMemo(() => {
+    const known = leads ? new Set(leads.leads.map((lead) => lead.id)) : null;
+    return all.filter(
+      (session) =>
+        agents.includes(session.agent) &&
+        (!session.conductor ||
+          (known !== null && !known.has(session.conductor))),
+    );
+  }, [all, agents, leads]);
 
   /** Thinking or working: a turn open in its transcript. */
   const isWorking = (session: AgentSession) =>
@@ -198,7 +216,7 @@ export function useAgentRail(
     (entry) =>
       entry.kind !== "shell" &&
       !entry.exit &&
-      !sessions.some(
+      !all.some(
         (session) =>
           session.id === entry.resume && session.agent === entry.kind,
       ),
@@ -210,7 +228,7 @@ export function useAgentRail(
    * each one started, under its first message, until the listing has it.
    */
   const pending: PendingChat[] = [];
-  if (onNewPage || starting)
+  if (onNewPage || (starting && !starting.conductor))
     pending.push({
       key: "new",
       agent: starting?.agent ?? chatAgent ?? "claude",
@@ -223,6 +241,7 @@ export function useAgentRail(
   for (const [id, chat] of Object.entries(started)) {
     if (
       chat.workspace !== workspace ||
+      chat.conductor ||
       all.some((session) => session.id === id)
     )
       continue;
@@ -286,6 +305,7 @@ export function useAgentRail(
 
   return {
     visible,
+    loading,
     sessions,
     pending,
     fresh,

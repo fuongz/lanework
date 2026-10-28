@@ -1,15 +1,19 @@
-import { File01Icon, Image01Icon } from "@hugeicons/core-free-icons";
+import {
+  File01Icon,
+  Image01Icon,
+  SlashIcon,
+  UserGroupIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo } from "react";
+import { createContext, memo, useContext } from "react";
 import type {
   AssistantTurn,
   Attachment,
   PermissionAnswer,
-  PermissionRequest,
   Turn,
   UserTurn,
 } from "#/../shared/conversation";
-import { PermissionCard } from "#/components/shared/agents/permission-card";
+import type { LeadIcon } from "#/../shared/orchestration";
 import {
   LinkedText,
   MarkdownBody,
@@ -22,6 +26,7 @@ import {
   textLines,
   turnText,
 } from "#/lib/conversation-format";
+import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { AssistantActions, UserActions } from "./turn-view.actions";
 import { chatLink, liveChatLink } from "./turn-view.link-chip";
@@ -105,6 +110,92 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
   );
 }
 
+/**
+ * The `/command` that starts a prompt, and each `@path` or `@conductor` in
+ * it, drawn as the composer drew them while it was written (FE-92, FE-93):
+ * weighted, with the command's mark. The rest is linked text.
+ */
+const PROMPT_TOKEN = /^\/[^\s/]+(?=\s|$)|(?<=^|\s)@\S+/g;
+
+/**
+ * The conductors a page knows, by id (FE-95): an `@id` in a prompt shows as
+ * the conductor's icon and name. Empty where no page provides it: the id.
+ */
+export const ConductorNames = createContext<
+  ReadonlyMap<string, { name: string; icon: LeadIcon }>
+>(new Map());
+
+/** The commands the composer names rather than spells out. */
+const COMMAND_LABELS: Record<string, string> = {
+  "/orchestrate": "Orchestrate",
+};
+
+function PromptText({ text }: { text: string }) {
+  const conductors = useContext(ConductorNames);
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(PROMPT_TOKEN)) {
+    const at = match.index ?? 0;
+    const token = match[0];
+    if (at > last)
+      parts.push(
+        <LinkedText
+          key={`t${at}`}
+          source={text.slice(last, at)}
+          link={chatLink}
+        />,
+      );
+    const command = token.startsWith("/");
+    const conductor = command ? undefined : conductors.get(token.slice(1));
+    const path = !command && !conductor && /[./]/.test(token.slice(1));
+    parts.push(
+      <span
+        key={`c${at}`}
+        title={token}
+        className={cn(
+          "mx-px inline-flex items-baseline gap-1 align-baseline font-medium",
+          token === "/orchestrate"
+            ? "text-tone-violet"
+            : command
+              ? "text-muted-foreground"
+              : "text-primary",
+        )}
+      >
+        {(command || path || conductor) && (
+          <HugeiconsIcon
+            icon={
+              conductor
+                ? leadIcon(conductor.icon)
+                : token === "/orchestrate"
+                  ? UserGroupIcon
+                  : command
+                    ? SlashIcon
+                    : File01Icon
+            }
+            className="size-3.5 shrink-0 self-center"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        )}
+        {conductor
+          ? conductor.name
+          : command
+            ? (COMMAND_LABELS[token] ?? token)
+            : path
+              ? token.slice(1)
+              : token}
+      </span>,
+    );
+    last = at + token.length;
+  }
+  if (last === 0) return <LinkedText source={text} link={chatLink} />;
+  if (last < text.length)
+    parts.push(
+      <LinkedText key="tail" source={text.slice(last)} link={chatLink} />,
+    );
+  return <>{parts}</>;
+}
+
 /** What the person wrote: a bubble on the right, attachments above. */
 export function UserBubble({
   text,
@@ -139,7 +230,7 @@ export function UserBubble({
         )}
         {text && (
           <p className="font-content text-[14px] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere]">
-            <LinkedText source={text} link={chatLink} />
+            <PromptText text={text} />
           </p>
         )}
       </div>
@@ -171,7 +262,6 @@ export interface TurnHandlers {
 function AssistantView({
   turn,
   delta,
-  permissions,
   slug,
   conversation,
   handlers,
@@ -179,7 +269,6 @@ function AssistantView({
 }: {
   turn: AssistantTurn;
   delta: string;
-  permissions: PermissionRequest[];
   slug: string;
   conversation: string;
   handlers: TurnHandlers;
@@ -203,17 +292,6 @@ function AssistantView({
       blocks[blocks.length - 1] = { type: "text", text: joined };
     else blocks.push({ type: "text", text: joined });
   }
-  const answered = new Set(
-    blocks
-      .filter((block) => block.type === "permission")
-      .map((block) => block.request.id),
-  );
-  // NOTE: Questions are not drawn in the turn: they take the composer's place
-  // (conversation-view), where the answer is typed.
-  const waiting = permissions.filter(
-    (request) => !answered.has(request.id) && !request.questions,
-  );
-  const pendingIds = new Set(permissions.map((request) => request.id));
   const text = turnText({ ...turn, blocks });
   const lastIndex = blocks.length - 1;
   return (
@@ -247,30 +325,11 @@ function AssistantView({
               conversation={conversation}
             />
           );
-        // A permission still waiting gets its card; an answered one is gone.
-        if (
-          !turn.open ||
-          !pendingIds.has(block.request.id) ||
-          block.request.questions
-        )
-          return null;
-        return (
-          <PermissionCard
-            key={block.request.id}
-            request={block.request}
-            agent={handlers.agent}
-            onAnswer={handlers.onAnswer}
-          />
-        );
+        // A permission waiting is asked where the prompt is typed
+        // (conversation-view), as a question is; an answered one is gone.
+        return null;
       })}
-      {waiting.map((request) => (
-        <PermissionCard
-          key={request.id}
-          request={request}
-          agent={handlers.agent}
-          onAnswer={handlers.onAnswer}
-        />
-      ))}
+
       {!turn.open && (
         <AssistantActions
           text={text}
@@ -301,7 +360,6 @@ export const TurnView = memo(
   function TurnView({
     turn,
     delta,
-    permissions,
     slug,
     conversation,
     handlers,
@@ -310,7 +368,6 @@ export const TurnView = memo(
   }: {
     turn: Turn;
     delta: string;
-    permissions: PermissionRequest[];
     slug: string;
     conversation: string;
     handlers: TurnHandlers;
@@ -333,7 +390,6 @@ export const TurnView = memo(
         <AssistantView
           turn={turn}
           delta={delta}
-          permissions={permissions}
           slug={slug}
           conversation={conversation}
           handlers={handlers}
@@ -349,7 +405,6 @@ export const TurnView = memo(
       a.handlers !== b.handlers ||
       a.anchor !== b.anchor ||
       a.delta !== b.delta ||
-      a.permissions !== b.permissions ||
       a.forking !== b.forking
     )
       return false;

@@ -55,6 +55,13 @@ interface AgentSessionsState {
     pinned: boolean,
   ) => Promise<void>;
   /**
+   * Let a conversation go from its conductor (FE-95): Reset. It stays, and
+   * the rail lists it under Agents again.
+   *
+   * @throws What main refused, when it did.
+   */
+  releaseConductor: (workspace: string, session: AgentSession) => Promise<void>;
+  /**
    * Delete a conversation's transcript for good.
    *
    * @throws What main refused, when it did.
@@ -313,6 +320,20 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     }));
   },
 
+  releaseConductor: async (workspace, session) => {
+    const surface = window.desktop?.terminal;
+    if (!surface) return;
+    const listed = await surface.releaseAgentSessionConductor(
+      workspace,
+      session.agent,
+      session.id,
+    );
+    latest.set(workspace, (latest.get(workspace) ?? 0) + 1);
+    set((state) => ({
+      byWorkspace: { ...state.byWorkspace, [workspace]: listed },
+    }));
+  },
+
   archive: async (workspace, session) => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
@@ -437,6 +458,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
             entry.title === listed[index]?.title &&
             entry.updatedAt === listed[index]?.updatedAt &&
             entry.pinnedAt === listed[index]?.pinnedAt &&
+            entry.conductor === listed[index]?.conductor &&
             entry.working === listed[index]?.working &&
             sameCard(entry.card, listed[index]?.card) &&
             sameSubagents(entry.subagents, listed[index]?.subagents ?? []) &&
@@ -464,7 +486,15 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       });
     } catch {
       // No folder, not signed in, a file mid-write: the group keeps what it
-      // showed, or stays hidden (FE-23/D9).
+      // showed, or stays hidden (FE-23/D9). A first read that failed reads
+      // as none, so the rail's skeleton does not wait forever.
+      if (
+        latest.get(workspace) === mine &&
+        get().byWorkspace[workspace] === undefined
+      )
+        set((state) => ({
+          byWorkspace: { ...state.byWorkspace, [workspace]: [] },
+        }));
     }
   },
 
