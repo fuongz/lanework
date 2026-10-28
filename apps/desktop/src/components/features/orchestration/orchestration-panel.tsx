@@ -17,6 +17,7 @@ import {
   visibleText,
   visibleTurns,
 } from "#/lib/orchestration-prompt";
+import { withLiveContext } from "#/stores/conductor-context";
 import { useProposalEdits } from "./orchestration-panel.store";
 import { ProposalCard } from "./proposal-card";
 import { RunPanel } from "./run-panel";
@@ -99,23 +100,30 @@ export function useOrchestration({
       if (!leadAgent || !request.trim()) return false;
       const id = proposalId();
       setPending({ id, request, teamLead: teamLead?.id ?? null });
+      // Its context files as they stand now (FE-96).
+      const planner =
+        teamLead && workspace
+          ? await withLiveContext(workspace, teamLead)
+          : teamLead;
       const ok = await sendRef.current(
-        planningPrompt(id, request.trim(), leadAgent, cwd, teamLead),
+        planningPrompt(id, request.trim(), leadAgent, cwd, planner),
         attachments,
         names,
       );
       if (!ok) setPending((current) => (current?.id === id ? null : current));
       return ok;
     },
-    [leadAgent, cwd],
+    [leadAgent, cwd, workspace],
   );
 
   const repair = useCallback(
     async (proposal: DerivedProposal): Promise<boolean> => {
       if (!leadAgent || proposal.repaired) return false;
       // A lead removed since: the fix is asked against the whole catalog.
-      const teamLead =
+      const found =
         leads?.find((entry) => entry.id === proposal.teamLead) ?? null;
+      const teamLead =
+        found && workspace ? await withLiveContext(workspace, found) : found;
       return sendRef.current(
         repairPrompt(
           proposal.id,
@@ -130,7 +138,7 @@ export function useOrchestration({
         [],
       );
     },
-    [leadAgent, cwd, leads],
+    [leadAgent, cwd, leads, workspace],
   );
 
   // ─── The lead's runs ──────────────────────────────────────────────────────

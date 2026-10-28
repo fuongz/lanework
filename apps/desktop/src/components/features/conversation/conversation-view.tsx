@@ -70,6 +70,7 @@ import {
 } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
+import { withLiveContext } from "#/stores/conductor-context";
 import { useConversationSends } from "#/stores/conversation-sends";
 import { useNewChats } from "#/stores/new-chats";
 import {
@@ -550,7 +551,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       !readConductorEnvelope(typed)
         ? conductorTurn(
             typed,
-            conductor,
+            await withLiveContext(workspace, conductor),
             agent,
             conversation?.cwd ?? null,
             lastConductorContext(turns),

@@ -10,9 +10,11 @@ import {
 import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
 import {
   type ControlServer,
+  contextPath,
   ID_PATTERN,
   type JevMainHandlers,
   jevChannels,
+  LEAD_CONTEXT_FILES_MAX,
   type LeadsMainHandlers,
   leadId,
   leadsChannels,
@@ -175,6 +177,24 @@ function registerLeads(
     return leads.setDefault(
       ipcSlug(args[0]),
       args[1] === null ? null : leadId(args[1]),
+    );
+  });
+  // Context files (FE-96): the chooser is main's, and a path the page sends
+  // back is checked as project-relative before it is looked at.
+  handle(leadsChannels.pickContext, devUrl, (args) => {
+    arity(args, 1);
+    return leads.pickContext(ipcSlug(args[0]));
+  });
+  handle(leadsChannels.inspectContext, devUrl, (args) => {
+    arity(args, 2);
+    const paths = args[1];
+    if (!Array.isArray(paths) || paths.length > LEAD_CONTEXT_FILES_MAX)
+      throw new Error(
+        `paths must list at most ${LEAD_CONTEXT_FILES_MAX} context files`,
+      );
+    return leads.inspectContext(
+      ipcSlug(args[0]),
+      paths.map((path) => contextPath(path)),
     );
   });
 }

@@ -26,6 +26,7 @@ import {
   readEnvelope,
 } from "#/lib/orchestration-prompt";
 import { useBoard } from "#/stores/board";
+import { withLiveContext } from "#/stores/conductor-context";
 import { handSentMessage } from "#/stores/conversation-sends";
 import { useNewChats } from "#/stores/new-chats";
 
@@ -115,7 +116,13 @@ export function NewConversationPage({
     // names it.
     const outgoing =
       conductor && !readEnvelope(text)
-        ? conductorTurn(text, conductor, agentOfModel(chosen.model), cwd, null)
+        ? conductorTurn(
+            text,
+            await withLiveContext(workspace, conductor),
+            agentOfModel(chosen.model),
+            cwd,
+            null,
+          )
         : text;
     const { begin, end } = useNewChats.getState();
     // The rail's row for it, from Enter on: the CLI takes a while to answer
@@ -165,15 +172,20 @@ export function NewConversationPage({
   // the proposal card once the lead answers. Under a team lead (FE-88) the
   // conversation starts on the lead's own model and effort, when the app
   // offers that model; else on the one picked.
-  const orchestrate = (
+  const orchestrate = async (
     request: string,
     attachments: OutgoingAttachment[],
     names: { name: string; image: boolean }[],
     picked: TeamLead | null,
   ): Promise<boolean> => {
-    if (!settings || !request.trim()) return Promise.resolve(false);
-    // In a conductor's conversation, `/orchestrate` plans as that conductor.
-    const teamLead = picked ?? conductor;
+    if (!settings || !request.trim()) return false;
+    // In a conductor's conversation, `/orchestrate` plans as that conductor,
+    // with its context files as they stand now (FE-96).
+    const chosenLead = picked ?? conductor;
+    const teamLead =
+      chosenLead && workspace
+        ? await withLiveContext(workspace, chosenLead)
+        : chosenLead;
     const own = teamLead?.lead;
     const started: ComposerSettings =
       own && allModels().some((entry) => entry.id === own.model)

@@ -1,4 +1,8 @@
-import { NoteEditIcon, Settings01Icon } from "@hugeicons/core-free-icons";
+import {
+  Folder01Icon,
+  NoteEditIcon,
+  Settings01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMemo, useState } from "react";
 import { allModels } from "#/../shared/conversation";
@@ -21,6 +25,7 @@ import {
 import { ipcMessage } from "#/lib/ipc-error";
 import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
+import { ConductorContext } from "./conductor-context";
 import {
   blankDraft,
   conductorEditor,
@@ -52,6 +57,13 @@ const PAGES = [
     label: "Instructions",
     icon: NoteEditIcon,
     description: "What it is told before every request.",
+    sections: [],
+  },
+  {
+    key: "context",
+    label: "Context",
+    icon: Folder01Icon,
+    description: "Project files it reads before it answers.",
     sections: [],
   },
 ] as const;
@@ -216,6 +228,17 @@ export function ConductorDialog({
                 className="min-h-0 flex-1"
               />
             </div>
+          ) : page === "context" ? (
+            <ConductorContext
+              workspace={workspace}
+              paths={draft.input.contextFiles}
+              onChange={(contextFiles) =>
+                setDraft({
+                  ...draft,
+                  input: { ...draft.input, contextFiles },
+                })
+              }
+            />
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-5 pb-6">
               <SettingsPage

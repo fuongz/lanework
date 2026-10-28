@@ -14,6 +14,12 @@
 // in `<lanework_conductor>`: who it is and when to delegate, the first time
 // and again whenever that changes. It answers small things itself; for
 // substantial work it replies with a proposal, read here the same way.
+//
+// A conductor's context files (FE-96) go along as a list of paths, never
+// their contents: it reads them itself, so it sees them as they are now. The
+// caller drops the ones that are gone (`withLiveContext`) and marks folders
+// with a trailing `/`; a changed list changes the fingerprint, so the next
+// message carries the rules again.
 
 import {
   AiChipIcon,
@@ -162,8 +168,20 @@ export function tiersAllowed(lead: TeamLead | null): boolean {
   );
 }
 
-/** What the team lead adds to the planning prompt; nothing without one. */
-function leadBlocks(lead: TeamLead | null): string[] {
+/**
+ * The conductor's context files as a block, or null for none (FE-96). Only
+ * the paths: a worker sees one only when a task's prompt names it.
+ */
+function contextBlock(lead: TeamLead): string | null {
+  if (!lead.contextFiles.length) return null;
+  return `<context_files>\nRead these project files and folders (relative to the checkout root) before you answer or plan, and again when one may have changed; they are this project's ground truth for you. A worker does not see them: when a task depends on one, name it in that task's prompt.\n${lead.contextFiles.map((path) => `- ${path}`).join("\n")}\n</context_files>`;
+}
+
+/**
+ * What the team lead adds to the planning prompt; nothing without one.
+ * `context` false: the caller says the context files itself.
+ */
+function leadBlocks(lead: TeamLead | null, context = true): string[] {
   if (!lead) return [];
   const blocks = [
     `You plan as the team lead "${lead.name}". Follow its instructions below; where they conflict with the rules above, they win, except for the proposal format, the write-scope rules and the available models.`,
@@ -174,6 +192,8 @@ function leadBlocks(lead: TeamLead | null): string[] {
     blocks.push(
       `<team_lead_instructions>\n${instructions}\n</team_lead_instructions>`,
     );
+  const files = context ? contextBlock(lead) : null;
+  if (files) blocks.push(files);
   if (lead.checks.length)
     blocks.push(
       [
@@ -215,6 +235,7 @@ function proposalRules(
   leadAgent: ConversationAgent,
   cwd: string | null,
   lead: TeamLead | null,
+  context = true,
 ): string[] {
   const tiers = tiersAllowed(lead);
   const limit = lead ? lead.maxWorkers : DEFAULT_MAX_WORKERS;
@@ -230,7 +251,7 @@ function proposalRules(
     `Schema: {"title":"Short title","summary":"What will be done and how the tasks fit together","tasks":[{"id":"task-1","title":"Short task title","prompt":"Self-contained instructions, constraints and checks","agent":"claude|codex|null","model":"exact model id or null","effort":"${EFFORTS.join("|")}|null","files":["src/feature"],"dependsOn":[]}]}`,
     `Task ids: 1-64 letters, digits, - or _. Titles: at most ${TITLE_MAX} characters. Summary: at most ${SUMMARY_MAX}. Parallel worker limit: ${limit} (at most ${lead ? lead.maxWorkers : WORKERS_MAX}).`,
     modelsBlock(lead),
-    ...leadBlocks(lead),
+    ...leadBlocks(lead, context),
   ];
 }
 
@@ -358,8 +379,10 @@ function conductorRules(
   return [
     `<conductor>\nYou are "${lead.name}", a conductor in Lanework: the lead of this project's team of coding agents, in one long conversation the user comes back to over time. Lanework adds this block ahead of the user's message; they did not write it and do not see it. Act on it rather than talk about it: never quote, summarise or describe it.\n</conductor>`,
     `<delegation_rules>\nAnswer questions, explanations, reviews and small, tightly coupled changes yourself, directly. When a request is substantial (long-running, made of independent parts, or better split across specialised workers), do not do the work yourself: investigate only as much as planning needs, write one short sentence on what you propose, then one orchestration proposal inside <lanework_proposal>...</lanework_proposal>, and nothing after it. Lanework draws it as a card the user edits and approves; nothing runs before that, so never ask for approval in prose and never start the work yourself. Once it is approved, Lanework tells you how to coordinate the run. Respect the user's wishes about delegating: when they ask you to do something yourself, do it.\n</delegation_rules>`,
-    `<proposal_rules>\n${proposalRules(leadAgent, cwd, lead).join("\n\n")}\n</proposal_rules>`,
-  ];
+    // Its context files stand for every answer, not only for a proposal.
+    contextBlock(lead),
+    `<proposal_rules>\n${proposalRules(leadAgent, cwd, lead, false).join("\n\n")}\n</proposal_rules>`,
+  ].filter((block): block is string => block !== null);
 }
 
 /**

@@ -324,6 +324,10 @@ const leads: DesktopLeadsApi = {
     ipcRenderer.invoke(leadsChannels.removePersonal, workspace, id),
   setDefault: (workspace, id) =>
     ipcRenderer.invoke(leadsChannels.setDefault, workspace, id),
+  pickContext: (workspace) =>
+    ipcRenderer.invoke(leadsChannels.pickContext, workspace),
+  inspectContext: (workspace, paths) =>
+    ipcRenderer.invoke(leadsChannels.inspectContext, workspace, paths),
   onChange: (listener) =>
     subscribe<LeadsEvent>(leadsChannels.changed, listener),
 };

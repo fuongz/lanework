@@ -118,6 +118,7 @@ export function blankDraft(models: readonly AgentModel[]): Draft {
       icon: "Robot02Icon",
       lead: { agent, model: id, effort: null },
       instructions: CONDUCTOR_INSTRUCTIONS,
+      contextFiles: [],
       ...CONDUCTOR_DEFAULTS,
       workers: [...CONDUCTOR_DEFAULTS.workers],
       checks: [...CONDUCTOR_DEFAULTS.checks],

@@ -7,7 +7,8 @@
 //   project) is handed to ONE project, the first one listed after the
 //   upgrade, and is gone from then on: never shown in two.
 // - `repo`: `.lanework/leads/<id>.md` in the workspace's folder, frontmatter
-//   then the instructions as markdown.
+//   then the instructions as markdown. Its context files (FE-96) are the
+//   `context:` list in the frontmatter.
 //
 // A repo lead is `repo:<id>` (FE-89/D3), so a file a project checks in never stands in for
 // a lead the user trusts, and it may not carry `jev` (D1). A repo file that
@@ -28,11 +29,17 @@ import {
   mkdir,
   readdir,
   readFile,
+  realpath,
   rename,
+  stat,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import {
+  type ContextEntry,
+  type ContextPick,
+  contextPath,
+  LEAD_CONTEXT_FILES_MAX,
   type LeadsEvent,
   type LeadsList,
   type LeadsMainHandlers,
@@ -61,7 +68,8 @@ export interface LeadStoreDeps {
   broadcast: (event: LeadsEvent) => void;
 }
 
-export interface LeadStore extends LeadsMainHandlers {
+/** Every handler but the chooser, which needs Electron (`index.ts`). */
+export interface LeadStore extends Omit<LeadsMainHandlers, "pickContext"> {
   /**
    * The lead a run starts under, as `list(workspace)` would show it.
    *
@@ -140,6 +148,9 @@ async function readRepoLead(path: string, stem: string): Promise<TeamLead> {
     );
   if ("source" in frontmatter)
     throw new Error("source is not a frontmatter key");
+  if ("contextFiles" in frontmatter)
+    throw new Error("context files go in a context: list, not contextFiles");
+  const { context, ...rest } = frontmatter;
   if (
     frontmatter.id != null &&
     frontmatter.id !== stem &&
@@ -150,8 +161,9 @@ async function readRepoLead(path: string, stem: string): Promise<TeamLead> {
     );
   return parseTeamLead(
     {
-      ...frontmatter,
+      ...rest,
       id: stem,
+      contextFiles: context ?? [],
       checks: frontmatter.checks ?? [],
       jev: frontmatter.jev ?? null,
       permission: frontmatter.permission ?? null,
@@ -159,6 +171,61 @@ async function readRepoLead(path: string, stem: string): Promise<TeamLead> {
     },
     "repo",
   );
+}
+
+/** Whether `path` is `root` or under it; both already real paths. */
+function inside(root: string, path: string): boolean {
+  return (
+    path === root || path.startsWith(root.endsWith(sep) ? root : root + sep)
+  );
+}
+
+/**
+ * Each path as it stands under `folder` now. A path that resolves outside
+ * it (a symlink out of the project) reads as missing: never followed.
+ */
+export async function inspectContextIn(
+  folder: string | null,
+  paths: readonly string[],
+): Promise<ContextEntry[]> {
+  const root = folder ? await realpath(folder).catch(() => null) : null;
+  return Promise.all(
+    paths.slice(0, LEAD_CONTEXT_FILES_MAX).map(async (path) => {
+      const missing: ContextEntry = { path, kind: "missing" };
+      if (!root) return missing;
+      try {
+        const real = await realpath(join(root, contextPath(path)));
+        if (!inside(root, real) || real === root) return missing;
+        const info = await stat(real);
+        if (info.isDirectory()) return { path, kind: "folder" as const };
+        return info.isFile() ? { path, kind: "file" as const } : missing;
+      } catch {
+        return missing;
+      }
+    }),
+  );
+}
+
+/**
+ * Absolute paths the user chose, as context files of `folder`: relative,
+ * `/`-separated, the project's own folder and anything outside it left out.
+ */
+export async function contextPickIn(
+  folder: string,
+  chosen: readonly string[],
+): Promise<ContextPick> {
+  const root = await realpath(folder);
+  const paths: string[] = [];
+  let outside = 0;
+  for (const path of chosen) {
+    const real = await realpath(path).catch(() => null);
+    if (!real || !inside(root, real) || real === root) {
+      outside++;
+      continue;
+    }
+    paths.push(contextPath(relative(root, real).split(sep).join("/")));
+  }
+  return { paths: [...new Set(paths)], outside };
 }
 
 export function createLeadStore(deps: LeadStoreDeps): LeadStore {
@@ -315,6 +382,9 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
 
   return {
     list,
+
+    inspectContext: async (workspace, paths) =>
+      inspectContextIn(await deps.folderOf(workspace).catch(() => null), paths),
 
     async resolve(workspace, id) {
       const { leads, errors } = await list(workspace);

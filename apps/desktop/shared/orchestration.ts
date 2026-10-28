@@ -1137,6 +1137,10 @@ export const LEAD_WORKERS_MAX = 16;
 export const LEAD_CHECKS_MAX = 8;
 /** The longest one check may be. */
 export const LEAD_CHECK_MAX = 300;
+/** The most context files one conductor may list (FE-96). */
+export const LEAD_CONTEXT_FILES_MAX = 20;
+/** The longest one context file's path may be. */
+export const LEAD_CONTEXT_PATH_MAX = 1024;
 
 /** Where a team lead comes from. */
 export const LEAD_SOURCES = ["personal", "repo"] as const;
@@ -1178,6 +1182,12 @@ export interface TeamLead {
   lead: TierModel;
   /** Told to the lead before the user's request; may be empty. */
   instructions: string;
+  /**
+   * Files and folders in the project it reads before it answers or plans
+   * (FE-96): project-relative, `/`-separated, never absolute or `..`. Only
+   * the paths travel; it reads them itself, so it always sees the latest.
+   */
+  contextFiles: string[];
   /**
    * 0-{@link LEAD_WORKERS_MAX} distinct agent/model pairs. None (FE-95): it
    * picks from every model the app offers, as a run without a lead does, and
@@ -1300,6 +1310,37 @@ function oneLine(value: unknown, label: string, max: number): string {
   return line;
 }
 
+/**
+ * One context file's path, as `TeamLead.contextFiles` keeps it: relative to
+ * the project, `/` between parts, no `./`, no trailing `/`.
+ *
+ * @throws {ControlInputError} When it is empty, absolute, or climbs out.
+ */
+export function contextPath(value: unknown, label = "Context file"): string {
+  const raw = oneLine(value, label, LEAD_CONTEXT_PATH_MAX);
+  if (raw.includes("\\")) fail(`${label} must use / between folders`);
+  if (raw.startsWith("/") || raw.startsWith("~") || /^[A-Za-z]:/.test(raw))
+    fail(`${label} must be relative to the project, not absolute`);
+  const parts = raw.split("/").filter((part) => part && part !== ".");
+  if (!parts.length) fail(`${label} must name a file or folder in the project`);
+  if (parts.includes(".."))
+    fail(`${label} must stay inside the project: no ..`);
+  return parts.join("/");
+}
+
+function leadContextFiles(value: unknown): string[] {
+  const list = value ?? [];
+  if (!Array.isArray(list) || list.length > LEAD_CONTEXT_FILES_MAX)
+    fail(`contextFiles must list at most ${LEAD_CONTEXT_FILES_MAX} paths`);
+  return [
+    ...new Set(
+      list.map((entry, index) =>
+        contextPath(entry, `Context file ${index + 1}`),
+      ),
+    ),
+  ];
+}
+
 function leadWorkers(value: unknown): TeamLeadWorker[] {
   if (!Array.isArray(value) || value.length > LEAD_WORKERS_MAX)
     fail(`workers must list at most ${LEAD_WORKERS_MAX} workers`);
@@ -1350,6 +1391,7 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
       "icon",
       "lead",
       "instructions",
+      "contextFiles",
       "workers",
       "maxWorkers",
       "checks",
@@ -1401,6 +1443,7 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
     icon: oneOf(input.icon, LEAD_ICONS, "icon"),
     lead: tierModel(input.lead, "lead"),
     instructions: input.instructions.trim(),
+    contextFiles: leadContextFiles(input.contextFiles),
     workers: leadWorkers(input.workers),
     maxWorkers: input.maxWorkers as number,
     checks: [
@@ -1460,6 +1503,10 @@ export const leadsChannels = {
   removePersonal: "leads:remove-personal",
   /** The lead a new proposal starts on, or null for none. */
   setDefault: "leads:set-default",
+  /** Ask the user for context files in the project (FE-96). */
+  pickContext: "leads:pick-context",
+  /** Whether each context file is a file, a folder, or gone. */
+  inspectContext: "leads:inspect-context",
   /** Main → renderer: the leads changed. */
   changed: "leads:changed",
 } as const;
@@ -1470,6 +1517,20 @@ export const leadsChannels = {
  */
 export interface LeadsEvent {
   workspace: string | null;
+}
+
+/** A context file as it stands in the checkout now (FE-96). */
+export interface ContextEntry {
+  path: string;
+  kind: "file" | "folder" | "missing";
+}
+
+/** What the user picked for a conductor's context. */
+export interface ContextPick {
+  /** Project-relative, as {@link contextPath} keeps them. */
+  paths: string[];
+  /** How many picks were outside the project, and left out. */
+  outside: number;
 }
 
 /** Main → renderer, on {@link orchestrationChannels.changed}. */
@@ -1526,6 +1587,12 @@ export interface DesktopLeadsApi {
   savePersonal: (workspace: string, lead: TeamLeadInput) => Promise<LeadsList>;
   removePersonal: (workspace: string, id: string) => Promise<LeadsList>;
   setDefault: (workspace: string, id: string | null) => Promise<LeadsList>;
+  /** The native chooser, opened on the project's folder (FE-96). */
+  pickContext: (workspace: string) => Promise<ContextPick>;
+  inspectContext: (
+    workspace: string,
+    paths: string[],
+  ) => Promise<ContextEntry[]>;
   onChange: (listener: (event: LeadsEvent) => void) => () => void;
 }
 
@@ -1606,6 +1673,11 @@ export interface LeadsMainHandlers {
   savePersonal: (workspace: string, lead: TeamLead) => Promise<LeadsList>;
   removePersonal: (workspace: string, id: string) => Promise<LeadsList>;
   setDefault: (workspace: string, id: string | null) => Promise<LeadsList>;
+  pickContext: (workspace: string) => Promise<ContextPick>;
+  inspectContext: (
+    workspace: string,
+    paths: string[],
+  ) => Promise<ContextEntry[]>;
 }
 
 /** The loopback control server, as main starts and stops it. */
