@@ -377,6 +377,7 @@ export class CodexEngine {
         workspace: this.workspace,
         conversation: this.conversation,
         folder: this.folder,
+        named: () => this.conversation,
       }),
       stdio: ["pipe", "pipe", "pipe"],
     });

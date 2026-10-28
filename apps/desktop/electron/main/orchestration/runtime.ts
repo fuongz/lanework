@@ -670,6 +670,11 @@ export class Orchestrator {
     return null;
   }
 
+  /** Whether `folder` is a running worker's own worktree. */
+  isWorkerFolder(folder: string): boolean {
+    return this.workerAt(folder) !== null;
+  }
+
   /** The extra environment one engine process starts with. */
   envFor(target: EngineTarget): Record<string, string> | null {
     const worker = this.workerAt(target.folder);

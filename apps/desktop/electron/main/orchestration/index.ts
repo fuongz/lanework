@@ -21,7 +21,7 @@ import { sharedEngines } from "../conversation/engine";
 import { broadcast } from "../ipc";
 import { appHomeDir } from "../paths";
 import { terminalFolder } from "../workspaces";
-import { listenControl } from "./control-server";
+import { listenControl, type SessionsControl } from "./control-server";
 import { setEngineTap } from "./engine-tap";
 import { teamLeadOf } from "./leads";
 import { Orchestrator } from "./runtime";
@@ -83,6 +83,16 @@ export function workerFolderOf(
   return orchestrator().workerFolder(workspace, conversation);
 }
 
+/** Whether an engine in `folder` runs a worker of a run: its own worktree. */
+export function isWorkerFolder(folder: string): boolean {
+  return orchestrator().isWorkerFolder(folder);
+}
+
+/** The control server's `127.0.0.1:<port>`, once it listens. */
+export function controlEndpoint(): string | null {
+  return endpoint;
+}
+
 /**
  * Whether `conversation` is an orchestration worker's: its asks go to its
  * lead, never to the person (FE-100/O1).
@@ -111,10 +121,18 @@ export const orchestrationMain: OrchestrationMainHandlers = {
     orchestrator().control(runId, call, requestId),
 };
 
-export const startControlServer: StartControlServer = async (control) => {
+/**
+ * Listen for the lead's CLI, and a conductor's `sessions.*` calls when
+ * `sessions` is given.
+ */
+export const startControlServer = async (
+  control: Parameters<StartControlServer>[0],
+  sessions?: SessionsControl,
+): ReturnType<StartControlServer> => {
   const runs = orchestrator();
   const server = await listenControl({
     control,
+    sessions,
     runOfToken: (token) => runs.runOfToken(token),
     listening: (address) => {
       endpoint = address;

@@ -1,7 +1,8 @@
 // `lanework-control`: the lead agent's handle on its orchestration run
-// (FE-87). The lead (Claude Code or Codex) runs it from its shell; it sends
-// one JSON line to the app's loopback control server and prints the one line
-// it gets back.
+// (FE-87), and a conductor's on the sessions it starts
+// (`shared/conductor-sessions.ts`). The agent (Claude Code or Codex) runs it
+// from its shell; it sends one JSON line to the app's loopback control server
+// and prints the one line it gets back.
 //
 //   lanework-control ACTION [--json JSON | --input FILE|-] [--request-id ID]
 //
@@ -21,6 +22,15 @@
 import { randomUUID } from "node:crypto";
 import { openSync, readSync } from "node:fs";
 import { connect, isIP } from "node:net";
+import {
+  isSessionAction,
+  parseSessionInput,
+  SESSION_ACTIONS,
+  SESSION_HELP,
+  SESSIONS_ENV,
+  type SessionAction,
+  sessionFields,
+} from "../../shared/conductor-sessions";
 import {
   CONTROL_ACTIONS,
   CONTROL_ENV,
@@ -99,11 +109,15 @@ const ACTION_HELP: Record<ControlAction, string> = {
 
 /** The usage text, naming `exe` as the command to run. */
 export function controlHelp(exe = "lanework-control"): string {
-  return `Lanework control: supervise this orchestration run from the lead agent.
+  return `Lanework control: supervise an orchestration run from its lead agent,
+and the sessions a conductor starts.
 
 Usage: ${exe} ACTION [--json JSON | --input FILE|-] [--request-id ID]
 
-Actions, with the JSON object each one takes:
+A conductor's sessions, with the JSON object each one takes:
+${SESSION_ACTIONS.map((action) => SESSION_HELP[action]).join("\n")}
+
+An orchestration run's actions, for its lead only:
 ${CONTROL_ACTIONS.map((action) => ACTION_HELP[action]).join("\n")}
 
 Usual loop: list -> delegate ... -> wait or get -> steer a worker that drifts,
@@ -132,9 +146,9 @@ worker.
 Workers run inside the Lanework app, not in this process. Exiting this
 command, or a failure here, never cancels a task the run already took.
 
-Lanework sets ${CONTROL_ENV.endpoint} and ${CONTROL_ENV.token}
-for the lead agent's process only. They are already in your environment;
-never print them.
+Lanework sets ${CONTROL_ENV.endpoint}, ${SESSIONS_ENV.token}
+and, for a run's lead only, ${CONTROL_ENV.token}. They are already in your
+environment; never print them.
 `;
 }
 
@@ -144,7 +158,7 @@ type Parsed =
   | { kind: "help" }
   | {
       kind: "call";
-      action: ControlAction;
+      action: ControlAction | SessionAction;
       input: Record<string, unknown>;
       requestId: string;
     };
@@ -202,9 +216,9 @@ export function parseArgs(args: readonly string[]): Parsed {
     value === "help" || value === "--help" || value === "-h";
   const [first, ...rest] = args;
   if (first === undefined || isHelp(first)) return { kind: "help" };
-  if (!isControlAction(first))
+  if (!isControlAction(first) && !isSessionAction(first))
     throw new UsageError(
-      `Unknown action: ${first}. Use one of: ${CONTROL_ACTIONS.join(", ")}. Run lanework-control --help.`,
+      `Unknown action: ${first}. Use one of: ${[...SESSION_ACTIONS, ...CONTROL_ACTIONS].join(", ")}. Run lanework-control --help.`,
     );
   const action = first;
   let raw: string | null = null;
@@ -251,11 +265,14 @@ export function parseArgs(args: readonly string[]): Parsed {
       throw new UsageError("Input must be a JSON object");
   }
   try {
-    parseControlInput(action, input);
+    if (isSessionAction(action)) parseSessionInput(action, input);
+    else parseControlInput(action, input);
   } catch (error) {
     if (error instanceof ControlInputError) {
       // The contract's message already lists the fields for an unknown one.
-      const fields = controlFields(action);
+      const fields = isSessionAction(action)
+        ? sessionFields(action)
+        : controlFields(action);
       const hint = error.message.includes("Allowed:")
         ? ""
         : ` ${action} takes ${fields.length ? fields.join(", ") : "no fields"}.`;
@@ -307,7 +324,11 @@ function loopbackAddress(endpoint: string): { host: string; port: number } {
 function send(
   endpoint: string,
   token: string,
-  call: { action: ControlAction; input: unknown; requestId: string },
+  call: {
+    action: ControlAction | SessionAction;
+    input: unknown;
+    requestId: string;
+  },
 ): Promise<unknown> {
   const { host, port } = loopbackAddress(endpoint);
   const line = `${JSON.stringify({
@@ -440,20 +461,23 @@ export async function runControlCli(
     print(controlHelp(env[CONTROL_SELF_ENV] || "lanework-control").trimEnd());
     return 0;
   }
+  const sessions = isSessionAction(parsed.action);
   const endpoint = env[CONTROL_ENV.endpoint];
-  const token = env[CONTROL_ENV.token];
+  const token = env[sessions ? SESSIONS_ENV.token : CONTROL_ENV.token];
   if (!endpoint)
     return emit({
       ok: false,
-      error:
-        "No Lanework control connection. Only the lead of an approved orchestration run can use this; approve the plan in Lanework first.",
+      error: sessions
+        ? "No Lanework control connection. Only a conductor's conversation in the Lanework app can start sessions."
+        : "No Lanework control connection. Only the lead of an approved orchestration run can use this; approve the plan in Lanework first.",
       retryable: false,
     });
   if (!token)
     return emit({
       ok: false,
-      error:
-        "No Lanework control credential. Start the lead conversation from Lanework.",
+      error: sessions
+        ? "No Lanework sessions credential. Start the conductor's conversation from Lanework."
+        : "No Lanework control credential. Start the lead conversation from Lanework.",
       retryable: false,
     });
   let reply: unknown;

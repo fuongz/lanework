@@ -12,9 +12,17 @@
 //   being read share PENDING_BYTES_MAX, so a few large slow ones cannot hold
 //   the app's memory either.
 //
+// - A `sessions.*` action is a conductor's (conductor-sessions.ts): its token
+//   names the process that sent it, not a run.
+//
 // Nothing here imports Electron.
 
 import { createServer, type Socket } from "node:net";
+import {
+  isSessionAction,
+  parseSessionRequest,
+  type SessionCall,
+} from "../../../shared/conductor-sessions";
 import {
   CONTROL_INPUT_MAX,
   CONTROL_RESPONSE_MAX,
@@ -37,10 +45,23 @@ const PENDING_BYTES_MAX = 2 * CONTROL_INPUT_MAX;
 
 const UNAUTHORIZED = "Connection revoked or unauthorized";
 
+/** A conductor's sessions, as the server reaches them. */
+export interface SessionsControl<Caller = unknown> {
+  /** The process a token was minted for, or null. */
+  callerOf: (token: string) => Caller | null;
+  call: (
+    caller: Caller,
+    call: SessionCall,
+    requestId: string,
+  ) => Promise<unknown>;
+}
+
 export interface ControlServerOptions {
   control: OrchestrationMainHandlers["control"];
   /** The run a token belongs to, or null. */
   runOfToken: (token: string) => string | null;
+  /** Absent: every `sessions.*` call is refused. */
+  sessions?: SessionsControl;
   /** Told the endpoint once the server listens. */
   listening?: (endpoint: string) => void;
 }
@@ -69,27 +90,58 @@ async function answer(
     return { ok: false, error: "The request is not JSON", retryable: false };
   }
   // The token first: nothing about the input is said to a caller without one.
-  const token =
+  const fields =
     value && typeof value === "object" && !Array.isArray(value)
-      ? (value as { token?: unknown }).token
-      : undefined;
+      ? (value as { token?: unknown; action?: unknown })
+      : {};
+  const { token } = fields;
+  if (isSessionAction(fields.action)) {
+    const sessions = options.sessions;
+    const caller =
+      typeof token === "string" ? (sessions?.callerOf(token) ?? null) : null;
+    if (!sessions || !caller)
+      return { ok: false, error: UNAUTHORIZED, retryable: false };
+    let request: ReturnType<typeof parseSessionRequest>;
+    try {
+      request = parseSessionRequest(value);
+    } catch (error) {
+      return invalid(error);
+    }
+    const { token: _token, requestId, ...call } = request;
+    return settle(
+      Promise.resolve().then(() => sessions.call(caller, call, requestId)),
+      requestId,
+    );
+  }
   const runId = typeof token === "string" ? options.runOfToken(token) : null;
   if (!runId) return { ok: false, error: UNAUTHORIZED, retryable: false };
   let request: ReturnType<typeof parseControlRequest>;
   try {
     request = parseControlRequest(value);
   } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Invalid request",
-      retryable: false,
-    };
+    return invalid(error);
   }
   const { token: _token, requestId, ...call } = request;
+  return settle(options.control(runId, call, requestId), requestId);
+}
+
+function invalid(error: unknown): ControlResponse {
+  return {
+    ok: false,
+    error: error instanceof Error ? error.message : "Invalid request",
+    retryable: false,
+  };
+}
+
+/** A call's answer, or why it failed; one that takes too long is retried. */
+async function settle(
+  pending: Promise<unknown>,
+  requestId: string,
+): Promise<ControlResponse> {
   let timer: NodeJS.Timeout | undefined;
   try {
     const result = await Promise.race([
-      options.control(runId, call, requestId),
+      pending,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error("timeout")), CALL_TIMEOUT_MS);
       }),

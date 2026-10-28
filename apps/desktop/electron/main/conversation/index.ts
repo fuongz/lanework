@@ -11,6 +11,11 @@ import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { app, shell } from "electron";
+import type {
+  SessionAction,
+  SessionCall,
+  SessionResults,
+} from "../../../shared/conductor-sessions";
 import {
   type AgentModel,
   ANSWER_MAX,
@@ -36,10 +41,21 @@ import {
 } from "../../../shared/conversation";
 import { LEAD_REF_PATTERN } from "../../../shared/orchestration";
 import { isAgentSessionId } from "../../../shared/terminal";
+import { controlCliPath } from "../../control/install";
 import { broadcast, handle } from "../ipc";
 import { notify } from "../notifications";
-import { isWorkerConversation, workerFolderOf } from "../orchestration";
-import { bindConductorConversation } from "../terminal";
+import {
+  controlEndpoint,
+  isWorkerConversation,
+  isWorkerFolder,
+  workerFolderOf,
+} from "../orchestration";
+import { setSessionsEnv } from "../orchestration/engine-tap";
+import {
+  bindConductorConversation,
+  conductorOfConversation,
+  nameConversation,
+} from "../terminal";
 import { agentHomeDir } from "../test-seams";
 import { knownWorkspace, terminalFolder } from "../workspaces";
 import { awaitingNotice, createAwaitingLedger } from "./awaiting";
@@ -47,6 +63,7 @@ import { createAgentCli, createClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { createCodexModels } from "./codex-models";
 import { codexRolloutPath, readCodexConversation } from "./codex-transcript";
+import { ConductorSessions } from "./conductor-sessions";
 import { createEngines } from "./engine";
 import { forkConversation } from "./fork";
 import { type ImageScope, openableImage, previewImage } from "./image-preview";
@@ -91,6 +108,25 @@ interface TerminalBridge {
 function agentHome(): string {
   return agentHomeDir();
 }
+
+/** A conductor's sessions, once the conversation view registered. */
+let sessions: ConductorSessions | null = null;
+
+/**
+ * What the control server asks of a conductor's sessions: who a token is,
+ * and one call for it. Refused before the conversation view registered.
+ */
+export const conductorSessionsControl = {
+  callerOf: (token: string) => sessions?.callerOf(token) ?? null,
+  call: (
+    caller: NonNullable<ReturnType<ConductorSessions["callerOf"]>>,
+    call: SessionCall,
+    requestId: string,
+  ): Promise<SessionResults[SessionAction]> => {
+    if (!sessions) throw new Error("Conversations are not ready yet.");
+    return sessions.call(caller, call, requestId);
+  },
+};
 
 /** How long a project's `/` commands are reused before they are read again. */
 const COMMANDS_MS = 30_000;
@@ -368,6 +404,7 @@ export function registerConversation(
   const awaiting = createAwaitingLedger();
   const tell = (event: ConversationEvent) => {
     broadcast(conversationChannels.event, event);
+    sessions?.onEvent(event);
     // Read once the event's other listeners ran: orchestration learns a new
     // Codex worker's id from this same event (FE-100/O1).
     queueMicrotask(() => {
@@ -432,6 +469,22 @@ export function registerConversation(
     trusted: (folder, env) =>
       isClaudeTrusted(folder, claudeJsonFor(env, agentHome())),
   });
+
+  sessions = new ConductorSessions({
+    engines: () => engines,
+    folderOf,
+    agentOf,
+    read: readAny,
+    storedSettings: (conversation) => store.of(conversation),
+    conductorOf: conductorOfConversation,
+    name: nameConversation,
+    isWorkerFolder,
+    endpoint: controlEndpoint,
+    cliPath: controlCliPath(),
+    file: join(app.getPath("userData"), "conductor-sessions.json"),
+  });
+  const conductors = sessions;
+  setSessionsEnv((target) => conductors.envFor(target));
 
   // The conversations whose engine last answered `terminal`: when a tab
   // stops, the composer hears it may write again, without polling.

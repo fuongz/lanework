@@ -31,7 +31,11 @@ import { installControlCli } from "../control/install";
 import { registerAgentConfig } from "./agent-config";
 import { registerAgentSetup } from "./agent-setup";
 import { registerAuth } from "./auth";
-import { pidFileBridge, registerConversation } from "./conversation";
+import {
+  conductorSessionsControl,
+  pidFileBridge,
+  registerConversation,
+} from "./conversation";
 import { registerDictation } from "./dictation";
 import { readLinkedOpenPulls, registerGit } from "./git";
 import { registerHandoff } from "./handoff";
@@ -45,6 +49,7 @@ import { installMenuBar } from "./menu-bar";
 import { registerNotifications } from "./notifications";
 import { startPullWatcher } from "./notifications/pull-watcher";
 import { orchestrationMain, setJev, startControlServer } from "./orchestration";
+import type { SessionsControl } from "./orchestration/control-server";
 import { leadsMain } from "./orchestration/leads";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
@@ -423,7 +428,10 @@ app
       console.warn("Unable to install lanework-control", error),
     );
     // The lead's CLI reaches runs through this; it listens on loopback only.
-    startControlServer(orchestrationMain.control)
+    startControlServer(
+      orchestrationMain.control,
+      conductorSessionsControl as SessionsControl,
+    )
       .then((server) => {
         controlServer = server;
       })

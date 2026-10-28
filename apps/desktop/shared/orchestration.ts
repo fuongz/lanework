@@ -663,6 +663,14 @@ const SCHEMAS: {
   finish: { fields: [], parse: () => ({}) },
 };
 
+// The checks a conductor's `sessions.*` actions share (conductor-sessions.ts).
+export {
+  effort as controlEffort,
+  requestId as controlRequestId,
+  strictObject as controlObject,
+  text as controlText,
+};
+
 /** The fields each action takes, for `--help` and error messages. */
 export function controlFields(action: ControlAction): readonly string[] {
   return SCHEMAS[action].fields;

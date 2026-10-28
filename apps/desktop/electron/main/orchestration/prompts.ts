@@ -6,6 +6,8 @@
 // - `<lanework_assignment>`: the rules a worker works under.
 // - `<lanework_orchestration>`: what main tells the lead (approved, an
 //   update). A turn that is nothing but this block shows as no message.
+// - `<lanework_sessions>`: what main tells a conductor once sessions it
+//   started stopped (conductor-sessions.ts); shown as no message, too.
 //
 // Nothing here imports Electron.
 
@@ -16,7 +18,7 @@ export const ORCHESTRATION_TAG = "lanework_orchestration";
 
 /** Every hidden block, with the blank lines before it. */
 export const HIDDEN_BLOCKS =
-  /(?:\r?\n[ \t]*)*<(lanework_assignment|lanework_orchestration)\b[^>]*>[\s\S]*?<\/\1>/g;
+  /(?:\r?\n[ \t]*)*<(lanework_assignment|lanework_orchestration|lanework_sessions)\b[^>]*>[\s\S]*?<\/\1>/g;
 
 /** What a person should see of a turn's text: the hidden blocks removed. */
 export function visibleText(text: string): string {

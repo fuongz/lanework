@@ -12,8 +12,12 @@
 // - `write`: a tool call that writes files, as soon as the CLI names it.
 // - `result`: the text a turn ended with.
 //
+// A conductor's sessions add their own `env` (`setSessionsEnv`): the token
+// any conversation but a worker's starts with, checked on each call.
+//
 // Nothing here imports Electron or the engines.
 
+import { SESSIONS_ENV } from "../../../shared/conductor-sessions";
 import type { ConversationEvent } from "../../../shared/conversation";
 import { CONTROL_ENV } from "../../../shared/orchestration";
 
@@ -24,6 +28,11 @@ export interface EngineTarget {
   conversation: string | null;
   /** The folder it runs in: a worker's is its own worktree. */
   folder: string;
+  /**
+   * The conversation's id as it is now: a new Codex conversation's is named
+   * after its process started.
+   */
+  named?: () => string | null;
 }
 
 /** A tool call that writes files. */
@@ -49,10 +58,16 @@ export interface EngineTap {
 }
 
 let tap: EngineTap = {};
+let sessionsEnv: EngineTap["env"];
 
 /** Install orchestration's listeners; `{}` removes them. */
 export function setEngineTap(next: EngineTap): void {
   tap = next;
+}
+
+/** Install a conductor's sessions' env; undefined removes it. */
+export function setSessionsEnv(next: EngineTap["env"]): void {
+  sessionsEnv = next;
 }
 
 /** The listeners now installed. */
@@ -65,7 +80,8 @@ export function engineTap(): EngineTap {
  *
  * The control variables are always removed first, even when the app itself
  * was started with them (from a lead's own terminal): only the tap may give
- * them, and it gives them to a lead alone.
+ * them, and it gives them to a lead alone. The sessions token goes to every
+ * process but a worker's; only a conductor's may use it.
  */
 export function agentEnv(
   base: Record<string, string>,
@@ -74,13 +90,17 @@ export function agentEnv(
   const env = { ...base };
   delete env[CONTROL_ENV.endpoint];
   delete env[CONTROL_ENV.token];
-  let extra: Record<string, string> | null = null;
-  try {
-    extra = tap.env?.(target) ?? null;
-  } catch {
-    extra = null;
-  }
-  return extra ? { ...env, ...extra } : env;
+  delete env[SESSIONS_ENV.token];
+  delete env[SESSIONS_ENV.cli];
+  const extra = (give: EngineTap["env"]) => {
+    try {
+      return give?.(target) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  // The run's env last: a worker's scratch, or a lead's own endpoint.
+  return { ...env, ...extra(sessionsEnv), ...extra(tap.env) };
 }
 
 /** Tools that write the file their input names. */

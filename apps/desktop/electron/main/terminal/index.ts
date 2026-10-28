@@ -271,6 +271,43 @@ export async function bindConductorConversation(
 }
 
 /**
+ * The conductor whose own conversation `id` is in `workspace`, or null.
+ */
+export async function conductorOfConversation(
+  workspace: string,
+  agent: TerminalAgent,
+  id: string,
+): Promise<string | null> {
+  const mark = (await readAgentMarks(agentMarksFile()))[
+    agentKey({ agent, id })
+  ];
+  return mark?.conductor?.workspace === workspace ? mark.conductor.id : null;
+}
+
+/**
+ * Name a conversation main just started, as the rail's Rename would.
+ *
+ * @throws When the name is not one line of at most `AGENT_NAME_MAX`.
+ */
+export async function nameConversation(
+  agent: TerminalAgent,
+  id: string,
+  name: string,
+): Promise<void> {
+  if (!isAgentSessionId(id))
+    throw new Error("A valid conversation is required");
+  const clean = cleanAgentName(name);
+  await updateAgentMark(
+    agentMarksFile(),
+    agentKey({ agent, id }),
+    (current) => ({
+      ...current,
+      name: clean || undefined,
+    }),
+  );
+}
+
+/**
  * One transcript watcher per workspace that has been listed, restarted when
  * its folder changes (FE-25/D3).
  *

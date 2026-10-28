@@ -29,6 +29,10 @@ import {
 import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { AssistantActions, UserActions } from "./turn-view.actions";
+import {
+  LaunchedSessionCard,
+  launchedSessions,
+} from "./turn-view.launched-session";
 import { chatLink, liveChatLink } from "./turn-view.link-chip";
 import { ToolGroup } from "./turn-view.tool-group";
 
@@ -312,10 +316,14 @@ function AssistantView({
             />
           );
         }
-        if (block.type === "tools")
-          return (
+        if (block.type === "tools") {
+          const key = block.calls[0]?.id ?? `tools-${index}`;
+          // A conductor's sessions stay in sight under the folded commands
+          // that started them.
+          const launched = launchedSessions(block.calls);
+          const group = (
             <ToolGroup
-              key={block.calls[0]?.id ?? `tools-${index}`}
+              key={key}
               calls={block.calls}
               running={
                 turn.open &&
@@ -327,6 +335,20 @@ function AssistantView({
               conversation={conversation}
             />
           );
+          if (!launched.length) return group;
+          return (
+            <div key={key} className="flex min-w-0 flex-col gap-2">
+              {group}
+              {launched.map((session) => (
+                <LaunchedSessionCard
+                  key={session.sessionId}
+                  session={session}
+                  slug={slug}
+                />
+              ))}
+            </div>
+          );
+        }
         // A permission waiting is asked where the prompt is typed
         // (conversation-view), as a question is; an answered one is gone.
         return null;
