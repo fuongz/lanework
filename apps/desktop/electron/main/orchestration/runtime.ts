@@ -69,6 +69,7 @@ import {
   type OrchestrationRun,
   type OrchestrationTask,
   type ProposedTask,
+  type RunLeftovers,
   TASKS_MAX,
   type TeamLead,
   TIERS,
@@ -85,9 +86,12 @@ import {
   checkoutTop,
   checkPointer,
   createWorktree,
+  MoveFailed,
   mergeWorker,
   moveWorktree,
+  removeLeftovers,
   removeWorktree,
+  runLeftovers,
   type WorkerTree,
   WorktreePointerError,
   workerChanges,
@@ -427,6 +431,8 @@ export class Orchestrator {
   private notes = new Map<string, Set<string>>();
   private noteTimers = new Map<string, NodeJS.Timeout>();
   private briefing = new Set<string>();
+  /** Runs with a pump due because another run let go of files (O4). */
+  private nudged = new Set<string>();
   private jev: JevMainHandlers | null = null;
 
   constructor(private readonly deps: RuntimeDeps) {}
@@ -547,14 +553,23 @@ export class Orchestrator {
     void this.save(record).catch((error: unknown) =>
       console.error("Unable to save orchestration run", error),
     );
-    try {
-      this.deps.broadcast({ workspace: record.run.workspace, run: record.run });
-    } catch {
-      // No window to tell.
-    }
+    this.tellPage(record);
     const waiters = this.waiters.get(record.run.id);
     if (waiters)
       for (const taskId of taskIds) for (const wake of waiters) wake(taskId);
+    this.nudgeOthers(record);
+  }
+
+  /** Send the page the run as it is now, each queued task's wait with it. */
+  private tellPage(record: RunRecord): void {
+    try {
+      this.deps.broadcast({
+        workspace: record.run.workspace,
+        run: this.shown(record),
+      });
+    } catch {
+      // No window to tell.
+    }
   }
 
   private patch(
@@ -1040,20 +1055,66 @@ export class Orchestrator {
       if (!dependency.accepted)
         return `Waiting for ${id} "${dependency.title}" to be reviewed (it is ${dependency.status})`;
     }
+    const held = (holder: OrchestrationTask) =>
+      `${holder.id} "${holder.title}" (${holder.status}${holder.status === "completed" ? ", not reviewed" : ""})`;
     const holder = run.tasks.find(
       (other) =>
         other.id !== task.id &&
         this.holds(other) &&
         scopesOverlap(other.files, task.files),
     );
-    if (holder)
-      return `Waiting for files held by ${holder.id} "${holder.title}" (${holder.status}${holder.status === "completed" ? ", not reviewed" : ""})`;
+    if (holder) return `Waiting for files held by ${held(holder)}`;
+    // Several runs may be open in a project at once (FE-100/O4): files one
+    // holds are held for every other.
+    for (const other of this.openRuns(record)) {
+      const holder = other.run.tasks.find(
+        (entry) => this.holds(entry) && scopesOverlap(entry.files, task.files),
+      );
+      if (holder)
+        return `Waiting for files held by ${held(holder)} in ${other.teamLead ? `${other.teamLead.name}'s run` : `run ${other.run.id}`}`;
+    }
     const running = run.tasks.filter((entry) =>
       ACTIVE.has(entry.status),
     ).length;
     if (running >= run.maxWorkers)
       return `Waiting for a worker slot (${running}/${run.maxWorkers} busy)`;
     return null;
+  }
+
+  /**
+   * Every other run open (active or paused) in `record`'s project, on the
+   * same checkout (FE-100/O4).
+   */
+  private openRuns(record: RunRecord): RunRecord[] {
+    return [...this.records.values()].filter(
+      (other) =>
+        other !== record &&
+        other.run.workspace === record.run.workspace &&
+        other.folder === record.folder &&
+        (other.run.status === "active" || other.run.status === "paused"),
+    );
+  }
+
+  /**
+   * Pump every other active run of `record`'s project once this turn ends:
+   * a task of `record` may have taken or let go of files one of them waits
+   * on (FE-100/O4), so its queued tasks' waits are sent to the page again
+   * too. A run already due is not asked twice.
+   */
+  private nudgeOthers(record: RunRecord): void {
+    for (const other of this.openRuns(record)) {
+      if (
+        this.nudged.has(other.run.id) ||
+        !other.run.tasks.some((task) => task.status === "queued")
+      )
+        continue;
+      this.nudged.add(other.run.id);
+      setTimeout(() => {
+        this.nudged.delete(other.run.id);
+        this.tellPage(other);
+        this.pump(other);
+      }, 0);
+    }
   }
 
   private pump(record: RunRecord): void {
@@ -1265,8 +1326,13 @@ export class Orchestrator {
     own: TaskPrivate,
     engines: OrchestrationEngines,
   ): Promise<string> {
-    const tree = await this.treeOf(record, own);
-    if (!tree || !own.baseline || !task.branch || !(await exists(tree.path))) {
+    // Gone (a move that could not put it back): nothing to move, the next
+    // checkout starts from the current files.
+    const tree =
+      own.worktree && (await exists(own.worktree))
+        ? await this.treeOf(record, own)
+        : null;
+    if (!tree || !own.baseline || !task.branch) {
       own.move = false;
       return "";
     }
@@ -1287,10 +1353,19 @@ export class Orchestrator {
         own.baseline,
       );
     } catch (error) {
-      // Put back on its saved state: its admin dir is found again.
+      // Made again or not, its admin dir is found again next time. Its move
+      // and worktree change only on success (FE-100/O3).
       own.gitDir = null;
+      void this.save(record).catch(() => {});
+      const why = `could not carry its work onto the checkout's current files (${messageOf(error)})`;
+      if (error instanceof MoveFailed && !error.restored)
+        throw new Error(
+          `${why}, and its checkout could not be made again. Its work is kept in git at ${error.ref} (commit ${error.commit.slice(0, 12)}); a retry starts over from the project's current files`,
+        );
       throw new Error(
-        `could not carry its work onto the checkout's current files (${messageOf(error)}); its checkout holds its work as before`,
+        error instanceof MoveFailed
+          ? `${why}; its checkout was put back and holds its work as before`
+          : `${why}; its checkout holds its work as before`,
       );
     }
     own.move = false;
@@ -1854,13 +1929,44 @@ export class Orchestrator {
     record: RunRecord,
     task: OrchestrationTask,
     full: boolean,
-  ): OrchestrationTask & { waitingFor?: string } {
-    const waitingFor = this.waitingFor(record, task);
+  ): OrchestrationTask {
     return {
-      ...task,
+      ...this.withWaiting(record, task),
       prompt: full ? task.prompt : cut(task.prompt, 600),
       result: full ? task.result : cut(task.result, 2_000),
-      ...(waitingFor ? { waitingFor } : {}),
+    };
+  }
+
+  /**
+   * `task` with why it has not started, when it is queued (FE-100/O5):
+   * the page draws it, and a cancelled dependency shows it as blocked.
+   */
+  private withWaiting(
+    record: RunRecord,
+    task: OrchestrationTask,
+  ): OrchestrationTask {
+    const waitingFor = this.waitingFor(record, task);
+    if (!waitingFor) return task;
+    const cancelled =
+      task.status === "queued"
+        ? task.dependsOn.find(
+            (id) =>
+              record.run.tasks.find((entry) => entry.id === id)?.status ===
+              "cancelled",
+          )
+        : undefined;
+    return {
+      ...task,
+      waitingFor,
+      ...(cancelled ? { cancelledDependency: cancelled } : {}),
+    };
+  }
+
+  /** The run as the page sees it: whole, each queued task with its wait. */
+  private shown(record: RunRecord): OrchestrationRun {
+    return {
+      ...record.run,
+      tasks: record.run.tasks.map((task) => this.withWaiting(record, task)),
     };
   }
 
@@ -1870,7 +1976,7 @@ export class Orchestrator {
     await this.load();
     return [...this.records.values()]
       .filter((record) => record.run.workspace === workspace)
-      .map((record) => record.run)
+      .map((record) => this.shown(record))
       .sort((a, b) => b.createdAt - a.createdAt);
   }
 
@@ -1880,7 +1986,9 @@ export class Orchestrator {
   ): Promise<OrchestrationRun | null> {
     await this.load();
     const record = this.records.get(runId);
-    return record && record.run.workspace === workspace ? record.run : null;
+    return record && record.run.workspace === workspace
+      ? this.shown(record)
+      : null;
   }
 
   private async recordIn(workspace: string, runId: string): Promise<RunRecord> {
@@ -1924,16 +2032,20 @@ export class Orchestrator {
     if (existing) {
       if (existing.run.workspace !== proposal.workspace)
         throw new Error("That proposal belongs to another project.");
-      return existing.run;
+      return this.shown(existing);
     }
+    // Several runs may be open in a project at once, each tied to its own
+    // lead (FE-100/O4); their tasks wait on each other's files. One lead's
+    // conversation holds one open run: its control env names that run.
     const open = [...this.records.values()].find(
       (record) =>
         record.run.workspace === proposal.workspace &&
+        record.run.lead === proposal.lead &&
         (record.run.status === "active" || record.run.status === "paused"),
     );
     if (open)
       throw new Error(
-        `Run "${open.run.id}" is still ${open.run.status} in this project. Stop or finish it first.`,
+        `This conversation already leads a run that is ${open.run.status === "active" ? "running" : "paused"}. Stop or finish it first, or plan this from another conductor.`,
       );
     const folder = await this.deps.folderOf(proposal.workspace);
     if (!folder) throw new Error("This project has no folder here.");
@@ -2013,7 +2125,7 @@ export class Orchestrator {
       (error: unknown) => console.error("Unable to brief the lead", error),
     );
     this.pump(record);
-    return run;
+    return this.shown(record);
   }
 
   private async taskFrom(
@@ -2074,14 +2186,14 @@ export class Orchestrator {
       this.note(record, task.id);
     });
     this.pump(record);
-    return record.run;
+    return this.shown(record);
   }
 
   async pause(workspace: string, runId: string): Promise<OrchestrationRun> {
     const record = await this.recordIn(workspace, runId);
-    return this.serial(runId, async () => {
+    await this.serial(runId, async () => {
       const { run } = record;
-      if (run.status !== "active") return run;
+      if (run.status !== "active") return;
       run.status = "paused";
       run.reason =
         "Paused by the user. Resume continues interrupted workers in their own checkouts.";
@@ -2094,8 +2206,8 @@ export class Orchestrator {
         record,
         run.tasks.map((task) => task.id),
       );
-      return run;
     });
+    return this.shown(record);
   }
 
   async resume(workspace: string, runId: string): Promise<OrchestrationRun> {
@@ -2128,14 +2240,14 @@ export class Orchestrator {
       () => {},
     );
     this.pump(record);
-    return run;
+    return this.shown(record);
   }
 
   async stop(workspace: string, runId: string): Promise<OrchestrationRun> {
     const record = await this.recordIn(workspace, runId);
-    return this.serial(runId, async () => {
+    await this.serial(runId, async () => {
       const { run } = record;
-      if (run.status === "stopped" || run.status === "finished") return run;
+      if (run.status === "stopped" || run.status === "finished") return;
       run.status = "stopped";
       run.reason = "Stopped by the user.";
       this.revoke(run.id);
@@ -2152,8 +2264,95 @@ export class Orchestrator {
         record,
         run.tasks.map((task) => task.id),
       );
-      return run;
     });
+    return this.shown(record);
+  }
+
+  /**
+   * What a stopped run left in the project's git (FE-100/O2): the worktrees
+   * it kept with unreviewed work, its branches, its baseline and saved refs.
+   */
+  async leftovers(workspace: string, runId: string): Promise<RunLeftovers> {
+    const record = await this.recordIn(workspace, runId);
+    if (record.run.status !== "stopped")
+      throw new Error("Only a stopped run can be cleaned up.");
+    return this.serial(runId, () => this.leftoversOf(record));
+  }
+
+  private async leftoversOf(record: RunRecord): Promise<RunLeftovers> {
+    const found = await runLeftovers(
+      record.folder,
+      record.run.id,
+      join(this.deps.dataDir, "worktrees", record.run.id),
+    );
+    const real = async (path: string) => realpath(path).catch(() => path);
+    const owners = new Map<string, OrchestrationTask>();
+    for (const task of record.run.tasks) {
+      const tree = record.tasks[task.id]?.worktree;
+      if (tree) owners.set(await real(tree), task);
+    }
+    const worktrees: RunLeftovers["worktrees"] = [];
+    for (const path of found.worktrees) {
+      const task = owners.get(await real(path)) ?? null;
+      worktrees.push({
+        path,
+        taskId: task?.id ?? null,
+        title: task?.title ?? null,
+      });
+    }
+    return { worktrees, branches: found.branches, refs: found.refs };
+  }
+
+  /**
+   * Remove every worktree, branch and ref a stopped run left (FE-100/O2),
+   * after the user confirmed the list {@link leftovers} gave. A worker's
+   * transcript stays readable: it is kept under the folder its CLI used.
+   *
+   * @throws Naming what could not be removed; the rest is gone.
+   */
+  async cleanUp(workspace: string, runId: string): Promise<OrchestrationRun> {
+    const record = await this.recordIn(workspace, runId);
+    await this.serial(runId, async () => {
+      const { run } = record;
+      if (run.status !== "stopped")
+        throw new Error("Only a stopped run can be cleaned up.");
+      const found = await this.leftoversOf(record);
+      const failed = await removeLeftovers(record.folder, {
+        worktrees: found.worktrees.map((tree) => tree.path),
+        branches: found.branches,
+        refs: found.refs,
+      });
+      await rm(join(this.deps.dataDir, "worktrees", run.id), {
+        recursive: true,
+        force: true,
+      }).catch(() => {});
+      for (const task of run.tasks) {
+        const own = this.own(record, task);
+        if (own.scratch) {
+          await rm(own.scratch, { recursive: true, force: true }).catch(
+            () => {},
+          );
+          own.scratch = null;
+        }
+        this.placeTree(record, task, own, null);
+        own.gitDir = null;
+        own.baseline = null;
+        own.move = false;
+        task.branch = null;
+      }
+      for (const [folder, worker] of this.workers)
+        if (worker.record === record) this.workers.delete(folder);
+      run.cleanedAt = Date.now();
+      this.touch(
+        record,
+        run.tasks.map((task) => task.id),
+      );
+      if (failed.length)
+        throw new Error(
+          `Could not remove ${failed.length === 1 ? "this" : "these"}: ${failed.slice(0, 10).join(", ")}${failed.length > 10 ? ` and ${failed.length - 10} more` : ""}.`,
+        );
+    });
+    return this.shown(record);
   }
 
   async cancelTask(
@@ -2166,7 +2365,7 @@ export class Orchestrator {
       this.cancel(record, this.task(record, taskId)),
     );
     this.pump(record);
-    return record.run;
+    return this.shown(record);
   }
 
   /** Stop every running worker, leaving each `status`. */

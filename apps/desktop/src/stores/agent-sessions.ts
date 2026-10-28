@@ -249,6 +249,28 @@ const olderAttempt = (next: ClaudeUsage | null, shown: ClaudeUsage | null) =>
   (next?.fetchedAt ?? 0) < (shown?.fetchedAt ?? 0);
 
 /**
+ * How often a workspace is listed again while one of its sub-agents shows
+ * working (FE-100/S2).
+ *
+ * NOTE: A background sub-agent can end, or go still, without a write the
+ * watcher would see: its conversation sits quiet, and its own last write was
+ * before. Only while one shows working; no listing is polled otherwise.
+ */
+const SUBAGENT_POLL_MS = 30_000;
+
+/** Whether one of `sessions`' sub-agents shows working. */
+function subagentWorking(
+  sessions: AgentSession[],
+  live: Record<string, boolean>,
+): boolean {
+  return sessions.some((session) =>
+    session.subagents.some(
+      (sub) => live[subagentKey(session, sub)] ?? sub.working,
+    ),
+  );
+}
+
+/**
  * Whether two serializable answers say the same, so the rail need not redraw.
  */
 const sameJson = (a: unknown, b: unknown) =>
@@ -431,9 +453,35 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       // but not on every write of it.
       if (!parent) relistSoon(activity.workspace);
     });
+    // Listed again every SUBAGENT_POLL_MS while a sub-agent shows working.
+    const polls = new Map<string, ReturnType<typeof setInterval>>();
+    const poll = (state: AgentSessionsState) => {
+      for (const [workspace, sessions] of Object.entries(state.byWorkspace)) {
+        const busy = subagentWorking(sessions, state.live);
+        const timer = polls.get(workspace);
+        if (busy && !timer)
+          polls.set(
+            workspace,
+            setInterval(() => {
+              // A hidden window is listed again when it is shown.
+              if (document.visibilityState !== "hidden")
+                void get().load(workspace);
+            }, SUBAGENT_POLL_MS),
+          );
+        else if (!busy && timer) {
+          clearInterval(timer);
+          polls.delete(workspace);
+        }
+      }
+    };
+    poll(get());
+    const stopPoll = useAgentSessions.subscribe(poll);
     return () => {
       stopWritten();
       stopActivity();
+      stopPoll();
+      for (const timer of polls.values()) clearInterval(timer);
+      polls.clear();
     };
   },
 
@@ -449,7 +497,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       void get().loadCodexUsage(workspace);
       const previous = get().byWorkspace[workspace];
       // Unchanged: keep the old array, so the rail does not redraw.
-      if (
+      const unchanged =
         previous &&
         previous.length === listed.length &&
         previous.every(
@@ -464,24 +512,31 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
             sameSubagents(entry.subagents, listed[index]?.subagents ?? []) &&
             entry.background.running === listed[index]?.background.running &&
             entry.background.total === listed[index]?.background.total,
-        )
-      )
-        return;
+        );
       // NOTE: A fresh listing is the truth. What the watcher said about these
-      // conversations before it is older, and is dropped.
+      // conversations before it is older, and is dropped, even when the
+      // listing itself did not change: a sub-agent the watcher last saw
+      // working may have ended since without a write it would see.
       set((state) => {
+        const stale = listed.flatMap((entry) => [
+          agentKey(entry),
+          ...entry.subagents.map((sub) => subagentKey(entry, sub)),
+        ]);
+        const liveStale = stale.some((key) => key in state.live);
+        const cardsStale = listed.some(
+          (entry) => agentKey(entry) in state.cards,
+        );
+        if (unchanged && !liveStale && !cardsStale) return state;
         const live = { ...state.live };
         const cards = { ...state.cards };
-        for (const entry of listed) {
-          delete live[agentKey(entry)];
-          delete cards[agentKey(entry)];
-          for (const sub of entry.subagents)
-            delete live[subagentKey(entry, sub)];
-        }
+        for (const key of stale) delete live[key];
+        for (const entry of listed) delete cards[agentKey(entry)];
         return {
-          byWorkspace: { ...state.byWorkspace, [workspace]: listed },
-          live,
-          cards,
+          byWorkspace: unchanged
+            ? state.byWorkspace
+            : { ...state.byWorkspace, [workspace]: listed },
+          live: liveStale ? live : state.live,
+          cards: cardsStale ? cards : state.cards,
         };
       });
     } catch {

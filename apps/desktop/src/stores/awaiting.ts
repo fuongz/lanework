@@ -70,6 +70,8 @@ interface AwaitingState {
 
 let watchers = 0;
 let stop: (() => void) | null = null;
+/** Keys of conversations that are orchestration workers. */
+const workers = new Set<string>();
 
 export const useAwaiting = create<AwaitingState>((set) => {
   /** Apply one event to the map; the same map back when it changes nothing. */
@@ -86,6 +88,8 @@ export const useAwaiting = create<AwaitingState>((set) => {
     const key = awaitingKey(event.workspace, event.conversation);
     const entry = byKey[key];
     if (event.type === "permission") {
+      // A worker asks its lead, never the person (FE-100/D3).
+      if (workers.has(key)) return byKey;
       const request = requestOf(event.request);
       if (entry?.requests.some((item) => item.id === request.id)) return byKey;
       return {
@@ -132,6 +136,26 @@ export const useAwaiting = create<AwaitingState>((set) => {
     // given meanwhile is not brought back by an older list.
     let early: ConversationEvent[] | null = [];
     let disposed = false;
+    // Orchestration workers, from the runs main broadcasts (FE-100/D3): what
+    // one asks goes to its lead, so it is no island and no ping here. One
+    // that asked before its run named it is dropped once it does.
+    const offRuns = window.desktop?.orchestration?.onChange((event) => {
+      const named: string[] = [];
+      for (const task of event.run.tasks) {
+        if (!task.conversation) continue;
+        const key = awaitingKey(event.workspace, task.conversation);
+        if (workers.has(key)) continue;
+        workers.add(key);
+        named.push(key);
+      }
+      if (named.length === 0) return;
+      set((state) => {
+        if (!named.some((key) => key in state.byKey)) return state;
+        const byKey = { ...state.byKey };
+        for (const key of named) delete byKey[key];
+        return { byKey };
+      });
+    });
     const off = surface.onEvent((event) => {
       if (early) early.push(event);
       set((state) => {
@@ -157,6 +181,7 @@ export const useAwaiting = create<AwaitingState>((set) => {
     return () => {
       disposed = true;
       off();
+      offRuns?.();
     };
   };
 

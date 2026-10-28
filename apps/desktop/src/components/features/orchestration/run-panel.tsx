@@ -7,6 +7,7 @@ import {
   CheckmarkCircle02Icon,
   CircleIcon,
   Clock01Icon,
+  Delete02Icon,
   PauseIcon,
   PlayIcon,
   StopCircleIcon,
@@ -20,10 +21,12 @@ import type {
   NeedsInput,
   OrchestrationRun,
   OrchestrationTask,
+  RunLeftovers,
   RunStatus,
   TaskStatus,
 } from "#/../shared/orchestration";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
+import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import {
   AlertDialog,
@@ -38,7 +41,7 @@ import {
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { ipcMessage } from "#/lib/ipc-error";
-import { taskLabel, taskTone } from "#/lib/orchestration-status";
+import { shownStatus, taskLabel, taskTone } from "#/lib/orchestration-status";
 import { cn } from "#/lib/utils";
 import { useProposalEdits } from "./orchestration-panel.store";
 
@@ -61,18 +64,19 @@ const CANCELLABLE: readonly TaskStatus[] = [
 const ERROR_FOLD = 160;
 
 function StatusMark({ task }: { task: OrchestrationTask }) {
-  if (task.status === "running" || task.status === "cancelling")
+  const status = shownStatus(task);
+  if (status === "running" || status === "cancelling")
     return <OrbitSpinner className={cn("size-3.5 shrink-0", taskTone(task))} />;
   const icon =
-    task.status === "completed"
+    status === "completed"
       ? CheckmarkCircle02Icon
-      : task.status === "failed" || task.status === "blocked"
+      : status === "failed" || status === "blocked"
         ? Alert02Icon
-        : task.status === "cancelled"
+        : status === "cancelled"
           ? CancelCircleIcon
-          : task.status === "interrupted"
+          : status === "interrupted"
             ? StopCircleIcon
-            : task.status === "queued"
+            : status === "queued"
               ? Clock01Icon
               : CircleIcon;
   return (
@@ -164,6 +168,61 @@ function WorkerError({ id, error }: { id: string; error: string }) {
   );
 }
 
+/** What a stopped run left behind, as the cleanup dialog lists it. */
+function LeftoverList({ left }: { left: RunLeftovers }) {
+  const empty =
+    !left.worktrees.length && !left.branches.length && !left.refs.length;
+  if (empty)
+    return (
+      <p className="text-muted-foreground text-[12px]">
+        Nothing is left in git: no checkout, branch or ref.
+      </p>
+    );
+  const groups: { label: string; items: { key: string; text: string }[] }[] = [
+    {
+      label: "Checkouts",
+      items: left.worktrees.map((tree) => ({
+        key: tree.path,
+        text: tree.title ? `${tree.title}: ${tree.path}` : tree.path,
+      })),
+    },
+    {
+      label: "Branches",
+      items: left.branches.map((branch) => ({ key: branch, text: branch })),
+    },
+    {
+      label: "Lanework refs",
+      items: left.refs.map((ref) => ({ key: ref, text: ref })),
+    },
+  ];
+  return (
+    <div className="flex max-h-64 min-w-0 flex-col gap-2.5 overflow-y-auto">
+      {groups.map((group) =>
+        group.items.length ? (
+          <section key={group.label} className="flex min-w-0 flex-col gap-1">
+            <h3 className="text-[12px] font-medium">
+              {group.label}{" "}
+              <span className="text-muted-foreground tabular-nums">
+                {group.items.length}
+              </span>
+            </h3>
+            <ul className="flex min-w-0 flex-col gap-0.5">
+              {group.items.map((item) => (
+                <li
+                  key={item.key}
+                  className="text-muted-foreground font-mono text-[11px] break-all select-text"
+                >
+                  {item.text}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null,
+      )}
+    </div>
+  );
+}
+
 /**
  * A run's workers (FE-87): each one's status, what it waits on, and the
  * controls the user has over the run. A worker opens its transcript,
@@ -171,7 +230,9 @@ function WorkerError({ id, error }: { id: string; error: string }) {
  * waits here for Allow, or the cancel button (FE-89/D11).
  *
  * Pause sits in the header; Stop, which cannot be undone, sits apart at the
- * foot and asks first (FE-91). A polite live region says when a worker
+ * foot and asks first (FE-91). A stopped run offers to remove the checkouts,
+ * branches and refs it left, after listing them (FE-100/O2). A queued task
+ * says what it waits on (FE-100/O5). A polite live region says when a worker
  * fails, is blocked, or waits on the lead.
  */
 export function RunPanel({
@@ -194,6 +255,10 @@ export function RunPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
+  const [confirmClean, setConfirmClean] = useState(false);
+  /** What the stopped run left, read when the cleanup dialog opens. */
+  const [left, setLeft] = useState<RunLeftovers | null>(null);
+  const [leftError, setLeftError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const navigate = useNavigate();
   const base = useId();
@@ -245,6 +310,27 @@ export function RunPanel({
   };
   const surface = window.desktop?.orchestration;
 
+  // Read again each time the cleanup dialog opens: the list it confirms is
+  // what is there now (FE-100/O2).
+  useEffect(() => {
+    if (!confirmClean || !surface) return;
+    let gone = false;
+    setLeft(null);
+    setLeftError(null);
+    surface
+      .leftovers(workspace, run.id)
+      .then((found) => {
+        if (!gone) setLeft(found);
+      })
+      .catch((caught: unknown) => {
+        if (!gone)
+          setLeftError(ipcMessage(caught, "Could not read what is left."));
+      });
+    return () => {
+      gone = true;
+    };
+  }, [confirmClean, surface, workspace, run.id]);
+
   const accepted = run.tasks.filter((task) => task.accepted).length;
   const running = run.tasks.filter((task) => task.status === "running").length;
   const waiting = run.tasks.filter((task) => task.needsInput).length;
@@ -253,6 +339,8 @@ export function RunPanel({
   ).length;
   const queued = run.tasks.filter((task) => task.status === "queued").length;
   const live = run.status === "active" || run.status === "paused";
+  // A stopped run keeps unreviewed checkouts; the user removes them here.
+  const cleanable = run.status === "stopped" && !run.cleanedAt;
   // Read when the Stop dialog closes, after the stop's answer has landed.
   const liveRef = useRef(live);
   liveRef.current = live;
@@ -373,6 +461,13 @@ export function RunPanel({
                 : null;
             const errorId = `${base}-${task.id}-error`;
             const needsId = `${base}-${task.id}-needs`;
+            const waitId = `${base}-${task.id}-wait`;
+            // Why it has not started (FE-100/O5); a wider scope says so
+            // itself, below.
+            const waitingFor =
+              task.status === "queued" && !wider && task.waitingFor
+                ? task.waitingFor
+                : null;
             return (
               <li
                 key={task.id}
@@ -394,6 +489,7 @@ export function RunPanel({
                     aria-label={`Open ${task.title}'s conversation, ${taskLabel(task)}`}
                     aria-describedby={
                       [
+                        waitingFor ? waitId : null,
                         task.needsInput ? needsId : null,
                         task.error ? errorId : null,
                       ]
@@ -489,8 +585,22 @@ export function RunPanel({
                 </div>
                 {/* Out of the row's button, so the error can be expanded
                     and selected. */}
-                {(task.needsInput || task.error || wider) && (
+                {(task.needsInput || task.error || wider || waitingFor) && (
                   <div className="flex min-w-0 flex-col gap-0.5 pl-5.5">
+                    {waitingFor && (
+                      <p
+                        id={waitId}
+                        className={cn(
+                          "line-clamp-2 text-[11px] break-words",
+                          task.cancelledDependency
+                            ? "text-tone-amber"
+                            : "text-muted-foreground",
+                        )}
+                        title={waitingFor}
+                      >
+                        {waitingFor}
+                      </p>
+                    )}
                     {task.needsInput && (
                       <p
                         id={needsId}
@@ -534,7 +644,7 @@ export function RunPanel({
         </p>
       )}
 
-      {(someDone || (live && surface)) && (
+      {(someDone || ((live || cleanable) && surface)) && (
         <footer className="text-muted-foreground border-border flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-t px-3 py-2 text-[11px]">
           {someDone && (
             <p className="min-w-0 flex-1">
@@ -559,6 +669,24 @@ export function RunPanel({
                 aria-hidden="true"
               />
               {busy === "stop" ? "Stopping…" : "Stop run"}
+            </Button>
+          )}
+          {cleanable && surface && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy !== null}
+              onClick={() => setConfirmClean(true)}
+              title="Remove the checkouts, branches and refs this run left"
+              className="ml-auto"
+            >
+              <HugeiconsIcon
+                icon={Delete02Icon}
+                strokeWidth={2}
+                data-icon="inline-start"
+                aria-hidden="true"
+              />
+              {busy === "clean" ? "Cleaning up…" : "Clean up leftovers"}
             </Button>
           )}
         </footer>
@@ -604,6 +732,58 @@ export function RunPanel({
                 }}
               >
                 {busy === "stop" ? "Stopping…" : "Stop run"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {surface && cleanable && (
+        <AlertDialog open={confirmClean} onOpenChange={setConfirmClean}>
+          <AlertDialogContent
+            // Cleaned, that button is gone: the title takes the focus.
+            finalFocus={() => headingRef.current}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>Clean up this run?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This removes what the stopped run left in the project's git.
+                Work in these checkouts that was never reviewed is lost. The
+                workers' conversations stay readable.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {leftError ? (
+              <p role="alert" className="text-destructive text-[12px]">
+                {leftError}
+              </p>
+            ) : left ? (
+              <LeftoverList left={left} />
+            ) : (
+              <ListSkeleton
+                label="Reading what the run left"
+                rows={3}
+                className="rounded-lg"
+              />
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={busy === "clean"}>
+                Keep them
+              </AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                // `border-0`: see the Stop dialog above.
+                className="border-0"
+                disabled={busy === "clean" || left === null}
+                onClick={async () => {
+                  await act(
+                    "clean",
+                    () => surface.cleanUp(workspace, run.id),
+                    "Could not clean up the run.",
+                  );
+                  setConfirmClean(false);
+                }}
+              >
+                {busy === "clean" ? "Removing…" : "Remove all"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

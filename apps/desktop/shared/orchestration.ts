@@ -175,6 +175,18 @@ export interface OrchestrationTask {
   conversation: string | null;
   /** The worker's branch in its own worktree, once it has one. */
   branch: string | null;
+  /**
+   * Why a queued task has not started, as main worked it out when it sent
+   * the task (FE-100/O5): a dependency, files another task holds (in this
+   * run or another open run of the project), a worker slot, the user.
+   * Absent when it is not queued, or may start now.
+   */
+  waitingFor?: string;
+  /**
+   * The dependency it waits on was cancelled, by id: it never starts by
+   * itself, so the page shows it as blocked (FE-100/O5).
+   */
+  cancelledDependency?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -201,8 +213,29 @@ export interface OrchestrationRun {
    */
   teamLead: string | null;
   tasks: OrchestrationTask[];
+  /**
+   * When the user removed what a stopped run left behind: its worktrees,
+   * branches and refs (FE-100/O2). Absent until then.
+   */
+  cleanedAt?: number | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * What a stopped run left in the project's git (FE-100/O2): the worktrees
+ * kept with unreviewed work, their `lanework/<run>/<task>` branches, and the
+ * app's own refs under `refs/lanework/baseline/` and `refs/lanework/saved/`.
+ */
+export interface RunLeftovers {
+  worktrees: {
+    path: string;
+    /** The task it was made for; null for one no task names any more. */
+    taskId: string | null;
+    title: string | null;
+  }[];
+  branches: string[];
+  refs: string[];
 }
 
 // ─── Proposal ───────────────────────────────────────────────────────────────
@@ -1478,6 +1511,10 @@ export const orchestrationChannels = {
   cancelTask: "orchestration:cancel-task",
   /** The user approves the wider write scopes a queued task waits on (D11). */
   approveScope: "orchestration:approve-scope",
+  /** What a stopped run left behind in git (FE-100/O2). */
+  leftovers: "orchestration:leftovers",
+  /** Remove what a stopped run left behind, after the user confirmed. */
+  cleanUp: "orchestration:clean-up",
   /** Main → renderer: a run changed. */
   changed: "orchestration:changed",
 } as const;
@@ -1561,6 +1598,8 @@ export interface DesktopOrchestrationApi {
     runId: string,
     taskId: string,
   ) => Promise<OrchestrationRun>;
+  leftovers: (workspace: string, runId: string) => Promise<RunLeftovers>;
+  cleanUp: (workspace: string, runId: string) => Promise<OrchestrationRun>;
   onChange: (listener: (event: OrchestrationEvent) => void) => () => void;
 }
 
@@ -1628,6 +1667,16 @@ export interface OrchestrationMainHandlers {
     runId: string,
     taskId: string,
   ) => Promise<OrchestrationRun>;
+  /**
+   * What a stopped run left behind (FE-100/O2); refused for a run that is
+   * not stopped.
+   */
+  leftovers: (workspace: string, runId: string) => Promise<RunLeftovers>;
+  /**
+   * Remove every worktree, branch and ref {@link leftovers} lists, then mark
+   * the run cleaned; throws naming what could not be removed.
+   */
+  cleanUp: (workspace: string, runId: string) => Promise<OrchestrationRun>;
   /**
    * One control call from a lead, already authenticated: `runId` is the run
    * its token belongs to.

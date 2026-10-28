@@ -83,6 +83,17 @@ export function workerFolderOf(
   return orchestrator().workerFolder(workspace, conversation);
 }
 
+/**
+ * Whether `conversation` is an orchestration worker's: its asks go to its
+ * lead, never to the person (FE-100/O1).
+ */
+export function isWorkerConversation(
+  workspace: string,
+  conversation: string,
+): boolean {
+  return orchestrator().workerFolder(workspace, conversation) !== null;
+}
+
 export const orchestrationMain: OrchestrationMainHandlers = {
   runs: (workspace) => orchestrator().runs(workspace),
   run: (workspace, runId) => orchestrator().run(workspace, runId),
@@ -94,6 +105,8 @@ export const orchestrationMain: OrchestrationMainHandlers = {
     orchestrator().cancelTask(workspace, runId, taskId),
   approveScope: (workspace, runId, taskId) =>
     orchestrator().approveScope(workspace, runId, taskId),
+  leftovers: (workspace, runId) => orchestrator().leftovers(workspace, runId),
+  cleanUp: (workspace, runId) => orchestrator().cleanUp(workspace, runId),
   control: (runId, call, requestId) =>
     orchestrator().control(runId, call, requestId),
 };

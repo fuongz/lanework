@@ -13,12 +13,12 @@ import {
   isAgentSessionId,
 } from "../../../shared/terminal";
 import {
-  claudeSubagentEnded,
-  claudeSubagentWorking,
+  claudeSubagentGoing,
   claudeWorking,
   codexWorking,
   lastActivity,
   STALE_MS,
+  SUBAGENT_STALE_MS,
 } from "../transcripts/activity";
 import {
   CHUNK,
@@ -35,6 +35,7 @@ import { backgroundCount, readTranscriptTasks } from "./background-tasks";
 // Transitional re-exports (FE-80): import these from `../transcripts/`.
 export {
   claudeEndedSubagents,
+  claudeSubagentGoing,
   claudeSubagentWorking,
   claudeWorking,
   codexWorking,
@@ -299,7 +300,8 @@ async function claudeSubagents(
           )
           .find(Boolean) ??
         "Sub-agent";
-      const recent = Date.now() - info.mtimeMs <= STALE_MS;
+      // A background one may go on long after its conversation went quiet.
+      const recent = Date.now() - info.mtimeMs <= SUBAGENT_STALE_MS;
       const tail = recent
         ? lines(await readRange(file, Math.max(0, info.size - CHUNK), CHUNK), {
             head: info.size <= CHUNK,
@@ -315,8 +317,7 @@ async function claudeSubagents(
         updatedAt: info.mtime.toISOString(),
         working:
           recent &&
-          claudeSubagentWorking(tail) &&
-          !(await claudeSubagentEnded(file)),
+          (await claudeSubagentGoing(file, { mtimeMs: info.mtimeMs, tail })),
       };
     }),
   );

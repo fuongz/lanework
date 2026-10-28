@@ -38,7 +38,7 @@ import { LEAD_REF_PATTERN } from "../../../shared/orchestration";
 import { isAgentSessionId } from "../../../shared/terminal";
 import { broadcast, handle } from "../ipc";
 import { notify } from "../notifications";
-import { workerFolderOf } from "../orchestration";
+import { isWorkerConversation, workerFolderOf } from "../orchestration";
 import { bindConductorConversation } from "../terminal";
 import { agentHomeDir } from "../test-seams";
 import { knownWorkspace, terminalFolder } from "../workspaces";
@@ -367,14 +367,28 @@ export function registerConversation(
   // same events the page gets.
   const awaiting = createAwaitingLedger();
   const tell = (event: ConversationEvent) => {
-    const asked = awaiting.apply(
-      event,
-      () =>
-        engines.pending(event.workspace, event.conversation)?.agent ?? "claude",
-    );
     broadcast(conversationChannels.event, event);
-    if (asked && event.type === "permission")
-      void notifyAsked(event.workspace, event.conversation, asked);
+    // Read once the event's other listeners ran: orchestration learns a new
+    // Codex worker's id from this same event (FE-100/O1).
+    queueMicrotask(() => {
+      // A worker of an orchestration run asks its lead, never the person:
+      // no island, no notification, no ping (FE-100/O1).
+      if (
+        typeof event.conversation === "string" &&
+        isWorkerConversation(event.workspace, event.conversation)
+      ) {
+        awaiting.clear(event.workspace, event.conversation);
+        return;
+      }
+      const asked = awaiting.apply(
+        event,
+        () =>
+          engines.pending(event.workspace, event.conversation)?.agent ??
+          "claude",
+      );
+      if (asked && event.type === "permission")
+        void notifyAsked(event.workspace, event.conversation, asked);
+    });
   };
   /**
    * Tell the person an agent waits on them. A click opens its conversation;

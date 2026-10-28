@@ -32,6 +32,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   readlink,
   realpath,
@@ -428,6 +429,25 @@ export interface MovedCheckout extends WorkerCheckout {
 }
 
 /**
+ * A move that failed (FE-100/O3), and where the worker's work is now.
+ *
+ * `restored`: the worktree is back as it was, on its saved state with its
+ * old baseline. Otherwise it could not be made again, and the work is only
+ * in git, at `ref` (commit `commit`), until the run is cleaned up.
+ */
+export class MoveFailed extends Error {
+  override name = "MoveFailed";
+  constructor(
+    message: string,
+    readonly restored: boolean,
+    readonly ref: string,
+    readonly commit: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
  * Move a worker's work onto the lead checkout's files as they are now
  * (FE-90/D4): after its review conflicted, a retry starts from what it
  * conflicted with.
@@ -438,8 +458,12 @@ export interface MovedCheckout extends WorkerCheckout {
  * A file both sides changed keeps conflict markers for the worker to resolve.
  * Nothing is staged: everything after the new baseline is the worker's.
  *
- * When the changes cannot be applied at all, the worktree is put back as it
- * was, on its saved state with its old baseline, and this throws.
+ * Anything that fails once the worktree is removed, making it again
+ * included, puts it back as it was: its saved state, on its old baseline
+ * (FE-100/O3).
+ *
+ * @throws {MoveFailed} After it was put back, or when it could not be: the
+ *   error says which, and where the work is.
  */
 export async function moveWorktree(
   root: string,
@@ -472,10 +496,10 @@ export async function moveWorktree(
       saved,
     ])
   ).stdout;
-  await removeWorktree(root, tree.path, branch);
-  const fresh = await createWorktree(root, tree.path, branch);
   const dir = await mkdtemp(join(tmpdir(), "lanework-move-"));
   try {
+    await removeWorktree(root, tree.path, branch);
+    const fresh = await createWorktree(root, tree.path, branch);
     const file = join(dir, "work.patch");
     await writeFile(file, patch, { mode: 0o600 });
     let conflicts: string[] = [];
@@ -504,20 +528,26 @@ export async function moveWorktree(
     await gitText(root, ["update-ref", "-d", keep]);
     return { ...fresh, conflicts };
   } catch (error) {
-    // Put it back as it was: the saved state, on the old baseline.
-    await removeWorktree(root, fresh.path, branch).catch(() => {});
-    await gitText(root, [
-      "worktree",
-      "add",
-      "-b",
-      branch,
-      "--",
-      tree.path,
-      saved,
-    ]);
-    await gitText(root, ["update-ref", baselineRef(branch), baseline]);
+    const why = error instanceof Error ? error.message : String(error);
+    // Put it back as it was: the saved state, on the old baseline. The
+    // saved ref goes only once the worktree holds that state again.
+    try {
+      await removeWorktree(root, tree.path, branch);
+      await gitText(root, [
+        "worktree",
+        "add",
+        "-B",
+        branch,
+        "--",
+        tree.path,
+        saved,
+      ]);
+      await gitText(root, ["update-ref", baselineRef(branch), baseline]);
+    } catch {
+      throw new MoveFailed(why, false, keep, saved);
+    }
     await gitText(root, ["update-ref", "-d", keep]).catch(() => "");
-    throw error;
+    throw new MoveFailed(why, true, keep, saved);
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
@@ -859,4 +889,105 @@ export async function removeWorktree(
   await git(root, ["update-ref", "-d", baselineRef(branch)], [1]).catch(
     () => null,
   );
+}
+
+/** What a run left in `root`'s git (FE-100/O2). */
+export interface GitLeftovers {
+  /** Worktree folders, as git or the run's folder names them. */
+  worktrees: string[];
+  /** Branch names, `lanework/<run>/<task>`. */
+  branches: string[];
+  /** Full ref names under `refs/lanework/baseline/` and `.../saved/`. */
+  refs: string[];
+}
+
+/** The refs under each `prefix` (whole path segments), by full name. */
+async function refsUnder(
+  root: string,
+  prefixes: readonly string[],
+): Promise<string[]> {
+  if (!prefixes.length) return [];
+  const out = await gitText(root, [
+    "for-each-ref",
+    "--format=%(refname)",
+    ...prefixes,
+  ]);
+  return out.split("\n").filter(Boolean);
+}
+
+/**
+ * Everything run `runId` left in `root`'s git: the worktrees on its branches
+ * or under `worktrees` (the run's own folder of worktrees), its branches,
+ * and its baseline and saved refs.
+ */
+export async function runLeftovers(
+  root: string,
+  runId: string,
+  worktrees: string,
+): Promise<GitLeftovers> {
+  const heads = `refs/heads/lanework/${runId}`;
+  const bases = [worktrees, await realpath(worktrees).catch(() => null)].filter(
+    (base): base is string => base !== null,
+  );
+  const inside = (path: string) =>
+    bases.some((base) => {
+      const rel = within(base, path);
+      return rel !== null && rel !== ".";
+    });
+  // Only folders inside the run's own folder: removing one is `rm -rf`, so a
+  // checkout that merely has a run's branch out (the main one, say) is never
+  // a leftover. Its branch stays, as git refuses to delete it.
+  const found = new Set<string>();
+  for (const line of (
+    await gitText(root, ["worktree", "list", "--porcelain"])
+  ).split("\n")) {
+    if (!line.startsWith("worktree ")) continue;
+    const path = line.slice("worktree ".length);
+    if (inside(path)) found.add(path);
+  }
+  // Folders git no longer knows of, left in the run's own folder.
+  for (const name of await readdir(worktrees).catch(() => [] as string[])) {
+    const at = join(worktrees, name);
+    const real = await realpath(at).catch(() => at);
+    if (!found.has(at) && !found.has(real)) found.add(at);
+  }
+  const branches = (await refsUnder(root, [heads])).map((ref) =>
+    ref.slice("refs/heads/".length),
+  );
+  const refs = await refsUnder(root, [
+    `refs/lanework/baseline/${runId}`,
+    `refs/lanework/saved/${runId}`,
+  ]);
+  return { worktrees: [...found].sort(), branches, refs };
+}
+
+/**
+ * Remove what {@link runLeftovers} found: each worktree (forced), each
+ * branch, each ref.
+ *
+ * @returns What is still there afterwards, by name; empty when all of it
+ *   went.
+ */
+export async function removeLeftovers(
+  root: string,
+  left: GitLeftovers,
+): Promise<string[]> {
+  for (const tree of left.worktrees) await removeWorktree(root, tree, null);
+  for (const branch of left.branches)
+    await git(root, ["branch", "-D", "--", branch], [1]).catch(() => null);
+  for (const ref of left.refs)
+    await git(root, ["update-ref", "-d", ref], [1]).catch(() => null);
+  const failed: string[] = [];
+  for (const tree of left.worktrees)
+    if (await lstat(tree).catch(() => null)) failed.push(tree);
+  const still = new Set(
+    await refsUnder(root, [
+      ...left.branches.map((branch) => `refs/heads/${branch}`),
+      ...left.refs,
+    ]).catch(() => [] as string[]),
+  );
+  for (const branch of left.branches)
+    if (still.has(`refs/heads/${branch}`)) failed.push(branch);
+  for (const ref of left.refs) if (still.has(ref)) failed.push(ref);
+  return failed;
 }

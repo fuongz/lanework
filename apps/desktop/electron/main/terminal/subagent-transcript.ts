@@ -17,7 +17,7 @@ import {
 } from "../../../shared/terminal";
 import {
   claudeProjectDir,
-  claudeSubagentWorking,
+  claudeSubagentGoing,
   codexRole,
   codexRollouts,
   codexWorking,
@@ -28,6 +28,7 @@ import {
   STALE_MS,
   tidy,
 } from "./agent-sessions";
+import { workflowRunEnded } from "./background-tasks";
 
 /** The most of a transcript one read takes (FE-35/D10). */
 const SUBAGENT_READ_MAX = 8 * 1024 * 1024;
@@ -95,20 +96,26 @@ export function subagentRequest(args: unknown[]): SubagentRequest {
  * {@link TAIL} (where the report and the state are), with what lies between
  * left out.
  *
- * @returns `fresh` when the file was written within {@link STALE_MS}.
+ * @returns `fresh` when the file was written within {@link STALE_MS}, and
+ *   when it was last written.
  * @throws when `file` is missing or not a file.
  */
-async function readTranscript(
-  file: string,
-): Promise<{ rows: Line[]; truncated: boolean; fresh: boolean }> {
+async function readTranscript(file: string): Promise<{
+  rows: Line[];
+  truncated: boolean;
+  fresh: boolean;
+  mtimeMs: number;
+}> {
   const info = await stat(file);
   if (!info.isFile()) throw new Error("That sub-agent has no transcript.");
   const fresh = Date.now() - info.mtimeMs <= STALE_MS;
+  const { mtimeMs } = info;
   if (info.size <= SUBAGENT_READ_MAX)
     return {
       rows: lines(await readRange(file, 0, info.size), { head: true }),
       truncated: false,
       fresh,
+      mtimeMs,
     };
   const head = lines(await readRange(file, 0, SUBAGENT_READ_MAX - TAIL), {
     head: true,
@@ -116,7 +123,7 @@ async function readTranscript(
   const tail = lines(await readRange(file, info.size - TAIL, TAIL), {
     head: false,
   });
-  return { rows: [...head, ...tail], truncated: true, fresh };
+  return { rows: [...head, ...tail], truncated: true, fresh, mtimeMs };
 }
 
 /** `value` when it is a string with something on it; otherwise null. */
@@ -273,15 +280,18 @@ interface ClaudeMeta {
  * Its report is what it handed back through {@link HANDBACK} when it did.
  * Otherwise, once it is done, its last answer: the text after the last
  * thing it was told or shown.
+ *
+ * @param working Whether it is still going, by the check the capsules use
+ *   ({@link claudeSubagentGoing}, FE-100/S4).
  */
 function claudeSubagentTranscript(
   rows: Line[],
   meta: ClaudeMeta | null,
   {
     folder,
-    fresh,
+    working,
     truncated,
-  }: { folder: string; fresh: boolean; truncated: boolean },
+  }: { folder: string; working: boolean; truncated: boolean },
 ): SubagentTranscript {
   const ref = rows.findIndex((line) => line.type === "fork-context-ref");
   let at = ref + 1;
@@ -346,7 +356,6 @@ function claudeSubagentTranscript(
         failed.add(part.tool_use_id);
   }
 
-  const working = fresh && claudeSubagentWorking(rows);
   let report: string | null = handback;
   if (report === null && !working) {
     const answer = own
@@ -652,8 +661,8 @@ export async function readSubagentTranscript(
   subagentRequest(["-", agent, conversation, sub, run ?? null]);
   if (agent === "codex") {
     const file = await codexSubagentFile(home, folder, conversation, sub);
-    const { rows, ...read } = await readTranscript(file);
-    return codexSubagentTranscript(rows, { folder, ...read });
+    const { rows, fresh, truncated } = await readTranscript(file);
+    return codexSubagentTranscript(rows, { folder, fresh, truncated });
   }
   const dir = join(
     home,
@@ -664,17 +673,33 @@ export async function readSubagentTranscript(
     "subagents",
     ...(run ? ["workflows", run] : []),
   );
-  const { rows, ...read } = await readTranscript(
-    join(dir, `agent-${sub}.jsonl`),
-  ).catch(() => {
+  const file = join(dir, `agent-${sub}.jsonl`);
+  const { rows, truncated, mtimeMs } = await readTranscript(file).catch(() => {
     throw new Error("That sub-agent is not one of this conversation's.");
   });
   const meta = await readRange(join(dir, `agent-${sub}.meta.json`), 0, META_MAX)
     .then((text) => JSON.parse(text) as unknown)
     .catch(() => null);
+  // The same check as the capsules: its conversation's word on its end, and
+  // for a workflow's agent its run's.
+  const working =
+    (await claudeSubagentGoing(file, { mtimeMs, tail: rows })) &&
+    !(
+      run &&
+      (await workflowRunEnded(
+        join(
+          home,
+          ".claude",
+          "projects",
+          claudeProjectDir(folder),
+          `${conversation}.jsonl`,
+        ),
+        run,
+      ).catch(() => false))
+    );
   return claudeSubagentTranscript(
     rows,
     meta && typeof meta === "object" ? (meta as ClaudeMeta) : null,
-    { folder, ...read },
+    { folder, working, truncated },
   );
 }

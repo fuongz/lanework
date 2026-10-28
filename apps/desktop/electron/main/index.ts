@@ -103,11 +103,16 @@ function registerOrchestration(
     const proposal: OrchestrationProposal = parseProposal(args[0]);
     return runs.approve(proposal);
   });
-  for (const action of ["pause", "resume", "stop"] as const)
+  for (const action of ["pause", "resume", "stop", "cleanUp"] as const)
     handle(orchestrationChannels[action], devUrl, (args) => {
       arity(args, 2);
       return runs[action](ipcSlug(args[0]), ipcId(args[1], "runId"));
     });
+  // What a stopped run left behind, for the clean-up dialog (FE-100/D4).
+  handle(orchestrationChannels.leftovers, devUrl, (args) => {
+    arity(args, 2);
+    return runs.leftovers(ipcSlug(args[0]), ipcId(args[1], "runId"));
+  });
   handle(orchestrationChannels.cancelTask, devUrl, (args) => {
     arity(args, 3);
     return runs.cancelTask(

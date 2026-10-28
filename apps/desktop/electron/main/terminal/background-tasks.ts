@@ -23,12 +23,16 @@ import {
   type BackgroundTaskStatus,
   isAgentSessionId,
   isBackgroundTaskId,
-  isClaudeSubagentId,
   isWorkflowRunId,
   type WorkflowAgent,
   type WorkflowPhase,
 } from "../../../shared/terminal";
-import { STALE_MS, transcriptWorking } from "../transcripts/activity";
+import {
+  claudeSubagentGoing,
+  STALE_MS,
+  SUBAGENT_STALE_MS,
+} from "../transcripts/activity";
+import { readJournal } from "../transcripts/journal";
 import {
   CLAUDE_SUBAGENT_FILE,
   claudeProjectDir,
@@ -45,8 +49,6 @@ export { ownUid, type Proc, processTable, visible } from "./process-table";
 const WORKFLOW_AGENT_MAX = 200;
 /** The most of a run's agent files read, newest first: retries included. */
 const WORKFLOW_FILE_MAX = 4 * WORKFLOW_AGENT_MAX;
-/** The most of a run's `journal.jsonl` one read takes, for its order. */
-const JOURNAL_MAX = 256 * 1024;
 /** The most of a workflow agent's `.meta.json` one read takes. */
 const META_MAX = 64 * 1024;
 /** How much of a transcript one read step takes. */
@@ -593,6 +595,44 @@ function tasksOf(parsed: Parsed, transcript: string): BackgroundTask[] {
   return ordered(out);
 }
 
+/**
+ * `tasks`, each background agent no notification ended running or lost by
+ * its OWN file (FE-100/S2), running first again.
+ *
+ * NOTE: Not by its conversation's silence, as {@link tasksOf} judges every
+ * other task: a conversation waits on its background agents without a word.
+ * Lost once its file sat still for {@link SUBAGENT_STALE_MS}; the CLI that
+ * owned it ending first is a `stopped` notification, which `notify` reads.
+ * With no file to go by, the conversation's silence stands.
+ */
+async function withAgents(
+  parsed: Parsed,
+  transcript: string,
+  tasks: BackgroundTask[],
+): Promise<BackgroundTask[]> {
+  // Ended by a notification (a `stopped` one too) or a TaskStop: as it says.
+  const open = (task: BackgroundTask) =>
+    task.kind === "agent" &&
+    task.subagentId !== null &&
+    !parsed.notices.get(task.id)?.status;
+  if (!tasks.some(open)) return tasks;
+  const dir = join(transcript.replace(/\.jsonl$/, ""), "subagents");
+  return ordered(
+    await Promise.all(
+      tasks.map(async (task) => {
+        if (!open(task)) return task;
+        const info = await stat(join(dir, `agent-${task.subagentId}.jsonl`))
+          .then((found) => (found.isFile() ? found : null))
+          .catch(() => null);
+        if (!info) return task;
+        const status: BackgroundTaskStatus =
+          Date.now() - info.mtimeMs <= SUBAGENT_STALE_MS ? "running" : "lost";
+        return status === task.status ? task : { ...task, status };
+      }),
+    ),
+  );
+}
+
 /** `tasks`, running first, then newest. */
 function ordered(tasks: BackgroundTask[]): BackgroundTask[] {
   const running = (task: BackgroundTask) => (task.status === "running" ? 0 : 1);
@@ -615,71 +655,38 @@ export function workflowRunDir(transcript: string, runId: string): string {
 }
 
 /**
- * The order the run's `journal.jsonl` started its agents in, with the phase
- * and label it gave each.
- *
- * NOTE: The journal is the CLI's own, undocumented. It only orders the
- * agents (FE-01/D1): each agent's `.meta.json` says what it is, so a journal
- * of another shape, or none, still lists them all.
- */
-async function journalOrder(
-  dir: string,
-): Promise<
-  Map<string, { at: number; phase: string | null; label: string | null }>
-> {
-  const order = new Map<
-    string,
-    { at: number; phase: string | null; label: string | null }
-  >();
-  const text = await readRange(
-    join(dir, "journal.jsonl"),
-    0,
-    JOURNAL_MAX,
-  ).catch(() => "");
-  for (const part of text.split("\n")) {
-    try {
-      const entry = record(JSON.parse(part));
-      const id = entry?.agentId;
-      if (entry?.type !== "started" || !isClaudeSubagentId(id) || order.has(id))
-        continue;
-      order.set(id, {
-        at: order.size,
-        phase: str(entry.phase),
-        label: str(entry.label),
-      });
-    } catch {
-      // Not a line of it, or cut.
-    }
-  }
-  return order;
-}
-
-/**
  * `task`, a workflow, with its run's agents read from its folder.
  *
- * Each agent's label and phase come from its `.meta.json`, and whether it
- * works from its transcript's end (FE-01/D1). A run its conversation has
+ * Each agent's label and phase come from its `.meta.json`, its order from
+ * the run's journal, and whether it works from the check every sub-agent
+ * gets ({@link claudeSubagentGoing}) (FE-01/D1). A run its conversation has
  * gone quiet on is still running while one of its agents was written within
- * {@link STALE_MS}: the conversation waits on it without a word.
+ * {@link SUBAGENT_STALE_MS}: the conversation waits on it without a word.
  *
  * NOTE: A resumed run (`resumeFromRunId`) writes to the same folder, and
- * starts each agent that had not finished again under a new id with the
- * same label. Only the newest agent of a label is kept, where that label
- * first stood: an agent a past attempt finished stays, one it left behind
- * gives way to its retry.
+ * starts each agent that had not finished again under a new id, with the
+ * same journal key (or, without one, the same phase and label). Only then
+ * does one agent give way to another (FE-100/S3): a later attempt's agent
+ * takes the place of an earlier attempt's that gave back no result. Agents
+ * of one attempt are all listed, however alike they are named.
+ *
+ * @param attempts When each attempt at the run was started, epoch ms,
+ *   oldest first: the task that launched it, then each that resumed it.
  */
 async function withWorkflow(
   task: BackgroundTask,
   started: Started,
   ended: boolean,
   transcript: string,
+  attempts: number[],
 ): Promise<BackgroundTask> {
   if (!started.run) return task;
   const dir = workflowRunDir(transcript, started.run.runId);
-  const [names, order] = await Promise.all([
+  const [names, journal] = await Promise.all([
     readdir(dir).catch(() => [] as string[]),
-    journalOrder(dir),
+    readJournal(dir),
   ]);
+  const order = journal.started;
   const files = (
     await Promise.all(
       names.map(async (name) => {
@@ -709,25 +716,47 @@ async function withWorkflow(
           .catch(() => null),
       );
       const journaled = order.get(entry.id);
+      const label = tidy(
+        str(meta?.description) ?? journaled?.label ?? entry.id,
+      );
+      const phase = str(meta?.workflowPhase) ?? journaled?.phase ?? null;
+      // The attempt that started it: the newest begun before its file was.
+      let attempt = 0;
+      for (const [at, begun] of attempts.entries())
+        if (begun <= entry.info.birthtimeMs) attempt = at;
       return {
         ...entry,
-        label: tidy(str(meta?.description) ?? journaled?.label ?? entry.id),
-        phase: str(meta?.workflowPhase) ?? journaled?.phase ?? null,
+        label,
+        phase,
+        attempt,
+        same: journaled?.key ?? `${phase ?? ""}\u0000${label}`,
       };
     }),
   );
-  // By label, where it first stood, the newest of it.
-  const kept = new Map<string, (typeof read)[number]>();
+  // Each agent where it first stood; a retry in the place of what it retried.
+  const kept: (typeof read)[number][] = [];
+  const slots = new Map<string, number[]>();
   for (const entry of read) {
-    const key = `${entry.phase ?? ""}\u0000${entry.label}`;
-    const prior = kept.get(key);
-    if (!prior || entry.info.birthtimeMs >= prior.info.birthtimeMs)
-      kept.set(key, entry);
+    const mine = slots.get(entry.same) ?? [];
+    const retried = mine.find((at) => {
+      const prior = kept[at];
+      return (
+        prior !== undefined &&
+        prior.attempt < entry.attempt &&
+        !journal.results.has(prior.id)
+      );
+    });
+    if (retried !== undefined) kept[retried] = entry;
+    else {
+      mine.push(kept.length);
+      slots.set(entry.same, mine);
+      kept.push(entry);
+    }
   }
-  const latest = [...kept.values()].slice(0, WORKFLOW_AGENT_MAX);
+  const latest = kept.slice(0, WORKFLOW_AGENT_MAX);
   const newest = Math.max(0, ...files.map((entry) => entry.info.mtimeMs));
   const status: BackgroundTaskStatus =
-    !ended && task.status === "lost" && Date.now() - newest <= STALE_MS
+    !ended && task.status === "lost" && Date.now() - newest <= SUBAGENT_STALE_MS
       ? "running"
       : task.status;
   const phases: WorkflowPhase[] = [];
@@ -736,8 +765,7 @@ async function withWorkflow(
       id,
       label,
       // An ended run's agents are done, whatever their last line says.
-      working:
-        status === "running" && (await transcriptWorking(file, "claude", true)),
+      working: status === "running" && (await claudeSubagentGoing(file)),
       updatedAt: new Date(info.mtimeMs).toISOString(),
     };
     const known = phases.find((entry) => entry.name === phase);
@@ -764,12 +792,18 @@ async function withWorkflows(
 ): Promise<BackgroundTask[]> {
   if (!tasks.some((task) => task.kind === "workflow")) return tasks;
   const newestOfRun = new Map<string, BackgroundTask>();
+  // When each attempt at each run began, the launch and every resume.
+  const attempts = new Map<string, number[]>();
   for (const task of tasks) {
     const run = parsed.started.get(task.id)?.run?.runId;
     if (!run) continue;
     const prior = newestOfRun.get(run);
     if (!prior || task.startedAt >= prior.startedAt) newestOfRun.set(run, task);
+    const begun = Date.parse(task.startedAt);
+    if (Number.isFinite(begun))
+      attempts.set(run, [...(attempts.get(run) ?? []), begun]);
   }
+  for (const begun of attempts.values()) begun.sort((a, b) => a - b);
   return ordered(
     await Promise.all(
       tasks.flatMap<BackgroundTask | Promise<BackgroundTask>>((task) => {
@@ -782,6 +816,7 @@ async function withWorkflows(
             started,
             Boolean(parsed.notices.get(task.id)?.status),
             transcript,
+            attempts.get(started.run.runId) ?? [],
           ),
         ];
       }),
@@ -794,7 +829,32 @@ export async function readTranscriptTasks(
   file: string,
 ): Promise<BackgroundTask[]> {
   const parsed = await parseOnce(file);
-  return withWorkflows(parsed, file, tasksOf(parsed, file));
+  return withWorkflows(
+    parsed,
+    file,
+    await withAgents(parsed, file, tasksOf(parsed, file)),
+  );
+}
+
+/**
+ * Whether workflow run `runId` of transcript `file` has ended: its newest
+ * attempt was told it ended, as the capsule's run is (FE-100/S4).
+ *
+ * @returns false while it runs, and for a run the transcript never started.
+ */
+export async function workflowRunEnded(
+  file: string,
+  runId: string,
+): Promise<boolean> {
+  const parsed = await parseOnce(file);
+  let newest: Started | null = null;
+  for (const started of parsed.started.values())
+    if (
+      started.run?.runId === runId &&
+      (!newest || started.task.startedAt >= newest.task.startedAt)
+    )
+      newest = started;
+  return newest !== null && Boolean(parsed.notices.get(newest.task.id)?.status);
 }
 
 /** Conversation `conversation`'s background tasks, without pids. */
@@ -1117,7 +1177,7 @@ export async function readBackgroundTasksWithPids(
   const tasks = await withWorkflows(
     parsed,
     transcript,
-    tasksOf(parsed, transcript),
+    await withAgents(parsed, transcript, tasksOf(parsed, transcript)),
   );
   if (
     !tasks.some(

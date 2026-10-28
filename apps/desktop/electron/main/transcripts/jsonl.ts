@@ -69,3 +69,62 @@ export function tidy(text: string): string {
 export function claudeProjectDir(cwd: string): string {
   return cwd.replace(/[^A-Za-z0-9]/g, "-");
 }
+
+/** How much of a file one step of {@link eachLine} reads. */
+const LINE_STEP = 1024 * 1024;
+
+/**
+ * Hand each whole line of `file` from byte `start` to `visit`, in order.
+ *
+ * A line still being written (no newline after it yet) is left for the next
+ * read. A line longer than one step is handed over cut, as its first step:
+ * what it starts with is all a reader of markers needs.
+ *
+ * @param start The start of a line.
+ * @returns Where the whole lines read end: the next read's `start`.
+ */
+export async function eachLine(
+  file: string,
+  start: number,
+  visit: (line: string) => void,
+): Promise<number> {
+  const handle = await open(file, "r");
+  try {
+    const { size } = await handle.stat();
+    if (start >= size) return start;
+    const buffer = Buffer.alloc(Math.min(LINE_STEP, size - start));
+    let at = start;
+    // Inside a line longer than a step, already handed over.
+    let skipping = false;
+    while (at < size) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        Math.min(buffer.length, size - at),
+        at,
+      );
+      if (bytesRead === 0) break;
+      const chunk = buffer.subarray(0, bytesRead);
+      let from = 0;
+      for (;;) {
+        const end = chunk.indexOf(0x0a, from);
+        if (end === -1) break;
+        if (!skipping) visit(chunk.toString("utf8", from, end));
+        skipping = false;
+        from = end + 1;
+      }
+      if (from > 0) {
+        at += from;
+        continue;
+      }
+      // Not one newline in a whole step: still being written, or that long.
+      if (at + bytesRead >= size) break;
+      if (!skipping) visit(chunk.toString("utf8"));
+      skipping = true;
+      at += bytesRead;
+    }
+    return at;
+  } finally {
+    await handle.close();
+  }
+}
