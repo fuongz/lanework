@@ -55,6 +55,7 @@ import {
   useAgentSessions,
 } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
+import { awaitingKey, useAwaiting } from "#/stores/awaiting";
 import { useChatEngines } from "#/stores/chat-engines";
 import { CodexGoalBadge } from "./codex-goal-badge";
 
@@ -233,6 +234,25 @@ function BackgroundShellRows({
   );
 }
 
+/**
+ * A conversation waiting on the person (FE-97/D4a): a primary dot in its
+ * agent icon's slot, with a ring that keeps expanding until it is answered.
+ *
+ * Reduced motion drops the ring and keeps the dot.
+ */
+export function AwaitingDot({ className = "size-3" }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="awaiting-dot"
+      className={cn("relative grid shrink-0 place-items-center", className)}
+    >
+      <span className="bg-primary absolute size-2 animate-ping rounded-full opacity-75 motion-reduce:hidden motion-reduce:animate-none" />
+      <span className="bg-primary relative size-2 rounded-full" />
+    </span>
+  );
+}
+
 /** What hover hides to make room for the quick actions. */
 const MAKES_ROOM = "group-hover/row:invisible group-focus-within/row:invisible";
 
@@ -334,6 +354,10 @@ export function SessionRow({
     return entry ? factsSummary(entry.facts) : null;
   });
   const readFacts = useAgentFacts((state) => state.read);
+  // Its agent stopped on a question or a permission (FE-97).
+  const awaiting = useAwaiting(
+    (state) => awaitingKey(workspace, session.id) in state.byKey,
+  );
   const peeking = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -429,9 +453,9 @@ export function SessionRow({
                 type="button"
                 onClick={onResume}
                 aria-current={current ? "page" : undefined}
-                aria-label={`Open “${session.title}”`}
+                aria-label={`Open “${session.title}”${awaiting ? ", waiting for you" : ""}`}
                 aria-busy={working || undefined}
-                title={`${session.title}\n${agent}, ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}${summary ? `\n${summary}` : ""}`}
+                title={`${session.title}\n${agent}, ${awaiting ? "waiting for you" : working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}${summary ? `\n${summary}` : ""}`}
                 onPointerEnter={peek}
                 onPointerLeave={unpeek}
                 onFocus={peek}
@@ -442,10 +466,14 @@ export function SessionRow({
           >
             {/* With sub-agents, hover trades the icon for their chevron. */}
             <span className={`flex shrink-0 ${nested ? MAKES_ROOM : ""}`}>
-              <TerminalKindIcon
-                kind={session.agent}
-                className="size-3 shrink-0"
-              />
+              {awaiting ? (
+                <AwaitingDot />
+              ) : (
+                <TerminalKindIcon
+                  kind={session.agent}
+                  className="size-3 shrink-0"
+                />
+              )}
             </span>
             <span
               className={`min-w-0 flex-1 truncate ${working ? "text-shimmer" : ""}`}

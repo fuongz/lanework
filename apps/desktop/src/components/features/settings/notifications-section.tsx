@@ -129,6 +129,21 @@ export function NotificationsSection() {
                 />
               ),
             },
+            // An agent stopped on a question or a tool's permission (FE-97).
+            {
+              label: "Needs your input",
+              description:
+                "Get notified when Claude or Codex asks a question or needs permission.",
+              keywords:
+                "input waiting question ask permission approve allow agent claude codex blocked",
+              control: (
+                <DeliverySelect
+                  label="Needs your input notifications"
+                  value={settings?.input ?? null}
+                  onChange={(value) => change("input", value)}
+                />
+              ),
+            },
             {
               label: "Pull requests",
               description:

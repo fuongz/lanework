@@ -13,6 +13,8 @@ import {
 } from "#/components/ui/tooltip";
 import { relativeTime } from "#/lib/relative-time";
 import { agentKey } from "#/stores/agent-sessions";
+import { useAwaiting } from "#/stores/awaiting";
+import { AwaitingDot } from "./agent-sessions-nav.row";
 
 /** A new conversation not listed yet, as the rail's hook describes one. */
 interface PendingSlot {
@@ -59,12 +61,17 @@ export function AgentSessionsMini({
   openSession: (session: AgentSession) => void;
   go: (next: TerminalSession | null) => void;
 }) {
+  // Conversations waiting on the person (FE-97), by id: a CLI's conversation
+  // id is a UUID, so it names one conversation in any project.
+  const awaiting = useAwaiting((state) => state.byKey);
+  const isAwaiting = (session: AgentSession) =>
+    Object.values(awaiting).some((entry) => entry.conversation === session.id);
   const slot = (
     key: string,
     kind: AgentSession["agent"],
     label: string,
     tip: string,
-    state: "working" | "running" | null,
+    state: "working" | "running" | "awaiting" | null,
     current: boolean,
     onClick: () => void,
   ) => (
@@ -81,8 +88,12 @@ export function AgentSessionsMini({
           />
         }
       >
-        <TerminalKindIcon kind={kind} className="size-4" />
-        {state && (
+        {state === "awaiting" ? (
+          <AwaitingDot className="size-4" />
+        ) : (
+          <TerminalKindIcon kind={kind} className="size-4" />
+        )}
+        {state && state !== "awaiting" && (
           <span
             aria-hidden="true"
             className={`ring-sidebar absolute top-1.5 right-1.5 size-2 rounded-full ring-2 ${state === "working" ? "bg-tone-sky animate-pulse" : "bg-tone-emerald"}`}
@@ -98,12 +109,13 @@ export function AgentSessionsMini({
     const agent = TERMINAL_KIND_LABELS[session.agent];
     const working = isWorking(session);
     const terminal = isRunning(session);
+    const waiting = isAwaiting(session);
     return slot(
       agentKey(session),
       session.agent,
-      `Open “${session.title}”`,
-      `${session.title} — ${agent}, ${working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}`,
-      working ? "working" : terminal ? "running" : null,
+      `Open “${session.title}”${waiting ? ", waiting for you" : ""}`,
+      `${session.title} — ${agent}, ${waiting ? "waiting for you" : working ? "working" : terminal ? "running" : relativeTime(session.updatedAt, now)}`,
+      waiting ? "awaiting" : working ? "working" : terminal ? "running" : null,
       isCurrent(session),
       () => openSession(session),
     );

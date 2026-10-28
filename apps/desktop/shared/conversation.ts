@@ -510,6 +510,23 @@ export interface PermissionRequest {
   questions: AskQuestion[] | null;
 }
 
+/** A conversation whose engine waits on the person: a tool, or questions. */
+export interface Awaiting {
+  workspace: string;
+  conversation: string;
+  agent: "claude" | "codex";
+  /** Oldest first. */
+  requests: {
+    id: string;
+    tool: string;
+    summary: string;
+    /** `AskUserQuestion`'s first question; null for a tool's permission. */
+    question: string | null;
+  }[];
+  /** ISO time its first request still open was asked. */
+  since: string;
+}
+
 /** One of `AskUserQuestion`'s questions, as the CLI's input has it. */
 export interface AskQuestion {
   question: string;
@@ -699,6 +716,8 @@ export const conversationChannels = {
   engineState: "conversation:engine-state",
   /** What the engine is waiting on the person for: a tool, or questions. */
   permissions: "conversation:permissions",
+  /** Every conversation, in every workspace, waiting on the person (FE-97). */
+  awaiting: "conversation:awaiting",
   /** The last settings used anywhere, for one never sent from chat. */
   lastSettings: "conversation:last-settings",
   /** Codex's models, as `codex` lists them in its own cache. */
@@ -768,6 +787,12 @@ export interface DesktopConversationApi {
     workspace: string,
     conversation: string,
   ) => Promise<PermissionRequest[]>;
+  /**
+   * Every conversation an engine is waiting on the person in, for the rail's
+   * ping and the island (FE-97). Kept current by `permission` and
+   * `permission-done` events after this first read.
+   */
+  awaiting: () => Promise<Awaiting[]>;
   lastSettings: () => Promise<ComposerSettings>;
   /** Codex's models, read from `~/.codex/models_cache.json` by main. */
   codexModels: () => Promise<AgentModel[]>;

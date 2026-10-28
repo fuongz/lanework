@@ -1,8 +1,9 @@
-// OS notifications: an agent run finishing, a new pull request on a
-// linked repository — each switched on or off from Settings → Notifications.
+// OS notifications: an agent run finishing, an agent waiting on the person
+// (FE-97), a new pull request on a linked repository — each switched on or
+// off from Settings → Notifications.
 
 /** What can notify. One row each in Settings → Notifications. */
-const NOTIFICATION_KINDS = ["sessions", "pulls"] as const;
+const NOTIFICATION_KINDS = ["sessions", "input", "pulls"] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 /**
@@ -17,9 +18,13 @@ export type NotificationSettings = Record<
   NotificationDelivery
 >;
 
-/** Both on (FE-70/D6): a run finishing notified before this page existed. */
+/**
+ * All on (FE-70/D6): a run finishing notified before this page existed, and
+ * an agent left waiting is worth hearing about (FE-97/D3a).
+ */
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   sessions: "push",
+  input: "push",
   pulls: "push",
 };
 

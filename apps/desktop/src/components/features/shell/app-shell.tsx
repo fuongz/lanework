@@ -22,12 +22,14 @@ import {
 } from "#/components/ui/resizable";
 import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { readStored, writeStored } from "#/lib/stored";
+import { useAwaitingWatch } from "#/stores/awaiting";
 import { useBoard } from "#/stores/board";
 import { useLayout } from "#/stores/layout";
 import { useMcpAuthWatch } from "#/stores/mcp-auth";
 import { terminalShown, useTerminal } from "#/stores/terminal";
 import { AgentUsageStrip } from "./agent-usage-strip";
 import { AppSidebar } from "./app-sidebar";
+import { AwaitingIsland, useAwaitingElsewhere } from "./awaiting-island";
 import { BoardNoticeIsland, useBoardNotice } from "./board-notice-island";
 import { CommandPalette } from "./command-palette";
 import { DictationIsland, useDictationUp } from "./dictation-island";
@@ -190,6 +192,10 @@ export function AppShell() {
   // asked again on a timer and on focus; the island speaks when they are not.
   useMcpAuthWatch();
   const mcpAuthUp = useMcpAuthRows().length > 0;
+  // Conversations whose agent waits on the person (FE-97), followed for the
+  // whole window: the island and the rail's ping both read them.
+  useAwaitingWatch();
+  const awaitingUp = useAwaitingElsewhere().length > 0;
   // The project in the URL, not the board store's `active`: on the project
   // picker there is no project, so no terminal (neither the panel nor its
   // bar) rather than whichever project's was open last.
@@ -484,17 +490,21 @@ export function AppShell() {
           />
         </button>
       </nav>
-      {/* The islands (harness updates, board notices, the Lanework MCP
-          sign-in, dictation), fixed at the top centre over the title bar's
-          edge and the page. One spot, one island: an open microphone has it,
-          then a notice, then sign-in, and the harness pill waits for all of
+      {/* The islands (harness updates, board notices, an agent waiting on
+          the person, the Lanework MCP sign-in, dictation), fixed at the top
+          centre over the title bar's edge and the page. One spot, one
+          island: an open microphone has it, then a notice, then a waiting
+          agent (FE-97), then sign-in, and the harness pill waits for all of
           them.
 
           NOTE: After the nav for the same reason as the nav: their `no-drag`
           must be laid down after the title bar's drag strip, or the strip
           eats their clicks. */}
-      <HarnessIsland yieldTo={dictating || notice !== null || mcpAuthUp} />
-      <McpAuthIsland yieldTo={dictating || notice !== null} />
+      <HarnessIsland
+        yieldTo={dictating || notice !== null || awaitingUp || mcpAuthUp}
+      />
+      <McpAuthIsland yieldTo={dictating || notice !== null || awaitingUp} />
+      <AwaitingIsland yieldTo={dictating || notice !== null} />
       <BoardNoticeIsland notice={dictating ? null : notice} />
       <DictationIsland />
     </div>

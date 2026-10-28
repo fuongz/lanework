@@ -15,10 +15,12 @@ import {
   type AgentModel,
   ANSWER_MAX,
   ANSWERS_MAX,
+  type Awaiting,
   agentOfModel,
   type ComposerSettings,
   type Conversation,
   type ConversationAgent,
+  type ConversationEvent,
   conversationChannels,
   type EngineState,
   type ImagePreview,
@@ -35,10 +37,12 @@ import {
 import { LEAD_REF_PATTERN } from "../../../shared/orchestration";
 import { isAgentSessionId } from "../../../shared/terminal";
 import { broadcast, handle } from "../ipc";
+import { notify } from "../notifications";
 import { workerFolderOf } from "../orchestration";
 import { bindConductorConversation } from "../terminal";
 import { agentHomeDir } from "../test-seams";
-import { terminalFolder } from "../workspaces";
+import { knownWorkspace, terminalFolder } from "../workspaces";
+import { awaitingNotice, createAwaitingLedger } from "./awaiting";
 import { createAgentCli, createClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { createCodexModels } from "./codex-models";
@@ -359,6 +363,46 @@ export function registerConversation(
     return models;
   };
   const ready = codexModels();
+  // FE-97: what every engine waits on the person for, followed from the
+  // same events the page gets.
+  const awaiting = createAwaitingLedger();
+  const tell = (event: ConversationEvent) => {
+    const asked = awaiting.apply(
+      event,
+      () =>
+        engines.pending(event.workspace, event.conversation)?.agent ?? "claude",
+    );
+    broadcast(conversationChannels.event, event);
+    if (asked && event.type === "permission")
+      void notifyAsked(event.workspace, event.conversation, asked);
+  };
+  /**
+   * Tell the person an agent waits on them. A click opens its conversation;
+   * a focused window already on it is not told.
+   */
+  const notifyAsked = async (
+    workspace: string,
+    conversation: string,
+    request: PermissionRequest,
+  ): Promise<void> => {
+    const { workspace: project } = await knownWorkspace(workspace).catch(
+      () => ({ workspace: null }),
+    );
+    // Answered, or the engine closed, while the project was looked up.
+    const still = awaiting
+      .list()
+      .find(
+        (entry) =>
+          entry.workspace === workspace && entry.conversation === conversation,
+      );
+    if (!project || !still?.requests.some((entry) => entry.id === request.id))
+      return;
+    await notify({
+      kind: "input",
+      ...awaitingNotice(still.agent, request),
+      target: { kind: "session", slug: project.slug, conversation },
+    }).catch(() => {});
+  };
   const engines = createEngines({
     cli: createClaudeCli(() =>
       testing ? process.env.LANEWORK_CLAUDE_BIN : undefined,
@@ -366,7 +410,7 @@ export function registerConversation(
     codexCli: createAgentCli("codex", () =>
       testing ? process.env.LANEWORK_CODEX_BIN : undefined,
     ),
-    emit: (event) => broadcast(conversationChannels.event, event),
+    emit: tell,
     terminalOn: bridge.terminalOn,
     killTerminal: bridge.kill,
     remember: (id, settings) => void store.remember(id, settings),
@@ -396,11 +440,7 @@ export function registerConversation(
       void engines.state(which.workspace, which.conversation).then((engine) => {
         if (engine.state === "terminal") return;
         paused.delete(id);
-        broadcast(conversationChannels.event, {
-          type: "state",
-          ...which,
-          engine,
-        });
+        tell({ type: "state", ...which, engine });
       });
     }
   });
@@ -623,6 +663,7 @@ export function registerConversation(
       throw new Error("A workspace and a conversation are required");
     const { workspace, conversation } = conversationOf(args);
     await engines.close(workspace, conversation);
+    awaiting.clear(workspace, conversation);
   });
 
   handle(
@@ -639,6 +680,7 @@ export function registerConversation(
       throw new Error("A workspace and a conversation are required");
     const { workspace, conversation } = conversationOf(args);
     await engines.release(workspace, conversation);
+    awaiting.clear(workspace, conversation);
   });
 
   handle(
@@ -664,6 +706,15 @@ export function registerConversation(
         throw new Error("A workspace and a conversation are required");
       const { workspace, conversation } = conversationOf(args);
       return engines.permissions(workspace, conversation);
+    },
+  );
+
+  handle(
+    conversationChannels.awaiting,
+    devUrl,
+    async (args): Promise<Awaiting[]> => {
+      if (args.length !== 0) throw new Error("No arguments are taken");
+      return awaiting.list();
     },
   );
 
