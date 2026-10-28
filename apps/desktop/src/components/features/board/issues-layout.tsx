@@ -84,10 +84,7 @@ export function IssuesLayout() {
       >
         {/* The list column's ground is the Pull requests list's, so the
             two tabs read as one column. */}
-        <aside
-          aria-label="Issues"
-          className="bg-sidebar flex h-full min-h-0 flex-col"
-        >
+        <aside aria-label="Issues" className="flex h-full min-h-0 flex-col">
           <IssuesList />
         </aside>
       </ResizablePanel>

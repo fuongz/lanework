@@ -81,7 +81,7 @@ export function PullsLayout() {
       >
         <aside
           aria-label="Pull requests"
-          className="bg-sidebar flex h-full min-h-0 flex-col"
+          className="flex h-full min-h-0 flex-col"
         >
           <PullsList />
         </aside>

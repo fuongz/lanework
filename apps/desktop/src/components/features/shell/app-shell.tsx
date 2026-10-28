@@ -405,7 +405,7 @@ export function AppShell() {
               bar sits under it, outside, as the window's status bar.
               `overflow-hidden` clips the page and the terminal to the
               card's corners; each still scrolls on its own. */}
-          <div className="my-1.5 mr-1.5 flex min-h-0 flex-1 flex-col gap-1">
+          <div className="mb-1.5 mr-1.5 flex min-h-0 flex-1 flex-col gap-1">
             <div className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-panel-edge">
               <div className="min-h-0 flex-1">
                 <ResizablePanelGroup

@@ -261,17 +261,17 @@ export function AppSidebar({
 
   return (
     <aside
-      className={`app-sidebar flex min-h-0 flex-1 flex-col px-2.5 ${swapped ? "motion-safe:animate-in motion-safe:fade-in-0 duration-200" : ""}`}
+      className={`app-sidebar flex gap-1 min-h-0 flex-1 flex-col px-2.5 ${swapped ? "motion-safe:animate-in motion-safe:fade-in-0 duration-200" : ""}`}
     >
       {/* No spacer for the window controls: the window's title bar above the
           rail holds them, open or folded. */}
-      <div className="mt-2 shrink-0">
+      <div className="shrink-0">
         <ProjectSwitcher />
       </div>
 
       {/* Search, not a compose button: the palette behind it reaches New
           issue too, and ⌘N still opens that directly. */}
-      <div className="mt-1 mb-1 shrink-0">
+      <div className="shrink-0">
         <button
           type="button"
           onClick={open}
@@ -457,7 +457,7 @@ export function AppSidebar({
         )}
       </RailHover>
 
-      <div className="mt-2 shrink-0 pt-2 pb-2.5">
+      <div className="shrink-0 py-2">
         <LocalModeRail />
         <Link
           to="/settings"
