@@ -92,7 +92,7 @@ export function ConductorPicks({
               className={cn(
                 "text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04] flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[13px] transition-colors",
                 on &&
-                  "border-primary/50 bg-primary/[0.06] text-foreground hover:bg-primary/[0.08]",
+                  "border-tone-teal/50 bg-tone-teal/[0.06] text-tone-teal hover:text-tone-teal hover:bg-tone-teal/[0.08]",
               )}
             >
               <HugeiconsIcon

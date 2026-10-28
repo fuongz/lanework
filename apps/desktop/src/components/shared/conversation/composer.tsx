@@ -202,6 +202,24 @@ function chipSpec(item: Suggestion): ChipSpec {
   };
 }
 
+/** A team lead named with `@` as a chip: its icon and name. */
+function leadChip(lead: TeamLead): ChipSpec {
+  return {
+    value: `@${lead.id}`,
+    label: lead.name,
+    title: `@${lead.id}\n${lead.name}`,
+    icon: (
+      <HugeiconsIcon
+        icon={leadIcon(lead.icon)}
+        className="size-3.5 shrink-0"
+        strokeWidth={1.8}
+        aria-hidden="true"
+      />
+    ),
+    tone: "teal",
+  };
+}
+
 /** `label` with the part `query` matches in weight, as the list shows it. */
 function Matched({ label, query }: { label: string; query: string }) {
   const needle = query
@@ -423,7 +441,18 @@ export const Composer = forwardRef<
   // The `/command` that starts the message and each `@path` in it, drawn as
   // chips (FE-92, FE-93). The text kept and sent stays the whole message.
   const [chipsVersion, learned] = useState(0);
+  /** The lead an `@` names as `/orchestrate`'s first word (FE-88), if any. */
+  const leadFor = (token: string): TeamLead | null => {
+    if (!onOrchestrate || !token.startsWith("@")) return null;
+    const named = /^\s*\/orchestrate[ \t]+(@\S+)/.exec(latest.current)?.[1];
+    if (named !== token) return null;
+    return (
+      leadsRef.current?.leads.find((lead) => `@${lead.id}` === token) ?? null
+    );
+  };
   const chipFor = (token: string): ChipSpec | null => {
+    const lead = leadFor(token);
+    if (lead) return leadChip(lead);
     const item =
       token === ORCHESTRATE.value
         ? onOrchestrate
@@ -432,6 +461,10 @@ export const Composer = forwardRef<
         : (known.get(token) ?? null);
     return item ? chipSpec(item) : null;
   };
+  // Leads read after the text was drawn: drawn again, so `@lead` is a chip.
+  useEffect(() => {
+    if (leads) learned((n) => n + 1);
+  }, [leads]);
   // The `/` list read ahead, so the first `/` opens it at once (FE-92).
   useEffect(() => {
     void window.desktop?.conversation
@@ -446,7 +479,10 @@ export const Composer = forwardRef<
     ...(text.match(/(?<=^|\s)@\S+/g) ?? []),
   ].filter(
     (token) =>
-      token !== ORCHESTRATE.value && !known.has(token) && !looked.has(token),
+      token !== ORCHESTRATE.value &&
+      !leadFor(token) &&
+      !known.has(token) &&
+      !looked.has(token),
   );
   const unknownKey = unknown.join("\n");
   // biome-ignore lint/correctness/useExhaustiveDependencies: asked again only when the unknown tokens change.

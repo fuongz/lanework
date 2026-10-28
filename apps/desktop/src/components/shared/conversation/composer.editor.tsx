@@ -35,9 +35,10 @@ export interface ChipSpec {
   icon: ReactNode;
   /**
    * `muted` for a command that is not a skill (FE-93/D3); `violet` for
-   * /orchestrate, which hands the request to workers (FE-95).
+   * /orchestrate, which hands the request to workers (FE-95); `teal` for
+   * the conductor it names with `@`.
    */
-  tone: "primary" | "muted" | "violet";
+  tone: "primary" | "muted" | "violet" | "teal";
 }
 
 type Segment = { text: string } | { chip: ChipSpec };
@@ -261,7 +262,9 @@ export const ChipEditor = forwardRef<
             ? "text-primary"
             : part.chip.tone === "violet"
               ? "text-tone-violet"
-              : "text-muted-foreground",
+              : part.chip.tone === "teal"
+                ? "text-tone-teal"
+                : "text-muted-foreground",
         );
         made.push({ node: span, spec: part.chip, key: ++chipKeys });
         return span;

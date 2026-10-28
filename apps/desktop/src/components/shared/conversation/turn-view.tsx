@@ -156,9 +156,11 @@ function PromptText({ text }: { text: string }) {
           "mx-px inline-flex items-baseline gap-1 align-baseline font-medium",
           token === "/orchestrate"
             ? "text-tone-violet"
-            : command
-              ? "text-muted-foreground"
-              : "text-primary",
+            : conductor
+              ? "text-tone-teal"
+              : command
+                ? "text-muted-foreground"
+                : "text-primary",
         )}
       >
         {(command || path || conductor) && (
