@@ -9,13 +9,19 @@ import {
   type OutgoingAttachment,
 } from "#/../shared/conversation";
 import type { TeamLead } from "#/../shared/orchestration";
+import type { BoardCard } from "#/../shared/workspaces";
 import { setChatAgent } from "#/components/shared/conversation/chat-agent";
-import { Composer } from "#/components/shared/conversation/composer";
+import {
+  Composer,
+  type ComposerHandle,
+  useTeamLeads,
+} from "#/components/shared/conversation/composer";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { conductorConversation, orderConductors } from "#/lib/conductors";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
   conductorTurn,
@@ -25,15 +31,23 @@ import {
   proposalId,
   readEnvelope,
 } from "#/lib/orchestration-prompt";
+import { useAgentSessions } from "#/stores/agent-sessions";
 import { useBoard } from "#/stores/board";
 import { withLiveContext } from "#/stores/conductor-context";
 import { handSentMessage } from "#/stores/conversation-sends";
 import { useNewChats } from "#/stores/new-chats";
+import {
+  BoardPicks,
+  ConductorPicks,
+  cardPrompt,
+} from "./new-conversation-view.picks";
 
 const ROUTE = "/_app/w/$slug/agents/chat/new" as const;
 
 /**
- * The new-conversation page: the composer alone, under a question.
+ * The new-conversation page: a question over the composer, then what only
+ * Lanework has to start from (FE-98): the conductors to hand it to, and the
+ * board's live cards to pick up.
  *
  * The model picked picks the CLI — Claude Code or Codex — so the page names
  * no agent until then. Sending starts the user's own `claude` or `codex` on a
@@ -51,12 +65,28 @@ export function NewConversationView() {
  */
 export function NewConversationPage({
   slug,
-  conductor = null,
+  conductor: own = null,
 }: {
   slug: string;
   conductor?: TeamLead | null;
 }) {
   const workspace = useWorkspaceKey(slug);
+  const composer = useRef<ComposerHandle>(null);
+  // A conductor picked under "Hand it to" (FE-98/D3a): this page becomes its
+  // own, the draft kept. The settings before it, to go back to on unpick.
+  const [handTo, setHandTo] = useState<TeamLead | null>(null);
+  const before = useRef<ComposerSettings | null>(null);
+  const conductor = own ?? handTo;
+  const offers = own === null;
+  const leads = useTeamLeads(workspace, offers);
+  const sessions = useAgentSessions((state) =>
+    workspace ? state.byWorkspace[workspace] : undefined,
+  );
+  const started = useNewChats((state) => state.started);
+  const board = useBoard((state) =>
+    state.active?.slug === slug ? state.view : null,
+  );
+  const boardLoading = useBoard((state) => state.loading);
   const navigate = useNavigate();
   const mounted = useRef(false);
   useEffect(() => {
@@ -209,6 +239,37 @@ export function NewConversationPage({
     );
   };
 
+  const conversationOf = (lead: TeamLead) =>
+    workspace
+      ? conductorConversation(sessions, started, workspace, lead.id)
+      : null;
+  const pickConductor = (lead: TeamLead | null) => {
+    // One conversation per conductor: one it already has is opened, not
+    // started again beside it.
+    const existing = lead ? conversationOf(lead) : null;
+    if (existing) {
+      void navigate({
+        to: "/w/$slug/agents/chat/$conversation",
+        params: { slug, conversation: existing },
+      });
+      return;
+    }
+    if (lead) {
+      before.current ??= settings;
+      setSettings((current) =>
+        current ? conductorSettings(before.current ?? current, lead) : current,
+      );
+    } else {
+      const back = before.current;
+      before.current = null;
+      if (back) setSettings(back);
+    }
+    setHandTo(lead);
+  };
+  const pickCard = (card: BoardCard) => {
+    if (board) composer.current?.insert(cardPrompt(board, card));
+  };
+
   return (
     <section
       aria-label={conductor ? conductor.name : "New conversation"}
@@ -243,10 +304,9 @@ export function NewConversationPage({
           )}
           {workspace && settings && (
             <Composer
+              ref={composer}
               slug={slug}
-              draftKey={
-                conductor ? `conductor:${slug}:${conductor.id}` : `new:${slug}`
-              }
+              draftKey={own ? `conductor:${slug}:${own.id}` : `new:${slug}`}
               autoFocus
               workspace={workspace}
               settings={settings}
@@ -261,6 +321,22 @@ export function NewConversationPage({
               onOrchestrate={orchestrate}
               onStop={() => {}}
             />
+          )}
+          {offers && (
+            <div className="mt-6 flex flex-col gap-6">
+              <ConductorPicks
+                conductors={orderConductors(leads)}
+                picked={handTo}
+                hasConversation={(lead) => conversationOf(lead) !== null}
+                onPick={pickConductor}
+              />
+              <BoardPicks
+                slug={slug}
+                view={board}
+                loading={boardLoading}
+                onPick={pickCard}
+              />
+            </div>
           )}
         </div>
       </div>

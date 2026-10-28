@@ -67,6 +67,56 @@ export function StatusIcon({
   );
 }
 
+/**
+ * A card in progress: its lane's circle, filled as far as its checklist is
+ * checked. Takes the status icon's place, so how far along it is reads
+ * where the eye already goes for where it stands.
+ */
+export function ProgressRing({
+  column,
+  done,
+  total,
+  className,
+}: {
+  column: BoardColumn | undefined;
+  done: number;
+  total: number;
+  className?: string;
+}) {
+  const share = total > 0 ? Math.min(1, done / total) : 0;
+  // A wedge from 12 o'clock, inside a ring: a pie, so a sliver still shows.
+  const angle = share * 2 * Math.PI;
+  const x = 7 + 4 * Math.sin(angle);
+  const y = 7 - 4 * Math.cos(angle);
+  const large = share > 0.5 ? 1 : 0;
+  return (
+    <svg
+      viewBox="0 0 14 14"
+      aria-hidden="true"
+      className={cn("size-3.5 shrink-0", toneText(column?.tone), className)}
+    >
+      <circle
+        cx="7"
+        cy="7"
+        r="6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      {share >= 1 ? (
+        <circle cx="7" cy="7" r="4" fill="currentColor" />
+      ) : (
+        share > 0 && (
+          <path
+            d={`M7 7 L7 3 A4 4 0 ${large} 1 ${x.toFixed(2)} ${y.toFixed(2)} Z`}
+            fill="currentColor"
+          />
+        )
+      )}
+    </svg>
+  );
+}
+
 const PRIORITY_TONE: Record<string, string> = {
   high: "rose",
   medium: "amber",

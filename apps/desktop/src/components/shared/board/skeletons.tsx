@@ -17,21 +17,26 @@ export function IssuesListSkeleton() {
     >
       {[0, 1].map((group) => (
         <div key={group}>
-          <div className="flex h-8 items-center gap-2 px-3">
-            <Skeleton className="size-3.5 rounded-full" />
-            <Skeleton className="h-3 w-24" />
+          <div className="flex h-7 items-center gap-1.5 px-3">
+            <Skeleton className="size-3 rounded-full" />
+            <Skeleton className="h-2.5 w-20" />
           </div>
           {[0, 1, 2].map((row) => (
-            <div key={row} className="flex flex-col gap-1.5 px-5 py-2.5">
-              <div className="flex h-4 items-center gap-1.5">
-                <Skeleton className="size-3.5 shrink-0 rounded-full" />
-                <Skeleton className="h-2.5 w-20" />
-                <Skeleton className="ml-auto h-2.5 w-12" />
+            <div key={row}>
+              <div className="flex flex-col gap-1.5 px-5 py-2">
+                <div className="flex h-4 items-center gap-2">
+                  <Skeleton className="size-3.5 shrink-0 rounded-full" />
+                  <Skeleton
+                    className="h-3.5"
+                    style={{ width: `${74 - row * 8 + group * 6}%` }}
+                  />
+                </div>
+                <div className="flex h-4 items-center gap-3 ps-[22px]">
+                  <Skeleton className="h-2.5 w-10" />
+                  <Skeleton className="h-2.5 w-14" />
+                  <Skeleton className="ml-auto h-2.5 w-6" />
+                </div>
               </div>
-              <Skeleton
-                className="h-3.5"
-                style={{ width: `${74 - row * 8 + group * 6}%` }}
-              />
             </div>
           ))}
         </div>

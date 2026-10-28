@@ -26,6 +26,8 @@ import {
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { UserAvatar } from "#/components/shared/common/user-avatar";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
+import { ListGroupHeader } from "#/components/shared/navigation/list-group-header";
+import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { SourceHeader } from "#/components/shared/navigation/source-tabs";
 import {
   Empty,
@@ -36,7 +38,7 @@ import {
 } from "#/components/ui/empty";
 import { ScrollArea } from "#/components/ui/scroll-area";
 import { PULL_TABS, type PullSearch, type PullTab } from "#/lib/pull-search";
-import { shortAge } from "#/lib/relative-time";
+import { relativeTime, shortAge } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import { canReadPulls, usePulls } from "#/stores/pulls";
 import {
@@ -136,6 +138,10 @@ function PullFilterGlyph({ value }: { value: string }) {
   );
 }
 
+/**
+ * One pull request as two lines, the shape of an issue's row: its state,
+ * number and title, then its author, branch, size and age in quiet text.
+ */
 function Row({
   pull,
   slug,
@@ -155,34 +161,38 @@ function Row({
         to="/w/$slug/issues/pulls/$number"
         params={{ slug, number: String(pull.number) }}
         search={search}
-        className="hover:bg-foreground/[0.03] focus-visible:ring-accent-brand flex flex-col gap-1 px-4 py-2 outline-none focus-visible:ring-2 focus-visible:-ring-offset-1"
+        className={`${RAIL_ROW} focus-visible:ring-accent-brand flex flex-col gap-0.5 rounded-lg px-3 py-2 outline-none focus-visible:ring-2`}
         activeProps={{ className: "bg-foreground/[0.06]" }}
       >
-        <div className="flex items-start gap-2">
+        <span className="flex min-w-0 items-center gap-2">
           <HugeiconsIcon
             icon={mark.icon}
-            className={cn("mt-0.5 size-3.5 shrink-0", mark.tone)}
+            className={cn("size-3.5 shrink-0", mark.tone)}
             strokeWidth={1.8}
             aria-hidden="true"
           />
-          <span className="line-clamp-1 flex-1 text-[13px]">{pull.title}</span>
-          <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
-            {shortAge(pull.updatedAt, now)}
+          {/* The number leads the title, quiet, so the line under it has
+              room for the rest. */}
+          <span className="text-muted-foreground shrink-0 text-[13px] tabular-nums">
+            #{pull.number}
           </span>
-        </div>
-        <div className="text-muted-foreground flex items-center gap-1.5 pl-5.5 text-[11px]">
-          <span className="shrink-0 tabular-nums">#{pull.number}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+            {pull.title}
+          </span>
+        </span>
+        {/* Under the title, set apart by space rather than pills or "·". */}
+        <span className="text-muted-foreground flex min-w-0 items-center gap-3 ps-[22px] text-xs">
           {pull.author && (
-            <>
+            <span className="flex min-w-0 items-center gap-1">
               <UserAvatar
                 src={pull.author.avatarUrl}
                 seed={pull.author.login}
                 className="size-3.5"
               />
               <span className="max-w-24 truncate">{pull.author.login}</span>
-            </>
+            </span>
           )}
-          <span className="max-w-28 truncate font-mono">{pull.headRef}</span>
+          <span className="min-w-0 truncate font-mono">{pull.headRef}</span>
           <span className="ml-auto shrink-0 tabular-nums">
             <span className="text-emerald-600 dark:text-emerald-400">
               +{pull.additions}
@@ -191,7 +201,13 @@ function Row({
               −{pull.deletions}
             </span>
           </span>
-        </div>
+          <span
+            className="shrink-0 tabular-nums"
+            title={relativeTime(pull.updatedAt, now)}
+          >
+            {shortAge(pull.updatedAt, now)}
+          </span>
+        </span>
       </Link>
     </li>
   );
@@ -210,24 +226,29 @@ function Group({
   now: number;
   search: PullSearch;
 }) {
+  const [open, setOpen] = useState(true);
   if (!pulls.length) return null;
   return (
-    <section>
-      <h3 className="bg-sidebar/95 text-muted-foreground sticky top-0 z-10 flex h-7 items-center gap-2 px-4 text-[11px] font-medium backdrop-blur">
-        {name}
-        <span className="tabular-nums">{pulls.length}</span>
-      </h3>
-      <ul>
-        {pulls.map((pull) => (
-          <Row
-            key={pull.number}
-            pull={pull}
-            slug={slug}
-            now={now}
-            search={search}
-          />
-        ))}
-      </ul>
+    <section aria-label={name}>
+      <ListGroupHeader
+        name={name}
+        count={pulls.length}
+        open={open}
+        onToggle={() => setOpen((value) => !value)}
+      />
+      {open && (
+        <ul className="flex flex-col gap-0.5">
+          {pulls.map((pull) => (
+            <Row
+              key={pull.number}
+              pull={pull}
+              slug={slug}
+              now={now}
+              search={search}
+            />
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -494,16 +515,20 @@ export function PullsList() {
                 rows={6}
               />
             )}
-            {groups.map((group) => (
-              <Group
-                key={group.name}
-                name={group.name}
-                pulls={group.pulls}
-                slug={slug}
-                now={now}
-                search={search}
-              />
-            ))}
+            <RailHover backgroundClassName="rounded-lg bg-foreground/[0.03]">
+              <div className="flex flex-col gap-3 px-2 pb-2">
+                {groups.map((group) => (
+                  <Group
+                    key={group.name}
+                    name={group.name}
+                    pulls={group.pulls}
+                    slug={slug}
+                    now={now}
+                    search={search}
+                  />
+                ))}
+              </div>
+            </RailHover>
           </ScrollArea>
         </>
       ) : ready ? (

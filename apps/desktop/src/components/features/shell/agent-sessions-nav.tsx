@@ -3,12 +3,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import type { AgentSession } from "#/../shared/terminal";
+import { StatusPing } from "#/components/shared/agents/status-ping";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
-import { WorkingMark } from "#/components/shared/terminal/working-mark";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,7 +30,7 @@ import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { AgentSessionSearch } from "./agent-session-search";
 import { AgentSessionsMini } from "./agent-sessions-nav.mini";
-import { QuickActions, SessionRow, StopItem } from "./agent-sessions-nav.row";
+import { SessionRow, StopItem } from "./agent-sessions-nav.row";
 import { useAgentRail } from "./agent-sessions-nav.sessions";
 import { RenameAgentDialog } from "./rename-agent-dialog";
 
@@ -41,8 +41,8 @@ import { RenameAgentDialog } from "./rename-agent-dialog";
 const FOLDED = 5;
 
 /**
- * The rail's Agents group: the Claude and Codex conversations this project's
- * folder has, newest first.
+ * The rail's Sessions group: the Claude and Codex conversations this
+ * project's folder has.
  *
  * A row opens its agent full size in the main view: the one already resuming
  * it, or a new one.
@@ -50,10 +50,10 @@ const FOLDED = 5;
  * - The rail is the agents' tab list (FE-26/D1). The row whose agent is on
  *   screen is marked the way an active link is, and a new conversation with
  *   no transcript yet still has a row, so it can be got back to.
- * - Three groups, and a row is in exactly one: Running holds the agents whose
- *   pty is alive, Stop in each one's context menu; Pinned the pinned
- *   transcripts; Agents the rest. Running wins over Pinned: a pinned
- *   conversation that is resumed moves up to Running, and back on Stop.
+ * - One list, in three runs: the pinned ones first, newest pin on top and
+ *   marked with a pin; then the ones running (a live pty, the chat's engine,
+ *   or a run they lead); then the rest, newest first, past a fold. A row's
+ *   dot under its icon says where it stands; Stop is in its context menu.
  * - Hidden when there is nothing here to do: no agent CLI on this machine, or
  *   no folder and no conversation (FE-23/D9). A folder with no conversation
  *   yet keeps the group, for its + (FE-26/D3).
@@ -85,10 +85,10 @@ export function AgentSessionsNav({
   // does not jump when they land.
   if (rail.loading && hasFolder && !mini)
     return (
-      <nav aria-label="Agents" className="flex flex-col gap-0.5">
+      <nav aria-label="Sessions" className="flex flex-col gap-0.5">
         <div className="flex min-w-0 items-center pt-4 pr-1 pb-1">
           <span className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
-            Agents
+            Sessions
           </span>
         </div>
         <ListSkeleton
@@ -128,7 +128,7 @@ export function AgentSessionsNav({
   );
 }
 
-/** The full rail's Pinned, Running and Agents groups, and their dialogs. */
+/** The full rail's Sessions group, and its dialogs. */
 function AgentSessionsList({
   workspace,
   slug,
@@ -149,10 +149,8 @@ function AgentSessionsList({
     pending,
     fresh,
     inRunning,
-    idle,
-    pinned,
+    pinned: pinnedIdle,
     rest,
-    hasRunning,
     now,
     terminalId,
     viewing,
@@ -184,8 +182,16 @@ function AgentSessionsList({
   } | null>(null);
 
   const shown = expanded ? rest : rest.slice(0, FOLDED);
+  // Pinned lead the list whether or not they run, newest pin on top.
+  const pinned = [
+    ...inRunning.filter((session) => session.pinnedAt !== null),
+    ...pinnedIdle,
+  ].sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
+  const runningUnpinned = inRunning.filter(
+    (session) => session.pinnedAt === null,
+  );
 
-  const sessionRow = (session: AgentSession, inPinned = false) => {
+  const sessionRow = (session: AgentSession) => {
     const key = agentKey(session);
     const all = allSubagents.has(key);
     return (
@@ -194,7 +200,7 @@ function AgentSessionsList({
         workspace={workspace}
         slug={slug}
         session={session}
-        inPinned={inPinned}
+        running={rail.isRunning(session)}
         row={row}
         active={activeClass}
         now={now}
@@ -224,91 +230,16 @@ function AgentSessionsList({
   return (
     // One provider for the rail's quick actions. Base UI's own 600ms is longer
     // than a pointer rests on a 20px icon, so the tip would never show; and
-    // once one is open, the next (Stop → Pin) opens without waiting.
+    // once one is open, the next row's Pin opens without waiting.
     <TooltipProvider delay={50}>
-      {pinned.length > 0 && (
-        <nav aria-label="Pinned" className="flex flex-col gap-0.5">
-          <div className="flex min-w-0 items-center gap-2 pt-4 pb-1 pr-1">
-            <span className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
-              Pinned
-            </span>
-          </div>
-          {pinned.map((session) => sessionRow(session, true))}
-        </nav>
-      )}
-      {/* The agents running right now (their pty is alive), whether or not
-          they are mid-turn: the ones with Stop. Hidden when none is. */}
-      {hasRunning && (
-        <nav aria-label="Running" className="flex flex-col gap-0.5">
-          <div className="flex min-w-0 items-center gap-2 pt-4 pb-1 pr-1">
-            <span className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
-              Running
-            </span>
-          </div>
-          {pending.map((entry) => (
-            <button
-              key={entry.key}
-              type="button"
-              aria-current={entry.current ? "page" : undefined}
-              aria-label={`Open “${entry.label}”`}
-              aria-busy={entry.working || undefined}
-              title={`${entry.label}\n${TERMINAL_KIND_LABELS[entry.agent]}, ${entry.working ? "starting" : "new"}`}
-              onClick={entry.open}
-              className={`${row} w-full text-left ${entry.current ? activeClass : ""}`}
-            >
-              <TerminalKindIcon
-                kind={entry.agent}
-                className="size-3 shrink-0"
-              />
-              <span
-                className={`min-w-0 flex-1 truncate ${entry.working ? "text-shimmer" : "text-muted-foreground"}`}
-              >
-                {entry.label}
-              </span>
-              {entry.working && <WorkingMark />}
-            </button>
-          ))}
-          {fresh.map((entry) => {
-            const agent = TERMINAL_KIND_LABELS[entry.kind];
-            const current = entry.id === terminalId;
-            return (
-              <div key={entry.id} className="group/row relative">
-                <ContextMenu>
-                  <ContextMenuTrigger
-                    render={
-                      <button
-                        type="button"
-                        aria-current={current ? "page" : undefined}
-                        aria-label={`Open new ${agent} session`}
-                        onClick={() => go(entry)}
-                        className={`${row} w-full text-left ${current ? activeClass : ""} group-hover/row:pe-7 group-focus-within/row:pe-7`}
-                      />
-                    }
-                  >
-                    <TerminalKindIcon
-                      kind={entry.kind}
-                      className="size-3 shrink-0"
-                    />
-                    <span className="text-muted-foreground min-w-0 flex-1 truncate">
-                      New {agent} session
-                    </span>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent>
-                    <StopItem onStop={() => void stop(workspace, entry.id)} />
-                  </ContextMenuContent>
-                </ContextMenu>
-                <QuickActions onStop={() => void stop(workspace, entry.id)} />
-              </div>
-            );
-          })}
-          {inRunning.map((session) => sessionRow(session))}
-        </nav>
-      )}
-      {(idle.length > 0 || hasFolder) && (
-        <nav aria-label="Agents" className="flex flex-col gap-0.5">
+      {(sessions.length > 0 ||
+        pending.length > 0 ||
+        fresh.length > 0 ||
+        hasFolder) && (
+        <nav aria-label="Sessions" className="flex flex-col gap-0.5">
           <div className="flex min-w-0 items-center justify-between gap-2 pt-4 pb-1 pr-1">
             <span className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
-              Agents
+              Sessions
             </span>
             <span className="flex items-center gap-0.5">
               {/* Every conversation by title, past the fold: Claude Code's
@@ -350,6 +281,68 @@ function AgentSessionsList({
               </button>
             </span>
           </div>
+          {pinned.map((session) => sessionRow(session))}
+          {pending.map((entry) => (
+            <button
+              key={entry.key}
+              type="button"
+              aria-current={entry.current ? "page" : undefined}
+              aria-label={`Open “${entry.label}”`}
+              aria-busy={entry.working || undefined}
+              title={`${entry.label}\n${TERMINAL_KIND_LABELS[entry.agent]}, ${entry.working ? "starting" : "new"}`}
+              onClick={entry.open}
+              className={`${row} w-full text-left ${entry.current ? activeClass : ""}`}
+            >
+              <span className="relative flex shrink-0">
+                <TerminalKindIcon
+                  kind={entry.agent}
+                  className="size-3 shrink-0"
+                />
+                {entry.working && <StatusPing tone="working" />}
+              </span>
+              <span
+                className={`min-w-0 flex-1 truncate ${entry.working ? "text-shimmer" : "text-muted-foreground"}`}
+              >
+                {entry.label}
+              </span>
+            </button>
+          ))}
+          {fresh.map((entry) => {
+            const agent = TERMINAL_KIND_LABELS[entry.kind];
+            const current = entry.id === terminalId;
+            return (
+              <div key={entry.id} className="group/row relative">
+                <ContextMenu>
+                  <ContextMenuTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-current={current ? "page" : undefined}
+                        aria-label={`Open new ${agent} session`}
+                        onClick={() => go(entry)}
+                        className={`${row} w-full text-left ${current ? activeClass : ""}`}
+                      />
+                    }
+                  >
+                    <span className="relative flex shrink-0">
+                      <TerminalKindIcon
+                        kind={entry.kind}
+                        className="size-3 shrink-0"
+                      />
+                      <StatusPing tone="running" />
+                    </span>
+                    <span className="text-muted-foreground min-w-0 flex-1 truncate">
+                      New {agent} session
+                    </span>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <StopItem onStop={() => void stop(workspace, entry.id)} />
+                  </ContextMenuContent>
+                </ContextMenu>
+              </div>
+            );
+          })}
+          {runningUnpinned.map((session) => sessionRow(session))}
           {shown.map((session) => sessionRow(session))}
           {rest.length > FOLDED && (
             <button
@@ -380,7 +373,7 @@ function AgentSessionsList({
             </AlertDialogTitle>
             <AlertDialogDescription>
               Whatever it is doing now is interrupted. The conversation is kept
-              and can be resumed from the Agents group.
+              and can be resumed from Sessions.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

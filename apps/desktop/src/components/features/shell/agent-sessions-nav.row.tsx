@@ -2,7 +2,6 @@ import {
   ArrowRight01Icon,
   PinIcon,
   PinOffIcon,
-  StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
@@ -22,6 +21,7 @@ import {
   useStopBackgroundTask,
 } from "#/components/shared/agents/background-tasks";
 import { factsSummary } from "#/components/shared/agents/conversation-facts";
+import { StatusPing } from "#/components/shared/agents/status-ping";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
 import {
   TERMINAL_KIND_LABELS,
@@ -83,29 +83,19 @@ const FACTS_FRESH_MS = 15_000;
  * button cannot hold another. Both live in the context menu too.
  */
 export function QuickActions({
-  onStop,
   pin,
 }: {
-  onStop?: () => void;
-  pin?: { pinned: boolean; onToggle: () => void };
+  pin: { pinned: boolean; onToggle: () => void };
 }) {
+  // Stop is in the row's context menu only: a hover target that kills an
+  // agent is too easy to hit on the way to the row.
   return (
     <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
-      {onStop && (
-        <QuickAction
-          label="Stop"
-          icon={StopIcon}
-          onClick={onStop}
-          className="hover:text-destructive"
-        />
-      )}
-      {pin && (
-        <QuickAction
-          label={pin.pinned ? "Unpin" : "Pin"}
-          icon={pin.pinned ? PinOffIcon : PinIcon}
-          onClick={pin.onToggle}
-        />
-      )}
+      <QuickAction
+        label={pin.pinned ? "Unpin" : "Pin"}
+        icon={pin.pinned ? PinOffIcon : PinIcon}
+        onClick={pin.onToggle}
+      />
     </div>
   );
 }
@@ -277,7 +267,7 @@ export function SessionRow({
   workspace,
   slug,
   session,
-  inPinned = false,
+  running,
   row,
   active: activeClass,
   now,
@@ -297,8 +287,8 @@ export function SessionRow({
   workspace: string;
   slug: string;
   session: AgentSession;
-  /** Drawn in the Pinned group, which says so itself. */
-  inPinned?: boolean;
+  /** Its agent is running (a tab, the chat's engine, or a run it leads). */
+  running: boolean;
   /** The rail's row classes. */
   row: string;
   /** The rail's active-row classes. */
@@ -460,18 +450,21 @@ export function SessionRow({
                 onPointerLeave={unpeek}
                 onFocus={peek}
                 onBlur={unpeek}
-                className={`${row} w-full text-left ${current ? activeClass : ""} ${terminal ? "group-hover/row:pe-12 group-focus-within/row:pe-12" : "group-hover/row:pe-7 group-focus-within/row:pe-7"}`}
+                className={`${row} w-full text-left ${current ? activeClass : ""} group-hover/row:pe-7 group-focus-within/row:pe-7`}
               />
             }
           >
             {/* With sub-agents, hover trades the icon for their chevron. */}
-            <span className={`flex shrink-0 ${nested ? MAKES_ROOM : ""}`}>
-              {awaiting ? (
-                <AwaitingDot />
-              ) : (
-                <TerminalKindIcon
-                  kind={session.agent}
-                  className="size-3 shrink-0"
+            <span
+              className={`relative flex shrink-0 ${nested ? MAKES_ROOM : ""}`}
+            >
+              <TerminalKindIcon
+                kind={session.agent}
+                className="size-3 shrink-0"
+              />
+              {(awaiting || working || running) && (
+                <StatusPing
+                  tone={awaiting ? "awaiting" : working ? "working" : "running"}
                 />
               )}
             </span>
@@ -480,9 +473,8 @@ export function SessionRow({
             >
               {session.title}
             </span>
-            {/* The Pinned group says so itself; in Running the mark is where
-            the row goes back to on Stop. */}
-            {isPinned && !inPinned && (
+            {/* Pinned rows lead Sessions; the mark says why this one is up. */}
+            {isPinned && (
               <HugeiconsIcon
                 icon={PinIcon}
                 className={`text-muted-foreground size-3 shrink-0 ${MAKES_ROOM}`}
@@ -490,36 +482,12 @@ export function SessionRow({
                 aria-label="Pinned"
               />
             )}
-            {/* How many it spawned; while some are going, how many are,
-              beside a dot that stands for a spinner (FE-33/D7). */}
-            {children > 0 && (
-              <span
-                aria-hidden="true"
-                data-testid="subagent-count"
-                className={`text-muted-foreground flex shrink-0 items-center gap-1 text-xs tabular-nums ${MAKES_ROOM}`}
-              >
-                {childrenGoing > 0 && (
-                  <span className="bg-tone-emerald size-1.5 rounded-full" />
-                )}
-                {childrenGoing > 0 ? childrenGoing : children}
-              </span>
-            )}
             {/* A Codex goal that stopped short says so (FE-41/D4). */}
             <CodexGoalBadge
               workspace={workspace}
               session={session}
               className={MAKES_ROOM}
             />
-            {working && (
-              <span className={`flex shrink-0 ${MAKES_ROOM}`}>
-                <WorkingMark />
-              </span>
-            )}
-            <span
-              className={`text-muted-foreground shrink-0 text-xs tabular-nums ${MAKES_ROOM}`}
-            >
-              {shortAge(session.updatedAt, now)}
-            </span>
           </ContextMenuTrigger>
           <ContextMenuContent>
             <ContextMenuItem onClick={onRename}>Rename</ContextMenuItem>
@@ -605,7 +573,6 @@ export function SessionRow({
           </button>
         )}
         <QuickActions
-          onStop={onStop}
           pin={{
             pinned: isPinned,
             onToggle: () => void pin(workspace, session, !isPinned),

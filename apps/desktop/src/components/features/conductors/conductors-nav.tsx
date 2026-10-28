@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import type { TeamLead } from "#/../shared/orchestration";
+import { StatusPing } from "#/components/shared/agents/status-ping";
 import { useTeamLeads } from "#/components/shared/conversation/composer";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
@@ -45,14 +46,6 @@ import {
   useConductorStatuses,
 } from "./conductor-status";
 
-/** The dot on a conductor's icon: idle, working, or waiting on the user. */
-const DOT: Record<ConductorState, string> = {
-  // Opaque: a see-through grey reads as a hole on a highlighted row.
-  idle: "bg-[color-mix(in_oklab,var(--muted-foreground)_55%,var(--sidebar))]",
-  working: "bg-tone-sky animate-pulse motion-reduce:animate-none",
-  "needs-you": "bg-tone-amber",
-};
-
 function ConductorIcon({
   lead,
   state,
@@ -70,15 +63,10 @@ function ConductorIcon({
         strokeWidth={1.5}
         aria-hidden="true"
       />
-      <span
-        aria-hidden="true"
-        className={cn(
-          // No ring: one in the rail's colour shows as a halo on a highlighted
-          // row. Out at the corner instead, clear of the icon's strokes.
-          "absolute -top-1 -right-1 size-1.5 rounded-full",
-          DOT[state],
-        )}
-      />
+      {/* As a session's: nothing at rest, a ping under the corner else. */}
+      {state !== "idle" && (
+        <StatusPing tone={state === "working" ? "working" : "awaiting"} />
+      )}
     </span>
   );
 }

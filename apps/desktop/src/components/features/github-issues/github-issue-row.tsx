@@ -1,9 +1,8 @@
-import { GithubIcon, RecordIcon } from "@hugeicons/core-free-icons";
+import { RecordIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { RowBadge } from "#/components/shared/board/row-badge";
 import { RAIL_ROW } from "#/components/shared/navigation/rail-hover";
 import { Skeleton } from "#/components/ui/skeleton";
-import { relativeTime } from "#/lib/relative-time";
+import { relativeTime, shortAge } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import type { GitHubIssue, IssueLabel } from "../../../../shared/git";
 
@@ -68,40 +67,35 @@ export function GitHubIssueRow({
         onClick={() => onSelect(issue)}
         className={cn(
           RAIL_ROW,
-          "focus-visible:ring-accent-brand relative flex w-full flex-col gap-1 rounded-lg px-3 py-2.5 text-left outline-none focus-visible:ring-2",
+          "focus-visible:ring-accent-brand relative flex w-full flex-col gap-0.5 rounded-lg px-3 py-2 text-left outline-none focus-visible:ring-2",
           selected && "bg-foreground/[0.06]",
         )}
       >
-        {/* Two lines, as a card's row draws, so the list's two kinds of row
-            read as one list: where it comes from, then what it is. */}
-        <span className="text-muted-foreground flex w-full items-center gap-1.5 text-xs">
+        {/* Two lines, as a card's row draws: its number and title, then
+            its age in quiet text under it. */}
+        <span className="flex w-full min-w-0 items-center gap-2">
           <HugeiconsIcon
-            icon={GithubIcon}
-            className="text-foreground size-3.5 shrink-0"
+            icon={RecordIcon}
+            className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
             strokeWidth={1.8}
             aria-hidden="true"
           />
-          <RowBadge>
-            <HugeiconsIcon
-              icon={RecordIcon}
-              className="size-3 shrink-0 text-emerald-600 dark:text-emerald-400"
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-            Issue
-          </RowBadge>
-          <RowBadge>#{issue.number}</RowBadge>
-          <span className="ml-auto shrink-0 pl-2 tabular-nums">
-            {relativeTime(issue.updatedAt, now)}
+          {/* The number leads the title, quiet, so the line under it has
+              room for the rest. */}
+          <span className="text-muted-foreground shrink-0 text-[13px] tabular-nums">
+            #{issue.number}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+            {issue.title}
           </span>
         </span>
-        <span
-          className={cn(
-            "w-full truncate text-[13px]",
-            selected && "font-medium",
-          )}
-        >
-          {issue.title}
+        <span className="text-muted-foreground flex w-full items-center gap-3 ps-[22px] text-xs">
+          <span
+            className="ml-auto shrink-0 tabular-nums"
+            title={relativeTime(issue.updatedAt, now)}
+          >
+            {shortAge(issue.updatedAt, now)}
+          </span>
         </span>
       </button>
     </li>
@@ -125,14 +119,19 @@ export function GitHubIssuesSkeleton({ rows = 3 }: { rows?: number }) {
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: a placeholder has no identity — the index is all it is.
           key={row}
-          className="flex flex-col gap-1.5 px-5 py-2.5"
+          className="flex flex-col gap-1.5 px-5 py-2"
         >
-          <div className="flex h-4 items-center gap-1.5">
+          <div className="flex h-4 items-center gap-2">
             <Skeleton className="size-3.5 shrink-0 rounded-full" />
-            <Skeleton className="h-2.5 w-20" />
-            <Skeleton className="ml-auto h-2.5 w-12" />
+            <Skeleton
+              className="h-3.5"
+              style={{ width: `${78 - row * 10}%` }}
+            />
           </div>
-          <Skeleton className="h-3.5" style={{ width: `${78 - row * 10}%` }} />
+          <div className="flex h-4 items-center gap-3 ps-[22px]">
+            <Skeleton className="h-2.5 w-8" />
+            <Skeleton className="ml-auto h-2.5 w-6" />
+          </div>
         </div>
       ))}
     </div>

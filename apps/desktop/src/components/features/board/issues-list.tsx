@@ -1,8 +1,4 @@
-import {
-  Add01Icon,
-  CheckListIcon,
-  FilterIcon,
-} from "@hugeicons/core-free-icons";
+import { Add01Icon, FilterIcon, GithubIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Link,
@@ -11,17 +7,21 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { GitHubIssue } from "#/../shared/git";
 import {
   type BoardCard,
   type BoardView,
   matchesSearch,
 } from "#/../shared/workspaces";
 import { CardAgentsMark } from "#/components/shared/board/card-agents";
-import { PriorityIcon, StatusIcon } from "#/components/shared/board/glyphs";
+import {
+  PriorityIcon,
+  ProgressRing,
+  StatusIcon,
+} from "#/components/shared/board/glyphs";
 import { IssueMenu } from "#/components/shared/board/issue-menu";
-import { RowBadge } from "#/components/shared/board/row-badge";
+import { PRIORITY_LABEL } from "#/components/shared/board/properties";
 import { IssuesListSkeleton } from "#/components/shared/board/skeletons";
+import { ListGroupHeader } from "#/components/shared/navigation/list-group-header";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import {
   Empty,
@@ -38,7 +38,7 @@ import {
   statusKeys,
 } from "#/lib/board-view";
 import { type IssueSearch, parseIssueSearch } from "#/lib/issue-search";
-import { relativeTime } from "#/lib/relative-time";
+import { relativeTime, shortAge } from "#/lib/relative-time";
 import { useBoard } from "#/stores/board";
 import { listOf, useGitHubIssues } from "#/stores/github-issues";
 import {
@@ -59,11 +59,6 @@ type Entry = { kind: "card"; taskId: string } | { kind: "gh"; number: number };
  * so that is the grouping it is asked for.
  */
 const GROUP_BY = "status";
-
-/** One row of the list, with the time it is sorted by. */
-type Row =
-  | { kind: "card"; card: BoardCard; at: number }
-  | { kind: "gh"; issue: GitHubIssue; at: number };
 
 /** An ISO time as a number to sort by; 0 for one that is missing. */
 const stamp = (iso: string | null | undefined) => {
@@ -89,7 +84,24 @@ function ownedElsewhere(target: EventTarget | null): boolean {
   );
 }
 
-/** One card as a two-line row: where it stands, then what it is. */
+/**
+ * The lanes in the order the list draws them: the work under way first,
+ * then what is next, then what is over.
+ */
+const ROLE_ORDER = ["active", "start", "intake", null, "done", "archive"];
+const roleRank = (role: string | null) => {
+  const at = ROLE_ORDER.indexOf(role);
+  return at === -1 ? ROLE_ORDER.indexOf(null) : at;
+};
+/** Lanes that start folded: what is finished is rarely what is looked for. */
+const FOLDED_ROLES = new Set(["done", "archive"]);
+
+const GITHUB_GROUP = "github";
+
+/**
+ * One card as two lines: its lane's mark and what it is, then its id,
+ * priority, checklist and age in quiet text under the title.
+ */
 function CardRow({
   card,
   view,
@@ -104,14 +116,15 @@ function CardRow({
   now: number;
 }) {
   const column = columnOf(view.columns, card.columnKey);
-  // How far through its checklist the card is: only while it is being
-  // worked on, and only when it has a checklist. Before work starts it is 0%
-  // and after it ends 100%, which the status already says.
   const progress = checklistProgress(card);
-  const done =
-    column?.role === "active" && progress && progress.total > 0
-      ? Math.round((progress.done / progress.total) * 100)
-      : null;
+  const counted = progress && progress.total > 0 ? progress : null;
+  const mark =
+    column?.role === "active" && counted ? (
+      <ProgressRing column={column} done={counted.done} total={counted.total} />
+    ) : (
+      <StatusIcon column={column} />
+    );
+  const pad = (n: number) => String(n).padStart(2, "0");
   return (
     // NOTE: The menu renders the `li` rather than wrapping it: a `ul` whose
     // children are divs reports the wrong number of items to a screen reader.
@@ -124,61 +137,58 @@ function CardRow({
         disabled={!card.taskId}
         activeOptions={{ includeSearch: false }}
         activeProps={{ className: "bg-foreground/[0.06]" }}
-        className={`${RAIL_ROW} group focus-visible:ring-accent-brand relative flex flex-col gap-1 rounded-lg px-3 py-2.5 outline-none focus-visible:ring-2 aria-disabled:cursor-default`}
+        className={`${RAIL_ROW} group focus-visible:ring-accent-brand relative flex flex-col gap-0.5 rounded-lg px-3 py-2 outline-none focus-visible:ring-2 aria-disabled:cursor-default`}
       >
-        {/* Two lines, the shape every row in this list shares: where it
-            stands, then what it is. A card in progress adds a third. */}
-        <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
-          <PriorityIcon priority={card.priority} />
-          <RowBadge className="max-w-[60%]">
-            {/* While an agent works on the card, its presence takes the
-                status icon's place. */}
-            <CardAgentsMark card={card}>
-              <StatusIcon column={column} />
-            </CardAgentsMark>
-            <span className="truncate">{column?.name ?? "Issue"}</span>
-          </RowBadge>
-          {card.taskId && <RowBadge>{card.taskId}</RowBadge>}
-          <span className="ml-auto shrink-0 pl-2 tabular-nums">
-            {relativeTime(card.updatedAt ?? card.createdAt, now)}
+        <span className="flex min-w-0 items-center gap-2">
+          {/* While an agent works on the card, its presence takes the
+              mark's place. */}
+          <CardAgentsMark card={card}>{mark}</CardAgentsMark>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+            {card.title}
           </span>
         </span>
-        <span className="truncate text-[13px] group-data-[status=active]:font-medium">
-          {card.title}
-        </span>
-        {done !== null && (
-          // A third line only while the card is being worked on: how far
-          // through its checklist it is, as one small badge.
-          <span className="flex">
-            <RowBadge>
-              <span
-                className="flex items-center gap-1 tabular-nums"
-                title={`${progress?.done} of ${progress?.total} checked`}
-              >
-                <HugeiconsIcon
-                  icon={CheckListIcon}
-                  className="size-3"
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                />
-                {done}%
-              </span>
-            </RowBadge>
+        {/* Under the title, set apart by space rather than pills or "·". */}
+        <span className="text-muted-foreground flex min-w-0 items-center gap-3 ps-[22px] text-xs">
+          {card.taskId && (
+            <span className="shrink-0 tabular-nums">{card.taskId}</span>
+          )}
+          {card.priority && (
+            <span className="flex shrink-0 items-center gap-1">
+              <PriorityIcon priority={card.priority} className="size-3" />
+              {PRIORITY_LABEL[card.priority]}
+            </span>
+          )}
+          {counted && (
+            <span
+              className="shrink-0 tabular-nums"
+              title={`${counted.done} of ${counted.total} checked`}
+            >
+              {pad(counted.done)}/{pad(counted.total)}
+            </span>
+          )}
+          <span
+            className="ml-auto shrink-0 tabular-nums"
+            title={relativeTime(card.updatedAt ?? card.createdAt, now)}
+          >
+            {shortAge(card.updatedAt ?? card.createdAt, now)}
           </span>
-        )}
+        </span>
       </Link>
     </IssueMenu>
   );
 }
 
 /**
- * The issue list: the board's cards by group, then the repo's GitHub issues.
+ * The issue list: the board's cards grouped by lane, then the repo's GitHub
+ * issues as a group of their own.
  *
+ * - Lanes under way first (In Progress, To-Do), done and archived last and
+ *   folded until opened. Newest activity first within each.
  * - The board's filters (status, category, priority, tag) cut the cards
  *   only. A GitHub issue has none of those fields (FE-75/D5a).
- * - The search box cuts both.
- * - j/k and ↑/↓ move the selection down the rows as drawn: cards, then
- *   GitHub issues, skipping folded groups (FE-75/D8).
+ * - The search box cuts both, and hides a group left empty.
+ * - j/k and ↑/↓ move the selection down the rows as drawn, skipping folded
+ *   groups (FE-75/D8).
  */
 export function IssuesList() {
   const { slug } = useParams({ from: "/_app/w/$slug/issues" });
@@ -264,46 +274,53 @@ export function IssuesList() {
   // "No cards yet" is about the board, not the page of it on screen.
   const emptyBoard = view ? (view.total ?? view.cards.length) === 0 : false;
 
-  // One list, newest activity first, cards and GitHub issues mixed. The row's
-  // first line already says which is which, so a header per group would only
-  // push the work further down.
-  const rows = useMemo(() => {
-    const out: Row[] = [];
-    const seen = new Set<string>();
-    for (const group of groups)
-      for (const card of group.cards) {
-        if (seen.has(card.id)) continue;
-        seen.add(card.id);
-        out.push({
-          kind: "card",
-          card,
-          at: stamp(card.updatedAt ?? card.createdAt),
-        });
-      }
-    for (const issue of issues)
-      out.push({ kind: "gh", issue, at: stamp(issue.updatedAt) });
-    return out.sort((left, right) => right.at - left.at);
-  }, [groups, issues]);
+  // Folded or open, by group key; unset follows the lane (done and archive
+  // start folded).
+  const [fold, setFold] = useState<Record<string, boolean>>({});
+  const isOpen = (key: string, role: string | null) =>
+    fold[key] ?? !FOLDED_ROLES.has(role ?? "");
+  const toggle = (key: string, role: string | null) =>
+    setFold((state) => ({ ...state, [key]: !isOpen(key, role) }));
 
+  // The lanes under way first, each newest activity first. A search keeps a
+  // lane only while something in it matches.
+  const lanes = useMemo(() => {
+    if (!view) return [];
+    const shown = statusKeys(view.columns, search.status);
+    return groups
+      .filter((group) => shown.includes(group.key))
+      .map((group) => ({
+        ...group,
+        cards: [...group.cards].sort(
+          (left, right) =>
+            stamp(right.updatedAt ?? right.createdAt) -
+            stamp(left.updatedAt ?? left.createdAt),
+        ),
+      }))
+      .filter((group) => group.cards.length > 0)
+      .sort((left, right) => roleRank(left.role) - roleRank(right.role));
+  }, [view, groups, search.status]);
+  const ghIssues = useMemo(
+    () => [...issues].sort((l, r) => stamp(r.updatedAt) - stamp(l.updatedAt)),
+    [issues],
+  );
+  const ghOpen = fold[GITHUB_GROUP] ?? true;
+
+  // j/k walk the rows as drawn, past folded groups (FE-75/D8).
   const entries: Entry[] = [];
-  for (const row of rows) {
-    if (row.kind === "gh")
-      entries.push({ kind: "gh", number: row.issue.number });
-    else if (row.card.taskId)
-      entries.push({ kind: "card", taskId: row.card.taskId });
-  }
+  for (const lane of lanes)
+    if (isOpen(lane.key, lane.role))
+      for (const card of lane.cards)
+        if (card.taskId) entries.push({ kind: "card", taskId: card.taskId });
+  if (ghOpen)
+    for (const issue of ghIssues)
+      entries.push({ kind: "gh", number: issue.number });
 
-  // The groups the service has more of, read together by one Load more.
-  const more = groups.filter(
-    (group) =>
-      view?.groups?.[group.key]?.cursor &&
-      statusKeys(view.columns, search.status).includes(group.key),
-  );
-  const left = more.reduce(
-    (sum, group) =>
-      sum + Math.max((counts?.[group.key] ?? 0) - group.cards.length, 0),
-    0,
-  );
+  /** The cards a lane has on the service and not on screen, if it pages. */
+  const leftIn = (key: string, shown: number) =>
+    view?.groups?.[key]?.cursor
+      ? Math.max((counts?.[key] ?? 0) - shown, 0)
+      : null;
 
   const current: string | null = selected.taskId
     ? `card:${selected.taskId}`
@@ -368,7 +385,8 @@ export function IssuesList() {
     row?.scrollIntoView({ block: "nearest" });
   }, [current]);
 
-  const nothing = view && rows.length === 0 && !github.loading;
+  const nothing =
+    view && lanes.length === 0 && ghIssues.length === 0 && !github.loading;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -410,39 +428,82 @@ export function IssuesList() {
               </EmptyHeader>
             </Empty>
           )}
-          {rows.length > 0 && (
-            <ul className="flex flex-col gap-0.5 px-2">
-              {rows.map((row) =>
-                row.kind === "card" && view ? (
-                  <CardRow
-                    key={`card:${row.card.id}`}
-                    card={row.card}
-                    view={view}
-                    slug={slug}
-                    search={search}
-                    now={now}
-                  />
-                ) : row.kind === "gh" ? (
-                  <GitHubIssueRow
-                    key={`gh:${row.issue.number}`}
-                    issue={row.issue}
-                    now={githubNow}
-                    selected={current === `gh:${row.issue.number}`}
-                    onSelect={() =>
-                      go({ kind: "gh", number: row.issue.number })
+          <div className="flex flex-col gap-3 px-2 pb-2">
+            {lanes.map((lane) => {
+              const open = isOpen(lane.key, lane.role);
+              const left = needle ? null : leftIn(lane.key, lane.cards.length);
+              return (
+                <section key={lane.key} aria-label={lane.name}>
+                  <ListGroupHeader
+                    name={lane.name}
+                    count={counts?.[lane.key] ?? lane.cards.length}
+                    open={open}
+                    onToggle={() => toggle(lane.key, lane.role)}
+                    icon={
+                      <StatusIcon
+                        column={columnOf(view?.columns ?? [], lane.key)}
+                        className="size-3"
+                      />
                     }
                   />
-                ) : null,
-              )}
-            </ul>
-          )}
-          {/* A search only looks through what is already read, so it does
-              not offer to read more. */}
-          {!needle && more.length > 0 && (
-            <div className="px-2 py-1">
-              <LoadMore groups={more.map((group) => group.key)} left={left} />
-            </div>
-          )}
+                  {open && view && (
+                    <ul className="flex flex-col gap-0.5">
+                      {lane.cards.map((card) => (
+                        <CardRow
+                          key={card.id}
+                          card={card}
+                          view={view}
+                          slug={slug}
+                          search={search}
+                          now={now}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                  {/* A search only looks through what is already read, so
+                      it does not offer to read more. */}
+                  {open && left !== null && (
+                    <LoadMore groups={[lane.key]} left={left} />
+                  )}
+                </section>
+              );
+            })}
+            {(ghIssues.length > 0 || (!github.view && github.loading)) && (
+              <section aria-label="GitHub issues">
+                <ListGroupHeader
+                  name="GitHub"
+                  count={ghIssues.length}
+                  open={ghOpen}
+                  onToggle={() =>
+                    setFold((state) => ({ ...state, [GITHUB_GROUP]: !ghOpen }))
+                  }
+                  icon={
+                    <HugeiconsIcon
+                      icon={GithubIcon}
+                      className="size-3 shrink-0"
+                      strokeWidth={1.8}
+                      aria-hidden="true"
+                    />
+                  }
+                />
+                {ghOpen && ghIssues.length > 0 && (
+                  <ul className="flex flex-col gap-0.5">
+                    {ghIssues.map((issue) => (
+                      <GitHubIssueRow
+                        key={issue.number}
+                        issue={issue}
+                        now={githubNow}
+                        selected={current === `gh:${issue.number}`}
+                        onSelect={() =>
+                          go({ kind: "gh", number: issue.number })
+                        }
+                      />
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
+          </div>
           {!github.view && github.loading && <GitHubIssuesSkeleton rows={2} />}
           {/* A project with no folder or no GitHub remote has no GitHub
               issues to read, and saying so on every open would be noise. */}

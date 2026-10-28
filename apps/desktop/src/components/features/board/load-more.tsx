@@ -4,11 +4,9 @@ import { Button } from "#/components/ui/button";
 import { useBoard } from "#/stores/board";
 
 /**
- * The last row of the list while the service has more cards than it sent.
- *
- * NOTE: One button for every group that has a next page. The list is not
- * grouped, but the service still pages each status on its own, so a press
- * reads the next page of each, one after another.
+ * The last row of a lane while the service has more of its cards than it
+ * sent. The service pages each status on its own; given several groups, a
+ * press reads the next page of each, one after another.
  */
 export function LoadMore({
   groups,
