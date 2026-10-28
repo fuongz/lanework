@@ -27,7 +27,6 @@ import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
-import { WorkingMark } from "#/components/shared/terminal/working-mark";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -46,7 +45,7 @@ import {
   taskLabel as workerLabel,
   taskTone as workerTone,
 } from "#/lib/orchestration-status";
-import { relativeTime, shortAge } from "#/lib/relative-time";
+import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import { useAgentFacts } from "#/stores/agent-facts";
 import {
@@ -194,22 +193,21 @@ function BackgroundShellRows({
                 />
               }
             >
-              {/* Its kind on the left, so a row says what runs; the spinner on
-            the right, beside its age. */}
-              <HugeiconsIcon
-                icon={TASK_KIND_ICONS[task.kind]}
-                className="text-muted-foreground size-3 shrink-0"
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
+              {/* Its kind on the left, so a row says what runs; the ping
+              under it, as a session's, says it still does. */}
+              <span className="relative flex shrink-0">
+                <HugeiconsIcon
+                  icon={TASK_KIND_ICONS[task.kind]}
+                  className="text-muted-foreground size-3 shrink-0"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+                <StatusPing tone="working" />
+              </span>
               <span
                 className={`min-w-0 flex-1 truncate ${viewed ? "" : "text-muted-foreground"}`}
               >
                 {name}
-              </span>
-              <WorkingMark />
-              <span className="text-muted-foreground shrink-0 tabular-nums">
-                {shortAge(task.startedAt, now)}
               </span>
             </ContextMenuTrigger>
             {canStop(task) && (
@@ -606,18 +604,17 @@ export function SessionRow({
             title={`${sub.title}\n${sub.type ?? "Sub-agent"}, ${busy ? "working" : relativeTime(sub.updatedAt, now)}`}
             className={cn(row, SUB_ROW, viewed(sub) && activeClass)}
           >
-            <TerminalKindIcon
-              kind={session.agent}
-              className="size-3 shrink-0 opacity-60"
-            />
+            <span className="relative flex shrink-0">
+              <TerminalKindIcon
+                kind={session.agent}
+                className="size-3 shrink-0 opacity-60"
+              />
+              {busy && <StatusPing tone="working" />}
+            </span>
             <span
               className={`min-w-0 flex-1 truncate ${busy ? "text-shimmer" : viewed(sub) ? "" : "text-muted-foreground"}`}
             >
               {sub.title}
-            </span>
-            {busy && <WorkingMark />}
-            <span className="text-muted-foreground shrink-0 tabular-nums">
-              {shortAge(sub.updatedAt, now)}
             </span>
           </button>
         ))}
@@ -650,18 +647,19 @@ export function SessionRow({
               title={`${task.title}\n${TERMINAL_KIND_LABELS[task.agent]} worker, ${workerLabel(task).toLowerCase()}`}
               className={cn(row, SUB_ROW, seen && activeClass)}
             >
-              <TerminalKindIcon
-                kind={task.agent}
-                className="size-3 shrink-0 opacity-60"
-              />
+              <span className="relative flex shrink-0">
+                <TerminalKindIcon
+                  kind={task.agent}
+                  className="size-3 shrink-0 opacity-60"
+                />
+                {busy && <StatusPing tone="working" />}
+              </span>
               <span
                 className={`min-w-0 flex-1 truncate ${busy ? "text-shimmer" : seen ? "" : "text-muted-foreground"}`}
               >
                 {task.title}
               </span>
-              {busy ? (
-                <WorkingMark />
-              ) : (
+              {!busy && (
                 <span className={cn("shrink-0", workerTone(task))}>
                   {workerLabel(task)}
                 </span>
