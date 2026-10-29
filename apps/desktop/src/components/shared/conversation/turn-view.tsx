@@ -1,5 +1,6 @@
 import {
   File01Icon,
+  Folder01Icon,
   Image01Icon,
   SlashIcon,
   UserGroupIcon,
@@ -193,7 +194,9 @@ function PromptText({ text }: { text: string }) {
                   ? UserGroupIcon
                   : command
                     ? SlashIcon
-                    : File01Icon
+                    : /\/$/.test(named)
+                      ? Folder01Icon
+                      : File01Icon
             }
             // The first line's middle, not the badge's: a long name wraps.
             className="mt-[0.3em] size-3.5 shrink-0"

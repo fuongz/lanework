@@ -121,9 +121,14 @@ async function readSmall(path: string, max: number): Promise<Buffer | null> {
   }
 }
 
-/** `@path`, quoted when it has a space — how the CLI reads a file mention. */
-function mention(path: string): string {
-  return /\s|"/.test(path) ? `@"${path.replace(/"/g, '\\"')}"` : `@${path}`;
+/**
+ * `@path`, quoted when it has a space — how the CLI reads a file mention. A
+ * folder ends in `/`, as the composer writes one (FE-93/D2), so the chat
+ * badges it as a folder.
+ */
+function mention(path: string, folder = false): string {
+  const at = folder ? `${path.replace(/\/+$/, "")}/` : path;
+  return /\s|"/.test(at) ? `@"${at.replace(/"/g, '\\"')}"` : `@${at}`;
 }
 
 /**
@@ -170,7 +175,7 @@ export async function contentOf(
           data: bytes.toString("base64"),
         },
       });
-    else mentions.push(mention(attachment.path));
+    else mentions.push(mention(attachment.path, info.isDirectory()));
   }
   const body = [text.trim(), mentions.join(" ")].filter(Boolean).join("\n\n");
   return [...(body ? [{ type: "text" as const, text: body }] : []), ...images];
