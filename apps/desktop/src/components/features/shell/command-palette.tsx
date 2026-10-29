@@ -11,6 +11,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type BoardCard, matchesSearch } from "#/../shared/workspaces";
 import { StatusIcon } from "#/components/shared/board/glyphs";
 import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { columnOf } from "#/lib/board-view";
 import { useBoard } from "#/stores/board";
 import { useCommandPalette } from "#/stores/command-palette";
@@ -274,9 +280,14 @@ export function CommandPalette() {
             </p>
           )}
           {matches.length === 0 && (
-            <p className="text-muted-foreground px-2.5 py-6 text-center text-[13px]">
-              Nothing matches “{query.trim()}”.
-            </p>
+            <Empty className="py-6">
+              <EmptyHeader>
+                <EmptyTitle>No matches</EmptyTitle>
+                <EmptyDescription>
+                  Nothing matches “{query.trim()}”.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
           {matches.map((command, index) => (
             <button

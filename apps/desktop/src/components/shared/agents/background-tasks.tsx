@@ -272,9 +272,13 @@ export function WorkflowPhases({
 }) {
   if (workflow.phases.length === 0)
     return (
-      <p className={cn("text-muted-foreground px-1.5 text-xs", className)}>
-        No agent started yet.
-      </p>
+      <Empty className={cn("items-start p-0 px-1.5 text-left", className)}>
+        <EmptyHeader className="items-start">
+          <EmptyDescription className="text-xs">
+            No agent started yet.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   return (
     <div className={cn("flex min-w-0 flex-col gap-1", className)}>

@@ -15,6 +15,12 @@ import {
 } from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
+import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
@@ -214,12 +220,14 @@ export function HistoryList() {
           );
         })}
         {needle && !visible.length && (
-          <p
-            role="status"
-            className="text-muted-foreground px-2.5 py-4 text-xs"
-          >
-            No matching commits in the loaded history.
-          </p>
+          <Empty role="status" className="flex-none py-6">
+            <EmptyHeader>
+              <EmptyTitle>No matches</EmptyTitle>
+              <EmptyDescription>
+                No matching commits in the loaded history.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
         {needle && more && (
           <Button

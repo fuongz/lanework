@@ -1,5 +1,10 @@
-import { Alert02Icon, FolderOpenIcon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  FolderOpenIcon,
+  MagicWand01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import type { SetupDoc, SetupFile } from "#/../shared/agent-setup";
 import type { Workspace } from "#/../shared/workspaces";
@@ -18,11 +23,13 @@ import {
 } from "#/components/shared/settings/file-browser";
 import { useAgentSetup } from "#/components/shared/settings/use-agent-setup";
 import { Alert, AlertDescription } from "#/components/ui/alert";
-import { Button } from "#/components/ui/button";
+import { Button, buttonVariants } from "#/components/ui/button";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
 import { ipcMessage } from "#/lib/ipc-error";
@@ -120,16 +127,25 @@ function SkillPane({ slug, skill }: { slug: string; skill: SetupDoc }) {
 function Placeholder({
   title,
   description,
+  icon = MagicWand01Icon,
+  children,
 }: {
   title: string;
   description: string;
+  icon?: typeof MagicWand01Icon;
+  /** The way out, when there is one. */
+  children?: ReactNode;
 }) {
   return (
     <Empty className="flex-1">
       <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <HugeiconsIcon icon={icon} strokeWidth={1.8} />
+        </EmptyMedia>
         <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyHeader>
+      {children && <EmptyContent>{children}</EmptyContent>}
     </Empty>
   );
 }
@@ -170,9 +186,17 @@ function Skills({ project }: { project: Workspace }) {
   if (setup && !setup.folder)
     pane = (
       <Placeholder
+        icon={FolderOpenIcon}
         title="This project has no folder on this machine"
         description="Link a folder to see its skills."
-      />
+      >
+        <Link
+          to="/settings/workspaces"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          Open General
+        </Link>
+      </Placeholder>
     );
   else if (setup && skills.length === 0)
     pane = (
@@ -213,9 +237,11 @@ function Skills({ project }: { project: Workspace }) {
               noun="skill"
             />
           ) : (
-            <p className="text-muted-foreground px-3.5 py-3 text-xs">
-              No skills.
-            </p>
+            <Empty className="flex-none py-8">
+              <EmptyHeader>
+                <EmptyTitle>No skills yet</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           )
         ) : (
           <ListSkeleton label="Reading skills" rows={6} />

@@ -1,6 +1,12 @@
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { matches, SETTINGS_GROUPS } from "#/lib/settings-catalog";
 import { useSettingsSearch } from "#/stores/settings-search";
 
@@ -17,9 +23,14 @@ export function SettingsNav() {
 
   if (groups.length === 0)
     return (
-      <p className="text-muted-foreground px-2 py-6 text-[13px]">
-        No settings match “{query.trim()}”.
-      </p>
+      <Empty className="flex-none px-2 py-6">
+        <EmptyHeader>
+          <EmptyTitle>No matches</EmptyTitle>
+          <EmptyDescription>
+            No settings match “{query.trim()}”.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
 
   return (

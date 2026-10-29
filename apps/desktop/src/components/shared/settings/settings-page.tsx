@@ -1,4 +1,13 @@
+import { Search01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { matches } from "#/lib/settings-catalog";
 import { cn } from "#/lib/utils";
 import { useSettingsSearch } from "#/stores/settings-search";
@@ -105,9 +114,17 @@ export function SettingsPage({
       </p>
 
       {visible.length === 0 ? (
-        <p className="text-muted-foreground mt-12 text-sm">
-          Nothing on this page matches “{query.trim()}”.
-        </p>
+        <Empty className="mt-6">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <HugeiconsIcon icon={Search01Icon} strokeWidth={1.8} />
+            </EmptyMedia>
+            <EmptyTitle>No matches</EmptyTitle>
+            <EmptyDescription>
+              Nothing on this page matches “{query.trim()}”.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         visible.map((section) => (
           <section

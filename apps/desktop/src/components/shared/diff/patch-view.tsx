@@ -1,3 +1,5 @@
+import { GitCompareIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
   type CodeViewItem,
   type FileDiffLoadedFiles,
@@ -13,6 +15,13 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { useDark } from "#/hooks/use-dark";
 import { DiffFileHeader } from "./diff-file-header";
 
@@ -188,9 +197,17 @@ export function PatchView({
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {header}
-        <p className="text-muted-foreground p-4 text-xs">
-          Nothing to show here.
-        </p>
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <HugeiconsIcon icon={GitCompareIcon} strokeWidth={1.8} />
+            </EmptyMedia>
+            <EmptyTitle>Nothing to show</EmptyTitle>
+            <EmptyDescription>
+              There is no change in this diff.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </div>
     );
 

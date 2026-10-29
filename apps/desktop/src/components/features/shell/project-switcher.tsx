@@ -35,6 +35,12 @@ import {
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -362,14 +368,24 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 }}
               >
                 {workspaces.length === 0 && (
-                  <p className="text-muted-foreground px-2 py-3 text-[13px]">
-                    No projects on this account yet.
-                  </p>
+                  <Empty className="px-2 py-4">
+                    <EmptyHeader>
+                      <EmptyTitle>No projects yet</EmptyTitle>
+                      <EmptyDescription>
+                        No projects on this account yet.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 )}
                 {workspaces.length > 0 && shownWorkspaces.length === 0 && (
-                  <p className="text-muted-foreground truncate px-2 py-3 text-[13px]">
-                    No project matches “{query.trim()}”.
-                  </p>
+                  <Empty className="px-2 py-4">
+                    <EmptyHeader>
+                      <EmptyTitle>No matches</EmptyTitle>
+                      <EmptyDescription className="max-w-full truncate">
+                        No project matches “{query.trim()}”.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 )}
                 {shownWorkspaces.map((workspace) => (
                   <ContextMenu key={workspace.slug}>

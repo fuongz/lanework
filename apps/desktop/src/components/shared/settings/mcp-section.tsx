@@ -1,4 +1,4 @@
-import { Alert02Icon } from "@hugeicons/core-free-icons";
+import { Alert02Icon, McpServerIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import type {
@@ -20,6 +20,7 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
 import { ipcMessage } from "#/lib/ipc-error";
@@ -281,6 +282,9 @@ function Nothing({
     <SettingsCard>
       <Empty className="py-8">
         <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <HugeiconsIcon icon={McpServerIcon} strokeWidth={1.8} />
+          </EmptyMedia>
           <EmptyTitle>{title}</EmptyTitle>
           <EmptyDescription>{description}</EmptyDescription>
         </EmptyHeader>

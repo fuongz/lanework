@@ -40,6 +40,12 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Switch } from "#/components/ui/switch";
 import { readStored, writeStored } from "#/lib/stored";
 import { cn } from "#/lib/utils";
@@ -215,11 +221,20 @@ function ModelPanel({
           )}
           {legacy.map(row)}
           {shown.length === 0 && (
-            <p className="text-muted-foreground px-2.5 py-3 text-xs">
-              {only === "favorites" && !query
-                ? "No favorites yet. Star a model to keep it here."
-                : "No model matches."}
-            </p>
+            <Empty className="px-2.5 py-4">
+              <EmptyHeader>
+                <EmptyTitle>
+                  {only === "favorites" && !query
+                    ? "No favorites yet"
+                    : "No matches"}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {only === "favorites" && !query
+                    ? "Star a model to keep it here."
+                    : "No model matches."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
         </div>
       </div>

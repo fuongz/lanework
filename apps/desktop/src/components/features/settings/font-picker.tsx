@@ -19,6 +19,12 @@ import {
   CommandSeparator,
 } from "#/components/ui/command";
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -238,9 +244,14 @@ function FamilyCombobox({
             {loading ? (
               <ListSkeleton label="Loading fonts" rows={5} icon={false} />
             ) : failed ? (
-              <p className="text-muted-foreground px-2.5 py-1.5 text-xs">
-                Couldn’t read this Mac’s fonts.
-              </p>
+              <Empty className="py-6">
+                <EmptyHeader>
+                  <EmptyTitle>No fonts</EmptyTitle>
+                  <EmptyDescription>
+                    Couldn’t read this Mac’s fonts.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               <CommandEmpty>No fonts match.</CommandEmpty>
             )}

@@ -18,6 +18,12 @@ import {
   SettingsPage,
 } from "#/components/shared/settings/settings-page";
 import { Button } from "#/components/ui/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Input } from "#/components/ui/input";
 import { Kbd } from "#/components/ui/kbd";
 import {
@@ -160,9 +166,14 @@ function DictionaryEditor() {
       </div>
       <div ref={list} className="flex flex-col gap-2 px-4 py-3">
         {entries.length === 0 && (
-          <p className="text-muted-foreground text-[13px]">
-            No entries. Add one for a word dictation keeps getting wrong.
-          </p>
+          <Empty className="py-6">
+            <EmptyHeader>
+              <EmptyTitle>No entries yet</EmptyTitle>
+              <EmptyDescription>
+                Add one for a word dictation keeps getting wrong.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
         {entries.map((entry) => (
           <div

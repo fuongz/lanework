@@ -6,6 +6,13 @@ import {
   SettingsPage,
 } from "#/components/shared/settings/settings-page";
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
+import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
@@ -76,9 +83,17 @@ export function KeybindingsSection() {
               </div>
               <SettingsCard className="overflow-hidden">
                 {shown.length === 0 ? (
-                  <p className="text-muted-foreground px-4 py-3.5 text-[13px]">
-                    No shortcut matches “{filter.trim() || query.trim()}”.
-                  </p>
+                  <Empty className="py-8">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <HugeiconsIcon icon={Search01Icon} strokeWidth={1.8} />
+                      </EmptyMedia>
+                      <EmptyTitle>No matching shortcuts</EmptyTitle>
+                      <EmptyDescription>
+                        No shortcut matches “{filter.trim() || query.trim()}”.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 ) : (
                   <table className="w-full table-fixed text-left">
                     <thead className="border-border border-b">

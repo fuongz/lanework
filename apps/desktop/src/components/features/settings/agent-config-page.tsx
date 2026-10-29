@@ -1,4 +1,8 @@
-import { RefreshIcon } from "@hugeicons/core-free-icons";
+import {
+  File01Icon,
+  MagicWand01Icon,
+  RefreshIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,6 +20,7 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
 import { ipcMessage } from "#/lib/ipc-error";
@@ -225,9 +230,13 @@ export function AgentConfigPage({ kind }: { kind: "config" | "skill" }) {
               noun={kind === "skill" ? "skill" : "file"}
             />
           ) : (
-            <p className="text-muted-foreground px-3.5 py-3 text-xs">
-              {kind === "skill" ? "No skills yet." : "No files yet."}
-            </p>
+            <Empty className="flex-none py-8">
+              <EmptyHeader>
+                <EmptyTitle>
+                  {kind === "skill" ? "No skills yet" : "No files yet"}
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           )
         ) : (
           <ListSkeleton
@@ -268,12 +277,22 @@ export function AgentConfigPage({ kind }: { kind: "config" | "skill" }) {
       {!openFiles.some((file) => file.id === openId) && (
         <Empty className="flex-1">
           <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <HugeiconsIcon
+                icon={kind === "skill" ? MagicWand01Icon : File01Icon}
+                strokeWidth={1.8}
+              />
+            </EmptyMedia>
             <EmptyTitle>
               {openId && files
                 ? "That file is no longer there"
-                : kind === "skill"
-                  ? "Pick a skill"
-                  : "Pick a file"}
+                : files && !mine.length
+                  ? kind === "skill"
+                    ? "No skills yet"
+                    : "No files yet"
+                  : kind === "skill"
+                    ? "Pick a skill"
+                    : "Pick a file"}
             </EmptyTitle>
             <EmptyDescription>{page.empty}</EmptyDescription>
           </EmptyHeader>

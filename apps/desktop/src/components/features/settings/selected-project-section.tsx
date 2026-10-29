@@ -1,4 +1,5 @@
 import {
+  DashboardSquare02Icon,
   Delete02Icon,
   Folder01Icon,
   GitBranchIcon,
@@ -44,6 +45,7 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
 import { Input } from "#/components/ui/input";
@@ -384,6 +386,9 @@ export function SelectedProjectSection({
     return (
       <Empty className="py-10">
         <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <HugeiconsIcon icon={DashboardSquare02Icon} strokeWidth={1.8} />
+          </EmptyMedia>
           <EmptyTitle>No projects yet</EmptyTitle>
           <EmptyDescription>
             Create one to see its settings here.

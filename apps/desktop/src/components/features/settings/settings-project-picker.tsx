@@ -10,6 +10,12 @@ import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { CreateProjectDialog } from "#/components/shared/workspaces/create-project-dialog";
 import { ProjectTile } from "#/components/shared/workspaces/project-tile";
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -163,14 +169,21 @@ export function SettingsProjectPicker() {
               }}
             >
               {workspaces.length === 0 && (
-                <p className="text-muted-foreground px-2 py-3 text-[13px]">
-                  No projects yet.
-                </p>
+                <Empty className="px-2 py-4">
+                  <EmptyHeader>
+                    <EmptyTitle>No projects yet</EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
               )}
               {workspaces.length > 0 && shown.length === 0 && (
-                <p className="text-muted-foreground truncate px-2 py-3 text-[13px]">
-                  No project matches “{query.trim()}”.
-                </p>
+                <Empty className="px-2 py-4">
+                  <EmptyHeader>
+                    <EmptyTitle>No matches</EmptyTitle>
+                    <EmptyDescription className="max-w-full truncate">
+                      No project matches “{query.trim()}”.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               )}
               {shown.map((workspace) => (
                 <button

@@ -1,4 +1,4 @@
-import { Search01Icon } from "@hugeicons/core-free-icons";
+import { MagicWand01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -27,6 +27,7 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
 import {
@@ -261,13 +262,20 @@ export function SkillsPage() {
             ) : (
               <Empty className="flex-1">
                 <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <HugeiconsIcon icon={MagicWand01Icon} strokeWidth={1.8} />
+                  </EmptyMedia>
                   <EmptyTitle>
                     {openId && files
                       ? "That skill is no longer there"
-                      : "Pick a skill"}
+                      : files && !skills.length
+                        ? "No skills yet"
+                        : "Pick a skill"}
                   </EmptyTitle>
                   <EmptyDescription>
-                    Your skills for every project.
+                    {files && !skills.length
+                      ? "Your skills for every project show here."
+                      : "Your skills for every project."}
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
@@ -296,9 +304,12 @@ function SkillList({
 }) {
   if (!skills.length)
     return (
-      <p className="text-muted-foreground px-3.5 py-3 text-xs">
-        {empty ?? "No skills yet."}
-      </p>
+      <Empty className="flex-none py-8">
+        <EmptyHeader>
+          <EmptyTitle>{empty ? "No matches" : "No skills yet"}</EmptyTitle>
+          {empty && <EmptyDescription>{empty}</EmptyDescription>}
+        </EmptyHeader>
+      </Empty>
     );
   return (
     <ScrollArea className="flex-1">

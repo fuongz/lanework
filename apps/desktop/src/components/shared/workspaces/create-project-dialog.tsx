@@ -15,8 +15,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "#/components/ui/dialog";
-import { Input } from "#/components/ui/input";
-import { InputGroup, InputGroupAddon } from "#/components/ui/input-group";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "#/components/ui/input-group";
 import { useBoard } from "#/stores/board";
 
 /**
@@ -110,16 +113,15 @@ export function CreateProjectDialog({
                 aria-hidden="true"
               />
             </InputGroupAddon>
-            <Input
+            <InputGroupInput
               // NOTE: Tests and users reach for this accessible name; keep it.
               aria-label="New project name"
-              data-slot="input-group-control"
               placeholder="Project name"
               value={name}
               maxLength={200}
               disabled={working}
               autoFocus
-              className="h-9 border-0 bg-transparent text-[13px] focus-visible:border-0 focus-visible:ring-0 md:text-[13px]"
+              className="h-9 text-[13px] md:text-[13px]"
               onChange={(event) => setName(event.target.value)}
             />
           </InputGroup>

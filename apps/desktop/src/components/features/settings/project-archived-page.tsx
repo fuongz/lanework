@@ -1,4 +1,4 @@
-import { Delete02Icon } from "@hugeicons/core-free-icons";
+import { Archive02Icon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useState } from "react";
 import type { ArchivedAgentSession } from "#/../shared/terminal";
@@ -25,6 +25,7 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
@@ -48,6 +49,9 @@ function Nothing({
     <SettingsCard>
       <Empty className="py-8">
         <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <HugeiconsIcon icon={Archive02Icon} strokeWidth={1.8} />
+          </EmptyMedia>
           <EmptyTitle>{title}</EmptyTitle>
           <EmptyDescription>{description}</EmptyDescription>
         </EmptyHeader>
