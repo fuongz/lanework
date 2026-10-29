@@ -174,8 +174,8 @@ export function NewConversationPage({
       end(workspace, conversation);
       handSentMessage(JSON.stringify([slug, conversation]), {
         key: "first",
+        since: null,
         expect: 1,
-        after: 0,
         text: outgoing,
         attachments: names.map((entry) => ({
           name: entry.name,

@@ -79,7 +79,11 @@ import {
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { withLiveContext } from "#/stores/conductor-context";
-import { useConversationSends } from "#/stores/conversation-sends";
+import {
+  type SentMessage,
+  turnsSince,
+  useConversationSends,
+} from "#/stores/conversation-sends";
 import { useNewChats } from "#/stores/new-chats";
 import {
   AwaitingProposal,
@@ -241,7 +245,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     () => conversation?.turns.filter((turn) => turn.role === "user") ?? [],
     [conversation],
   );
-  const users = userTurns.length;
+  const lastUser = userTurns.at(-1)?.id ?? null;
   // What the engine holds back, drawn above the composer instead.
   const queue = (engine.state !== "terminal" && engine.queue) || NOTHING;
   const paused = engine.state !== "terminal" && engine.paused === true;
@@ -262,22 +266,27 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     !trust[agent].trusted;
   const held = useMemo(() => new Set(queue.map((entry) => entry.id)), [queue]);
   // What was sent from here and is in the transcript now drops away.
+  const landed = useCallback(
+    (entry: SentMessage) =>
+      entry.expect !== null &&
+      turnsSince(userTurns, entry.since).length >= entry.expect,
+    [userTurns],
+  );
   const waiting = sent.filter(
-    (entry) =>
-      !held.has(entry.key) && (entry.expect === null || users < entry.expect),
+    (entry) => !held.has(entry.key) && !landed(entry),
   );
   useEffect(() => {
     setSent((previous) =>
-      previous.some((entry) => entry.expect !== null && users >= entry.expect)
-        ? previous.filter(
-            (entry) => entry.expect === null || users < entry.expect,
-          )
+      previous.some(landed)
+        ? previous.filter((entry) => !landed(entry))
         : previous,
     );
-  }, [users, setSent]);
+  }, [landed, setSent]);
 
-  const usersRef = useRef(users);
-  usersRef.current = users;
+  const landedRef = useRef(landed);
+  landedRef.current = landed;
+  const lastRef = useRef(lastUser);
+  lastRef.current = lastUser;
   const heldRef = useRef(held);
   heldRef.current = held;
   const userTurnsRef = useRef(userTurns);
@@ -288,9 +297,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const release = useCallback(() => {
     if (!engineLoaded || !loaded) return;
     setSent((previous) => {
-      const now = usersRef.current;
+      const since = lastRef.current;
       let flying = previous.filter(
-        (entry) => entry.expect !== null && now < entry.expect,
+        (entry) => entry.expect !== null && !landedRef.current(entry),
       ).length;
       let changed = false;
       const next = previous.flatMap((entry) => {
@@ -303,17 +312,15 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         changed = true;
         // A queued turn may already have landed while this page was closed.
         if (
-          userTurnsRef.current
-            .slice(entry.after)
-            .some(
-              (turn) =>
-                turn.text === entry.text &&
-                turn.attachments.length === entry.attachments.length,
-            )
+          turnsSince(userTurnsRef.current, entry.since).some(
+            (turn) =>
+              turn.text === entry.text &&
+              turn.attachments.length === entry.attachments.length,
+          )
         )
           return [];
         flying++;
-        return [{ ...entry, expect: now + flying }];
+        return [{ ...entry, since, expect: flying }];
       });
       return changed ? next : previous;
     });
@@ -585,16 +592,14 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       {
         key,
         text,
-        after: users,
+        since: lastUser,
         attachments: names.map((entry) => ({
           name: entry.name,
           mediaType: entry.image ? "image/*" : "text/plain",
           path: null,
         })),
         expect:
-          users +
-          previous.filter((e) => e.expect !== null && users < e.expect).length +
-          1,
+          previous.filter((e) => e.expect !== null && !landed(e)).length + 1,
       },
     ]);
     atBottom.current = true;

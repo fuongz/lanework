@@ -7,10 +7,24 @@ export interface SentMessage {
   key: string;
   text: string;
   attachments: Attachment[];
-  /** User-turn count at which the transcript has this message; null in queue. */
+  /**
+   * The last user turn when it went to the CLI (null: none yet). A long
+   * transcript is read from its end only, so a count of all user turns
+   * stops growing; turns after this one do not.
+   */
+  since: string | null;
+  /** User turns after `since` at which the transcript has this message; null in queue. */
   expect: number | null;
-  /** Transcript length before sending, for queued messages completed off-screen. */
-  after: number;
+}
+
+/** User turns after `since`; all of them when it is null or read past. */
+export function turnsSince<T extends { id: string }>(
+  turns: T[],
+  since: string | null,
+): T[] {
+  if (since === null) return turns;
+  const at = turns.findIndex((turn) => turn.id === since);
+  return at === -1 ? turns : turns.slice(at + 1);
 }
 
 export interface PendingAttachment {
