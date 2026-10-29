@@ -30,7 +30,7 @@ export function PermissionCard({
   onAnswer,
 }: {
   request: PermissionRequest;
-  /** Who asks, by name: Claude or Codex. */
+  /** Who asks, by name: Claude, Codex or OpenCode. */
   agent?: string;
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
 }) {

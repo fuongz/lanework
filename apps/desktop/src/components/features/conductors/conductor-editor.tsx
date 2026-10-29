@@ -44,6 +44,9 @@ import {
   SelectValue,
 } from "#/components/ui/select";
 
+/** A conductor leads; OpenCode only works (FE-105/D5). */
+const LEAD_EXCLUDE = ["opencode"] as const;
+
 export const ICONS: Record<LeadIcon, typeof Robot02Icon> = {
   Robot02Icon,
   Brain02Icon,
@@ -264,6 +267,7 @@ export function conductorEditor({
             <ModelMenu
               side="bottom"
               fast={false}
+              exclude={LEAD_EXCLUDE}
               settings={{
                 ...DEFAULT_SETTINGS,
                 model: input.lead.model,

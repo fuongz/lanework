@@ -20,6 +20,10 @@
 // caller drops the ones that are gone (`withLiveContext`) and marks folders
 // with a trailing `/`; a changed list changes the fingerprint, so the next
 // message carries the rules again.
+//
+// OpenCode (FE-105/D5) may be a task's worker, never the lead: its models are
+// in the catalog as `provider/model` ids, and one the page has not listed yet
+// is kept with a warning, as Codex's is.
 
 import {
   AiChipIcon,
@@ -42,6 +46,7 @@ import {
   type ConversationAgent,
   EFFORTS,
   modelName,
+  OPENCODE_MODEL_ID,
   type Turn,
 } from "#/../shared/conversation";
 import {
@@ -158,6 +163,11 @@ export function catalog(lead: TeamLead | null = null): CatalogEntry[] {
     }));
 }
 
+/** Whether the catalog under `lead` offers any of `agent`'s models. */
+function catalogHas(lead: TeamLead | null, agent: ConversationAgent): boolean {
+  return catalog(lead).some((entry) => entry.agent === agent);
+}
+
 function requestBlock(request: string): string {
   return `<user_request>\n${request}\n</user_request>`;
 }
@@ -249,7 +259,12 @@ function proposalRules(
     'Give every task self-contained instructions and project-relative write scopes in files; a directory covers everything under it, and [] means the task edits no file. Run independent work in parallel on disjoint files, and order edits to a shared file with dependsOn. A task that regenerates or validates the whole project gets files ["."]. Workers must never commit, push, switch branches or write outside the checkout; each runs in its own isolated checkout the app makes, so never ask one to create a worktree. Any git finalisation the user asked for is yours, after every worker is reviewed and the run is finished: no worker does it.',
     root,
     "Return the proposal as one JSON object inside <lanework_proposal>...</lanework_proposal>, and nothing after it. The app renders it as an editable card, so do not ask for approval in prose. No Markdown inside the JSON. dependsOn names other task ids; the graph must have no cycle.",
-    `Schema: {"title":"Short title","summary":"What will be done and how the tasks fit together","tasks":[{"id":"task-1","title":"Short task title","prompt":"Self-contained instructions, constraints and checks","agent":"claude|codex|null","model":"exact model id or null","effort":"${EFFORTS.join("|")}|null","files":["src/feature"],"dependsOn":[]}]}`,
+    `Schema: {"title":"Short title","summary":"What will be done and how the tasks fit together","tasks":[{"id":"task-1","title":"Short task title","prompt":"Self-contained instructions, constraints and checks","agent":"claude|codex|opencode|null","model":"exact model id or null","effort":"${EFFORTS.join("|")}|null","files":["src/feature"],"dependsOn":[]}]}`,
+    ...(catalogHas(lead, "opencode")
+      ? [
+          'OpenCode models (agent "opencode", ids "provider/model") run as workers only, never as the lead. Name the exact id from the catalog.',
+        ]
+      : []),
     `Task ids: 1-64 letters, digits, - or _. Titles: at most ${TITLE_MAX} characters. Summary: at most ${SUMMARY_MAX}. Parallel worker limit: ${limit} (at most ${lead ? lead.maxWorkers : WORKERS_MAX}).`,
     modelsBlock(lead),
     ...leadBlocks(lead, context),
@@ -554,6 +569,15 @@ function checkModels(
     // Codex's list moves faster than ours: an unlisted Codex model is kept
     // and the card warns, rather than locking the proposal (FE-91/U9).
     if (!found && task.agent === "codex") return task;
+    // So is OpenCode's (FE-105): its list is the user's providers, read from
+    // its service, and may not be read yet. A well-formed `provider/model`
+    // is kept as OpenCode's, its agent filled in; main has the last word.
+    if (
+      !found &&
+      (task.agent === "opencode" || task.agent === null) &&
+      OPENCODE_MODEL_ID.test(task.model)
+    )
+      return { ...task, agent: "opencode" };
     if (!found)
       throw new Error(
         `Task "${task.id}" names model "${task.model}", which is not in the catalog. Use one of: ${models.map((entry) => entry.model).join(", ")}`,

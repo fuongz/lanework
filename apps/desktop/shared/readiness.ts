@@ -11,6 +11,7 @@ export type ReadinessId =
   | "claude-md"
   | "claude-mcp"
   | "codex-mcp"
+  | "opencode-mcp"
   | "hook"
   | "legacy-reviews";
 

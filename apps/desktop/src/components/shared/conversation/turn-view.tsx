@@ -10,6 +10,7 @@ import { createContext, memo, useContext } from "react";
 import type {
   AssistantTurn,
   Attachment,
+  ConversationAgent,
   PermissionAnswer,
   Turn,
   UserTurn,
@@ -277,8 +278,10 @@ export function UserBubble({
 }
 
 export interface TurnHandlers {
-  /** Who the permission cards say asks: Claude or Codex. */
+  /** Who the permission cards say asks: Claude, Codex or OpenCode. */
   agent?: string;
+  /** The CLI the turns are of, for its mark; Claude's when not said. */
+  kind?: ConversationAgent;
   /** None for a conversation that cannot be forked (Codex's). */
   onFork?: () => void;
   /** None where there is no composer to reply into (a worker's view). */
@@ -352,6 +355,7 @@ function AssistantView({
                 block.calls.some((call) => call.output === null)
               }
               lead={index === 0}
+              kind={handlers.kind ?? "claude"}
               slug={slug}
               conversation={conversation}
             />

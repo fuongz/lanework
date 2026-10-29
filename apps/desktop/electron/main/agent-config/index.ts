@@ -1,5 +1,5 @@
-// Settings → Agents → Config files: the user's own Claude Code and Codex
-// config, read and written by id. See `files.ts` for how a write is
+// Settings → Agents → Config files: the user's own Claude Code, Codex and
+// OpenCode config, read and written by id. See `files.ts` for how a write is
 // kept safe, and `shared/agent-config.ts` for why the text crosses whole.
 import { stat } from "node:fs/promises";
 import {
@@ -20,8 +20,10 @@ import { handle } from "../ipc";
 import { agentHomeDir } from "../test-seams";
 import {
   listConfigFiles,
+  pathOf,
   readConfigFile,
   revealTarget,
+  shown,
   writeConfigFile,
 } from "./files";
 import { type RiskyChange, riskyChange } from "./risky-keys";
@@ -62,12 +64,10 @@ async function confirmRisky(
   change: RiskyChange,
 ): Promise<boolean> {
   if (!app.isPackaged && process.env.LANEWORK_TEST_USER_DATA) return true;
-  const file =
-    id === "claude-settings"
-      ? "~/.claude/settings.json"
-      : id === "codex-hooks"
-        ? "~/.codex/hooks.json"
-        : "~/.codex/config.toml";
+  // The path as the list shows it, so OpenCode's `.json` or `.jsonc` and a
+  // moved agent home are named as they are (FE-105/D1).
+  const home = where();
+  const file = shown(pathOf(id, home), home.home);
   const options: MessageBoxOptions = {
     type: "warning",
     buttons: ["Cancel", "Save"],

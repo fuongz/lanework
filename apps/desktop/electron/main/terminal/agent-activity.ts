@@ -18,9 +18,11 @@ import {
   claudeProjectDir,
   codexRolloutOf,
   lastCardIn,
+  STALE_MS,
   transcriptCompleted,
   transcriptWorking,
 } from "./agent-sessions";
+import { opencodeChanges, opencodeDataDirOf } from "./opencode-sessions";
 
 /**
  * How long after a write its transcript is read for the turn's state.
@@ -112,8 +114,9 @@ export function watchAgentActivity(
   // With `subagent` set, it is that sub-agent of `id` that was written: its
   // own state, no card, and no `onWrite`, since a sub-agent is never the
   // conversation a tab is on.
+  // Only the CLIs whose transcripts are files watched here report.
   const report = (
-    agent: TerminalAgent,
+    agent: "claude" | "codex",
     id: string,
     file: string,
     subagent: string | null = null,
@@ -128,7 +131,7 @@ export function watchAgentActivity(
         void (async () => {
           const working = await transcriptWorking(
             file,
-            agent as "claude" | "codex",
+            agent,
             subagent !== null,
           );
           // Looked for only while working: an idle agent is on no card.
@@ -150,7 +153,7 @@ export function watchAgentActivity(
             else if (
               wasRunning &&
               onCompleted &&
-              (await transcriptCompleted(file, agent as "claude" | "codex"))
+              (await transcriptCompleted(file, agent))
             ) {
               if (!stopped) onCompleted(agent, id);
             }
@@ -297,9 +300,82 @@ export function watchAgentActivity(
     // No Codex sessions on this machine.
   }
 
+  // OpenCode (FE-104): one database for every folder, written through its
+  // WAL. A write of it is read, once settled, for this folder's sessions
+  // written since the last look.
+  const opencodeDir = opencodeDataDirOf(home);
+  // When each session was last seen written, and whether it was working.
+  const opencodeSeen = new Map<string, { updated: number; working: boolean }>();
+  let opencodeSince = Date.now() - STALE_MS;
+  let opencodeTimer: NodeJS.Timeout | null = null;
+  let opencodeReading = false;
+  const opencodeCheck = async () => {
+    // NOTE: A session still working is looked at again whether or not it
+    // was written since: its turn may have closed on a write to another
+    // table.
+    let since = opencodeSince;
+    for (const seen of opencodeSeen.values())
+      if (seen.working) since = Math.min(since, seen.updated);
+    const changes = await opencodeChanges(opencodeDir, folder, since);
+    if (stopped) return;
+    for (const change of changes) {
+      opencodeSince = Math.max(opencodeSince, change.updated);
+      const before = opencodeSeen.get(change.id);
+      opencodeSeen.set(change.id, {
+        updated: change.updated,
+        working: change.working,
+      });
+      const written = !before || change.updated > before.updated;
+      if (change.root) {
+        // A sub-agent: every settled write of it is news, as Claude's is.
+        if (written || before?.working !== change.working)
+          onActivity("opencode", change.root, change.working, null, change.id);
+        continue;
+      }
+      if (written) onWrite?.("opencode", change.id);
+      if (before?.working === change.working) continue;
+      // First seen idle: nothing changed that a row shows.
+      if (!before && !change.working) continue;
+      onActivity("opencode", change.id, change.working, null, null);
+      if (before?.working && !change.working && change.succeeded)
+        onCompleted?.("opencode", change.id);
+    }
+    // Keep the map to what can still move.
+    if (opencodeSeen.size > 256)
+      for (const [id, seen] of opencodeSeen)
+        if (!seen.working && seen.updated < opencodeSince - STALE_MS)
+          opencodeSeen.delete(id);
+  };
+  const opencodeWritten = () => {
+    if (stopped || opencodeTimer) return;
+    opencodeTimer = setTimeout(() => {
+      opencodeTimer = null;
+      // One read at a time; a write during it is read on the next settle.
+      if (opencodeReading) return opencodeWritten();
+      opencodeReading = true;
+      void opencodeCheck()
+        .catch(() => undefined)
+        .finally(() => {
+          opencodeReading = false;
+        });
+    }, SETTLE_MS);
+  };
+  try {
+    watchers.push(
+      watch(opencodeDir, (_event, name) => {
+        const file = name ? String(name) : "";
+        if (file === "opencode.db" || file === "opencode.db-wal")
+          opencodeWritten();
+      }),
+    );
+  } catch {
+    // No OpenCode on this machine.
+  }
+
   for (const watcher of watchers) watcher.on("error", () => watcher.close());
   return () => {
     stopped = true;
+    if (opencodeTimer) clearTimeout(opencodeTimer);
     for (const timer of pending.values()) clearTimeout(timer);
     for (const watcher of watchers) watcher.close();
     for (const file of [...followed.keys()]) unfollow(file);

@@ -15,6 +15,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "#/components/ui/button";
 import { ClaudeAiIcon } from "#/components/ui/svgs/claudeAiIcon";
 import { CodexDark } from "#/components/ui/svgs/codexDark";
+import { OpencodeDark } from "#/components/ui/svgs/opencodeDark";
 import { cn } from "#/lib/utils";
 import { useHarness, useHarnessWatch } from "#/stores/harness";
 import {
@@ -26,6 +27,7 @@ import {
 export const HARNESS_NAMES: Record<HarnessAgent, string> = {
   claude: "Claude Code",
   codex: "Codex",
+  opencode: "OpenCode",
 };
 
 /** How long "✓ Codex 0.163.0" stands before the island goes. */
@@ -71,11 +73,11 @@ export function HarnessIcon({
   agent: HarnessAgent;
   className?: string;
 }) {
-  return agent === "claude" ? (
-    <ClaudeAiIcon aria-hidden="true" className={className} />
-  ) : (
-    <CodexDark aria-hidden="true" className={className} />
-  );
+  if (agent === "claude")
+    return <ClaudeAiIcon aria-hidden="true" className={className} />;
+  if (agent === "opencode")
+    return <OpencodeDark aria-hidden="true" className={className} />;
+  return <CodexDark aria-hidden="true" className={className} />;
 }
 
 function Spinner({ className }: { className?: string }) {

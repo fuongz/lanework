@@ -4,7 +4,7 @@
 // NOTE: Transport-agnostic. `host.ts` wires this to Electron's message ports
 // inside the utility process, and `tests/terminal-sessions.spec.ts` drives it
 // directly under plain Node, which is why nothing here imports Electron.
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename } from "node:path";
 import { type IPty, spawn as spawnPty } from "@lydell/node-pty";
@@ -13,7 +13,7 @@ import * as headlessModule from "@xterm/headless";
 import {
   type CardBriefMode,
   clampGeometry,
-  isAgentSessionId,
+  isAgentSessionIdOf,
   isBoardId,
   isCardBrief,
   isTerminalKind,
@@ -223,6 +223,7 @@ function cardOf(
 const RESUME_ARGS: Record<TerminalAgent, (id: string) => string> = {
   claude: (id) => `--resume ${id}`,
   codex: (id) => `resume ${id}`,
+  opencode: (id) => `-s ${id}`,
 };
 
 /**
@@ -232,10 +233,28 @@ const RESUME_ARGS: Record<TerminalAgent, (id: string) => string> = {
  * NOTE: Without it a new tab's `resume` stays null, so nothing ties it to
  * the transcript the CLI writes once somebody types, and the rail shows the
  * tab AND that transcript as two rows for one agent. Codex has no such flag.
+ * OpenCode's `-s` continues a session or, when there is none, starts one
+ * under that id with the first message (FE-103/D4).
  */
 const NEW_ARGS: Partial<Record<TerminalAgent, (id: string) => string>> = {
   claude: (id) => `--session-id ${id}`,
+  opencode: (id) => `-s ${id}`,
 };
+
+const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/**
+ * A new conversation id for `agent`, shaped as that CLI makes its own.
+ *
+ * OpenCode's is `ses_`, 12 hex digits of the inverted time (its ids sort
+ * newest first) and 14 random letters or digits.
+ */
+function newSessionId(agent: TerminalAgent): string {
+  if (agent !== "opencode") return randomUUID();
+  const time = ~(BigInt(Date.now()) * 0x1000n) & 0xffffffffffffn;
+  const random = [...randomBytes(14)].map((byte) => BASE62[byte % 62]).join("");
+  return `ses_${time.toString(16).padStart(12, "0")}${random}`;
+}
 
 /**
  * The pty host's terminals: spawn, stream, resize, reorder and stop them.
@@ -362,16 +381,19 @@ export function createSessions(options: SessionsOptions = {}) {
     // NOTE: Checked again here, not only in main: this line is typed into a
     // shell, and a UUID is hex and dashes, nothing a shell reads as syntax.
     const resumed =
-      kind !== "shell" && isAgentSessionId(request.resume)
+      kind !== "shell" && isAgentSessionIdOf(kind, request.resume)
         ? request.resume
         : null;
     const named = kind !== "shell" && !resumed ? NEW_ARGS[kind] : undefined;
-    const resume = resumed ?? (named ? randomUUID() : null);
+    const resume =
+      resumed ?? (named && kind !== "shell" ? newSessionId(kind) : null);
     // A card is for a NEW conversation only: a resumed one has its own
     // history, and a prompt typed over it would be a second request.
     const card = kind !== "shell" && !resumed ? cardOf(request.card) : null;
+    // OpenCode reads a bare word as the folder to start in; its first prompt
+    // goes by flag.
     const prompt = card
-      ? ` ${shellQuote(cardPrompt(card.mode, card.boardId, card.card))}`
+      ? ` ${kind === "opencode" ? "--prompt " : ""}${shellQuote(cardPrompt(card.mode, card.boardId, card.card))}`
       : "";
     const bridgeArgs =
       kind === "claude"
@@ -659,7 +681,7 @@ export function createSessions(options: SessionsOptions = {}) {
         session.info.workspace !== workspace ||
         session.info.kind === "shell" ||
         session.info.exit ||
-        !isAgentSessionId(binding.resume) ||
+        !isAgentSessionIdOf(session.info.kind, binding.resume) ||
         session.info.resume === binding.resume
       )
         continue;

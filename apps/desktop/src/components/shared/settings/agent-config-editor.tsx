@@ -6,6 +6,7 @@ import {
   type StreamParser,
   syntaxHighlighting,
 } from "@codemirror/language";
+import { json as jsonStream } from "@codemirror/legacy-modes/mode/javascript";
 import { toml } from "@codemirror/legacy-modes/mode/toml";
 import { EditorState, type Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
@@ -16,6 +17,13 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { tags } from "@lezer/highlight";
+// NOTE: The ESM build, by path, as main imports it: the package's `main` is a
+// UMD wrapper bundlers cannot follow.
+import {
+  type ParseError,
+  parse as parseJsonc,
+  printParseErrorCode,
+} from "jsonc-parser/lib/esm/main.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ConfigFile,
@@ -48,7 +56,11 @@ import {
   markdownLanguage,
 } from "./agent-config-editor.language";
 
-const AGENT_NAMES = { claude: "Claude Code", codex: "Codex" } as const;
+const AGENT_NAMES = {
+  claude: "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
+} as const;
 
 /**
  * The open file of Settings → Config files (FE-47/D8).
@@ -289,7 +301,7 @@ export function useConfigFile(file: ConfigFile | null, onSaved: () => void) {
   }, [id]);
 
   const format = file?.format ?? "markdown";
-  const problem = useMemo(() => syntaxError(format, text), [format, text]);
+  const problem = useMemo(() => formatError(format, text), [format, text]);
   const dirty = !!base && text !== base.text;
 
   async function save() {
@@ -343,6 +355,35 @@ export function useConfigFile(file: ConfigFile | null, onSaved: () => void) {
     revert: () => base && setText(base.text),
     reveal,
   };
+}
+
+/**
+ * Why `text` would not load, as main checks it before a write.
+ *
+ * NOTE: JSONC (OpenCode's config, FE-105/D1) is checked here, the same way as
+ * `electron/main/agent-config/jsonc.ts`: comments and trailing commas pass,
+ * and the text is never reformatted. Every other format is `syntaxError`'s.
+ */
+function formatError(format: ConfigFormat, text: string): string | null {
+  if (format !== "jsonc") return syntaxError(format, text);
+  if (!text.trim()) return null;
+  const errors: ParseError[] = [];
+  const value: unknown = parseJsonc(text, errors, {
+    allowTrailingComma: true,
+    disallowComments: false,
+  });
+  const first = errors[0];
+  if (first) {
+    const before = text.slice(0, first.offset).split("\n");
+    const column = (before[before.length - 1]?.length ?? 0) + 1;
+    const code = printParseErrorCode(first.error)
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .toLowerCase();
+    return `Line ${before.length}, column ${column}: ${code.charAt(0).toUpperCase()}${code.slice(1)}`;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return "OpenCode's config must be one JSON object.";
+  return null;
 }
 
 /**
@@ -549,6 +590,9 @@ export function CodeEditor({
 /** The grammar for each config format. */
 const LANGUAGES: Record<ConfigFormat, () => Extension> = {
   json: () => json(),
+  // Lezer's JSON grammar has no comments; the stream mode reads them as such.
+  jsonc: () =>
+    StreamLanguage.define(jsonStream as unknown as StreamParser<unknown>),
   // legacy-modes types its parsers against `@codemirror/streamparser`, a twin
   // of the same interface. The parser itself is what `define` takes.
   toml: () => StreamLanguage.define(toml as unknown as StreamParser<unknown>),

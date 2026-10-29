@@ -60,6 +60,14 @@ const ROOTS: Record<SkillRoot, { folder: string; order: number }> = {
   claude: { folder: "~/.claude/skills", order: 0 },
   agents: { folder: "~/.agents/skills", order: 1 },
   codex: { folder: "~/.codex/skills", order: 2 },
+  opencode: { folder: "~/.config/opencode/skills", order: 3 },
+};
+
+/** Whose skill a file is, for the open file's title. */
+const AGENT_NAMES: Record<ConfigFile["agent"], string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
 };
 
 function rootOf(file: ConfigFile): SkillRoot {
@@ -153,7 +161,7 @@ export function SkillsPage() {
   }
 
   const title = current
-    ? `${current.label} — ${current.agent === "claude" ? "Claude Code" : "Codex"} skill`
+    ? `${current.label} — ${AGENT_NAMES[current.agent]} skill`
     : "Skill";
 
   return (
@@ -361,8 +369,9 @@ function SkillList({
 }
 
 /**
- * The mark of the folder a skill is in: Claude's, Codex's, or the shared
- * `~/.agents`, drawn as OpenCode's, which reads it as Codex does.
+ * The mark of the folder a skill is in: Claude's, Codex's, OpenCode's own
+ * (FE-105/D1), or the shared `~/.agents`, drawn as OpenCode's too, which
+ * reads it as Codex does. The tooltip names which folder.
  */
 function RootMark({ root }: { root: SkillRoot }) {
   const label = ROOTS[root].folder;

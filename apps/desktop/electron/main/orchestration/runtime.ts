@@ -4,10 +4,12 @@
 //   and the scheduler starts each one when a worker slot is free, every task
 //   it depends on was accepted (`review`), and no task holding files it
 //   claims is still open.
-// - Each worker is an ordinary Claude or Codex conversation, run by the chat's
-//   own engines, in a git worktree on `lanework/<run>/<task>` with a private
-//   scratch folder as TMPDIR. Its first turn carries the hidden assignment
-//   envelope.
+// - Each worker is an ordinary Claude, Codex or OpenCode (FE-105)
+//   conversation, run by the chat's own engines, in a git worktree on
+//   `lanework/<run>/<task>` with a private scratch folder as TMPDIR. Its first
+//   turn carries the hidden assignment envelope.
+// - The lead is Claude or Codex, never OpenCode (FE-105/D5): it needs the
+//   run's control env, and OpenCode runs in the user's own service.
 // - A write outside a worker's scope stops that worker alone (`blocked`):
 //   the engines report each write as the CLI names it, and the files it
 //   changed are checked again when its turn ends.
@@ -56,6 +58,7 @@ import {
   type ControlCall,
   ControlInputError,
   type ControlInputs,
+  canLead,
   type DelegateInput,
   type JevMainHandlers,
   type JudgeMode,
@@ -125,7 +128,12 @@ export interface OrchestrationEngines {
     folder: string,
     out: Outgoing,
   ): Promise<EngineState>;
-  startCodex(
+  /**
+   * Start a NEW conversation on a CLI that names it itself: a Codex or an
+   * OpenCode worker (FE-105). Answers once it is named.
+   */
+  startNamed(
+    agent: "codex" | "opencode",
     workspace: string,
     folder: string,
     out: Outgoing,
@@ -310,7 +318,38 @@ const TIER_EFFORT: Record<Tier, Effort> = {
   heavy: "high",
 };
 
-/** The tiers' models when Jev has none set. */
+/**
+ * The model an `agent` worker runs on when the task names its agent but no
+ * model, and the tier's model is another CLI's: the run's choice its CLI
+ * starts on by itself (OpenCode's preferred model, FE-105), else the first.
+ *
+ * NOTE: OpenCode has no tiers of its own. Its list is whatever providers the
+ * user configured, with no notion of cheap or capable, so every tier runs
+ * the preferred model; only the effort (OpenCode's variant) follows the tier.
+ * A lead that wants another names the model, or a team lead lists its
+ * OpenCode workers per tier, or Jev's tiers name OpenCode models.
+ */
+function preferredChoice(
+  choices: readonly WorkerChoice[],
+  agent: ConversationAgent,
+): WorkerChoice | undefined {
+  const own = choices.filter((entry) => entry.agent === agent);
+  const preferred = allModels().find(
+    (model) =>
+      model.agent === agent &&
+      model.preferred &&
+      own.some((entry) => entry.model === model.id),
+  );
+  return (
+    (preferred && own.find((entry) => entry.model === preferred.id)) ?? own[0]
+  );
+}
+
+/**
+ * The tiers' models when Jev has none set: the lead's own CLI's. A lead is
+ * never OpenCode (FE-105/D5); an OpenCode worker is picked by
+ * {@link preferredChoice}.
+ */
 function defaultTiers(lead: ConversationAgent): Record<Tier, TierModel> {
   if (lead === "codex") {
     const model = settingsFor("codex", DEFAULT_SETTINGS).model;
@@ -1014,7 +1053,7 @@ export class Orchestrator {
     let agent = model.agent;
     let id = model.model;
     if (input.agent && input.agent !== agent) {
-      const first = choices.find((entry) => entry.agent === input.agent);
+      const first = preferredChoice(choices, input.agent);
       if (!first)
         refuse(
           `No ${input.agent} model is allowed in this run. Allowed: ${allowed()}`,
@@ -1232,6 +1271,10 @@ export class Orchestrator {
           withChecks(text, record.teamLead?.checks ?? []),
           task.files,
           own.scratch,
+          // NOTE: OpenCode's process is the user's service, started before
+          // the run: our TMPDIR never reaches it (FE-105). Its writes and
+          // its result still reach the run through the engine tap.
+          task.agent !== "opencode",
         ),
         settings,
       );
@@ -1246,8 +1289,11 @@ export class Orchestrator {
           out,
           task.agent,
         );
-      else if (task.agent === "codex") {
-        const started = await engines.startCodex(
+      else if (task.agent === "codex" || task.agent === "opencode") {
+        // Both name their own conversation (FE-105): OpenCode's session is
+        // made in the worktree, so the engine tap finds the worker by it.
+        const started = await engines.startNamed(
+          task.agent,
           record.run.workspace,
           worktree,
           out,
@@ -2033,6 +2079,11 @@ export class Orchestrator {
     proposal: OrchestrationProposal,
   ): Promise<OrchestrationRun> {
     await this.load();
+    // The page's check, again: OpenCode cannot lead (FE-105/D5).
+    if (!canLead(proposal.leadAgent))
+      throw new Error(
+        "OpenCode runs only as a worker. Plan this from a Claude or Codex conversation.",
+      );
     const existing = this.records.get(proposal.id);
     if (existing) {
       if (existing.run.workspace !== proposal.workspace)

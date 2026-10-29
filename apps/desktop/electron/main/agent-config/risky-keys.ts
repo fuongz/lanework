@@ -4,24 +4,40 @@
 // (FE-81/D1), so a script in the renderer cannot plant a command that outlives
 // the session.
 //
+// NOTE: OpenCode's config is watched too (FE-105/D1), for its own keys: MCP
+// servers, plugins (code it loads), and the formatters and language servers
+// it starts.
+//
 // NOTE: Node only, no Electron: pure functions over the old and new text.
 import { parse as parseToml } from "smol-toml";
 import type { ConfigFileId } from "../../../shared/agent-config";
+import { parseJsonc } from "../agent-setup/opencode";
+
+type WatchedFormat = "json" | "jsonc" | "toml";
 
 /** The files whose risky keys are confirmed; markdown and skills never are. */
-const WATCHED: Partial<Record<ConfigFileId, "json" | "toml">> = {
+const WATCHED: Partial<Record<ConfigFileId, WatchedFormat>> = {
   "claude-settings": "json",
   "codex-config": "toml",
   "codex-hooks": "json",
+  "opencode-config": "jsonc",
 };
 
-/** The top-level keys that run a command, in any watched file. */
+/** The top-level keys that run a command, in Claude's and Codex's files. */
 export const RISKY_KEYS = [
   "hooks",
   "statusLine",
   "apiKeyHelper",
   "mcpServers",
   "mcp_servers",
+] as const;
+
+/** The same in OpenCode's config (FE-105/D1). */
+export const OPENCODE_RISKY_KEYS = [
+  "mcp",
+  "plugin",
+  "formatter",
+  "lsp",
 ] as const;
 
 /** The leaf keys a person reads as "the command". */
@@ -31,8 +47,10 @@ const COMMAND_LEAVES = new Set(["command", "args", "url", "apiKeyHelper"]);
 const SHOWN_MAX = 12;
 const LINE_MAX = 240;
 
-function parse(format: "json" | "toml", text: string): unknown {
+function parse(format: WatchedFormat, text: string): unknown {
   if (!text.trim()) return {};
+  // `{}` for blank, null when it does not parse: as below.
+  if (format === "jsonc") return parseJsonc(text);
   try {
     return format === "json" ? JSON.parse(text) : parseToml(text);
   } catch {
@@ -67,13 +85,15 @@ function leaves(value: unknown, path: string, out: Map<string, Leaf>) {
   out.set(JSON.stringify([path, shown]), { path, value: shown });
 }
 
-function riskyLeaves(config: unknown): Map<string, Leaf> {
+function riskyLeaves(
+  config: unknown,
+  keys: readonly string[],
+): Map<string, Leaf> {
   const out = new Map<string, Leaf>();
   if (!config || typeof config !== "object" || Array.isArray(config))
     return out;
   const record = config as Record<string, unknown>;
-  for (const key of RISKY_KEYS)
-    if (key in record) leaves(record[key], key, out);
+  for (const key of keys) if (key in record) leaves(record[key], key, out);
   return out;
 }
 
@@ -99,9 +119,10 @@ export function riskyChange(
   if (!format) return null;
   const next = parse(format, after);
   if (next === null) return null;
+  const watched = format === "jsonc" ? OPENCODE_RISKY_KEYS : RISKY_KEYS;
   // An old file that no longer parses: everything in the new one is new.
-  const old = riskyLeaves(parse(format, before));
-  const added = [...riskyLeaves(next)]
+  const old = riskyLeaves(parse(format, before), watched);
+  const added = [...riskyLeaves(next, watched)]
     .filter(([key]) => !old.has(key))
     .map(([, leaf]) => leaf);
   if (!added.length) return null;

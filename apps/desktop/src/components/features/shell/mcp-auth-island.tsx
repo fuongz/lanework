@@ -20,16 +20,25 @@ import {
 } from "#/components/shared/agents/harness-island";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
-import { cloudAgents, needsAttention, useMcpAuth } from "#/stores/mcp-auth";
+import {
+  cloudAgents,
+  MCP_LOGIN_COMMAND,
+  needsAttention,
+  useMcpAuth,
+} from "#/stores/mcp-auth";
 import type { LaneworkMcpAgent } from "../../../../shared/auth";
+import type { HarnessAgent } from "../../../../shared/harness";
 
 const NAMES: Record<LaneworkMcpAgent, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
+  opencode: "OpenCode",
 };
-const CLI: Record<LaneworkMcpAgent, "claude" | "codex"> = {
+/** Each agent's mark, by the harness store's name for it. */
+const HARNESS: Record<LaneworkMcpAgent, HarnessAgent> = {
   "claude-code": "claude",
   codex: "codex",
+  opencode: "opencode",
 };
 /** How long "✓ Signed in" stays before the island goes. */
 const DONE_MS = 2000;
@@ -319,7 +328,7 @@ function Panel({
     const auth = await login(agent);
     if (auth === "needs-login" || auth === "unknown")
       setError(
-        `${NAMES[agent]} did not finish signing in. Try again, or run ${CLI[agent]} mcp login lanework in a terminal.`,
+        `${NAMES[agent]} did not finish signing in. Try again, or run ${MCP_LOGIN_COMMAND[agent]} in a terminal.`,
       );
   }
 
@@ -363,7 +372,7 @@ function Panel({
             className="flex min-h-7 items-center gap-2.5"
           >
             <HarnessIcon
-              agent={row.agent === "codex" ? "codex" : "claude"}
+              agent={HARNESS[row.agent]}
               className="size-4 shrink-0"
             />
             <div className="flex min-w-0 flex-1 flex-col">

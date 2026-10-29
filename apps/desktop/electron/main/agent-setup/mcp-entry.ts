@@ -1,10 +1,11 @@
-// The `lanework` MCP server entry in Claude Code's and Codex's user config
-// (FE-52/D8): the offline server over stdio while the app runs on the local
-// board, the cloud one over HTTP once signed in.
+// The `lanework` MCP server entry in Claude Code's, Codex's and OpenCode's
+// user config (FE-52/D8, FE-104): the offline server over stdio while the app
+// runs on the local board, the cloud one over HTTP once signed in.
 //
 // NOTE: Only OUR entry, ever. `~/.claude.json` holds every project Claude Code
 // has seen and every other MCP server the user added; `~/.codex/config.toml`
-// is Codex's whole configuration.
+// is Codex's whole configuration; `opencode.json[c]` is OpenCode's, comments
+// included (`opencode.ts` edits it in place).
 // - Everything but the `lanework` entry passes through untouched.
 // - A file we cannot safely rewrite is refused.
 // - Every write goes through `config-file.ts` (INF-05): atomic, through a
@@ -31,6 +32,16 @@ import { type AgentHome, agentHome } from "../agent-home";
 import { updateConfigFile } from "../config-file";
 import { shellQuote } from "../handoff/claude-settings";
 import { appHomeDir } from "../paths";
+import {
+  notJsonc,
+  opencodeConfigPath,
+  opencodeMcpState,
+  parseJsonc,
+  usesV1Layout,
+  v1Refusal,
+  withOpencodeMcp,
+  withoutOpencodeMcp,
+} from "./opencode";
 
 /** The name of our entry in both agents' MCP server config. */
 export const MCP_NAME = "lanework";
@@ -430,7 +441,11 @@ function parseObject(text: string | null): Json | null {
 
 /** The config file that holds `agent`'s MCP servers. */
 const configPathOf = (agent: LaneworkMcpAgent, home = resolveHome()) =>
-  agent === "codex" ? join(home.codexDir, "config.toml") : home.claudeJson;
+  agent === "codex"
+    ? join(home.codexDir, "config.toml")
+    : agent === "opencode"
+      ? opencodeConfigPath(home.home)
+      : home.claudeJson;
 
 /** `agent`'s entry as its config file holds it now. */
 async function entryStatus(agent: LaneworkMcpAgent): Promise<LaneworkMcpEntry> {
@@ -442,6 +457,27 @@ async function entryStatus(agent: LaneworkMcpAgent): Promise<LaneworkMcpEntry> {
       configPath,
       unreadable: false,
     };
+  if (agent === "opencode") {
+    const config = parseJsonc(text);
+    // A file in OpenCode 1's layout is one the app will not rewrite.
+    if (!config || usesV1Layout(config))
+      return {
+        installed: false,
+        ours: false,
+        mode: null,
+        transport: null,
+        configPath,
+        unreadable: true,
+      };
+    const shim = mcpShimPath();
+    return {
+      ...opencodeMcpState(config, shim, (command) =>
+        isStaleShim(command, shim),
+      ),
+      configPath,
+      unreadable: false,
+    };
+  }
   const json = parseObject(text);
   if (!json)
     return {
@@ -459,11 +495,12 @@ async function entryStatus(agent: LaneworkMcpAgent): Promise<LaneworkMcpEntry> {
 export async function laneworkMcpStatus(
   want: LaneworkMcpMode | null,
 ): Promise<LaneworkMcpStatus> {
-  const [claude, codex] = await Promise.all([
+  const [claude, codex, opencode] = await Promise.all([
     entryStatus("claude-code"),
     entryStatus("codex"),
+    entryStatus("opencode"),
   ]);
-  return { want, shimPath: mcpShimPath(), claude, codex };
+  return { want, shimPath: mcpShimPath(), claude, codex, opencode };
 }
 
 /**
@@ -471,7 +508,8 @@ export async function laneworkMcpStatus(
  *
  * Replaces any `lanework` entry.
  *
- * @throws When `~/.claude.json` is not valid JSON; it is never overwritten.
+ * @throws When `~/.claude.json` or OpenCode's config is not valid JSON, or
+ *   OpenCode's uses its 1.x layout; neither is ever overwritten.
  */
 export async function installLaneworkMcp(
   agent: LaneworkMcpAgent,
@@ -480,7 +518,22 @@ export async function installLaneworkMcp(
   const path = configPathOf(agent);
   if (agent === "claude-code" && !parseObject(await readOptional(path)))
     throw notJson(path);
+  // Refused before the shim is written; `withOpencodeMcp` checks again under
+  // the write.
+  if (agent === "opencode") {
+    const config = parseJsonc(await readOptional(path));
+    if (!config) throw notJsonc(path);
+    if (usesV1Layout(config)) throw v1Refusal(path);
+  }
   if (mode === "local") await writeMcpShim();
+  if (agent === "opencode") {
+    await updateConfigFile(
+      path,
+      (text) => withOpencodeMcp(text, mode, mcpShimPath(), path),
+      NEW_CONFIG_MODE,
+    );
+    return;
+  }
   if (agent === "codex") {
     await updateConfigFile(
       path,
@@ -503,12 +556,19 @@ export async function installLaneworkMcp(
 /**
  * Remove the `lanework` entry for `agent`; other servers are left alone.
  *
- * @throws When `~/.claude.json` is not valid JSON; it is never overwritten.
+ * @throws When `~/.claude.json` or OpenCode's config is not valid JSON; it is
+ *   never overwritten.
  */
 export async function removeLaneworkMcp(
   agent: LaneworkMcpAgent,
 ): Promise<void> {
   const path = configPathOf(agent);
+  if (agent === "opencode") {
+    await updateConfigFile(path, (text) =>
+      text === null ? null : withoutOpencodeMcp(text, path),
+    );
+    return;
+  }
   if (agent === "codex") {
     await updateConfigFile(path, (text) =>
       text === null ? null : withoutCodexMcp(text),
@@ -550,7 +610,7 @@ export async function syncLaneworkMcp(
   // A copy that may not write the shim leaves stdio entries as they are: the
   // installed app repoints them on its next launch (INF-05, GAP-02).
   if (mode === "local" && currentShimRefusal()) return;
-  const agents = ["claude-code", "codex"] as const;
+  const agents = ["claude-code", "codex", "opencode"] as const;
   const statuses = await Promise.all(
     agents.map((agent) => entryStatus(agent).catch(() => null)),
   );

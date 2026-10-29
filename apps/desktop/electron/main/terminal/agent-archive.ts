@@ -96,6 +96,8 @@ export async function archiveAgentTranscript(
       claudeArchive(home, folder),
       id,
     );
+  // NOTE: Named, never "the other one": OpenCode keeps no archive (FE-104/D11).
+  if (agent !== "codex") throw new Error("This agent has no archive.");
   await codex(["archive", id]);
 }
 
@@ -120,6 +122,8 @@ export async function unarchiveAgentTranscript(
       claudeLive(home, folder),
       id,
     );
+  // NOTE: Named, never "the other one": OpenCode keeps no archive (FE-104/D11).
+  if (agent !== "codex") throw new Error("This agent has no archive.");
   await codex(["unarchive", id]);
 }
 

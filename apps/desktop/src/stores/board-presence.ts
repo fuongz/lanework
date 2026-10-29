@@ -90,6 +90,7 @@ export function usePresencePoll(workspaceId: string | null): void {
 export function presenceKind(agent: string): TerminalAgent | null {
   if (agent.startsWith("claude")) return "claude";
   if (agent.startsWith("codex")) return "codex";
+  if (agent.startsWith("opencode")) return "opencode";
   return null;
 }
 

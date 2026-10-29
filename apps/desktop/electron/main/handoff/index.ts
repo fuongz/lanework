@@ -1,12 +1,15 @@
 // Settings → Agents: switch the checkpoint Stop hook on and off for Claude
-// Code and for Codex on this machine, with no terminal and no token to paste.
+// Code, Codex and OpenCode on this machine, with no terminal and no token to
+// paste.
 //
 // - On: our entry goes into the CLI's own settings (`~/.claude/settings.json`,
-//   `~/.codex/hooks.json`; user level, so every repo gets it), and this
+//   `~/.codex/hooks.json`; user level, so every repo gets it), or for OpenCode
+//   our plugin file into `~/.config/opencode/plugins/` (FE-104), and this
 //   machine's credential goes into the Keychain item the hook reads.
-// - Off: our entry is removed, and nothing else in the file is touched.
+// - Off: our entry is removed, and nothing else in the file is touched; our
+//   OpenCode plugin file is deleted.
 //
-// NOTE: Both entries run one script, `~/.lanew/hooks/lanework-checkpoint`
+// NOTE: Every entry runs one script, `~/.lanew/hooks/lanework-checkpoint`
 // (FE-29/D3), which names this app's binary and the bundled hook. Those paths
 // move when the app is updated or moved, so the script is rewritten on every
 // launch (`syncHandoff`). The commands in the CLIs' files never change, and
@@ -39,11 +42,14 @@ import {
   setInstallFacts,
   shimRefusalMessage,
 } from "../agent-setup/mcp-entry";
+import { opencodeConfigDir } from "../agent-setup/opencode";
 import { resolveApi } from "../auth/client";
 import { readLocalMode } from "../auth/local-mode";
 import { type MachineRecord, readRecord } from "../auth/store";
+import { updateConfigFile } from "../config-file";
 import { handle } from "../ipc";
 import { appHomeDir } from "../paths";
+import { agentHomeDir } from "../test-seams";
 import {
   buildHookCommand,
   buildShim,
@@ -62,6 +68,11 @@ import {
   readCodexConfig,
   trustKey,
 } from "./codex";
+import {
+  buildOpencodePlugin,
+  opencodePluginPath,
+  readOpencodePlugin,
+} from "./opencode";
 import {
   deleteHookSecret,
   readHookSecret,
@@ -124,7 +135,18 @@ async function writeConfig(config: HookConfig): Promise<void> {
   });
 }
 
-const settingsPathFor = (agent: HookAgent) =>
+/** Every CLI the hook runs for. */
+const HOOK_AGENTS: readonly HookAgent[] = ["claude-code", "codex", "opencode"];
+
+/** OpenCode's plugin file: the test's fake home in a dev build (FE-104). */
+const opencodePlugin = () =>
+  opencodePluginPath(opencodeConfigDir(agentHomeDir()));
+
+/** Whether any CLI has the hook on: the credential and push-wip need one. */
+const anyInstalled = (config: HookConfig) =>
+  HOOK_AGENTS.some((agent) => config.installed[agent] === true);
+
+const settingsPathFor = (agent: Exclude<HookAgent, "opencode">) =>
   agent === "codex" ? codexHooksPath() : claudeSettingsPath();
 
 /**
@@ -160,7 +182,7 @@ async function writeShim(record: MachineRecord | null): Promise<void> {
   await chmod(shimPath(), 0o700);
 }
 
-const commandFor = (agent: HookAgent) =>
+const commandFor = (agent: Exclude<HookAgent, "opencode">) =>
   buildHookCommand({ shimPath: shimPath(), agent });
 
 /** The newest session the hook recorded, from its own state files. */
@@ -183,7 +205,7 @@ async function lastCheckpoint(): Promise<HandoffStatus["last"]> {
 }
 
 async function agentStatus(
-  agent: HookAgent,
+  agent: Exclude<HookAgent, "opencode">,
   config: HookConfig,
 ): Promise<
   AgentHookStatus & { position: { group: number; index: number } | null }
@@ -197,6 +219,25 @@ async function agentStatus(
     settingsPath: path,
     removedElsewhere: read.ok && !installed && config.installed[agent] === true,
     position: read.ok ? findHookPosition(read.settings) : null,
+  };
+}
+
+/**
+ * OpenCode's hook: our plugin file, running this app home's shim.
+ *
+ * A file of that name somebody else wrote reads as `settingsUnreadable`: the
+ * switch refuses rather than overwrite it.
+ */
+async function opencodeStatus(config: HookConfig): Promise<AgentHookStatus> {
+  const path = opencodePlugin();
+  const read = await readOpencodePlugin(path);
+  const installed = read.kind === "ours" && read.shimPath === shimPath();
+  return {
+    installed,
+    settingsUnreadable: read.kind === "foreign",
+    settingsPath: path,
+    removedElsewhere:
+      read.kind === "missing" && config.installed.opencode === true,
   };
 }
 
@@ -217,6 +258,7 @@ async function handoffStatus(): Promise<HandoffStatus> {
     pushWipUntracked: config.pushWipUntracked,
     last: await lastCheckpoint(),
     claude,
+    opencode: await opencodeStatus(config),
     codex: {
       ...codex,
       hooksEnabled: codexConfig.hooksEnabled,
@@ -239,6 +281,7 @@ async function enable(agent: HookAgent): Promise<HandoffStatus> {
   // the local store for a repo linked to a local board (FE-52/D9).
   if (!record && !(await readLocalMode()))
     throw new Error("Sign in first, so the hook has a credential.");
+  if (agent === "opencode") return enableOpencode(record);
   const path = settingsPathFor(agent);
   const read = await readSettings(path);
   if (!read.ok)
@@ -265,20 +308,55 @@ async function enable(agent: HookAgent): Promise<HandoffStatus> {
   return handoffStatus();
 }
 
-async function disable(agent: HookAgent): Promise<HandoffStatus> {
-  const path = settingsPathFor(agent);
-  const read = await readSettings(path);
-  if (read.ok && findHook(read.settings) !== null)
-    await updateSettings(
-      (settings) =>
-        findHook(settings) === null ? null : withoutHook(settings),
-      path,
+/**
+ * Write our OpenCode plugin (FE-104).
+ *
+ * Through `updateConfigFile` like every other hook install: atomic, and never
+ * over a file that changed under the write. A file of that name that is not
+ * ours is refused.
+ */
+async function enableOpencode(
+  record: MachineRecord | null,
+): Promise<HandoffStatus> {
+  const path = opencodePlugin();
+  if ((await readOpencodePlugin(path)).kind === "foreign")
+    throw new Error(
+      `${path} was not written by Lanework. Move or remove it, then try again — Lanework will not overwrite it.`,
     );
+  if (record) await writeHookSecret(resolveApi(record.apiUrl), record.secret);
+  await writeShim(record);
+  const plugin = buildOpencodePlugin(shimPath());
+  await mkdir(dirname(path), { recursive: true });
+  await updateConfigFile(path, (text) => (text === plugin ? null : plugin));
+  const config = await readConfig();
+  await writeConfig({
+    ...config,
+    installed: { ...config.installed, opencode: true },
+  });
+  return handoffStatus();
+}
+
+async function disable(agent: HookAgent): Promise<HandoffStatus> {
+  if (agent === "opencode") {
+    // Only our own file goes; one somebody else wrote stays.
+    const path = opencodePlugin();
+    if ((await readOpencodePlugin(path)).kind === "ours")
+      await rm(path, { force: true });
+  } else {
+    const path = settingsPathFor(agent);
+    const read = await readSettings(path);
+    if (read.ok && findHook(read.settings) !== null)
+      await updateSettings(
+        (settings) =>
+          findHook(settings) === null ? null : withoutHook(settings),
+        path,
+      );
+  }
   const config = await readConfig();
   const installed = { ...config.installed, [agent]: false };
   await writeConfig({ ...config, installed });
   // The credential goes once no CLI uses it any more.
-  if (!installed["claude-code"] && !installed.codex) {
+  if (!anyInstalled({ ...config, installed })) {
     const record = await readRecord();
     await deleteHookSecret(resolveApi(record?.apiUrl));
   }
@@ -323,7 +401,7 @@ async function confirmPushWip(): Promise<boolean> {
 
 async function setPushWip(on: boolean): Promise<HandoffStatus> {
   const config = await readConfig();
-  if (!config.installed["claude-code"] && !config.installed.codex)
+  if (!anyInstalled(config))
     throw new Error("Turn on handing work between agents first.");
   // Cancel leaves the switch off; the status says so and the UI follows it.
   if (on && !config.pushWip && !(await confirmPushWip()))
@@ -431,6 +509,18 @@ export async function syncHandoff(): Promise<void> {
         path,
       );
   }
+  // OpenCode's plugin (FE-104): ours only when it runs this app home's shim;
+  // one that runs another home's belongs to that install. Rewritten when an
+  // older build of the app wrote it differently.
+  const plugin = await readOpencodePlugin(opencodePlugin());
+  const pluginNow = buildOpencodePlugin(shimPath());
+  if (plugin.kind === "ours" && plugin.shimPath === shimPath()) {
+    present.push("opencode");
+    if (plugin.text !== pluginNow)
+      await updateConfigFile(opencodePlugin(), (text) =>
+        text === plugin.text ? pluginNow : null,
+      );
+  }
   if (!present.length) return;
   const record = await readRecord();
   await writeShim(record);
@@ -444,7 +534,7 @@ export async function syncHandoff(): Promise<void> {
 }
 
 const isAgent = (value: unknown): value is HookAgent =>
-  value === "claude-code" || value === "codex";
+  value === "claude-code" || value === "codex" || value === "opencode";
 
 /**
  * Offer to move a packaged macOS app that runs from anywhere but an
@@ -486,12 +576,12 @@ export function registerHandoff(devUrl?: string): void {
   });
   handle(handoffChannels.enable, devUrl, (args) => {
     if (args.length !== 1 || !isAgent(args[0]))
-      throw new Error('enable takes "claude-code" or "codex"');
+      throw new Error('enable takes "claude-code", "codex" or "opencode"');
     return enable(args[0]);
   });
   handle(handoffChannels.disable, devUrl, (args) => {
     if (args.length !== 1 || !isAgent(args[0]))
-      throw new Error('disable takes "claude-code" or "codex"');
+      throw new Error('disable takes "claude-code", "codex" or "opencode"');
     return disable(args[0]);
   });
   handle(handoffChannels.setPushWip, devUrl, (args) => {

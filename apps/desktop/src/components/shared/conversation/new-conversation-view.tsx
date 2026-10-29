@@ -49,9 +49,9 @@ const ROUTE = "/_app/w/$slug/agents/chat/new" as const;
  * Lanework has to start from (FE-98): the conductors to hand it to, and the
  * board's live cards to pick up.
  *
- * The model picked picks the CLI — Claude Code or Codex — so the page names
- * no agent until then. Sending starts the user's own `claude` or `codex` on a
- * new conversation and opens it as a chat.
+ * The model picked picks the CLI — Claude Code, Codex or OpenCode — so the
+ * page names no agent until then. Sending starts the user's own `claude`,
+ * `codex` or `opencode` on a new conversation and opens it as a chat.
  */
 export function NewConversationView() {
   const { slug } = useParams({ from: ROUTE });

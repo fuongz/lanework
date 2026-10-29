@@ -20,7 +20,12 @@ import { Switch } from "#/components/ui/switch";
 import { useClock } from "#/hooks/use-clock";
 import { useCopy } from "#/hooks/use-copy";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
-import { claudeView, codexView, type UsageView } from "#/lib/agent-usage";
+import {
+  claudeView,
+  codexView,
+  opencodeView,
+  type UsageView,
+} from "#/lib/agent-usage";
 import { ipcMessage } from "#/lib/ipc-error";
 import { relativeTime } from "#/lib/relative-time";
 import { useAgentSessions } from "#/stores/agent-sessions";
@@ -29,7 +34,10 @@ import { useBoard } from "#/stores/board";
 import { useHarness, useHarnessWatch } from "#/stores/harness";
 import {
   cloudAgents,
+  MCP_CLI,
+  MCP_LOGIN_COMMAND,
   type McpAuthView,
+  mcpEntry,
   useMcpAuth,
   useMcpAuthWatch,
 } from "#/stores/mcp-auth";
@@ -49,6 +57,7 @@ import { HarnessCard } from "./harness-section.card";
 const NAMES: Record<HookAgent, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
+  opencode: "OpenCode",
 };
 
 /**
@@ -61,6 +70,7 @@ const NAMES: Record<HookAgent, string> = {
 const CLIS = [
   { harness: "claude", agent: "claude-code" },
   { harness: "codex", agent: "codex" },
+  { harness: "opencode", agent: "opencode" },
 ] as const satisfies readonly { harness: HarnessAgent; agent: HookAgent }[];
 
 const NO_HOOK: AgentHookStatus = {
@@ -80,7 +90,7 @@ const rowWords = (rows: SettingsRowSpec[]) =>
  * Settings › Agents › Harness: the coding agent CLIs Lanework runs.
  *
  * One card each, with its version and usage limits, its Lanework MCP entry
- * and its checkpoint hook; then what both share.
+ * and its checkpoint hook; then what all of them share.
  *
  * NOTE: A switch per CLI, and pushing code is a third, separate choice that
  * starts off (FE-28/D3). A checkpoint is text, redacted on this machine.
@@ -131,9 +141,11 @@ export function HarnessSection() {
 
   // The same usage the terminal bar's strip shows. Claude's is asked of its
   // account once when the page opens. Codex's is only what its newest turn in
-  // the open project reported, so it needs a project.
+  // the open project reported, so it needs a project. OpenCode Go's limits
+  // come with Codex's read (FE-104/D10).
   const claudeUsage = useAgentSessions((state) => state.claudeUsage);
   const codexQuota = useAgentSessions((state) => state.codexQuota);
+  const opencodeUsage = useAgentSessions((state) => state.opencodeUsage);
   const refreshClaude = useAgentSessions((state) => state.refreshClaudeUsage);
   const loadCodexUsage = useAgentSessions((state) => state.loadCodexUsage);
   useEffect(() => {
@@ -145,6 +157,7 @@ export function HarnessSection() {
   const usage: Record<HarnessAgent, UsageView | null> = {
     claude: claudeView(claudeUsage),
     codex: codexView(codexQuota, now),
+    opencode: opencodeView(opencodeUsage, now),
   };
 
   async function approveInCodex() {
@@ -202,7 +215,7 @@ export function HarnessSection() {
     const auth = await loginTo(agent);
     setError(
       auth === "needs-login" || auth === "unknown"
-        ? `${NAMES[agent]} did not finish signing in. Try again, or run ${agent === "codex" ? "codex" : "claude"} mcp login lanework in a terminal.`
+        ? `${NAMES[agent]} did not finish signing in. Try again, or run ${MCP_LOGIN_COMMAND[agent]} in a terminal.`
         : null,
     );
   }
@@ -238,7 +251,11 @@ export function HarnessSection() {
   const mcpSurface = window.desktop?.laneworkMcp;
   // Local mode needs no credential: the hook writes locally (FE-52/D9).
   const blocked = !status?.supported || (!status.signedIn && !local);
-  const anyOn = !!status && (status.claude.installed || status.codex.installed);
+  const anyOn =
+    !!status &&
+    (status.claude.installed ||
+      status.codex.installed ||
+      status.opencode.installed);
 
   const why = (hook: AgentHookStatus, what: string): string =>
     !status
@@ -285,7 +302,7 @@ export function HarnessSection() {
     agent: LaneworkMcpAgent,
     auth: McpAuthView | undefined,
   ): SettingsRowSpec => {
-    const cli = agent === "codex" ? "codex" : "claude";
+    const cli = MCP_CLI[agent];
     const name = NAMES[agent];
     const waiting = !auth || auth === "checking" || auth === "login";
     const attention = auth === "needs-login" || auth === "failed";
@@ -310,7 +327,7 @@ export function HarnessSection() {
       description:
         (auth && DESCRIPTION[auth]) ?? `${name} signs in through your browser.`,
       keywords:
-        "mcp login sign in oauth authenticate token expired claude codex",
+        "mcp login sign in oauth authenticate token expired claude codex opencode",
       control: (
         <div className="flex items-center gap-3">
           <span
@@ -360,8 +377,7 @@ export function HarnessSection() {
   };
 
   const mcpRows = (agent: LaneworkMcpAgent): SettingsRowSpec[] => {
-    const entry =
-      agent === "claude-code" ? mcpStatus?.claude : mcpStatus?.codex;
+    const entry = mcpEntry(mcpStatus, agent);
     const board: SettingsRowSpec = {
       label: "Lanework MCP",
       description: !mcpStatus
@@ -373,7 +389,8 @@ export function HarnessSection() {
             : mcpStatus.want === "local"
               ? `Gives ${NAMES[agent]} the board's tools, for your local projects.`
               : `Gives ${NAMES[agent]} the board's tools.`,
-      keywords: "mcp server lanework board tools claude codex stdio local",
+      keywords:
+        "mcp server lanework board tools claude codex opencode stdio local",
       control: (
         <Switch
           aria-label={`Lanework MCP — ${NAMES[agent]}`}
@@ -484,15 +501,34 @@ export function HarnessSection() {
       : []),
   ];
 
+  // OpenCode's hook is a plugin file in its config folder, which OpenCode loads
+  // on its next start (FE-104).
+  const opencode = status?.opencode;
+  const opencodeRows: SettingsRowSpec[] = [
+    {
+      label: "Save progress for the next agent",
+      description: why(
+        opencode ?? NO_HOOK,
+        "Leaves a checkpoint on the card after each turn, so another agent can continue. Added as a plugin OpenCode loads when it starts.",
+      ),
+      keywords: "opencode handoff checkpoint resume hook plugin",
+      control: switchFor("opencode", opencode),
+    },
+    ...removed(opencode),
+  ];
+  const HOOK_ROWS: Record<HookAgent, SettingsRowSpec[]> = {
+    "claude-code": claudeRows,
+    codex: codexRows,
+    opencode: opencodeRows,
+  };
+
   // Signed out without "Skip for now", a checkpoint has nowhere to land. The
   // switches go rather than sit disabled under a reason that reads like a
   // fault. The version and usage stay: they are local.
   const cardSections: SettingsSectionSpec[] = CLIS.map(
     ({ harness: kind, agent }) => {
       const info = harness.find((entry) => entry.agent === kind);
-      const rows = handoff
-        ? [...mcpRows(agent), ...(agent === "codex" ? codexRows : claudeRows)]
-        : [];
+      const rows = handoff ? [...mcpRows(agent), ...HOOK_ROWS[agent]] : [];
       return {
         title: HARNESS_NAMES[kind],
         hideTitle: true,
@@ -515,7 +551,7 @@ export function HarnessSection() {
 
   if (handoff)
     sections.push({
-      title: "Both agents",
+      title: "All agents",
       rows: [
         {
           label: "Also push unfinished code to GitHub",
@@ -584,7 +620,8 @@ export function HarnessSection() {
           : checkedAt
             ? `Last checked ${relativeTime(checkedAt, now)}.`
             : "Lanework also checks on its own.",
-        keywords: "check updates harness version latest claude codex upgrade",
+        keywords:
+          "check updates harness version latest claude codex opencode upgrade",
         control: (
           <Button
             size="lg"
@@ -635,6 +672,17 @@ export function HarnessSection() {
               },
             ]
           : []),
+        ...(status.opencode.installed
+          ? [
+              {
+                label: "OpenCode plugin",
+                description: "Where OpenCode finds it.",
+                control: (
+                  <SettingsValue>{status.opencode.settingsPath}</SettingsValue>
+                ),
+              },
+            ]
+          : []),
         ...(local
           ? []
           : [
@@ -677,7 +725,7 @@ export function HarnessSection() {
         {
           label: "Hand a card to another agent",
           description: "Tell any connected agent: resume <task id>.",
-          keywords: "resume codex claude command",
+          keywords: "resume codex claude opencode command",
         },
       ],
     });

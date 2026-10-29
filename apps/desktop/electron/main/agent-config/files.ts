@@ -8,6 +8,11 @@
 // NOTE: A file's path comes only from `pathOf(id, where)`. The renderer names
 // an id: one of a fixed list, or a skill, whose folder name `parseSkillId`
 // has already held to a single segment with no `..` and no leading dot (D9).
+//
+// NOTE: OpenCode's paths (FE-105/D1) come from `agent-setup/opencode.ts`, the
+// same ones its MCP entry is written to, resolved from `where.home`: under the
+// test seam's fake home no variable can send them to the real
+// `~/.config/opencode`.
 import { createHash } from "node:crypto";
 import { copyFile, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
@@ -26,13 +31,16 @@ import {
 } from "../../../shared/agent-config";
 import { syntaxError } from "../../../shared/agent-config-text";
 import type { AgentHome } from "../agent-home";
+import { opencodeConfigDir, opencodeConfigPath } from "../agent-setup/opencode";
 import { frontmatterFields, splitFrontmatter } from "../agent-setup/read";
 import { configTarget, replaceConfigFile } from "../config-file";
 import { HOOK_MARKER } from "../handoff/claude-settings";
+import { jsoncSyntaxError } from "./jsonc";
 
 interface Spec {
-  agent: "claude" | "codex";
-  label: string;
+  agent: ConfigFile["agent"];
+  /** The file name; its own base name when unset (OpenCode's may be either). */
+  label?: string;
   description: string;
   format: ConfigFormat;
   path: (where: AgentHome) => string;
@@ -74,6 +82,22 @@ const SPECS: Record<FixedConfigId, Spec> = {
     format: "markdown",
     path: (where) => join(where.codexDir, "AGENTS.md"),
   },
+  // NOTE: `opencode.json` or `opencode.jsonc`, whichever is there, else a new
+  // `opencode.json`; `$OPENCODE_CONFIG` only for the real home. Both names are
+  // JSONC to OpenCode, so both are checked as JSONC (FE-105/D1).
+  "opencode-config": {
+    agent: "opencode",
+    description: "Models, providers, MCP servers and permissions.",
+    format: "jsonc",
+    path: (where) => opencodeConfigPath(where.home),
+  },
+  "opencode-agents-md": {
+    agent: "opencode",
+    label: "AGENTS.md",
+    description: "Instructions OpenCode reads in every project.",
+    format: "markdown",
+    path: (where) => join(opencodeConfigDir(where.home), "AGENTS.md"),
+  },
 };
 
 /** How many `*.lanework-bak-*` copies of one file are kept (FE-47/D4). */
@@ -83,12 +107,25 @@ const BACKUP = ".lanework-bak-";
 
 /** The folder each skill root names (D9). */
 function skillRoot(root: SkillRoot, where: AgentHome): string {
-  return root === "claude"
-    ? join(where.claudeDir, "skills")
-    : root === "agents"
-      ? join(where.home, ".agents", "skills")
-      : join(where.codexDir, "skills");
+  switch (root) {
+    case "claude":
+      return join(where.claudeDir, "skills");
+    case "agents":
+      return join(where.home, ".agents", "skills");
+    case "codex":
+      return join(where.codexDir, "skills");
+    case "opencode":
+      return join(opencodeConfigDir(where.home), "skills");
+  }
 }
+
+/** Whose skill one under `root` is. */
+const SKILL_AGENT: Record<SkillRoot, ConfigFile["agent"]> = {
+  claude: "claude",
+  agents: "codex",
+  codex: "codex",
+  opencode: "opencode",
+};
 
 /** The most skills one root lists. */
 const SKILLS_MAX = 200;
@@ -110,7 +147,8 @@ export function pathOf(id: ConfigFileId, where: AgentHome): string {
   return spec.path(where);
 }
 
-function shown(path: string, home: string): string {
+/** `path` with the home shortened to `~`, as the list and dialogs show it. */
+export function shown(path: string, home: string): string {
   const rest = relative(home, path);
   return rest && !rest.startsWith("..") && !rest.startsWith(sep)
     ? `~/${rest.split(sep).join("/")}`
@@ -131,7 +169,7 @@ export async function listConfigFiles(where: AgentHome): Promise<ConfigFile[]> {
         id,
         agent: spec.agent,
         kind: "config" as const,
-        label: spec.label,
+        label: spec.label ?? basename(path),
         description: spec.description,
         path: shown(path, where.home),
         format: spec.format,
@@ -166,7 +204,7 @@ async function skillsIn(root: SkillRoot, where: AgentHome) {
     if (!info?.isFile()) continue;
     found.push({
       id,
-      agent: root === "claude" ? "claude" : "codex",
+      agent: SKILL_AGENT[root],
       kind: "skill",
       label: name,
       description: await skillDescription(path),
@@ -307,7 +345,10 @@ async function write(
   // A skill is edited, never made here: its folder is the agent's to create.
   if (!before && parseSkillId(id))
     return { status: "invalid", error: "That skill is no longer there." };
-  const error = syntaxError(formatOf(id), text);
+  const format = formatOf(id);
+  // Checked, never rewritten: a JSONC file keeps its comments (FE-105/D1).
+  const error =
+    format === "jsonc" ? jsoncSyntaxError(text) : syntaxError(format, text);
   if (error) return { status: "invalid", error };
 
   const backup = before ? await backUp(target, now) : null;

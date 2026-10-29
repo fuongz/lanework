@@ -197,6 +197,9 @@ async function setTrust(
   agent: SetupAgent,
   on: boolean,
 ): Promise<ProjectTrust> {
+  // OpenCode asks no trust question for a folder (FE-104): nothing to write.
+  if (agent === "opencode")
+    throw new Error("OpenCode has no folder trust to change.");
   const at = await trustFolders(slug);
   if (!at) throw new Error("This project has no folder on this machine.");
   const home = where();
@@ -245,7 +248,7 @@ async function mcpRemove(agent: LaneworkMcpAgent): Promise<LaneworkMcpStatus> {
 }
 
 const isMcpAgent = (value: unknown): value is LaneworkMcpAgent =>
-  value === "claude-code" || value === "codex";
+  value === "claude-code" || value === "codex" || value === "opencode";
 
 export function registerAgentSetup(devUrl?: string): void {
   setMcpHome(where);
@@ -255,22 +258,22 @@ export function registerAgentSetup(devUrl?: string): void {
   });
   handle(laneworkMcpChannels.install, devUrl, (args) => {
     if (args.length !== 1 || !isMcpAgent(args[0]))
-      throw new Error('install takes "claude-code" or "codex"');
+      throw new Error('install takes "claude-code", "codex" or "opencode"');
     return mcpInstall(args[0]);
   });
   handle(laneworkMcpChannels.remove, devUrl, (args) => {
     if (args.length !== 1 || !isMcpAgent(args[0]))
-      throw new Error('remove takes "claude-code" or "codex"');
+      throw new Error('remove takes "claude-code", "codex" or "opencode"');
     return mcpRemove(args[0]);
   });
   handle(laneworkMcpChannels.auth, devUrl, (args) => {
     if (args.length !== 1 || !isMcpAgent(args[0]))
-      throw new Error('auth takes "claude-code" or "codex"');
+      throw new Error('auth takes "claude-code", "codex" or "opencode"');
     return laneworkMcpAuth(args[0]);
   });
   handle(laneworkMcpChannels.login, devUrl, (args) => {
     if (args.length !== 1 || !isMcpAgent(args[0]))
-      throw new Error('login takes "claude-code" or "codex"');
+      throw new Error('login takes "claude-code", "codex" or "opencode"');
     return loginLaneworkMcp(args[0], (url) => {
       void shell.openExternal(url).catch(() => {});
     });

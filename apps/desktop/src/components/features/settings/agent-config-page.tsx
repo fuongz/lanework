@@ -55,7 +55,7 @@ const PAGES = {
     route: "/settings/config",
     title: "Config files",
     empty:
-      "Claude Code and Codex settings for every project. Saving keeps a backup.",
+      "Claude Code, Codex and OpenCode settings for every project. Saving keeps a backup.",
   },
   skill: {
     route: "/settings/skills",
@@ -67,9 +67,9 @@ const PAGES = {
 /**
  * Settings › Config files and Settings › Skills (FE-47/D8, D9).
  *
- * The user's own Claude Code and Codex config files, or skills, as a tree by
- * agent, beside the ones open as tabs in an editor, the way the Files screen
- * is.
+ * The user's own Claude Code, Codex and OpenCode config files, or skills, as
+ * a tree by agent, beside the ones open as tabs in an editor, the way the
+ * Files screen is.
  *
  * The active tab is in the URL (`?file=<id>`), so Back returns to the
  * previous one. Every open tab's pane stays mounted, only hidden, so its

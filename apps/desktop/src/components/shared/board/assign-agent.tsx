@@ -442,7 +442,7 @@ function AgentItems({
   label?: (agent: string) => string;
 }) {
   if (agents.length === 0)
-    return <Item disabled>No Claude or Codex on this machine</Item>;
+    return <Item disabled>No coding agent on this machine</Item>;
   return agents.map((agent) => (
     <Item
       key={agent}

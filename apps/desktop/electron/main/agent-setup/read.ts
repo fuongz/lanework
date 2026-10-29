@@ -1,5 +1,5 @@
-// A project's agent setup, read off the disk: what Claude Code and Codex
-// would load in its folder (MCP servers, skills, commands, hooks, permissions
+// A project's agent setup, read off the disk: what Claude Code, Codex and
+// OpenCode (FE-104) would load in its folder (MCP servers, skills, commands, hooks, permissions
 // and plugins), gathered from every config file that says so.
 //
 // Read-only, and nothing here imports Electron: main calls it, and a spec
@@ -27,6 +27,12 @@ import { redact } from "../../hook/redact";
 import { type AgentHome, CONFIG_MAX_BYTES, readText } from "../agent-home";
 import { splitFrontmatter } from "../frontmatter";
 import { HOOK_MARKER } from "../handoff/claude-settings";
+import {
+  opencodeConfigDir,
+  opencodeConfigPath,
+  parseJsonc,
+  usesV1Layout,
+} from "./opencode";
 import {
   outsideStrings,
   splitTop,
@@ -1227,6 +1233,147 @@ async function readCodex(read: Read): Promise<void> {
   );
 }
 
+// ── OpenCode (FE-104) ──────────────────────────────────────────────────────
+
+/** A plugin file OpenCode loads from a `plugins/` folder. */
+const PLUGIN_FILE = /\.(?:[cm]?[jt]s)$/;
+
+/**
+ * OpenCode's setup: the MCP servers and plugins of its user config and the
+ * repo's, its plugin files, its skills and its commands.
+ *
+ * NOTE: OpenCode asks no trust question, so nothing of the repo's is marked
+ * off for want of one. A repo config wins a server's name over the user's.
+ * Our checkpoint plugin is listed as a hook, as the other CLIs' Stop hooks
+ * are (FE-40/D5).
+ */
+async function readOpencode(read: Read): Promise<void> {
+  const { folder, where } = read;
+  const configDir = opencodeConfigDir(where.home);
+  const userPath = opencodeConfigPath(where.home);
+  const base = (
+    scope: SetupScope,
+    source: string,
+  ): Origin & { source: string } => ({
+    agent: "opencode",
+    scope,
+    source,
+    plugin: null,
+    disabled: null,
+  });
+
+  const layers: { scope: SetupScope; path: string }[] = [
+    ...[
+      "opencode.json",
+      "opencode.jsonc",
+      join(".opencode", "opencode.json"),
+      join(".opencode", "opencode.jsonc"),
+    ].map((name) => ({ scope: "project" as const, path: join(folder, name) })),
+    { scope: "user", path: userPath },
+  ];
+  const servers: SetupMcpServer[] = [];
+  for (const layer of layers) {
+    const raw = await readConfig(read, layer.path);
+    if (raw === null) continue;
+    const source = shown(read, layer.path);
+    const config = parseJsonc(raw);
+    if (!config) {
+      read.setup.unreadable.push(source);
+      continue;
+    }
+    // 2.x: `mcp.servers`; 1.x: the servers directly under `mcp`.
+    const mcp = isObject(config.mcp) ? config.mcp : {};
+    const map = usesV1Layout(config)
+      ? mcp
+      : isObject(mcp.servers)
+        ? mcp.servers
+        : {};
+    for (const [name, entry] of Object.entries(map)) {
+      if (!isObject(entry) || (name === "timeout" && !("type" in entry)))
+        continue;
+      // NOTE: Only these: `environment`, `headers` and `oauth` are never read.
+      const command = Array.isArray(entry.command)
+        ? text(entry.command[0])
+        : text(entry.command);
+      servers.push({
+        ...base(layer.scope, source),
+        id: idOf("mcp", "opencode", layer.scope, null, source, name),
+        disabled:
+          entry.disabled === true
+            ? "Off: disabled = true"
+            : entry.enabled === false
+              ? "Off: enabled = false"
+              : null,
+        name,
+        ...serverFields({ command, url: text(entry.url) }),
+      });
+    }
+    for (const spec of Array.isArray(config.plugin) ? config.plugin : []) {
+      const name = typeof spec === "string" ? spec : text(spec?.package);
+      if (!name) continue;
+      read.setup.plugins.push({
+        ...base(layer.scope, source),
+        id: idOf("plugin", "opencode", layer.scope, source, name),
+        name: shownText(name, 120),
+        version: null,
+      });
+    }
+  }
+  const winner = new Map<string, SetupScope>();
+  for (const server of servers) {
+    if (server.disabled) continue;
+    const won = winner.get(server.name);
+    if (won) server.disabled = `Replaced by the ${won} server of the same name`;
+    else winner.set(server.name, server.scope);
+  }
+  read.setup.mcp.push(...servers);
+
+  // Plugin files, the user's and the repo's. Ours is the checkpoint hook.
+  for (const [scope, dir] of [
+    ["user", join(configDir, "plugins")],
+    ["user", join(configDir, "plugin")],
+    ["project", join(folder, ".opencode", "plugins")],
+    ["project", join(folder, ".opencode", "plugin")],
+  ] as const) {
+    for (const name of await listDir(dir)) {
+      if (!PLUGIN_FILE.test(name)) continue;
+      const path = join(dir, name);
+      const source = shown(read, path);
+      if (name.startsWith(HOOK_MARKER)) {
+        read.setup.hooks.push({
+          ...base(scope, source),
+          id: idOf("hook", "opencode", scope, null, source),
+          event: "session.idle",
+          matcher: null,
+          type: "plugin",
+          detail: name,
+          lanework: true,
+        });
+        continue;
+      }
+      read.setup.plugins.push({
+        ...base(scope, source),
+        id: idOf("plugin", "opencode", scope, source),
+        name: shownText(name, 120),
+        version: null,
+      });
+    }
+  }
+
+  // Skills and commands: the repo's `.opencode/`, then the user's config
+  // folder. OpenCode reads both the plural and the older singular folder.
+  await skillsIn(
+    read,
+    join(folder, ".opencode", "skills"),
+    base("project", ""),
+  );
+  await skillsIn(read, join(configDir, "skills"), base("user", ""));
+  for (const dir of ["commands", "command"]) {
+    await commandsIn(read, join(folder, ".opencode", dir), base("project", ""));
+    await commandsIn(read, join(configDir, dir), base("user", ""));
+  }
+}
+
 // ── Entry points ───────────────────────────────────────────────────────────
 
 const emptySetup = (folder: string | null): AgentSetup => ({
@@ -1241,8 +1388,16 @@ const emptySetup = (folder: string | null): AgentSetup => ({
   readAt: new Date().toISOString(),
 });
 
+/** How agents sort: Claude, Codex, then OpenCode. */
+const AGENT_ORDER: Record<SetupAgent, number> = {
+  claude: 0,
+  codex: 1,
+  opencode: 2,
+};
+
 /**
- * Sort `list` in place: Claude's rows before Codex's, then by scope.
+ * Sort `list` in place: Claude's rows, then Codex's, then OpenCode's, then
+ * by scope.
  *
  * Scopes go local, project, user, plugin, system ({@link SCOPE_ORDER}).
  */
@@ -1251,13 +1406,13 @@ function byOrigin<T extends { agent: SetupAgent; scope: SetupScope }>(
 ): T[] {
   return list.sort(
     (a, b) =>
-      (a.agent === b.agent ? 0 : a.agent === "claude" ? -1 : 1) ||
+      AGENT_ORDER[a.agent] - AGENT_ORDER[b.agent] ||
       SCOPE_ORDER[a.scope] - SCOPE_ORDER[b.scope],
   );
 }
 
 /**
- * Everything both CLIs would load in `folder`.
+ * Everything the three CLIs would load in `folder`.
  *
  * Also the file behind each skill and command, kept in main by the id the
  * renderer is given, so the renderer never names a path (FE-40/D4).
@@ -1278,6 +1433,7 @@ export async function readAgentSetup(
   };
   await readClaude(read);
   await readCodex(read);
+  await readOpencode(read);
   const { setup } = read;
   byOrigin(setup.mcp);
   byOrigin(setup.skills);

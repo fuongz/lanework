@@ -1,5 +1,10 @@
-import { Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  ArrowDown01Icon,
+  ArrowRight01Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useState } from "react";
 import { HarnessAccountRow } from "#/components/shared/agents/harness-account";
 import { HARNESS_NAMES } from "#/components/shared/agents/harness-island";
 import { TextSkeleton } from "#/components/shared/loading/skeletons";
@@ -10,6 +15,7 @@ import {
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { UsageBar } from "#/components/shared/terminal/usage-bar";
 import { type UsageView, updatedText } from "#/lib/agent-usage";
+import { cn } from "#/lib/utils";
 import {
   compareVersions,
   type HarnessAccount,
@@ -35,7 +41,9 @@ const INSTALLED_WITH: Record<InstallMethod, string> = {
  * - The account: its organization, whether it is ready, the plan, and the
  *   email, blurred.
  * - Its usage limits.
- * - Its rows, drawn as {@link SettingsPage} draws a section's.
+ * - Its rows, drawn as {@link SettingsPage} draws a section's, folded under
+ *   the usage by default: the version and the limits are what a glance is
+ *   for, and the switches are set once.
  */
 export function HarnessCard({
   kind,
@@ -61,6 +69,7 @@ export function HarnessCard({
     info.latest !== null &&
     compareVersions(info.latest, info.version) > 0;
   const signedIn = !!account?.signedIn;
+  const [open, setOpen] = useState(false);
 
   return (
     <SettingsCard>
@@ -138,31 +147,56 @@ export function HarnessCard({
         />
       )}
       {usage && <UsageRow view={usage} now={now} />}
-      {rows.map((row) => (
-        <div
-          key={row.label}
-          className="flex items-center justify-between gap-8 px-4 py-3.5"
+      {rows.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 px-4 py-2.5 text-[13px] font-medium transition-colors"
         >
-          <div className="flex min-w-0 flex-col gap-1">
-            <span className="text-sm font-medium">{row.label}</span>
-            {row.description ? (
-              <span className="text-muted-foreground text-[13px] leading-relaxed">
-                {row.description}
-              </span>
+          {/* The app's one disclosure arrow (issue detail's sub-issues). */}
+          <HugeiconsIcon
+            icon={open ? ArrowDown01Icon : ArrowRight01Icon}
+            className="size-3.5"
+            strokeWidth={2}
+            aria-hidden="true"
+          />
+          Settings
+        </button>
+      )}
+      {open &&
+        rows.map((row) => (
+          <div
+            key={row.label}
+            className="flex items-center justify-between gap-8 px-4 py-3.5"
+          >
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="text-sm font-medium">{row.label}</span>
+              {row.description ? (
+                <span className="text-muted-foreground text-[13px] leading-relaxed">
+                  {row.description}
+                </span>
+              ) : null}
+            </div>
+            {row.control ? (
+              <div className="flex shrink-0 items-center">{row.control}</div>
             ) : null}
           </div>
-          {row.control ? (
-            <div className="flex shrink-0 items-center">{row.control}</div>
-          ) : null}
-        </div>
-      ))}
+        ))}
     </SettingsCard>
   );
 }
 
+/** What each limit's bar is called to a screen reader. */
+const REGION = {
+  "5h": "5-hour limit",
+  Weekly: "Weekly limit",
+  Monthly: "Monthly limit",
+} as const;
+
 /**
  * The 5-hour and weekly limits side by side, as the terminal bar's popover
- * has them.
+ * has them; OpenCode Go's monthly one too (FE-104/D10).
  *
  * Draws nothing when there are no numbers and no error: a row of dashes would
  * read as "0% used" to anyone skimming.
@@ -172,6 +206,7 @@ function UsageRow({ view, now }: { view: UsageView; now: number }) {
     [
       ["5h", view.fiveHour],
       ["Weekly", view.weekly],
+      ["Monthly", view.monthly],
     ] as const
   ).flatMap(([label, window]) => (window ? [{ label, window }] : []));
   if (windows.length === 0 && !view.error) return null;
@@ -181,13 +216,18 @@ function UsageRow({ view, now }: { view: UsageView; now: number }) {
       data-testid={`harness-usage-${view.agent}`}
     >
       {windows.length > 0 && (
-        <div className="grid grid-cols-2 gap-6">
+        <div
+          className={cn(
+            "grid gap-6",
+            windows.length > 2 ? "grid-cols-3" : "grid-cols-2",
+          )}
+        >
           {windows.map(({ label, window }) => (
             <UsageBar
               key={label}
               name={view.name}
               label={label}
-              region={label === "5h" ? "5-hour limit" : "Weekly limit"}
+              region={REGION[label]}
               window={window}
               now={now}
             />

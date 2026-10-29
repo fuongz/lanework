@@ -26,8 +26,10 @@ import {
   type CardBrief,
   clampGeometry,
   isAgentSessionId,
+  isAgentSessionIdOf,
   isBoardId,
   isCardBrief,
+  isTerminalAgent,
   isTerminalKind,
   type ListeningPort,
   type SubagentTranscript,
@@ -80,6 +82,7 @@ import {
   stopBackgroundTask,
   taskOutputRequest,
 } from "./background-tasks";
+import { runOpencode } from "./opencode-cli";
 import { listPorts, stopPort } from "./ports";
 import { readSubagentTranscript, subagentRequest } from "./subagent-transcript";
 import { codexCli, codexDirs, registerUsage } from "./usage";
@@ -262,7 +265,7 @@ export async function bindConductorConversation(
   id: string,
   conductor: string,
 ): Promise<void> {
-  if (!isAgentSessionId(id))
+  if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
   await bindConductor(agentMarksFile(), agentKey({ agent, id }), {
     id: conductor,
@@ -294,7 +297,7 @@ export async function nameConversation(
   id: string,
   name: string,
 ): Promise<void> {
-  if (!isAgentSessionId(id))
+  if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
   const clean = cleanAgentName(name);
   await updateAgentMark(
@@ -519,9 +522,8 @@ async function markable(args: unknown[]): Promise<{
   const workspace = key(args[0], "workspace");
   const agent = args[1];
   const id = args[2];
-  if (agent !== "claude" && agent !== "codex")
-    throw new Error("A valid agent is required");
-  if (!isAgentSessionId(id))
+  if (!isTerminalAgent(agent)) throw new Error("A valid agent is required");
+  if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
   const known = await agentSessionsOf(workspace);
   if (!known.some((entry) => entry.agent === agent && entry.id === id))
@@ -853,7 +855,7 @@ export function registerTerminal(devUrl?: string): void {
       // `null` is "none", sent only to put a card behind it.
       const resume = args[4] ?? undefined;
       if (resume !== undefined) {
-        if (kind === "shell" || !isAgentSessionId(resume))
+        if (kind === "shell" || !isAgentSessionIdOf(kind, resume))
           throw new Error("Unknown conversation");
         const known = await agentSessionsOf(workspace);
         if (!known.some((entry) => entry.id === resume && entry.agent === kind))
@@ -963,7 +965,7 @@ export function registerTerminal(devUrl?: string): void {
         throw new Error("Stop this conversation before deleting it.");
       const folder = await terminalFolder(workspace);
       if (!folder) throw new Error("This project has no folder here.");
-      await deleteAgentTranscript(agentHome(), folder, agent, id);
+      await deleteAgentTranscript(agentHome(), folder, agent, id, runOpencode);
       await updateAgentMark(agentMarksFile(), mark, () => ({}));
       return agentSessionsOf(workspace);
     },

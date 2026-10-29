@@ -15,13 +15,19 @@
 // Nothing here imports Electron, so a Node script can drive it against a
 // real CLI.
 //
+// `createEngines` holds every CLI's engines behind one interface
+// (`conversation-engine.ts`, FE-104): this Claude one, Codex's
+// (`codex-engine.ts`) and OpenCode's (`opencode-engine.ts`).
+//
 // NOTE: Nothing the page typed becomes an argument: settings are checked
 // again against the fixed lists (`checkSettings`) and the id is a UUID.
 import { type ChildProcess, spawn as spawnChild } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  AGENT_LABELS,
   type AskQuestion,
   type ComposerSettings,
+  type ConversationAgent,
   type ConversationEvent,
   checkSettings,
   type EngineQueue,
@@ -42,6 +48,8 @@ import {
 import type { ClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { CodexEngine } from "./codex-engine";
+import type { ConversationEngine } from "./conversation-engine";
+import { OpenCodeEngine, type OpenCodeEngineDeps } from "./opencode-engine";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { buildTurns, inputText, type Line } from "./transcript";
 
@@ -50,6 +58,11 @@ interface EngineDeps {
   cli: () => Promise<ClaudeCli>;
   /** The `codex` binary, for a Codex conversation. */
   codexCli?: () => Promise<ClaudeCli>;
+  /**
+   * OpenCode's background service, for an OpenCode conversation (FE-104);
+   * absent, an OpenCode conversation cannot run.
+   */
+  opencode?: OpenCodeEngineDeps["service"];
   emit: (event: ConversationEvent) => void;
   /** The id of a live pty running Claude on this conversation, or null. */
   terminalOn: (
@@ -182,7 +195,8 @@ interface Control {
 }
 
 /** One Claude conversation's headless `claude`, and the turn it runs. */
-class Engine {
+class Engine implements ConversationEngine {
+  readonly agent = "claude" as const;
   child: ChildProcess | null = null;
   /** The process's settings: as started, then as control requests changed. */
   applied: ComposerSettings | null = null;
@@ -243,7 +257,25 @@ class Engine {
      * resuming it. Cleared once a line of the conversation comes back.
      */
     public fresh = false,
-  ) {}
+  ) {
+    this.named = Promise.resolve(conversation);
+  }
+
+  /** Main names a Claude conversation itself: known from the start. */
+  readonly named: Promise<string>;
+
+  pid(): number | null {
+    return this.child?.pid ?? null;
+  }
+
+  alive(): boolean {
+    return this.child !== null;
+  }
+
+  kill(): void {
+    this.stopping = true;
+    this.child?.kill("SIGTERM");
+  }
 
   state(): EngineState {
     const held: EngineQueue = this.held.state();
@@ -866,9 +898,12 @@ export function sharedEngines(): Engines | null {
 
 export type Engines = ReturnType<typeof createEngines>;
 
+/** The CLIs that name a new conversation themselves (FE-104). */
+export type NamingAgent = Exclude<ConversationAgent, "claude">;
+
 /** Every conversation's engine, by workspace and id. */
 export function createEngines(input: EngineDeps) {
-  const engines = new Map<string, Engine | CodexEngine>();
+  const engines = new Map<string, ConversationEngine>();
   // The settings each conversation last ran with here, so orchestration can
   // send its lead a turn on them (FE-87).
   const lastSettings = new Map<string, ComposerSettings>();
@@ -890,14 +925,51 @@ export function createEngines(input: EngineDeps) {
     remember: deps.remember,
     spawn: deps.spawn,
   });
+  const opencodeDeps = (): OpenCodeEngineDeps => ({
+    service:
+      deps.opencode ??
+      (() => Promise.reject(new Error("OpenCode is not available."))),
+    emit: deps.emit,
+    remember: deps.remember,
+  });
   const keyOf = (workspace: string, conversation: string) =>
     `${workspace}\0${conversation}`;
+
+  /**
+   * A new engine for `agent`'s conversation.
+   *
+   * @param conversation Null for a new Codex or OpenCode one: its CLI names
+   *   it on the first turn.
+   */
+  function make(
+    agent: ConversationAgent,
+    workspace: string,
+    conversation: string | null,
+    folder: string,
+  ): ConversationEngine {
+    switch (agent) {
+      case "codex":
+        return new CodexEngine(workspace, conversation, folder, codexDeps());
+      case "opencode":
+        return new OpenCodeEngine(
+          workspace,
+          conversation,
+          folder,
+          opencodeDeps(),
+        );
+      case "claude":
+        if (!conversation) throw new Error("A conversation is required.");
+        return new Engine(workspace, conversation, folder, deps);
+    }
+  }
 
   // The engines' own process ids, so a terminal check never counts them.
   function pids(): Set<number> {
     const out = new Set<number>();
-    for (const engine of engines.values())
-      if (engine.child?.pid) out.add(engine.child.pid);
+    for (const engine of engines.values()) {
+      const pid = engine.pid();
+      if (pid) out.add(pid);
+    }
     return out;
   }
 
@@ -916,16 +988,57 @@ export function createEngines(input: EngineDeps) {
     conversation: string,
   ): Promise<EngineState> {
     const engine = engines.get(keyOf(workspace, conversation));
-    if (engine?.child || engine?.busy) return engine.state();
+    if (engine?.alive() || engine?.busy) return engine.state();
     return (
       (await terminalState(workspace, conversation)) ??
       engine?.state() ?? { state: "idle" }
     );
   }
 
+  /**
+   * Start a NEW conversation on a CLI that names it, `out` its first turn.
+   *
+   * Answers once the CLI has named it.
+   *
+   * @throws When the CLI fails, or names no conversation within 30 seconds.
+   */
+  async function startNamed(
+    agent: NamingAgent,
+    workspace: string,
+    folder: string,
+    out: Outgoing,
+  ): Promise<{ conversation: string; engine: EngineState }> {
+    const engine = make(agent, workspace, null, folder);
+    await engine.deliver(out);
+    let timer: NodeJS.Timeout | undefined;
+    const conversation = await Promise.race([
+      engine.named,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `${AGENT_LABELS[agent]} did not start the conversation.`,
+              ),
+            ),
+          30_000,
+        );
+      }),
+    ])
+      .catch(async (error: Error) => {
+        await engine.halt();
+        throw error;
+      })
+      .finally(() => clearTimeout(timer));
+    engines.set(keyOf(workspace, conversation), engine);
+    engine.emitState();
+    return { conversation, engine: engine.state() };
+  }
+
   const api = {
     pids,
     state,
+    startNamed,
 
     /** The settings `conversation` last ran with here, or null. */
     settingsOf(conversation: string): ComposerSettings | null {
@@ -947,15 +1060,11 @@ export function createEngines(input: EngineDeps) {
       conversation: string,
       folder: string,
       out: Outgoing,
-      agent: "claude" | "codex" = "claude",
+      agent: ConversationAgent = "claude",
     ): Promise<EngineState> {
       const key = keyOf(workspace, conversation);
       let engine = engines.get(key);
-      if (
-        engine &&
-        (engine.folder !== folder ||
-          engine instanceof CodexEngine !== (agent === "codex"))
-      ) {
+      if (engine && (engine.folder !== folder || engine.agent !== agent)) {
         if (engine.busy) throw new Error("A turn is still running.");
         await engine.halt();
         engines.delete(key);
@@ -965,16 +1074,13 @@ export function createEngines(input: EngineDeps) {
         await engine.accept(out);
         return engine.state();
       }
-      if (!engine?.child) {
+      if (!engine?.alive()) {
         // NOTE: Single writer: a pty already running Claude on it wins.
         const terminal = await terminalState(workspace, conversation);
         if (terminal) return terminal;
       }
       if (!engine) {
-        engine =
-          agent === "codex"
-            ? new CodexEngine(workspace, conversation, folder, codexDeps())
-            : new Engine(workspace, conversation, folder, deps);
+        engine = make(agent, workspace, conversation, folder);
         engines.set(key, engine);
       }
       const running = engine;
@@ -989,36 +1095,14 @@ export function createEngines(input: EngineDeps) {
     /**
      * Start a NEW Codex conversation with `out` as its first turn.
      *
-     * Codex names the id itself, on its first line; this answers once it
-     * has.
-     *
-     * @throws When Codex fails, or names no conversation within 30 seconds.
+     * Kept for orchestration, which starts Codex workers by this name.
      */
-    async startCodex(
+    startCodex(
       workspace: string,
       folder: string,
       out: Outgoing,
     ): Promise<{ conversation: string; engine: EngineState }> {
-      const engine = new CodexEngine(workspace, null, folder, codexDeps());
-      await engine.deliver(out);
-      let timer: NodeJS.Timeout | undefined;
-      const conversation = await Promise.race([
-        engine.named,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error("Codex did not start the conversation.")),
-            30_000,
-          );
-        }),
-      ])
-        .catch(async (error: Error) => {
-          await engine.halt();
-          throw error;
-        })
-        .finally(() => clearTimeout(timer));
-      engines.set(keyOf(workspace, conversation), engine);
-      engine.emitState();
-      return { conversation, engine: engine.state() };
+      return startNamed("codex", workspace, folder, out);
     },
 
     /**
@@ -1049,16 +1133,17 @@ export function createEngines(input: EngineDeps) {
      * What an engine holds of a conversation, or null when none runs it.
      *
      * For one the CLI has not written down yet (started here, first turn
-     * running).
+     * running), and for OpenCode's running turn, which its service writes
+     * down only as each step ends.
      */
     pending(
       workspace: string,
       conversation: string,
-    ): { agent: "claude" | "codex"; turns: Turn[]; working: boolean } | null {
+    ): { agent: ConversationAgent; turns: Turn[]; working: boolean } | null {
       const engine = engines.get(keyOf(workspace, conversation));
       if (!engine) return null;
       return {
-        agent: engine instanceof CodexEngine ? "codex" : "claude",
+        agent: engine.agent,
         turns: engine.turns(),
         working: engine.busy,
       };
@@ -1076,9 +1161,7 @@ export function createEngines(input: EngineDeps) {
      */
     untrusted(workspace: string, conversation: string): boolean {
       const engine = engines.get(keyOf(workspace, conversation));
-      return (
-        engine instanceof Engine && Boolean(engine.child) && engine.untrusted
-      );
+      return Boolean(engine?.alive() && engine.untrusted);
     },
 
     async stop(workspace: string, conversation: string): Promise<void> {
@@ -1183,20 +1266,24 @@ export function createEngines(input: EngineDeps) {
      * An idle one's process ends now, and the next turn starts it with the
      * new trust. A running turn is never cut off: its process restarts before
      * the next turn instead.
+     *
+     * NOTE: OpenCode has no folder trust (FE-104): nothing asks for it, so
+     * none of its engines is ever matched here.
      */
     async retrust(
       workspace: string,
       folder: string,
-      agent: "claude" | "codex",
+      agent: ConversationAgent,
     ): Promise<void> {
+      if (agent === "opencode") return;
       await Promise.all(
         [...engines.values()]
           .filter(
             (engine) =>
               engine.workspace === workspace &&
               engine.folder === folder &&
-              engine instanceof CodexEngine === (agent === "codex") &&
-              engine.child,
+              engine.agent === agent &&
+              engine.alive(),
           )
           .map(async (engine) => {
             if (engine.busy) {
@@ -1212,7 +1299,7 @@ export function createEngines(input: EngineDeps) {
     /** The conversations of `workspace` whose engine process is alive. */
     alive(workspace: string): string[] {
       return [...engines.values()]
-        .filter((engine) => engine.workspace === workspace && engine.child)
+        .filter((engine) => engine.workspace === workspace && engine.alive())
         .flatMap((engine) =>
           engine.conversation ? [engine.conversation] : [],
         );
@@ -1236,10 +1323,7 @@ export function createEngines(input: EngineDeps) {
 
     /** Signal every engine's process to end, without waiting: app quit. */
     killAll(): void {
-      for (const engine of engines.values()) {
-        engine.stopping = true;
-        engine.child?.kill("SIGTERM");
-      }
+      for (const engine of engines.values()) engine.kill();
     },
   };
   shared = api;

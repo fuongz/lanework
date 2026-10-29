@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ProjectTrust, SetupAgent } from "#/../shared/agent-setup";
+import type { ProjectTrust } from "#/../shared/agent-setup";
 import type { RepoTrust } from "#/../shared/worktree";
+import type { TrustAgent } from "#/components/shared/settings/trust-dialog";
 import { ipcMessage } from "#/lib/ipc-error";
 
 /**
- * Whether Claude Code and Codex trust a project's folder, and the user's
+ * Whether Claude Code and Codex trust a project's folder (OpenCode asks no
+ * such question), and the user's
  * answer written back (FE-101).
  *
  * Read on opening, and again on window focus: the user may answer a CLI's own
@@ -16,15 +18,15 @@ import { ipcMessage } from "#/lib/ipc-error";
 export function useProjectTrust(slug: string | null): {
   trust: ProjectTrust | null;
   error: string | null;
-  busy: SetupAgent | null;
-  set: (agent: SetupAgent, on: boolean) => Promise<boolean>;
+  busy: TrustAgent | null;
+  set: (agent: TrustAgent, on: boolean) => Promise<boolean>;
 } {
   const [state, setState] = useState<{
     slug: string | null;
     trust: ProjectTrust | null;
     error: string | null;
   }>({ slug: null, trust: null, error: null });
-  const [busy, setBusy] = useState<SetupAgent | null>(null);
+  const [busy, setBusy] = useState<TrustAgent | null>(null);
 
   useEffect(() => {
     const surface = window.desktop?.agentSetup;
@@ -44,7 +46,7 @@ export function useProjectTrust(slug: string | null): {
   }, [slug]);
 
   const set = useCallback(
-    async (agent: SetupAgent, on: boolean) => {
+    async (agent: TrustAgent, on: boolean) => {
       const surface = window.desktop?.agentSetup;
       if (!slug || !surface) return false;
       setBusy(agent);

@@ -5,8 +5,10 @@ import { AGENT_NOTES, MCP_HOST, MCP_URL } from "../../../shared/agent-notes";
 import type {
   ReadinessCheck,
   ReadinessFix,
+  ReadinessId,
   ReadinessReport,
 } from "../../../shared/readiness";
+import { parseJsonc } from "../agent-setup/opencode";
 
 type Json = Record<string, unknown>;
 
@@ -107,6 +109,20 @@ export function codexHasLanework(toml: string | null): boolean {
   return false;
 }
 
+/**
+ * Whether one of OpenCode's config files has the lanework MCP server
+ * (FE-104).
+ *
+ * Under `mcp.servers` (OpenCode 2) or directly under `mcp` (OpenCode 1), by
+ * name or by URL. A file that does not parse counts as "not there".
+ */
+export function opencodeHasLanework(jsonc: string | null): boolean {
+  if (!jsonc) return false;
+  const mcp = parseJsonc(jsonc)?.mcp;
+  if (!isObject(mcp)) return false;
+  return hasLaneworkServer(mcp.servers) || hasLaneworkServer(mcp);
+}
+
 /** Everything main gathers about one project before judging it. */
 export interface ReadinessFacts {
   slug: string;
@@ -129,11 +145,19 @@ export interface ReadinessFacts {
    */
   claude: { used: boolean; hook: boolean };
   codex: { used: boolean; hook: boolean; mcp: boolean };
+  /**
+   * OpenCode on this machine (FE-104): `used` when its config or data folder
+   * exists. Optional, so facts gathered before FE-104 still judge.
+   */
+  opencode?: { used: boolean; hook: boolean; mcp: boolean };
   checkedAt: string;
 }
 
 const CLAUDE_ADD = `claude mcp add --transport http --scope user lanework ${MCP_URL}`;
 const CODEX_ADD = `codex mcp add lanework --url ${MCP_URL}`;
+
+/** The check id for OpenCode's MCP server (FE-104). */
+const OPENCODE_MCP: ReadinessId = "opencode-mcp";
 
 function check(
   base: Omit<ReadinessCheck, "detail" | "fix" | "action"> &
@@ -230,11 +254,31 @@ export function buildReport(facts: ReadinessFacts): ReadinessReport {
       ),
     );
 
+  const opencode = facts.opencode ?? { used: false, hook: false, mcp: false };
+  if (opencode.used)
+    checks.push(
+      check(
+        {
+          id: OPENCODE_MCP,
+          level: "blocker",
+          ok: opencode.mcp,
+          title: "Lanework MCP for OpenCode",
+          action: "agent-settings",
+        },
+        "OpenCode has no lanework MCP server, so it cannot reach the board. Add it in Settings › Agents, or under mcp.servers in its opencode.json.",
+      ),
+    );
+
   const unhooked = [
     facts.claude.used && !facts.claude.hook ? "Claude Code" : null,
     facts.codex.used && !facts.codex.hook ? "Codex" : null,
+    opencode.used && !opencode.hook ? "OpenCode" : null,
   ].filter(Boolean);
-  if (facts.claude.used || facts.codex.used)
+  const named =
+    unhooked.length > 2
+      ? `${unhooked.slice(0, -1).join(", ")} and ${unhooked.at(-1)}`
+      : unhooked.join(" and ");
+  if (facts.claude.used || facts.codex.used || opencode.used)
     checks.push(
       check(
         {
@@ -244,7 +288,7 @@ export function buildReport(facts: ReadinessFacts): ReadinessReport {
           title: "Checkpoints between agents",
           action: "agent-settings",
         },
-        `${unhooked.join(" and ")} does not leave a checkpoint on the card after each turn, so another agent cannot pick the work up. Turn it on in Settings › Agents › Harness.`,
+        `${named} does not leave a checkpoint on the card after each turn, so another agent cannot pick the work up. Turn it on in Settings › Agents › Harness.`,
       ),
     );
 

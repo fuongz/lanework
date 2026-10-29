@@ -25,15 +25,25 @@ export function visibleText(text: string): string {
   return text.replace(HIDDEN_BLOCKS, "").trim();
 }
 
-/** A worker's turn: the lead's instructions, then the envelope. */
+/**
+ * A worker's turn: the lead's instructions, then the envelope.
+ *
+ * @param envSet Whether TMPDIR, TMP and TEMP point at `scratch`. False for an
+ *   OpenCode worker (FE-105): its process is the user's own service, which
+ *   our env never reaches, so it is told to point them there itself.
+ */
 export function workerTurn(
   text: string,
   files: readonly string[],
   scratch: string | null,
+  envSet = true,
 ): string {
-  const scratchLine = scratch
-    ? `\nYour private scratch folder is ${JSON.stringify(scratch)}; TMPDIR, TMP and TEMP point there. Put temporary helpers and test output there, nowhere else outside your scope.`
-    : "";
+  const where = JSON.stringify(scratch);
+  const scratchLine = !scratch
+    ? ""
+    : envSet
+      ? `\nYour private scratch folder is ${where}; TMPDIR, TMP and TEMP point there. Put temporary helpers and test output there, nowhere else outside your scope.`
+      : `\nYour private scratch folder is ${where}. TMPDIR does not point there: set TMPDIR=${where} on commands that write temporary files. Put temporary helpers and test output there, nowhere else outside your scope.`;
   return `${text}
 
 <${ASSIGNMENT_TAG}>

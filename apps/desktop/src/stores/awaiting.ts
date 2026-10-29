@@ -51,7 +51,7 @@ function agentOf(
   const listed = useAgentSessions
     .getState()
     .byWorkspace[workspace]?.find((session) => session.id === conversation);
-  if (listed) return listed.agent === "codex" ? "codex" : "claude";
+  if (listed) return listed.agent;
   const started = useNewChats.getState().started[conversation];
   return started?.agent ?? null;
 }

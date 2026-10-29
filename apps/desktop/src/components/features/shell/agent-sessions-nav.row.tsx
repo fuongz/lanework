@@ -424,25 +424,30 @@ export function SessionRow({
             >
               {isPinned ? "Unpin" : "Pin"}
             </ContextMenuItem>
-            {/* Off while a tab runs it (FE-72/D5), as Delete is. */}
-            <ContextMenuItem
-              disabled={Boolean(onStop)}
-              onClick={() =>
-                archive(workspace, session).then(
-                  () => {
-                    if (viewing === session.id)
-                      void navigate({
-                        to: "/w/$slug/issues",
-                        params: { slug },
-                      });
-                  },
-                  (error: unknown) =>
-                    onArchiveError(ipcMessage(error, "Could not archive it.")),
-                )
-              }
-            >
-              Archive
-            </ContextMenuItem>
+            {/* Off while a tab runs it (FE-72/D5), as Delete is. OpenCode
+                keeps no archive (FE-104/D11). */}
+            {session.agent !== "opencode" && (
+              <ContextMenuItem
+                disabled={Boolean(onStop)}
+                onClick={() =>
+                  archive(workspace, session).then(
+                    () => {
+                      if (viewing === session.id)
+                        void navigate({
+                          to: "/w/$slug/issues",
+                          params: { slug },
+                        });
+                    },
+                    (error: unknown) =>
+                      onArchiveError(
+                        ipcMessage(error, "Could not archive it."),
+                      ),
+                  )
+                }
+              >
+                Archive
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator />
             {/* The chat's Terminal button, moved here: the same
                 conversation in a terminal, not while a turn runs (D3). */}
@@ -459,7 +464,8 @@ export function SessionRow({
             <ContextMenuSeparator />
             {onStop && <StopItem onStop={onStop} />}
             {/* NOTE: Off while a tab runs it (FE-57/D4): the CLI would only
-                write the transcript again. Stop first. */}
+                write the transcript again. Stop first. Main deletes
+                OpenCode's through its own CLI (FE-104). */}
             <ContextMenuItem
               variant="destructive"
               disabled={Boolean(onStop)}

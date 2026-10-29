@@ -248,10 +248,17 @@ const conversation: DesktopConversationApi = {
   awaiting: () => ipcRenderer.invoke(conversationChannels.awaiting),
   lastSettings: () => ipcRenderer.invoke(conversationChannels.lastSettings),
   codexModels: () => ipcRenderer.invoke(conversationChannels.codexModels),
+  opencodeModels: () => ipcRenderer.invoke(conversationChannels.opencodeModels),
   linkPreview: (url) =>
     ipcRenderer.invoke(conversationChannels.linkPreview, url),
-  suggest: (workspace, kind, query) =>
-    ipcRenderer.invoke(conversationChannels.suggest, workspace, kind, query),
+  suggest: (workspace, kind, query, agent) =>
+    ipcRenderer.invoke(
+      conversationChannels.suggest,
+      workspace,
+      kind,
+      query,
+      agent ?? null,
+    ),
   openLink: (url) => ipcRenderer.invoke(conversationChannels.openLink, url),
   image: (workspace, id, path) =>
     ipcRenderer.invoke(conversationChannels.image, workspace, id, path),

@@ -1,8 +1,8 @@
-// Whether Claude Code and Codex are signed in to the cloud `lanework` MCP
-// server, and a way to sign them in from Settings → Agents.
+// Whether Claude Code, Codex and OpenCode are signed in to the cloud
+// `lanework` MCP server, and a way to sign them in from Settings → Agents.
 //
 // NOTE: Each CLI is asked (`codex mcp list --json`, `claude mcp get
-// lanework`); their token stores are never read. Claude Code keeps its tokens
+// lanework`, `opencode mcp list`); their token stores are never read. Claude Code keeps its tokens
 // in the Keychain under its own item (reading it would prompt the user), and
 // either CLI may move them in any release: the CLI is the one that knows.
 //
@@ -19,7 +19,28 @@ import { MCP_NAME } from "./mcp-entry";
 const COMMAND: Record<LaneworkMcpAgent, string> = {
   "claude-code": "claude",
   codex: "codex",
+  opencode: "opencode",
 };
+
+/**
+ * Parse `opencode mcp list`: our server's line (FE-104).
+ *
+ * OpenCode prints text only, one `<mark> <name>  <status>` line per server:
+ * `connected`, `needs authentication`, `failed: <error>`, or another state
+ * (`pending`, `disabled`), which is "unknown", never a guess.
+ */
+function parseOpencodeAuth(output: string): LaneworkMcpAuth {
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^\s*\S+\s+(\S+)\s+(.+?)\s*$/.exec(line);
+    if (match?.[1] !== MCP_NAME) continue;
+    const status = match[2] ?? "";
+    if (/^needs auth/i.test(status)) return "needs-login";
+    if (/^failed\b/i.test(status)) return "failed";
+    if (/^connected$/i.test(status)) return "signed-in";
+    return "unknown";
+  }
+  return "unknown";
+}
 
 /** Parse `codex mcp list --json`: the `auth_status` of our server. */
 function parseCodexAuth(output: string): LaneworkMcpAuth {
@@ -141,12 +162,20 @@ export async function laneworkMcpAuth(
   if (process.platform === "win32") return "unknown";
   const output = await inShell(
     agent,
-    agent === "codex" ? "mcp list --json" : `mcp get ${MCP_NAME}`,
+    agent === "codex"
+      ? "mcp list --json"
+      : agent === "opencode"
+        ? "mcp list"
+        : `mcp get ${MCP_NAME}`,
     15_000,
   );
   if (output === null) return "no-cli";
   if (output === undefined) return "unknown";
-  return agent === "codex" ? parseCodexAuth(output) : parseClaudeAuth(output);
+  return agent === "codex"
+    ? parseCodexAuth(output)
+    : agent === "opencode"
+      ? parseOpencodeAuth(output)
+      : parseClaudeAuth(output);
 }
 
 /**
@@ -177,9 +206,10 @@ const pending = new Map<LaneworkMcpAgent, Promise<LaneworkMcpAuth>>();
 const pages = new Map<LaneworkMcpAgent, string>();
 
 /**
- * Run `<cli> mcp login lanework`.
+ * Run `<cli> mcp login lanework` (`opencode mcp auth lanework`).
  *
- * The CLI waits for the OAuth callback; Codex opens the browser itself.
+ * The CLI waits for the OAuth callback; Codex and OpenCode open the browser
+ * themselves.
  * Claude Code runs on a pseudo-terminal ({@link underTty}) and does not, so
  * `open` gets the page it prints. It has five minutes to finish, then the
  * shell is killed. Either way the answer is what the CLI reports after.
@@ -200,7 +230,7 @@ export function loginLaneworkMcp(
     if (process.platform === "win32") return "unknown" as const;
     const output = await inShell(
       agent,
-      `mcp login ${MCP_NAME}`,
+      agent === "opencode" ? `mcp auth ${MCP_NAME}` : `mcp login ${MCP_NAME}`,
       300_000,
       agent === "claude-code",
       agent === "claude-code"

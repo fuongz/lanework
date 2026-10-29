@@ -1,8 +1,8 @@
-// What Claude Code and Codex are TOLD about a project: the CLAUDE.md and
-// AGENTS.md files each reads, in the order it reads them, shown read-only.
+// What Claude Code, Codex and OpenCode are TOLD about a project: the CLAUDE.md
+// and AGENTS.md files each reads, in the order it reads them, shown read-only.
 // Memory is what Claude wrote down for itself; this is the other half.
 
-export type InstructionAgent = "claude" | "codex";
+export type InstructionAgent = "claude" | "codex" | "opencode";
 
 /** Where a file sits in an agent's reading order: the label on its row. */
 export type InstructionScope =
@@ -73,6 +73,8 @@ export interface InstructionList {
   claude: InstructionNode[];
   /** What Codex reads, in order. */
   codex: InstructionNode[];
+  /** What OpenCode reads, in order (FE-104). */
+  opencode: InstructionNode[];
   /** Files below the folder that load as an agent works there (FE-37/D5). */
   nested: InstructionNode[];
   /** More nested files than one scan takes. */
@@ -133,7 +135,7 @@ export function isInstructionId(value: unknown): value is string {
 }
 
 export function isInstructionAgent(value: unknown): value is InstructionAgent {
-  return value === "claude" || value === "codex";
+  return value === "claude" || value === "codex" || value === "opencode";
 }
 
 interface ImportMatch {

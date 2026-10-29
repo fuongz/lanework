@@ -7,11 +7,30 @@ import {
   type ComposerSettings,
   checkSettings,
   DEFAULT_SETTINGS,
+  OPENCODE_MODEL_ID,
 } from "../../../shared/conversation";
-import { isAgentSessionId } from "../../../shared/terminal";
+import { isAgentSessionId, isAgentSessionIdOf } from "../../../shared/terminal";
 
 /** Conversations remembered, at most; the oldest go first. */
 const KEEP = 500;
+
+/**
+ * Settings off the file, kept while their model may still be listed.
+ *
+ * NOTE: An OpenCode model is known only once its service has listed it
+ * (FE-104), which may be after the file is read. One that is a
+ * `provider/model` is kept as it was written, and checked again by
+ * {@link checkSettings} each time it is handed out.
+ */
+function stored(value: unknown): ComposerSettings | null {
+  const settings = checkSettings(value);
+  if (settings) return settings;
+  const v = (value ?? {}) as Record<string, unknown>;
+  if (typeof v.model !== "string" || !OPENCODE_MODEL_ID.test(v.model))
+    return null;
+  const rest = checkSettings({ ...v, model: DEFAULT_SETTINGS.model });
+  return rest ? { ...rest, model: v.model } : null;
+}
 
 /** What the settings file holds. */
 interface Stored {
@@ -37,10 +56,14 @@ export function createSettingsStore(file: string) {
       const value = JSON.parse(await readFile(file, "utf8")) as Partial<Stored>;
       const conversations: Record<string, ComposerSettings> = {};
       for (const [id, settings] of Object.entries(value.conversations ?? {})) {
-        const checked = checkSettings(settings);
-        if (isAgentSessionId(id) && checked) conversations[id] = checked;
+        const checked = stored(settings);
+        if (
+          (isAgentSessionId(id) || isAgentSessionIdOf("opencode", id)) &&
+          checked
+        )
+          conversations[id] = checked;
       }
-      cache = { last: checkSettings(value.last), conversations };
+      cache = { last: stored(value.last), conversations };
     } catch {
       cache = empty;
     }
@@ -62,10 +85,10 @@ export function createSettingsStore(file: string) {
 
   return {
     async of(id: string): Promise<ComposerSettings | null> {
-      return (await load()).conversations[id] ?? null;
+      return checkSettings((await load()).conversations[id]);
     },
     async last(): Promise<ComposerSettings> {
-      return (await load()).last ?? DEFAULT_SETTINGS;
+      return checkSettings((await load()).last) ?? DEFAULT_SETTINGS;
     },
     async remember(id: string, settings: ComposerSettings): Promise<void> {
       const value = await load();

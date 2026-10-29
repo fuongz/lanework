@@ -2,8 +2,11 @@ import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import type { ToolCall } from "#/../shared/conversation";
-import type { TerminalAgent } from "#/../shared/terminal";
-import { isAgentSessionId } from "#/../shared/terminal";
+import {
+  isAgentSessionIdOf,
+  isTerminalAgent,
+  type TerminalAgent,
+} from "#/../shared/terminal";
 import { StatusPing } from "#/components/shared/agents/status-ping";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { useWorkspaceKey } from "#/hooks/use-workspace-key";
@@ -34,18 +37,17 @@ function receiptOf(call: ToolCall): LaunchedSession | null {
         result?: { sessionId?: unknown; title?: unknown; agent?: unknown };
       };
       const result = reply.result;
-      if (reply.ok !== true || !isAgentSessionId(result?.sessionId))
-        return null;
+      if (reply.ok !== true || !result) return null;
+      const agent = isTerminalAgent(result.agent) ? result.agent : null;
+      // A UUID, or OpenCode's `ses_…`; an unnamed agent's is a UUID.
+      if (!isAgentSessionIdOf(agent ?? "claude", result.sessionId)) return null;
       return {
         sessionId: result.sessionId,
         title:
           typeof result.title === "string" && result.title
             ? result.title
             : "Session",
-        agent:
-          result.agent === "claude" || result.agent === "codex"
-            ? result.agent
-            : null,
+        agent,
       };
     } catch {
       // Not the receipt: an earlier line may be.

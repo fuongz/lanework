@@ -59,7 +59,9 @@ export interface SessionEngines {
     folder: string,
     out: Outgoing,
   ): Promise<EngineState>;
-  startCodex(
+  /** A new Codex or OpenCode conversation, named by its CLI (FE-104). */
+  startNamed(
+    agent: Exclude<ConversationAgent, "claude">,
     workspace: string,
     folder: string,
     out: Outgoing,
@@ -371,8 +373,9 @@ export class ConductorSessions {
       createdAt: Date.now(),
     };
     let session: string;
-    if (agent === "codex") {
-      session = (await engines.startCodex(workspace, folder, out)).conversation;
+    if (agent !== "claude") {
+      session = (await engines.startNamed(agent, workspace, folder, out))
+        .conversation;
       if (input.notifyOnComplete)
         await this.watch({ ...launch, session }, true);
     } else {

@@ -8,6 +8,7 @@ import type { HarnessAgent, InstallMethod } from "../../../shared/harness";
 export const NPM_PACKAGES: Record<HarnessAgent, string> = {
   claude: "@anthropic-ai/claude-code",
   codex: "@openai/codex",
+  opencode: "opencode-ai",
 };
 
 const VERSION = /\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.]+)?/;
@@ -96,6 +97,12 @@ export function installMethodOf(
     )
   )
     return "native";
+  // OpenCode's own installer puts its binary in `~/.opencode/bin`.
+  if (
+    agent === "opencode" &&
+    under(realPath, posix.join(home, ".opencode", "bin"))
+  )
+    return "native";
   if (realPath.includes("/Caskroom/")) return "brew-cask";
   if (realPath.includes("/Cellar/")) return "brew-formula";
   if (realPath.includes("/node_modules/")) return "npm";
@@ -128,7 +135,11 @@ export function updateCommandOf(
 ): string | null {
   switch (method) {
     case "native":
-      return agent === "claude" ? "claude update" : null;
+      return agent === "claude"
+        ? "claude update"
+        : agent === "opencode"
+          ? "opencode upgrade"
+          : null;
     case "brew-cask": {
       const name = brewNameOf(realPath);
       return name ? `brew upgrade --cask ${name}` : null;

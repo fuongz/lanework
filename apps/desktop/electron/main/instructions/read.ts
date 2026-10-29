@@ -1,5 +1,5 @@
-// The instruction files Claude Code and Codex read for a project, found the
-// way each CLI finds them, and a watch on where they live.
+// The instruction files Claude Code, Codex and OpenCode read for a project,
+// found the way each CLI finds them, and a watch on where they live.
 //
 // NOTE: Read-only, and nothing here imports Electron. Main calls it, and a
 // spec drives it under plain Node against a fake home folder.
@@ -77,6 +77,11 @@ export interface InstructionRoots {
   claudeHome: string;
   /** `$CODEX_HOME`, or `~/.codex`. */
   codexHome: string;
+  /**
+   * OpenCode's config folder (FE-104): `$XDG_CONFIG_HOME/opencode`, or
+   * `~/.config/opencode`. Unset, the latter under `home`.
+   */
+  opencodeConfig?: string;
   /** Claude's `.claude.json`, where it records approving external imports. */
   claudeJson: string;
   /** The managed policy CLAUDE.md for this OS. Null where there is none. */
@@ -819,6 +824,45 @@ async function codexList(at: Gatherer): Promise<InstructionNode[]> {
 }
 
 /**
+ * OpenCode's reading (FE-104): its own AGENTS.md, then every AGENTS.md from
+ * the folder it starts in up to the home folder, or up to the project's root
+ * when the folder is outside home.
+ *
+ * NOTE: As OpenCode 2 reads them (its `ConfigInstructionPlugin`): AGENTS.md
+ * only, never CLAUDE.md, whole, with no byte budget and no imports. Files the
+ * config's `instructions` globs add are not listed.
+ */
+async function opencodeList(at: Gatherer): Promise<InstructionNode[]> {
+  const { folder, home } = at.roots;
+  const configDir =
+    at.roots.opencodeConfig ?? join(home, ".config", "opencode");
+  at.watch(configDir);
+  const nodes: InstructionNode[] = [];
+  const global = await at.file(join(configDir, "AGENTS.md"));
+  if (!global.missing)
+    nodes.push(
+      (await blank(global))
+        ? node(global.id, "user", "skipped", "Empty: there is nothing to read.")
+        : node(global.id, "user", "launch", null),
+    );
+  const stop = inside(home, folder) ? home : await projectRoot(folder);
+  const chain = ancestors(folder).filter((dir) => inside(stop, dir));
+  for (const dir of chain) {
+    const path = join(dir, "AGENTS.md");
+    if (!(await isFile(path))) continue;
+    const file = await at.file(path);
+    if (file.id === global.id) continue;
+    const scope: InstructionScope = dir === folder ? "project" : "parent";
+    nodes.push(
+      (await blank(file))
+        ? node(file.id, scope, "skipped", "Empty: there is nothing to read.")
+        : node(file.id, scope, "launch", null),
+    );
+  }
+  return nodes;
+}
+
+/**
  * Instruction files below the folder, each with who reads it and when.
  *
  * They load only as an agent works in them (FE-37/D5). The scan is bounded:
@@ -888,16 +932,24 @@ async function nestedList(
         : `Codex reads it when it starts in ${where} or below.`;
     const byClaude =
       name === "AGENTS.md" ? await claude.nestedAgents(dir) : null;
+    // OpenCode's read tool brings in the AGENTS.md of a file's folder (FE-104).
+    const byOpencode =
+      name === "AGENTS.md"
+        ? `OpenCode reads it once it reads a file in ${where}.`
+        : null;
+    const agents: InstructionAgent[] = ["codex"];
+    if (byClaude) agents.push("claude");
+    if (byOpencode) agents.push("opencode");
     nodes.push(
       node(
         file.id,
         "nested",
         "conditional",
-        byClaude ? `${codex} ${byClaude}` : codex,
+        [codex, byClaude, byOpencode].filter(Boolean).join(" "),
         byClaude
           ? await claude.imports(file.path, await at.text(file), 1, false)
           : [],
-        byClaude ? ["codex", "claude"] : ["codex"],
+        agents,
       ),
     );
   }
@@ -913,6 +965,7 @@ export async function listInstructions(
   await claude.prepare();
   const claudeNodes = await claude.list();
   const codexNodes = await codexList(at);
+  const opencodeNodes = await opencodeList(at);
   const nested = await nestedList(at, claude);
   return {
     list: {
@@ -920,6 +973,7 @@ export async function listInstructions(
       files: at.files,
       claude: claudeNodes,
       codex: codexNodes,
+      opencode: opencodeNodes,
       nested: nested.nodes,
       nestedTruncated: nested.truncated,
       claudeMode: claude.mode,
@@ -1020,7 +1074,13 @@ export async function effectiveInstructions(
       await walk(entry.children);
     }
   };
-  await walk(agent === "claude" ? tree.list.claude : tree.list.codex);
+  await walk(
+    agent === "claude"
+      ? tree.list.claude
+      : agent === "opencode"
+        ? tree.list.opencode
+        : tree.list.codex,
+  );
   return { agent, files: tree.list.files, sections };
 }
 

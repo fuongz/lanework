@@ -43,7 +43,9 @@ __export(exports_lanework_checkpoint, {
   checkedApi: () => checkedApi,
   digest: () => digest,
   digestCodex: () => digestCodex,
+  digestOpencode: () => digestOpencode,
   isSecretFile: () => isSecretFile,
+  readOpencodeSession: () => readOpencodeSession,
   redact: () => redact,
   snapshot: () => snapshot,
   stripUserinfo: () => stripUserinfo
@@ -3074,8 +3076,8 @@ function hookConfig() {
 var HOOK_CONFIG = hookConfig();
 var PUSH_WIP = ARGS.flags.has("push-wip") || HOOK_CONFIG.pushWip === true;
 var PUSH_WIP_UNTRACKED = ARGS.flags.has("push-wip-untracked") || HOOK_CONFIG.pushWipUntracked === true;
-var AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : "claude-code";
-var AGENT_NAME = AGENT === "codex" ? "Codex" : "Claude Code";
+var AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : ARGS.flags.get("agent") === "opencode" ? "opencode" : "claude-code";
+var AGENT_NAME = AGENT === "codex" ? "Codex" : AGENT === "opencode" ? "OpenCode" : "Claude Code";
 var STATE_DIR = import_node_path6.join(import_node_os6.homedir(), ".cache", "lanework", "checkpoint");
 var LOG = import_node_path6.join(STATE_DIR, "hook.log");
 var THIN_MS = 60000;
@@ -3412,6 +3414,205 @@ ${source}`;
     commands: (structured ? commands : scriptCommands).slice(-15)
   };
 }
+function opencodeDataDir() {
+  if (process.env.OPENCODE_DATA_DIR)
+    return process.env.OPENCODE_DATA_DIR;
+  if (process.env.XDG_DATA_HOME)
+    return import_node_path6.join(process.env.XDG_DATA_HOME, "opencode");
+  return import_node_path6.join(import_node_os6.homedir(), ".local", "share", "opencode");
+}
+var asObject = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+function parseData(raw) {
+  if (typeof raw !== "string")
+    return {};
+  try {
+    return asObject(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+function opencodeTool(block) {
+  const name = typeof block.name === "string" ? block.name : typeof block.tool === "string" ? block.tool : null;
+  if (!name)
+    return null;
+  const state = asObject(block.state);
+  const metadata = asObject(state.metadata);
+  const output = typeof state.output === "string" ? state.output : Array.isArray(state.content) ? state.content.map((part) => {
+    const text = asObject(part).text;
+    return typeof text === "string" ? text : "";
+  }).join(`
+`) : "";
+  return {
+    name,
+    input: asObject(state.input),
+    status: typeof state.status === "string" ? state.status : null,
+    output,
+    exit: typeof metadata.exit === "number" ? metadata.exit : null
+  };
+}
+function opencodeV2Messages(db, sessionId) {
+  const rows = db.prepare(`SELECT type, data FROM session_message
+        WHERE session_id = ? AND type IN ('user', 'assistant')
+        ORDER BY seq`).all(sessionId);
+  const messages = [];
+  for (const row of rows) {
+    const data = parseData(row.data);
+    if (row.type === "user") {
+      const text = typeof data.text === "string" ? data.text : "";
+      messages.push({ role: "user", texts: [text], tools: [] });
+      continue;
+    }
+    const message = {
+      role: "assistant",
+      texts: [],
+      tools: []
+    };
+    for (const raw of Array.isArray(data.content) ? data.content : []) {
+      const block = asObject(raw);
+      if (block.type === "text" && typeof block.text === "string")
+        message.texts.push(block.text);
+      else if (block.type === "tool") {
+        const tool = opencodeTool(block);
+        if (tool)
+          message.tools.push(tool);
+      }
+    }
+    messages.push(message);
+  }
+  return messages;
+}
+function opencodeV1Messages(db, sessionId) {
+  const rows = db.prepare(`SELECT m.id AS id, m.data AS message, p.data AS part
+         FROM message m LEFT JOIN part p ON p.message_id = m.id
+        WHERE m.session_id = ?
+        ORDER BY m.time_created, m.id, p.id`).all(sessionId);
+  const messages = [];
+  let current = null;
+  for (const row of rows) {
+    if (current?.id !== row.id) {
+      const role = parseData(row.message).role;
+      current = role === "user" || role === "assistant" ? { id: row.id, message: { role, texts: [], tools: [] } } : null;
+      if (current)
+        messages.push(current.message);
+    }
+    if (!current)
+      continue;
+    const part = parseData(row.part);
+    if (part.type === "text" && typeof part.text === "string") {
+      if (part.synthetic !== true)
+        current.message.texts.push(part.text);
+    } else if (part.type === "tool") {
+      const tool = opencodeTool(part);
+      if (tool)
+        current.message.tools.push(tool);
+    }
+  }
+  return messages;
+}
+function readOpencodeSession(sessionId, file = import_node_path6.join(opencodeDataDir(), "opencode.db")) {
+  if (!import_node_fs5.existsSync(file))
+    return null;
+  const sqlite = process.getBuiltinModule?.("node:sqlite");
+  if (!sqlite) {
+    log("node:sqlite is not available; OpenCode's session cannot be read");
+    return null;
+  }
+  const db = new sqlite.DatabaseSync(file, { readOnly: true });
+  try {
+    const has = (table) => db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined;
+    for (const [sessions, read] of [
+      ["session_v2", opencodeV2Messages],
+      ["session", opencodeV1Messages]
+    ]) {
+      if (!has(sessions))
+        continue;
+      const session = db.prepare(`SELECT directory FROM ${sessions} WHERE id = ?`).get(sessionId);
+      if (!session)
+        continue;
+      return {
+        directory: typeof session.directory === "string" ? session.directory : null,
+        messages: read(db, sessionId)
+      };
+    }
+    return null;
+  } finally {
+    db.close();
+  }
+}
+var OPENCODE_FILE_TOOLS = new Set(["edit", "write", "multiedit", "patch"]);
+function digestOpencode(messages, root) {
+  let mcpTaskId = null;
+  let typedTaskId = null;
+  let request = null;
+  let replies = [];
+  let previousReplies = [];
+  const files = [];
+  const commands = [];
+  const touch = (path) => {
+    const rel = repoPath(path, root);
+    if (!rel)
+      return;
+    const at = files.indexOf(rel);
+    if (at !== -1)
+      files.splice(at, 1);
+    files.push(rel);
+  };
+  for (const message of messages) {
+    if (message.role === "user") {
+      const text = message.texts.join(`
+`).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+      if (!text || text.startsWith("<"))
+        continue;
+      request = text;
+      if (replies.length)
+        previousReplies = replies;
+      replies = [];
+      for (const m of text.match(TASK_ID) ?? [])
+        if (!NOT_TASK_ID.test(m))
+          typedTaskId = m;
+      continue;
+    }
+    for (const text of message.texts)
+      if (text.trim())
+        replies.push(text.trim());
+    for (const tool of message.tools) {
+      const { name, input } = tool;
+      if (name.startsWith("lanework_")) {
+        if (typeof input.card === "string")
+          mcpTaskId = input.card;
+        if (name.endsWith("create_review")) {
+          const minted = /\\?"taskId\\?"\s*:\s*\\?"([^"\\]+)/.exec(tool.output);
+          if (minted?.[1])
+            mcpTaskId = minted[1];
+        }
+      }
+      if (OPENCODE_FILE_TOOLS.has(name)) {
+        const path = input.filePath ?? input.file_path ?? input.path;
+        if (typeof path === "string")
+          touch(path);
+      }
+      if (name === "apply_patch" && typeof input.patchText === "string")
+        for (const m of input.patchText.matchAll(PATCH_FILE))
+          touch((m[1] ?? "").trim());
+      if (name === "bash" && typeof input.command === "string")
+        commands.push({
+          command: clip2(input.command.split(`
+`)[0] ?? "", 300),
+          ok: tool.status === "error" ? false : tool.exit !== null ? tool.exit === 0 : tool.status === "completed" ? true : null
+        });
+    }
+  }
+  return {
+    taskId: mcpTaskId ?? typedTaskId,
+    request,
+    lastReply: (replies.length ? replies : previousReplies).join(`
+
+`) || null,
+    replyIsPrevious: !replies.length && previousReplies.length > 0,
+    files: files.slice(-100),
+    commands: commands.slice(-15)
+  };
+}
 var readSecret2 = () => readSecret(API);
 async function http(path, init = {}) {
   const { secret, ...rest } = init;
@@ -3598,6 +3799,8 @@ ${clip2(redact(d.lastReply), 5000)}` : `${AGENT_NAME} stopped before writing any
 async function work(inputFile) {
   const input = readJson(inputFile, {});
   import_node_fs5.rmSync(inputFile, { force: true });
+  if (AGENT === "opencode")
+    return workOpencode(input);
   if (!input.cwd)
     return;
   const transcriptPath = input.transcript_path || (AGENT === "codex" ? findCodexRollout(input.session_id) : null);
@@ -3610,6 +3813,39 @@ async function work(inputFile) {
   const remote = stripUserinfo(origin);
   const transcript = import_node_fs5.readFileSync(transcriptPath, "utf8");
   const d = AGENT === "codex" ? digestCodex(transcript, root, input.last_assistant_message ?? null) : digest(transcript, root);
+  if (!d.taskId) {
+    log(`session ${input.session_id}: no card in the transcript; nothing sent`);
+    return;
+  }
+  let local = null;
+  try {
+    local = localBoardFor(remote);
+  } catch (error) {
+    log(`local board unavailable: ${String(error)}`);
+  }
+  try {
+    await checkpointTo(local, { ...d, taskId: d.taskId }, input, root, remote);
+  } finally {
+    local?.store.close();
+  }
+}
+async function workOpencode(input) {
+  if (!input.session_id)
+    return;
+  const session = readOpencodeSession(input.session_id);
+  if (!session) {
+    log(`opencode session ${input.session_id}: not found; nothing sent`);
+    return;
+  }
+  const cwd = input.cwd || session.directory;
+  if (!cwd)
+    return;
+  const root = tryGit(cwd, ["rev-parse", "--show-toplevel"]);
+  const origin = root && tryGit(root, ["remote", "get-url", "origin"]);
+  if (!root || !origin)
+    return;
+  const remote = stripUserinfo(origin);
+  const d = digestOpencode(session.messages, root);
   if (!d.taskId) {
     log(`session ${input.session_id}: no card in the transcript; nothing sent`);
     return;

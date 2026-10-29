@@ -1,5 +1,5 @@
-// The Stop hook for Claude Code and Codex: leave a checkpoint on the lanework
-// card this session is working, so another agent (Codex, or Claude in the
+// The Stop hook for Claude Code, Codex and OpenCode (FE-104): leave a
+// checkpoint on the lanework card this session is working, so another agent (Codex, or Claude in the
 // cloud) can resume it once this one runs out of quota.
 //
 // NOTE: The desktop app installs it (Settings → Agents). The app bundles this
@@ -23,8 +23,13 @@
 // checkpoint written there, with no credential and no network (FE-52/D9).
 // See `local-board.ts`.
 //
-// It costs no model quota: it reads the transcript file the CLI already
-// wrote, and nothing here calls a model. That is the point: when the quota
+// OpenCode has no Stop hook: the app writes a plugin into its config folder
+// that runs this hook with `--agent opencode` on `session.idle`, handing it
+// `{ session_id, cwd }` on stdin. Its transcript is read, read-only, from
+// OpenCode's own `opencode.db` (`node:sqlite`, loaded only then).
+//
+// It costs no model quota: it reads the transcript the CLI already wrote,
+// and nothing here calls a model. That is the point: when the quota
 // runs out mid-task, the last completed turn is still on the card.
 //
 // NOTE: It is never in the way. The hook proper only copies stdin to a temp
@@ -173,9 +178,19 @@ const PUSH_WIP = ARGS.flags.has("push-wip") || HOOK_CONFIG.pushWip === true;
  */
 const PUSH_WIP_UNTRACKED =
   ARGS.flags.has("push-wip-untracked") || HOOK_CONFIG.pushWipUntracked === true;
-/** Which CLI ran this turn: `claude-code` or `codex`. */
-const AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : "claude-code";
-const AGENT_NAME = AGENT === "codex" ? "Codex" : "Claude Code";
+/** Which CLI ran this turn: `claude-code`, `codex` or `opencode`. */
+const AGENT =
+  ARGS.flags.get("agent") === "codex"
+    ? "codex"
+    : ARGS.flags.get("agent") === "opencode"
+      ? "opencode"
+      : "claude-code";
+const AGENT_NAME =
+  AGENT === "codex"
+    ? "Codex"
+    : AGENT === "opencode"
+      ? "OpenCode"
+      : "Claude Code";
 const STATE_DIR = join(homedir(), ".cache", "lanework", "checkpoint");
 const LOG = join(STATE_DIR, "hook.log");
 /** An unchanged turn inside this window writes nothing (BE-17/D10). */
@@ -656,6 +671,296 @@ export function digestCodex(
   };
 }
 
+// ── OpenCode (FE-104) ───────────────────────────────────────────────────────
+
+/** One tool call of an OpenCode message, in either schema. */
+export type OpencodeTool = {
+  name: string;
+  input: Record<string, unknown>;
+  status: string | null;
+  /** What the tool returned, as text; empty when it kept none. */
+  output: string;
+  /** A shell command's exit code, when OpenCode recorded one. */
+  exit: number | null;
+};
+
+/** One message of an OpenCode session, flattened from either schema. */
+export type OpencodeMessage = {
+  role: "user" | "assistant";
+  texts: string[];
+  tools: OpencodeTool[];
+};
+
+/**
+ * Where OpenCode keeps its data: `$OPENCODE_DATA_DIR`, else
+ * `$XDG_DATA_HOME/opencode`, else `~/.local/share/opencode`.
+ */
+function opencodeDataDir(): string {
+  if (process.env.OPENCODE_DATA_DIR) return process.env.OPENCODE_DATA_DIR;
+  if (process.env.XDG_DATA_HOME)
+    return join(process.env.XDG_DATA_HOME, "opencode");
+  return join(homedir(), ".local", "share", "opencode");
+}
+
+const asObject = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+function parseData(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== "string") return {};
+  try {
+    return asObject(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+/** A tool call from a 2.x content block or a 1.x part. */
+function opencodeTool(block: Record<string, unknown>): OpencodeTool | null {
+  const name =
+    typeof block.name === "string"
+      ? block.name
+      : typeof block.tool === "string"
+        ? block.tool
+        : null;
+  if (!name) return null;
+  const state = asObject(block.state);
+  const metadata = asObject(state.metadata);
+  const output =
+    typeof state.output === "string"
+      ? state.output
+      : Array.isArray(state.content)
+        ? state.content
+            .map((part) => {
+              const text = asObject(part).text;
+              return typeof text === "string" ? text : "";
+            })
+            .join("\n")
+        : "";
+  return {
+    name,
+    input: asObject(state.input),
+    status: typeof state.status === "string" ? state.status : null,
+    output,
+    exit: typeof metadata.exit === "number" ? metadata.exit : null,
+  };
+}
+
+/** The 2.x rows of one session: `session_message`, its content inline. */
+function opencodeV2Messages(
+  db: import("node:sqlite").DatabaseSync,
+  sessionId: string,
+): OpencodeMessage[] {
+  const rows = db
+    .prepare(
+      `SELECT type, data FROM session_message
+        WHERE session_id = ? AND type IN ('user', 'assistant')
+        ORDER BY seq`,
+    )
+    .all(sessionId) as { type: unknown; data: unknown }[];
+  const messages: OpencodeMessage[] = [];
+  for (const row of rows) {
+    const data = parseData(row.data);
+    if (row.type === "user") {
+      const text = typeof data.text === "string" ? data.text : "";
+      messages.push({ role: "user", texts: [text], tools: [] });
+      continue;
+    }
+    const message: OpencodeMessage = {
+      role: "assistant",
+      texts: [],
+      tools: [],
+    };
+    for (const raw of Array.isArray(data.content) ? data.content : []) {
+      const block = asObject(raw);
+      if (block.type === "text" && typeof block.text === "string")
+        message.texts.push(block.text);
+      else if (block.type === "tool") {
+        const tool = opencodeTool(block);
+        if (tool) message.tools.push(tool);
+      }
+    }
+    messages.push(message);
+  }
+  return messages;
+}
+
+/** The 1.x rows of one session: `message`, each with its `part`s. */
+function opencodeV1Messages(
+  db: import("node:sqlite").DatabaseSync,
+  sessionId: string,
+): OpencodeMessage[] {
+  const rows = db
+    .prepare(
+      `SELECT m.id AS id, m.data AS message, p.data AS part
+         FROM message m LEFT JOIN part p ON p.message_id = m.id
+        WHERE m.session_id = ?
+        ORDER BY m.time_created, m.id, p.id`,
+    )
+    .all(sessionId) as { id: unknown; message: unknown; part: unknown }[];
+  const messages: OpencodeMessage[] = [];
+  let current = null as { id: unknown; message: OpencodeMessage } | null;
+  for (const row of rows) {
+    if (current?.id !== row.id) {
+      const role = parseData(row.message).role;
+      current =
+        role === "user" || role === "assistant"
+          ? { id: row.id, message: { role, texts: [], tools: [] } }
+          : null;
+      if (current) messages.push(current.message);
+    }
+    if (!current) continue;
+    const part = parseData(row.part);
+    // A synthetic part is context OpenCode added, not what anyone typed.
+    if (part.type === "text" && typeof part.text === "string") {
+      if (part.synthetic !== true) current.message.texts.push(part.text);
+    } else if (part.type === "tool") {
+      const tool = opencodeTool(part);
+      if (tool) current.message.tools.push(tool);
+    }
+  }
+  return messages;
+}
+
+/**
+ * Read one OpenCode session's messages, read-only.
+ *
+ * 2.x keeps them in `session_v2` and `session_message`; 1.x in `session`,
+ * `message` and `part`. `node:sqlite` is loaded here, not at the top, so a
+ * Node without it (the plugin's user Node, under 22.5) costs OpenCode's
+ * checkpoints only.
+ *
+ * @returns Null when the database, the session or `node:sqlite` is missing.
+ */
+export function readOpencodeSession(
+  sessionId: string,
+  file: string = join(opencodeDataDir(), "opencode.db"),
+): { directory: string | null; messages: OpencodeMessage[] } | null {
+  if (!existsSync(file)) return null;
+  const sqlite = process.getBuiltinModule?.("node:sqlite") as
+    | typeof import("node:sqlite")
+    | undefined;
+  if (!sqlite) {
+    log("node:sqlite is not available; OpenCode's session cannot be read");
+    return null;
+  }
+  const db = new sqlite.DatabaseSync(file, { readOnly: true });
+  try {
+    const has = (table: string) =>
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .get(table) !== undefined;
+    for (const [sessions, read] of [
+      ["session_v2", opencodeV2Messages],
+      ["session", opencodeV1Messages],
+    ] as const) {
+      if (!has(sessions)) continue;
+      const session = db
+        .prepare(`SELECT directory FROM ${sessions} WHERE id = ?`)
+        .get(sessionId) as { directory?: unknown } | undefined;
+      if (!session) continue;
+      return {
+        directory:
+          typeof session.directory === "string" ? session.directory : null,
+        messages: read(db, sessionId),
+      };
+    }
+    return null;
+  } finally {
+    db.close();
+  }
+}
+
+/** OpenCode's tools that write a file; `filePath` names it. */
+const OPENCODE_FILE_TOOLS = new Set(["edit", "write", "multiedit", "patch"]);
+
+/**
+ * Condense an OpenCode session the way {@link digest} does a Claude
+ * transcript.
+ *
+ * NOTE: OpenCode names an MCP tool `<server>_<tool>`, so ours are
+ * `lanework_get_review`, `lanework_create_review`, and so on.
+ */
+export function digestOpencode(
+  messages: OpencodeMessage[],
+  root: string,
+): Digest {
+  let mcpTaskId: string | null = null;
+  let typedTaskId: string | null = null;
+  let request: string | null = null;
+  let replies: string[] = [];
+  let previousReplies: string[] = [];
+  const files: string[] = [];
+  const commands: { command: string; ok: boolean | null }[] = [];
+  const touch = (path: string) => {
+    const rel = repoPath(path, root);
+    if (!rel) return;
+    const at = files.indexOf(rel);
+    if (at !== -1) files.splice(at, 1);
+    files.push(rel);
+  };
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      const text = message.texts
+        .join("\n")
+        .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
+        .trim();
+      if (!text || text.startsWith("<")) continue;
+      request = text;
+      if (replies.length) previousReplies = replies;
+      replies = [];
+      for (const m of text.match(TASK_ID) ?? [])
+        if (!NOT_TASK_ID.test(m)) typedTaskId = m;
+      continue;
+    }
+    for (const text of message.texts)
+      if (text.trim()) replies.push(text.trim());
+    for (const tool of message.tools) {
+      const { name, input } = tool;
+      if (name.startsWith("lanework_")) {
+        if (typeof input.card === "string") mcpTaskId = input.card;
+        if (name.endsWith("create_review")) {
+          const minted = /\\?"taskId\\?"\s*:\s*\\?"([^"\\]+)/.exec(tool.output);
+          if (minted?.[1]) mcpTaskId = minted[1];
+        }
+      }
+      if (OPENCODE_FILE_TOOLS.has(name)) {
+        const path = input.filePath ?? input.file_path ?? input.path;
+        if (typeof path === "string") touch(path);
+      }
+      if (name === "apply_patch" && typeof input.patchText === "string")
+        for (const m of input.patchText.matchAll(PATCH_FILE))
+          touch((m[1] ?? "").trim());
+      if (name === "bash" && typeof input.command === "string")
+        commands.push({
+          command: clip(input.command.split("\n")[0] ?? "", 300),
+          ok:
+            tool.status === "error"
+              ? false
+              : tool.exit !== null
+                ? tool.exit === 0
+                : tool.status === "completed"
+                  ? true
+                  : null,
+        });
+    }
+  }
+
+  return {
+    taskId: mcpTaskId ?? typedTaskId,
+    request,
+    lastReply:
+      (replies.length ? replies : previousReplies).join("\n\n") || null,
+    replyIsPrevious: !replies.length && previousReplies.length > 0,
+    files: files.slice(-100),
+    commands: commands.slice(-15),
+  };
+}
+
 // ── Credential and board ────────────────────────────────────────────────────
 
 /** This machine's credential, wherever this install keeps it. */
@@ -976,6 +1281,7 @@ export function buildBody(
 async function work(inputFile: string): Promise<void> {
   const input = readJson<HookInput>(inputFile, {});
   rmSync(inputFile, { force: true });
+  if (AGENT === "opencode") return workOpencode(input);
   if (!input.cwd) return;
   const transcriptPath =
     input.transcript_path ||
@@ -1001,6 +1307,39 @@ async function work(inputFile: string): Promise<void> {
   // A repo whose board is on this machine's local board writes there and
   // needs no credential (FE-52/D9). Any trouble opening it falls back to the
   // cloud.
+  let local: LocalBoard | null = null;
+  try {
+    local = localBoardFor(remote);
+  } catch (error) {
+    log(`local board unavailable: ${String(error)}`);
+  }
+  try {
+    await checkpointTo(local, { ...d, taskId: d.taskId }, input, root, remote);
+  } finally {
+    local?.store.close();
+  }
+}
+
+/** The worker for an OpenCode turn: its session read from `opencode.db`. */
+async function workOpencode(input: HookInput): Promise<void> {
+  if (!input.session_id) return;
+  const session = readOpencodeSession(input.session_id);
+  if (!session) {
+    log(`opencode session ${input.session_id}: not found; nothing sent`);
+    return;
+  }
+  const cwd = input.cwd || session.directory;
+  if (!cwd) return;
+  const root = tryGit(cwd, ["rev-parse", "--show-toplevel"]);
+  const origin = root && tryGit(root, ["remote", "get-url", "origin"]);
+  if (!root || !origin) return;
+  // Never the raw URL: it can carry a token (FE-78/D2).
+  const remote = stripUserinfo(origin);
+  const d = digestOpencode(session.messages, root);
+  if (!d.taskId) {
+    log(`session ${input.session_id}: no card in the transcript; nothing sent`);
+    return;
+  }
   let local: LocalBoard | null = null;
   try {
     local = localBoardFor(remote);

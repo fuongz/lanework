@@ -15,6 +15,7 @@ import {
   isInstructionAgent,
   isInstructionId,
 } from "../../../shared/instructions";
+import { opencodeConfigDir } from "../agent-setup/opencode";
 import { broadcast, handle } from "../ipc";
 import { agentHomeDir } from "../test-seams";
 import { terminalFolder } from "../workspaces";
@@ -42,6 +43,7 @@ function rootsFor(folder: string): InstructionRoots {
     home: at,
     claudeHome: claudeConfig || join(at, ".claude"),
     codexHome: process.env.CODEX_HOME || join(at, ".codex"),
+    opencodeConfig: opencodeConfigDir(at),
     claudeJson: claudeConfig
       ? join(claudeConfig, ".claude.json")
       : join(at, ".claude.json"),
@@ -106,6 +108,7 @@ const EMPTY: Omit<InstructionList, "claudeMode"> = {
   files: {},
   claude: [],
   codex: [],
+  opencode: [],
   nested: [],
   nestedTruncated: false,
 };

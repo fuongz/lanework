@@ -1,8 +1,8 @@
 // Handing a card between agents: the Stop hook that leaves a checkpoint on
-// the card after every turn (BE-17), for Claude Code and for Codex, switched
-// on from Settings → Agents instead of from a terminal.
+// the card after every turn (BE-17), for Claude Code, Codex and OpenCode
+// (FE-104), switched on from Settings → Agents instead of from a terminal.
 
-export type HookAgent = "claude-code" | "codex";
+export type HookAgent = "claude-code" | "codex" | "opencode";
 
 /** One CLI's hook, as its settings file holds it. */
 export interface AgentHookStatus {
@@ -60,6 +60,8 @@ export interface HandoffStatus {
   last: { taskId: string; at: string } | null;
   claude: AgentHookStatus;
   codex: CodexHookStatus;
+  /** OpenCode's hook: a plugin file in its config folder (FE-104). */
+  opencode: AgentHookStatus;
   /** What to add to Codex's config.toml when hooks are off (FE-29/D5). */
   codexFeatureLine: string;
 }

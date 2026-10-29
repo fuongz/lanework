@@ -18,6 +18,7 @@ import {
 import {
   AGENT_LABELS,
   type AssistantTurn,
+  agentOfModel,
   type ComposerSettings,
   DEFAULT_SETTINGS,
   mentionsAsNames,
@@ -26,6 +27,7 @@ import {
   type QueuedMessage,
   settingsFor,
 } from "#/../shared/conversation";
+import { canLead } from "#/../shared/orchestration";
 import type { AgentSession } from "#/../shared/terminal";
 import { PermissionCard } from "#/components/features/conversation/permission-card";
 import { ContextButton } from "#/components/shared/agents/conversation-facts";
@@ -221,10 +223,29 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const own = conversation?.settings ?? null;
   // NOTE: On the conversation's own CLI: the last used anywhere may be the
   // other one's model.
+  // The model its last answer came from: what a conversation begun outside
+  // the app (OpenCode's TUI) last ran on, when it has no settings here.
+  const ranOn = useMemo(() => {
+    const turns = conversation?.turns ?? [];
+    for (let at = turns.length - 1; at >= 0; at--) {
+      const turn = turns[at];
+      if (turn?.role === "assistant" && turn.model) return turn.model;
+    }
+    return null;
+  }, [conversation?.turns]);
   useEffect(() => {
     if (!loaded || settings || !agent) return;
+    // NOTE: A model this CLI cannot run falls to its default, which for
+    // OpenCode is none until its list is read: the model it last ran on is
+    // kept instead (FE-105).
+    const onAgent = (base: ComposerSettings) => {
+      const next = settingsFor(agent, base);
+      return next.model || !ranOn || agentOfModel(ranOn) !== agent
+        ? next
+        : { ...next, model: ranOn };
+    };
     if (own) {
-      setSettings(settingsFor(agent, own));
+      setSettings(onAgent(own));
       return;
     }
     let gone = false;
@@ -232,13 +253,12 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     void (surface ? surface.lastSettings() : Promise.resolve(DEFAULT_SETTINGS))
       .catch(() => DEFAULT_SETTINGS)
       .then((last) => {
-        if (!gone)
-          setSettings((current) => current ?? settingsFor(agent, last));
+        if (!gone) setSettings((current) => current ?? onAgent(last));
       });
     return () => {
       gone = true;
     };
-  }, [loaded, own, settings, agent]);
+  }, [loaded, own, settings, agent, ranOn]);
 
   const turns = conversation?.turns ?? [];
   const userTurns = useMemo(
@@ -258,9 +278,11 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     set: setTrust,
   } = useProjectTrust(workspace ?? null);
   const [trustAsk, setTrustAsk] = useState<TrustAsk | null>(null);
+  // OpenCode asks no trust question for a folder (FE-104): no banner.
   const untrusted =
     engine.state !== "terminal" &&
     agent !== null &&
+    agent !== "opencode" &&
     trust !== null &&
     trust.folder !== null &&
     !trust[agent].trusted;
@@ -350,7 +372,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const orchestration = useOrchestration({
     workspace,
     lead: id,
-    leadAgent: agent,
+    // OpenCode never leads (FE-105/D5): no planning turn it would be refused.
+    leadAgent: canLead(agent) ? agent : null,
     turns,
     working,
     cwd: conversation?.cwd ?? null,
@@ -512,9 +535,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
 
   const handlers = useMemo<TurnHandlers>(
     () => ({
-      // Forking copies a Claude transcript; Codex's are not forked here.
+      // Forking copies a Claude transcript; Codex's and OpenCode's are not
+      // forked here.
       onFork:
-        agent === "codex"
+        agent === "codex" || agent === "opencode"
           ? undefined
           : () => {
               if (!workspace || forking) return;
@@ -548,6 +572,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           },
       onAnswer: answer,
       agent: label,
+      kind: agent ?? "claude",
     }),
     [
       workspace,

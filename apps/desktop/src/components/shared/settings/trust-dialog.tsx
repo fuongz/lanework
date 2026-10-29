@@ -10,13 +10,23 @@ import {
   AlertDialogTitle,
 } from "#/components/ui/alert-dialog";
 
-const NAME: Record<SetupAgent, string> = {
+/**
+ * The CLIs that ask whether a folder is trusted.
+ *
+ * NOTE: OpenCode asks no such question (FE-104), so it is never offered.
+ */
+export type TrustAgent = Exclude<SetupAgent, "opencode">;
+
+export const TRUST_NAME: Record<TrustAgent, string> = {
   claude: "Claude Code",
   codex: "Codex",
 };
 
+/** Every CLI whose folder trust is shown, in {@link TRUST_NAME}'s order. */
+export const TRUST_AGENTS = Object.keys(TRUST_NAME) as readonly TrustAgent[];
+
 /** What trusting the folder lets the repository run, per CLI. */
-const LOADS: Record<SetupAgent, React.ReactNode> = {
+const LOADS: Record<TrustAgent, React.ReactNode> = {
   claude: (
     <>
       its <code>.claude</code> settings, so their hooks, <code>env</code> and{" "}
@@ -33,7 +43,7 @@ const LOADS: Record<SetupAgent, React.ReactNode> = {
 
 /** The request the dialog asks about; null keeps it closed. */
 export interface TrustAsk {
-  agent: SetupAgent;
+  agent: TrustAgent;
   on: boolean;
 }
 
@@ -55,7 +65,7 @@ export function TrustDialog({
   onConfirm: (ask: TrustAsk) => void;
   onClose: () => void;
 }) {
-  const name = ask ? NAME[ask.agent] : "";
+  const name = ask ? TRUST_NAME[ask.agent] : "";
   return (
     <AlertDialog
       open={ask !== null}

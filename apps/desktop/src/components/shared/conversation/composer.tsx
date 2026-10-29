@@ -468,14 +468,15 @@ export const Composer = forwardRef<
   // The `/` list read ahead, so the first `/` opens it at once (FE-92).
   useEffect(() => {
     void window.desktop?.conversation
-      ?.suggest(workspace, "command", "")
+      ?.suggest(workspace, "command", "", agent)
       .then(remember)
       .catch(() => {});
-  }, [workspace]);
+  }, [workspace, agent]);
   // A restored draft's commands and paths nobody has listed yet: each asked
   // for once.
   const unknown = [
-    ...(/^\/[^\s/]+(?=\s|$)/.exec(text) ?? []),
+    // OpenCode names a command in a folder `/git/commit` (FE-105/D3).
+    ...(/^\/[^\s]+(?=\s|$)/.exec(text) ?? []),
     ...(text.match(/(?<=^|\s)@\S+/g) ?? []),
   ].filter(
     (token) =>
@@ -493,7 +494,7 @@ export const Composer = forwardRef<
       looked.add(token);
       const path = token.startsWith("@");
       void surface
-        .suggest(workspace, path ? "file" : "command", token.slice(1))
+        .suggest(workspace, path ? "file" : "command", token.slice(1), agent)
         .then((listed) => {
           remember(listed.filter((item) => item.value === token));
           // Each answer redraws: the others may still be on their way.
@@ -616,7 +617,7 @@ export const Composer = forwardRef<
         ? [ORCHESTRATE]
         : [];
     void surface
-      .suggest(workspace, kind, found.query)
+      .suggest(workspace, kind, found.query, agent)
       .catch(() => [] as Suggestion[])
       .then((listed) => {
         remember(listed);

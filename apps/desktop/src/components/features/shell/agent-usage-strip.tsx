@@ -1,7 +1,13 @@
 import { Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLocation, useParams, useSearch } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type {
   CodexResetCredit,
   CodexResetCredits,
@@ -26,7 +32,9 @@ import {
   claudeView,
   codexView,
   NEARLY_SPENT,
+  opencodeView,
   resetClock,
+  resetDuration,
   resetText,
   titleCase,
   type UsageAgent,
@@ -38,6 +46,13 @@ import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useTerminal } from "#/stores/terminal";
+
+/** What the strip calls each agent, where room is short. */
+const SHORT: Record<UsageAgent, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  opencode: "OpenCode",
+};
 
 /** Coming back to the window refreshes at most this often. */
 const FOCUS_REFRESH_MS = 60_000;
@@ -96,13 +111,16 @@ function useUsageAgent(workspace: string): UsageAgent | null {
  *   (FE-54/D1b).
  * - Claude's numbers come from its account and ⟳ asks Anthropic again.
  *   Codex's are only as fresh as its newest turn here, and ⟳ reads them again
- *   from this machine. An error keeps the last snapshot and says why it is
- *   old.
+ *   from this machine. OpenCode's are OpenCode Go's 5-hour, weekly and
+ *   monthly limits, read with Codex's (FE-104/D10); without a Go
+ *   subscription there is nothing to show. An error keeps the last snapshot
+ *   and says why it is old.
  */
 export function AgentUsageStrip({ workspace }: { workspace: string }) {
   const agent = useUsageAgent(workspace);
   const claudeUsage = useAgentSessions((state) => state.claudeUsage);
   const codexQuota = useAgentSessions((state) => state.codexQuota);
+  const opencodeUsage = useAgentSessions((state) => state.opencodeUsage);
   const claudeRefreshing = useAgentSessions((state) => state.claudeRefreshing);
   const refreshClaude = useAgentSessions((state) => state.refreshClaudeUsage);
   const loadCodexUsage = useAgentSessions((state) => state.loadCodexUsage);
@@ -110,18 +128,21 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
   const consumeCodexReset = useAgentSessions(
     (state) => state.consumeCodexReset,
   );
-  const [codexRefreshing, setCodexRefreshing] = useState(false);
+  // Codex's and OpenCode's ⟳ are this strip's own; Claude's is the store's.
+  const [localRefreshing, setLocalRefreshing] = useState(false);
   const now = useClock();
 
-  const refreshing = agent === "codex" ? codexRefreshing : claudeRefreshing;
+  const refreshing = agent === "claude" ? claudeRefreshing : localRefreshing;
   const refresh = async () => {
     if (agent === "claude") return refreshClaude();
-    if (agent !== "codex") return;
-    setCodexRefreshing(true);
+    if (!agent) return;
+    setLocalRefreshing(true);
     try {
-      await refreshCodex(workspace, true);
+      if (agent === "codex") await refreshCodex(workspace, true);
+      // OpenCode's limits are read with Codex's usage, from OpenCode Go.
+      else await loadCodexUsage(workspace);
     } finally {
-      setCodexRefreshing(false);
+      setLocalRefreshing(false);
     }
   };
 
@@ -141,13 +162,16 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
       ? claudeView(claudeUsage)
       : agent === "codex"
         ? codexView(codexQuota, now)
-        : null;
+        : agent === "opencode"
+          ? opencodeView(opencodeUsage, now)
+          : null;
   if (!view) return null;
 
   const windows = (
     [
       ["5h", view.fiveHour],
       ["weekly", view.weekly],
+      ["monthly", view.monthly],
     ] as const
   ).flatMap(([label, window]) => (window ? [{ label, window }] : []));
   const summary = windows.length
@@ -160,8 +184,8 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
     : view.empty === "expired"
       ? "sign-in expired"
       : "unavailable";
-  const short = view.agent === "claude" ? "Claude" : "Codex";
-  // The session's window, or the weekly one when the source has no 5-hour.
+  const short = SHORT[view.agent];
+  // The session's window, or the next one when the source has no 5-hour.
   const session = windows[0]?.window ?? null;
   const left =
     session?.resetsAt == null ? null : resetClock(session.resetsAt, now);
@@ -171,8 +195,10 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
   return (
     <Popover
       onOpenChange={(open) => {
-        // Codex is asked again on opening, at most once a minute.
+        // Codex is asked again on opening, at most once a minute; OpenCode's
+        // limits are read again with it.
         if (open && view.agent === "codex") void refreshCodex(workspace, false);
+        if (open && view.agent === "opencode") void loadCodexUsage(workspace);
       }}
     >
       <PopoverTrigger
@@ -199,7 +225,9 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
             >
               {`${Math.round(clamp(session.usedPercent))}%`}
             </span>
-            {left !== null && <span className="opacity-70">resets {left}</span>}
+            {session.resetsAt != null && left !== null && (
+              <ResetLabel at={session.resetsAt} now={now} clock={left} />
+            )}
           </>
         )}
         {view.error && (
@@ -262,7 +290,7 @@ function UsageDetails({
   /** Spend a banked reset; Codex only. */
   onUseReset: (creditId: string) => Promise<CodexResetOutcome>;
 }) {
-  const hasWindows = Boolean(view.fiveHour || view.weekly);
+  const hasWindows = Boolean(view.fiveHour || view.weekly || view.monthly);
   // Read when the popover opens, and again on coming back to the window.
   const account = useHarnessAccounts()[view.agent];
   const signedIn = account?.signedIn ? account : null;
@@ -319,6 +347,16 @@ function UsageDetails({
           window={view.weekly}
           now={now}
         />
+        {/* OpenCode Go also limits a month (FE-104/D10). */}
+        {view.agent === "opencode" && (
+          <UsageBar
+            name={view.name}
+            label="Monthly"
+            region="Monthly limit"
+            window={view.monthly}
+            now={now}
+          />
+        )}
       </div>
       {view.resets && (
         <CodexResets resets={view.resets} now={now} onUse={onUseReset} />
@@ -493,5 +531,131 @@ function CodexResets({
         </div>
       ))}
     </section>
+  );
+}
+
+/** How long each of a reset's two readings stands before the other. */
+const RESET_FLIP_MS = 5_000;
+
+/**
+ * One motion for the flip: the readings slide and the line's width eases
+ * with the same duration and curve, so they move as one.
+ */
+const FLIP_MOTION = "duration-[450ms] ease-[cubic-bezier(0.22,1,0.36,1)]";
+
+/**
+ * "resets at 9:48 PM", then every five seconds "resets in 1h 23m", and back:
+ * when it is and how long until, in turn.
+ *
+ * On a flip the old reading slides up and out as the new one slides up into
+ * the line, and the line's width eases to the new reading's rather than
+ * jumping. With reduced motion the reading is swapped in place.
+ *
+ * Within the hour both say the same, so only "in 42 minutes" stands.
+ */
+function ResetLabel({
+  at,
+  now,
+  clock,
+}: {
+  at: number;
+  now: number;
+  /** {@link resetClock}'s reading: "at 9:48 PM", "in 42 minutes". */
+  clock: string;
+}) {
+  const flips = at - now >= 60 * 60_000;
+  const [until, setUntil] = useState(false);
+  useEffect(() => {
+    if (!flips) {
+      setUntil(false);
+      return;
+    }
+    const timer = setInterval(() => setUntil((value) => !value), RESET_FLIP_MS);
+    return () => clearInterval(timer);
+  }, [flips]);
+  const mode = until && flips ? "until" : "clock";
+  const text = mode === "until" ? `in ${resetDuration(at - now)}` : clock;
+
+  // A new mode is a flip, animated; the same mode's minute ticking over
+  // ("1h 23m" to "1h 22m") is only a new text.
+  const [shown, setShown] = useState({
+    mode,
+    flips: 0,
+    prev: null as string | null,
+  });
+  const last = useRef({ mode, text });
+  useEffect(() => {
+    // Read now: the updater runs after `last` holds the new reading.
+    const prev = last.current;
+    if (prev.mode !== mode)
+      setShown((current) => ({
+        mode,
+        flips: current.flips + 1,
+        prev: prev.text,
+      }));
+    last.current = { mode, text };
+  }, [mode, text]);
+
+  // The reading's own width, measured off-line, so the line can ease to it.
+  const measure = useRef<HTMLSpanElement>(null);
+  const [width, setWidth] = useState<number | null>(null);
+  // Watched, not read once: a new reading, or the font arriving, resizes it.
+  useLayoutEffect(() => {
+    const node = measure.current;
+    if (!node) return;
+    const update = () => {
+      const next = node.getBoundingClientRect().width;
+      if (next) setWidth(Math.ceil(next));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <span className="inline-flex items-baseline opacity-70">
+      resets&nbsp;
+      <span
+        className={cn(
+          // Clipped top and bottom only, for the slide: a longer reading
+          // shows whole while the width eases out to it.
+          "relative inline-block overflow-x-visible overflow-y-clip whitespace-nowrap transition-[width] motion-reduce:transition-none",
+          FLIP_MOTION,
+        )}
+        style={width ? { width } : undefined}
+      >
+        <span
+          ref={measure}
+          aria-hidden="true"
+          className="invisible absolute top-0 left-0"
+        >
+          {text}
+        </span>
+        {shown.prev !== null && (
+          <span
+            key={`out-${shown.flips}`}
+            aria-hidden="true"
+            className={cn(
+              "animate-out fade-out-0 slide-out-to-top-full absolute top-0 left-0 [--tw-animation-fill-mode:forwards] motion-reduce:hidden",
+              FLIP_MOTION,
+            )}
+          >
+            {shown.prev}
+          </span>
+        )}
+        <span
+          key={`in-${shown.flips}`}
+          className={cn(
+            "inline-block",
+            shown.flips > 0 &&
+              "animate-in fade-in-0 slide-in-from-bottom-full motion-reduce:animate-none",
+            FLIP_MOTION,
+          )}
+        >
+          {text}
+        </span>
+      </span>
+    </span>
   );
 }

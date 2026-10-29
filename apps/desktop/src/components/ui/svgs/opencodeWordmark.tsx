@@ -1,8 +1,7 @@
 import type { SVGProps } from "react";
 
 const OpencodeWordmark = (props: SVGProps<SVGSVGElement>) => (
-  <svg {...props} viewBox="0 0 234 42" fill="none">
-    <title>OpenCode</title>
+  <svg aria-hidden="true" {...props} viewBox="0 0 234 42" fill="none">
     <path d="M18 30H6V18H18V30Z" fill="#4B4646" />
     <path d="M18 12H6V30H18V12ZM24 36H0V6H24V36Z" fill="#B7B1B1" />
     <path d="M48 30H36V18H48V30Z" fill="#4B4646" />

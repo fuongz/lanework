@@ -1,7 +1,8 @@
-// The user's own Claude Code and Codex config files, edited in the app: the
-// one place to change either agent's settings.
+// The user's own Claude Code, Codex and OpenCode config files, edited in the
+// app: the one place to change any agent's settings.
 //
-// NOTE: A fixed list (FE-47/D1), plus the user's skills (FE-47/D9). The
+// NOTE: A fixed list (FE-47/D1), plus the user's skills (FE-47/D9). OpenCode's
+// config, its AGENTS.md and its skills joined them in FE-105/D1. The
 // renderer names a file by its `ConfigFileId`, never by path. Main resolves it
 // from the agents' homes, so no renderer can point a read or a write at a file
 // of its choosing.
@@ -19,6 +20,8 @@ export const CONFIG_FILE_IDS = [
   "codex-config",
   "codex-hooks",
   "codex-agents-md",
+  "opencode-config",
+  "opencode-agents-md",
 ] as const;
 
 export type FixedConfigId = (typeof CONFIG_FILE_IDS)[number];
@@ -26,10 +29,11 @@ export type FixedConfigId = (typeof CONFIG_FILE_IDS)[number];
 /**
  * Where a user's skills live (FE-47/D9).
  *
- * Claude's `~/.claude/skills`, Codex's `~/.agents/skills`, and Codex's own
- * `$CODEX_HOME/skills`, which older Codex versions read.
+ * Claude's `~/.claude/skills`, Codex's `~/.agents/skills`, Codex's own
+ * `$CODEX_HOME/skills`, which older Codex versions read, and OpenCode's
+ * `~/.config/opencode/skills` (FE-105/D1).
  */
-export const SKILL_ROOTS = ["claude", "agents", "codex"] as const;
+export const SKILL_ROOTS = ["claude", "agents", "codex", "opencode"] as const;
 export type SkillRoot = (typeof SKILL_ROOTS)[number];
 
 /** A skill's `SKILL.md`: `skill:<root>:<folder name>`. */
@@ -37,7 +41,14 @@ export type SkillConfigId = `skill:${SkillRoot}:${string}`;
 
 export type ConfigFileId = FixedConfigId | SkillConfigId;
 
-export type ConfigFormat = "json" | "toml" | "markdown";
+/**
+ * How a file is checked before a write.
+ *
+ * `json` is strict, as Claude reads its settings. `jsonc` is OpenCode's: it
+ * allows comments and trailing commas, and a Save keeps them, byte for byte
+ * (FE-105/D1).
+ */
+export type ConfigFormat = "json" | "jsonc" | "toml" | "markdown";
 
 /**
  * One folder name and nothing else: no separator, no `..`, no leading dot
@@ -70,7 +81,7 @@ export function isConfigFileId(value: unknown): value is ConfigFileId {
 /** One row of the list: where the file is and what it is — not what it says. */
 export interface ConfigFile {
   id: ConfigFileId;
-  agent: "claude" | "codex";
+  agent: "claude" | "codex" | "opencode";
   /** A config file of the agent's own, or one of the user's skills (D9). */
   kind: "config" | "skill";
   /** The file name (`settings.json`, `CLAUDE.md`, …) or a skill's folder. */
@@ -105,7 +116,7 @@ export type ConfigWriteResult =
   | { status: "ok"; content: ConfigFileContent; backup: string | null }
   /** The file changed on disk after it was opened: reload, then edit again. */
   | { status: "conflict" }
-  /** Not valid JSON or TOML; nothing was written. */
+  /** Not valid JSON, JSONC or TOML; nothing was written. */
   | { status: "invalid"; error: string };
 
 export const agentConfigChannels = {

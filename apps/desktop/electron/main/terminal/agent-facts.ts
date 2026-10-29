@@ -1,6 +1,7 @@
 // One conversation's numbers, read for the agent view (FE-38): its model,
 // cost, tokens, context, lines changed, run time and Claude's newest recap.
-// Also a project's totals of them, for Settings (FE-38/D6).
+// Also a project's totals of them, for Settings (FE-38/D6), OpenCode's
+// included (FE-105/D8).
 //
 // Read-only, and nothing here imports Electron: main calls it, and a spec can
 // drive it under plain Node against a fake home folder.
@@ -13,6 +14,8 @@ import {
   type AgentUsage,
   type AgentUsageTotals,
   isAgentSessionId,
+  isAgentSessionIdOf,
+  isTerminalAgent,
   type TerminalAgent,
 } from "../../../shared/terminal";
 import {
@@ -23,6 +26,8 @@ import {
   lines,
   readRange,
 } from "./agent-sessions";
+import { opencodeFacts, opencodeUsage } from "./opencode-details";
+import { opencodeDataDirOf } from "./opencode-sessions";
 
 /** How much of a transcript one step back reads. */
 const CHUNK = 64 * 1024;
@@ -39,9 +44,11 @@ interface FactsRequest {
 /**
  * The request off the wire: ids, never a path.
  *
- * NOTE: The conversation is a UUID and nothing else, as a resume id is, so it
- * can be no `..`, separator or absolute path. The path is built from it by
- * {@link readAgentFacts}, inside the CLI's folder.
+ * NOTE: The conversation is of the shape its CLI writes and nothing else
+ * ({@link isAgentSessionIdOf}: a UUID, or OpenCode's `ses_…`), as a resume
+ * id is, so it can be no `..`, separator or absolute path. The path is built
+ * from it by {@link readAgentFacts}, inside the CLI's folder; OpenCode's is a
+ * bound value of a query (FE-104).
  *
  * @throws when any of the three arguments is missing or invalid.
  */
@@ -55,9 +62,8 @@ export function factsRequest(args: unknown[]): FactsRequest {
     workspace.length > 200
   )
     throw new Error("A valid workspace is required");
-  if (agent !== "claude" && agent !== "codex")
-    throw new Error("A valid agent is required");
-  if (!isAgentSessionId(id))
+  if (!isTerminalAgent(agent)) throw new Error("A valid agent is required");
+  if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
   return { workspace, agent, id };
 }
@@ -417,6 +423,8 @@ export async function readAgentFacts(
   id: string,
 ): Promise<AgentFacts> {
   factsRequest(["-", agent, id]);
+  if (agent === "opencode")
+    return opencodeFacts(opencodeDataDirOf(home), folder, id);
   if (agent === "codex")
     return codexFacts(await codexConversationFile(home, folder, id));
   const file = join(
@@ -459,6 +467,9 @@ const none = (): AgentUsageTotals => ({
  * - A Claude conversation's own totals hold its sub-agents' (FE-38/V5).
  * - A Codex thread's spawns are rollouts of their own, counted for their
  *   tokens but not as conversations.
+ * - OpenCode's are rows of its database, read in one query: a top-level
+ *   session is a conversation, and the sessions under it add to its totals
+ *   (FE-105/D8). None is ever too long to read.
  * - A conversation whose totals a read cannot reach is left out, and counted
  *   in `skipped`.
  */
@@ -472,24 +483,24 @@ export async function readAgentUsage(
     from: now - days * DAY,
     claude: none(),
     codex: none(),
+    opencode: none(),
   }));
   const oldest = Math.min(...windows.map((window) => window.from));
   let skipped = 0;
   const add = (
-    agent: TerminalAgent,
+    agent: "claude" | "codex" | "opencode",
     at: number,
-    facts: AgentFacts,
+    facts: Pick<AgentFacts, "tokens" | "costUSD">,
     conversation: boolean,
   ) => {
-    for (const window of windows) {
-      if (at < window.from) continue;
-      const totals = window[agent];
+    const put = (totals: AgentUsageTotals) => {
       if (conversation) totals.conversations++;
       totals.input += facts.tokens?.input ?? 0;
       totals.output += facts.tokens?.output ?? 0;
       if (facts.costUSD !== null)
         totals.costUSD = (totals.costUSD ?? 0) + facts.costUSD;
-    }
+    };
+    for (const window of windows) if (at >= window.from) put(window[agent]);
   };
 
   const dir = join(home, ".claude", "projects", claudeProjectDir(folder));
@@ -530,11 +541,24 @@ export async function readAgentUsage(
     }
   }
 
+  // NOTE: The environment's data folder counts only for the real home, so a
+  // spec's fake home never reads this machine's OpenCode.
+  for (const row of await opencodeUsage(
+    opencodeDataDirOf(home),
+    folder,
+    oldest,
+  )) {
+    // The totals keep no cached count, so none is read.
+    const tokens = { input: row.input, output: row.output, cached: 0 };
+    add("opencode", row.updated, { tokens, costUSD: row.costUSD }, true);
+  }
+
   return {
-    windows: windows.map(({ days, claude, codex }) => ({
+    windows: windows.map(({ days, claude, codex, opencode }) => ({
       days,
       claude,
       codex,
+      opencode,
     })),
     skipped,
   };

@@ -1,4 +1,5 @@
-// Claude's and Codex's usage limits for the footer (FE-41, FE-53, FE-74):
+// Claude's, Codex's and OpenCode Go's usage limits for the footer (FE-41,
+// FE-53, FE-74, FE-104/D10):
 // the polling, its timers, and the IPC that reads and refreshes them.
 //
 // NOTE: Split out of `terminal/index.ts` (FE-82/D2). It needs to know which
@@ -6,6 +7,7 @@
 // listing's state, so `registerUsage` is handed that rather than importing
 // the module that owns it.
 import { type FSWatcher, watch } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { app } from "electron";
 import {
@@ -14,6 +16,7 @@ import {
   type CodexQuota,
   type CodexResetOutcome,
   type CodexUsage,
+  type OpenCodeUsage,
   terminalChannels,
 } from "../../../shared/terminal";
 import { codexHome } from "../agent-home";
@@ -21,7 +24,7 @@ import { createAgentCli } from "../conversation/claude-cli";
 import { broadcast, handle } from "../ipc";
 import { arity, slug } from "../ipc-args";
 import { appHomeDir } from "../paths";
-import { testAgentHome } from "../test-seams";
+import { isTestRun, testAgentHome } from "../test-seams";
 import { claudeAuth, claudeAuthOf } from "./agents";
 import {
   type ClaudeOAuthOptions,
@@ -35,6 +38,24 @@ import {
   readCodexAppServerQuota,
 } from "./codex-app-server";
 import { type CodexDirs, readCodexUsage } from "./codex-usage";
+import { opencodeDataDirOf } from "./opencode-sessions";
+import { createOpencodeUsage } from "./opencode-usage";
+
+// ── OpenCode Go's limits (FE-104/D10) ────────────────────────────────────
+
+/**
+ * OpenCode Go's limits: from OpenCode's running service for the signed-in
+ * account, else from `opencode.ai` with a Go key; at most every 15 minutes,
+ * 5 once a window has started over.
+ *
+ * NOTE: Only for the real home, and never in a test run: a spec's fake home
+ * must neither read the developer's Go key nor spend a request on it.
+ */
+const opencodeGoUsage = createOpencodeUsage(() => opencodeDataDirOf(homedir()));
+export function opencodeUsageNow(): Promise<OpenCodeUsage | null> {
+  if (isTestRun() || testAgentHome()) return Promise.resolve(null);
+  return opencodeGoUsage().catch(() => null);
+}
 
 /** What the usage reads need from the terminal's conversation listing. */
 export interface UsageListing {
@@ -354,13 +375,14 @@ export function registerUsage(
       const ids = [...listed]
         .filter((entry) => entry.startsWith("codex:"))
         .map((entry) => entry.slice("codex:".length));
-      const [usage, claude] = await Promise.all([
+      const [usage, claude, opencode] = await Promise.all([
         readCodexUsage(codexDirs(), ids),
         claudeUsageNow(false),
+        opencodeUsageNow(),
       ]);
       // In the background: the listing never waits on Codex starting.
       void refreshCodexServer(CODEX_SERVER_TTL_MS);
-      return { ...usage, quota: codexQuotaNow(usage.quota), claude };
+      return { ...usage, quota: codexQuotaNow(usage.quota), claude, opencode };
     },
   );
   // NOTE: A boolean alone (FE-74). The answer is read with `codexUsage`.

@@ -7,6 +7,8 @@ import type {
   CodexQuota,
   CodexQuotaWindow,
   CodexResetCredits,
+  OpenCodeUsage,
+  OpenCodeUsageWindow,
 } from "../../shared/terminal";
 
 /** A window this full reads in the warning tone. */
@@ -19,7 +21,7 @@ const ERROR_TEXT: Record<ClaudeUsageError, string> = {
 };
 
 /** The agents whose account usage the strip can show. */
-export type UsageAgent = "claude" | "codex";
+export type UsageAgent = "claude" | "codex" | "opencode";
 
 /** One limit as the strip draws it, whichever agent it came from. */
 export interface UsageWindow {
@@ -31,10 +33,12 @@ export interface UsageWindow {
 /** What the strip and its popover need, whichever agent it came from. */
 export interface UsageView {
   agent: UsageAgent;
-  /** "Claude Code", "Codex". */
+  /** "Claude Code", "Codex", "OpenCode". */
   name: string;
   fiveHour: UsageWindow | null;
   weekly: UsageWindow | null;
+  /** OpenCode Go's monthly limit; null for the others. */
+  monthly: UsageWindow | null;
   /** When the numbers were true, ISO. */
   at: string | null;
   stale: boolean;
@@ -140,6 +144,7 @@ export function claudeView(usage: ClaudeUsage | null): UsageView | null {
     name: "Claude Code",
     fiveHour: usage.primary,
     weekly: usage.secondary,
+    monthly: null,
     at: usage.at,
     stale: usage.stale,
     plan: usage.plan ? titleCase(usage.plan) : null,
@@ -169,6 +174,7 @@ export function codexView(
     name: "Codex",
     fiveHour: live(quota.primary),
     weekly: live(quota.secondary),
+    monthly: null,
     at: quota.at,
     stale: false,
     plan: quota.plan ? titleCase(quota.plan) : null,
@@ -179,9 +185,55 @@ export function codexView(
   };
 }
 
+/** How long each of OpenCode Go's windows runs, in minutes (FE-104/D10). */
+const OPENCODE_WINDOW = {
+  fiveHour: 300,
+  weekly: 10_080,
+  monthly: 43_200,
+} as const;
+
+/**
+ * OpenCode Go's limits, or null without a Go subscription (FE-104/D10).
+ *
+ * Its rolling 5-hour window, its week and its month. A window past its reset
+ * has started over since, so its number is dropped rather than shown wrong. A
+ * refused key reads as the others' expired sign-in.
+ */
+export function opencodeView(
+  usage: OpenCodeUsage | null,
+  now: number,
+): UsageView | null {
+  if (!usage) return null;
+  const pick = (minutes: number): UsageWindow | null => {
+    const found = usage.windows.find(
+      (window: OpenCodeUsageWindow) => window.windowMinutes === minutes,
+    );
+    if (!found) return null;
+    if (found.resetsAt !== null && found.resetsAt <= now) return null;
+    return { usedPercent: found.usedPercent, resetsAt: found.resetsAt };
+  };
+  const expired = usage.error === "expired";
+  return {
+    agent: "opencode",
+    name: "OpenCode",
+    fiveHour: pick(OPENCODE_WINDOW.fiveHour),
+    weekly: pick(OPENCODE_WINDOW.weekly),
+    monthly: pick(OPENCODE_WINDOW.monthly),
+    at: usage.at,
+    stale: expired,
+    plan: "Go",
+    error: expired
+      ? "Your OpenCode sign-in has expired. Sign in to OpenCode again."
+      : null,
+    empty: expired ? "expired" : "—",
+    planNote: null,
+    resets: null,
+  };
+}
+
 export function barTone(used: number) {
   return used >= NEARLY_SPENT ? "bg-tone-amber" : "bg-foreground/55";
 }
 
 export const usageAgent = (kind: string | undefined): UsageAgent | null =>
-  kind === "claude" || kind === "codex" ? kind : null;
+  kind === "claude" || kind === "codex" || kind === "opencode" ? kind : null;

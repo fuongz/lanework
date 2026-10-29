@@ -4,6 +4,7 @@
 // Read-only, and nothing here imports Electron: main calls it, and a spec can
 // drive it under plain Node against a fake home folder.
 import { open, readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { mentionsAsNames } from "../../../shared/conversation";
 import {
@@ -32,6 +33,7 @@ import {
   tidy,
 } from "../transcripts/jsonl";
 import { backgroundCount, readTranscriptTasks } from "./background-tasks";
+import { opencodeDataDir, opencodeSessions } from "./opencode-sessions";
 
 // Transitional re-exports (FE-80): import these from `../transcripts/`.
 export {
@@ -692,7 +694,7 @@ async function codexSessions(
 }
 
 /**
- * Both CLIs' conversations for `folder`, newest first.
+ * Every CLI's conversations for `folder`, newest first.
  *
  * At most `limit`, plus every `agent:id` in `keep` that still exists: the
  * pinned ones, which stay however old they are (FE-25/D1).
@@ -706,11 +708,17 @@ export async function listAgentSessions(
   keep: ReadonlySet<string> = new Set(),
   limit = AGENT_SESSION_LIMIT,
 ): Promise<AgentSession[]> {
-  const [claude, codex] = await Promise.all([
+  const [claude, codex, opencode] = await Promise.all([
     claudeSessions(home, folder, keep, limit).catch(() => []),
     codexSessions(home, folder, keep, limit).catch(() => []),
+    opencodeSessions(
+      opencodeDataDir(home, process.env, home === homedir()),
+      folder,
+      keep,
+      limit,
+    ).catch(() => []),
   ]);
-  const all = [...claude, ...codex].sort((a, b) =>
+  const all = [...claude, ...codex, ...opencode].sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt),
   );
   const kept = all.filter((entry) => keep.has(agentKey(entry)));

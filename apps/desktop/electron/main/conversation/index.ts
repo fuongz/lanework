@@ -5,10 +5,12 @@
 // id, never a folder or a command:
 // - the folder is the one main wrote down for the workspace
 //   (`terminalFolder`);
-// - the id is a UUID whose transcript is in the CLI's folder for it;
+// - the id is a UUID whose transcript is in the CLI's folder for it, or an
+//   OpenCode `ses_` id its database has for that folder (FE-104);
 // - settings come from the fixed lists.
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { app, shell } from "electron";
 import type {
@@ -17,6 +19,7 @@ import type {
   SessionResults,
 } from "../../../shared/conductor-sessions";
 import {
+  AGENT_LABELS,
   type AgentModel,
   ANSWER_MAX,
   ANSWERS_MAX,
@@ -38,9 +41,11 @@ import {
   type SendRequest,
   type Suggestion,
   setCodexModels,
+  setOpenCodeModels,
+  type Turn,
 } from "../../../shared/conversation";
 import { LEAD_REF_PATTERN } from "../../../shared/orchestration";
-import { isAgentSessionId } from "../../../shared/terminal";
+import { isAgentSessionId, isAgentSessionIdOf } from "../../../shared/terminal";
 import { controlCliPath } from "../../control/install";
 import { broadcast, handle } from "../ipc";
 import { notify } from "../notifications";
@@ -56,6 +61,8 @@ import {
   conductorOfConversation,
   nameConversation,
 } from "../terminal";
+import { opencodeDataDir } from "../terminal/opencode-sessions";
+import { opencodeGoKey } from "../terminal/opencode-usage";
 import { agentHomeDir } from "../test-seams";
 import { knownWorkspace, terminalFolder } from "../workspaces";
 import { awaitingNotice, createAwaitingLedger } from "./awaiting";
@@ -69,6 +76,13 @@ import { forkConversation } from "./fork";
 import { type ImageScope, openableImage, previewImage } from "./image-preview";
 import { createLinkPreviews } from "./link-preview";
 import { claudePidsOn } from "./live-claude";
+import { openCodeClient } from "./opencode-client";
+import { createOpenCodeModels } from "./opencode-models";
+import { createOpenCodeService } from "./opencode-service";
+import {
+  isOpenCodeConversation,
+  readOpenCodeConversation,
+} from "./opencode-transcript";
 import { contentOf, isMessageId, sendRequest } from "./outgoing";
 import type { Outgoing } from "./queue";
 import { createSettingsStore } from "./settings-store";
@@ -109,6 +123,37 @@ function agentHome(): string {
   return agentHomeDir();
 }
 
+/**
+ * Where OpenCode keeps its database, under the test seam's home too.
+ *
+ * NOTE: OpenCode's own variables count only for the real home, as the rail
+ * reads them (`terminal/agent-sessions.ts`).
+ */
+function opencodeData(): string {
+  const home = agentHome();
+  return opencodeDataDir(home, process.env, home === homedir());
+}
+
+/** A conversation id of any CLI: a UUID, or OpenCode's `ses_` (FE-104). */
+function isConversationId(value: unknown): value is string {
+  return isAgentSessionId(value) || isAgentSessionIdOf("opencode", value);
+}
+
+/**
+ * The transcript's turns with the engine's running ones over them.
+ *
+ * OpenCode writes a step to its database only as the step ends: mid-turn,
+ * what the engine drew from its events is newer. From the first turn the
+ * engine holds, its turns stand in for the database's.
+ */
+function withLive(turns: Turn[], live: Turn[]): Turn[] {
+  if (!live.length) return turns;
+  const ids = new Set(live.map((turn) => turn.id));
+  const first = turns.findIndex((turn) => ids.has(turn.id));
+  const kept = first >= 0 ? turns.slice(0, first) : turns;
+  return [...kept.filter((turn) => !ids.has(turn.id)), ...live];
+}
+
 /** A conductor's sessions, once the conversation view registered. */
 let sessions: ConductorSessions | null = null;
 
@@ -144,16 +189,21 @@ const commandCache = new Map<
  * network, and `/` must open at once. Older than {@link COMMANDS_MS}, the
  * list kept still answers while a new one is read behind it.
  */
-function commandsOf(workspace: string): Promise<Suggestion[]> {
+function commandsOf(
+  workspace: string,
+  agent: ConversationAgent = "claude",
+): Promise<Suggestion[]> {
   const read = () =>
     terminalFolder(workspace).then((folder) =>
-      listCommands(agentHome(), folder),
+      listCommands(agentHome(), folder, agent),
     );
-  const cached = commandCache.get(workspace);
+  // By agent too: OpenCode's list is not Claude's (FE-105/D3).
+  const cacheKey = `${workspace}\0${agent}`;
+  const cached = commandCache.get(cacheKey);
   if (!cached) {
     const all = read();
-    commandCache.set(workspace, { at: Date.now(), all });
-    all.catch(() => commandCache.delete(workspace));
+    commandCache.set(cacheKey, { at: Date.now(), all });
+    all.catch(() => commandCache.delete(cacheKey));
     if (commandCache.size > 16)
       commandCache.delete(commandCache.keys().next().value as string);
     return all;
@@ -162,7 +212,7 @@ function commandsOf(workspace: string): Promise<Suggestion[]> {
     cached.at = Date.now();
     const next = read();
     next
-      .then(() => commandCache.set(workspace, { at: Date.now(), all: next }))
+      .then(() => commandCache.set(cacheKey, { at: Date.now(), all: next }))
       .catch(() => {});
   }
   return cached.all;
@@ -215,7 +265,7 @@ function conversationOf(args: unknown[]): {
   if (args.length < 2)
     throw new Error("A workspace and a conversation are required");
   const workspace = key(args[0], "workspace");
-  if (!isAgentSessionId(args[1]))
+  if (!isConversationId(args[1]))
     throw new Error("A valid conversation is required");
   return { workspace, conversation: args[1] };
 }
@@ -262,15 +312,21 @@ async function folderOf(workspace: string): Promise<string> {
 /**
  * Which CLI wrote conversation `id` of `folder`.
  *
- * Claude's when its file is in Claude's folder for it, Codex's when a
+ * OpenCode's when it is a `ses_` id OpenCode's database has for that folder;
+ * else Claude's when its file is in Claude's folder for it, Codex's when a
  * rollout of that folder has the id.
  *
- * @returns null when neither CLI has written it down.
+ * @returns null when no CLI has written it down.
  */
 async function agentOf(
   folder: string,
   id: string,
 ): Promise<ConversationAgent | null> {
+  if (isAgentSessionIdOf("opencode", id))
+    return (await isOpenCodeConversation(opencodeData(), folder, id))
+      ? "opencode"
+      : null;
+  if (!isAgentSessionId(id)) return null;
   const file = transcriptPath(agentHome(), folder, id);
   if ((await stat(file).catch(() => null))?.isFile()) return "claude";
   if (await codexRolloutPath(agentHome(), folder, id).catch(() => null))
@@ -280,9 +336,14 @@ async function agentOf(
 
 /** Conversation `id` of `folder`, read from whichever CLI wrote it. */
 async function readAny(folder: string, id: string): Promise<Conversation> {
-  return (await agentOf(folder, id)) === "codex"
-    ? readCodexConversation(agentHome(), folder, id)
-    : readConversation(agentHome(), folder, id);
+  switch (await agentOf(folder, id)) {
+    case "opencode":
+      return readOpenCodeConversation(opencodeData(), folder, id);
+    case "codex":
+      return readCodexConversation(agentHome(), folder, id);
+    default:
+      return readConversation(agentHome(), folder, id);
+  }
 }
 
 /**
@@ -398,7 +459,51 @@ export function registerConversation(
     setCodexModels(models);
     return models;
   };
-  const ready = codexModels();
+  // FE-104: OpenCode's models are its service's. Found through the user's
+  // own `opencode`; LANEWORK_OPENCODE_BIN is the test seam.
+  const opencode = createOpenCodeService(
+    createAgentCli("opencode", () =>
+      testing ? process.env.LANEWORK_OPENCODE_BIN : undefined,
+    ),
+  );
+  // A Go key puts OpenCode Go's models first: the subscription the user pays
+  // for. Only the real home's key counts, as for the usage it gates.
+  const realHome = () => agentHomeDir() === homedir();
+  const readOpenCodeModels = createOpenCodeModels(
+    async () => openCodeClient(await opencode.service(), null),
+    async () =>
+      realHome() &&
+      Boolean(
+        await opencodeGoKey(opencodeDataDir(agentHomeDir(), process.env, true)),
+      ),
+  );
+  const opencodeModels = async (fresh = false): Promise<AgentModel[]> => {
+    const models = await readOpenCodeModels(fresh);
+    setOpenCodeModels(models);
+    return models;
+  };
+  /**
+   * OpenCode's models, asked again only when `model` looks like one of
+   * OpenCode's (`provider/model`) that is not listed yet: a send on any
+   * other CLI never waits on OpenCode's service.
+   */
+  const knowModel = async (model: unknown): Promise<void> => {
+    if (
+      typeof model === "string" &&
+      model.includes("/") &&
+      !(await readOpenCodeModels()).some((entry) => entry.id === model)
+    )
+      await opencodeModels(true);
+  };
+  // NOTE: A stored OpenCode model is only known once its list is. A missing
+  // or slow OpenCode does not hold the first read up for long.
+  const ready = Promise.all([
+    codexModels(),
+    Promise.race([
+      opencodeModels(),
+      new Promise((resolve) => setTimeout(resolve, 5_000)),
+    ]),
+  ]);
   // FE-97: what every engine waits on the person for, followed from the
   // same events the page gets.
   const awaiting = createAwaitingLedger();
@@ -465,6 +570,11 @@ export function registerConversation(
     terminalOn: bridge.terminalOn,
     killTerminal: bridge.kill,
     remember: (id, settings) => void store.remember(id, settings),
+    // FE-104: a service that moved or restarted is asked for again.
+    opencode: (fresh) => {
+      if (fresh) opencode.forget();
+      return opencode.service(fresh);
+    },
     // FE-77/D3: Claude's trust record, under the test seam's home too.
     trusted: (folder, env) =>
       isClaudeTrusted(folder, claudeJsonFor(env, agentHome())),
@@ -527,8 +637,8 @@ export function registerConversation(
       const agent = await agentOf(folder, conversation);
       // A conversation started here whose first line the CLI has not
       // written yet: what its engine holds so far.
-      const pending = agent ? null : engines.pending(workspace, conversation);
-      if (pending)
+      const pending = engines.pending(workspace, conversation);
+      if (pending && !agent)
         return {
           id: conversation,
           agent: pending.agent,
@@ -541,6 +651,14 @@ export function registerConversation(
           truncated: false,
         };
       const read = await readAny(folder, conversation);
+      // OpenCode's running turn, newer than its database (FE-104).
+      if (agent === "opencode" && pending?.working)
+        return {
+          ...read,
+          turns: withLive(read.turns, pending.turns),
+          working: true,
+          settings: await store.of(conversation),
+        };
       return { ...read, settings: await store.of(conversation) };
     },
   );
@@ -549,9 +667,12 @@ export function registerConversation(
     conversationChannels.start,
     devUrl,
     async (args): Promise<{ conversation: string; engine: EngineState }> => {
-      // A model Codex listed since the last read is known now.
+      // A model Codex or OpenCode listed since the last read is known now.
       await codexModels();
       if (args.length !== 1) throw new Error("A request is required");
+      await knowModel(
+        (args[0] as { settings?: { model?: unknown } } | null)?.settings?.model,
+      );
       // NOTE: The id is main's own, never the page's, so a new one cannot
       // name a conversation that already exists.
       const conversation = randomUUID();
@@ -568,11 +689,12 @@ export function registerConversation(
         throw new Error("Write something first.");
       const folder = await folderOf(request.workspace);
       const out = await outgoingOf(request);
-      // The model picks the CLI: Codex names its conversation itself.
+      // The model picks the CLI: Codex and OpenCode name their conversation
+      // themselves.
       const agent = agentOfModel(request.settings.model);
       const started =
-        agent === "codex"
-          ? await engines.startCodex(request.workspace, folder, out)
+        agent !== "claude"
+          ? await engines.startNamed(agent, request.workspace, folder, out)
           : {
               conversation,
               engine: await engines.start(
@@ -599,6 +721,9 @@ export function registerConversation(
     async (args): Promise<EngineState> => {
       await codexModels();
       if (args.length !== 1) throw new Error("A request is required");
+      await knowModel(
+        (args[0] as { settings?: { model?: unknown } } | null)?.settings?.model,
+      );
       const request = sendRequest(args[0]);
       // A worker is the lead's to talk to; a send from here would start a
       // second engine on its conversation in the project's folder (FE-87).
@@ -616,7 +741,7 @@ export function registerConversation(
       // A conversation stays on the CLI that wrote it.
       if (agentOfModel(request.settings.model) !== agent)
         throw new Error(
-          `Pick a ${agent === "codex" ? "Codex" : "Claude"} model for this conversation.`,
+          `Pick ${agent === "opencode" ? "an" : "a"} ${AGENT_LABELS[agent]} model for this conversation.`,
         );
       return noted(
         request.workspace,
@@ -701,8 +826,11 @@ export function registerConversation(
       throw new Error("A workspace and a conversation are required");
     const { workspace, conversation } = conversationOf(args);
     const folder = await folderOf(workspace);
-    if ((await agentOf(folder, conversation)) === "codex")
-      throw new Error("A Codex conversation cannot be forked here yet.");
+    const agent = await agentOf(folder, conversation);
+    if (agent === "codex" || agent === "opencode")
+      throw new Error(
+        `${agent === "opencode" ? "An" : "A"} ${AGENT_LABELS[agent]} conversation cannot be forked here yet.`,
+      );
     const fork = await forkConversation(agentHome(), folder, conversation);
     const settings = await store.of(conversation);
     if (settings) await store.remember(fork, settings);
@@ -805,6 +933,15 @@ export function registerConversation(
   );
 
   handle(
+    conversationChannels.opencodeModels,
+    devUrl,
+    async (args): Promise<AgentModel[]> => {
+      if (args.length !== 0) throw new Error("No arguments are taken");
+      return opencodeModels();
+    },
+  );
+
+  handle(
     conversationChannels.linkPreview,
     devUrl,
     async (args): Promise<LinkPreview> => {
@@ -844,14 +981,24 @@ export function registerConversation(
     conversationChannels.suggest,
     devUrl,
     async (args): Promise<Suggestion[]> => {
-      if (args.length !== 3)
+      if (args.length !== 3 && args.length !== 4)
         throw new Error("A workspace, a kind and a query are required");
       const workspace = key(args[0], "workspace");
-      const [, kind, query] = args;
+      const [, kind, query, agent = null] = args;
       if (typeof query !== "string" || query.length > 200)
         throw new Error("A valid query is required");
+      if (
+        agent !== null &&
+        agent !== "claude" &&
+        agent !== "codex" &&
+        agent !== "opencode"
+      )
+        throw new Error("A valid agent is required");
       if (kind === "command")
-        return rankCommands(await commandsOf(workspace), query);
+        return rankCommands(
+          await commandsOf(workspace, agent ?? undefined),
+          query,
+        );
       if (kind === "file")
         return suggestFiles(await folderOf(workspace), query);
       throw new Error("Unknown kind");

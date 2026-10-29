@@ -1,5 +1,5 @@
 // The orchestration contract (FE-87): a lead conversation (Claude or Codex)
-// spawns worker conversations on demand, and Jev, a cheap calibrated judge,
+// spawns worker conversations (Claude, Codex or OpenCode, FE-105) on demand, and Jev, a cheap calibrated judge,
 // answers the bounded questions on the way so the lead is asked only when
 // Jev is unsure.
 //
@@ -19,11 +19,18 @@
 // NOTE: No runtime logic lives here, only shapes, limits and validators. The
 // file is imported by the preload and the renderer, so it must not import
 // Node or Electron.
+//
+// NOTE: OpenCode may be a worker, never the lead (FE-105/D5). A lead's CLI
+// must start with the run's control env, and OpenCode runs inside the user's
+// own service, which no env of ours reaches. Every validator that reads a
+// lead's agent ({@link LEAD_AGENTS}) refuses it; the ones that read a
+// worker's ({@link WORKER_AGENTS}) take it, with a `provider/model` id.
 
 import {
   type ConversationAgent,
   EFFORTS,
   type Effort,
+  OPENCODE_MODEL_ID,
   PERMISSIONS,
   type Permission,
 } from "./conversation";
@@ -55,8 +62,23 @@ export const REQUEST_ID_MAX = 128;
 export const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 /** What a request id may be: a UUID, or a worker CLI's own request id. */
 export const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
-/** What a model id may be: it becomes `--model` / `-m`'s value. */
+/**
+ * What a Claude or Codex model id may be: it becomes `--model` / `-m`'s
+ * value. An OpenCode worker's is `provider/model` instead
+ * (`OPENCODE_MODEL_ID`, FE-105).
+ */
 export const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/** The CLIs a run's lead (or a team lead's own model) may run on (FE-105/D5). */
+export const LEAD_AGENTS = ["claude", "codex"] as const;
+export type LeadAgent = (typeof LEAD_AGENTS)[number];
+/** The CLIs a worker may run on: a lead's, and OpenCode (FE-105/D5). */
+export const WORKER_AGENTS = ["claude", "codex", "opencode"] as const;
+
+/** Whether `agent` may lead a run: OpenCode may only be a worker. */
+export function canLead(agent: ConversationAgent | null): agent is LeadAgent {
+  return (LEAD_AGENTS as readonly string[]).includes(agent ?? "");
+}
 
 // ─── Run and task ───────────────────────────────────────────────────────────
 
@@ -479,15 +501,42 @@ function requestId(value: unknown): string {
   return value;
 }
 
+/** A worker's CLI: Claude, Codex or OpenCode (FE-105). */
 function agent(value: unknown, label = "agent"): ConversationAgent {
-  if (value !== "claude" && value !== "codex")
-    fail(`${label} must be "claude" or "codex"`);
-  return value;
+  if (!(WORKER_AGENTS as readonly unknown[]).includes(value))
+    fail(`${label} must be "claude", "codex" or "opencode"`);
+  return value as ConversationAgent;
 }
 
-function model(value: unknown, label = "model"): string {
-  if (typeof value !== "string" || !MODEL_ID_PATTERN.test(value))
-    fail(`${label} must be a model id from list`);
+/** A lead's CLI: Claude or Codex, never OpenCode (FE-105/D5). */
+function leadAgent(value: unknown, label = "leadAgent"): LeadAgent {
+  if (value === "opencode")
+    fail(
+      `${label} cannot be "opencode": OpenCode runs only as a worker. Lead with Claude or Codex`,
+    );
+  if (!canLead(value as ConversationAgent))
+    fail(`${label} must be "claude" or "codex"`);
+  return value as LeadAgent;
+}
+
+/**
+ * A model id: a plain name (Claude, Codex) or OpenCode's `provider/model`.
+ * Given `on`, the id must have that CLI's shape.
+ */
+function model(
+  value: unknown,
+  label = "model",
+  on: ConversationAgent | null = null,
+): string {
+  if (typeof value !== "string") fail(`${label} must be a model id from list`);
+  const plain = MODEL_ID_PATTERN.test(value);
+  const opencode = OPENCODE_MODEL_ID.test(value);
+  if (on === "opencode" ? !opencode : on ? !plain : !plain && !opencode)
+    fail(
+      on === "opencode"
+        ? `${label} must be an OpenCode model id from list (provider/model)`
+        : `${label} must be a model id from list`,
+    );
   return value;
 }
 
@@ -574,7 +623,8 @@ const SCHEMAS: {
         files: scopes(input.files),
       };
       if (input.agent !== undefined) out.agent = agent(input.agent);
-      if (input.model !== undefined) out.model = model(input.model);
+      if (input.model !== undefined)
+        out.model = model(input.model, "model", out.agent ?? null);
       if (input.effort !== undefined) out.effort = effort(input.effort);
       if (input.dependsOn !== undefined)
         out.dependsOn = idList(input.dependsOn, "dependsOn");
@@ -753,12 +803,15 @@ export function parseProposedTasks(value: unknown): ProposedTask[] {
       ],
       label,
     );
+    const on =
+      task.agent == null ? null : agent(task.agent, `${label}'s agent`);
     return {
       id: id(task.id, `${label}'s id`),
       title: text(task.title, `${label}'s title`, TITLE_MAX),
       prompt: text(task.prompt, `${label}'s prompt`, PROMPT_MAX),
-      agent: task.agent == null ? null : agent(task.agent, `${label}'s agent`),
-      model: task.model == null ? null : model(task.model, `${label}'s model`),
+      agent: on,
+      model:
+        task.model == null ? null : model(task.model, `${label}'s model`, on),
       effort:
         task.effort == null ? null : effort(task.effort, `${label}'s effort`),
       files: scopes(task.files, `${label}'s files`),
@@ -831,7 +884,7 @@ export function parseProposal(value: unknown): OrchestrationProposal {
     id: id(input.id, "id"),
     workspace: input.workspace,
     lead: input.lead,
-    leadAgent: agent(input.leadAgent, "leadAgent"),
+    leadAgent: leadAgent(input.leadAgent),
     request: text(input.request, "request", PROMPT_MAX),
     status: "ready",
     title: text(input.title, "title", TITLE_MAX),
@@ -965,11 +1018,18 @@ export interface JudgeLogEntry {
 /** The most a judge request's context may weigh, in characters. */
 export const JUDGE_CONTEXT_MAX = 20_000;
 
-function tierModel(value: unknown, label: string): TierModel {
+/**
+ * A tier's model, or a team lead's own (`lead`: Claude or Codex only). A
+ * tier's runs a worker, so it may be OpenCode's (FE-105).
+ */
+function tierModel(value: unknown, label: string, lead = false): TierModel {
   const input = strictObject(value, ["agent", "model", "effort"], label);
+  const on = lead
+    ? leadAgent(input.agent, `${label}'s agent`)
+    : agent(input.agent, `${label}'s agent`);
   return {
-    agent: agent(input.agent, `${label}'s agent`),
-    model: model(input.model, `${label}'s model`),
+    agent: on,
+    model: model(input.model, `${label}'s model`, on),
     effort:
       input.effort == null ? null : effort(input.effort, `${label}'s effort`),
   };
@@ -1207,7 +1267,7 @@ export const LEAD_ICONS = [
 ] as const;
 export type LeadIcon = (typeof LEAD_ICONS)[number];
 
-/** A worker a team lead may hand work to. */
+/** A worker a team lead may hand work to: Claude, Codex or OpenCode (FE-105). */
 export interface TeamLeadWorker {
   agent: ConversationAgent;
   model: string;
@@ -1219,7 +1279,7 @@ export interface TeamLead {
   id: string;
   name: string;
   icon: LeadIcon;
-  /** The lead's own CLI, model and effort. */
+  /** The lead's own CLI (Claude or Codex, never OpenCode: FE-105), model and effort. */
   lead: TierModel;
   /** Told to the lead before the user's request; may be empty. */
   instructions: string;
@@ -1388,9 +1448,10 @@ function leadWorkers(value: unknown): TeamLeadWorker[] {
   const workers = value.map((entry, index): TeamLeadWorker => {
     const label = `Worker ${index + 1}`;
     const input = strictObject(entry, ["agent", "model", "tier"], label);
+    const on = agent(input.agent, `${label}'s agent`);
     return {
-      agent: agent(input.agent, `${label}'s agent`),
-      model: model(input.model, `${label}'s model`),
+      agent: on,
+      model: model(input.model, `${label}'s model`, on),
       tier:
         input.tier == null ? null : oneOf(input.tier, TIERS, `${label}'s tier`),
     };
@@ -1482,7 +1543,7 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
     id,
     name: oneLine(input.name, "name", LEAD_NAME_MAX),
     icon: oneOf(input.icon, LEAD_ICONS, "icon"),
-    lead: tierModel(input.lead, "lead"),
+    lead: tierModel(input.lead, "lead", true),
     instructions: input.instructions.trim(),
     contextFiles: leadContextFiles(input.contextFiles),
     workers: leadWorkers(input.workers),

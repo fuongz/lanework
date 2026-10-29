@@ -62,7 +62,8 @@ export function AgentSessionsMini({
   go: (next: TerminalSession | null) => void;
 }) {
   // Conversations waiting on the person (FE-97), by id: a CLI's conversation
-  // id is a UUID, so it names one conversation in any project.
+  // id is a UUID or OpenCode's `ses_…`, so it names one conversation in any
+  // project.
   const awaiting = useAwaiting((state) => state.byKey);
   const isAwaiting = (session: AgentSession) =>
     Object.values(awaiting).some((entry) => entry.conversation === session.id);

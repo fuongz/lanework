@@ -4,6 +4,8 @@ import type { TerminalKind } from "#/../shared/terminal";
 import { ClaudeAiIcon } from "#/components/ui/svgs/claudeAiIcon";
 import { CodexDark } from "#/components/ui/svgs/codexDark";
 import { CodexLight } from "#/components/ui/svgs/codexLight";
+import { Opencode } from "#/components/ui/svgs/opencode";
+import { OpencodeDark } from "#/components/ui/svgs/opencodeDark";
 import { cn } from "#/lib/utils";
 
 /** What the + menu calls each kind, and what an agent tab is named after. */
@@ -11,6 +13,7 @@ export const TERMINAL_KIND_LABELS: Record<TerminalKind, string> = {
   shell: "Terminal",
   claude: "Claude",
   codex: "Codex",
+  opencode: "OpenCode",
 };
 
 /**
@@ -19,7 +22,7 @@ export const TERMINAL_KIND_LABELS: Record<TerminalKind, string> = {
  * Shared by the + menu and the tab strip, so "which mark is Codex" has one
  * answer.
  *
- * NOTE: Codex is two marks with one visible, by CSS rather than a theme hook.
+ * NOTE: Codex and OpenCode are two marks with one visible, by CSS rather than a theme hook.
  * The `.dark` class is on `<html>` before the first paint, and a hook would
  * draw the light mark for one frame on a dark panel.
  */
@@ -40,6 +43,16 @@ export function TerminalKindIcon({
           className={cn("dark:hidden", className)}
         />
         <CodexDark
+          aria-hidden="true"
+          className={cn("hidden dark:block", className)}
+        />
+      </>
+    );
+  if (kind === "opencode")
+    return (
+      <>
+        <Opencode aria-hidden="true" className={cn("dark:hidden", className)} />
+        <OpencodeDark
           aria-hidden="true"
           className={cn("hidden dark:block", className)}
         />

@@ -12,6 +12,7 @@ import {
 export const AGENT_LABELS: Record<InstructionAgent, string> = {
   claude: "Claude",
   codex: "Codex",
+  opencode: "OpenCode",
 };
 
 export const SCOPE_LABELS: Record<InstructionScope, string> = {
@@ -50,6 +51,7 @@ export function appearances(
   };
   walk("claude", list.claude);
   walk("codex", list.codex);
+  walk("opencode", list.opencode);
   walk("nested", list.nested);
   return found;
 }

@@ -74,30 +74,44 @@ function writeFavorites(ids: string[]) {
   writeStored(FAVORITES_KEY, JSON.stringify(ids));
 }
 
-const AGENTS: readonly ConversationAgent[] = ["claude", "codex"];
+/** Every CLI a chat runs on, in {@link AGENT_LABELS}' order: one tab each. */
+const AGENTS = Object.keys(AGENT_LABELS) as readonly ConversationAgent[];
+
+/** Excludes nothing; one array, so the panel's memo holds. */
+const NO_AGENTS: readonly ConversationAgent[] = [];
 
 /**
  * The model panel: favourites, a tab per CLI, and a search over its models.
  *
- * A narrow column: favourites, then one tab each for Claude and Codex, the
- * tab's legacy models after a divider. `agent` locks it to one CLI's models,
- * because a conversation stays on the CLI that wrote it.
+ * A narrow column: favourites, then one tab each for Claude, Codex and
+ * OpenCode, the tab's legacy models after a divider. `agent` locks it to one
+ * CLI's models, because a conversation stays on the CLI that wrote it.
+ *
+ * NOTE: OpenCode's models are the providers the user set up in OpenCode, read
+ * by main (FE-104). With none, its tab says how to get some rather than
+ * offering a model that would not run.
  */
 function ModelPanel({
   model,
   agent,
+  exclude = NO_AGENTS,
   onPick,
 }: {
   model: string;
   agent: ConversationAgent | null;
+  exclude?: readonly ConversationAgent[];
   onPick: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [only, setOnly] = useState<ConversationAgent | "favorites">(
     () => agent ?? agentOfModel(model),
   );
-  const tabs = agent ? [agent] : AGENTS;
-  const models = useModels();
+  const tabs = agent ? [agent] : AGENTS.filter((tab) => !exclude.includes(tab));
+  const all = useModels();
+  const models = useMemo(
+    () => all.filter((entry) => !exclude.includes(entry.agent)),
+    [all, exclude],
+  );
   const [favorites, setFavorites] = useState(readFavorites);
   const toggle = (id: string) => {
     const next = favorites.includes(id)
@@ -114,11 +128,35 @@ function ModelPanel({
         (only === "favorites"
           ? favorites.includes(entry.id)
           : entry.agent === only) &&
-        (!q || entry.label.toLowerCase().includes(q) || entry.id.includes(q)),
+        (!q ||
+          entry.label.toLowerCase().includes(q) ||
+          entry.id.includes(q) ||
+          (entry.group?.toLowerCase().includes(q) ?? false)),
     );
   }, [query, only, favorites, agent, models]);
+  // OpenCode's tab with no models at all: none configured, not no match.
+  const noOpenCode =
+    only === "opencode" &&
+    !query.trim() &&
+    !models.some((entry) => entry.agent === "opencode");
+  // OpenCode's come grouped by provider (FE-104): headed runs, in main's
+  // order, each with its own deprecated ones last. The others keep the
+  // divider before their legacy models.
+  const grouped = shown.some((entry) => entry.group);
   const current = shown.filter((entry) => !entry.legacy);
   const legacy = shown.filter((entry) => entry.legacy);
+  const runs = grouped
+    ? shown.reduce<{ group: string | null; entries: AgentModel[] }[]>(
+        (out, entry) => {
+          const group = entry.group ?? null;
+          const last = out.at(-1);
+          if (last && last.group === group) last.entries.push(entry);
+          else out.push({ group, entries: [entry] });
+          return out;
+        },
+        [],
+      )
+    : [];
 
   const row = (entry: AgentModel) => (
     <DropdownMenuItem
@@ -130,6 +168,11 @@ function ModelPanel({
         <TerminalKindIcon kind={entry.agent} className="size-3.5 shrink-0" />
       )}
       <span className="flex-1 truncate">{entry.label}</span>
+      {entry.preferred && (
+        <span className="text-muted-foreground shrink-0 text-[12px]">
+          Default
+        </span>
+      )}
       <button
         type="button"
         aria-label={
@@ -162,7 +205,7 @@ function ModelPanel({
   );
 
   return (
-    <div className="flex h-[min(26rem,var(--available-height))] w-[19rem]">
+    <div className="flex h-[min(26rem,var(--available-height))] w-[22rem]">
       <div className="border-foreground/10 flex w-11 shrink-0 flex-col items-center gap-1 border-r py-1">
         <button
           type="button"
@@ -212,26 +255,50 @@ function ModelPanel({
           />
         </label>
         <div className="min-h-0 flex-1 overflow-y-auto p-1">
-          {current.map(row)}
-          {current.length > 0 && legacy.length > 0 && (
-            <div
-              aria-hidden="true"
-              className="bg-foreground/10 mx-2 my-1 h-px"
-            />
+          {grouped ? (
+            runs.map((run) => (
+              <DropdownMenuGroup key={run.entries[0]?.id}>
+                {run.group && (
+                  <DropdownMenuLabel
+                    // The group being scrolled through stays named on top. No
+                    // fill of its own, so it is the panel's colour; the blur
+                    // keeps the rows passing under it from showing through.
+                    className="sticky -top-1 z-10 -mx-1 px-3.5 pt-2.5 pb-1 text-[12px] backdrop-blur-3xl"
+                  >
+                    {run.group}
+                  </DropdownMenuLabel>
+                )}
+                {run.entries.map(row)}
+              </DropdownMenuGroup>
+            ))
+          ) : (
+            <>
+              {current.map(row)}
+              {current.length > 0 && legacy.length > 0 && (
+                <div
+                  aria-hidden="true"
+                  className="bg-foreground/10 mx-2 my-1 h-px"
+                />
+              )}
+              {legacy.map(row)}
+            </>
           )}
-          {legacy.map(row)}
           {shown.length === 0 && (
             <Empty className="px-2.5 py-4">
               <EmptyHeader>
                 <EmptyTitle>
-                  {only === "favorites" && !query
-                    ? "No favorites yet"
-                    : "No matches"}
+                  {noOpenCode
+                    ? "No OpenCode models"
+                    : only === "favorites" && !query
+                      ? "No favorites yet"
+                      : "No matches"}
                 </EmptyTitle>
                 <EmptyDescription>
-                  {only === "favorites" && !query
-                    ? "Star a model to keep it here."
-                    : "No model matches."}
+                  {noOpenCode
+                    ? "Configure a provider in OpenCode, then open this menu again."
+                    : only === "favorites" && !query
+                      ? "Star a model to keep it here."
+                      : "No model matches."}
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -250,6 +317,7 @@ function ModelPanel({
 export function ModelMenu({
   settings,
   agent = null,
+  exclude,
   onChange,
   disabled,
   side = "top",
@@ -260,8 +328,10 @@ export function ModelMenu({
   className,
 }: {
   settings: ComposerSettings;
-  /** Only this CLI's models; null offers both. */
+  /** Only this CLI's models; null offers every CLI's. */
   agent?: ConversationAgent | null;
+  /** CLIs whose models it never offers: a conductor's lead is never OpenCode (FE-105/D5). */
+  exclude?: readonly ConversationAgent[];
   onChange: (next: Partial<ComposerSettings>) => void;
   disabled?: boolean;
   /** Where the menu opens: above the composer, below a settings row. */
@@ -279,13 +349,15 @@ export function ModelMenu({
   ghost?: boolean;
   className?: string;
 }) {
-  // Re-drawn when Codex's list arrives: its labels come with it.
+  // Re-drawn when Codex's or OpenCode's list arrives: labels come with it.
   useModels();
   const automatic = auto?.active ?? false;
+  // OpenCode has no model until its list is read (FE-104): "" until then.
   const name = automatic
     ? "Auto"
-    : (modelName(settings.model) ?? settings.model);
-  const kind = agentOfModel(settings.model);
+    : (modelName(settings.model) ?? (settings.model || "No model"));
+  // A locked CLI's mark, even for a model its list has not named yet.
+  const kind = agent ?? agentOfModel(settings.model);
   const effortLabel = effortSet ? EFFORT_LABELS[settings.effort] : "Default";
   return (
     <DropdownMenu>
@@ -316,9 +388,10 @@ export function ModelMenu({
         side={side}
         align={side === "top" ? "start" : "end"}
         sideOffset={6}
-        className="w-60 p-1.5"
+        className="w-72 p-1.5"
       >
-        {fast && (
+        {/* OpenCode has no fast mode: its engine ignores it (FE-104). */}
+        {fast && kind !== "opencode" && (
           <DropdownMenuItem
             closeOnClick={false}
             onClick={() => onChange({ fast: !settings.fast })}
@@ -350,10 +423,11 @@ export function ModelMenu({
         )}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className="h-9 rounded-lg px-2.5 text-[13px]">
-            <span className="flex-1">Model</span>
-            <span className="text-muted-foreground flex items-center gap-1.5">
-              <TerminalKindIcon kind={kind} className="size-3.5" />
-              {name}
+            <span className="shrink-0">Model</span>
+            {/* One line however long the name: OpenCode's run long. */}
+            <span className="text-muted-foreground ml-auto flex min-w-0 items-center gap-1.5">
+              <TerminalKindIcon kind={kind} className="size-3.5 shrink-0" />
+              <span className="truncate">{name}</span>
             </span>
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent
@@ -363,6 +437,7 @@ export function ModelMenu({
             <ModelPanel
               model={settings.model}
               agent={agent}
+              exclude={exclude}
               onPick={(model) => onChange({ model })}
             />
           </DropdownMenuSubContent>

@@ -12,12 +12,13 @@ import type { AgentCard } from "./terminal";
 
 // ─── Composer settings ──────────────────────────────────────────────────────
 
-/** The CLI a conversation runs on: Claude Code, or Codex. */
-export type ConversationAgent = "claude" | "codex";
+/** The CLI a conversation runs on: Claude Code, Codex, or OpenCode (FE-104). */
+export type ConversationAgent = "claude" | "codex" | "opencode";
 
 export const AGENT_LABELS: Record<ConversationAgent, string> = {
   claude: "Claude",
   codex: "Codex",
+  opencode: "OpenCode",
 };
 
 /** A model the picker offers, newest first within a family. */
@@ -29,6 +30,13 @@ export interface AgentModel {
   agent: ConversationAgent;
   /** Shown below the current generation, after a divider. */
   legacy?: boolean;
+  /**
+   * The heading the picker lists it under: OpenCode's provider, as its
+   * service names it ("OpenCode Go"). None for Claude's and Codex's.
+   */
+  group?: string;
+  /** The one its CLI starts on by itself, marked "Default" in the picker. */
+  preferred?: boolean;
 }
 
 /**
@@ -73,8 +81,26 @@ export const CODEX_MODELS: readonly AgentModel[] = [
   { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", agent: "codex", legacy: true },
 ];
 
+/**
+ * OpenCode's models, fixed in code: none (FE-104).
+ *
+ * NOTE: OpenCode's models are the providers the user configured, as
+ * `provider/model` ids its service lists at runtime. No static list could be
+ * right, so the picker offers OpenCode's only once main has read them.
+ */
+export const OPENCODE_MODELS: readonly AgentModel[] = [];
+
 /** What a Codex model id may be: it becomes `-m`'s value. */
 export const CODEX_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/**
+ * What an OpenCode model id may be: `provider/model`, as its service names
+ * them. The model part may hold slashes of its own (a gateway's
+ * `openai/gpt-…`); the provider is everything before the first. A variant
+ * (reasoning effort) is not part of it.
+ */
+export const OPENCODE_MODEL_ID =
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
 
 /**
  * Codex's models as this process knows them.
@@ -83,7 +109,13 @@ export const CODEX_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
  * has asked main (in the renderer).
  */
 let codexList: readonly AgentModel[] = CODEX_MODELS;
-let everyModel: readonly AgentModel[] = [...CLAUDE_MODELS, ...codexList];
+/** OpenCode's models as main last read them from its service. */
+let opencodeList: readonly AgentModel[] = OPENCODE_MODELS;
+let everyModel: readonly AgentModel[] = [
+  ...CLAUDE_MODELS,
+  ...codexList,
+  ...opencodeList,
+];
 const listeners = new Set<() => void>();
 
 /**
@@ -101,7 +133,23 @@ export function setCodexModels(list: readonly AgentModel[]): void {
   const next = clean.length > 0 ? clean : CODEX_MODELS;
   if (JSON.stringify(next) === JSON.stringify(codexList)) return;
   codexList = next;
-  everyModel = [...CLAUDE_MODELS, ...codexList];
+  everyModel = [...CLAUDE_MODELS, ...codexList, ...opencodeList];
+  for (const listener of listeners) listener();
+}
+
+/**
+ * Take `list` as OpenCode's models, the ones its service lists (FE-104).
+ *
+ * Unlike Codex's there is no fallback: an empty list means no OpenCode model
+ * can be picked. Ids that are not `provider/model` are dropped.
+ */
+export function setOpenCodeModels(list: readonly AgentModel[]): void {
+  const next = list.filter(
+    (entry) => entry.agent === "opencode" && OPENCODE_MODEL_ID.test(entry.id),
+  );
+  if (JSON.stringify(next) === JSON.stringify(opencodeList)) return;
+  opencodeList = next;
+  everyModel = [...CLAUDE_MODELS, ...codexList, ...opencodeList];
   for (const listener of listeners) listener();
 }
 
@@ -123,20 +171,42 @@ export function allModels(): readonly AgentModel[] {
 
 const DEFAULT_MODEL = "claude-opus-5-5";
 
-/** Each CLI's default: Codex's is the first of its list. */
+/**
+ * Each CLI's default: Codex's and OpenCode's are the first of their lists.
+ *
+ * NOTE: OpenCode has no fallback id (FE-104): until its list is read it is
+ * `""`, which {@link checkSettings} refuses, so no turn runs on a guess.
+ */
 function defaultModel(agent: ConversationAgent): string {
-  return agent === "codex"
-    ? (codexList[0]?.id ?? "gpt-6.1-sol")
-    : DEFAULT_MODEL;
+  switch (agent) {
+    case "claude":
+      return DEFAULT_MODEL;
+    case "codex":
+      return codexList[0]?.id ?? "gpt-6.1-sol";
+    case "opencode":
+      return (
+        opencodeList.find((entry) => entry.preferred)?.id ??
+        opencodeList[0]?.id ??
+        ""
+      );
+  }
 }
 
 function isModel(value: unknown): value is string {
   return typeof value === "string" && allModels().some((m) => m.id === value);
 }
 
-/** The CLI that runs model `id`; Claude for one not listed. */
+/**
+ * The CLI that runs model `id`; Claude for one not listed.
+ *
+ * NOTE: A `provider/model` id is OpenCode's even before its list is read
+ * (FE-105): Claude's and Codex's ids never hold a slash, and a reopened
+ * OpenCode conversation must keep its model rather than fall to "No model".
+ */
 export function agentOfModel(id: string | null): ConversationAgent {
-  return allModels().find((m) => m.id === id)?.agent ?? "claude";
+  const listed = allModels().find((m) => m.id === id)?.agent;
+  if (listed) return listed;
+  return id && OPENCODE_MODEL_ID.test(id) ? "opencode" : "claude";
 }
 
 /** The model's label, or the id as the CLI named it when it is not listed. */
@@ -514,7 +584,7 @@ export interface PermissionRequest {
 export interface Awaiting {
   workspace: string;
   conversation: string;
-  agent: "claude" | "codex";
+  agent: ConversationAgent;
   /** Oldest first. */
   requests: {
     id: string;
@@ -722,6 +792,8 @@ export const conversationChannels = {
   lastSettings: "conversation:last-settings",
   /** Codex's models, as `codex` lists them in its own cache. */
   codexModels: "conversation:codex-models",
+  /** OpenCode's models, as its service lists them (FE-104). */
+  opencodeModels: "conversation:opencode-models",
   linkPreview: "conversation:link-preview",
   /** Slash commands, or files in the workspace's folder, matching a query. */
   suggest: "conversation:suggest",
@@ -796,10 +868,20 @@ export interface DesktopConversationApi {
   lastSettings: () => Promise<ComposerSettings>;
   /** Codex's models, read from `~/.codex/models_cache.json` by main. */
   codexModels: () => Promise<AgentModel[]>;
+  /**
+   * OpenCode's models, asked of its service by main (FE-104); empty when
+   * OpenCode is missing, older than 2.0.15, or its service cannot start.
+   */
+  opencodeModels: () => Promise<AgentModel[]>;
+  /**
+   * `agent` picks whose `/` commands are listed (FE-105/D3); none is
+   * Claude's.
+   */
   suggest: (
     workspace: string,
     kind: SuggestionKind,
     query: string,
+    agent?: ConversationAgent | null,
   ) => Promise<Suggestion[]>;
   linkPreview: (url: string) => Promise<LinkPreview>;
   /**

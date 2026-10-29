@@ -156,8 +156,8 @@ export function useConversation(
       })
       .catch(() => {});
 
-    // Either CLI's: the id is a UUID, and a Codex conversation's rollout
-    // moves the same way a Claude transcript does.
+    // Any CLI's: the id is a UUID or OpenCode's `ses_…`, and a Codex
+    // rollout or an OpenCode session moves the way a Claude transcript does.
     const offActivity = terminal?.onAgentActivity((activity) => {
       if (
         activity.workspace === workspace &&

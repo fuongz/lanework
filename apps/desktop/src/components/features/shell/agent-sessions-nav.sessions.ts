@@ -278,7 +278,8 @@ export function useAgentRail(
   };
 
   /**
-   * Open a conversation's row: Claude's and Codex's open as a chat (FE-62/D3).
+   * Open a conversation's row as a chat (FE-62/D3), OpenCode's too
+   * (FE-104).
    *
    * Unless a tab is running it, where it was last used; then that tab opens.
    */

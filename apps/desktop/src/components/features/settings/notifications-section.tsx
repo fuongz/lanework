@@ -118,7 +118,8 @@ export function NotificationsSection() {
           rows: [
             {
               label: "Agent sessions",
-              description: "Get notified when a Claude or Codex run finishes.",
+              description:
+                "Get notified when a Claude, Codex or OpenCode run finishes.",
               keywords:
                 "agent agents session sessions claude codex run finished done complete",
               control: (
@@ -133,7 +134,7 @@ export function NotificationsSection() {
             {
               label: "Needs your input",
               description:
-                "Get notified when Claude or Codex asks a question or needs permission.",
+                "Get notified when Claude, Codex or OpenCode asks a question or needs permission.",
               keywords:
                 "input waiting question ask permission approve allow agent claude codex blocked",
               control: (

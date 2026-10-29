@@ -14,18 +14,22 @@ import {
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import { type MouseEvent, memo, useContext, useState } from "react";
-import type { ToolCall, ToolKind } from "#/../shared/conversation";
+import type {
+  ConversationAgent,
+  ToolCall,
+  ToolKind,
+} from "#/../shared/conversation";
 import {
   ImageThumb,
   ImageViewerContext,
 } from "#/components/shared/common/markdown-body";
+import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
-import { ClaudeAiIcon } from "#/components/ui/svgs/claudeAiIcon";
 import {
   baseName,
   groupTitle,
@@ -257,14 +261,17 @@ export const ToolGroup = memo(function ToolGroup({
   calls,
   running,
   lead,
+  kind,
   slug,
   conversation,
 }: {
   calls: ToolCall[];
   /** The open turn's last group, a call still without its result. */
   running: boolean;
-  /** The first thing of its turn: the Claude mark leads it. */
+  /** The first thing of its turn: the CLI's mark leads it. */
   lead: boolean;
+  /** Which CLI's mark: the conversation's own, never always Claude's. */
+  kind: ConversationAgent;
   slug: string;
   conversation: string;
 }) {
@@ -312,7 +319,7 @@ export const ToolGroup = memo(function ToolGroup({
             )}
           >
             {lead ? (
-              <ClaudeAiIcon className="size-3.5" />
+              <TerminalKindIcon kind={kind} className="size-3.5" />
             ) : (
               <HugeiconsIcon
                 icon={KIND_ICONS[calls[0]?.kind ?? "other"]}

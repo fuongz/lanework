@@ -1,11 +1,14 @@
 // What `/` and `@` offer in the composer (FE-62/D8): slash commands and
-// skills, or files in the workspace's folder, fuzzy-matched. Nothing here
-// imports Electron.
+// skills, or files in the workspace's folder, fuzzy-matched. A conversation
+// on OpenCode is offered OpenCode's, read from its config folders, no
+// OpenCode service needed (FE-105/D3). Nothing here imports Electron.
 import { constants } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import {
   type CommandSource,
+  type ConversationAgent,
   commandLabel,
   type Suggestion,
 } from "../../../shared/conversation";
@@ -24,35 +27,47 @@ const CACHE_MS = 10_000;
 /** The longest description shown, in characters. */
 const DESCRIPTION_MAX = 160;
 
-/** Built-in commands that work in a headless session. */
-const BUILT_IN: Suggestion[] = (
-  [
-    {
-      value: "/compact",
-      detail: "Compact the conversation, keeping a summary",
-    },
-    { value: "/context", detail: "Show what fills the context window" },
-    { value: "/cost", detail: "Show this session's cost and duration" },
-    { value: "/init", detail: "Write a CLAUDE.md for this codebase" },
-    { value: "/review", detail: "Review a pull request" },
-    {
-      value: "/security-review",
-      detail: "Security review of the pending changes",
-    },
-    {
-      value: "/pr-comments",
-      detail: "Get comments from a GitHub pull request",
-    },
-    { value: "/release-notes", detail: "Show the release notes" },
-  ] as const
-).map(
-  (item): Suggestion => ({
-    ...item,
-    label: commandLabel(item.value),
-    kind: "builtin",
-    source: "builtin",
-  }),
-);
+/** As listed, with a label, the kind and the source. */
+function builtIns(items: readonly { value: string; detail: string }[]) {
+  return items.map(
+    (item): Suggestion => ({
+      ...item,
+      label: commandLabel(item.value),
+      kind: "builtin",
+      source: "builtin",
+    }),
+  );
+}
+
+/** Claude's built-in commands that work in a headless session. */
+const BUILT_IN: Suggestion[] = builtIns([
+  {
+    value: "/compact",
+    detail: "Compact the conversation, keeping a summary",
+  },
+  { value: "/context", detail: "Show what fills the context window" },
+  { value: "/cost", detail: "Show this session's cost and duration" },
+  { value: "/init", detail: "Write a CLAUDE.md for this codebase" },
+  { value: "/review", detail: "Review a pull request" },
+  {
+    value: "/security-review",
+    detail: "Security review of the pending changes",
+  },
+  {
+    value: "/pr-comments",
+    detail: "Get comments from a GitHub pull request",
+  },
+  { value: "/release-notes", detail: "Show the release notes" },
+]);
+
+/** OpenCode's built-in commands, as it describes them (FE-105/D3). */
+const OPENCODE_BUILT_IN: Suggestion[] = builtIns([
+  { value: "/init", detail: "Guided AGENTS.md setup" },
+  {
+    value: "/review",
+    detail: "Review changes: a commit, a branch or a PR, else the uncommitted",
+  },
+]);
 
 /** How well `query` matches `text`: higher is better, null is no match. */
 function fuzzyScore(text: string, query: string): number | null {
@@ -151,18 +166,24 @@ async function describe(
 /**
  * Every `.md` under `dir` as `/name`.
  *
- * A file in a subfolder is `/folder:name`, as the CLI names it.
+ * A file in a subfolder is `/folder:name`, as Claude names it; OpenCode
+ * names it `/folder/name`, so it passes `/` as `separator` (FE-105/D3).
  */
 async function commandsIn(
   dir: string,
   source: CommandSource,
+  separator = ":",
 ): Promise<Suggestion[]> {
   const out: Suggestion[] = [];
   const walk = async (at: string, prefix: string, depth: number) => {
     const entries = await readdir(at, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (entry.isDirectory() && depth < 3)
-        await walk(join(at, entry.name), `${prefix}${entry.name}:`, depth + 1);
+        await walk(
+          join(at, entry.name),
+          `${prefix}${entry.name}${separator}`,
+          depth + 1,
+        );
       else if (entry.isFile() && entry.name.endsWith(".md")) {
         const { description } = await describe(join(at, entry.name));
         const value = `/${prefix}${entry.name.slice(0, -3)}`;
@@ -210,19 +231,68 @@ async function skillsIn(
 }
 
 /**
- * Every slash command and skill, unranked.
+ * OpenCode's global config folders, where its user commands and skills live
+ * (FE-105/D3): `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`, then
+ * `$OPENCODE_CONFIG_DIR` when it is set.
  *
- * The project's come first, then the user's, then the built-in ones. The
- * user's are Claude's (`~/.claude`), then Codex's (`~/.agents/skills`, then
- * `$CODEX_HOME/skills`) (FE-92/D3).
- *
- * @param folder The workspace's folder; null leaves out the project's own.
+ * NOTE: The environment counts only for the real home, as in
+ * `opencodeDataDir` (`terminal/opencode-sessions.ts`): a spec points `home`
+ * somewhere else and must not read the machine's commands through it.
  */
-export async function listCommands(
+export function opencodeConfigDirs(
   home: string,
-  folder: string | null,
-): Promise<Suggestion[]> {
-  const groups = await Promise.all([
+  env: NodeJS.ProcessEnv = process.env,
+  realHome = home === homedir(),
+): string[] {
+  const base =
+    realHome && env.XDG_CONFIG_HOME
+      ? join(env.XDG_CONFIG_HOME, "opencode")
+      : join(home, ".config", "opencode");
+  const extra = realHome ? env.OPENCODE_CONFIG_DIR : undefined;
+  return extra && extra !== base ? [base, extra] : [base];
+}
+
+/**
+ * A config folder's commands and skills, the way OpenCode reads them: its
+ * `command/` and `commands/` (`.md`, named by path), and its `skill/` and
+ * `skills/` (`<name>/SKILL.md`).
+ */
+function opencodeIn(dir: string, source: CommandSource) {
+  return [
+    commandsIn(join(dir, "command"), source, "/"),
+    commandsIn(join(dir, "commands"), source, "/"),
+    skillsIn(join(dir, "skill"), source),
+    skillsIn(join(dir, "skills"), source),
+  ];
+}
+
+/**
+ * What OpenCode offers (FE-105/D3): the project's `.opencode`, then the
+ * user's config folders ({@link opencodeConfigDirs}).
+ *
+ * NOTE: OpenCode also reads the skills other agents share, `.claude/skills`
+ * and `.agents/skills`, in the project and in the home (its compatibility
+ * sources, checked in OpenCode 2.2), so those are offered too. It walks up
+ * from the folder for `.opencode`; only the folder's own is read here.
+ */
+function opencodeGroups(home: string, folder: string | null) {
+  return [
+    ...(folder ? opencodeIn(join(folder, ".opencode"), "project") : []),
+    folder ? skillsIn(join(folder, ".claude", "skills"), "project") : [],
+    folder ? skillsIn(join(folder, ".agents", "skills"), "project") : [],
+    ...opencodeConfigDirs(home).flatMap((dir) => opencodeIn(dir, "personal")),
+    skillsIn(join(home, ".claude", "skills"), "personal"),
+    skillsIn(join(home, ".agents", "skills"), "personal"),
+  ];
+}
+
+/**
+ * What Claude and Codex offer: the project's, then the user's, which are
+ * Claude's (`~/.claude`), then Codex's (`~/.agents/skills`, then
+ * `$CODEX_HOME/skills`) (FE-92/D3).
+ */
+function claudeGroups(home: string, folder: string | null) {
+  return [
     folder ? commandsIn(join(folder, ".claude", "commands"), "project") : [],
     folder ? skillsIn(join(folder, ".claude", "skills"), "project") : [],
     folder ? skillsIn(join(folder, ".agents", "skills"), "project") : [],
@@ -230,11 +300,33 @@ export async function listCommands(
     skillsIn(join(home, ".claude", "skills"), "personal"),
     skillsIn(join(home, ".agents", "skills"), "personal"),
     skillsIn(join(codexHome(home), "skills"), "personal"),
-  ]);
+  ];
+}
+
+/**
+ * Every slash command and skill, unranked.
+ *
+ * The project's come first, then the user's, then the agent's built-in
+ * ones. OpenCode's are read from its own folders (FE-105/D3); Claude's and
+ * Codex's as before.
+ *
+ * @param folder The workspace's folder; null leaves out the project's own.
+ * @param agent The conversation's agent; Claude's list when not known.
+ */
+export async function listCommands(
+  home: string,
+  folder: string | null,
+  agent: ConversationAgent = "claude",
+): Promise<Suggestion[]> {
+  const opencode = agent === "opencode";
+  const groups = await Promise.all(
+    opencode ? opencodeGroups(home, folder) : claudeGroups(home, folder),
+  );
+  const builtIn = opencode ? OPENCODE_BUILT_IN : BUILT_IN;
   const seen = new Set<string>();
   const all: Suggestion[] = [];
   // The project's first: it wins a name both have.
-  for (const item of [...groups.flat(), ...BUILT_IN]) {
+  for (const item of [...groups.flat(), ...builtIn]) {
     if (seen.has(item.value)) continue;
     seen.add(item.value);
     all.push(item);

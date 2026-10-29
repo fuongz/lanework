@@ -1,6 +1,7 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AGENT_LABELS } from "#/../shared/conversation";
 import {
   HarnessIcon,
   ISLAND_HOST,
@@ -31,12 +32,7 @@ interface Waiting extends AwaitingEntry {
 
 /** "Claude is asking", or "Codex needs permission". */
 function headline(entry: Waiting): string {
-  const who =
-    entry.agent === "codex"
-      ? "Codex"
-      : entry.agent === "claude"
-        ? "Claude"
-        : "An agent";
+  const who = entry.agent ? AGENT_LABELS[entry.agent] : "An agent";
   return entry.requests[0]?.question
     ? `${who} is asking`
     : `${who} needs permission`;

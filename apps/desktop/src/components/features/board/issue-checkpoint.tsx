@@ -22,6 +22,7 @@ const REFRESH_MS = 30_000;
 function agentName(slug: string): string {
   if (slug.startsWith("claude")) return "Claude Code";
   if (slug.startsWith("codex")) return "Codex";
+  if (slug.startsWith("opencode")) return "OpenCode";
   return slug;
 }
 
@@ -35,6 +36,12 @@ const RESUMERS = [
     key: "claude",
     label: "Claude Code",
     command: (id: string) => `claude "resume ${id}"`,
+  },
+  {
+    // OpenCode's TUI takes its first prompt as a flag, not an argument.
+    key: "opencode",
+    label: "OpenCode",
+    command: (id: string) => `opencode --prompt "resume ${id}"`,
   },
 ] as const;
 

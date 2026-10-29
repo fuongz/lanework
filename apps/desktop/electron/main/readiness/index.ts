@@ -16,6 +16,7 @@
 // nothing outside the folder (`~/.claude.json`, `config.toml`) is written.
 import { randomUUID } from "node:crypto";
 import { readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   isReadinessFix,
@@ -25,13 +26,17 @@ import {
   readinessChannels,
 } from "../../../shared/readiness";
 import { claudeDir, claudeJsonPath, readText } from "../agent-home";
+import { opencodeConfigDir, opencodeConfigPath } from "../agent-setup/opencode";
 import {
   claudeSettingsPath,
   findHook,
   readSettings,
 } from "../handoff/claude-settings";
 import { codexConfigPath, codexHome, codexHooksPath } from "../handoff/codex";
+import { opencodePluginPath, readOpencodePlugin } from "../handoff/opencode";
 import { handle } from "../ipc";
+import { opencodeDataDir } from "../terminal/opencode-sessions";
+import { agentHomeDir } from "../test-seams";
 import { knownWorkspace } from "../workspaces";
 import { folderExists } from "../workspaces/local-folder";
 import { readFolders } from "../workspaces/store";
@@ -41,6 +46,7 @@ import {
   claudeHasLanework,
   codexHasLanework,
   FIX_FILES,
+  opencodeHasLanework,
   type ReadinessFacts,
 } from "./checks";
 
@@ -82,6 +88,36 @@ async function resolve(slug: string) {
  * Claude's and Codex's files are read only when that CLI is used on this
  * machine.
  */
+/**
+ * OpenCode on this machine (FE-104): used, hooked, and whether its user
+ * config, or the folder's own, has the lanework MCP server.
+ */
+async function opencodeFacts(folder: string | null) {
+  const home = agentHomeDir();
+  const realHome = home === homedir();
+  const configDir = opencodeConfigDir(home);
+  const used = (
+    await Promise.all([
+      exists(configDir),
+      exists(opencodeDataDir(home, process.env, realHome)),
+    ])
+  ).some(Boolean);
+  if (!used) return { used, hook: false, mcp: false };
+  const plugin = await readOpencodePlugin(opencodePluginPath(configDir));
+  const configs = [
+    opencodeConfigPath(home),
+    ...(folder
+      ? ["opencode.json", "opencode.jsonc"].map((name) => join(folder, name))
+      : []),
+  ];
+  const texts = await Promise.all(configs.map((path) => readText(path)));
+  return {
+    used,
+    hook: plugin.kind === "ours",
+    mcp: texts.some(opencodeHasLanework),
+  };
+}
+
 async function gather(slug: string): Promise<ReadinessFacts> {
   const { workspace, path } = await resolve(slug);
   const [claudeUsed, codexUsed] = await Promise.all([
@@ -126,6 +162,7 @@ async function gather(slug: string): Promise<ReadinessFacts> {
       hook: codexHook,
       mcp: codexHasLanework(codexToml),
     },
+    opencode: await opencodeFacts(path),
     checkedAt: new Date().toISOString(),
   };
 }

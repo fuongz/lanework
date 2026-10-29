@@ -3,11 +3,12 @@
 // decides when a desktop notification goes out.
 //
 // NOTE: Pure. It only follows the engines' events; it never asks an engine.
-import type {
-  Awaiting,
-  ConversationAgent,
-  ConversationEvent,
-  PermissionRequest,
+import {
+  AGENT_LABELS,
+  type Awaiting,
+  type ConversationAgent,
+  type ConversationEvent,
+  type PermissionRequest,
 } from "../../../shared/conversation";
 
 /** How many conversations are kept; the oldest goes first. */
@@ -132,7 +133,7 @@ export function awaitingNotice(
   agent: ConversationAgent,
   request: PermissionRequest,
 ): { title: string; body: string } {
-  const who = agent === "codex" ? "Codex" : "Claude";
+  const who = AGENT_LABELS[agent];
   const question = request.questions?.[0]?.question;
   const text = (question || request.summary || request.tool)
     .replace(/\s+/g, " ")

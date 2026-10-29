@@ -3,7 +3,8 @@
 //
 // NOTE: Only what the CLIs' own FILE TOOLS did: Claude's `Edit`, `Write`,
 // `MultiEdit` and `NotebookEdit` (and its file history, when that is on), and
-// Codex's `apply_patch`. A file changed through the shell is in no
+// Codex's `apply_patch`, OpenCode's `edit`, `write` and `apply_patch` (read
+// from its database, FE-104). A file changed through the shell is in no
 // transcript, and the UI says so rather than let "not listed" read as "not
 // touched".
 //
@@ -18,6 +19,8 @@ import {
   type AgentFileTouch,
   type AgentSession,
   isAgentSessionId,
+  isAgentSessionIdOf,
+  isTerminalAgent,
   type TerminalAgent,
 } from "../../../shared/terminal";
 import { locate, repoFacts } from "../git/worktree";
@@ -31,6 +34,8 @@ import {
   META_CHUNK,
   readRange,
 } from "./agent-sessions";
+import { opencodeEdits } from "./opencode-details";
+import { opencodeDataDirOf } from "./opencode-sessions";
 
 /**
  * The most of one transcript a scan reads: its LAST 32 MB.
@@ -51,8 +56,9 @@ interface AgentFilesRequest {
 /**
  * The agent view's request off the wire: ids, never a path.
  *
- * The same rule as a sub-agent's (FE-35/D10). A conversation is a UUID, so
- * it can be no `..`, separator or absolute path.
+ * The same rule as a sub-agent's (FE-35/D10). A conversation is a UUID, or
+ * OpenCode's `ses_…` (FE-104), so it can be no `..`, separator or absolute
+ * path.
  *
  * @throws when any of the three arguments is missing or invalid.
  */
@@ -66,9 +72,8 @@ export function agentFilesRequest(args: unknown[]): AgentFilesRequest {
     workspace.length > 200
   )
     throw new Error("A valid workspace is required");
-  if (agent !== "claude" && agent !== "codex")
-    throw new Error("A valid agent is required");
-  if (!isAgentSessionId(id))
+  if (!isTerminalAgent(agent)) throw new Error("A valid agent is required");
+  if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
   return { workspace, agent, id };
 }
@@ -96,6 +101,8 @@ const NEEDLES: Record<TerminalAgent, Buffer[]> = {
     '"type":"create"',
   ].map((needle) => Buffer.from(needle)),
   codex: ['"FileChange"', "apply_patch"].map((needle) => Buffer.from(needle)),
+  // Its sessions are rows of a database, not a transcript to scan.
+  opencode: [],
 };
 
 /** One file's edits in one transcript. */
@@ -667,6 +674,33 @@ async function codexSources(
 }
 
 /**
+ * OpenCode conversation `id`'s edits and its sub-agents', in the shape a
+ * transcript's scan has (FE-104).
+ *
+ * @throws when the conversation is not one of `folder`'s.
+ */
+async function opencodeScanned(
+  home: string,
+  folder: string,
+  id: string,
+): Promise<
+  {
+    source: { via: AgentFileTouch["via"] };
+    scan: Awaited<ReturnType<typeof scanTranscript>> | null;
+  }[]
+> {
+  const { sources, partial } = await opencodeEdits(
+    opencodeDataDirOf(home),
+    folder,
+    id,
+  );
+  return sources.map(({ via, files }) => ({
+    source: { via },
+    scan: { partial, files },
+  }));
+}
+
+/**
  * The files `agent`'s conversation `id` in `folder` edited with its file
  * tools, newest edit first.
  *
@@ -688,16 +722,20 @@ export async function readAgentFiles(
 ): Promise<AgentFiles> {
   agentFilesRequest(["-", agent, id]);
   const roots = known ?? (await repoRoots(folder));
-  const sources =
-    agent === "claude"
-      ? await claudeSources(home, folder, id)
-      : await codexSources(home, folder, id);
-  const scanned = await Promise.all(
-    sources.map(async (source) => ({
-      source,
-      scan: await scanTranscript(source.file, agent, folder).catch(() => null),
-    })),
-  );
+  const scanned =
+    agent === "opencode"
+      ? await opencodeScanned(home, folder, id)
+      : await Promise.all(
+          (agent === "claude"
+            ? await claudeSources(home, folder, id)
+            : await codexSources(home, folder, id)
+          ).map(async (source) => ({
+            source: { via: source.via },
+            scan: await scanTranscript(source.file, agent, folder).catch(
+              () => null,
+            ),
+          })),
+        );
   const merged = new Map<string, AgentFileTouch & { own: boolean }>();
   let partial = false;
   for (const { source, scan } of scanned) {

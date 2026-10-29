@@ -47,7 +47,7 @@ export function InstructionsEffective() {
     return (
       <InstructionsMessage
         title="No such agent"
-        description="Instructions are shown for Claude and Codex."
+        description="Instructions are shown for Claude, Codex and OpenCode."
       />
     );
   if (!effective)

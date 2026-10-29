@@ -11,7 +11,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState } from "react";
-import type { FolderTrust, SetupAgent } from "#/../shared/agent-setup";
+import type { FolderTrust } from "#/../shared/agent-setup";
 import type { ReadinessFix } from "#/../shared/readiness";
 import type { Workspace } from "#/../shared/workspaces";
 import type { RepoTrust } from "#/../shared/worktree";
@@ -21,6 +21,9 @@ import {
   SettingsCard,
 } from "#/components/shared/settings/settings-page";
 import {
+  TRUST_AGENTS,
+  TRUST_NAME,
+  type TrustAgent,
   type TrustAsk,
   TrustDialog,
 } from "#/components/shared/settings/trust-dialog";
@@ -132,10 +135,15 @@ function ReadinessSection({
   );
 }
 
+/** What each CLI loads from a trusted folder, and the verb it takes. */
+const TRUST_LOADS: Record<TrustAgent, { config: string; load: string }> = {
+  claude: { config: ".claude settings", load: "load" },
+  codex: { config: ".codex config", load: "loads" },
+};
+
 /** What a CLI's trust in the folder means for its chats, in words. */
-function trustText(agent: SetupAgent, trust: FolderTrust): string {
-  const config = agent === "claude" ? ".claude settings" : ".codex config";
-  const load = agent === "claude" ? "load" : "loads";
+function trustText(agent: TrustAgent, trust: FolderTrust): string {
+  const { config, load } = TRUST_LOADS[agent];
   if (trust.from)
     return `Trusted through ${trust.from}, so the repository’s ${config} ${load} here. Untrust it there to stop that.`;
   if (trust.trusted) return `Trusted: the repository’s ${config} ${load}.`;
@@ -260,7 +268,8 @@ function GitTrustRow({ slug }: { slug: string }) {
 
 /**
  * Whether Claude Code and Codex trust the project's folder, with the user's
- * answer changed here (FE-101): Trust when it is not, Untrust when its own
+ * answer changed here (FE-101). OpenCode asks no such question (FE-104), so
+ * it has no row: Trust when it is not, Untrust when its own
  * record is what trusts it. A trust from a folder above is said, not offered
  * to take back: untrusting this folder would not end it.
  */
@@ -274,9 +283,9 @@ function TrustSection({ slug }: { slug: string }) {
       <h3 className="text-[15px] font-medium">Folder trust</h3>
       <SettingsCard>
         {trust ? (
-          (["claude", "codex"] as const).map((agent) => {
+          TRUST_AGENTS.map((agent) => {
             const state = trust[agent];
-            const name = agent === "claude" ? "Claude Code" : "Codex";
+            const name = TRUST_NAME[agent];
             return (
               <Row
                 key={agent}

@@ -1,13 +1,14 @@
 // One sub-agent's transcript, read for the viewer: what it was asked, the
-// tools it called and what it reported back. A Claude sub-agent, or a thread
-// a Codex conversation spawned.
+// tools it called and what it reported back. A Claude sub-agent, a thread
+// a Codex conversation spawned, or a child session of OpenCode's (FE-104).
 //
 // NOTE: Read-only, and nothing here imports Electron: main calls it, and a
 // spec can drive it under plain Node against a fake home folder.
 import { stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import {
-  isAgentSessionId,
+  isAgentSessionIdOf,
   isClaudeSubagentId,
   isWorkflowRunId,
   SUBAGENT_INPUT_MAX,
@@ -29,6 +30,15 @@ import {
   tidy,
 } from "./agent-sessions";
 import { workflowRunEnded } from "./background-tasks";
+import { opencodeModelName } from "./opencode-details";
+import {
+  type OpencodeSchema,
+  opencodeDataDirOf,
+  opencodePromptText,
+  opencodeSessionIn,
+  opencodeSubagentTitle,
+  withOpencodeDb,
+} from "./opencode-sessions";
 
 /** The most of a transcript one read takes (FE-35/D10). */
 const SUBAGENT_READ_MAX = 8 * 1024 * 1024;
@@ -52,7 +62,8 @@ interface SubagentRequest {
  *
  * NOTE: Each one of the shape its CLI writes and nothing else (a
  * conversation is a UUID, a Claude sub-agent the `<id>` of its file's name,
- * a Codex thread a UUID), so none can be `..`, a separator or an absolute
+ * a Codex thread a UUID, an OpenCode conversation and its child session each
+ * a `ses_…`), so none can be `..`, a separator or an absolute
  * path. The path is built from them by {@link readSubagentTranscript},
  * inside the CLI's folder.
  *
@@ -68,13 +79,15 @@ export function subagentRequest(args: unknown[]): SubagentRequest {
     workspace.length > 200
   )
     throw new Error("A valid workspace is required");
-  if (agent !== "claude" && agent !== "codex")
+  if (agent !== "claude" && agent !== "codex" && agent !== "opencode")
     throw new Error("A valid agent is required");
-  if (!isAgentSessionId(conversation))
+  if (!isAgentSessionIdOf(agent, conversation))
     throw new Error("A valid conversation is required");
   if (
     typeof sub !== "string" ||
-    !(agent === "claude" ? isClaudeSubagentId(sub) : isAgentSessionId(sub))
+    !(agent === "claude"
+      ? isClaudeSubagentId(sub)
+      : isAgentSessionIdOf(agent, sub))
   )
     throw new Error("A valid sub-agent is required");
   // A workflow's agents are Claude's only, in a folder named by the run.
@@ -659,6 +672,13 @@ export async function readSubagentTranscript(
   { agent, conversation, sub, run }: Omit<SubagentRequest, "workspace">,
 ): Promise<SubagentTranscript> {
   subagentRequest(["-", agent, conversation, sub, run ?? null]);
+  if (agent === "opencode")
+    return opencodeSubagentTranscript(
+      opencodeDataDirOf(home),
+      folder,
+      conversation,
+      sub,
+    );
   if (agent === "codex") {
     const file = await codexSubagentFile(home, folder, conversation, sub);
     const { rows, fresh, truncated } = await readTranscript(file);
@@ -702,4 +722,176 @@ export async function readSubagentTranscript(
     meta && typeof meta === "object" ? (meta as ClaudeMeta) : null,
     { folder, working, truncated },
   );
+}
+
+/** An OpenCode child session's messages read at most (FE-35/D10). */
+const OPENCODE_ROWS_MAX = 2000;
+/** Of a longer one: its first ones, for the prompt; the rest from its end. */
+const OPENCODE_HEAD_ROWS = 50;
+
+/** What an OpenCode tool call was made on, in one line (FE-104). */
+function opencodeStepSummary(
+  tool: string,
+  input: Record<string, unknown>,
+  folder: string,
+): string {
+  const path = input.filePath ?? input.path;
+  if (typeof path === "string") return shown(path, folder);
+  if (typeof input.command === "string") return firstLine(input.command);
+  if (typeof input.pattern === "string") return input.pattern;
+  if (typeof input.url === "string") return input.url;
+  if (typeof input.description === "string")
+    return firstLine(input.description);
+  if (typeof input.patchText === "string")
+    return patched(input.patchText, folder);
+  if (tool === "todowrite") return "todos";
+  return anyString(input);
+}
+
+/** A `session_message` row, as the transcript reads it. */
+interface OpencodeRow {
+  type: unknown;
+  data: unknown;
+}
+
+/** Child session `sub`'s messages: all of them, or its start and its end. */
+function opencodeRows(
+  db: DatabaseSync,
+  sub: string,
+): { rows: OpencodeRow[]; truncated: boolean } {
+  const select = `SELECT type, data FROM session_message
+                   WHERE session_id = ? AND type IN ('user', 'assistant')`;
+  const total = (
+    db
+      .prepare(
+        `SELECT count(*) AS n FROM session_message
+          WHERE session_id = ? AND type IN ('user', 'assistant')`,
+      )
+      .get(sub) as { n?: unknown } | undefined
+  )?.n;
+  if (typeof total !== "number" || total <= OPENCODE_ROWS_MAX)
+    return {
+      rows: db
+        .prepare(`${select} ORDER BY seq`)
+        .all(sub) as unknown as OpencodeRow[],
+      truncated: false,
+    };
+  const head = db
+    .prepare(`${select} ORDER BY seq LIMIT ?`)
+    .all(sub, OPENCODE_HEAD_ROWS) as unknown as OpencodeRow[];
+  const tail = (
+    db
+      .prepare(`${select} ORDER BY seq DESC LIMIT ?`)
+      .all(
+        sub,
+        OPENCODE_ROWS_MAX - OPENCODE_HEAD_ROWS,
+      ) as unknown as OpencodeRow[]
+  ).reverse();
+  return { rows: [...head, ...tail], truncated: true };
+}
+
+/** Whether `sub` was spawned, at any depth, by `conversation`. */
+function opencodeDescends(
+  db: DatabaseSync,
+  schema: OpencodeSchema,
+  sub: string,
+  conversation: string,
+): boolean {
+  const up = db.prepare(
+    `SELECT parent_id AS parent FROM ${schema.table} WHERE id = ?`,
+  );
+  let at: unknown = sub;
+  for (let depth = 0; depth < 8 && typeof at === "string"; depth++) {
+    at = (up.get(at) as { parent?: unknown } | undefined)?.parent;
+    if (at === conversation) return true;
+  }
+  return false;
+}
+
+/**
+ * OpenCode child session `sub` of `conversation` in `folder`, read for the
+ * viewer (FE-104).
+ *
+ * What it was told is its first `user` message; its steps the tool parts of
+ * its answers; its report the text of its last answer, once it is done.
+ *
+ * NOTE: Schema v2 only. The legacy one keeps its parts in `part`, and an
+ * OpenCode that old shows the sub-agent with no steps.
+ *
+ * @throws when `sub` is not a session `conversation` spawned in `folder`.
+ */
+export async function opencodeSubagentTranscript(
+  dataDir: string,
+  folder: string,
+  conversation: string,
+  sub: string,
+): Promise<SubagentTranscript> {
+  const read = await withOpencodeDb(
+    dataDir,
+    null as SubagentTranscript | null,
+    (db, schema) => {
+      const row = opencodeSessionIn(db, schema, folder, sub);
+      if (!row || !opencodeDescends(db, schema, sub, conversation)) return null;
+      const { rows, truncated } = schema.v2
+        ? opencodeRows(db, sub)
+        : { rows: [], truncated: false };
+      let prompt: string | null = null;
+      let report: string | null = null;
+      let model = opencodeModelName(row.model);
+      const steps: SubagentStep[] = [];
+      for (const message of rows) {
+        if (message.type === "user") {
+          prompt ??= opencodePromptText(message.data);
+          continue;
+        }
+        let data: Record<string, unknown>;
+        try {
+          data = JSON.parse(String(message.data)) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        model =
+          opencodeModelName(data.model as Record<string, unknown> | null) ??
+          model;
+        const content = Array.isArray(data.content) ? data.content : [];
+        const texts: string[] = [];
+        for (const part of content as Record<string, unknown>[]) {
+          if (part?.type === "text" && typeof part.text === "string") {
+            if (part.text.trim()) texts.push(part.text.trim());
+            continue;
+          }
+          if (part?.type !== "tool" || typeof part.name !== "string") continue;
+          const state = (part.state ?? {}) as Record<string, unknown>;
+          const input =
+            state.input && typeof state.input === "object"
+              ? (state.input as Record<string, unknown>)
+              : {};
+          steps.push({
+            tool: part.name,
+            summary: opencodeStepSummary(part.name, input, folder),
+            input: inputText(input),
+            error: state.status === "error",
+          });
+        }
+        // The newest answer's words are its report; one of only tool calls
+        // leaves the one before it standing.
+        if (texts.length > 0) report = texts.join("\n\n");
+      }
+      return {
+        title: opencodeSubagentTitle(row.title) ?? "Sub-agent",
+        type: row.agent,
+        model,
+        startedAt: new Date(row.created).toISOString(),
+        endedAt: new Date(row.updated).toISOString(),
+        working: row.working,
+        prompt,
+        steps,
+        report: row.working ? null : report,
+        truncated,
+      } satisfies SubagentTranscript;
+    },
+  );
+  if (!read)
+    throw new Error("That sub-agent is not one of this conversation's.");
+  return read;
 }

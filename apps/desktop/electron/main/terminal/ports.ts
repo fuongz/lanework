@@ -33,6 +33,7 @@ const BOUNDARY = new Set([
   "nu",
   "claude",
   "codex",
+  "opencode",
   "login",
   "tmux",
   "screen",

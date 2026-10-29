@@ -117,12 +117,13 @@ export interface DesktopAuthApi {
  * Where the `lanework` MCP server entry in an agent's user config points
  * (FE-52/D8).
  *
- * The config is `~/.claude.json` for Claude Code, `config.toml` for Codex.
- * `local` is the offline server over stdio (the app's own shim); `cloud` is
- * `https://mcp.lanework.dev/v1` over HTTP.
+ * The config is `~/.claude.json` for Claude Code, `config.toml` for Codex,
+ * `opencode.json` for OpenCode (FE-104). `local` is the offline server over
+ * stdio (the app's own shim); `cloud` is `https://mcp.lanework.dev/v1` over
+ * HTTP.
  */
 export type LaneworkMcpMode = "local" | "cloud";
-export type LaneworkMcpAgent = "claude-code" | "codex";
+export type LaneworkMcpAgent = "claude-code" | "codex" | "opencode";
 
 export interface LaneworkMcpEntry {
   /** A `lanework` entry is in this agent's config. */
@@ -159,6 +160,7 @@ export interface LaneworkMcpStatus {
   shimPath: string;
   claude: LaneworkMcpEntry;
   codex: LaneworkMcpEntry;
+  opencode: LaneworkMcpEntry;
 }
 
 export const laneworkMcpChannels = {

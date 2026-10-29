@@ -8,7 +8,7 @@ import {
   PASTE_MAX,
   type SendRequest,
 } from "../../../shared/conversation";
-import { isAgentSessionId } from "../../../shared/terminal";
+import { isAgentSessionId, isAgentSessionIdOf } from "../../../shared/terminal";
 
 /** The longest prompt main passes on, in characters. */
 const PROMPT_MAX = 256 * 1024;
@@ -54,7 +54,11 @@ export function sendRequest(value: unknown): SendRequest {
     v.workspace.length > 200
   )
     throw new Error("A valid workspace is required");
-  if (!isAgentSessionId(v.conversation))
+  // A UUID, or OpenCode's own `ses_` id (FE-104).
+  if (
+    !isAgentSessionId(v.conversation) &&
+    !isAgentSessionIdOf("opencode", v.conversation)
+  )
     throw new Error("A valid conversation is required");
   if (typeof v.text !== "string" || v.text.length > PROMPT_MAX)
     throw new Error("The message is too long.");

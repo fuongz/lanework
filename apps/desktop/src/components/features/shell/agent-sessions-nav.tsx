@@ -2,7 +2,7 @@ import { Add01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import type { AgentSession } from "#/../shared/terminal";
+import type { AgentSession, TerminalAgent } from "#/../shared/terminal";
 import { StatusPing } from "#/components/shared/agents/status-ping";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
@@ -34,6 +34,13 @@ import { SessionRow, StopItem } from "./agent-sessions-nav.row";
 import { useAgentRail } from "./agent-sessions-nav.sessions";
 import { RenameAgentDialog } from "./rename-agent-dialog";
 
+/** What would have found a deleted conversation again, per CLI. */
+const RESUME_COMMAND: Record<TerminalAgent, string> = {
+  claude: "claude --resume",
+  codex: "codex resume",
+  opencode: "opencode --session",
+};
+
 /**
  * Rows before "Show more"; the rest, up to the listing's 20, after it
  * (FE-23/D4).
@@ -41,7 +48,7 @@ import { RenameAgentDialog } from "./rename-agent-dialog";
 const FOLDED = 5;
 
 /**
- * The rail's Sessions group: the Claude and Codex conversations this
+ * The rail's Sessions group: the Claude, Codex and OpenCode conversations this
  * project's folder has.
  *
  * A row opens its agent full size in the main view: the one already resuming
@@ -401,10 +408,7 @@ function AgentSessionsList({
             </AlertDialogTitle>
             <AlertDialogDescription>
               Its transcript is deleted from this machine for good. There is no
-              undo, and{" "}
-              {deleting?.session.agent === "codex"
-                ? "codex resume"
-                : "claude --resume"}{" "}
+              undo, and {RESUME_COMMAND[deleting?.session.agent ?? "claude"]}{" "}
               will no longer find it.
             </AlertDialogDescription>
           </AlertDialogHeader>

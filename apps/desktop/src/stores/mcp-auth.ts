@@ -3,11 +3,50 @@ import { create } from "zustand";
 import type {
   LaneworkMcpAgent,
   LaneworkMcpAuth,
+  LaneworkMcpEntry,
   LaneworkMcpStatus,
 } from "../../shared/auth";
 import { useSession } from "./session";
 
-const MCP_AGENTS = ["claude-code", "codex"] as const;
+const MCP_AGENTS = [
+  "claude-code",
+  "codex",
+  "opencode",
+] as const satisfies readonly LaneworkMcpAgent[];
+
+/** The command each agent's CLI goes by on the PATH. */
+export const MCP_CLI: Record<LaneworkMcpAgent, string> = {
+  "claude-code": "claude",
+  codex: "codex",
+  opencode: "opencode",
+};
+
+/**
+ * What signs an agent's CLI in to the `lanework` server from a terminal.
+ *
+ * NOTE: OpenCode names it `mcp auth`, not `mcp login`.
+ */
+export const MCP_LOGIN_COMMAND: Record<LaneworkMcpAgent, string> = {
+  "claude-code": "claude mcp login lanework",
+  codex: "codex mcp login lanework",
+  opencode: "opencode mcp auth lanework",
+};
+
+/** The `lanework` entry in `agent`'s own config, as `status` reads it. */
+export function mcpEntry(
+  status: LaneworkMcpStatus | null | undefined,
+  agent: LaneworkMcpAgent,
+): LaneworkMcpEntry | undefined {
+  if (!status) return undefined;
+  switch (agent) {
+    case "claude-code":
+      return status.claude;
+    case "codex":
+      return status.codex;
+    case "opencode":
+      return status.opencode;
+  }
+}
 
 /** What a row shows: the CLI's answer, or that one is on its way. */
 export type McpAuthView = LaneworkMcpAuth | "checking" | "login";
@@ -25,13 +64,14 @@ export function cloudAgents(
   status: LaneworkMcpStatus | null,
 ): LaneworkMcpAgent[] {
   return MCP_AGENTS.filter((agent) => {
-    const entry = agent === "claude-code" ? status?.claude : status?.codex;
+    const entry = mcpEntry(status, agent);
     return !!entry?.ours && entry.mode === "cloud";
   });
 }
 
 /**
- * Whether Claude Code and Codex are signed in to the cloud Lanework MCP.
+ * Whether Claude Code, Codex and OpenCode are signed in to the cloud Lanework
+ * MCP.
  *
  * Read by Settings › Agents and the sign-in island.
  *

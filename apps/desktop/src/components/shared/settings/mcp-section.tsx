@@ -35,6 +35,7 @@ type Scope = "global" | "project";
 const AGENTS: { agent: SetupAgent; title: string }[] = [
   { agent: "claude", title: "Claude Code" },
   { agent: "codex", title: "Codex" },
+  { agent: "opencode", title: "OpenCode" },
 ];
 
 const SCOPES: Record<SetupScope, string> = {
@@ -47,10 +48,15 @@ const SCOPES: Record<SetupScope, string> = {
 
 /** Where each agent's servers come from, for its empty card. */
 const FILES: Record<Scope, Record<SetupAgent, string>> = {
-  global: { claude: "~/.claude.json", codex: "~/.codex/config.toml" },
+  global: {
+    claude: "~/.claude.json",
+    codex: "~/.codex/config.toml",
+    opencode: "~/.config/opencode/opencode.json",
+  },
   project: {
     claude: ".mcp.json or this project’s entry in ~/.claude.json",
     codex: ".codex/config.toml",
+    opencode: "opencode.json",
   },
 };
 

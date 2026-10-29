@@ -1,5 +1,5 @@
-// Where the user's own `claude` (or `codex`) is, for the headless engine
-// (FE-62/D1).
+// Where the user's own `claude` (or `codex`, or `opencode`) is, for the
+// headless engine (FE-62/D1, FE-104).
 //
 // Found the way the terminal finds agent CLIs (`terminal/agents.ts`): the
 // user's login AND interactive shell is asked, because Claude's installer may
@@ -22,7 +22,7 @@ export interface ClaudeCli {
 }
 
 /** The CLIs the chat runs. */
-type CliName = "claude" | "codex";
+type CliName = "claude" | "codex" | "opencode";
 
 /** Fences the probe's answers off from whatever the shell profile prints. */
 const MARK = "__lanework_agent_cli__";
@@ -93,23 +93,35 @@ function probe(
 
 /** Each CLI's own installers' places, when the shell could not say. */
 function installed(name: CliName): string[] {
-  return name === "claude"
-    ? [
+  switch (name) {
+    case "claude":
+      return [
         join(homedir(), ".local", "bin", "claude"),
         join(homedir(), ".claude", "local", "claude"),
         "/opt/homebrew/bin/claude",
         "/usr/local/bin/claude",
-      ]
-    : [
+      ];
+    case "codex":
+      return [
         join(homedir(), ".local", "bin", "codex"),
         "/opt/homebrew/bin/codex",
         "/usr/local/bin/codex",
       ];
+    case "opencode":
+      // Its own installer's place first (`~/.opencode/bin`).
+      return [
+        join(homedir(), ".opencode", "bin", "opencode"),
+        join(homedir(), ".local", "bin", "opencode"),
+        "/opt/homebrew/bin/opencode",
+        "/usr/local/bin/opencode",
+      ];
+  }
 }
 
 const MISSING: Record<CliName, string> = {
   claude: "Claude Code is not installed on this Mac.",
   codex: "Codex is not installed on this Mac.",
+  opencode: "OpenCode is not installed on this Mac.",
 };
 
 /** The `claude` binary; see {@link createAgentCli}. */

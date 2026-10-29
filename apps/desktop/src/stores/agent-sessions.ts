@@ -10,6 +10,7 @@ import {
   type CodexQuota,
   type CodexResetOutcome,
   isWorkflowAgentKey,
+  type OpenCodeUsage,
   type TerminalAgent,
 } from "../../shared/terminal";
 
@@ -93,6 +94,13 @@ interface AgentSessionsState {
    * answered last. Null until read, or when main has nothing to show.
    */
   claudeUsage: ClaudeUsage | null;
+  /**
+   * OpenCode Go's limits (FE-104/D10), read with Codex's usage.
+   *
+   * The account's, so one for every project. Null without a Go subscription,
+   * or until read.
+   */
+  opencodeUsage: OpenCodeUsage | null;
   /** A `refreshClaudeUsage` is in flight: the strip's ⟳ spins. */
   claudeRefreshing: boolean;
   /**
@@ -283,6 +291,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   open: {},
   codexQuota: null,
   claudeUsage: null,
+  opencodeUsage: null,
   claudeRefreshing: false,
   codexGoals: {},
 
@@ -417,8 +426,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     });
     const stopActivity = surface.onAgentActivity((activity: AgentActivity) => {
       // A settled write may carry new usage, or move a Codex goal on.
-      if (activity.agent === "codex" || activity.agent === "claude")
-        usageSoon(activity.workspace);
+      usageSoon(activity.workspace);
       const known = get().byWorkspace[activity.workspace] ?? [];
       const parent = known.find(
         (entry) => agentKey(entry) === agentKey(activity),
@@ -574,14 +582,23 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
           sameJson(state.claudeUsage, usage.claude ?? null)
             ? state.claudeUsage
             : (usage.claude ?? null);
+        const opencode = sameJson(state.opencodeUsage, usage.opencode ?? null)
+          ? state.opencodeUsage
+          : (usage.opencode ?? null);
         const goals = sameJson(state.codexGoals[workspace], usage.goals)
           ? state.codexGoals
           : { ...state.codexGoals, [workspace]: usage.goals };
         return quota === state.codexQuota &&
           claude === state.claudeUsage &&
+          opencode === state.opencodeUsage &&
           goals === state.codexGoals
           ? state
-          : { codexQuota: quota, claudeUsage: claude, codexGoals: goals };
+          : {
+              codexQuota: quota,
+              claudeUsage: claude,
+              opencodeUsage: opencode,
+              codexGoals: goals,
+            };
       });
     } catch {
       // Main answers empty rather than failing; a refused call keeps what

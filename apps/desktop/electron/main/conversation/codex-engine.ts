@@ -40,6 +40,7 @@ import {
 import { isAgentSessionId } from "../../../shared/terminal";
 import { agentEnv, engineTap, safely } from "../orchestration/engine-tap";
 import type { ClaudeCli } from "./claude-cli";
+import type { ConversationEngine } from "./conversation-engine";
 import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { cut, inputText } from "./transcript";
@@ -213,7 +214,10 @@ interface Pending {
 }
 
 /** One Codex conversation's `codex app-server`, and the turn it runs. */
-export class CodexEngine {
+export class CodexEngine implements ConversationEngine {
+  readonly agent = "codex" as const;
+  /** Codex keeps no trust of ours to fall back from: never limited here. */
+  readonly untrusted = false;
   child: ChildProcess | null = null;
   busy = false;
   starting = false;
@@ -266,6 +270,19 @@ export class CodexEngine {
     // Nobody waits on it for a conversation that already has its id.
     this.named.catch(() => {});
     if (conversation) this.name(conversation);
+  }
+
+  pid(): number | null {
+    return this.child?.pid ?? null;
+  }
+
+  alive(): boolean {
+    return this.child !== null;
+  }
+
+  kill(): void {
+    this.stopping = true;
+    this.child?.kill("SIGTERM");
   }
 
   state(): EngineState {

@@ -370,7 +370,7 @@ function AgentGroup({
         title={
           agent === "claude"
             ? `Everything Claude reads at launch, as ${MODE_LABELS[list.claudeMode]}`
-            : "Everything Codex reads at launch"
+            : `Everything ${AGENT_LABELS[agent]} reads at launch`
         }
       >
         <span className="size-4 shrink-0" />
@@ -594,6 +594,13 @@ export function InstructionsList({
         slug={slug}
         list={list}
         agent="codex"
+        collapsed={collapsed}
+        toggle={toggle}
+      />
+      <AgentGroup
+        slug={slug}
+        list={list}
+        agent="opencode"
         collapsed={collapsed}
         toggle={toggle}
       />

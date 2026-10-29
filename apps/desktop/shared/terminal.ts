@@ -15,17 +15,28 @@
  * maps it to the one CLI it stands for, so no command line ever crosses from
  * the page (FE-19/D8).
  */
-export const TERMINAL_KINDS = ["shell", "claude", "codex"] as const;
+export const TERMINAL_KINDS = ["shell", "claude", "codex", "opencode"] as const;
 export type TerminalKind = (typeof TERMINAL_KINDS)[number];
 
 /** The kinds that are an agent's CLI, offered where this machine has it. */
 export type TerminalAgent = Exclude<TerminalKind, "shell">;
-export const TERMINAL_AGENTS: readonly TerminalAgent[] = ["claude", "codex"];
+export const TERMINAL_AGENTS: readonly TerminalAgent[] = [
+  "claude",
+  "codex",
+  "opencode",
+];
 
 export function isTerminalKind(value: unknown): value is TerminalKind {
   return (
     typeof value === "string" &&
     (TERMINAL_KINDS as readonly string[]).includes(value)
+  );
+}
+
+export function isTerminalAgent(value: unknown): value is TerminalAgent {
+  return (
+    typeof value === "string" &&
+    (TERMINAL_AGENTS as readonly string[]).includes(value)
   );
 }
 
@@ -124,7 +135,10 @@ export function isCardBrief(value: unknown): value is CardBrief {
  * What the rail's Agents group lists, and what a click resumes.
  */
 export interface AgentSession {
-  /** The CLI's own conversation id: a UUID ({@link isAgentSessionId}). */
+  /**
+   * The CLI's own conversation id: a UUID, or OpenCode's `ses_…`
+   * ({@link isAgentSessionIdOf}).
+   */
   id: string;
   agent: TerminalAgent;
   /** What the rail shows: the name given in Lanework, else `cliTitle`. */
@@ -536,7 +550,9 @@ export interface AgentFacts {
   /** Codex only: the reasoning effort its newest turn ran at. */
   effort: string | null;
   /**
-   * Claude only: what the conversation would have cost at API prices.
+   * Claude and OpenCode: what the conversation would have cost at API prices.
+   *
+   * OpenCode's is what it recorded; null when that is 0 (a Go subscription).
    *
    * An estimate, not what a subscription is billed, as Claude last saved it
    * (`cost-state`). Its sub-agents' spend is in it (FE-38/V5).
@@ -561,7 +577,7 @@ export interface AgentFacts {
    * (FE-38/D2).
    */
   context: { tokens: number; window: number | null } | null;
-  /** Claude only: lines its edits added and removed. */
+  /** Claude and OpenCode: lines its edits added and removed. */
   lines: { added: number; removed: number } | null;
   /**
    * Claude only, in ms: how long its CLI ran (`wall`).
@@ -590,11 +606,14 @@ export const AGENT_FACTS_READ_MAX = 4 * 1024 * 1024;
 /** One agent's totals over a window of days (FE-38/D6). */
 export interface AgentUsageTotals {
   /**
-   * Conversations written to in the window; a Codex thread's spawns are not
-   * counted.
+   * Conversations written to in the window; a Codex thread's spawns and an
+   * OpenCode session's sub-sessions are not counted (FE-105/D8).
    */
   conversations: number;
-  /** Claude only: the sum of each conversation's {@link AgentFacts.costUSD}. */
+  /**
+   * Claude and OpenCode: the sum of each conversation's
+   * {@link AgentFacts.costUSD}; null when none had one (Codex, OpenCode Go).
+   */
   costUSD: number | null;
   input: number;
   output: number;
@@ -610,6 +629,8 @@ export interface AgentUsage {
     days: number;
     claude: AgentUsageTotals;
     codex: AgentUsageTotals;
+    /** Read from OpenCode's database (FE-105/D8). */
+    opencode: AgentUsageTotals;
   }[];
   /** Transcripts too long to total in one read, left out of the sums. */
   skipped: number;
@@ -832,6 +853,32 @@ export interface ClaudeUsage {
   error?: ClaudeUsageError | null;
 }
 
+/** One of OpenCode Go's limits (FE-104/D10). */
+export interface OpenCodeUsageWindow {
+  /** How much of it is used, 0–100. */
+  usedPercent: number;
+  /** How long it runs: 300 (rolling), 10080 (week) or 43200 (month). */
+  windowMinutes: number;
+  /** When it starts over, epoch ms; null when OpenCode does not say. */
+  resetsAt: number | null;
+  /** OpenCode's own word for it. */
+  status: "ok" | "rate-limited";
+}
+
+/**
+ * OpenCode Go's limits, from `opencode.ai/zen/go/v1/usage` (FE-104/D10).
+ *
+ * Null (not this) when there is no Go subscription (403) or no key.
+ */
+export interface OpenCodeUsage {
+  /** Rolling, then weekly, then monthly; the ones OpenCode reported. */
+  windows: OpenCodeUsageWindow[];
+  /** When it was asked; ISO. */
+  at: string;
+  /** `expired` when the key was refused (401): sign in again. */
+  error: "expired" | null;
+}
+
 /** What {@link DesktopTerminalApi.codexUsage} answers for a workspace. */
 export interface CodexUsage {
   quota: CodexQuota | null;
@@ -839,6 +886,8 @@ export interface CodexUsage {
   goals: Record<string, CodexGoal>;
   /** Claude account metadata and limits, when available. */
   claude?: ClaudeUsage | null;
+  /** OpenCode Go's limits (FE-104/D10); null without a Go subscription. */
+  opencode?: OpenCodeUsage | null;
 }
 
 /** The longest name a session may be given in Lanework. */
@@ -856,6 +905,26 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 export function isAgentSessionId(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
+}
+
+/** OpenCode's own session id: `ses_` and 26 letters or digits (FE-103/D6). */
+const OPENCODE_ID = /^ses_[0-9A-Za-z]{26}$/;
+
+/**
+ * Whether `value` is a conversation id of `agent`'s, shaped as that CLI
+ * writes it.
+ *
+ * NOTE: {@link isAgentSessionId}'s rule, per agent: OpenCode's ids are not
+ * UUIDs, but letters, digits and one underscore are no more a shell's syntax
+ * than hex and dashes are.
+ */
+export function isAgentSessionIdOf(
+  agent: TerminalAgent,
+  value: unknown,
+): value is string {
+  return agent === "opencode"
+    ? typeof value === "string" && OPENCODE_ID.test(value)
+    : isAgentSessionId(value);
 }
 
 export const TERMINAL_LIMITS = {

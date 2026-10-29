@@ -11,7 +11,13 @@
 // NOTE: The renderer names a project by slug and a skill or command by the
 // `id` main handed out with it, never by path (FE-40/D4).
 
-export type SetupAgent = "claude" | "codex";
+/**
+ * The CLIs whose setup is read; OpenCode since FE-104.
+ *
+ * NOTE: OpenCode asks no trust question for a folder, so {@link ProjectTrust}
+ * has no `opencode` and main refuses `setTrust` for it.
+ */
+export type SetupAgent = "claude" | "codex" | "opencode";
 
 /**
  * Where an entry comes from (FE-40/D3).

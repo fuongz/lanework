@@ -1,8 +1,7 @@
 import type { SVGProps } from "react";
 
 const Opencode = (props: SVGProps<SVGSVGElement>) => (
-  <svg {...props} viewBox="0 0 512 512" fill="none">
-    <title>OpenCode</title>
+  <svg aria-hidden="true" {...props} viewBox="0 0 512 512" fill="none">
     <rect width="512" height="512" fill="#FDFCFC" />
     <path d="M320 224V352H192V224H320Z" fill="#E6E5E6" />
     <path

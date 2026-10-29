@@ -8,13 +8,18 @@
 // against a fake one.
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { isAgentSessionId, type TerminalAgent } from "../../../shared/terminal";
+import {
+  isAgentSessionId,
+  isAgentSessionIdOf,
+  type TerminalAgent,
+} from "../../../shared/terminal";
 import {
   claudeProjectDir,
   codexRolloutOf,
   codexRollouts,
   lines,
 } from "./agent-sessions";
+import { opencodeDataDirOf, opencodeOwns } from "./opencode-sessions";
 
 /**
  * Delete a conversation main has checked is one of `folder`'s.
@@ -22,7 +27,10 @@ import {
  * - Claude: `<id>.jsonl` and its `<id>/` folder (sub-agents, tool results).
  * - Codex: the conversation's rollout, the rollouts it spawned, and its lines
  *   in `session_index.jsonl` (FE-57/D3).
+ * - OpenCode: `opencode session delete <id>`, which takes its child sessions
+ *   with it (FE-104). Its database is OpenCode's: only its CLI writes it.
  *
+ * @param runOpencode Runs `opencode <args>`: main's, or a spec's stand-in.
  * @throws when `id` is not a session id, or there is no file for it.
  */
 export async function deleteAgentTranscript(
@@ -30,7 +38,20 @@ export async function deleteAgentTranscript(
   folder: string,
   agent: TerminalAgent,
   id: string,
+  runOpencode?: (args: string[]) => Promise<void>,
 ): Promise<void> {
+  // NOTE: Named, never "the other one": OpenCode's sessions live in its own
+  // database, which only its CLI writes (FE-104/D11).
+  if (agent === "opencode") {
+    if (!isAgentSessionIdOf("opencode", id))
+      throw new Error("A valid conversation is required");
+    if (!(await opencodeOwns(opencodeDataDirOf(home), folder, id)))
+      throw new Error("That conversation is not one of this project's.");
+    if (!runOpencode)
+      throw new Error("OpenCode conversations can't be deleted here.");
+    await runOpencode(["session", "delete", id]);
+    return;
+  }
   if (!isAgentSessionId(id))
     throw new Error("A valid conversation is required");
   if (agent === "claude") {
