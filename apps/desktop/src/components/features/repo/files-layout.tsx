@@ -7,7 +7,11 @@ import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
-import { RepoEmpty, RepoMessage } from "#/components/shared/repo/repo-empty";
+import {
+  HeldReadAction,
+  RepoEmpty,
+  RepoMessage,
+} from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
 import { Kbd } from "#/components/ui/kbd";
 import {
@@ -41,6 +45,7 @@ export function FilesLayout() {
   const refreshWorktree = useWorktree((state) => state.refresh);
   const primaryState = useWorktree((state) => state.state);
   const worktreeError = useWorktree((state) => state.error);
+  const askAgain = useWorktree((state) => state.askAgain);
   const folderStatus = useFiles((state) => state.folderStatus);
   const open = useFiles((state) => state.open);
   const refresh = useFiles((state) => state.refresh);
@@ -194,7 +199,15 @@ export function FilesLayout() {
           <RepoMessage
             title="The repository could not be read"
             description={readError}
-          />
+          >
+            <HeldReadAction
+              message={readError}
+              onRetry={async (refusal) => {
+                if (refusal === "refused") await askAgain(slug, folder);
+                refreshAll();
+              }}
+            />
+          </RepoMessage>
         ) : (
           <SplitSkeleton label="Reading the repository" />
         )}

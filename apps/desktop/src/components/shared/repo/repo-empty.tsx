@@ -1,8 +1,8 @@
-import { GitBranchIcon } from "@hugeicons/core-free-icons";
+import { GitBranchIcon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
-import { buttonVariants } from "#/components/ui/button";
+import { type ReactNode, useState } from "react";
+import { Button, buttonVariants } from "#/components/ui/button";
 import {
   Empty,
   EmptyContent,
@@ -11,7 +11,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
-import type { WorktreeState } from "../../../../shared/worktree";
+import {
+  type ReadsRefusal,
+  refusalOf,
+  type WorktreeState,
+} from "../../../../shared/worktree";
 
 /**
  * Why there is no repository to show, in the sentence that fixes it.
@@ -99,5 +103,42 @@ export function RepoMessage({
         {children && <EmptyContent>{children}</EmptyContent>}
       </Empty>
     </div>
+  );
+}
+
+/**
+ * The way past a read the git gate held back (FE-102): Ask again when the
+ * user said "Don't run", Try again when the check could not run. Nothing for
+ * any other error.
+ *
+ * @param onRetry Asks again (for `refused`), then reads the screen again.
+ */
+export function HeldReadAction({
+  message,
+  onRetry,
+}: {
+  message: string | null;
+  onRetry: (refusal: ReadsRefusal) => Promise<unknown>;
+}) {
+  const refusal = refusalOf(message);
+  const [busy, setBusy] = useState(false);
+  if (!refusal) return null;
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        void onRetry(refusal).finally(() => setBusy(false));
+      }}
+    >
+      <HugeiconsIcon
+        icon={RefreshIcon}
+        strokeWidth={1.5}
+        data-icon="inline-start"
+      />
+      {refusal === "refused" ? "Ask again" : "Try again"}
+    </Button>
   );
 }

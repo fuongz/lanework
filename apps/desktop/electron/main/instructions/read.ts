@@ -207,7 +207,7 @@ function ancestors(folder: string): string[] {
  * NOTE: An automatic read (FE-77/D6): a folder the user has not trusted, or
  * one with risky git config they declined, reads as if it were no repository.
  */
-async function projectRoot(folder: string): Promise<string> {
+export async function projectRoot(folder: string): Promise<string> {
   try {
     if (!(await readsAllowed(folder))) return folder;
     const stdout = await gitReadOut(folder, ["rev-parse", "--show-toplevel"], {

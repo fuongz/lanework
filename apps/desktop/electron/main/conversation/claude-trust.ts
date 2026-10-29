@@ -13,6 +13,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { claudeJsonPath } from "../agent-home";
+import { updateConfigFile } from "../config-file";
 
 /** `~/.claude.json` keeps every project's history: it can be large. */
 const CLAUDE_JSON_MAX = 32 * 1024 * 1024;
@@ -97,4 +98,116 @@ export async function isClaudeTrusted(
   } catch {
     return false;
   }
+}
+
+/**
+ * Claude's trust in `folder`, told apart: its own record, and the folder above
+ * it that trusts it when its own does not (FE-101).
+ *
+ * @returns `own` true, false or null (no record); `from` the nearest ancestor
+ *   whose record trusts it, null when none does or the folder's own does.
+ */
+export function claudeTrustOf(
+  claudeJson: unknown,
+  folder: string,
+  real: string = folder,
+): { own: boolean | null; from: string | null } {
+  const projects =
+    claudeJson && typeof claudeJson === "object"
+      ? (claudeJson as { projects?: unknown }).projects
+      : null;
+  const record =
+    projects && typeof projects === "object"
+      ? (projects as Record<string, unknown>)
+      : {};
+  const accepted = (path: string): boolean | null => {
+    if (!Object.hasOwn(record, path)) return null;
+    const value = (record[path] as { hasTrustDialogAccepted?: unknown } | null)
+      ?.hasTrustDialogAccepted;
+    return typeof value === "boolean" ? value : null;
+  };
+  const own = accepted(resolve(real)) ?? accepted(resolve(folder));
+  if (own === true) return { own, from: null };
+  const self = new Set([resolve(folder), resolve(real)]);
+  for (const path of [...ancestors(folder), ...ancestors(real)])
+    if (!self.has(path) && accepted(path) === true) return { own, from: path };
+  return { own, from: null };
+}
+
+/** {@link claudeTrustOf}, read fresh from `claudeJson`; any doubt reads as none. */
+export async function readClaudeTrust(
+  folder: string,
+  claudeJson = claudeJsonFor(),
+): Promise<{ own: boolean | null; from: string | null }> {
+  try {
+    const info = await stat(claudeJson);
+    if (!info.isFile() || info.size > CLAUDE_JSON_MAX)
+      return { own: null, from: null };
+    const parsed: unknown = JSON.parse(await readFile(claudeJson, "utf8"));
+    const real = await realpath(folder).catch(() => resolve(folder));
+    return claudeTrustOf(parsed, folder, real);
+  } catch {
+    return { own: null, from: null };
+  }
+}
+
+/**
+ * Record the user's answer to Claude's trust question for `folder` itself, as
+ * the trust dialog would: `projects[<real path>].hasTrustDialogAccepted`
+ * (FE-101).
+ *
+ * Only that one key changes; the rest of the project's record, and of the
+ * file, is written back as it was read. Ancestors are never touched.
+ *
+ * NOTE: Only on the user's click. Trust lets the repo's `.claude` hooks,
+ * `env` and `apiKeyHelper` run as the user (FE-77/D3).
+ *
+ * @throws When the file is not a JSON object: it is never overwritten.
+ */
+export async function setClaudeTrust(
+  folder: string,
+  on: boolean,
+  claudeJson = claudeJsonFor(),
+): Promise<void> {
+  const real = await realpath(folder).catch(() => resolve(folder));
+  await updateConfigFile(
+    claudeJson,
+    (text) => {
+      const parsed: unknown = text?.trim() ? JSON.parse(text) : {};
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+        throw new Error(
+          `${claudeJson} is not a JSON object. Fix it, then try again — Lanework will not overwrite it.`,
+        );
+      const json = parsed as { projects?: unknown };
+      const projects =
+        json.projects && typeof json.projects === "object"
+          ? (json.projects as Record<string, unknown>)
+          : {};
+      // The folder's records as Claude filed them, else a new one under the
+      // real path, which is the cwd Claude itself sees.
+      const there = [...new Set([resolve(folder), real])].filter((key) =>
+        Object.hasOwn(projects, key),
+      );
+      const keys = there.length ? there : [real];
+      const next = { ...projects };
+      for (const key of keys) {
+        const was = projects[key];
+        const project =
+          was && typeof was === "object"
+            ? (was as Record<string, unknown>)
+            : {};
+        next[key] = { ...project, hasTrustDialogAccepted: on };
+      }
+      if (
+        keys.every(
+          (key) =>
+            (projects[key] as { hasTrustDialogAccepted?: unknown } | undefined)
+              ?.hasTrustDialogAccepted === on,
+        )
+      )
+        return null;
+      return `${JSON.stringify({ ...json, projects: next }, null, 2)}\n`;
+    },
+    0o600,
+  );
 }

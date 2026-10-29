@@ -9,7 +9,10 @@ import { Link, useParams } from "@tanstack/react-router";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
-import { RepoMessage } from "#/components/shared/repo/repo-empty";
+import {
+  HeldReadAction,
+  RepoMessage,
+} from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
 import {
   InputGroup,
@@ -39,6 +42,9 @@ export function HistoryList() {
   const read = useWorktree((state) => state.historyRead);
   const error = useWorktree((state) => state.historyError);
   const moreHistory = useWorktree((state) => state.moreHistory);
+  const openHistory = useWorktree((state) => state.openHistory);
+  const refresh = useWorktree((state) => state.refresh);
+  const askAgain = useWorktree((state) => state.askAgain);
   const sentinel = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState({ slug, value: "" });
   const query = search.slug === slug ? search.value : "";
@@ -77,10 +83,16 @@ export function HistoryList() {
   if (!commits.length) {
     if (error)
       return (
-        <RepoMessage
-          title="The history could not be read"
-          description={error}
-        />
+        <RepoMessage title="The history could not be read" description={error}>
+          <HeldReadAction
+            message={error}
+            onRetry={async (refusal) => {
+              if (refusal === "refused") await askAgain(slug);
+              await refresh();
+              await openHistory(slug);
+            }}
+          />
+        </RepoMessage>
       );
     // Not read yet is a loading state, not "No commits yet".
     return loading || !read ? (

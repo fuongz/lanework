@@ -1,21 +1,26 @@
 // A project's agent setup, for Settings → Projects.
 //
-// NOTE: Read-only. The renderer names a project by slug, and a skill or
+// NOTE: Read-only, but for the trust answer (FE-101). The renderer names a
+// project by slug, and a skill or
 // command by the id `read` handed out with it. The folder is resolved here,
 // from the folder links this process wrote down, and the file from a fresh
 // read of that folder's setup. So no renderer can point a read, or Finder, at
 // a file of its choosing. There is no channel that writes a project's files.
 //
-// The one write is the `lanework` MCP entry in the agents' user config
-// (`mcp-entry.ts`), and only that entry (FE-52/D8).
+// Two writes: the `lanework` MCP entry in the agents' user config
+// (`mcp-entry.ts`), and only that entry (FE-52/D8); and each CLI's trust
+// record for the project's own folder, on the user's confirmed click
+// (FE-101).
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { join, resolve, sep } from "node:path";
 import { app, shell } from "electron";
 import {
   type AgentSetup,
   agentSetupChannels,
   isSetupId,
+  type ProjectTrust,
+  type SetupAgent,
   type SetupFile,
   type SetupScope,
 } from "../../../shared/agent-setup";
@@ -28,6 +33,10 @@ import { agentHome } from "../agent-home";
 import { currentSession } from "../auth";
 import { readLocalMode } from "../auth/local-mode";
 import { readRecord } from "../auth/store";
+import { readClaudeTrust, setClaudeTrust } from "../conversation/claude-trust";
+import { readCodexTrust, setCodexTrust } from "../conversation/codex-trust";
+import { sharedEngines } from "../conversation/engine";
+import { projectRoot } from "../instructions/read";
 import { handle } from "../ipc";
 import { agentHomeDir } from "../test-seams";
 import { terminalFolder } from "../workspaces";
@@ -135,6 +144,73 @@ async function reveal(slug: string, id: string): Promise<void> {
   shell.showItemInFolder(path);
 }
 
+/** `path` with the home folder shortened to `~`. */
+function shortened(path: string): string {
+  const { home } = where();
+  return path === home || path.startsWith(home + sep)
+    ? `~${path.slice(home.length)}`
+    : path;
+}
+
+/** The project's folder, as given and as its real path. */
+async function trustFolders(slug: string) {
+  const folder = await terminalFolder(slug);
+  if (!folder) return null;
+  const real = await realpath(folder).catch(() => resolve(folder));
+  return { folder, real };
+}
+
+const NO_TRUST = { trusted: false, own: null, from: null };
+
+/** Whether each CLI trusts the project's folder now, read fresh (FE-101). */
+async function trust(slug: string): Promise<ProjectTrust> {
+  const at = await trustFolders(slug);
+  if (!at) return { folder: null, claude: NO_TRUST, codex: NO_TRUST };
+  const home = where();
+  const claude = await readClaudeTrust(at.folder, home.claudeJson);
+  const codex = await readCodexTrust(
+    [at.folder, at.real],
+    await projectRoot(at.folder),
+    join(home.codexDir, "config.toml"),
+  );
+  return {
+    folder: shortened(at.folder),
+    claude: {
+      trusted: claude.own === true || claude.from !== null,
+      own: claude.own,
+      from: claude.from ? shortened(claude.from) : null,
+    },
+    codex: {
+      trusted: codex.trusted,
+      own: codex.own === null ? null : codex.own === "trusted",
+      from: codex.from ? shortened(codex.from) : null,
+    },
+  };
+}
+
+/**
+ * Write the user's trust answer for one CLI, then bring the project's open
+ * chats onto it (FE-101).
+ */
+async function setTrust(
+  slug: string,
+  agent: SetupAgent,
+  on: boolean,
+): Promise<ProjectTrust> {
+  const at = await trustFolders(slug);
+  if (!at) throw new Error("This project has no folder on this machine.");
+  const home = where();
+  if (agent === "claude") await setClaudeTrust(at.folder, on, home.claudeJson);
+  else
+    await setCodexTrust(
+      [at.folder, at.real],
+      on,
+      join(home.codexDir, "config.toml"),
+    );
+  await sharedEngines()?.retrust(slug, at.folder, agent);
+  return trust(slug);
+}
+
 function slugArg(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
     throw new Error("A project is required");
@@ -224,5 +300,20 @@ export function registerAgentSetup(devUrl?: string): void {
   handle(agentSetupChannels.reveal, devUrl, (args) => {
     if (args.length !== 2) throw new Error("reveal takes a project and an id");
     return reveal(slugArg(args[0]), idArg(args[1]));
+  });
+  handle(agentSetupChannels.trust, devUrl, (args) => {
+    if (args.length !== 1) throw new Error("trust takes one project");
+    return trust(slugArg(args[0]));
+  });
+  handle(agentSetupChannels.setTrust, devUrl, (args) => {
+    if (
+      args.length !== 3 ||
+      (args[1] !== "claude" && args[1] !== "codex") ||
+      typeof args[2] !== "boolean"
+    )
+      throw new Error(
+        'setTrust takes a project, "claude" or "codex", and true or false',
+      );
+    return setTrust(slugArg(args[0]), args[1], args[2]);
   });
 }

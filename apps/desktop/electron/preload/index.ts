@@ -75,6 +75,9 @@ import {
 } from "../../shared/workspaces";
 import {
   type DesktopWorktreeApi,
+  isHeldRead,
+  READS_REFUSED_MESSAGE,
+  READS_UNCHECKED_MESSAGE,
   worktreeChannels,
 } from "../../shared/worktree";
 
@@ -108,6 +111,22 @@ const auth: DesktopAuthApi = {
 };
 
 /**
+ * A worktree read, with a read the git gate held back turned back into an
+ * error (FE-102): main answers it instead of throwing, so it is not logged.
+ */
+function read(channel: string, ...args: unknown[]): Promise<never> {
+  return ipcRenderer.invoke(channel, ...args).then((value: unknown) => {
+    if (isHeldRead(value))
+      throw new Error(
+        value.heldRead === "refused"
+          ? READS_REFUSED_MESSAGE
+          : READS_UNCHECKED_MESSAGE,
+      );
+    return value as never;
+  });
+}
+
+/**
  * The local-repository surface.
  *
  * NOTE: Every call names a project, never a folder; main resolves it. Paths
@@ -115,38 +134,35 @@ const auth: DesktopAuthApi = {
  * status before it acts.
  */
 const worktree: DesktopWorktreeApi = {
-  files: (slug, folder) =>
-    ipcRenderer.invoke(worktreeChannels.files, slug, folder),
-  dir: (slug, path, folder) =>
-    ipcRenderer.invoke(worktreeChannels.dir, slug, path, folder),
-  view: (slug, path, folder) =>
-    ipcRenderer.invoke(worktreeChannels.view, slug, path, folder),
+  files: (slug, folder) => read(worktreeChannels.files, slug, folder),
+  dir: (slug, path, folder) => read(worktreeChannels.dir, slug, path, folder),
+  view: (slug, path, folder) => read(worktreeChannels.view, slug, path, folder),
   reveal: (slug, path, folder) =>
-    ipcRenderer.invoke(worktreeChannels.reveal, slug, path, folder),
-  locate: (slug, path) =>
-    ipcRenderer.invoke(worktreeChannels.locate, slug, path),
+    read(worktreeChannels.reveal, slug, path, folder),
+  locate: (slug, path) => read(worktreeChannels.locate, slug, path),
   openDefault: (slug, path, folder) =>
-    ipcRenderer.invoke(worktreeChannels.openDefault, slug, path, folder),
-  status: (slug, folder) =>
-    ipcRenderer.invoke(worktreeChannels.status, slug, folder),
-  patch: (slug) => ipcRenderer.invoke(worktreeChannels.patch, slug),
+    read(worktreeChannels.openDefault, slug, path, folder),
+  status: (slug, folder) => read(worktreeChannels.status, slug, folder),
+  patch: (slug) => read(worktreeChannels.patch, slug),
   fileText: (slug, path, side) =>
-    ipcRenderer.invoke(worktreeChannels.fileText, slug, path, side),
-  stage: (slug, paths) =>
-    ipcRenderer.invoke(worktreeChannels.stage, slug, paths),
-  unstage: (slug, paths) =>
-    ipcRenderer.invoke(worktreeChannels.unstage, slug, paths),
-  restore: (slug, paths) =>
-    ipcRenderer.invoke(worktreeChannels.restore, slug, paths),
+    read(worktreeChannels.fileText, slug, path, side),
+  stage: (slug, paths) => read(worktreeChannels.stage, slug, paths),
+  unstage: (slug, paths) => read(worktreeChannels.unstage, slug, paths),
+  restore: (slug, paths) => read(worktreeChannels.restore, slug, paths),
   commit: (slug, message, mode) =>
-    ipcRenderer.invoke(worktreeChannels.commit, slug, message, mode),
+    read(worktreeChannels.commit, slug, message, mode),
   sync: (slug, action, remote) =>
-    ipcRenderer.invoke(worktreeChannels.sync, slug, action, remote),
-  log: (slug, skip) => ipcRenderer.invoke(worktreeChannels.log, slug, skip),
-  show: (slug, sha) => ipcRenderer.invoke(worktreeChannels.show, slug, sha),
-  branches: (slug) => ipcRenderer.invoke(worktreeChannels.branches, slug),
-  switchBranch: (slug, name) =>
-    ipcRenderer.invoke(worktreeChannels.switchBranch, slug, name),
+    read(worktreeChannels.sync, slug, action, remote),
+  log: (slug, skip) => read(worktreeChannels.log, slug, skip),
+  show: (slug, sha) => read(worktreeChannels.show, slug, sha),
+  branches: (slug) => read(worktreeChannels.branches, slug),
+  switchBranch: (slug, name) => read(worktreeChannels.switchBranch, slug, name),
+  repoTrust: (slug, folder) =>
+    ipcRenderer.invoke(worktreeChannels.repoTrust, slug, folder),
+  askAgain: (slug, folder) =>
+    ipcRenderer.invoke(worktreeChannels.askAgain, slug, folder),
+  restrict: (slug, folder) =>
+    ipcRenderer.invoke(worktreeChannels.restrict, slug, folder),
 };
 
 /** Settings → Notifications, and where a clicked one leads. */
@@ -400,6 +416,9 @@ const agentSetup: DesktopAgentSetupApi = {
   readGlobal: () => ipcRenderer.invoke(agentSetupChannels.readGlobal),
   open: (slug, id) => ipcRenderer.invoke(agentSetupChannels.open, slug, id),
   reveal: (slug, id) => ipcRenderer.invoke(agentSetupChannels.reveal, slug, id),
+  trust: (slug) => ipcRenderer.invoke(agentSetupChannels.trust, slug),
+  setTrust: (slug, agent, on) =>
+    ipcRenderer.invoke(agentSetupChannels.setTrust, slug, agent, on),
 };
 
 const laneworkMcp: DesktopLaneworkMcpApi = {

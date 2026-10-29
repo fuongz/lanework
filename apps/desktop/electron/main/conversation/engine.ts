@@ -226,6 +226,11 @@ class Engine {
    * record for the folder (FE-77/D3). Set again at every start.
    */
   untrusted = false;
+  /**
+   * The folder's trust changed while a turn ran: the process restarts before
+   * the next one, to load (or drop) the repo's settings (FE-101).
+   */
+  stale = false;
 
   constructor(
     readonly workspace: string,
@@ -330,6 +335,7 @@ class Engine {
       ((folder, env) => isClaudeTrusted(folder, claudeJsonFor(env)))
     )(this.folder, cli.env).catch(() => false);
     this.untrusted = !trusted;
+    this.stale = false;
     const child = spawn(
       cli.file,
       engineArgs(this.conversation, settings, this.fresh, trusted),
@@ -770,6 +776,7 @@ class Engine {
       const restart =
         !this.child ||
         !was ||
+        this.stale ||
         was.effort !== out.settings.effort ||
         was.fast !== out.settings.fast;
       if (!restart && was) {
@@ -1167,6 +1174,39 @@ export function createEngines(input: EngineDeps) {
       await engine.halt();
       engines.delete(key);
       engine.emitState();
+    },
+
+    /**
+     * Bring `agent`'s engines on `folder` onto a trust answer just written
+     * (FE-101).
+     *
+     * An idle one's process ends now, and the next turn starts it with the
+     * new trust. A running turn is never cut off: its process restarts before
+     * the next turn instead.
+     */
+    async retrust(
+      workspace: string,
+      folder: string,
+      agent: "claude" | "codex",
+    ): Promise<void> {
+      await Promise.all(
+        [...engines.values()]
+          .filter(
+            (engine) =>
+              engine.workspace === workspace &&
+              engine.folder === folder &&
+              engine instanceof CodexEngine === (agent === "codex") &&
+              engine.child,
+          )
+          .map(async (engine) => {
+            if (engine.busy) {
+              engine.stale = true;
+              return;
+            }
+            await engine.halt();
+            engine.emitState();
+          }),
+      );
     },
 
     /** The conversations of `workspace` whose engine process is alive. */

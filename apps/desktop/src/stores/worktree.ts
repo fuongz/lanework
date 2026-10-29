@@ -131,6 +131,11 @@ interface WorktreeStore {
   open: (slug: string) => Promise<void>;
   refresh: () => Promise<void>;
   /**
+   * Forget the git gate's answer for the repository and ask again in the
+   * native prompt (FE-102). The caller reads again after.
+   */
+  askAgain: (slug: string, folder?: number) => Promise<void>;
+  /**
    * Read the status alone, without the patch, for the rail's `+/−` badge.
    *
    * NOTE: Yields to a full `refresh`. If one is running, or starts while this
@@ -497,6 +502,12 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
         if (mine !== ticket.branches) return;
         set({ branches: { slug, list: null } });
       }
+    },
+
+    askAgain: async (slug, folder) => {
+      await desktopSurface("worktree")
+        .askAgain(slug, folder)
+        .catch(() => {});
     },
 
     switchBranch: async (slug, name) => {

@@ -235,6 +235,11 @@ export class CodexEngine {
   turnId: string | null = null;
   /** The settings the running turn was started with. */
   applied: ComposerSettings | null = null;
+  /**
+   * The folder's trust changed while a turn ran: the app-server restarts
+   * before the next one, to load (or drop) the repo's `.codex/` (FE-101).
+   */
+  stale = false;
   /** The images of the running turn and its steers, removed when it ends. */
   dirs: string[] = [];
   exited: Promise<void> = Promise.resolve();
@@ -952,6 +957,10 @@ export class CodexEngine {
    */
   async deliver(out: CodexOutgoing): Promise<void> {
     const settings = checked(out.settings);
+    if (this.stale) {
+      this.stale = false;
+      await this.halt();
+    }
     this.busy = true;
     this.starting = true;
     this.stopping = false;

@@ -1,6 +1,7 @@
 // A project's agent setup: every MCP server, skill, command, hook, permission
 // and plugin Claude Code and Codex would load in its folder, as their config
-// files on this machine say. Read-only: nothing here changes them.
+// files on this machine say. Read-only, but for one thing: the user's answer
+// to each CLI's trust question for the folder (FE-101).
 //
 // NOTE: Cleaned in MAIN, before it crosses. No `env`, `headers`, `args` value,
 // token or URL query string ever reaches the renderer. An MCP server is its
@@ -123,8 +124,31 @@ export interface SetupFile {
   truncated: boolean;
 }
 
+/**
+ * One CLI's trust in a project's folder (FE-101).
+ *
+ * - `trusted`: whether it loads the repo's own config there now.
+ * - `own`: the folder's own record: true, false, or null with none.
+ * - `from`: the folder above whose record trusts it when its own does not,
+ *   home shortened to `~`. Untrusting the folder cannot take that away.
+ */
+export interface FolderTrust {
+  trusted: boolean;
+  own: boolean | null;
+  from: string | null;
+}
+
+export interface ProjectTrust {
+  /** The folder it was read for, home shortened; null without one. */
+  folder: string | null;
+  claude: FolderTrust;
+  codex: FolderTrust;
+}
+
 export const agentSetupChannels = {
   read: "agent-setup:read",
+  trust: "agent-setup:trust",
+  setTrust: "agent-setup:set-trust",
   readGlobal: "agent-setup:read-global",
   open: "agent-setup:open",
   reveal: "agent-setup:reveal",
@@ -148,4 +172,17 @@ export interface DesktopAgentSetupApi {
   open: (slug: string, id: string) => Promise<SetupFile>;
   /** Shows that file in Finder. */
   reveal: (slug: string, id: string) => Promise<void>;
+  /** Whether Claude Code and Codex trust the project's folder (FE-101). */
+  trust: (slug: string) => Promise<ProjectTrust>;
+  /**
+   * Trust the project's folder, or take the trust back, for one CLI.
+   *
+   * Only on the user's confirmed click. Open chats in the project restart on
+   * their next turn, an idle one at once.
+   */
+  setTrust: (
+    slug: string,
+    agent: SetupAgent,
+    on: boolean,
+  ) => Promise<ProjectTrust>;
 }

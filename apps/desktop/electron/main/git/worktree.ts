@@ -13,6 +13,9 @@ import {
   type FileView,
   HISTORY_PAGE,
   patchStats,
+  READS_REFUSED_MESSAGE,
+  READS_UNCHECKED_MESSAGE,
+  type ReadsRefusal,
   type StagedState,
   type SyncAction,
   type WorktreeFile,
@@ -27,7 +30,7 @@ import {
   gitWrite as write,
   gitWriteOut as writeOut,
 } from "./runner";
-import { readsAllowed } from "./trust-gate";
+import { readsVerdict } from "./trust-gate";
 
 export { GitMissingError };
 
@@ -70,16 +73,17 @@ const MAX_UNTRACKED_READS = 200;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 /**
- * An automatic read of this folder was refused (FE-77, D6).
+ * An automatic read of this folder was held back (FE-77, D6).
  *
  * The folder's git config or hooks name programs, and the user answered
- * "Don't run" (or there was nobody to ask). The renderer shows the message as
- * the screen's error, the same way it shows any read that failed.
+ * "Don't run" (`refused`), or the check could not run (`unchecked`). The IPC
+ * layer answers it as a {@link HeldRead} rather than a throw (FE-102), and the
+ * renderer shows the message as the screen's error, with Ask again.
  */
 export class ReadsRefusedError extends Error {
-  constructor() {
+  constructor(readonly reason: ReadsRefusal = "refused") {
     super(
-      "Lanework did not read this repository. Its git settings run programs of their own, and you chose not to let them run.",
+      reason === "refused" ? READS_REFUSED_MESSAGE : READS_UNCHECKED_MESSAGE,
     );
     this.name = "ReadsRefusedError";
   }
@@ -95,7 +99,8 @@ export class ReadsRefusedError extends Error {
  * @throws {ReadsRefusedError} When the reads are not allowed.
  */
 export async function assertReadable(folder: string): Promise<void> {
-  if (!(await readsAllowed(folder))) throw new ReadsRefusedError();
+  const verdict = await readsVerdict(folder);
+  if (verdict !== "run") throw new ReadsRefusedError(verdict);
 }
 
 /**

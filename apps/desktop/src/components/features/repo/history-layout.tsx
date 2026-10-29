@@ -7,7 +7,11 @@ import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
-import { RepoEmpty, RepoMessage } from "#/components/shared/repo/repo-empty";
+import {
+  HeldReadAction,
+  RepoEmpty,
+  RepoMessage,
+} from "#/components/shared/repo/repo-empty";
 import { Button } from "#/components/ui/button";
 import {
   ResizableHandle,
@@ -31,6 +35,7 @@ export function HistoryLayout() {
   const state = useWorktree((state) => state.state);
   const error = useWorktree((state) => state.error);
   const refresh = useWorktree((state) => state.refresh);
+  const askAgain = useWorktree((state) => state.askAgain);
   const loading = useWorktree((state) => state.historyLoading);
 
   const { defaultLayout, onLayoutChanged } = usePersistedLayout(
@@ -79,7 +84,16 @@ export function HistoryLayout() {
           <RepoMessage
             title="The repository could not be read"
             description={error}
-          />
+          >
+            <HeldReadAction
+              message={error}
+              onRetry={async (refusal) => {
+                if (refusal === "refused") await askAgain(slug);
+                await refresh();
+                await openHistory(slug);
+              }}
+            />
+          </RepoMessage>
         ) : (
           <SplitSkeleton label="Reading the repository" lines={2} />
         )}

@@ -3,6 +3,7 @@ import {
   ArrowDown01Icon,
   ArrowRight01Icon,
   MessageMultiple01Icon,
+  SecurityCheckIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
@@ -47,8 +48,14 @@ import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
+import {
+  type TrustAsk,
+  TrustDialog,
+} from "#/components/shared/settings/trust-dialog";
+import { useProjectTrust } from "#/components/shared/settings/use-project-trust";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { Alert, AlertDescription } from "#/components/ui/alert";
+import { Button } from "#/components/ui/button";
 import {
   Empty,
   EmptyDescription,
@@ -237,7 +244,21 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   // What the engine holds back, drawn above the composer instead.
   const queue = (engine.state !== "terminal" && engine.queue) || NOTHING;
   const paused = engine.state !== "terminal" && engine.paused === true;
-  const untrusted = engine.state !== "terminal" && engine.untrusted === true;
+  // FE-101: read from each CLI's own record, so the banner stands before the
+  // first turn too, and goes once the user trusts the folder.
+  const {
+    trust,
+    busy: trusting,
+    error: trustError,
+    set: setTrust,
+  } = useProjectTrust(workspace ?? null);
+  const [trustAsk, setTrustAsk] = useState<TrustAsk | null>(null);
+  const untrusted =
+    engine.state !== "terminal" &&
+    agent !== null &&
+    trust !== null &&
+    trust.folder !== null &&
+    !trust[agent].trusted;
   const held = useMemo(() => new Set(queue.map((entry) => entry.id)), [queue]);
   // What was sent from here and is in the transcript now drops away.
   const waiting = sent.filter(
@@ -912,13 +933,54 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 (engine.state === "error" ? engine.message : null)}
             </p>
           )}
-          {untrusted && (
-            <p role="status" className="text-muted-foreground px-1 text-xs">
-              This chat runs without the project's <code>.claude</code>{" "}
-              settings, because Claude hasn't trusted this folder yet. Open a
-              Claude tab here once and accept its trust prompt.
+          {untrusted && agent && (
+            <div
+              role="status"
+              className="text-muted-foreground flex items-center gap-3 px-1 text-xs"
+            >
+              <p className="min-w-0 flex-1">
+                {agent === "claude" ? (
+                  <>
+                    This chat runs without the project’s <code>.claude</code>{" "}
+                    settings, because Claude Code doesn’t trust this folder.
+                  </>
+                ) : (
+                  <>
+                    This chat runs without the project’s <code>.codex</code>{" "}
+                    config and <code>AGENTS.md</code>, because Codex doesn’t
+                    trust this folder.
+                  </>
+                )}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={trusting !== null}
+                onClick={() => setTrustAsk({ agent, on: true })}
+              >
+                <HugeiconsIcon
+                  icon={SecurityCheckIcon}
+                  strokeWidth={1.5}
+                  data-icon="inline-start"
+                />
+                {trusting === agent ? "Trusting…" : "Trust this folder"}
+              </Button>
+            </div>
+          )}
+          {trustError && (
+            <p role="alert" className="text-destructive px-1 text-xs">
+              {trustError}
             </p>
           )}
+          <TrustDialog
+            ask={trustAsk}
+            folder={trust?.folder ?? null}
+            onClose={() => setTrustAsk(null)}
+            onConfirm={(request) => {
+              setTrustAsk(null);
+              void setTrust(request.agent, request.on);
+            }}
+          />
           {workspace && (
             <JobCapsules
               slug={slug}

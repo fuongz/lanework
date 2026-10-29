@@ -1,7 +1,11 @@
 import { useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { SplitSkeleton } from "#/components/shared/loading/skeletons";
-import { RepoEmpty, RepoMessage } from "#/components/shared/repo/repo-empty";
+import {
+  HeldReadAction,
+  RepoEmpty,
+  RepoMessage,
+} from "#/components/shared/repo/repo-empty";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -28,6 +32,7 @@ export function ChangesLayout() {
   const refresh = useWorktree((state) => state.refresh);
   const state = useWorktree((state) => state.state);
   const error = useWorktree((state) => state.error);
+  const askAgain = useWorktree((state) => state.askAgain);
 
   const { defaultLayout, onLayoutChanged } = usePersistedLayout(
     "lanework:changes",
@@ -58,7 +63,15 @@ export function ChangesLayout() {
           <RepoMessage
             title="The repository could not be read"
             description={error}
-          />
+          >
+            <HeldReadAction
+              message={error}
+              onRetry={async (refusal) => {
+                if (refusal === "refused") await askAgain(slug);
+                await refresh();
+              }}
+            />
+          </RepoMessage>
         ) : (
           <SplitSkeleton label="Reading the repository" />
         )}

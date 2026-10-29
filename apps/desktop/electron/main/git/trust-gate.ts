@@ -4,8 +4,11 @@ import { appHomeDir } from "../paths";
 import {
   type RememberedTrust,
   type RepoTrustScan,
+  scanRepoTrust,
   type TrustAnswer,
+  type TrustFinding,
   TrustStore,
+  trustFingerprint,
 } from "./repo-trust";
 
 /**
@@ -39,7 +42,7 @@ const FRESH_MS = 60_000;
 let asker: TrustAsker | null = null;
 let store: Promise<TrustStore> | null = null;
 const fresh = new Map<string, number>();
-const pending = new Map<string, Promise<boolean>>();
+const pending = new Map<string, Promise<ReadVerdict>>();
 
 function storeFile(): string {
   return join(appHomeDir(), "repo-trust.json");
@@ -77,31 +80,104 @@ export function setTrustAsker(next: TrustAsker | null): void {
  * Concurrent calls for one folder share one scan and at most one prompt.
  * Never throws: a scan that fails counts as not allowed.
  */
-export function readsAllowed(folder: string): Promise<boolean> {
+export async function readsAllowed(folder: string): Promise<boolean> {
+  return (await readsVerdict(folder)) === "run";
+}
+
+/**
+ * Why an automatic read of `folder` may or may not go on (FE-102).
+ *
+ * - `run`: nothing risky, or the user trusted these exact findings.
+ * - `refused`: the user answered "Don't run" to them.
+ * - `unchecked`: the scan failed, or there was nobody to ask. The user never
+ *   said no, so the screen must not say they did.
+ *
+ * Concurrent calls for one folder share one scan and at most one prompt.
+ * Never throws.
+ */
+export function readsVerdict(folder: string): Promise<ReadVerdict> {
   const key = resolve(folder);
   const until = fresh.get(key);
-  if (until !== undefined && until > Date.now()) return Promise.resolve(true);
+  if (until !== undefined && until > Date.now()) return Promise.resolve("run");
   const running = pending.get(key);
   if (running) return running;
   const decided = decide(key)
-    .catch(() => false)
+    .catch((): ReadVerdict => "unchecked")
     .finally(() => pending.delete(key));
   pending.set(key, decided);
   return decided;
 }
 
-async function decide(folder: string): Promise<boolean> {
+export type ReadVerdict = "run" | "refused" | "unchecked";
+
+async function decide(folder: string): Promise<ReadVerdict> {
   const trust = await load();
   const verdict = await trust.decide(folder);
   if (verdict.kind === "run") {
     fresh.set(folder, Date.now() + FRESH_MS);
-    return true;
+    return "run";
   }
-  if (verdict.kind === "restricted" || !asker) return false;
+  if (verdict.kind === "restricted") return "refused";
+  if (!asker) return "unchecked";
   const answer = await asker(folder, verdict.scan);
   trust.set(folder, answer, verdict.scan);
-  if (answer !== "trusted") return false;
+  if (answer !== "trusted") return "refused";
   fresh.set(folder, Date.now() + FRESH_MS);
+  return "run";
+}
+
+/**
+ * Where a folder's git settings stand, read without asking (FE-102).
+ *
+ * - `safe`: nothing in them runs a program; nothing to answer.
+ * - `allowed` / `refused`: the user's answer to these exact findings.
+ * - `unasked`: risky, and not answered (or answered for other findings).
+ * - `unchecked`: the scan failed.
+ */
+export async function trustState(folder: string): Promise<{
+  state: "safe" | "allowed" | "refused" | "unasked" | "unchecked";
+  findings: TrustFinding[];
+}> {
+  const key = resolve(folder);
+  try {
+    const scan = await scanRepoTrust(key);
+    if (!scan.risky) return { state: "safe", findings: [] };
+    const known = (await load()).get(key);
+    const state =
+      known && known.fingerprint === trustFingerprint(scan.findings)
+        ? known.answer === "trusted"
+          ? "allowed"
+          : "refused"
+        : "unasked";
+    return { state, findings: scan.findings };
+  } catch {
+    return { state: "unchecked", findings: [] };
+  }
+}
+
+/**
+ * Forget the folder's answer and ask the user again, now (FE-102).
+ *
+ * The native prompt opens at once for a risky folder; a safe one just reads.
+ */
+export async function askAgain(folder: string): Promise<ReadVerdict> {
+  await forgetTrust(folder);
+  return readsVerdict(folder);
+}
+
+/**
+ * Answer "Don't run" for the folder's current findings, without a prompt:
+ * Settings' Stop running (FE-102).
+ *
+ * @returns False when nothing in its git settings runs a program, so there
+ *   is nothing to refuse.
+ */
+export async function restrictTrust(folder: string): Promise<boolean> {
+  const key = resolve(folder);
+  const scan = await scanRepoTrust(key);
+  if (!scan.risky) return false;
+  fresh.delete(key);
+  (await load()).set(key, "restricted", scan);
   return true;
 }
 

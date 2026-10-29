@@ -213,7 +213,60 @@ export const worktreeChannels = {
   show: "worktree:show",
   branches: "worktree:branches",
   switchBranch: "worktree:switch",
+  repoTrust: "worktree:repo-trust",
+  askAgain: "worktree:ask-again",
+  restrict: "worktree:restrict",
 } as const;
+
+// ── Automatic reads the git gate held back (FE-77/D6, FE-102) ────────────────
+
+/** Why an automatic read did not happen: the user said no, or no check ran. */
+export type ReadsRefusal = "refused" | "unchecked";
+
+export const READS_REFUSED_MESSAGE =
+  "Lanework did not read this repository. Its git settings run programs of their own, and you chose not to let them run.";
+export const READS_UNCHECKED_MESSAGE =
+  "Lanework could not check this repository’s git settings, so it did not read it.";
+
+/**
+ * What a read channel answers in place of its value when the gate held it
+ * back.
+ *
+ * NOTE: An answer, not a throw: Electron logs every throw out of a handler,
+ * and this one is expected. The preload turns it back into an error with the
+ * message above, so every screen shows it as it shows any failed read.
+ */
+export interface HeldRead {
+  heldRead: ReadsRefusal;
+}
+
+export function isHeldRead(value: unknown): value is HeldRead {
+  if (!value || typeof value !== "object") return false;
+  const reason = (value as { heldRead?: unknown }).heldRead;
+  return reason === "refused" || reason === "unchecked";
+}
+
+/** The refusal a read's error message stands for, or null for any other. */
+export function refusalOf(message: string | null): ReadsRefusal | null {
+  if (message === READS_REFUSED_MESSAGE) return "refused";
+  if (message === READS_UNCHECKED_MESSAGE) return "unchecked";
+  return null;
+}
+
+/**
+ * Where the repository's git settings stand (FE-102).
+ *
+ * - `safe`: nothing in them runs a program.
+ * - `allowed` / `refused`: the user's answer to what they name now.
+ * - `unasked`: they name programs nobody has answered for yet.
+ * - `unchecked`: the check failed.
+ * - `none`: no repository to check.
+ */
+export interface RepoTrust {
+  state: "safe" | "allowed" | "refused" | "unasked" | "unchecked" | "none";
+  /** What they name, one line each as the prompt lists them. */
+  findings: string[];
+}
 
 /**
  * The local-repository surface.
@@ -294,6 +347,16 @@ export interface DesktopWorktreeApi {
    * and that refusal is the answer the screen shows.
    */
   switchBranch: (slug: string, name: string) => Promise<WorktreeState>;
+  /** Where the repository's git settings stand; never asks (FE-102). */
+  repoTrust: (slug: string, folder?: number) => Promise<RepoTrust>;
+  /**
+   * Forget the answer and ask again now, in the native prompt (FE-102).
+   *
+   * Answers where things stand after the user answered.
+   */
+  askAgain: (slug: string, folder?: number) => Promise<RepoTrust>;
+  /** Answer "Don't run" without a prompt: Settings' Stop running. */
+  restrict: (slug: string, folder?: number) => Promise<RepoTrust>;
 }
 
 /**

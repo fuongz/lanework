@@ -1,17 +1,33 @@
 import {
   Delete02Icon,
   Folder01Icon,
+  GitBranchIcon,
+  RefreshIcon,
+  SecurityBlockIcon,
+  SecurityCheckIcon,
+  StopCircleIcon,
   TaskRemove01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState } from "react";
+import type { FolderTrust, SetupAgent } from "#/../shared/agent-setup";
 import type { ReadinessFix } from "#/../shared/readiness";
 import type { Workspace } from "#/../shared/workspaces";
+import type { RepoTrust } from "#/../shared/worktree";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   SETTINGS_BUTTON,
   SettingsCard,
 } from "#/components/shared/settings/settings-page";
+import {
+  type TrustAsk,
+  TrustDialog,
+} from "#/components/shared/settings/trust-dialog";
+import {
+  useProjectTrust,
+  useRepoTrust,
+} from "#/components/shared/settings/use-project-trust";
+import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { ProjectTile } from "#/components/shared/workspaces/project-tile";
 import {
   AlertDialog,
@@ -109,6 +125,213 @@ function ReadinessSection({
         slug={slug}
         fix={fix}
         onOpenChange={(open) => !open && setFix(null)}
+      />
+    </div>
+  );
+}
+
+/** What a CLI's trust in the folder means for its chats, in words. */
+function trustText(agent: SetupAgent, trust: FolderTrust): string {
+  const config = agent === "claude" ? ".claude settings" : ".codex config";
+  const load = agent === "claude" ? "load" : "loads";
+  if (trust.from)
+    return `Trusted through ${trust.from}, so the repository’s ${config} ${load} here. Untrust it there to stop that.`;
+  if (trust.trusted) return `Trusted: the repository’s ${config} ${load}.`;
+  if (trust.own === false)
+    return `Not trusted: chats run without the repository’s ${config}.`;
+  return `Not trusted yet: chats run without the repository’s ${config}.`;
+}
+
+/** A Folder trust row's mark: the agent's own, or git's, on a tile. */
+function TrustMark({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-lg">
+      {children}
+    </span>
+  );
+}
+
+/** A Folder trust button's icon, drawn as the other settings buttons'. */
+function ButtonIcon({
+  icon,
+  destructive = false,
+}: {
+  icon: typeof RefreshIcon;
+  destructive?: boolean;
+}) {
+  return destructive ? (
+    <HugeiconsIcon icon={icon} className="size-4" strokeWidth={2} />
+  ) : (
+    <HugeiconsIcon icon={icon} strokeWidth={1.5} data-icon="inline-start" />
+  );
+}
+
+/** What the repository's git settings run, as a short list in words. */
+function programs(findings: string[]): string {
+  if (findings.length <= 2) return findings.join(" and ");
+  return `${findings.slice(0, 2).join(", ")} and ${findings.length - 2} more`;
+}
+
+/** Lanework's own git gate for the repository, in words (FE-102). */
+function gitTrustText(trust: RepoTrust): string {
+  const run = programs(trust.findings);
+  switch (trust.state) {
+    case "safe":
+      return "Nothing in the repository’s git settings runs a program.";
+    case "allowed":
+      return `Lanework reads the repository, and its git settings run ${run}.`;
+    case "refused":
+      return `Lanework does not read the repository: its git settings run ${run}.`;
+    case "unasked":
+      return `Its git settings run ${run}. Lanework asks before it reads them.`;
+    case "unchecked":
+      return "Lanework could not check the repository’s git settings.";
+    case "none":
+      return "";
+  }
+}
+
+/**
+ * The Git settings row: Lanework's own reads of the repository (FE-77/D6),
+ * answered again from here (FE-102). Ask again opens the native prompt;
+ * Stop running answers "Don't run" without one.
+ */
+function GitTrustRow({ slug }: { slug: string }) {
+  const { trust, busy, run } = useRepoTrust(slug);
+  if (!trust || trust.state === "none") return null;
+  return (
+    <Row
+      leading={
+        <TrustMark>
+          <HugeiconsIcon
+            icon={GitBranchIcon}
+            className="size-4.5"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        </TrustMark>
+      }
+      label="Git settings"
+      description={
+        <span title={trust.findings.join("\n") || undefined}>
+          {gitTrustText(trust)}
+        </span>
+      }
+    >
+      {trust.state === "allowed" ? (
+        <Button
+          size="lg"
+          className={`${SETTINGS_BUTTON} border-0`}
+          variant="destructive"
+          disabled={busy}
+          onClick={() => void run("restrict")}
+        >
+          <ButtonIcon icon={StopCircleIcon} destructive />
+          Stop running
+        </Button>
+      ) : trust.state === "refused" || trust.state === "unasked" ? (
+        <Button
+          size="lg"
+          className={SETTINGS_BUTTON}
+          variant="outline"
+          disabled={busy}
+          onClick={() => void run("ask")}
+        >
+          <ButtonIcon icon={RefreshIcon} />
+          {trust.state === "refused" ? "Ask again" : "Ask now"}
+        </Button>
+      ) : trust.state === "unchecked" ? (
+        <Button
+          size="lg"
+          className={SETTINGS_BUTTON}
+          variant="outline"
+          disabled={busy}
+          onClick={() => void run("read")}
+        >
+          <ButtonIcon icon={RefreshIcon} />
+          Try again
+        </Button>
+      ) : null}
+    </Row>
+  );
+}
+
+/**
+ * Whether Claude Code and Codex trust the project's folder, with the user's
+ * answer changed here (FE-101): Trust when it is not, Untrust when its own
+ * record is what trusts it. A trust from a folder above is said, not offered
+ * to take back: untrusting this folder would not end it.
+ */
+function TrustSection({ slug }: { slug: string }) {
+  const { trust, error, busy, set } = useProjectTrust(slug);
+  const [ask, setAsk] = useState<TrustAsk | null>(null);
+  if (trust && !trust.folder) return null;
+
+  return (
+    <div className="mt-9 flex flex-col gap-3">
+      <h3 className="text-[15px] font-medium">Folder trust</h3>
+      <SettingsCard>
+        {trust ? (
+          (["claude", "codex"] as const).map((agent) => {
+            const state = trust[agent];
+            const name = agent === "claude" ? "Claude Code" : "Codex";
+            return (
+              <Row
+                key={agent}
+                leading={
+                  <TrustMark>
+                    <TerminalKindIcon kind={agent} className="size-4.5" />
+                  </TrustMark>
+                }
+                label={name}
+                description={trustText(agent, state)}
+              >
+                {!state.trusted ? (
+                  <Button
+                    size="lg"
+                    className={SETTINGS_BUTTON}
+                    variant="outline"
+                    aria-label={`Trust this folder for ${name}`}
+                    disabled={busy !== null}
+                    onClick={() => setAsk({ agent, on: true })}
+                  >
+                    <ButtonIcon icon={SecurityCheckIcon} />
+                    {busy === agent ? "Trusting…" : "Trust"}
+                  </Button>
+                ) : state.from === null ? (
+                  <Button
+                    size="lg"
+                    className={`${SETTINGS_BUTTON} border-0`}
+                    variant="destructive"
+                    aria-label={`Untrust this folder for ${name}`}
+                    disabled={busy !== null}
+                    onClick={() => setAsk({ agent, on: false })}
+                  >
+                    <ButtonIcon icon={SecurityBlockIcon} destructive />
+                    {busy === agent ? "Untrusting…" : "Untrust"}
+                  </Button>
+                ) : null}
+              </Row>
+            );
+          })
+        ) : (
+          <ListSkeleton label="Reading the folder’s trust" rows={2} />
+        )}
+        {trust && <GitTrustRow slug={slug} />}
+      </SettingsCard>
+      {error && (
+        <p role="alert" className="text-destructive px-1 text-xs">
+          {error}
+        </p>
+      )}
+      <TrustDialog
+        ask={ask}
+        folder={trust?.folder ?? null}
+        onClose={() => setAsk(null)}
+        onConfirm={(request) => {
+          setAsk(null);
+          void set(request.agent, request.on);
+        }}
       />
     </div>
   );
@@ -256,6 +479,8 @@ export function SelectedProjectSection({
       </SettingsCard>
 
       <ReadinessSection slug={workspace.slug} folders={folders} />
+
+      <TrustSection slug={workspace.slug} />
 
       <div className="mt-9 flex flex-col gap-3">
         <h3 className="text-destructive text-[15px] font-medium">

@@ -13,16 +13,20 @@ import {
   type FileListing,
   type FileSide,
   type FileView,
+  type HeldRead,
   LAUNCHABLE,
   opensInDefaultApp,
+  type RepoTrust,
   type SyncAction,
   type WorktreePatch,
   type WorktreeState,
   worktreeChannels,
 } from "../../../shared/worktree";
-import { handle } from "../ipc";
+import { handle as handleIpc } from "../ipc";
 import { knownWorkspace } from "../workspaces";
 import { readFolders } from "../workspaces/store";
+import type { TrustFinding } from "./repo-trust";
+import { askAgain, restrictTrust, trustState } from "./trust-gate";
 import {
   assertReadable,
   branches,
@@ -35,6 +39,7 @@ import {
   locateInRepo,
   log,
   patch,
+  ReadsRefusedError,
   restore,
   show,
   stage,
@@ -44,6 +49,44 @@ import {
   unstage,
   viewFile,
 } from "./worktree";
+
+/**
+ * Register a worktree handler: a read the git gate held back is answered as
+ * a {@link HeldRead}, not thrown, so Electron does not log an expected
+ * refusal on every read (FE-102). The preload makes it an error again.
+ */
+function handle<T>(
+  channel: string,
+  devUrl: string | undefined,
+  handler: (args: unknown[]) => T | Promise<T>,
+): void {
+  handleIpc(channel, devUrl, async (args): Promise<T | HeldRead> => {
+    try {
+      return await handler(args);
+    } catch (error) {
+      if (error instanceof ReadsRefusedError) return { heldRead: error.reason };
+      throw error;
+    }
+  });
+}
+
+/** One finding as the trust prompt lists it. */
+function findingText(finding: TrustFinding): string {
+  if (finding.kind === "hook") return `Hook: ${finding.name}`;
+  const value =
+    finding.value.length > 120
+      ? `${finding.value.slice(0, 117)}...`
+      : finding.value;
+  return `${finding.key} = ${value}`;
+}
+
+/** Where the repository's git settings stand, read without asking. */
+async function repoTrust(slug: string, folder = 0): Promise<RepoTrust> {
+  const found = await repo(slug, folder);
+  if ("state" in found) return { state: "none", findings: [] };
+  const { state, findings } = await trustState(found.top);
+  return { state, findings: findings.map(findingText) };
+}
 
 /**
  * Folder `index` of the project `slug`, as this machine linked it.
@@ -378,6 +421,35 @@ export function registerWorktree(devUrl?: string): void {
         throw new Error("Choose a remote.");
       await sync(await top(slug), action, remote);
       return current(slug);
+    },
+  );
+
+  // FE-102: the gate's answer, seen and changed from the app.
+  handle(
+    worktreeChannels.repoTrust,
+    devUrl,
+    (args): Promise<RepoTrust> => repoTrust(slugOf(args[0]), folderOf(args[1])),
+  );
+  handle(
+    worktreeChannels.askAgain,
+    devUrl,
+    async (args): Promise<RepoTrust> => {
+      const slug = slugOf(args[0]);
+      const folder = folderOf(args[1]);
+      const found = await repo(slug, folder);
+      if (!("state" in found)) await askAgain(found.top);
+      return repoTrust(slug, folder);
+    },
+  );
+  handle(
+    worktreeChannels.restrict,
+    devUrl,
+    async (args): Promise<RepoTrust> => {
+      const slug = slugOf(args[0]);
+      const folder = folderOf(args[1]);
+      const found = await repo(slug, folder);
+      if (!("state" in found)) await restrictTrust(found.top);
+      return repoTrust(slug, folder);
     },
   );
 
