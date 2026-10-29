@@ -832,3 +832,19 @@ export interface DesktopConversationApi {
   pathForFile: (file: File) => string;
   onEvent: (listener: (event: ConversationEvent) => void) => () => void;
 }
+
+/** An `@` mention: quoted when its path has a space (`@"/a b/c.csv"`). */
+export const MENTION = /(?<=^|\s)@(?:"((?:[^"\\]|\\.)*)"|(\S+))/g;
+
+/**
+ * `text` with each path mention as the file's name: a prompt's title on the
+ * rail and in the window reads `c.csv`, not `@"/Users/me/a b/c.csv"`. A
+ * mention with no `/` or `.` in it (a conductor's id) stays as written.
+ */
+export function mentionsAsNames(text: string): string {
+  return text.replace(MENTION, (whole, quoted?: string, bare?: string) => {
+    const path = quoted !== undefined ? quoted.replace(/\\(.)/g, "$1") : bare;
+    if (!path || !/[./]/.test(path)) return whole;
+    return path.replace(/\/+$/, "").split("/").pop() || path;
+  });
+}

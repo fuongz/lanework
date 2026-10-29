@@ -1,9 +1,5 @@
-import {
-  ArrowRight01Icon,
-  PinIcon,
-  PinOffIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { ArrowRight01Icon, PinIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import type { OrchestrationTask } from "#/../shared/orchestration";
@@ -34,11 +30,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "#/components/ui/tooltip";
 import { useOpenInTerminal } from "#/hooks/use-open-in-terminal";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
@@ -72,63 +63,6 @@ const SUB_ROW = "h-[26px] w-full ps-[30px] text-left text-xs";
 const PEEK_MS = 150;
 /** A row's numbers read this recently are shown again, not read again. */
 const FACTS_FRESH_MS = 15_000;
-
-/**
- * A row's quick actions, shown on hover or keyboard focus in place of its age.
- *
- * Stop for a running agent, then Pin, rightmost like the rail's others.
- *
- * NOTE: Siblings laid over the row, not inside it: the row is a button, and a
- * button cannot hold another. Both live in the context menu too.
- */
-export function QuickActions({
-  pin,
-}: {
-  pin: { pinned: boolean; onToggle: () => void };
-}) {
-  // Stop is in the row's context menu only: a hover target that kills an
-  // agent is too easy to hit on the way to the row.
-  return (
-    <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
-      <QuickAction
-        label={pin.pinned ? "Unpin" : "Pin"}
-        icon={pin.pinned ? PinOffIcon : PinIcon}
-        onClick={pin.onToggle}
-      />
-    </div>
-  );
-}
-
-/** One icon-only quick action; its tooltip says what it does before a click. */
-function QuickAction({
-  label,
-  icon,
-  onClick,
-  className = "",
-}: {
-  label: string;
-  icon: IconSvgElement;
-  onClick: () => void;
-  className?: string;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label={label}
-            onClick={onClick}
-            className={`text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] flex size-5 items-center justify-center rounded-md transition-colors ${className}`}
-          />
-        }
-      >
-        <HugeiconsIcon icon={icon} className="size-3.5" strokeWidth={1.8} />
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
 
 /**
  * A conversation's background shells and monitors still running, as rows
@@ -241,7 +175,7 @@ export function AwaitingDot({ className = "size-3" }: { className?: string }) {
   );
 }
 
-/** What hover hides to make room for the quick actions. */
+/** What hover hides to make room for the sub-agents' chevron. */
 const MAKES_ROOM = "group-hover/row:invisible group-focus-within/row:invisible";
 
 /** A running agent's Stop, in its row's context menu. */
@@ -448,7 +382,7 @@ export function SessionRow({
                 onPointerLeave={unpeek}
                 onFocus={peek}
                 onBlur={unpeek}
-                className={`${row} w-full text-left ${current ? activeClass : ""} group-hover/row:pe-7 group-focus-within/row:pe-7`}
+                className={`${row} w-full text-left ${current ? activeClass : ""}`}
               />
             }
           >
@@ -475,17 +409,13 @@ export function SessionRow({
             {isPinned && (
               <HugeiconsIcon
                 icon={PinIcon}
-                className={`text-muted-foreground size-3 shrink-0 ${MAKES_ROOM}`}
+                className="text-muted-foreground size-3 shrink-0"
                 strokeWidth={1.8}
                 aria-label="Pinned"
               />
             )}
             {/* A Codex goal that stopped short says so (FE-41/D4). */}
-            <CodexGoalBadge
-              workspace={workspace}
-              session={session}
-              className={MAKES_ROOM}
-            />
+            <CodexGoalBadge workspace={workspace} session={session} />
           </ContextMenuTrigger>
           <ContextMenuContent>
             <ContextMenuItem onClick={onRename}>Rename</ContextMenuItem>
@@ -513,6 +443,7 @@ export function SessionRow({
             >
               Archive
             </ContextMenuItem>
+            <ContextMenuSeparator />
             {/* The chat's Terminal button, moved here: the same
                 conversation in a terminal, not while a turn runs (D3). */}
             <ContextMenuItem
@@ -525,8 +456,8 @@ export function SessionRow({
             >
               {tab ? "Show terminal" : "Open in terminal"}
             </ContextMenuItem>
-            {onStop && <StopItem onStop={onStop} />}
             <ContextMenuSeparator />
+            {onStop && <StopItem onStop={onStop} />}
             {/* NOTE: Off while a tab runs it (FE-57/D4): the CLI would only
                 write the transcript again. Stop first. */}
             <ContextMenuItem
@@ -538,8 +469,8 @@ export function SessionRow({
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
-        {/* NOTE: A sibling laid over the icon, like the quick actions:
-          the row is a button, and a button cannot hold another. */}
+        {/* NOTE: A sibling laid over the icon: the row is a button, and a
+          button cannot hold another. */}
         {nested && (
           <button
             type="button"
@@ -570,12 +501,6 @@ export function SessionRow({
             />
           </button>
         )}
-        <QuickActions
-          pin={{
-            pinned: isPinned,
-            onToggle: () => void pin(workspace, session, !isPinned),
-          }}
-        />
       </div>
       {open && background > 0 && (
         <BackgroundShellRows

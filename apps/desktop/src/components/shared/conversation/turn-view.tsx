@@ -119,7 +119,23 @@ function AttachmentChip({ attachment }: { attachment: Attachment }) {
  * it, drawn as the composer drew them while it was written (FE-92, FE-93):
  * weighted, with the command's mark. The rest is linked text.
  */
-const PROMPT_TOKEN = /^\/[^\s/]+(?=\s|$)|(?<=^|\s)@\S+/g;
+const PROMPT_TOKEN = /^\/[^\s/]+(?=\s|$)|(?<=^|\s)@(?:"(?:[^"\\]|\\.)*"|\S+)/g;
+
+/** A path's last part, its file name; the full path stays in the title. */
+function fileName(path: string): string {
+  return path.replace(/\/+$/, "").split("/").pop() || path;
+}
+
+/**
+ * What an `@` mention names: the path as written, without the quotes main
+ * puts around one with a space in it (`@"/a b/c.csv"`, as the CLI reads it).
+ */
+function mentionOf(token: string): string {
+  const rest = token.slice(1);
+  return rest.length > 1 && rest.startsWith('"') && rest.endsWith('"')
+    ? rest.slice(1, -1).replace(/\\(.)/g, "$1")
+    : rest;
+}
 
 /**
  * The conductors a page knows, by id (FE-95): an `@id` in a prompt shows as
@@ -150,14 +166,15 @@ function PromptText({ text }: { text: string }) {
         />,
       );
     const command = token.startsWith("/");
-    const conductor = command ? undefined : conductors.get(token.slice(1));
-    const path = !command && !conductor && /[./]/.test(token.slice(1));
+    const named = command ? "" : mentionOf(token);
+    const conductor = command ? undefined : conductors.get(named);
+    const path = !command && !conductor && /[./]/.test(named);
     parts.push(
       <span
         key={`c${at}`}
-        title={token}
+        title={command ? token : `@${named}`}
         className={cn(
-          "mx-px inline-flex items-baseline gap-1 align-baseline font-medium",
+          "mx-px inline-flex items-start gap-1 align-baseline font-medium",
           token === "/orchestrate"
             ? "text-tone-violet"
             : conductor
@@ -178,7 +195,8 @@ function PromptText({ text }: { text: string }) {
                     ? SlashIcon
                     : File01Icon
             }
-            className="size-3.5 shrink-0 self-center"
+            // The first line's middle, not the badge's: a long name wraps.
+            className="mt-[0.3em] size-3.5 shrink-0"
             strokeWidth={1.8}
             aria-hidden="true"
           />
@@ -188,7 +206,7 @@ function PromptText({ text }: { text: string }) {
           : command
             ? (COMMAND_LABELS[token] ?? token)
             : path
-              ? token.slice(1)
+              ? fileName(named)
               : token}
       </span>,
     );

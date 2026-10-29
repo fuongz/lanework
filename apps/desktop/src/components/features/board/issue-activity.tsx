@@ -28,6 +28,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
 import { columnOf } from "#/lib/board-view";
@@ -371,6 +372,7 @@ function CommentEntry({
                 <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={1.8} />
                 Edit
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
                 onClick={() => void deleteComment(card.id, event.id)}

@@ -196,6 +196,7 @@ function SyncButton({
               ))}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             variant="destructive"
             disabled={!canPull}

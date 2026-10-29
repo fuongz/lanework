@@ -1,5 +1,3 @@
-import { Image01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import {
   createContext,
   Fragment,
@@ -17,6 +15,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
 import { Empty, EmptyDescription, EmptyHeader } from "#/components/ui/empty";
@@ -55,6 +54,18 @@ export const FileOpenerContext = createContext<FileOpener | null>(null);
  * Cmd/Ctrl-click or its context menu. The chat alone provides one, as with {@link FileOpenerContext}.
  */
 export const ImageViewerContext = createContext<FileOpener | null>(null);
+
+/**
+ * A file badge's context menu, after "Open in Files": Finder, then its paths,
+ * the Files tree's menu without "Open in Default App". The chat alone
+ * provides one, as with {@link FileOpenerContext}.
+ */
+export interface FileActions {
+  reveal: (path: string) => void;
+  copyPath: (path: string) => void;
+  copyRelativePath: (path: string) => void;
+}
+export const FileActionsContext = createContext<FileActions | null>(null);
 
 /**
  * Reads an image the chat names, for drawing it in place: `read` asks main
@@ -316,6 +327,7 @@ function FileBadge({
 }) {
   const open = useContext(FileOpenerContext);
   const view = useContext(ImageViewerContext);
+  const actions = useContext(FileActionsContext);
   const body = (
     <>
       {/* On the first line's middle, (1.25 − 1) / 2: on one line that is
@@ -328,6 +340,7 @@ function FileBadge({
   );
   // In the chat, the badge opens the file in Repository › Files; an image's
   // opens the lightbox instead on Cmd/Ctrl-click, or from its context menu.
+  // Right-click offers the same, then Finder and its paths.
   if (open) {
     const image = view && IMAGE_PATH.test(path) ? view : null;
     const button = (
@@ -343,15 +356,33 @@ function FileBadge({
         {body}
       </button>
     );
-    if (!image) return button;
     return (
       <ContextMenu>
         <ContextMenuTrigger render={button} />
         <ContextMenuContent>
-          <ContextMenuItem onClick={() => image(path)}>
-            <HugeiconsIcon icon={Image01Icon} strokeWidth={1.8} />
-            Open image
+          <ContextMenuItem onClick={() => open(path)}>
+            Open in Files
           </ContextMenuItem>
+          {image && (
+            <ContextMenuItem onClick={() => image(path)}>
+              Open image
+            </ContextMenuItem>
+          )}
+          {actions && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => actions.reveal(path)}>
+                Reveal in Finder
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => actions.copyPath(path)}>
+                Copy Path
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => actions.copyRelativePath(path)}>
+                Copy Relative Path
+              </ContextMenuItem>
+            </>
+          )}
         </ContextMenuContent>
       </ContextMenu>
     );

@@ -16,6 +16,7 @@ import {
   ContextMenuGroup,
   ContextMenuItem,
   ContextMenuLabel,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
 import { useBoard } from "#/stores/board";
@@ -60,6 +61,9 @@ export function IssueMenu({
           <ContextMenuGroup>
             <ContextMenuLabel>{name}</ContextMenuLabel>
             <AssignAgentMenuItems assign={assign} />
+          </ContextMenuGroup>
+          <ContextMenuSeparator />
+          <ContextMenuGroup>
             <ContextMenuItem
               variant="destructive"
               // Off while the board is a saved copy, like every other write. A

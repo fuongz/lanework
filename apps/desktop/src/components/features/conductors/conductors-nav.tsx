@@ -20,12 +20,14 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
 import {
@@ -193,11 +195,15 @@ export function ConductorsNav({
     }
   };
 
-  /** The menu's items, for the context menu and the `⋯` dropdown alike. */
+  /**
+   * The menu's items, for the context menu and the `⋯` dropdown alike: the
+   * conductor itself, then its conversation, then Delete apart.
+   */
   const items = (
     lead: TeamLead,
     status: ConductorStatus,
     Item: typeof ContextMenuItem | typeof DropdownMenuItem,
+    Separator: typeof ContextMenuSeparator | typeof DropdownMenuSeparator,
   ) => (
     <>
       {/* A repo's conductor is its file's: copy it to make it yours. */}
@@ -214,6 +220,7 @@ export function ConductorsNav({
       >
         {list.defaultId === lead.id ? "Clear default" : "Set as default"}
       </Item>
+      <Separator />
       {/* Its conversation in a terminal, not while it answers (D3). */}
       <Item
         disabled={status.conversation === null || status.state === "working"}
@@ -236,13 +243,16 @@ export function ConductorsNav({
         Reset conversation
       </Item>
       {lead.source === "personal" && (
-        <Item
-          variant="destructive"
-          disabled={status.state === "working"}
-          onClick={() => setDeleting(lead)}
-        >
-          Delete…
-        </Item>
+        <>
+          <Separator />
+          <Item
+            variant="destructive"
+            disabled={status.state === "working"}
+            onClick={() => setDeleting(lead)}
+          >
+            Delete…
+          </Item>
+        </>
       )}
     </>
   );
@@ -365,7 +375,7 @@ export function ConductorsNav({
                 </span>
               </ContextMenuTrigger>
               <ContextMenuContent className="w-max min-w-40">
-                {items(lead, status, ContextMenuItem)}
+                {items(lead, status, ContextMenuItem, ContextMenuSeparator)}
               </ContextMenuContent>
             </ContextMenu>
             <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
@@ -387,7 +397,7 @@ export function ConductorsNav({
                   />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-max min-w-40">
-                  {items(lead, status, DropdownMenuItem)}
+                  {items(lead, status, DropdownMenuItem, DropdownMenuSeparator)}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>

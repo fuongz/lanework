@@ -20,6 +20,7 @@ import {
   type AssistantTurn,
   type ComposerSettings,
   DEFAULT_SETTINGS,
+  mentionsAsNames,
   type OutgoingAttachment,
   type PermissionAnswer,
   type QueuedMessage,
@@ -724,7 +725,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     asWorker?.task.title ||
     conductor?.name ||
     listed?.title ||
-    (firstPrompt?.role === "user" ? firstLine(firstPrompt.text) : "") ||
+    (firstPrompt?.role === "user"
+      ? firstLine(mentionsAsNames(firstPrompt.text))
+      : "") ||
     `${label} conversation`;
 
   const lastPromptAt =

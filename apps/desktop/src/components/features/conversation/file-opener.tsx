@@ -4,6 +4,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import type { ImagePreview } from "#/../shared/conversation";
 import {
+  type FileActions,
+  FileActionsContext,
   FileOpenerContext,
   type ImageSource,
   ImageSourceContext,
@@ -29,6 +31,9 @@ const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
  * - An image drawn in place (a reply's `![alt](path)`, a generated image)
  *   is read through main the same way (`ImageSourceContext`), and kept for
  *   the conversation, so a re-render draws it at once.
+ * - A badge's context menu (`FileActionsContext`) reveals the file in Finder
+ *   or copies its path, found the same way. One not found in the repository
+ *   has no Finder to show; its path is copied as written.
  * - The lightbox stays for what the repository does not hold. An image pasted
  *   into this conversation lives outside the folder, and Files cannot open
  *   it. Anything else that cannot be found says so, in the same dialog.
@@ -95,6 +100,42 @@ export function FileOpenerProvider({
     [lightbox],
   );
 
+  /** A badge's context menu. Failures have no row to show on: logged. */
+  const actions = useMemo((): FileActions => {
+    const find = async (path: string) => {
+      const surface = window.desktop?.worktree;
+      if (!surface) return null;
+      return surface.locate(slug, path).catch(() => null);
+    };
+    const copy = (text: Promise<string>) =>
+      void text
+        .then((value) => navigator.clipboard.writeText(value))
+        .catch((error: unknown) => console.warn(error));
+    return {
+      reveal: (path) =>
+        void find(path)
+          .then((found) => {
+            if (!found) throw new Error(`${path} is not in this project.`);
+            return window.desktop?.worktree.reveal(slug, found);
+          })
+          .catch((error: unknown) => console.warn(error)),
+      copyRelativePath: (path) =>
+        copy(find(path).then((found) => found ?? path)),
+      // NOTE: The repository's folder comes with a listing; one directory,
+      // the file's own, is the cheapest one to ask for.
+      copyPath: (path) =>
+        copy(
+          find(path).then(async (found) => {
+            const surface = window.desktop?.worktree;
+            if (!found || !surface) return path;
+            const dir = found.slice(0, found.lastIndexOf("/") + 1);
+            const { root } = await surface.dir(slug, dir);
+            return `${root.replace(/\/+$/, "")}/${found}`;
+          }),
+        ),
+    };
+  }, [slug]);
+
   /**
    * Images drawn in place, read once per conversation. A miss is not kept: a
    * generated image may land on disk after the reply that names it.
@@ -141,7 +182,9 @@ export function FileOpenerProvider({
     <FileOpenerContext.Provider value={open}>
       <ImageViewerContext.Provider value={view}>
         <ImageSourceContext.Provider value={images}>
-          {children}
+          <FileActionsContext.Provider value={actions}>
+            {children}
+          </FileActionsContext.Provider>
         </ImageSourceContext.Provider>
       </ImageViewerContext.Provider>
       <Dialog

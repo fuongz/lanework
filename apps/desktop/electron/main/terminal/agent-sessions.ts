@@ -5,6 +5,7 @@
 // drive it under plain Node against a fake home folder.
 import { open, readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { mentionsAsNames } from "../../../shared/conversation";
 import {
   AGENT_SESSION_LIMIT,
   type AgentCard,
@@ -88,7 +89,7 @@ function typed(text: unknown): string | null {
       : tidy(`/orchestrate ${clean.slice(start + 15, end)}`);
   }
   if (clean.startsWith("<")) return null;
-  return tidy(clean);
+  return tidy(mentionsAsNames(clean));
 }
 
 /** A conversation's key across both CLIs: ids are only unique per agent. */
