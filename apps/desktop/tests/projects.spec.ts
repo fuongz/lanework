@@ -85,6 +85,24 @@ async function openImport(page: Page, project: string): Promise<void> {
     .click();
 }
 
+/**
+ * Point Settings → Projects at one project, through the picker in its title
+ * bar.
+ *
+ * ⚠️ The pages have no list of projects any more: the picker chooses which
+ * one they are about, and picking there does not open it.
+ */
+async function pickInSettings(page: Page, name: string): Promise<void> {
+  await page.getByRole("button", { name: /^Pick a project/ }).click();
+  await page
+    .getByRole("listbox", { name: "Projects" })
+    .getByRole("option", { name })
+    .click();
+  await expect(
+    page.getByRole("button", { name: `Pick a project — currently ${name}` }),
+  ).toBeVisible();
+}
+
 test("project responses reject malformed lists and only return display fields", () => {
   expect(parseProjects({ workspaces: [] })).toEqual([]);
   expect(
@@ -213,7 +231,13 @@ test("the rail remembers a project across relaunch, and never falls back silentl
       page.getByText("cloud-project", { exact: true }),
     ).toBeVisible();
     expect(plane.calls).toContain("GET /v1/sync/state");
-    expect(plane.projectAuth).toEqual(["Bearer lw_mch_test-secret"]);
+    // Every read carries the machine's credential. Not just one read: the
+    // menu bar and the new-PR watcher read the list at start too, and with
+    // the delay above none of them finds it cached yet.
+    expect(plane.projectAuth.length).toBeGreaterThan(0);
+    expect(new Set(plane.projectAuth)).toEqual(
+      new Set(["Bearer lw_mch_test-secret"]),
+    );
     await page.screenshot({
       path: "../../.agents/artifacts/2026-09-08-project-picker.png",
       // Native macOS vibrancy is outside the renderer capture. Flatten only
@@ -344,7 +368,10 @@ test("a service error is told apart from an empty account, and a bad selection k
     // ⚠️ The failure is the whole screen now, not a banner on one — so it is
     // addressed by what it SAYS rather than by `role="alert"`, which belongs to
     // a message interrupting something that still works.
-    await expect(page.getByText("Could not load your projects")).toBeVisible();
+    // `exact`: the description under the title repeats it with the status.
+    await expect(
+      page.getByText("Could not load your projects", { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText(/HTTP 503/)).toBeVisible();
     await expect(
       page.getByText("No projects yet", { exact: true }),
@@ -461,8 +488,12 @@ test("project IPC rejects invalid selections and signed-out callers", async () =
           ),
       ]) {
         try {
-          await call();
-          result.push("unexpected success");
+          // `load` and `select` answer a refusal as `{ ok: false }` rather
+          // than rejecting (`ProjectAnswer`); the rest reject.
+          const value = (await call()) as { ok?: boolean; message?: string };
+          result.push(
+            value?.ok === false ? (value.message ?? "") : "unexpected success",
+          );
         } catch (error) {
           result.push((error as Error).message);
         }
@@ -772,8 +803,9 @@ test("opening a project shows its cloud board, and a tick carries the revision",
     plane.setChecklistConflict(true);
     await page.getByRole("checkbox").first().click();
     await page.keyboard.press("ControlOrMeta+s");
+    // The heading of the both-sides panel; the notice island says it too.
     await expect(
-      page.getByText("Someone else changed this card"),
+      page.getByRole("heading", { name: "Someone else changed this card" }),
     ).toBeVisible();
     plane.setChecklistConflict(false);
 
@@ -785,8 +817,8 @@ test("opening a project shows its cloud board, and a tick carries the revision",
     await expect(leave).toBeVisible();
     await leave.getByRole("button", { name: "Discard" }).click();
 
-    // A move is one request, and the card's row in the list says where it
-    // went. There are no lanes any more (FE-75): the card's Status moves it.
+    // A move is one request, and the list files the row under where it went:
+    // the card's Status moves it, and the list groups by lane (FE-75).
     // ⚠️ The card's breadcrumb names the PROJECT, not "Issues" — it reads
     // "Cloud project › FE-01", the way the design draws it. The sidebar's own
     // Issues link carries a count in its accessible name, so it is not an exact
@@ -795,8 +827,10 @@ test("opening a project shows its cloud board, and a tick carries the revision",
     await page.getByRole("combobox", { name: "Status" }).click();
     await page.getByRole("option", { name: "In Progress" }).click();
     await expect(
-      page.getByRole("link", { name: /Cache the composer input/ }),
-    ).toContainText("In Progress");
+      page
+        .getByRole("region", { name: "In Progress" })
+        .getByRole("link", { name: /Cache the composer input/ }),
+    ).toBeVisible();
 
     // ⚠️ And when the board cannot be reached, the app shows its saved copy WITH
     // a label rather than an empty board — the failure that invites somebody to
@@ -1301,14 +1335,20 @@ test("the project menu shows the agents running in each project", async () => {
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Lanework");
-    const group = page.getByRole("navigation", { name: "Agents" });
-    await group.getByRole("button", { name: "New agent" }).click();
-    await page.getByRole("menuitem", { name: "New Claude" }).click();
-    await expect(
-      page
-        .getByRole("region", { name: "Claude — New Claude session" })
-        .locator(".xterm-rows"),
-    ).toContainText("claude-started");
+    // A Claude in a terminal tab, started through the terminal surface: the
+    // rail's "New conversation" opens a chat now (FE-98), and a fresh chat
+    // has no engine until its first send.
+    const started = await page.evaluate(
+      (project) =>
+        (globalThis as unknown as { desktop: DesktopApi }).desktop.terminal
+          .spawn(project, 80, 24, "claude")
+          .then(
+            () => "started",
+            (error: Error) => error.message,
+          ),
+      "ws-lanework",
+    );
+    expect(started).toBe("started");
 
     // From ANOTHER project, the menu still says what Lanework has running —
     // and says nothing about a project with no agent.
@@ -1383,7 +1423,7 @@ test("the project menu shows the agents running in each project", async () => {
   }
 });
 
-test("projects are put in order from Settings, and the switcher and ⌘1 follow it (FE-32)", async () => {
+test("projects are put in order from the switcher, and ⌘1 follows it (FE-32)", async () => {
   const plane = await startStubPlane({ projects });
   for (const id of ["ws-lanework", "ws-cloud-project"])
     plane.setBoard(id, {
@@ -1395,11 +1435,17 @@ test("projects are put in order from Settings, and the switcher and ⌘1 follow 
   await seedCredential(home, plane.origin);
   const env = launchEnv({ profile, home, apiUrl: plane.origin });
   let app = await electron.launch({ args: [process.cwd()], env });
+  // The reorder list's rows, by name: each is labelled "Move <name>,
+  // position <n>".
   const rows = (page: Page) =>
     page
-      .locator("[data-project-row]")
+      .locator('[aria-label^="Move "]')
       .evaluateAll((nodes) =>
-        nodes.map((node) => node.getAttribute("data-project-row")),
+        nodes.map((node) =>
+          node
+            .getAttribute("aria-label")
+            ?.replace(/^Move (.*), position \d+$/, "$1"),
+        ),
       );
   const menuOrder = async (page: Page) => {
     await page.getByRole("button", { name: /^Switch project/ }).click();
@@ -1411,14 +1457,15 @@ test("projects are put in order from Settings, and the switcher and ⌘1 follow 
   try {
     let page = await app.firstWindow();
     await switchTo(page, "Lanework");
-    await page.goto("app://lanework/settings/projects");
-    await expect.poll(() => rows(page)).toEqual(["lanework", "cloud-project"]);
+    // The order is edited in the switcher now, not in Settings → Projects:
+    // its Reorder button turns the list into a drag-to-reorder one.
+    await page.getByRole("button", { name: /^Switch project/ }).click();
+    await page.getByRole("button", { name: "Reorder projects" }).click();
+    await expect.poll(() => rows(page)).toEqual(["Lanework", "Cloud project"]);
 
-    // Dragged by its grip onto the first row: it takes that place.
+    // Dragged onto the first row: it takes that place.
     const grip = page.getByRole("button", { name: /^Move Cloud project/ });
-    const target = page.locator('[data-project-row="lanework"]');
-    // "On this account" sits below the fold, under the selected project.
-    await target.scrollIntoViewIfNeeded();
+    const target = page.getByRole("button", { name: /^Move Lanework/ });
     const from = await grip.boundingBox();
     const to = await target.boundingBox();
     if (!from || !to) throw new Error("no rows to drag");
@@ -1428,16 +1475,18 @@ test("projects are put in order from Settings, and the switcher and ⌘1 follow 
     await page.mouse.move(from.x + from.width / 2, from.y - 8, { steps: 3 });
     await page.mouse.move(from.x + from.width / 2, to.y + 4, { steps: 12 });
     await page.mouse.up();
-    await expect.poll(() => rows(page)).toEqual(["cloud-project", "lanework"]);
+    await expect.poll(() => rows(page)).toEqual(["Cloud project", "Lanework"]);
     expect(plane.calls).toContain("PUT /v1/sync/state/workspace-order");
 
-    // Alt+↓ on the focused grip moves it back down one place.
+    // Alt+↓ on the focused row moves it back down one place.
     await page.getByRole("button", { name: /^Move Cloud project/ }).focus();
     await page.keyboard.press("Alt+ArrowDown");
-    await expect.poll(() => rows(page)).toEqual(["lanework", "cloud-project"]);
+    await expect.poll(() => rows(page)).toEqual(["Lanework", "Cloud project"]);
     await page.getByRole("button", { name: /^Move Cloud project/ }).focus();
     await page.keyboard.press("Alt+ArrowUp");
-    await expect.poll(() => rows(page)).toEqual(["cloud-project", "lanework"]);
+    await expect.poll(() => rows(page)).toEqual(["Cloud project", "Lanework"]);
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+    await page.keyboard.press("Escape");
 
     // The switcher lists them in that order, and ⌘1 is the new first one.
     await page.goto("app://lanework/w/lanework/issues");
@@ -1652,7 +1701,9 @@ test("labels are picked from the board's vocabulary, and free text still lands",
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await switchTo(page, "Cloud project");
-    await page.getByRole("button", { name: /^New issue/ }).click();
+    // ⌘N: the open rail has no New issue button of its own any more; only
+    // the folded one carries it.
+    await page.keyboard.press("ControlOrMeta+n");
 
     // A label the board has named is picked, and the chip says its NAME.
     await page.getByRole("button", { name: "Add label" }).click();
@@ -1780,6 +1831,19 @@ function bigBoard(count: number) {
   };
 }
 
+/**
+ * Draw the Done lane, through the Filter menu's Status.
+ *
+ * The list shows only the lanes not finished until it is asked for more
+ * (FE-75), and a lane asked for still arrives folded.
+ */
+async function showDone(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Filter" }).click();
+  await page.getByRole("menuitem", { name: "Status" }).hover();
+  await page.getByRole("option", { name: "Done" }).click();
+  await page.keyboard.press("Escape");
+}
+
 test("a long board is readable: groups fold, filters cut, and ⌘K jumps by key", async () => {
   const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", bigBoard(33));
@@ -1797,16 +1861,22 @@ test("a long board is readable: groups fold, filters cut, and ⌘K jumps by key"
     await switchTo(page, "Cloud project");
 
     // ⚠️ 33 cards is the case the old card wall could not render usefully. Two
-    // lanes are open and the finished one starts folded — the largest lane on
-    // any board that has been running a while, and the least often read.
+    // lanes are drawn and the finished one is not, until the Status filter
+    // asks for it (FE-75) — the largest lane on any board that has been
+    // running a while, and the least often read.
     const rows = page.getByRole("listitem");
     await expect.poll(async () => await rows.count()).toBe(22);
+    await expect(page.getByRole("button", { name: /^Done/ })).toHaveCount(0);
+    await showDone(page);
+    // Asked for, it still arrives folded.
     await expect(
       page.getByRole("button", { name: /^Done/, expanded: false }),
     ).toBeVisible();
+    await expect.poll(async () => await rows.count()).toBe(22);
     await page.getByRole("button", { name: /^Done/ }).click();
     await expect.poll(async () => await rows.count()).toBe(33);
-    await page.getByRole("button", { name: /^Done/ }).click();
+    await page.getByRole("button", { name: "Remove Status filter" }).click();
+    await expect.poll(async () => await rows.count()).toBe(22);
 
     // ⚠️ ONE filter button, then a field, then a searchable list of its values.
     // Everything a board can be cut by goes through the same door.
@@ -1833,13 +1903,7 @@ test("a long board is readable: groups fold, filters cut, and ⌘K jumps by key"
     await page.getByRole("button", { name: "Remove Category filter" }).click();
     await expect.poll(async () => await rows.count()).toBe(22);
 
-    // Grouping is the second axis, and it drops empty groups rather than
-    // drawing a board that looks like it has states it does not.
-    await page.getByRole("combobox", { name: "Group by" }).click();
-    await page.getByRole("option", { name: "Priority" }).click();
-    await expect(page.getByRole("button", { name: /^High/ })).toBeVisible();
-    await page.getByRole("combobox", { name: "Group by" }).click();
-    await page.getByRole("option", { name: "Status" }).click();
+    // No Group by any more: the list is grouped by status, always (FE-75).
 
     // ⌘K finds a card by the key a person says out loud, and lands on it.
     await page.keyboard.press("ControlOrMeta+k");
@@ -1891,17 +1955,18 @@ test("issues read as list and detail: j/k move, Properties folds away, /board la
     await expect(page.getByText("No issue selected")).toBeVisible();
     await expect(page.getByText("Card number 1")).toBeVisible();
 
-    // j and k walk the rows as drawn — To-Do, then In Progress; Done starts
-    // folded and is skipped (FE-75/D8). The list stays beside the card.
-    await page.keyboard.press("j");
-    await expect(page).toHaveURL(/\/issues\/FE-01/);
-    await expect(page.getByLabel("Card title")).toHaveValue("Card number 1");
-    await page.keyboard.press("j");
-    await expect(page).toHaveURL(/\/issues\/BE-04/);
+    // j and k walk the rows as drawn — In Progress, then To-Do, the lanes
+    // under way first; Done is not drawn and is skipped (FE-75/D8). The list
+    // stays beside the card.
     await page.keyboard.press("j");
     await expect(page).toHaveURL(/\/issues\/BE-02/);
+    await expect(page.getByLabel("Card title")).toHaveValue("Card number 2");
+    await page.keyboard.press("j");
+    await expect(page).toHaveURL(/\/issues\/FE-05/);
+    await page.keyboard.press("j");
+    await expect(page).toHaveURL(/\/issues\/FE-01/);
     await page.keyboard.press("k");
-    await expect(page).toHaveURL(/\/issues\/BE-04/);
+    await expect(page).toHaveURL(/\/issues\/FE-05/);
     await expect(page.getByText("Card number 1")).toBeVisible();
 
     // Properties is a panel that folds away, and stays folded (FE-75/D3, D9).
@@ -1912,7 +1977,7 @@ test("issues read as list and detail: j/k move, Properties folds away, /board la
     await page.getByRole("button", { name: "Properties", exact: true }).click();
     await expect(properties).toHaveCount(0);
     await page.reload();
-    await expect(page.getByLabel("Card title")).toHaveValue("Card number 4");
+    await expect(page.getByLabel("Card title")).toHaveValue("Card number 5");
     await expect(properties).toHaveCount(0);
     await page.getByRole("button", { name: "Properties", exact: true }).click();
     await expect(properties).toBeVisible();
@@ -2302,9 +2367,10 @@ test("a project is created from the folders a person picked, primary first", asy
     await expect(page.getByText("Also in this project")).toBeVisible();
     await expect(page.getByText(repo, { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
-    // The row names the primary and counts the rest: "<extra> + 1 more" —
-    // and so does the selected-project section above it (FE-14).
-    await expect(page.getByText(`${extra} + 1 more`)).toHaveCount(2);
+    // The selected-project section names the primary and counts the rest:
+    // "<extra> + 1 more" (FE-14). There is no list of projects under it any
+    // more to say it twice.
+    await expect(page.getByText(`${extra} + 1 more`)).toHaveCount(1);
 
     // And the link survives a relaunch, which is what makes it a link rather
     // than something the dialog remembered.
@@ -2316,7 +2382,7 @@ test("a project is created from the folders a person picked, primary first", asy
       .getByRole("button", { name: /^Switch project/ })
       .waitFor({ state: "visible", timeout: 15_000 });
     await page.goto("app://lanework/settings/projects");
-    await expect(page.getByText(`${extra} + 1 more`)).toHaveCount(2);
+    await expect(page.getByText(`${extra} + 1 more`)).toHaveCount(1);
 
     expect(errors).toEqual([]);
   } finally {
@@ -2348,31 +2414,27 @@ test("projects are managed from settings: folders changed, deleted, created", as
 
     await page.goto("app://lanework/settings/projects");
     await expect(
-      page.getByRole("heading", { name: "Projects", exact: true }),
+      page.getByRole("heading", { name: "General", exact: true }),
     ).toBeVisible();
-    // Every project on the ACCOUNT, not just the one that is open — each a row
-    // that selects it for the section above (FE-14).
-    await expect(
-      page.getByRole("button", { name: "Select Cloud project" }),
-    ).toBeVisible();
-    // Neither project has a folder on this machine yet, and the page says so
-    // per row rather than once for the page — plus once in the section.
-    await expect(page.getByText("No folder on this machine")).toHaveCount(3);
+    // Any project on the ACCOUNT, not just the one that is open — picked in
+    // the title bar for the page below (FE-14).
+    await pickInSettings(page, "Cloud project");
+    // It has no folder on this machine yet, and the page says so.
+    await expect(page.getByText("No folder on this machine")).toHaveCount(1);
 
     // Folders and the name are two buttons, not one "edit": the folders are
     // this machine's, the name is the account's.
-    await page.getByRole("button", { name: "Select Cloud project" }).click();
     await page
       .getByRole("button", { name: "Source folders for Cloud project" })
       .click();
     await page.getByRole("button", { name: /^Add folders/ }).click();
     await page.getByRole("button", { name: "Save folders" }).click();
-    // The row and the section both say where it lives now.
-    await expect(page.getByText(repo, { exact: true })).toHaveCount(2);
+    // The section says where it lives now.
+    await expect(page.getByText(repo, { exact: true })).toHaveCount(1);
 
     // Deleting says what it does, and only then does it — and it reaches a
-    // project that is NOT open, by selecting it rather than switching to it.
-    await page.getByRole("button", { name: "Select Lanework" }).click();
+    // project that is NOT open, by picking it rather than switching to it.
+    await pickInSettings(page, "Lanework");
     await page.getByRole("button", { name: "Delete Lanework" }).click();
     await expect(
       page.getByText(/removes the project and its cloud board/),
@@ -2387,12 +2449,16 @@ test("projects are managed from settings: folders changed, deleted, created", as
       "DELETE /v1/sync/state/workspace/ws-lanework",
     );
 
-    // And a project can be created from here too, with the same dialog.
+    // And a project can be created from here too, with the same dialog: the
+    // picker's New project, which then picks it.
+    await page.getByRole("button", { name: /^Pick a project/ }).click();
     await page.getByRole("button", { name: "New project" }).click();
     await page.getByLabel("New project name").fill("From Settings");
     await page.getByRole("button", { name: "Create project" }).click();
     await expect(
-      page.getByRole("button", { name: "Select From Settings" }),
+      page.getByRole("button", {
+        name: "Pick a project — currently From Settings",
+      }),
     ).toBeVisible();
 
     expect(errors).toEqual([]);
@@ -2436,10 +2502,10 @@ test("a project with no cloud id says why it cannot be renamed or deleted", asyn
       .waitFor({ state: "visible", timeout: 15_000 });
 
     await page.goto("app://lanework/settings/projects");
-    await page.getByRole("button", { name: "Select Legacy project" }).click();
+    await pickInSettings(page, "Legacy project");
     const remove = page.getByRole("button", { name: "Delete Legacy project" });
     await expect(remove).toBeDisabled();
-    await expect(remove).toHaveAttribute("title", /no cloud id/);
+    await expect(remove).toHaveAttribute("title", /no cloud id/i);
     await expect(
       page.getByRole("button", { name: "Rename Legacy project" }),
     ).toBeDisabled();
@@ -2453,7 +2519,7 @@ test("a project with no cloud id says why it cannot be renamed or deleted", asyn
     expect(plane.calls.some((call) => call.startsWith("DELETE "))).toBe(false);
 
     // The project the account DID give an id is untouched by the gate.
-    await page.getByRole("button", { name: "Select Lanework" }).click();
+    await pickInSettings(page, "Lanework");
     await expect(
       page.getByRole("button", { name: "Delete Lanework" }),
     ).toBeEnabled();
@@ -2488,7 +2554,12 @@ test("every issue is removed from settings, once the key is typed", async () => 
     // board read, and the dialog would rightly say "every issue" instead of a
     // count it never saw.
     await page.getByRole("link", { name: /^Settings/ }).click();
-    await page.getByRole("link", { name: "Projects" }).click();
+    // Settings → Project → General: the project's own page (it was
+    // "Projects" before Settings was regrouped).
+    await page
+      .getByRole("navigation", { name: "Settings sections" })
+      .getByRole("link", { name: "General" })
+      .click();
     await page
       .getByRole("button", { name: "Remove all issues in Cloud project" })
       .click();
@@ -2568,7 +2639,7 @@ test("a project is renamed from settings, and its key does not move", async () =
     await switchTo(page, "Lanework");
 
     await page.goto("app://lanework/settings/projects");
-    await page.getByRole("button", { name: "Select Cloud project" }).click();
+    await pickInSettings(page, "Cloud project");
     await page.getByRole("button", { name: "Rename Cloud project" }).click();
 
     // The field arrives holding the current name — a rename is an edit, not an
@@ -2608,7 +2679,7 @@ test("a project is renamed from settings, and its key does not move", async () =
 
     // A name that is only whitespace never reaches the service: there is
     // nothing to save, so there is nothing to refuse.
-    await page.getByRole("button", { name: "Select Lanework" }).click();
+    await pickInSettings(page, "Lanework");
     await page.getByRole("button", { name: "Rename Lanework" }).click();
     await page.getByLabel("New name for Lanework").fill("   ");
     await expect(
@@ -2877,6 +2948,10 @@ test("a project URL whose list will not load asks once and stays put", async () 
 /**
  * Watch for the thing that reads as "loading again": a skeleton, or a card
  * mounting at `opacity: 0` because it is about to fade in (FE-15).
+ *
+ * ⚠️ The board's, not the GitHub issues group's under it (FE-75): that one is
+ * read from the repo through `gh`, not from the board, and has its own
+ * skeleton while it does.
  */
 async function watchForReload(page: Page): Promise<void> {
   // ⚠️ A string, not a function: this project's test tsconfig has no DOM lib,
@@ -2885,7 +2960,9 @@ async function watchForReload(page: Page): Promise<void> {
     const seen = { skeleton: false, fade: false };
     globalThis.__reload = seen;
     new MutationObserver(() => {
-      if (document.querySelector('[data-slot="skeleton"]')) seen.skeleton = true;
+      for (const node of document.querySelectorAll('[data-slot="skeleton"]'))
+        if (!node.closest('[aria-label="Loading GitHub issues"]'))
+          seen.skeleton = true;
       if (document.querySelector('li.shadow-card[style*="opacity: 0"]'))
         seen.fade = true;
     }).observe(document.body, {
@@ -3036,14 +3113,15 @@ test("a big board opens one group at a time, counted by the service", async () =
         .getByRole("link", { name: /Card number/ });
     await expect(group("To-Do")).toHaveCount(50);
     await expect(group("In Progress")).toHaveCount(20);
-    // Done starts folded; opening it draws the page it was read with.
+    // Done is drawn once asked for, folded; opening it draws the page it was
+    // read with.
+    await showDone(page);
     await header("Done").click();
     await expect(group("Done")).toHaveCount(20);
-    // The counts are the service's, not the page on screen.
+    // The counts are the service's, not the page on screen. (The rail's
+    // Issues link carries no count any more, only new pull requests.)
     await expect(header("Done")).toContainText("100");
-    await expect(page.getByRole("link", { name: /^Issues/ })).toContainText(
-      "300",
-    );
+    await expect(header("To-Do")).toContainText("100");
 
     const reads = plane.calls
       .slice(mark)
@@ -3056,11 +3134,13 @@ test("a big board opens one group at a time, counted by the service", async () =
       plane.calls.slice(mark).some((call) => call.includes("/stats")),
     ).toBe(true);
 
-    await page.getByRole("button", { name: /^Load more/ }).click();
+    // Each open lane has its own Load more; this one is In Progress's.
+    const more = page
+      .getByRole("region", { name: "In Progress" })
+      .getByRole("button", { name: /^Load more/ });
+    await more.click();
     await expect(group("In Progress")).toHaveCount(40);
-    await expect(
-      page.getByRole("button", { name: /^Load more/ }),
-    ).toContainText("60 left");
+    await expect(more).toContainText("60 left");
     expect(
       plane.calls.some((call) =>
         /items\?.*column=processing.*cursor=/.test(call),
@@ -3137,6 +3217,7 @@ test("a service without stats still gets the whole board", async () => {
     const page = await app.firstWindow();
     await switchTo(page, "Cloud project");
     const done = page.getByRole("button", { name: /^Done/ });
+    await showDone(page);
     await done.click();
     // Every card, as before FE-17, and no "Load more" to press.
     await expect(
@@ -3148,9 +3229,8 @@ test("a service without stats still gets the whole board", async () => {
     await expect(page.getByRole("button", { name: /^Load more/ })).toHaveCount(
       0,
     );
-    await expect(page.getByRole("link", { name: /^Issues/ })).toContainText(
-      "150",
-    );
+    // With no counts from the service, the lane counts what it read.
+    await expect(done).toContainText("50");
   } finally {
     await app.close();
     await plane.close();

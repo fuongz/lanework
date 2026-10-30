@@ -177,6 +177,37 @@ async function newTab(page: Page, kind: "Terminal" | "Claude" | "Codex") {
   await page.getByRole("menuitem", { name: kind }).click();
 }
 
+/**
+ * Start a new agent in a terminal, with no conversation yet, and open it.
+ *
+ * ⚠️ The rail's "New agent" menu is gone (FE-98): its + is "New conversation"
+ * now, which opens a chat page and starts nothing until a send. A blank agent
+ * in a pty is still what a card or Settings › Agents starts, through the
+ * terminal surface, and opened at its own URL — so that is how it is started
+ * here, and the rest is the real path: its view, its row, its title bar.
+ */
+async function newAgent(
+  page: Page,
+  agent: "claude" | "codex",
+  project = "ws-alpha",
+  slug = "alpha",
+) {
+  const id = await page.evaluate(
+    ([project, agent]) =>
+      (
+        window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+      ).desktop.terminal
+        .spawn(project, 120, 36, agent)
+        .then((session) => session.id),
+    [project, agent] as const,
+  );
+  await page.goto(`app://lanework/w/${slug}/agents/${id}`);
+}
+
+/** The rail's group of conversations (FE-98: "Agents" and "Running" before). */
+const sessions = (page: Page) =>
+  page.getByRole("navigation", { name: "Sessions" });
+
 /** Click a View-menu item the way the ⌘` accelerator does. */
 async function menu(app: ElectronApplication, id: string) {
   await app.evaluate(({ Menu }, itemId) => {
@@ -552,11 +583,11 @@ test("dragging a tab moves it, leaves the shown one alone, and outlives a reload
   }
 });
 
-test("the Agents + offers only the CLIs this machine has, and a new agent opens in the main view — never as a panel tab", async () => {
+test("the Sessions + opens a new conversation, and a new agent opens in the main view — never as a panel tab", async () => {
   const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
-  const { profile, home, repo } = await seedProfile(plane.origin);
+  const { profile, home } = await seedProfile(plane.origin);
   // Claude "installed", Codex not; and what it types is a marker, not the
   // real CLI (the printed line is not the typed one).
   const app = await boot(profile, home, plane.origin, {
@@ -574,26 +605,30 @@ test("the Agents + offers only the CLIs this machine has, and a new agent opens 
     await expect(page.getByRole("menuitem")).toHaveText([/^Terminal\s*⌘T$/]);
     await page.keyboard.press("Escape");
 
-    // The Agents group has a folder to run in, so it shows — with its +.
-    const group = page.getByRole("navigation", { name: "Agents" });
-    await group.getByRole("button", { name: "New agent" }).click();
-    await expect(page.getByRole("menuitem")).toHaveText(["New Claude"]);
-    await page.getByRole("menuitem", { name: "New Claude" }).click();
+    // The Sessions group has a folder to run in, so it shows — with its +,
+    // which opens a new conversation's page (FE-98), not a panel tab.
+    await sessions(page)
+      .getByRole("button", { name: "New conversation" })
+      .click();
+    await expect(page).toHaveURL(/\/w\/alpha\/agents\/chat\/new/);
+    await expect(tabs(page)).toHaveCount(1);
 
+    await newAgent(page, "claude");
     const view = page.getByRole("region", {
       name: "Claude — New Claude session",
     });
     await expect(view).toBeVisible();
     await expect(view.locator(".xterm-rows")).toContainText("claude-started");
-    await expect(titlebar(page)).toContainText(basename(repo));
-    // Its own row, under Running, marked as the one on screen — and no tab
-    // in the panel.
+    // The title bar names the agent; the folder it runs in is no longer
+    // drawn there.
+    await expect(titlebar(page)).toContainText("New Claude session");
+    // Its own row, in Sessions, marked as the one on screen — and no tab
+    // in the panel: the bar (the panel folds on the page load `newAgent`
+    // makes) still counts the one shell.
     await expect(
-      page
-        .getByRole("navigation", { name: "Running" })
-        .getByRole("button", { name: "Open new Claude session" }),
+      sessions(page).getByRole("button", { name: "Open new Claude session" }),
     ).toHaveAttribute("aria-current", "page");
-    await expect(tabs(page)).toHaveCount(1);
+    await expect(bar(page)).toHaveAccessibleName("Terminal 1");
   } finally {
     await app.close();
     await plane.close();
@@ -710,8 +745,11 @@ test("a running agent keeps ONE row as its CLI moves between conversations (FE-3
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    const group = page.getByRole("navigation", { name: "Agents" });
-    const running = page.getByRole("navigation", { name: "Running" });
+    // One Sessions group now (FE-98): what was Running is told by a row's
+    // tooltip, which says "running" (or "working", mid-turn) while a pty has
+    // its conversation.
+    const group = sessions(page);
+    const live = /\n(Claude|Codex), (running|working)/;
     const type = async (region: string, line: string) => {
       await page
         .getByRole("region", { name: region })
@@ -722,9 +760,8 @@ test("a running agent keeps ONE row as its CLI moves between conversations (FE-3
     };
 
     // A new Codex: no id until its first prompt writes a rollout — then
-    // its row IS that conversation, in Running, and nowhere else.
-    await group.getByRole("button", { name: "New agent" }).click();
-    await page.getByRole("menuitem", { name: "New Codex" }).click();
+    // its row IS that conversation, running, and there is no other.
+    await newAgent(page, "codex");
     await expect(
       page
         .getByRole("region", { name: "Codex — New Codex session" })
@@ -736,21 +773,17 @@ test("a running agent keeps ONE row as its CLI moves between conversations (FE-3
         .getByRole("region", { name: "Codex — New Codex session" })
         .locator(".xterm-rows"),
     ).toContainText("codex-heard-Respond to hello");
+    const hello = group.getByRole("button", {
+      name: "Open “Respond to hello”",
+    });
+    await expect(hello).toHaveCount(1);
+    await expect(hello).toHaveAttribute("title", live);
     await expect(
-      running.getByRole("button", {
-        name: "Resume “Respond to hello” in Codex",
-      }),
-    ).toBeVisible();
-    await expect(
-      running.getByRole("button", { name: "Open new Codex session" }),
+      group.getByRole("button", { name: "Open new Codex session" }),
     ).toHaveCount(0);
-    await expect(group.getByRole("button", { name: /in Codex$/ })).toHaveCount(
-      0,
-    );
 
-    // A new Claude, asked something: one row, in Running.
-    await group.getByRole("button", { name: "New agent" }).click();
-    await page.getByRole("menuitem", { name: "New Claude" }).click();
+    // A new Claude, asked something: one row, running.
+    await newAgent(page, "claude");
     await expect(
       page
         .getByRole("region", { name: "Claude — New Claude session" })
@@ -762,25 +795,29 @@ test("a running agent keeps ONE row as its CLI moves between conversations (FE-3
         .getByRole("region", { name: "Claude — New Claude session" })
         .locator(".xterm-rows"),
     ).toContainText("claude-heard-Read readme");
-    const readme = claudeRowName("Read readme");
-    await expect(running.getByRole("button", { name: readme })).toBeVisible();
+    const readme = group.getByRole("button", {
+      name: claudeRowName("Read readme"),
+    });
+    await expect(readme).toHaveCount(1);
+    await expect(readme).toHaveAttribute("title", live);
 
     // `/clear`: the agent is on an empty conversation now, and the one it
-    // left is a transcript — in Agents.
+    // left is a transcript — no longer running.
     await type("Claude — Read readme", "/clear");
     await expect(
-      running.getByRole("button", { name: "Open new Claude session" }),
+      group.getByRole("button", { name: "Open new Claude session" }),
     ).toBeVisible();
-    await expect(group.getByRole("button", { name: readme })).toBeVisible();
+    await expect(readme).toHaveCount(1);
+    await expect(readme).not.toHaveAttribute("title", live);
 
-    // `/resume` back to it: ONE row again, in Running — though nothing was
+    // `/resume` back to it: ONE row again, running — though nothing was
     // written to its transcript.
     await type("Claude — New Claude session", "/resume");
-    await expect(running.getByRole("button", { name: readme })).toBeVisible();
+    await expect(readme).toHaveAttribute("title", live);
     await expect(
-      running.getByRole("button", { name: "Open new Claude session" }),
+      group.getByRole("button", { name: "Open new Claude session" }),
     ).toHaveCount(0);
-    await expect(group.getByRole("button", { name: readme })).toHaveCount(0);
+    await expect(readme).toHaveCount(1);
   } finally {
     await app.close();
     await plane.close();
@@ -800,9 +837,7 @@ test("an agent whose CLI cannot start stays on screen to say why — only a clea
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    const group = page.getByRole("navigation", { name: "Agents" });
-    await group.getByRole("button", { name: "New agent" }).click();
-    await page.getByRole("menuitem", { name: "New Claude" }).click();
+    await newAgent(page, "claude");
     const view = page.getByRole("region", {
       name: "Claude — New Claude session",
     });
@@ -837,17 +872,23 @@ test("an Agents row resumes its conversation in the main view, which outlives le
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    const group = page.getByRole("navigation", { name: "Agents" });
-    const runningGroup = page.getByRole("navigation", { name: "Running" });
-    // A row is in ONE group — Running while its agent is — so found by page.
-    // Claude's opens its chat, whose Terminal resumes it in a pty (FE-62).
-    const claudeRow = page.getByRole("button", {
+    // One Sessions group (FE-98): a row whose conversation a pty runs says
+    // "running" (or "working") in its tooltip, where it used to move to a
+    // Running group. Both CLIs' rows open the chat; a terminal is the row's
+    // context menu's (FE-62).
+    const group = sessions(page);
+    const live = /\n(Claude|Codex), (running|working)/;
+    const claudeRow = group.getByRole("button", {
       name: claudeRowName("Flaky login test"),
+    });
+    const codexRow = group.getByRole("button", {
+      name: claudeRowName("Settings page cleanup"),
     });
     await expect(
       group.getByRole("button", { name: CONVERSATION_ROW }),
     ).toHaveCount(2);
-    await expect(runningGroup).toHaveCount(0);
+    await expect(claudeRow).not.toHaveAttribute("title", live);
+    await expect(codexRow).not.toHaveAttribute("title", live);
 
     await resumeClaudeInTerminal(page, "Flaky login test");
     const claude = page.getByRole("region", {
@@ -857,13 +898,9 @@ test("an Agents row resumes its conversation in the main view, which outlives le
       `ran-claude---resume-${CLAUDE_ID}`,
     );
     await expect(claudeRow).toHaveAttribute("aria-current", "page");
-    // Running now: it moved out of Agents, into Running.
-    await expect(
-      runningGroup.getByRole("button", { name: CONVERSATION_ROW }),
-    ).toHaveCount(1);
-    await expect(
-      group.getByRole("button", { name: CONVERSATION_ROW }),
-    ).toHaveCount(1);
+    // Running now, and only it.
+    await expect(claudeRow).toHaveAttribute("title", live);
+    await expect(codexRow).not.toHaveAttribute("title", live);
     const first = page.url();
 
     // The terminal panel is its own: no agent tab in it, and a shell opened
@@ -875,9 +912,8 @@ test("an Agents row resumes its conversation in the main view, which outlives le
     ).toHaveAccessibleName(/^(sh|zsh|bash) in /);
     await expect(claude).toBeVisible();
 
-    await page
-      .getByRole("button", { name: "Resume “Settings page cleanup” in Codex" })
-      .click();
+    await codexRow.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Open in terminal" }).click();
     const codex = page.getByRole("region", {
       name: "Codex — Settings page cleanup",
     });
@@ -886,24 +922,17 @@ test("an Agents row resumes its conversation in the main view, which outlives le
     );
 
     // Back to Claude: the SAME agent, not a second resume (FE-23/D6), with
-    // its screen as it was. Its row opens the chat, which knows a tab runs
-    // it and offers that tab (FE-62/D3).
+    // its screen as it was. Its row goes straight to the tab that runs it
+    // (FE-62/D3).
     await claudeRow.click();
-    const chat = page.getByRole("region", {
-      name: "Claude — Flaky login test",
-    });
-    await expect(chat.getByText("Running in Terminal")).toBeVisible();
-    await chat.getByRole("button", { name: "Open Terminal" }).click();
     await expect(page).toHaveURL(first);
     await expect(claude.locator(".xterm-rows")).toContainText(
       `ran-claude---resume-${CLAUDE_ID}`,
     );
 
-    // A Running row has Stop in its context menu, and as a quick action on
-    // hover beside Pin.
-    const codexName = "Resume “Settings page cleanup” in Codex";
-    const codexRunning = runningGroup.getByRole("button", { name: codexName });
-    await codexRunning.click({ button: "right" });
+    // A running row has Stop in its context menu.
+    await expect(codexRow).toHaveAttribute("title", live);
+    await codexRow.click({ button: "right" });
     await expect(page.getByRole("menuitem", { name: "Stop" })).toBeVisible();
     // FE-57/D4: a running conversation cannot be deleted — off in the menu,
     // and refused by main whatever the page sends.
@@ -925,39 +954,14 @@ test("an Agents row resumes its conversation in the main view, which outlives le
         CODEX_ID,
       ),
     ).toContain("Stop this conversation before deleting it.");
-    await codexRunning.hover();
-    const codexActions = codexRunning.locator("xpath=..");
-    await expect(
-      codexActions.getByRole("button", { name: "Pin" }),
-    ).toBeVisible();
     // An idle agent's Stop ends it without asking, and its row goes back to
-    // Agents as a transcript — whose quick actions and menu have no Stop.
-    const stopAction = codexActions.getByRole("button", { name: "Stop" });
-    // Icon-only, so a tooltip names it before the click. ⚠️ Retried as a
-    // pair, as the Changes list's: it fades in under a hovered row, and a
-    // pointer that lands mid-fade can miss the tooltip's enter event.
-    const tip = page.locator('[data-slot="tooltip-content"]');
-    await expect(async () => {
-      await codexRunning.hover();
-      await stopAction.hover();
-      await expect(tip).toHaveText("Stop", { timeout: 1_500 });
-    }).toPass({ timeout: 10_000 });
-    await stopAction.click();
+    // a transcript — whose menu has no Stop.
+    await codexRow.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Stop" }).click();
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
-    const codexIdle = group.getByRole("button", { name: codexName });
-    await expect(codexIdle).toBeVisible();
-    await expect(
-      runningGroup.getByRole("button", { name: CONVERSATION_ROW }),
-    ).toHaveCount(1);
-    await codexIdle.hover();
-    const idleActions = codexIdle.locator("xpath=..");
-    await expect(
-      idleActions.getByRole("button", { name: "Pin" }),
-    ).toBeVisible();
-    await expect(idleActions.getByRole("button", { name: "Stop" })).toHaveCount(
-      0,
-    );
-    await codexIdle.click({ button: "right" });
+    await expect(codexRow).not.toHaveAttribute("title", live);
+    await expect(claudeRow).toHaveAttribute("title", live);
+    await codexRow.click({ button: "right" });
     await expect(page.getByRole("menuitem", { name: "Pin" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Stop" })).toHaveCount(0);
     await page.keyboard.press("Escape");
@@ -981,6 +985,19 @@ test("an Agents row resumes its conversation in the main view, which outlives le
     await confirm.getByRole("button", { name: "Stop" }).click();
     // Gone, back to the board; the row (through its chat) resumes it again.
     await expect(claude).toHaveCount(0);
+    // ⚠️ Once its turn is closed: the transcript still reads mid-turn after
+    // the line above, and a conversation mid-turn cannot go to a terminal
+    // (FE-62/D3).
+    await appendFile(
+      join(
+        agentHome,
+        ".claude",
+        "projects",
+        claudeProjectDir(repo),
+        `${CLAUDE_ID}.jsonl`,
+      ),
+      `${JSON.stringify({ type: "system", subtype: "turn_duration" })}\n`,
+    );
     await resumeClaudeInTerminal(page, "Flaky login test");
     await expect(page).not.toHaveURL(first);
     await expect(
@@ -1000,7 +1017,7 @@ test("an Agents row resumes its conversation in the main view, which outlives le
     await expect(again).toHaveCount(0);
     await expect(page).toHaveURL(/\/issues/);
     await expect(claudeRow).not.toHaveAttribute("aria-current", "page");
-    await expect(runningGroup).toHaveCount(0);
+    await expect(claudeRow).not.toHaveAttribute("title", live);
 
     // Another project has no conversations and no folder: no group at all.
     await switchTo(page, "Beta");
@@ -1037,11 +1054,13 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
   try {
     let page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    const group = () => page.getByRole("navigation", { name: "Agents" });
-    const pinnedGroup = () => page.getByRole("navigation", { name: "Pinned" });
-    // A row changes group when pinned, so found across the rail's groups.
-    const claude = () =>
-      page.locator("nav").getByRole("button", { name: /^Open “/ });
+    // One Sessions group (FE-98): a pinned row leads it, with a pin mark,
+    // rather than moving to a Pinned group. Claude's row is told from Codex's
+    // by its tooltip.
+    const rows = () =>
+      sessions(page).getByRole("button", { name: CONVERSATION_ROW });
+    const claude = () => rows().and(page.getByTitle(/\nClaude, /));
+    const pinMark = () => claude().getByLabel("Pinned");
     await expect(claude()).toHaveAccessibleName(
       claudeRowName("Flaky login test"),
     );
@@ -1056,25 +1075,26 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
     await page.getByRole("button", { name: "Save" }).click();
     await expect(claude()).toHaveAccessibleName(claudeRowName("Login fix"));
 
-    // Pin: its own group, out of Agents, and kept across a relaunch.
-    await expect(pinnedGroup()).toHaveCount(0);
+    // Pin: to the top, marked, and kept across a relaunch. (Codex's, newer,
+    // leads until then.)
+    await expect(pinMark()).toHaveCount(0);
+    await expect(rows().first()).not.toHaveAccessibleName(
+      claudeRowName("Login fix"),
+    );
     await claude().click({ button: "right" });
     await page.getByRole("menuitem", { name: "Pin" }).click();
-    await expect(
-      pinnedGroup().getByRole("button", { name: CONVERSATION_ROW }),
-    ).toHaveAccessibleName(claudeRowName("Login fix"));
-    await expect(
-      group().getByRole("button", { name: CONVERSATION_ROW }),
-    ).toHaveCount(1);
+    await expect(pinMark()).toHaveCount(1);
+    await expect(rows().first()).toHaveAccessibleName(
+      claudeRowName("Login fix"),
+    );
+    await expect(rows()).toHaveCount(2);
 
     await app.close();
     app = await boot(profile, home, plane.origin, env);
     page = await app.firstWindow();
     await switchTo(page, "Alpha");
     await expect(claude()).toHaveAccessibleName(claudeRowName("Login fix"));
-    await expect(
-      pinnedGroup().getByRole("button", { name: CONVERSATION_ROW }),
-    ).toHaveCount(1);
+    await expect(pinMark()).toHaveCount(1);
 
     // Bookkeeping — what opening a conversation writes — is not work.
     await appendFile(transcript, `${JSON.stringify({ type: "cost-state" })}\n`);
@@ -1100,16 +1120,11 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
     await expect(claude()).toHaveAccessibleName(
       claudeRowName("Flaky login test"),
     );
-    // Unpin, from the row's hover quick action this time.
-    await claude().hover();
-    await claude()
-      .locator("xpath=..")
-      .getByRole("button", { name: "Unpin" })
-      .click();
-    await expect(pinnedGroup()).toHaveCount(0);
-    await expect(
-      group().getByRole("button", { name: CONVERSATION_ROW }),
-    ).toHaveCount(2);
+    // Unpin, from the same menu: there are no hover quick actions any more.
+    await claude().click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Unpin" }).click();
+    await expect(pinMark()).toHaveCount(0);
+    await expect(rows()).toHaveCount(2);
   } finally {
     await app.close();
     await plane.close();
@@ -1146,9 +1161,10 @@ test("FE-57: an Agents row's transcript is deleted for good from its context men
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    const rail = page.locator("nav");
-    const claude = rail.getByRole("button", { name: /^Open “/ });
-    const codex = rail.getByRole("button", { name: /in Codex$/ });
+    // Both CLIs' rows read "Open “…”" now (FE-98); the tooltip says which.
+    const rows = sessions(page).getByRole("button", { name: CONVERSATION_ROW });
+    const claude = rows.and(page.getByTitle(/\nClaude, /));
+    const codex = rows.and(page.getByTitle(/\nCodex, /));
     await expect(claude).toHaveAccessibleName(
       claudeRowName("Flaky login test"),
     );
@@ -1177,9 +1193,7 @@ test("FE-57: an Agents row's transcript is deleted for good from its context men
     // Pinned first, so the mark has to go with it.
     await claude.click({ button: "right" });
     await page.getByRole("menuitem", { name: "Pin" }).click();
-    await expect(
-      page.getByRole("navigation", { name: "Pinned" }),
-    ).toBeVisible();
+    await expect(claude.getByLabel("Pinned")).toBeVisible();
 
     // Cancel keeps everything.
     await claude.click({ button: "right" });
@@ -1195,9 +1209,7 @@ test("FE-57: an Agents row's transcript is deleted for good from its context men
     await dialog.getByRole("button", { name: "Delete" }).click();
     await expect(dialog).toBeHidden();
     await expect(claude).toHaveCount(0);
-    await expect(page.getByRole("navigation", { name: "Pinned" })).toHaveCount(
-      0,
-    );
+    await expect(sessions(page).getByLabel("Pinned")).toHaveCount(0);
     expect(await gone(join(claudeDir, `${CLAUDE_ID}.jsonl`))).toBe(true);
     expect(await gone(join(claudeDir, CLAUDE_ID))).toBe(true);
     // Its neighbours are not touched.
@@ -1262,7 +1274,7 @@ test("a conversation's sub-agents sit under its row — folded until one works (
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
-    const group = page.getByRole("navigation", { name: "Agents" });
+    const group = sessions(page);
     const claudeRow = page.getByRole("button", {
       name: claudeRowName("Flaky login test"),
     });
@@ -1278,9 +1290,13 @@ test("a conversation's sub-agents sit under its row — folded until one works (
     await expect(gibbs).toHaveAccessibleName(/^Gibbs: social card,/);
     await expect(gibbs).toHaveAttribute("aria-busy", "true");
 
-    // Claude's are all done: folded, and counted beside the age (D7).
+    // Claude's are all done: folded, and counted — by the chevron that
+    // unfolds them, in its tooltip (the count beside the age is gone).
+    const fold = page.getByRole("button", {
+      name: /^(Show|Hide) 3 sub-agents$/,
+    });
     await expect(subRows("Flaky login test")).toHaveCount(0);
-    await expect(claudeRow.getByTestId("subagent-count")).toHaveText("3");
+    await expect(fold).toHaveAttribute("title", "3 sub-agents");
     await claudeRow.hover();
     await page.getByRole("button", { name: "Show 3 sub-agents" }).click();
     await expect(
@@ -1310,7 +1326,7 @@ test("a conversation's sub-agents sit under its row — folded until one works (
     await expect(subRows("Flaky login test").first()).toContainText(
       "Map the rail code",
     );
-    await expect(claudeRow.getByTestId("subagent-count")).toHaveText("1");
+    await expect(fold).toHaveAttribute("title", "3 sub-agents, 1 working");
     await appendFile(
       join(subagents, "agent-done.jsonl"),
       line({
@@ -1320,7 +1336,7 @@ test("a conversation's sub-agents sit under its row — folded until one works (
       }),
     );
     await expect(mapped).not.toHaveAttribute("aria-busy", "true");
-    await expect(claudeRow.getByTestId("subagent-count")).toHaveText("3");
+    await expect(fold).toHaveAttribute("title", "3 sub-agents");
 
     // One just spawned: listed once it writes, going — and a fourth folds
     // the oldest away (D4).
@@ -1431,9 +1447,6 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
 
     // The row it opened from is marked; nothing was started (FE-35/V4).
     await expect(mapped).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("navigation", { name: "Running" })).toHaveCount(
-      0,
-    );
     expect(
       await page.evaluate(() =>
         (
@@ -1519,18 +1532,21 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
     await page.goBack();
     await expect(viewer).toBeVisible();
 
-    // Its conversation is a link away, resumed in a terminal (D9) — its row
-    // marked, though the row itself opens the chat (FE-62).
+    // Its conversation is a link away (D9): its chat, as its row opens it,
+    // since no terminal runs it (FE-62) — and still nothing is started.
     await titlebar(page)
       .getByRole("button", {
         name: "Open its conversation, “Flaky login test”, in Claude",
       })
       .click();
-    await expect(
-      page
-        .getByRole("region", { name: "Claude — Flaky login test" })
-        .locator(".xterm-rows"),
-    ).toContainText(`ran-claude---resume-${CLAUDE_ID}`);
+    await expect(page).toHaveURL(new RegExp(`/agents/chat/${CLAUDE_ID}$`));
+    expect(
+      await page.evaluate(() =>
+        (
+          window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+        ).desktop.terminal.list("ws-alpha"),
+      ),
+    ).toEqual([]);
     await expect(
       page.getByRole("button", { name: claudeRowName("Flaky login test") }),
     ).toHaveAttribute("aria-current", "page");
@@ -1541,7 +1557,7 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
   }
 });
 
-test("FE-38: an agent's view shows its conversation's numbers and Claude's recap, and follows its writes — a row's tooltip and Settings read them too", async () => {
+test("FE-38: an agent's view shows its conversation's numbers and Claude's recap, and follows its writes — a row's tooltip reads them too", async () => {
   const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
@@ -1570,7 +1586,7 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
     // A row's tooltip has its cost and context once it is hovered — read
     // then, and not before (FE-38/D5).
     const codexRow = page.getByRole("button", {
-      name: "Resume “Settings page cleanup” in Codex",
+      name: claudeRowName("Settings page cleanup"),
     });
     await expect(codexRow).toHaveAttribute("title", /\nCodex, /);
     await expect(codexRow).not.toHaveAttribute("title", /context/);
@@ -1690,10 +1706,10 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
     await page.keyboard.press("Escape");
 
     // Codex: no cost, lines, run time or recap — its context a share of the
-    // window it records (D2).
-    await page
-      .getByRole("button", { name: "Resume “Settings page cleanup” in Codex" })
-      .click();
+    // window it records (D2). In a terminal, from its row's menu: the row
+    // itself opens the chat (FE-98).
+    await codexRow.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Open in terminal" }).click();
     const codex = page.getByRole("region", {
       name: "Codex — Settings page cleanup",
     });
@@ -1713,17 +1729,8 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
     await page.keyboard.press("Escape");
     await expect(codex.getByRole("region", { name: "Recap" })).toHaveCount(0);
 
-    // Settings → Projects totals the folder's conversations (D6).
-    await page.goto("app://lanework/settings/projects");
-    const usage = page.getByTestId("agent-usage");
-    await expect(usage).toContainText("Last 7 days");
-    await expect(usage).toContainText("Last 30 days");
-    await expect(usage).toContainText(
-      "Claude ≈ $0.91, 152k in, 5k out, 1 conversation",
-    );
-    await expect(usage).toContainText(
-      "Codex 1.8M in, 17.3k out, 1 conversation",
-    );
+    // (Settings → Projects no longer totals the folder's conversations,
+    // FE-38/D6: the panel went when Settings was regrouped, f636f38.)
   } finally {
     await app.close();
     await plane.close();
@@ -2489,6 +2496,8 @@ test("FE-34: a settled card starts its agent at once; an open one is approved as
     const finished = new URL(issues);
     finished.searchParams.set("status", "done");
     await page.goto(finished.toString());
+    // …and draws it folded, as it draws every finished lane.
+    await page.getByRole("button", { name: /^Done/, expanded: false }).click();
     await handRow(page, "FE-49").click({ button: "right" });
     await expect(page.getByRole("menuitem", { name: "Delete…" })).toBeVisible();
     await expect(
@@ -2703,8 +2712,11 @@ test("folded, the window gets a title bar and the rail shows each agent as an ic
       name: claudeRowName("Flaky login test"),
     });
     await expect(claude).toBeVisible();
+    // Codex's reads "Open “…”" too now (FE-98).
     await expect(
-      agents.getByRole("button", { name: /in Codex$/ }),
+      agents.getByRole("button", {
+        name: claudeRowName("Settings page cleanup"),
+      }),
     ).toBeVisible();
     const box = await claude.boundingBox();
     expect((box?.x ?? 99) + (box?.width ?? 0)).toBeLessThanOrEqual(56);

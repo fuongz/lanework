@@ -825,6 +825,9 @@ test("the renderer learns who is signed in, and nothing more", async () => {
       "commitDiff",
       "commits",
       "fileText",
+      // The repo's GitHub issues, beside its pull requests (FE-75).
+      "issue",
+      "issues",
       "merge",
       "onAccountChange",
       "pull",
@@ -857,8 +860,11 @@ test("filters by state, and asks GitHub for it rather than trimming locally", as
     // Open is the default, so nothing merged is on screen yet.
     await expect(page.getByText("feat: ship the thing")).toHaveCount(0);
 
-    await page.getByRole("button", { name: /^Filter by state/ }).click();
-    await page.getByRole("menuitemradio", { name: "Merged" }).click();
+    // State is a field of the list's Filter menu, as the issue list's are
+    // (FE-75): the button, the field on hover, then its value.
+    await page.getByRole("button", { name: "Filter", exact: true }).click();
+    await page.getByRole("menuitem", { name: "State" }).hover();
+    await page.getByRole("option", { name: "Merged" }).click();
 
     await expect(page.getByText("feat: ship the thing")).toBeVisible({
       timeout: 15_000,
@@ -896,7 +902,10 @@ test("a tab that hides everything says so in its own words", async () => {
 
     // The repository has pull requests; this tab does not. "None to show"
     // here would send somebody looking for work that is right there.
-    await page.getByRole("button", { name: "Authored", exact: true }).click();
+    // Show is a field of the Filter menu now, not a row of tabs (FE-75).
+    await page.getByRole("button", { name: "Filter", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Show" }).hover();
+    await page.getByRole("option", { name: "Authored" }).click();
     await expect(page.getByText("None of these are yours")).toBeVisible();
     await expect(page.getByText("Try the All tab.")).toBeVisible();
   } finally {
@@ -1352,7 +1361,8 @@ test("summary and code are two tabs, and the tab is in the URL", async () => {
     // The summary is about the pull request, so it carries the facts the
     // header stopped carrying: the branches, and the description.
     await expect(page.getByText("Description")).toBeVisible();
-    await expect(page.getByText("Branch")).toBeVisible();
+    // `exact`: the merge box's "No conflicts with base branch" also says it.
+    await expect(page.getByText("Branch", { exact: true })).toBeVisible();
 
     // The branch row is on the summary, so the diff's second row, the one
     // with the commit picker, is gone here.
@@ -1451,9 +1461,11 @@ test("focus mode puts the other columns away, and gives them back", async () => 
     await expect
       .poll(async () => (await list.boundingBox())?.width ?? 0)
       .toBe(0);
+    // The rail folds to its icons, not to nothing (FE-57): the way back
+    // stays on screen.
     await expect
       .poll(async () => (await sidebar.boundingBox())?.width ?? 0)
-      .toBe(0);
+      .toBeLessThan(57);
 
     await page.getByRole("button", { name: "Show the other panels" }).click();
     await expect
@@ -1618,14 +1630,12 @@ test("a merged pull request offers no verdict, but still takes a comment", async
     // filter is sent to GitHub, not applied here.
     await page.goto(`app://lanework/w/${SLUG}/issues/pulls?tab=all&status=all`);
     await page.getByText("chore(deps): bump @types/node").first().click();
-    await expect(page.getByText("package.json").first()).toBeVisible({
-      timeout: 15_000,
-    });
-    // `exact`, because the list's `Reviewing` tab is also a button whose
-    // name contains "Review".
+    // `exact`, because "Needs my review" is also a button whose name
+    // contains "Review".
     const verdict = page.getByRole("button", { name: "Review", exact: true });
-    // The open one still offers it.
-    await expect(verdict).toBeVisible();
+    // The open one still offers it. It lands on the summary, which is where
+    // the verdict sits beside the comment box.
+    await expect(verdict).toBeVisible({ timeout: 15_000 });
 
     // The merged one, by its own title: each state is a distinct pull
     // request.

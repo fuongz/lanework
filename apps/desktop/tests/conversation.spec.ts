@@ -612,12 +612,13 @@ test("V5: a Claude conversation opens as a chat, sends a prompt and switches to 
 
     const modelPill = chat.getByRole("button", { name: /^Model: / });
     await modelPill.click();
-    const effort = page.getByRole("menuitem", { name: /^Effort/ });
+    // Effort is a slider in the menu itself; the submenu is the model list.
+    const effort = page.getByRole("slider", { name: "Effort" });
     await expect(effort).toBeVisible();
     await page.screenshot({ path: join(SHOTS, "model-menu.png") });
-    await effort.hover();
-    await expect(page.getByRole("menuitemradio").first()).toBeVisible();
-    await page.screenshot({ path: join(SHOTS, "effort-submenu.png") });
+    await page.getByRole("menuitem", { name: /^Model/ }).hover();
+    await expect(page.getByLabel("Search models")).toBeVisible();
+    await page.screenshot({ path: join(SHOTS, "model-submenu.png") });
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await expect(effort).toHaveCount(0);
@@ -708,8 +709,9 @@ test("V5: a Claude conversation opens as a chat, sends a prompt and switches to 
     await page.getByRole("button", { name: "Chat", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/agents/chat/${CHAT_ID}$`));
     await expect(chat.getByText("pong", { exact: true })).toBeVisible();
-    // The tab still runs it: the chat waits, one writer at a time.
-    await expect(chat.getByText("Running in Terminal")).toBeVisible();
+    // One writer at a time: Chat stopped the tab on the way (FE-62), so the
+    // chat takes a message again rather than waiting behind a banner.
+    await expect(box).toBeEditable();
   } finally {
     await app.close();
     await plane.close();
