@@ -787,6 +787,18 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           open: true,
         }
       : null;
+  // A turn on its way with nothing drawn for it yet (no text streaming, no
+  // tool running): the chat says it is working rather than standing blank.
+  const lastBlock = lastOpen?.blocks[lastOpen.blocks.length - 1];
+  const toolRunning =
+    lastBlock?.type === "tools" &&
+    lastBlock.calls.some((call) => call.output === null);
+  const thinking =
+    working &&
+    !delta &&
+    !toolRunning &&
+    waiting.length === 0 &&
+    asking.length === 0;
 
   return (
     <TooltipProvider delay={200}>
@@ -880,7 +892,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 ) : (
                   <ConversationSkeleton label="Reading the conversation" />
                 )
-              ) : turns.length === 0 && waiting.length === 0 && !stream ? (
+              ) : turns.length === 0 &&
+                waiting.length === 0 &&
+                !stream &&
+                !thinking ? (
                 <Empty className="py-16">
                   <EmptyHeader>
                     <EmptyMedia variant="icon">
@@ -933,6 +948,16 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                         pending="Sending…"
                       />
                     ))}
+                    {thinking && (
+                      <WorkingLine
+                        label={
+                          engine.state === "starting"
+                            ? `Starting ${label}…`
+                            : "Working…"
+                        }
+                        since={lastPromptAt}
+                      />
+                    )}
                     <OrchestrationPanel
                       slug={slug}
                       orchestration={orchestration}
@@ -1108,4 +1133,46 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       </section>
     </TooltipProvider>
   );
+}
+
+/**
+ * The chat's "still working" line: a turn is running with nothing drawn for
+ * it yet. Seconds since the prompt tick beside it, so a long wait reads as
+ * alive rather than stuck.
+ */
+function WorkingLine({
+  label,
+  since,
+}: {
+  label: string;
+  since: string | null;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const from = since ? Date.parse(since) : Number.NaN;
+  const seconds = Number.isNaN(from)
+    ? null
+    : Math.max(0, Math.floor((now - from) / 1000));
+  return (
+    <div
+      role="status"
+      className="text-muted-foreground flex items-center gap-2 text-[13px]"
+    >
+      <OrbitSpinner className="size-[13px]" />
+      <span className="text-shimmer">{label}</span>
+      {seconds !== null && seconds > 0 && (
+        <span className="tabular-nums">{elapsed(seconds)}</span>
+      )}
+    </div>
+  );
+}
+
+/** `42s`, `3m 05s`. */
+function elapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
 }

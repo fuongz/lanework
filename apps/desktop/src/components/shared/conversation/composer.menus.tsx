@@ -56,7 +56,7 @@ import { useModels } from "./composer.models";
 
 /** A pill in the composer's bottom row. */
 const PILL =
-  "text-foreground hover:bg-foreground/[0.08] aria-expanded:bg-foreground/[0.08] bg-foreground/[0.05] flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50";
+  "text-foreground hover:bg-foreground/[0.08] aria-expanded:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50";
 
 const FAVORITES_KEY = "lanework.conversation.favorite-models";
 
@@ -358,7 +358,6 @@ export function ModelMenu({
   fast = true,
   auto,
   effortSet = true,
-  ghost = false,
   className,
 }: {
   settings: ComposerSettings;
@@ -379,8 +378,6 @@ export function ModelMenu({
   auto?: { active: boolean; onPick: () => void };
   /** False while the effort is the default: the pill says so. */
   effortSet?: boolean;
-  /** No fill until hovered: for a row in a list, not a composer's bar. */
-  ghost?: boolean;
   className?: string;
 }) {
   // Re-drawn when Codex's or OpenCode's list arrives: labels come with it.
@@ -398,7 +395,7 @@ export function ModelMenu({
       <DropdownMenuTrigger
         disabled={disabled}
         aria-label={`Model: ${name}, effort ${effortLabel}${settings.fast ? ", fast" : ""}`}
-        className={cn(PILL, ghost && "bg-transparent", className)}
+        className={cn(PILL, className)}
       >
         {!automatic && <TerminalKindIcon kind={kind} className="size-3.5" />}
         <span>{name}</span>
@@ -724,7 +721,7 @@ export function AttachMenu({
       <DropdownMenuTrigger
         disabled={disabled}
         aria-label="Add to message"
-        className="text-muted-foreground hover:text-foreground bg-foreground/[0.05] hover:bg-foreground/[0.08] aria-expanded:bg-foreground/[0.08] aria-expanded:text-foreground focus-visible:ring-ring/30 flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-2"
+        className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.08] aria-expanded:bg-foreground/[0.08] aria-expanded:text-foreground focus-visible:ring-ring/30 flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-2"
       >
         <HugeiconsIcon icon={Add01Icon} className="size-4" strokeWidth={1.8} />
       </DropdownMenuTrigger>

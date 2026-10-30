@@ -369,7 +369,6 @@ function TaskRow({
         <ModelMenu
           side="bottom"
           fast={false}
-          ghost
           disabled={!editable}
           className="h-7 shrink-0 text-xs"
           settings={{

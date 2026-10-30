@@ -339,16 +339,43 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   pin: async (workspace, session, pinned) => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
-    const listed = await surface.pinAgentSession(
-      workspace,
-      session.agent,
-      session.id,
-      pinned,
-    );
-    latest.set(workspace, (latest.get(workspace) ?? 0) + 1);
-    set((state) => ({
-      byWorkspace: { ...state.byWorkspace, [workspace]: listed },
-    }));
+    // NOTE: Pinned in the list at once, saved behind it: a slow write must not
+    // hold the row where it was. Bumping `latest` drops a read already in
+    // flight, which would put the old pin back.
+    const mine = (latest.get(workspace) ?? 0) + 1;
+    latest.set(workspace, mine);
+    set((state) => {
+      const listed = state.byWorkspace[workspace];
+      if (!listed) return {};
+      return {
+        byWorkspace: {
+          ...state.byWorkspace,
+          [workspace]: listed.map((entry) =>
+            entry.agent === session.agent && entry.id === session.id
+              ? { ...entry, pinnedAt: pinned ? Date.now() : null }
+              : entry,
+          ),
+        },
+      };
+    });
+    try {
+      const listed = await surface.pinAgentSession(
+        workspace,
+        session.agent,
+        session.id,
+        pinned,
+      );
+      // A later pin or read already drew a newer list.
+      if (latest.get(workspace) !== mine) return;
+      latest.set(workspace, mine + 1);
+      set((state) => ({
+        byWorkspace: { ...state.byWorkspace, [workspace]: listed },
+      }));
+    } catch (error) {
+      // Not saved: the list as main has it puts the row back.
+      void get().load(workspace);
+      throw error;
+    }
   },
 
   releaseConductor: async (workspace, session) => {
