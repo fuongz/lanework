@@ -46,10 +46,11 @@ export function pickableCards(view: BoardView): BoardCard[] {
  */
 export function cardPrompt(view: BoardView, card: BoardCard): string {
   const role = view.columns.find((c) => c.key === card.columnKey)?.role;
-  const ref = card.taskId ?? card.title;
-  return role === "active"
-    ? `Resume ${ref}: ${card.title}`
-    : `Work on ${ref}: ${card.title}`;
+  const verb = role === "active" ? "Resume" : "Work on";
+  // An unfiled card has no task id; its title alone names it.
+  return card.taskId
+    ? `${verb} ${card.taskId}: ${card.title}`
+    : `${verb} ${card.title}`;
 }
 
 /**
