@@ -85,6 +85,36 @@ export function useSyncToCloud() {
   return { sync, syncing, error, clearError: () => setError(null) };
 }
 
+/**
+ * Copy one cloud board to a new local board (FE-110).
+ *
+ * The list is read again afterwards: the copy is a new entry on it. The
+ * answer says how many issues landed and under which slug.
+ */
+export function useExportToLocal() {
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function exportBoard(project: Project) {
+    const api = window.desktop?.projects;
+    if (!api || !project.id) return null;
+    setExporting(project.id);
+    setError(null);
+    try {
+      const result = await api.exportToLocal(project.id);
+      await useBoard.getState().hydrate();
+      return result;
+    } catch (failure) {
+      setError(ipcMessage(failure, "Could not copy this project to local."));
+      return null;
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  return { exportBoard, exporting, error };
+}
+
 /** Where a moved board lives now, if this machine can see it. */
 function useMovedTarget(
   project: Pick<Project, "movedTo"> | null | undefined,

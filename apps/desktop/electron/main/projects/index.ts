@@ -9,6 +9,7 @@ import {
   type BoardView,
   type BoardWrite,
   boardQueryKey,
+  type CloudExportResult,
   DEFAULT_BOARD_QUERY,
   type ImportPreview,
   type ImportReport,
@@ -59,6 +60,7 @@ import {
   toggleChecklistItem,
   updateCard,
 } from "./client";
+import { readCloudBoard, writeLocalCopy } from "./export-to-local";
 import {
   chooseFolders,
   folderFor,
@@ -168,6 +170,51 @@ async function syncToCloud(localId: string): Promise<LocalSyncResult> {
     };
   } finally {
     syncing.delete(localId);
+  }
+}
+
+/** Exports running now, by cloud id — one click is one copy. */
+const exporting = new Set<string>();
+
+/**
+ * Copies a cloud board to a new local board on this machine (FE-110).
+ *
+ * The cloud board is only read. The folder link is copied too (FE-110/D6), so
+ * the local board opens on the same checkout. The cloud project stays the one
+ * selected; the copy joins the list beside it.
+ */
+async function exportToLocal(projectId: string): Promise<CloudExportResult> {
+  const record = await authorizedRecord();
+  const source = (cachedList(record) ?? (await fetchProjects(record))).find(
+    (entry) => entry.id === projectId && entry.origin !== "local",
+  );
+  if (!source?.id) throw new Error("That project is not on your account.");
+  if (exporting.has(projectId))
+    throw new Error("This board is already being copied.");
+  exporting.add(projectId);
+  try {
+    const copy = await readCloudBoard(record, source.id);
+    await assertSameSession(record);
+    const outcome = writeLocal((store) =>
+      writeLocalCopy(
+        store,
+        { id: source.id as string, slug: source.slug, name: source.name },
+        copy,
+      ),
+    );
+    const paths = (await readFolders(record))[source.slug] ?? [];
+    if (paths.length)
+      await writeFolders(LOCAL_RECORD, outcome.project.slug, paths);
+    const snapshot = await load(source.id);
+    return {
+      cloudId: source.id,
+      localId: outcome.project.id,
+      localSlug: outcome.project.slug,
+      cards: outcome.cards,
+      snapshot,
+    };
+  } finally {
+    exporting.delete(projectId);
   }
 }
 
@@ -928,6 +975,14 @@ export function registerProjects(devUrl?: string): void {
     async (args): Promise<LocalSyncResult> => {
       const [localId] = requireId(args, 1);
       return syncToCloud(localId);
+    },
+  );
+  handle(
+    projectChannels.exportToLocal,
+    devUrl,
+    async (args): Promise<CloudExportResult> => {
+      const [projectId] = requireId(args, 1);
+      return exportToLocal(projectId);
     },
   );
   handle(

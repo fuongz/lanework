@@ -748,6 +748,72 @@ export async function fetchBoardConfig(
 }
 
 /**
+ * A board's configuration as a local board stores it (FE-110).
+ *
+ * NOTE: Not {@link parseBoardConfig}. That one keeps what the board view
+ * draws and drops what a copy needs: each category's task-id `format` and
+ * `pad`, and the tag cap. Without those, a copied board would mint `FE-7`
+ * after `FE-109` and cut every card back to three tags.
+ */
+export async function fetchBoardSettings(
+  record: MachineRecord,
+  projectId: string,
+): Promise<{
+  columns: BoardColumn[];
+  categories: {
+    key: string;
+    name: string;
+    prefix: string;
+    format: string;
+    pad: number;
+    tone: string;
+    position: number;
+  }[];
+  labels: BoardLabel[];
+  tags: { max: number; allowed: string[] } | null;
+}> {
+  const response = await call(record, paths.boardConfig(projectId));
+  if (!response.ok)
+    throw new Error(
+      `Could not load this board (HTTP ${response.status}). Try again.`,
+    );
+  const payload = await body(response);
+  const { columns, labels } = parseBoardConfig(payload);
+  const board = (payload as { board: Record<string, unknown> }).board;
+  const categories = (
+    Array.isArray(board.categories) ? board.categories : []
+  ).flatMap((entry, index) => {
+    if (!entry || typeof entry !== "object") return [];
+    const row = entry as Record<string, unknown>;
+    if (!text(row.key) || !text(row.prefix)) return [];
+    return [
+      {
+        key: row.key,
+        name: text(row.name) ? row.name : row.key,
+        prefix: row.prefix,
+        format: text(row.format) ? row.format : "{prefix}-{seq}",
+        pad: typeof row.pad === "number" ? row.pad : 2,
+        tone: text(row.tone) ? row.tone : "neutral",
+        position: typeof row.position === "number" ? row.position : index,
+      },
+    ];
+  });
+  const tags =
+    board.tags && typeof board.tags === "object"
+      ? (board.tags as Record<string, unknown>)
+      : null;
+  return {
+    columns,
+    categories,
+    labels,
+    tags:
+      tags && typeof tags.max === "number"
+        ? { max: tags.max, allowed: strings(tags.allowed) }
+        : null,
+  };
+}
+
+/**
  * Which of the tags a write asked for did not land on the card.
  *
  * Reported in the words the USER typed, not normalized. "ui polish was

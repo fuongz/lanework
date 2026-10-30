@@ -218,6 +218,19 @@ export class LocalStore {
   }
 
   /**
+   * Run several writes as one: all of them land, or none (FE-110).
+   *
+   * Every store write `fn` makes joins this one, so a throw anywhere rolls
+   * back the lot.
+   *
+   * NOTE: `fn` must be synchronous. An `await` inside would hold the lock
+   * across the event loop while the MCP server and the hook wait on it.
+   */
+  transaction<T>(fn: () => T): T {
+    return this.#write(fn);
+  }
+
+  /**
    * A number that moves on every committed write.
    *
    * It moves for a write from any connection or process. Poll it; when it

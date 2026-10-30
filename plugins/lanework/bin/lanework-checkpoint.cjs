@@ -1186,6 +1186,9 @@ class LocalStore {
       this.#depth -= 1;
     }
   }
+  transaction(fn) {
+    return this.#write(fn);
+  }
   dataVersion() {
     const row = this.#get("SELECT value FROM meta WHERE key = 'change_seq'");
     return Number(row?.value ?? 0);

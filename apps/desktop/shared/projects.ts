@@ -84,6 +84,18 @@ export interface LocalSyncResult {
   snapshot: ProjectSnapshot;
 }
 
+/** What "Export to local" answers (FE-110). */
+export interface CloudExportResult {
+  /** The cloud project that was copied; it is left as it was. */
+  cloudId: string;
+  /** The new local board. */
+  localId: string;
+  localSlug: string;
+  /** Cards copied. */
+  cards: number;
+  snapshot: ProjectSnapshot;
+}
+
 export interface ProjectSnapshot {
   projects: Project[];
   active: Project | null;
@@ -977,6 +989,8 @@ export const projectChannels = {
   folderReveal: "projects:folder:reveal",
   /** Move a local board to the cloud, in one click (FE-52/D7a). */
   syncToCloud: "projects:local:sync",
+  /** Copy a cloud board to a new local one (FE-110). */
+  exportToLocal: "projects:cloud:export",
   /**
    * Main → renderer: the local store changed under this window.
    *
@@ -1338,6 +1352,13 @@ export interface DesktopProjectsApi {
    * and points it at the cloud board. Refused while not signed in.
    */
   syncToCloud: (localId: string) => Promise<LocalSyncResult>;
+  /**
+   * Copy a CLOUD board to a new local board on this machine (FE-110).
+   *
+   * Keeps task ids, checklists, lanes and the newest checkpoints. The cloud
+   * board is not changed. Refused while not signed in.
+   */
+  exportToLocal: (projectId: string) => Promise<CloudExportResult>;
   /** The local store changed from outside this window (MCP, hook). */
   onLocalChange: (listener: (projectIds: string[]) => void) => () => void;
   board: DesktopBoardApi;

@@ -1,10 +1,11 @@
-import { CloudUploadIcon } from "@hugeicons/core-free-icons";
+import { CloudDownloadIcon, CloudUploadIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useState } from "react";
 import type { Project } from "#/../shared/projects";
 import { ImportLocalDialog } from "#/components/features/projects/import-local-dialog";
 import {
   isMovedProject,
+  useExportToLocal,
   useSyncToCloud,
 } from "#/components/shared/auth/local-mode";
 import { RenameProjectDialog } from "#/components/shared/projects/rename-project-dialog";
@@ -117,7 +118,16 @@ export function ProjectsSection() {
     (state) => state.session?.principal.kind === "machine",
   );
   const { sync, syncing, error: syncError } = useSyncToCloud();
-  const failure = failed ?? syncError;
+  const { exportBoard, exporting, error: exportError } = useExportToLocal();
+  // Keyed by the project it was about, so the line does not follow the
+  // selection onto another board.
+  const [exported, setExported] = useState<{
+    slug: string;
+    text: string;
+  } | null>(null);
+  const exportNote =
+    exported && exported.slug === selected?.slug ? exported.text : null;
+  const failure = failed ?? syncError ?? exportError;
 
   // One click moves it to the account. Only once signed in, since before that
   // there is no account to move it to, and never twice.
@@ -126,6 +136,8 @@ export function ProjectsSection() {
     !!selected &&
     isLocalProject(selected) &&
     !isMovedProject(selected);
+  // A cloud board can be copied down to this machine at any time (FE-110).
+  const canExport = signedIn && !!selected?.id && !isLocalProject(selected);
 
   return (
     <>
@@ -137,6 +149,20 @@ export function ProjectsSection() {
             : "The project picked at the top."
         }
         sections={[
+          ...(exportNote && !failure
+            ? [
+                {
+                  title: "Copied",
+                  hideTitle: true,
+                  content: (
+                    <Alert>
+                      <AlertTitle>Copied to this machine</AlertTitle>
+                      <AlertDescription>{exportNote}</AlertDescription>
+                    </Alert>
+                  ),
+                },
+              ]
+            : []),
           ...(failure
             ? [
                 {
@@ -169,7 +195,41 @@ export function ProjectsSection() {
                 onDelete={setConfirming}
                 onFailed={setFailed}
                 extraRows={
-                  canSync && selected ? (
+                  canExport && selected ? (
+                    <Row
+                      label="Export to local"
+                      description="Copy this project's board to this machine. The board on your account stays as it is."
+                    >
+                      <Button
+                        size="lg"
+                        className={SETTINGS_BUTTON}
+                        variant="outline"
+                        aria-label={`Export ${selected.name} to local`}
+                        disabled={exporting !== null}
+                        onClick={() => {
+                          setFailed(null);
+                          setExported(null);
+                          void exportBoard(selected).then((result) => {
+                            if (!result) return;
+                            setExported({
+                              slug: selected.slug,
+                              text: `${result.cards} ${result.cards === 1 ? "issue" : "issues"} copied to the local project ${result.localSlug}. Syncing it to the cloud later makes a second project there.`,
+                            });
+                          });
+                        }}
+                      >
+                        <HugeiconsIcon
+                          icon={CloudDownloadIcon}
+                          strokeWidth={1.8}
+                          data-icon="inline-start"
+                          aria-hidden="true"
+                        />
+                        {exporting === selected.id
+                          ? "Copying…"
+                          : "Export to local"}
+                      </Button>
+                    </Row>
+                  ) : canSync && selected ? (
                     <Row
                       label="Sync to cloud"
                       description="Move this project and its board to your account."

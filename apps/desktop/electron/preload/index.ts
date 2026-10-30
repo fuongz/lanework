@@ -735,6 +735,8 @@ const projects: DesktopProjectsApi = {
     ipcRenderer.invoke(projectChannels.deleteProject, id, slug),
   syncToCloud: (localId) =>
     ipcRenderer.invoke(projectChannels.syncToCloud, localId),
+  exportToLocal: (projectId) =>
+    ipcRenderer.invoke(projectChannels.exportToLocal, projectId),
   onLocalChange: (listener) =>
     subscribe(projectChannels.localChanged, listener),
   board: {
