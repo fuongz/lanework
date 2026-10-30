@@ -63,6 +63,7 @@ import {
   chooseFolders,
   folderFor,
   pickFolder,
+  registerDropped,
   registerFolder,
   revealFolder,
 } from "./folder-chooser";
@@ -1099,6 +1100,25 @@ export function registerWorkspaces(devUrl?: string): void {
       // its folders are filed under the local board.
       await assertCanUse();
       return chooseFolders("Add source folders");
+    },
+  );
+  handle(
+    workspaceChannels.folderDrop,
+    devUrl,
+    async (args): Promise<PickedFolder[]> => {
+      // FE-106: paths the preload read from dropped files. Shape first, and
+      // bounded: a drop is a handful of folders, never thousands.
+      const [paths] = args;
+      if (
+        args.length !== 1 ||
+        !Array.isArray(paths) ||
+        paths.length > 100 ||
+        !paths.every((path) => typeof path === "string" && path.length < 4096)
+      )
+        throw new Error("A list of dropped folders is required");
+      // Authorized as `folderChoose` is, for the same reason.
+      await assertCanUse();
+      return registerDropped(paths);
     },
   );
   handle(

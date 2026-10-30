@@ -4,7 +4,7 @@
 // unloadable outside an Electron process, and the test runner (plain Node)
 // imports the folder reader directly to check it against real files.
 import { randomUUID } from "node:crypto";
-import { basename } from "node:path";
+import { basename, isAbsolute } from "node:path";
 import { app, BrowserWindow, dialog, shell } from "electron";
 import type { PickedFolder } from "../../../shared/workspaces";
 import { folderExists } from "./local-folder";
@@ -98,6 +98,25 @@ function remember(id: string, path: string): void {
 export async function chooseFolders(title: string): Promise<PickedFolder[]> {
   const paths = await openChooser(title, true);
   return paths.map(registerFolder);
+}
+
+/**
+ * Ids for the folders among paths dragged in from the file manager (FE-106).
+ *
+ * The preload read them from dropped files (see `DesktopFolderApi.drop`).
+ * Only existing directories get an id: a dropped file, or a path that is
+ * gone by now, is left out rather than refused, so one stray file does not
+ * cost the folders dropped with it.
+ */
+export async function registerDropped(
+  paths: readonly string[],
+): Promise<PickedFolder[]> {
+  const picked: PickedFolder[] = [];
+  for (const path of new Set(paths)) {
+    if (isAbsolute(path) && (await folderExists(path)))
+      picked.push(registerFolder(path));
+  }
+  return picked;
 }
 
 /**

@@ -9,6 +9,14 @@ import { useState } from "react";
 import type { Workspace } from "#/../shared/workspaces";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "#/components/ui/popover";
 import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
@@ -148,10 +156,12 @@ export function SignInButton({
  * A one-line bar across the top of a local board, as "Offline" is.
  *
  * Being local is a property of the board, not of the screen looking at it.
- * Three states:
- * - local and signed out: sign in to sync;
+ * Two states:
  * - local and signed in: sync to cloud;
  * - moved: read-only, with the way to the cloud board.
+ *
+ * Signed out it draws nothing: in local mode every board is local, and the
+ * rail's badge already offers Sign in. A bar on every board said it again.
  */
 export function LocalBoardBar({ workspace }: { workspace: Workspace }) {
   const signedIn = useSession(
@@ -163,6 +173,7 @@ export function LocalBoardBar({ workspace }: { workspace: Workspace }) {
 
   if (!isLocalWorkspace(workspace)) return null;
   const moved = isMovedWorkspace(workspace);
+  if (!moved && !signedIn) return null;
 
   return (
     <div className="flex shrink-0 flex-col">
@@ -181,9 +192,7 @@ export function LocalBoardBar({ workspace }: { workspace: Workspace }) {
         <span className="text-muted-foreground min-w-0 truncate">
           {moved
             ? "Moved to your account. This copy is read-only."
-            : signedIn
-              ? "Saved on this machine only."
-              : "Saved on this machine only. Sign in to move it to your account."}
+            : "Saved on this machine only."}
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {moved ? (
@@ -202,7 +211,7 @@ export function LocalBoardBar({ workspace }: { workspace: Workspace }) {
                 Open cloud project
               </Button>
             )
-          ) : signedIn ? (
+          ) : (
             <Button
               variant="outline"
               size="sm"
@@ -230,8 +239,6 @@ export function LocalBoardBar({ workspace }: { workspace: Workspace }) {
               />
               {syncing ? "Moving…" : "Sync to cloud"}
             </Button>
-          ) : (
-            <SignInButton label="Sign in to sync" />
           )}
         </div>
       </div>
@@ -251,44 +258,73 @@ export function LocalBoardBar({ workspace }: { workspace: Workspace }) {
 }
 
 /**
- * The rail's footer in local mode (FE-52/D5).
+ * The rail's local-mode badge, beside Settings (FE-52/D5).
  *
  * Nobody is signed in, and this is the way to change that without hunting
- * through Settings. Draws nothing once signed in: a local board then says
- * "Local" in its own bar and in the project list, and the rail is as before.
+ * through Settings: one click opens what local mode means and the Sign in
+ * button. Draws nothing once signed in: a local board then says "Local" in
+ * its own bar and in the project list, and the rail is as before.
  */
 export function LocalModeRail() {
   const local = useSession(
     (state) => state.session?.principal.kind === "local",
   );
+  const busy = useSession((state) => state.busy);
   const error = useSession((state) => state.error);
   if (!local) return null;
   return (
-    <section
-      aria-label="Local mode"
-      className="bg-foreground/[0.035] mb-2 flex flex-col gap-2 rounded-md p-2.5"
-    >
-      <div className="flex items-center gap-2">
-        <HugeiconsIcon
-          icon={LaptopIcon}
-          className="text-muted-foreground size-4 shrink-0"
-          strokeWidth={1.5}
-          aria-hidden="true"
-        />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-          Local mode
-        </span>
-        <LocalBadge />
-      </div>
-      <p className="text-muted-foreground text-xs leading-relaxed">
-        Projects are saved on this machine only.
-      </p>
-      <SignInButton className="w-full" />
-      {error && (
-        <p role="alert" className="text-destructive text-xs break-words">
-          {error}
-        </p>
-      )}
-    </section>
+    <Popover>
+      <PopoverTrigger
+        render={
+          <Badge
+            variant={error ? "destructive" : "outline"}
+            render={<button type="button" />}
+            aria-label="Local mode"
+            title="Saved on this machine only"
+            className="hover:bg-muted cursor-pointer"
+          />
+        }
+      >
+        {busy ? (
+          <span
+            aria-hidden
+            className="startup-loading-spinner border-foreground/20 border-t-foreground/75 size-2.5 rounded-full border-[1.5px]"
+          />
+        ) : (
+          <HugeiconsIcon
+            icon={LaptopIcon}
+            strokeWidth={1.8}
+            data-icon="inline-start"
+            aria-hidden="true"
+          />
+        )}
+        Local
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" className="w-64">
+        <section aria-label="Local mode" className="flex flex-col gap-2.5">
+          <PopoverHeader>
+            <PopoverTitle className="flex items-center gap-2 text-[13px]">
+              <HugeiconsIcon
+                icon={LaptopIcon}
+                className="text-muted-foreground size-4 shrink-0"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+              Local mode
+            </PopoverTitle>
+            <PopoverDescription className="leading-relaxed">
+              Projects are saved on this machine only. Sign in to move them to
+              your account.
+            </PopoverDescription>
+          </PopoverHeader>
+          <SignInButton className="w-full" />
+          {error && (
+            <p role="alert" className="text-destructive text-xs break-words">
+              {error}
+            </p>
+          )}
+        </section>
+      </PopoverContent>
+    </Popover>
   );
 }

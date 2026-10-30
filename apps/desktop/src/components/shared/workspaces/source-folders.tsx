@@ -4,10 +4,11 @@ import {
   FolderAddIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
+import { type DragEvent, useState } from "react";
 import type { PickedFolder } from "#/../shared/workspaces";
 import { Button } from "#/components/ui/button";
 import { ipcMessage } from "#/lib/ipc-error";
+import { cn } from "#/lib/utils";
 
 /**
  * The folders a project is built from, as an editable list.
@@ -31,6 +32,18 @@ export function SourceFolders({
   disabled?: boolean;
 }) {
   const [picking, setPicking] = useState(false);
+  const [dragging, setDragging] = useState(false);
+
+  function merge(picked: PickedFolder[]) {
+    onChange([
+      ...folders,
+      // The same folder twice is one folder, and the second row would carry
+      // an id the first one already owns.
+      ...picked.filter(
+        (entry) => !folders.some((existing) => existing.path === entry.path),
+      ),
+    ]);
+  }
 
   async function add() {
     const api = window.desktop?.workspaces.folder;
@@ -40,20 +53,52 @@ export function SourceFolders({
       const picked = await api.choose();
       // Cancelling answers with nothing, which must not clear what is listed.
       if (!picked.length) return;
-      onChange([
-        ...folders,
-        // The same folder twice is one folder, and the second row would carry
-        // an id the first one already owns.
-        ...picked.filter(
-          (entry) => !folders.some((existing) => existing.path === entry.path),
-        ),
-      ]);
+      merge(picked);
     } catch (cause) {
       onError?.(ipcMessage(cause, "Could not open the folder chooser."));
     } finally {
       setPicking(false);
     }
   }
+
+  // FE-106: folders dragged in from Finder. Only a drag that carries files
+  // lights the target, so dragging text or a row across the dialog does not.
+  const carriesFiles = (event: DragEvent) =>
+    event.dataTransfer.types.includes("Files");
+
+  const dropTarget = {
+    onDragOver(event: DragEvent) {
+      if (disabled || !carriesFiles(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      setDragging(true);
+    },
+    onDragLeave(event: DragEvent) {
+      // Moving onto a child fires a leave on the parent; only leaving the
+      // target itself ends the highlight.
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+        setDragging(false);
+    },
+    async onDrop(event: DragEvent) {
+      if (disabled || !carriesFiles(event)) return;
+      event.preventDefault();
+      setDragging(false);
+      const api = window.desktop?.workspaces.folder;
+      const files = Array.from(event.dataTransfer.files);
+      if (!api || !files.length) return;
+      try {
+        const picked = await api.drop(files);
+        // D2: files are skipped; a drop with no folder at all says why.
+        if (!picked.length) {
+          onError?.("Only folders can be added.");
+          return;
+        }
+        merge(picked);
+      } catch (cause) {
+        onError?.(ipcMessage(cause, "Could not add the dropped folders."));
+      }
+    },
+  };
 
   if (folders.length === 0)
     return (
@@ -63,7 +108,11 @@ export function SourceFolders({
         type="button"
         onClick={() => void add()}
         disabled={picking || disabled}
-        className="border-border text-muted-foreground hover:bg-foreground/[0.03] hover:text-foreground focus-visible:ring-ring/30 flex h-28 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-[13px] transition-colors duration-150 outline-none focus-visible:ring-2 disabled:opacity-50"
+        {...dropTarget}
+        className={cn(
+          "border-border text-muted-foreground hover:bg-foreground/[0.03] hover:text-foreground focus-visible:ring-ring/30 flex h-28 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-[13px] transition-colors duration-150 outline-none focus-visible:ring-2 disabled:opacity-50",
+          dragging && "border-ring bg-foreground/[0.04] text-foreground",
+        )}
       >
         <HugeiconsIcon
           icon={FolderAddIcon}
@@ -74,14 +123,18 @@ export function SourceFolders({
         {/* The label does not change while the chooser is open: the OS panel
             is modal and covers this button, so a "Choosing…" state is never
             seen. */}
-        Add folders Lanework can read
+        {dragging ? "Drop to add" : "Add folders Lanework can read"}
       </button>
     );
 
   return (
     <ul
       aria-label="Source folders"
-      className="border-border divide-border flex flex-col divide-y rounded-lg border"
+      {...dropTarget}
+      className={cn(
+        "border-border divide-border flex flex-col divide-y rounded-lg border transition-colors duration-150",
+        dragging && "border-ring bg-foreground/[0.03]",
+      )}
     >
       {folders.map((folder, index) => (
         <li key={folder.id} className="flex h-11 items-center gap-2.5 px-2.5">

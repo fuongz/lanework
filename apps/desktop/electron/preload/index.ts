@@ -876,6 +876,13 @@ const workspaces: DesktopWorkspacesApi = {
   folder: {
     state: (slug) => ipcRenderer.invoke(workspaceChannels.folderState, slug),
     choose: () => ipcRenderer.invoke(workspaceChannels.folderChoose),
+    // FE-106: the path is read here, from a File the OS dropped. A script's
+    // own `new File(...)` answers "", and is left out.
+    drop: (files) =>
+      ipcRenderer.invoke(
+        workspaceChannels.folderDrop,
+        files.map((file) => webUtils.getPathForFile(file)).filter(Boolean),
+      ),
     list: (slug) => ipcRenderer.invoke(workspaceChannels.folderList, slug),
     link: (slug, folders) =>
       ipcRenderer.invoke(workspaceChannels.folderLink, slug, folders),

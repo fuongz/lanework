@@ -57,10 +57,10 @@ async function createProjectAndCard(page: Page) {
   await expect(
     page.getByRole("button", { name: `Switch project — currently ${PROJECT}` }),
   ).toBeVisible();
-  // The board says where it lives, the way "Offline" does.
-  const bar = page.getByRole("status", { name: "Local project" });
-  await expect(bar).toBeVisible();
-  await expect(bar.getByText("Local", { exact: true })).toBeVisible();
+  // Signed out, the board draws no "Local" bar: the rail's badge says it.
+  await expect(page.getByRole("status", { name: "Local project" })).toHaveCount(
+    0,
+  );
 
   await page.keyboard.press("ControlOrMeta+n");
   const title = page.getByRole("textbox", { name: "Issue title" });
@@ -151,7 +151,8 @@ test("cloud-only features are hidden in local mode and come back after sign-in",
       page.getByRole("button", { name: "Unsubscribe" }),
     ).toBeHidden();
 
-    // The rail offers the way in (D5).
+    // The rail offers the way in (D5): a badge beside Settings, opening it.
+    await page.getByRole("button", { name: "Local mode" }).click();
     const rail = page.getByRole("region", { name: "Local mode" });
     await expect(rail).toBeVisible();
     await expect(rail.getByRole("button", { name: "Sign in" })).toBeVisible();
@@ -224,7 +225,7 @@ test("cloud-only features are hidden in local mode and come back after sign-in",
     await expect(
       page.getByRole("button", { name: "Sync Cloud project to cloud" }),
     ).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "Local mode" })).toHaveCount(
+    await expect(page.getByRole("button", { name: "Local mode" })).toHaveCount(
       0,
     );
   } finally {

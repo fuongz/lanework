@@ -457,12 +457,13 @@ export function AppSidebar({
         )}
       </RailHover>
 
-      <div className="shrink-0 py-2">
-        <LocalModeRail />
+      {/* Local mode's badge sits beside Settings, outside its link: a button
+          inside an anchor is neither valid nor reachable by keyboard. */}
+      <div className="flex shrink-0 items-center gap-1 py-2">
         <Link
           to="/settings"
           aria-keyshortcuts="Meta+Comma"
-          className={LONE_ROW}
+          className={`${LONE_ROW} min-w-0 flex-1`}
         >
           <HugeiconsIcon
             icon={Settings01Icon}
@@ -474,6 +475,7 @@ export function AppSidebar({
           {/* The key the app menu's Settings… answers to (`menu.ts`). */}
           <Kbd className="ml-auto shrink-0">⌘,</Kbd>
         </Link>
+        <LocalModeRail />
       </div>
     </aside>
   );

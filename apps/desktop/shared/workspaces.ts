@@ -970,6 +970,7 @@ export const workspaceChannels = {
   folderState: "workspaces:folder:state",
   folderPick: "workspaces:folder:pick",
   folderChoose: "workspaces:folder:choose",
+  folderDrop: "workspaces:folder:drop",
   folderList: "workspaces:folder:list",
   folderLink: "workspaces:folder:link",
   folderForget: "workspaces:folder:forget",
@@ -1239,6 +1240,16 @@ export interface DesktopFolderApi {
    * here; `create` spends the ids.
    */
   choose: () => Promise<PickedFolder[]>;
+  /**
+   * Folders dragged in from the OS file manager, as `choose` answers them
+   * (FE-106). Files and anything else that is not a folder are left out.
+   *
+   * NOTE: The one entry whose channel carries paths, and why that is safe:
+   * it takes the dropped `File`s, not strings. Only the preload can read a
+   * dropped file's path (`webUtils.getPathForFile`), and a `File` a script
+   * builds has none, so the paths main receives are ones a person dropped.
+   */
+  drop: (files: File[]) => Promise<PickedFolder[]>;
   /**
    * The folders linked to a workspace, primary first, as addressable ids.
    *
