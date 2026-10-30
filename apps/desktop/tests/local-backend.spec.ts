@@ -100,6 +100,8 @@ test("local mode runs the whole board without a single request to the control pl
       );
       const sync = await fail(() => workspaces.syncToCloud(ws));
       const reloaded = await workspaces.load();
+      if (!reloaded.ok) throw new Error("read failed");
+      const snapshot = reloaded.snapshot;
       return {
         principal: session.principal.kind,
         origin: created.active?.origin,
@@ -120,8 +122,8 @@ test("local mode runs the whole board without a single request to the control pl
         changed: changes.cards.length,
         comment,
         sync,
-        listed: reloaded.workspaces.map((entry) => entry.name),
-        active: reloaded.active?.id === ws,
+        listed: snapshot.workspaces.map((entry) => entry.name),
+        active: snapshot.active?.id === ws,
       };
     });
 
@@ -216,21 +218,24 @@ test("signed in, Sync to cloud moves the local board, and a failed upload loses 
     const failed = await page.evaluate(async (ws) => {
       const { workspaces } = (globalThis as unknown as Desktop).desktop;
       const listed = await workspaces.load();
+      if (!listed.ok) throw new Error("read failed");
+      const snapshot = listed.snapshot;
       let error = "";
       try {
         await workspaces.syncToCloud(ws);
       } catch (caught) {
         error = (caught as Error).message;
       }
-      const after = await workspaces.load();
+      // The view is read again only once the failure is over: nothing about
+      // it should linger in this machine's own boards.
       const view = await workspaces.board.load(ws);
       const write = await workspaces.board.create(ws, {
         title: "Written after the failure",
       });
       return {
-        local: listed.workspaces.find((entry) => entry.id === ws)?.origin,
+        local: snapshot.workspaces.find((entry) => entry.id === ws)?.origin,
         error,
-        movedTo: after.workspaces.find((entry) => entry.id === ws)?.movedTo,
+        movedTo: snapshot.workspaces.find((entry) => entry.id === ws)?.movedTo,
         cards: view.cards.map((card) => card.title).sort(),
         write: write.kind,
       };

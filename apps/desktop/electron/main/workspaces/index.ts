@@ -16,6 +16,7 @@ import {
   type LocalSyncResult,
   type PickedFolder,
   type Workspace,
+  type WorkspaceAnswer,
   type WorkspaceSnapshot,
   workspaceChannels,
 } from "../../../shared/workspaces";
@@ -350,9 +351,14 @@ async function board(
     // which of them it was. The elapsed time is here for the same reason: a
     // failure at ~15000ms is the request timing out, not the network being
     // off.
-    console.error(
-      `Board ${workspaceId} fell back to the cache after ${Date.now() - startedAt}ms:`,
-      error,
+    //
+    // One line, no stack: this is a WARNED-ABOUT, expected fallback — the
+    // message itself is the information, and a stack of normal code is to
+    // find a bug, which nobody here believes happened.
+    console.warn(
+      `[board] ${workspaceId.slice(0, 8)} fell back to the cache after ${
+        Date.now() - startedAt
+      }ms: ${error instanceof Error ? error.message : String(error)}`,
     );
     const cached = await readBoardCache(record, workspaceId);
     if (cached) return cached;
@@ -419,13 +425,28 @@ function sealableCount(summary: Record<string, number>): number {
 }
 
 export function registerWorkspaces(devUrl?: string): void {
+  // NOTE: The two reads answer a RESULT, not a rejection: the board being
+  // unreachable is a normal state (offline, the laptop reading a local
+  // board), and the renderer already turns `message` into what is on
+  // screen. Thrown invokes would make Electron print `Error occurred in
+  // handler` here for an error a person has already seen in the app.
+  const answer = async (snapshot: () => Promise<WorkspaceSnapshot>) => {
+    try {
+      return { ok: true, snapshot: await snapshot() } as WorkspaceAnswer;
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      } as WorkspaceAnswer;
+    }
+  };
   handle(workspaceChannels.load, devUrl, (args) => {
     if (args.length) throw new Error("This operation takes no arguments");
-    return load();
+    return answer(load);
   });
   handle(workspaceChannels.select, devUrl, (args) => {
     const [id] = requireId(args, 1);
-    return load(id);
+    return answer(() => load(id));
   });
   handle(workspaceChannels.icon, devUrl, async (args) => {
     const [workspaceId] = requireId(args.slice(0, 1), 1);

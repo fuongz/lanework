@@ -70,10 +70,12 @@ const OPEN = "<lanework_orchestrate";
 const CLOSE = "</lanework_orchestrate>";
 const ENVELOPE =
   /^<lanework_orchestrate id="([A-Za-z0-9_-]{1,64})" kind="(plan|repair)"(?: lead="((?:repo:)?[a-z0-9][a-z0-9-]{0,47})")?>\n([\s\S]*)\n<\/lanework_orchestrate>$/;
+// A tag right after a backtick is one quoted in inline code (a reply that
+// talks about proposals), not a proposal: neither read nor hidden.
 const PROPOSAL_TAG =
-  /<lanework_proposal>\s*([\s\S]*?)\s*<\/lanework_proposal>/g;
+  /(?<!`)<lanework_proposal>\s*([\s\S]*?)\s*<\/lanework_proposal>/g;
 /** A proposal block still being streamed: from its tag to the end. */
-const PROPOSAL_OPEN = /<lanework_proposal>[\s\S]*$/;
+const PROPOSAL_OPEN = /(?<!`)<lanework_proposal>[\s\S]*$/;
 
 /** What the user sent, as the transcript has it. */
 export interface Envelope {

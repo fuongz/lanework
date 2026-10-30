@@ -172,6 +172,8 @@ export const laneworkMcpChannels = {
   auth: "lanework-mcp:auth",
   /** Run `<cli> mcp login lanework`, then ask again. */
   login: "lanework-mcp:login",
+  /** Stop the login `login` is running; it then answers as usual. */
+  cancelLogin: "lanework-mcp:cancel-login",
 } as const;
 
 export interface DesktopLaneworkMcpApi {
@@ -180,6 +182,7 @@ export interface DesktopLaneworkMcpApi {
   remove: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpStatus>;
   auth: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpAuth>;
   login: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpAuth>;
+  cancelLogin: (agent: LaneworkMcpAgent) => Promise<void>;
 }
 
 const anonymous: Principal = { kind: "anonymous" };

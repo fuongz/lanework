@@ -89,6 +89,18 @@ export interface WorkspaceSnapshot {
   active: Workspace | null;
 }
 
+/**
+ * What `workspaces.load` and `workspaces.select` answer.
+ *
+ * The board being unreachable is a normal state the person in front of the
+ * app reads on screen, so it is a RESULT, not a rejection: a thrown invoke
+ * makes Electron print `Error occurred in handler` in the main console for
+ * a renderer that has already handled it.
+ */
+export type WorkspaceAnswer =
+  | { ok: true; snapshot: WorkspaceSnapshot }
+  | { ok: false; message: string };
+
 /** One lane of a board, as the cloud states it. */
 export interface BoardColumn {
   key: string;
@@ -1249,8 +1261,8 @@ export interface DesktopFolderApi {
 }
 
 export interface DesktopWorkspacesApi {
-  load: () => Promise<WorkspaceSnapshot>;
-  select: (id: string) => Promise<WorkspaceSnapshot>;
+  load: () => Promise<WorkspaceAnswer>;
+  select: (id: string) => Promise<WorkspaceAnswer>;
   /**
    * A project's icon as a `data:` URL, or null for the letter tile.
    *

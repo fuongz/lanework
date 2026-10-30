@@ -393,15 +393,17 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const mine = ++ticket.workspaces;
     inflight = (async () => {
       try {
-        const snapshot = await desktopSurface("workspaces").load();
+        const answer = await desktopSurface("workspaces").load();
         if (mine !== ticket.workspaces) return;
-        set({
-          ready: true,
-          listLoaded: true,
-          workspaces: snapshot.workspaces,
-          active: snapshot.active,
-          error: null,
-        });
+        if (!answer.ok) set({ ready: true, error: answer.message });
+        else
+          set({
+            ready: true,
+            listLoaded: true,
+            workspaces: answer.snapshot.workspaces,
+            active: answer.snapshot.active,
+            error: null,
+          });
       } catch (error) {
         if (mine !== ticket.workspaces) return;
         // NOTE: `workspaces` and `listLoaded` are left alone. A failed read

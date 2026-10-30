@@ -1,4 +1,5 @@
 import {
+  AiChipIcon,
   Archive02Icon,
   CommandLineIcon,
   DashboardSquare02Icon,
@@ -98,6 +99,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: CommandLineIcon,
         keywords:
           "harness cli agent agents claude code codex version update install usage limit quota handoff checkpoint resume hook push wip lanework mcp sign in",
+      },
+      {
+        to: "/settings/models",
+        label: "Models",
+        icon: AiChipIcon,
+        keywords:
+          "models model picker show hide visible hidden claude codex opencode provider go",
       },
       {
         to: "/settings/decision",

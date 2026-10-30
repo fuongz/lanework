@@ -48,10 +48,13 @@ import { ToolGroup } from "./turn-view.tool-group";
 const OFFSCREEN =
   "[content-visibility:auto] [contain-intrinsic-size:auto_160px]";
 
-/** Where an envelope of the app's starts, its name with it. */
-const ENVELOPE_OPEN = /<(lanework_[A-Za-z_]*)/g;
+/**
+ * Where an envelope of the app's starts, its name with it. One right after a
+ * backtick is quoted in inline code, not an envelope: it stays in the text.
+ */
+const ENVELOPE_OPEN = /(?<!`)<(lanework_[A-Za-z_]*)/g;
 /** A close tag, for one whose open tag landed in an earlier line. */
-const ENVELOPE_CLOSE = /<\/(lanework_[A-Za-z_]+)>/;
+const ENVELOPE_CLOSE = /(?<!`)<\/(lanework_[A-Za-z_]+)>/;
 /** `<lanework_` still being typed at the very end: `<`, `<lan`, `<lanework`. */
 const PARTIAL_OPEN = /<(?:l(?:a(?:n(?:e(?:w(?:o(?:r(?:k)?)?)?)?)?)?)?)?$/;
 

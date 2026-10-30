@@ -40,7 +40,11 @@ import { projectRoot } from "../instructions/read";
 import { handle } from "../ipc";
 import { agentHomeDir } from "../test-seams";
 import { terminalFolder } from "../workspaces";
-import { laneworkMcpAuth, loginLaneworkMcp } from "./mcp-auth";
+import {
+  cancelLaneworkMcpLogin,
+  laneworkMcpAuth,
+  loginLaneworkMcp,
+} from "./mcp-auth";
 import {
   installLaneworkMcp,
   laneworkMcpStatus,
@@ -277,6 +281,11 @@ export function registerAgentSetup(devUrl?: string): void {
     return loginLaneworkMcp(args[0], (url) => {
       void shell.openExternal(url).catch(() => {});
     });
+  });
+  handle(laneworkMcpChannels.cancelLogin, devUrl, (args) => {
+    if (args.length !== 1 || !isMcpAgent(args[0]))
+      throw new Error('cancelLogin takes "claude-code", "codex" or "opencode"');
+    cancelLaneworkMcpLogin(args[0]);
   });
   // On every launch: entries that are ours follow the mode, and a stdio one
   // gets this build's shim. Read from disk rather than `currentSession()`,

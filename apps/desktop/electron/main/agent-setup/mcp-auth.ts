@@ -118,6 +118,7 @@ async function inShell(
   timeoutMs: number,
   tty = false,
   onOutput?: (output: string) => void,
+  signal?: AbortSignal,
 ): Promise<string | null | undefined> {
   const command = COMMAND[agent];
   const [missing, start] = [mark(agent, "missing"), mark(agent, "start")];
@@ -138,6 +139,7 @@ async function inShell(
   let seen = "";
   const { stdout } = await runInLoginShell(script, {
     timeoutMs,
+    signal,
     onStdout: onOutput
       ? (chunk) => {
           seen += chunk;
@@ -204,15 +206,27 @@ export function authorizeUrl(output: string): string | null {
 const pending = new Map<LaneworkMcpAgent, Promise<LaneworkMcpAuth>>();
 /** The sign-in page of the login still running, opened again on a second click. */
 const pages = new Map<LaneworkMcpAgent, string>();
+/** Stops the login still running: its shell is killed. */
+const stops = new Map<LaneworkMcpAgent, AbortController>();
+
+/**
+ * Stop the login running for `agent`, if any.
+ *
+ * Its `loginLaneworkMcp` then answers with what the CLI reports, as after a
+ * timeout.
+ */
+export function cancelLaneworkMcpLogin(agent: LaneworkMcpAgent): void {
+  stops.get(agent)?.abort();
+}
 
 /**
  * Run `<cli> mcp login lanework` (`opencode mcp auth lanework`).
  *
- * The CLI waits for the OAuth callback; Codex and OpenCode open the browser
- * themselves.
- * Claude Code runs on a pseudo-terminal ({@link underTty}) and does not, so
- * `open` gets the page it prints. It has five minutes to finish, then the
- * shell is killed. Either way the answer is what the CLI reports after.
+ * The CLI waits for the OAuth callback; Codex opens the browser itself.
+ * Claude Code runs on a pseudo-terminal ({@link underTty}) and does not, nor
+ * does OpenCode (2.2 only prints the page), so `open` gets the page they
+ * print. It has five minutes to finish, then the shell is killed. Either way
+ * the answer is what the CLI reports after.
  *
  * @param open Opens a URL in the user's browser.
  */
@@ -226,6 +240,8 @@ export function loginLaneworkMcp(
     if (page) open(page);
     return running;
   }
+  const stop = new AbortController();
+  stops.set(agent, stop);
   const login = (async () => {
     if (process.platform === "win32") return "unknown" as const;
     const output = await inShell(
@@ -233,7 +249,7 @@ export function loginLaneworkMcp(
       agent === "opencode" ? `mcp auth ${MCP_NAME}` : `mcp login ${MCP_NAME}`,
       300_000,
       agent === "claude-code",
-      agent === "claude-code"
+      agent === "claude-code" || agent === "opencode"
         ? (output) => {
             if (pages.has(agent)) return;
             const page = authorizeUrl(output);
@@ -242,12 +258,14 @@ export function loginLaneworkMcp(
             open(page);
           }
         : undefined,
+      stop.signal,
     );
     if (output === null) return "no-cli" as const;
     return laneworkMcpAuth(agent);
   })().finally(() => {
     pending.delete(agent);
     pages.delete(agent);
+    stops.delete(agent);
   });
   pending.set(agent, login);
   return login;

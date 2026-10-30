@@ -8,15 +8,21 @@ import { isTrustedUrl } from "./security";
  * iframe, a detached devtools target) can reach a channel, so the sender is
  * the gate. Checking it once here is safer than remembering it per handler.
  *
- * @throws When the sender is not the main frame of a window on a trusted URL.
+ * A sender whose frame no longer exists is a ghost, not an impostor: a page
+ * torn down mid-quit (Ctrl+C, dev restart) still delivers invokes that were
+ * already in flight. Throwing only prints `Error occurred in handler` noise
+ * for a renderer that cannot read it, so ghosts resolve to nothing instead.
+ *
+ * @throws When the sender is a LIVE frame that is not the main frame of
+ *   a window on a trusted URL.
  */
 export function assertTrustedSender(
   event: IpcMainInvokeEvent,
   devUrl?: string,
 ): void {
   const frame = event.senderFrame;
+  if (!frame) return;
   if (
-    !frame ||
     frame !== event.sender.mainFrame ||
     !BrowserWindow.fromWebContents(event.sender) ||
     !isTrustedUrl(frame.url, devUrl)

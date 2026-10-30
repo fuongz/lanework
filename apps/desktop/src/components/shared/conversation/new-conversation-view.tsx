@@ -8,7 +8,7 @@ import {
   DEFAULT_SETTINGS,
   type OutgoingAttachment,
 } from "#/../shared/conversation";
-import type { TeamLead } from "#/../shared/orchestration";
+import { canLead, type TeamLead } from "#/../shared/orchestration";
 import type { BoardCard } from "#/../shared/workspaces";
 import { setChatAgent } from "#/components/shared/conversation/chat-agent";
 import {
@@ -225,6 +225,13 @@ export function NewConversationPage({
             effort: own.effort ?? settings.effort,
           }
         : settings;
+    // OpenCode never leads (FE-105/D5): its planning turn would draw no card.
+    if (!canLead(agentOfModel(started.model))) {
+      setError(
+        "OpenCode runs only as a worker. Pick a Claude or Codex model to orchestrate.",
+      );
+      return false;
+    }
     return send(
       planningPrompt(
         proposalId(),
@@ -318,7 +325,9 @@ export function NewConversationPage({
               working={false}
               queued={0}
               onSend={send}
-              onOrchestrate={orchestrate}
+              onOrchestrate={
+                canLead(agentOfModel(settings.model)) ? orchestrate : undefined
+              }
               onStop={() => {}}
             />
           )}

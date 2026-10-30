@@ -15,6 +15,8 @@ export interface ShellOptions {
   timeoutMs: number;
   /** Each piece of stdout as it arrives, for a caller that acts mid-run. */
   onStdout?: (chunk: string) => void;
+  /** Kills the shell's process group early, like the timeout does. */
+  signal?: AbortSignal;
 }
 
 interface ShellResult {
@@ -70,12 +72,19 @@ export function runInLoginShell(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
       resolve({ stdout, stderr, code });
     };
     const timer = setTimeout(() => {
       kill();
       settle(null);
     }, options.timeoutMs);
+    const abort = () => {
+      kill();
+      settle(null);
+    };
+    if (options.signal?.aborted) abort();
+    else options.signal?.addEventListener("abort", abort, { once: true });
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {

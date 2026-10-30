@@ -7,12 +7,14 @@ import {
   PencilEdit02Icon,
   Search01Icon,
   SecurityWarningIcon,
+  Settings01Icon,
   SparklesIcon,
   SquareLock02Icon,
   StarIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { useNavigate } from "@tanstack/react-router";
 import { type KeyboardEvent, useMemo, useState } from "react";
 import {
   AGENT_LABELS,
@@ -49,6 +51,7 @@ import {
 import { Switch } from "#/components/ui/switch";
 import { readStored, writeStored } from "#/lib/stored";
 import { cn } from "#/lib/utils";
+import { usePreferences } from "#/stores/preferences";
 import { useModels } from "./composer.models";
 
 /** A pill in the composer's bottom row. */
@@ -107,11 +110,16 @@ function ModelPanel({
     () => agent ?? agentOfModel(model),
   );
   const tabs = agent ? [agent] : AGENTS.filter((tab) => !exclude.includes(tab));
+  const navigate = useNavigate();
   const all = useModels();
+  const hiddenModels = usePreferences((state) => state.hiddenModels);
   const models = useMemo(
     () => all.filter((entry) => !exclude.includes(entry.agent)),
     [all, exclude],
   );
+  // Settings → Models hides a model from here; the one picked stays, so the
+  // tick still says what runs.
+  const hidden = useMemo(() => new Set(hiddenModels), [hiddenModels]);
   const [favorites, setFavorites] = useState(readFavorites);
   const toggle = (id: string) => {
     const next = favorites.includes(id)
@@ -124,6 +132,7 @@ function ModelPanel({
     const q = query.trim().toLowerCase();
     return models.filter(
       (entry) =>
+        (!hidden.has(entry.id) || entry.id === model) &&
         (!agent || entry.agent === agent) &&
         (only === "favorites"
           ? favorites.includes(entry.id)
@@ -133,12 +142,19 @@ function ModelPanel({
           entry.id.includes(q) ||
           (entry.group?.toLowerCase().includes(q) ?? false)),
     );
-  }, [query, only, favorites, agent, models]);
+  }, [query, only, favorites, agent, models, hidden, model]);
   // OpenCode's tab with no models at all: none configured, not no match.
   const noOpenCode =
     only === "opencode" &&
     !query.trim() &&
     !models.some((entry) => entry.agent === "opencode");
+  // A tab whose every model is hidden: say where they went.
+  const allHidden =
+    !noOpenCode &&
+    only !== "favorites" &&
+    !query.trim() &&
+    shown.length === 0 &&
+    models.some((entry) => entry.agent === only);
   // OpenCode's come grouped by provider (FE-104): headed runs, in main's
   // order, each with its own deprecated ones last. The others keep the
   // divider before their legacy models.
@@ -229,6 +245,20 @@ function ModelPanel({
             <TerminalKindIcon kind={tab} className="size-4" />
           </button>
         ))}
+        {/* An item, so picking it closes the menu on its way to Settings. */}
+        <DropdownMenuItem
+          aria-label="Manage models"
+          title="Manage models"
+          onClick={() => void navigate({ to: "/settings/models" })}
+          className="text-muted-foreground hover:text-foreground mt-auto flex size-8 items-center justify-center rounded-lg p-0"
+        >
+          <HugeiconsIcon
+            icon={Settings01Icon}
+            className="size-4"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        </DropdownMenuItem>
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <label className="border-foreground/10 flex h-10 shrink-0 items-center gap-2 border-b px-2.5">
@@ -289,16 +319,20 @@ function ModelPanel({
                 <EmptyTitle>
                   {noOpenCode
                     ? "No OpenCode models"
-                    : only === "favorites" && !query
-                      ? "No favorites yet"
-                      : "No matches"}
+                    : allHidden
+                      ? `Every ${AGENT_LABELS[only as ConversationAgent]} model is hidden`
+                      : only === "favorites" && !query
+                        ? "No favorites yet"
+                        : "No matches"}
                 </EmptyTitle>
                 <EmptyDescription>
                   {noOpenCode
                     ? "Configure a provider in OpenCode, then open this menu again."
-                    : only === "favorites" && !query
-                      ? "Star a model to keep it here."
-                      : "No model matches."}
+                    : allHidden
+                      ? "Show them again with Manage models, the gear below the tabs."
+                      : only === "favorites" && !query
+                        ? "Star a model to keep it here."
+                        : "No model matches."}
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>

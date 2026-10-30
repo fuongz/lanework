@@ -203,7 +203,12 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         )
       : undefined,
   );
-  const facts = useConversationFacts(workspace, agent ?? "claude", id);
+  // NOTE: The agent as known, not a fabricated default: main checks the
+  // conversation's id against ITS agent's shape, so a read sent before the
+  // transcript lands ("claude" fused with an OpenCode `ses_…` id) is refused
+  // (terminal:agent-facts "A valid conversation is required"). The hook
+  // skips until the agent is known, then reads with the right pair.
+  const facts = useConversationFacts(workspace, agent, id);
 
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
   // A conversation just started from the new page: its first message,
@@ -1086,7 +1091,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 working={running}
                 queued={queue.length}
                 onSend={send}
-                onOrchestrate={orchestrate}
+                // OpenCode never leads (FE-105/D5): `/orchestrate` goes as typed.
+                onOrchestrate={canLead(agent) ? orchestrate : undefined}
                 onStop={stop}
                 onEditLastQueued={() => {
                   // A queued repair has nothing typed to give back (FE-91).

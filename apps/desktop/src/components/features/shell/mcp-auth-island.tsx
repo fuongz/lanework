@@ -314,6 +314,7 @@ function Panel({
   onClose: () => void;
 }) {
   const login = useMcpAuth((state) => state.login);
+  const cancelLogin = useMcpAuth((state) => state.cancelLogin);
   const check = useMcpAuth((state) => state.check);
   const dismiss = useMcpAuth((state) => state.dismiss);
   const view = useMcpAuth((state) => state.view);
@@ -390,14 +391,36 @@ function Panel({
               </span>
             </div>
             {row.shown === "login" ? (
-              <Button
-                disabled
-                aria-busy="true"
-                className={cn(PILL_BUTTON, "bg-white/10 text-white/80")}
-              >
-                <Spinner className="size-3.5" />
-                Waiting
-              </Button>
+              // Hovering (or tabbing to) Waiting turns it into Stop.
+              <div className="group/stop grid">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    PILL_BUTTON,
+                    "flex items-center gap-1.5 bg-white/10 text-white/80 [grid-area:1/1] group-focus-within/stop:invisible group-hover/stop:invisible",
+                  )}
+                >
+                  <Spinner className="size-3.5" />
+                  Waiting
+                </span>
+                <Button
+                  variant="destructive"
+                  aria-label={`Stop signing ${NAMES[row.agent]} in`}
+                  onClick={() => cancelLogin(row.agent)}
+                  className={cn(
+                    PILL_BUTTON,
+                    "border-0 opacity-0 [grid-area:1/1] group-hover/stop:opacity-100 focus-visible:opacity-100",
+                  )}
+                >
+                  <HugeiconsIcon
+                    icon={MultiplicationSignIcon}
+                    className="size-3.5"
+                    strokeWidth={2.2}
+                    aria-hidden="true"
+                  />
+                  Stop
+                </Button>
+              </div>
             ) : row.shown === "done" ? (
               <span className="flex h-7 items-center gap-1 px-1 text-[12px] text-emerald-400">
                 <HugeiconsIcon

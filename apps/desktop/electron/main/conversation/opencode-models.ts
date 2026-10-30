@@ -143,7 +143,7 @@ const GO_PROVIDER = "opencode-go";
  * OpenCode's models, as the picker offers them, from its service.
  *
  * Grouped by provider, as the picker lists them: OpenCode Go's first when
- * the user has a Go key (`goFirst`), the rest by name; within a provider by
+ * the user has Go (`goFirst`), the rest by name; within a provider by
  * name, its deprecated ones last. The one OpenCode starts on is `preferred`.
  * A disabled one, or one that is not a chat model, is left out.
  *
@@ -215,7 +215,8 @@ export async function readOpenCodeModels(
  */
 export function createOpenCodeModels(
   connect: () => Promise<OpenCodeClient>,
-  hasGo: () => Promise<boolean> = async () => false,
+  /** Whether the user has OpenCode Go, asked with the same client. */
+  hasGo: (client: OpenCodeClient) => Promise<boolean> = async () => false,
   maxAgeMs = 30_000,
 ) {
   let cached: { at: number; models: AgentModel[] } | null = null;
@@ -223,8 +224,10 @@ export function createOpenCodeModels(
   return async function opencodeModels(fresh = false): Promise<AgentModel[]> {
     if (!fresh && cached && Date.now() - cached.at < maxAgeMs)
       return cached.models;
-    running ??= Promise.all([connect(), hasGo().catch(() => false)])
-      .then(([client, go]) => readOpenCodeModels(client, go))
+    running ??= connect()
+      .then(async (client) =>
+        readOpenCodeModels(client, await hasGo(client).catch(() => false)),
+      )
       // A failed read keeps what the last one found.
       .catch(() => cached?.models ?? [])
       .then((models) => {

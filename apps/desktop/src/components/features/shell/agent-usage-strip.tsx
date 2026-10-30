@@ -549,7 +549,8 @@ const FLIP_MOTION = "duration-[450ms] ease-[cubic-bezier(0.22,1,0.36,1)]";
  *
  * On a flip the old reading slides up and out as the new one slides up into
  * the line, and the line's width eases to the new reading's rather than
- * jumping. With reduced motion the reading is swapped in place.
+ * jumping; nothing shows past that width, so a flip never widens the
+ * window. With reduced motion the reading is swapped in place.
  *
  * Within the hour both say the same, so only "in 42 minutes" stands.
  */
@@ -618,9 +619,13 @@ function ResetLabel({
       resets&nbsp;
       <span
         className={cn(
-          // Clipped top and bottom only, for the slide: a longer reading
-          // shows whole while the width eases out to it.
-          "relative inline-block overflow-x-visible overflow-y-clip whitespace-nowrap transition-[width] motion-reduce:transition-none",
+          // Clipped on both axes: top and bottom for the slide, and the
+          // sides because the strip sits at the window's right edge. A
+          // reading wider than the easing width (the old one leaving, the
+          // new one arriving) spilled past it and gave the whole window a
+          // horizontal scrollbar on every flip; now it is revealed as the
+          // width eases instead.
+          "relative inline-block overflow-clip whitespace-nowrap transition-[width] motion-reduce:transition-none",
           FLIP_MOTION,
         )}
         style={width ? { width } : undefined}

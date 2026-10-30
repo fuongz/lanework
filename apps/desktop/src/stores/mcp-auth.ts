@@ -94,11 +94,17 @@ interface McpAuthState {
   loadStatus: () => Promise<void>;
   setStatus: (status: LaneworkMcpStatus) => void;
   check: (agent: LaneworkMcpAgent) => Promise<void>;
-  login: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpAuth>;
+  /** "cancelled" when the user stopped it: no error to show. */
+  login: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpAuth | "cancelled">;
+  /** Stop the login running; its `login` answers "cancelled". */
+  cancelLogin: (agent: LaneworkMcpAgent) => void;
   dismiss: (agent: LaneworkMcpAgent) => void;
 }
 
 const surface = () => window.desktop?.laneworkMcp;
+
+/** Agents whose running login the user stopped. */
+const stopped = new Set<LaneworkMcpAgent>();
 
 export const useMcpAuth = create<McpAuthState>((set, get) => {
   const answer = (agent: LaneworkMcpAgent, auth: LaneworkMcpAuth) =>
@@ -143,14 +149,23 @@ export const useMcpAuth = create<McpAuthState>((set, get) => {
     login: async (agent) => {
       const api = surface();
       if (!api) return "unknown";
+      stopped.delete(agent);
       set((state) => ({ view: { ...state.view, [agent]: "login" } }));
       const auth = await api.login(agent).catch(() => "unknown" as const);
       answer(agent, auth);
+      if (stopped.delete(agent) && auth !== "signed-in") return "cancelled";
       if (auth === "signed-in")
         set((state) => ({
           signedInAt: { ...state.signedInAt, [agent]: Date.now() },
         }));
       return auth;
+    },
+    cancelLogin: (agent) => {
+      if (get().view[agent] !== "login") return;
+      stopped.add(agent);
+      void surface()
+        ?.cancelLogin(agent)
+        .catch(() => {});
     },
     dismiss: (agent) => {
       const auth = get().settled[agent];

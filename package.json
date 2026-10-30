@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "bun run --cwd apps/desktop dev",
+    "dev": "bun run --silent --cwd apps/desktop dev",
     "build": "bun run --cwd apps/desktop build",
     "build:plugin": "node scripts/build-plugin.mjs",
     "typecheck": "bun run --cwd packages/protocol typecheck && bun run --cwd apps/desktop typecheck",

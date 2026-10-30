@@ -434,6 +434,8 @@ const laneworkMcp: DesktopLaneworkMcpApi = {
   remove: (agent) => ipcRenderer.invoke(laneworkMcpChannels.remove, agent),
   auth: (agent) => ipcRenderer.invoke(laneworkMcpChannels.auth, agent),
   login: (agent) => ipcRenderer.invoke(laneworkMcpChannels.login, agent),
+  cancelLogin: (agent) =>
+    ipcRenderer.invoke(laneworkMcpChannels.cancelLogin, agent),
 };
 
 /**

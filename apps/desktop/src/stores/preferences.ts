@@ -68,6 +68,21 @@ function readCorrections(value: unknown): DictationCorrection[] | null {
   );
 }
 
+/** The most model ids kept hidden: every CLI's list, with room to spare. */
+const HIDDEN_MAX = 2000;
+
+function readHidden(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value.filter(
+        (id): id is string =>
+          typeof id === "string" && id.length > 0 && id.length <= 200,
+      ),
+    ),
+  ].slice(0, HIDDEN_MAX);
+}
+
 function isProjectSort(value: unknown): value is ProjectSort {
   return (
     typeof value === "string" &&
@@ -109,6 +124,12 @@ interface Preferences {
   dictationCorrections: DictationCorrection[] | null;
   setDictationCorrections: (value: DictationCorrection[] | null) => void;
   /**
+   * The models the composer's picker leaves out, by id (Settings → Models).
+   * Lanework's own list: a CLI's own picker is not read or changed.
+   */
+  hiddenModels: string[];
+  setModelsHidden: (ids: readonly string[], hidden: boolean) => void;
+  /**
    * True once `persist.rehydrate()` has settled.
    *
    * NOTE: Read this before branching on `onboarded`. Hydration is skipped at
@@ -136,6 +157,15 @@ export const usePreferences = create<Preferences>()(
       dictationCorrections: null,
       setDictationCorrections: (dictationCorrections) =>
         set({ dictationCorrections }),
+      hiddenModels: [],
+      setModelsHidden: (ids, hidden) =>
+        set((state) => {
+          const next = new Set(state.hiddenModels);
+          for (const id of ids)
+            if (hidden) next.add(id);
+            else next.delete(id);
+          return { hiddenModels: readHidden([...next]) };
+        }),
       hydrated: false,
     }),
     {
@@ -150,6 +180,7 @@ export const usePreferences = create<Preferences>()(
         projectSort,
         dictationLocale,
         dictationCorrections,
+        hiddenModels,
       }) => ({
         theme,
         onboarded,
@@ -157,6 +188,7 @@ export const usePreferences = create<Preferences>()(
         projectSort,
         dictationLocale,
         dictationCorrections,
+        hiddenModels,
       }),
       onRehydrateStorage: () => () =>
         usePreferences.setState({ hydrated: true }),
@@ -179,6 +211,7 @@ export const usePreferences = create<Preferences>()(
             ? saved.dictationLocale
             : "vi_VN",
           dictationCorrections: readCorrections(saved?.dictationCorrections),
+          hiddenModels: readHidden(saved?.hiddenModels),
           // A record without this key belongs to someone who has already used
           // the app; only a machine with nothing saved is new. Otherwise the
           // tour would replay for every install that predates it.

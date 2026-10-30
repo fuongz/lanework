@@ -1,6 +1,7 @@
 import {
   Copy01Icon,
   Loading03Icon,
+  MultiplicationSignIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -28,6 +29,7 @@ import {
 } from "#/lib/agent-usage";
 import { ipcMessage } from "#/lib/ipc-error";
 import { relativeTime } from "#/lib/relative-time";
+import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
@@ -209,6 +211,7 @@ export function HarnessSection() {
   const mcpAuth = useMcpAuth((state) => state.view);
   const checkMcpAuth = useMcpAuth((state) => state.check);
   const loginTo = useMcpAuth((state) => state.login);
+  const cancelMcpLogin = useMcpAuth((state) => state.cancelLogin);
   const cloud = cloudAgents(mcpStatus);
 
   async function loginMcp(agent: LaneworkMcpAgent) {
@@ -329,7 +332,9 @@ export function HarnessSection() {
       keywords:
         "mcp login sign in oauth authenticate token expired claude codex opencode",
       control: (
-        <div className="flex items-center gap-3">
+        // A login waiting on the browser: hovering it (or tabbing to it)
+        // swaps the spinner for Stop.
+        <div className="group/mcp-login flex items-center gap-3">
           <span
             className={
               attention
@@ -339,7 +344,34 @@ export function HarnessSection() {
           >
             {LABEL[auth ?? "checking"]}
           </span>
-          {waiting ? (
+          {auth === "login" ? (
+            <div className="grid place-items-center">
+              <HugeiconsIcon
+                icon={Loading03Icon}
+                className="text-muted-foreground size-3.5 animate-spin [grid-area:1/1] group-focus-within/mcp-login:opacity-0 group-hover/mcp-login:opacity-0 motion-reduce:animate-none"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              />
+              <Button
+                size="lg"
+                className={cn(
+                  SETTINGS_BUTTON,
+                  "border-0 opacity-0 [grid-area:1/1] group-hover/mcp-login:opacity-100 focus-visible:opacity-100",
+                )}
+                variant="destructive"
+                aria-label={`Stop signing ${name} in`}
+                onClick={() => cancelMcpLogin(agent)}
+              >
+                <HugeiconsIcon
+                  icon={MultiplicationSignIcon}
+                  className="size-4"
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
+                Stop
+              </Button>
+            </div>
+          ) : waiting ? (
             <HugeiconsIcon
               icon={Loading03Icon}
               className="text-muted-foreground size-3.5 animate-spin motion-reduce:animate-none"

@@ -62,7 +62,10 @@ import {
   nameConversation,
 } from "../terminal";
 import { opencodeDataDir } from "../terminal/opencode-sessions";
-import { opencodeGoKey } from "../terminal/opencode-usage";
+import {
+  opencodeGoKey,
+  opencodeServiceUsage,
+} from "../terminal/opencode-usage";
 import { agentHomeDir } from "../test-seams";
 import { knownWorkspace, terminalFolder } from "../workspaces";
 import { awaitingNotice, createAwaitingLedger } from "./awaiting";
@@ -466,16 +469,23 @@ export function registerConversation(
       testing ? process.env.LANEWORK_OPENCODE_BIN : undefined,
     ),
   );
-  // A Go key puts OpenCode Go's models first: the subscription the user pays
-  // for. Only the real home's key counts, as for the usage it gates.
+  // Go puts OpenCode Go's models first: the subscription the user pays for.
+  // The account signed in on opencode.ai has it when the service's limits
+  // name `go` (it has no key of its own, FE-105); else a Go key. Only the
+  // real home's counts, as for the usage it gates.
   const realHome = () => agentHomeDir() === homedir();
   const readOpenCodeModels = createOpenCodeModels(
     async () => openCodeClient(await opencode.service(), null),
-    async () =>
-      realHome() &&
-      Boolean(
+    async (client) => {
+      if (!realHome()) return false;
+      const limits = await client
+        .request("GET", "/api/experimental/usage/limits", undefined, 5_000)
+        .catch(() => null);
+      if (opencodeServiceUsage(limits)) return true;
+      return Boolean(
         await opencodeGoKey(opencodeDataDir(agentHomeDir(), process.env, true)),
-      ),
+      );
+    },
   );
   const opencodeModels = async (fresh = false): Promise<AgentModel[]> => {
     const models = await readOpenCodeModels(fresh);
