@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Workspace } from "#/../shared/workspaces";
+import type { Project } from "#/../shared/projects";
 import { Button } from "#/components/ui/button";
 import {
   Dialog,
@@ -23,15 +23,15 @@ import { useBoard } from "#/stores/board";
  * - A write to the account, not this machine: every machine signed into it
  *   sees the new name, hence "on your account" rather than "here".
  * - Only reachable for a project the cloud has an id for; the caller decides.
- *   `workspace.id` is null against a service older than the field, and such
+ *   `project.id` is null against a service older than the field, and such
  *   a service has no rename route either.
  */
 export function RenameProjectDialog({
-  workspace,
+  project,
   open,
   onOpenChange,
 }: {
-  workspace: Workspace & { id: string };
+  project: Project & { id: string };
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -39,19 +39,19 @@ export function RenameProjectDialog({
   // renders this dialog as `{renaming && …}`: it mounts per project and
   // unmounts on close. Keeping one mounted across rows would need the name
   // re-seeded on the way in.
-  const [name, setName] = useState(workspace.name);
+  const [name, setName] = useState(project.name);
   const [failed, setFailed] = useState<string | null>(null);
   const busy = useBoard((state) => state.busy);
   const renameProject = useBoard((state) => state.renameProject);
-  const working = busy === `rename:${workspace.id}`;
+  const working = busy === `rename:${project.id}`;
 
   const typed = name.trim();
-  const unchanged = typed === workspace.name;
+  const unchanged = typed === project.name;
 
   function submit() {
     if (!typed || unchanged) return;
     setFailed(null);
-    void renameProject(workspace.id, typed).then((result) => {
+    void renameProject(project.id, typed).then((result) => {
       // Kept on failure, as the create dialog does: the refused name is the
       // thing being edited.
       if (result.error) {
@@ -69,7 +69,7 @@ export function RenameProjectDialog({
           <DialogTitle>Rename project</DialogTitle>
           <DialogDescription>
             This changes the name on your account, so every machine signed in
-            sees it. The key <span className="font-mono">{workspace.slug}</span>{" "}
+            sees it. The key <span className="font-mono">{project.slug}</span>{" "}
             stays as it is.
           </DialogDescription>
         </DialogHeader>
@@ -82,7 +82,7 @@ export function RenameProjectDialog({
           }}
         >
           <Input
-            aria-label={`New name for ${workspace.name}`}
+            aria-label={`New name for ${project.name}`}
             value={name}
             maxLength={200}
             disabled={working}

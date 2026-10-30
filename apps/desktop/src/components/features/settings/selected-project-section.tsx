@@ -12,10 +12,11 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState } from "react";
 import type { FolderTrust } from "#/../shared/agent-setup";
+import type { Project } from "#/../shared/projects";
 import type { ReadinessFix } from "#/../shared/readiness";
-import type { Workspace } from "#/../shared/workspaces";
 import type { RepoTrust } from "#/../shared/worktree";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
+import { ProjectTile } from "#/components/shared/projects/project-tile";
 import {
   SETTINGS_BUTTON,
   SettingsCard,
@@ -32,7 +33,6 @@ import {
   useRepoTrust,
 } from "#/components/shared/settings/use-project-trust";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
-import { ProjectTile } from "#/components/shared/workspaces/project-tile";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -360,7 +360,7 @@ function TrustSection({ slug }: { slug: string }) {
  *   took months to fill, and a click is not a decision.
  */
 export function SelectedProjectSection({
-  workspace,
+  project,
   folders,
   onRename,
   onFolders,
@@ -370,12 +370,12 @@ export function SelectedProjectSection({
   extraRows,
   dangerRows,
 }: {
-  workspace: Workspace | null;
+  project: Project | null;
   folders: string[];
-  onRename: (workspace: Workspace & { id: string }) => void;
-  onFolders: (workspace: Workspace) => void;
-  onImport: (workspace: Workspace) => void;
-  onDelete: (workspace: Workspace & { id: string }) => void;
+  onRename: (project: Project & { id: string }) => void;
+  onFolders: (project: Project) => void;
+  onImport: (project: Project) => void;
+  onDelete: (project: Project & { id: string }) => void;
   onFailed: (message: string | null) => void;
   /** More rows for the project's card: Sync to cloud, for a local one. */
   extraRows?: React.ReactNode;
@@ -391,7 +391,7 @@ export function SelectedProjectSection({
   const [removed, setRemoved] = useState<number | null>(null);
   const confirmId = useId();
 
-  if (!workspace)
+  if (!project)
     return (
       <Empty className="py-10">
         <EmptyHeader>
@@ -406,17 +406,17 @@ export function SelectedProjectSection({
       </Empty>
     );
 
-  const id = workspace.id;
+  const id = project.id;
   const noId =
     "This project has no cloud ID yet, so it cannot be changed here.";
   // A count only when it is known, from the open board's list read. For any
   // other project the dialog says "every issue" rather than a number this
   // page never read.
   const count =
-    active?.slug === workspace.slug && view
+    active?.slug === project.slug && view
       ? (view.total ?? view.cards.length)
       : null;
-  const working = busy === `purge:${workspace.slug}`;
+  const working = busy === `purge:${project.slug}`;
 
   // The same rhythm as `SettingsPage` (`gap-2.5`, then `mt-9` and `gap-3` per
   // heading), so "Ready for agents" and "Danger zone" read as sections of the
@@ -425,22 +425,20 @@ export function SelectedProjectSection({
     <div className="flex flex-col gap-2.5">
       <SettingsCard>
         <Row
-          leading={
-            <ProjectTile workspace={workspace} className="size-9 text-sm" />
-          }
-          label={workspace.name}
+          leading={<ProjectTile project={project} className="size-9 text-sm" />}
+          label={project.name}
           description={
-            <span className="font-mono text-xs">{workspace.slug}</span>
+            <span className="font-mono text-xs">{project.slug}</span>
           }
         >
           <Button
             size="lg"
             className={SETTINGS_BUTTON}
             variant="outline"
-            aria-label={`Rename ${workspace.name}`}
+            aria-label={`Rename ${project.name}`}
             disabled={!id || busy === `rename:${id}`}
             title={id ? undefined : noId}
-            onClick={() => id && onRename({ ...workspace, id })}
+            onClick={() => id && onRename({ ...project, id })}
           >
             {busy === `rename:${id}` ? "Saving…" : "Rename"}
           </Button>
@@ -461,8 +459,8 @@ export function SelectedProjectSection({
             size="lg"
             className={SETTINGS_BUTTON}
             variant="outline"
-            aria-label={`Source folders for ${workspace.name}`}
-            onClick={() => onFolders(workspace)}
+            aria-label={`Source folders for ${project.name}`}
+            onClick={() => onFolders(project)}
           >
             <HugeiconsIcon
               icon={Folder01Icon}
@@ -483,8 +481,8 @@ export function SelectedProjectSection({
             size="lg"
             className={SETTINGS_BUTTON}
             variant="outline"
-            aria-label={`Import from local into ${workspace.name}`}
-            onClick={() => onImport(workspace)}
+            aria-label={`Import from local into ${project.name}`}
+            onClick={() => onImport(project)}
           >
             Import from local
           </Button>
@@ -492,9 +490,9 @@ export function SelectedProjectSection({
         {extraRows}
       </SettingsCard>
 
-      <ReadinessSection slug={workspace.slug} folders={folders} />
+      <ReadinessSection slug={project.slug} folders={folders} />
 
-      <TrustSection slug={workspace.slug} />
+      <TrustSection slug={project.slug} />
 
       <div className="mt-9 flex flex-col gap-3">
         <h3 className="text-destructive text-[15px] font-medium">
@@ -516,7 +514,7 @@ export function SelectedProjectSection({
               variant="destructive"
               // The same tinted pill as Account → Sign out, and its
               // `border-0` for the same reason (see `account-section.tsx`).
-              aria-label={`Remove all issues in ${workspace.name}`}
+              aria-label={`Remove all issues in ${project.name}`}
               disabled={!id || working}
               title={id ? undefined : noId}
               onClick={() => {
@@ -540,17 +538,17 @@ export function SelectedProjectSection({
               size="lg"
               className={`${SETTINGS_BUTTON} border-0`}
               variant="destructive"
-              aria-label={`Delete ${workspace.name}`}
-              disabled={!id || busy === `delete:${workspace.slug}`}
+              aria-label={`Delete ${project.name}`}
+              disabled={!id || busy === `delete:${project.slug}`}
               title={id ? undefined : noId}
-              onClick={() => id && onDelete({ ...workspace, id })}
+              onClick={() => id && onDelete({ ...project, id })}
             >
               <HugeiconsIcon
                 icon={Delete02Icon}
                 className="size-4"
                 strokeWidth={2}
               />
-              {busy === `delete:${workspace.slug}` ? "Deleting…" : "Delete"}
+              {busy === `delete:${project.slug}` ? "Deleting…" : "Delete"}
             </Button>
           </Row>
         </SettingsCard>
@@ -564,7 +562,7 @@ export function SelectedProjectSection({
           <AlertDialogHeader>
             <AlertDialogTitle>
               Remove {count === null ? "every issue" : `all ${count} issues`} in{" "}
-              {workspace.name}?
+              {project.name}?
             </AlertDialogTitle>
             <AlertDialogDescription>
               Every card on this board is deleted for good, archived ones too,
@@ -575,9 +573,8 @@ export function SelectedProjectSection({
           </AlertDialogHeader>
           <div className="flex flex-col gap-1.5 text-[13px]">
             <label htmlFor={confirmId}>
-              Type{" "}
-              <span className="font-mono font-medium">{workspace.slug}</span> to
-              confirm.
+              Type <span className="font-mono font-medium">{project.slug}</span>{" "}
+              to confirm.
             </label>
             <Input
               id={confirmId}
@@ -595,13 +592,13 @@ export function SelectedProjectSection({
               // NOTE: The exact key, not a case-insensitive match. The service
               // checks the same string, so what enables the button is what the
               // request will be accepted with.
-              disabled={typed !== workspace.slug || !id}
+              disabled={typed !== project.slug || !id}
               onClick={() => {
-                if (!id || typed !== workspace.slug) return;
+                if (!id || typed !== project.slug) return;
                 setPurging(false);
                 onFailed(null);
                 setRemoved(null);
-                void purgeIssues(id, workspace.slug).then((result) => {
+                void purgeIssues(id, project.slug).then((result) => {
                   if (result.error) onFailed(result.error);
                   else setRemoved(result.deleted ?? 0);
                 });

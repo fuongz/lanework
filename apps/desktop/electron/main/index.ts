@@ -51,6 +51,8 @@ import { startPullWatcher } from "./notifications/pull-watcher";
 import { orchestrationMain, setJev, startControlServer } from "./orchestration";
 import type { SessionsControl } from "./orchestration/control-server";
 import { leadsMain } from "./orchestration/leads";
+import { moveLegacyProjectsDir } from "./paths";
+import { registerProjects } from "./projects";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { appOrigin, isTrustedUrl } from "./security";
@@ -60,7 +62,6 @@ import {
   onRunningChanged,
   registerTerminal,
 } from "./terminal";
-import { registerWorkspaces } from "./workspaces";
 
 // ─── Orchestration and Jev (FE-87) ─────────────────────────────────────────
 //
@@ -76,7 +77,7 @@ function ipcId(value: unknown, label: string): string {
 }
 function ipcSlug(value: unknown): string {
   if (typeof value !== "string" || !value || value.length > 128)
-    throw new Error("workspace must be a slug");
+    throw new Error("project must be a slug");
   return value;
 }
 function arity(args: unknown[], count: number): void {
@@ -233,6 +234,9 @@ if (devUrl && new URL(devUrl).origin !== "http://127.0.0.1:5175")
   throw new Error("Unexpected development origin");
 if (!app.isPackaged && process.env.LANEWORK_TEST_USER_DATA)
   app.setPath("userData", process.env.LANEWORK_TEST_USER_DATA);
+// Before anything reads the project state: it lived in `workspaces/` until
+// FE-107.
+moveLegacyProjectsDir();
 /**
  * INF-05 (SR-07/SW-04): the production CSP (`protocol.ts`) on the Vite dev
  * origin too, so dev renders the same hostile content (PR bodies,
@@ -399,16 +403,16 @@ app
       broadcast(channels.themeChanged, nativeTheme.shouldUseDarkColors),
     );
     registerAuth(devUrl);
-    registerWorkspaces(devUrl);
+    registerProjects(devUrl);
     registerGit(devUrl);
     registerTerminal(devUrl);
     // A Lanework tab is found and stopped by its id. A Claude in any other
     // terminal app is caught by its pid file.
     const pids = pidFileBridge();
     registerConversation(devUrl, {
-      terminalOn: async (workspace, conversation, ours) =>
-        (await agentTerminalOn(workspace, conversation)) ??
-        pids.terminalOn(workspace, conversation, ours),
+      terminalOn: async (project, conversation, ours) =>
+        (await agentTerminalOn(project, conversation)) ??
+        pids.terminalOn(project, conversation, ours),
       kill: (id) => (id.startsWith("pid:") ? pids.kill(id) : killTerminal(id)),
       onRunningChanged,
     });

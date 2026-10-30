@@ -121,9 +121,9 @@ import {
 
 /** What the run engine needs of the chat's engines (`conversation/engine`). */
 export interface OrchestrationEngines {
-  state(workspace: string, conversation: string): Promise<EngineState>;
+  state(project: string, conversation: string): Promise<EngineState>;
   start(
-    workspace: string,
+    project: string,
     conversation: string,
     folder: string,
     out: Outgoing,
@@ -134,35 +134,35 @@ export interface OrchestrationEngines {
    */
   startNamed(
     agent: "codex" | "opencode",
-    workspace: string,
+    project: string,
     folder: string,
     out: Outgoing,
   ): Promise<{ conversation: string; engine: EngineState }>;
   send(
-    workspace: string,
+    project: string,
     conversation: string,
     folder: string,
     out: Outgoing,
     agent?: ConversationAgent,
   ): Promise<EngineState>;
-  stop(workspace: string, conversation: string): Promise<void>;
+  stop(project: string, conversation: string): Promise<void>;
   answer(
-    workspace: string,
+    project: string,
     conversation: string,
     id: string,
     answer: PermissionAnswer,
   ): void;
-  release(workspace: string, conversation: string): Promise<void>;
-  close(workspace: string, conversation: string): Promise<void>;
+  release(project: string, conversation: string): Promise<void>;
+  close(project: string, conversation: string): Promise<void>;
   settingsOf(conversation: string): ComposerSettings | null;
-  alive(workspace: string): string[];
+  alive(project: string): string[];
 }
 
 export interface RuntimeDeps {
   /** The chat's engines; null before the conversation view registered. */
   engines: () => OrchestrationEngines | null;
-  /** The folder main wrote down for a workspace. */
-  folderOf: (workspace: string) => Promise<string | null>;
+  /** The folder main wrote down for a project. */
+  folderOf: (project: string) => Promise<string | null>;
   /** Where runs, worktrees and nothing else of ours are kept. */
   dataDir: string;
   broadcast: (event: OrchestrationEvent) => void;
@@ -173,10 +173,10 @@ export interface RuntimeDeps {
   /** How long Jev is waited on before its answer counts as not decided. */
   jevTimeoutMs?: number;
   /**
-   * The team lead a proposal names, as the workspace sees it (FE-88); throws
+   * The team lead a proposal names, as the project sees it (FE-88); throws
    * when it is gone or broken. Absent: a proposal naming one is refused.
    */
-  teamLead?: (workspace: string, id: string) => Promise<TeamLead>;
+  teamLead?: (project: string, id: string) => Promise<TeamLead>;
 }
 
 /** A refusal the lead reads and acts on; retrying the same call cannot help. */
@@ -452,7 +452,7 @@ export class Orchestrator {
   >();
   /** `<run>\0<task>` → the dispatch starting that worker (FE-90/D1). */
   private dispatching = new Map<string, Promise<void>>();
-  /** Workspace → the proposal being approved there (FE-90/D2). */
+  /** Project → the proposal being approved there (FE-90/D2). */
   private approving = new Map<
     string,
     { id: string; promise: Promise<OrchestrationRun> }
@@ -502,6 +502,15 @@ export class Orchestrator {
           await readFile(join(dir, name), "utf8"),
         ) as RunRecord;
         if (record.version !== 1 || !record.run?.id) continue;
+        // NOTE: A run saved before FE-107 names its project `workspace`. It
+        // is read as `project` and saved that way on the next write.
+        const legacy = record.run as { workspace?: unknown };
+        if (
+          record.run.project === undefined &&
+          typeof legacy.workspace === "string"
+        )
+          record.run.project = legacy.workspace;
+        delete legacy.workspace;
         record.approvedScopes ??= [
           ...new Set(record.run.tasks.flatMap((task) => task.files)),
         ];
@@ -603,7 +612,7 @@ export class Orchestrator {
   private tellPage(record: RunRecord): void {
     try {
       this.deps.broadcast({
-        workspace: record.run.workspace,
+        project: record.run.project,
         run: this.shown(record),
       });
     } catch {
@@ -697,9 +706,9 @@ export class Orchestrator {
    * A worker's conversation, as the chat should read it: the folder its
    * transcript is filed under, even once its worktree is gone (FE-90/D8).
    */
-  workerFolder(workspace: string, conversation: string): string | null {
+  workerFolder(project: string, conversation: string): string | null {
     for (const record of this.records.values()) {
-      if (record.run.workspace !== workspace) continue;
+      if (record.run.project !== project) continue;
       for (const task of record.run.tasks)
         if (task.conversation === conversation) {
           const own = record.tasks[task.id];
@@ -726,10 +735,7 @@ export class Orchestrator {
     if (!endpoint) return null;
     for (const record of this.records.values()) {
       const { run } = record;
-      if (
-        run.workspace !== target.workspace ||
-        run.lead !== target.conversation
-      )
+      if (run.project !== target.project || run.lead !== target.conversation)
         continue;
       if (run.status !== "active" && run.status !== "paused") continue;
       const token = this.tokenOf.get(run.id);
@@ -753,7 +759,7 @@ export class Orchestrator {
     if (engine.state !== "idle" && engine.state !== "error") return;
     for (const record of this.records.values())
       if (
-        record.run.workspace === event.workspace &&
+        record.run.project === event.project &&
         record.run.lead === event.conversation
       ) {
         if (engine.state === "idle") this.leadReached(record);
@@ -1133,7 +1139,7 @@ export class Orchestrator {
     return [...this.records.values()].filter(
       (other) =>
         other !== record &&
-        other.run.workspace === record.run.workspace &&
+        other.run.project === record.run.project &&
         other.folder === record.folder &&
         (other.run.status === "active" || other.run.status === "paused"),
     );
@@ -1283,7 +1289,7 @@ export class Orchestrator {
       let state: EngineState;
       if (task.conversation)
         state = await engines.send(
-          record.run.workspace,
+          record.run.project,
           task.conversation,
           worktree,
           out,
@@ -1294,7 +1300,7 @@ export class Orchestrator {
         // made in the worktree, so the engine tap finds the worker by it.
         const started = await engines.startNamed(
           task.agent,
-          record.run.workspace,
+          record.run.project,
           worktree,
           out,
         );
@@ -1305,7 +1311,7 @@ export class Orchestrator {
         const id = randomUUID();
         task.conversation = id;
         opened = id;
-        state = await engines.start(record.run.workspace, id, worktree, out);
+        state = await engines.start(record.run.project, id, worktree, out);
       }
       this.touch(record, [task.id]);
       if (task.status !== "running") {
@@ -1314,7 +1320,7 @@ export class Orchestrator {
         // Stopped while its CLI started: stop that one too.
         if (task.conversation)
           await engines
-            .stop(record.run.workspace, task.conversation)
+            .stop(record.run.project, task.conversation)
             .catch(() => {});
         throw new Abandoned();
       }
@@ -1350,8 +1356,8 @@ export class Orchestrator {
   ): Promise<void> {
     const engines = this.deps.engines();
     if (made.opened) {
-      await engines?.stop(record.run.workspace, made.opened).catch(() => {});
-      await engines?.close(record.run.workspace, made.opened).catch(() => {});
+      await engines?.stop(record.run.project, made.opened).catch(() => {});
+      await engines?.close(record.run.project, made.opened).catch(() => {});
       if (task.conversation === made.opened) task.conversation = null;
       own.turn ??= made.turn;
     }
@@ -1390,10 +1396,10 @@ export class Orchestrator {
     // Its CLI runs in the folder about to be made again: it starts afresh.
     if (
       task.conversation &&
-      engines.alive(record.run.workspace).includes(task.conversation)
+      engines.alive(record.run.project).includes(task.conversation)
     )
       await engines
-        .release(record.run.workspace, task.conversation)
+        .release(record.run.project, task.conversation)
         .catch(() => {});
     let moved: Awaited<ReturnType<typeof moveWorktree>>;
     try {
@@ -1578,7 +1584,7 @@ export class Orchestrator {
       );
       if (task.conversation)
         await this.engines()
-          .stop(record.run.workspace, task.conversation)
+          .stop(record.run.project, task.conversation)
           .catch(() => {});
       this.note(record, task.id);
     });
@@ -1596,7 +1602,7 @@ export class Orchestrator {
       if (task.conversation)
         try {
           engines?.answer(
-            record.run.workspace,
+            record.run.project,
             task.conversation,
             entry.needs.requestId,
             {
@@ -1621,7 +1627,7 @@ export class Orchestrator {
     answer: PermissionAnswer,
   ): void {
     if (!task.conversation) throw new Error("The worker has no conversation");
-    this.engines().answer(record.run.workspace, task.conversation, id, answer);
+    this.engines().answer(record.run.project, task.conversation, id, answer);
   }
 
   private async onPermission(
@@ -1826,14 +1832,14 @@ export class Orchestrator {
     const engines = this.deps.engines();
     if (!engines) return;
     const { run } = record;
-    const state = await engines.state(run.workspace, run.lead);
+    const state = await engines.state(run.project, run.lead);
     if (state.state !== "idle" && state.state !== "error") return;
     const changed = [...set];
     set.clear();
     let failure: string | null = null;
     try {
       const next = await engines.send(
-        run.workspace,
+        run.project,
         run.lead,
         await this.leadFolder(record),
         outgoing(
@@ -1899,7 +1905,7 @@ export class Orchestrator {
    */
   private async leadFolder(record: RunRecord): Promise<string> {
     return (
-      (await this.deps.folderOf(record.run.workspace).catch(() => null)) ??
+      (await this.deps.folderOf(record.run.project).catch(() => null)) ??
       record.folder
     );
   }
@@ -1937,7 +1943,7 @@ export class Orchestrator {
       const engines = this.engines();
       const deadline = Date.now() + 30 * 60_000;
       for (;;) {
-        const state = await engines.state(run.workspace, run.lead);
+        const state = await engines.state(run.project, run.lead);
         if (state.state === "terminal") {
           run.reason =
             "The lead's conversation is open in a terminal, which cannot reach the run. Close it there, then Resume.";
@@ -1948,10 +1954,10 @@ export class Orchestrator {
         if (Date.now() > deadline) return;
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
-      if (engines.alive(run.workspace).includes(run.lead))
-        await engines.release(run.workspace, run.lead).catch(() => {});
+      if (engines.alive(run.project).includes(run.lead))
+        await engines.release(run.project, run.lead).catch(() => {});
       await engines.send(
-        run.workspace,
+        run.project,
         run.lead,
         await this.leadFolder(record),
         outgoing(text, this.leadSettings(record)),
@@ -2023,29 +2029,24 @@ export class Orchestrator {
 
   // ── IPC ──
 
-  async runs(workspace: string): Promise<OrchestrationRun[]> {
+  async runs(project: string): Promise<OrchestrationRun[]> {
     await this.load();
     return [...this.records.values()]
-      .filter((record) => record.run.workspace === workspace)
+      .filter((record) => record.run.project === project)
       .map((record) => this.shown(record))
       .sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  async run(
-    workspace: string,
-    runId: string,
-  ): Promise<OrchestrationRun | null> {
+  async run(project: string, runId: string): Promise<OrchestrationRun | null> {
     await this.load();
     const record = this.records.get(runId);
-    return record && record.run.workspace === workspace
-      ? this.shown(record)
-      : null;
+    return record && record.run.project === project ? this.shown(record) : null;
   }
 
-  private async recordIn(workspace: string, runId: string): Promise<RunRecord> {
+  private async recordIn(project: string, runId: string): Promise<RunRecord> {
     await this.load();
     const record = this.records.get(runId);
-    if (!record || record.run.workspace !== workspace)
+    if (!record || record.run.project !== project)
       throw new Error("That run is not in this project.");
     return record;
   }
@@ -2053,12 +2054,12 @@ export class Orchestrator {
   /**
    * Start the run a proposal describes.
    *
-   * One approval at a time per workspace (FE-90/D2): approving the same
+   * One approval at a time per project (FE-90/D2): approving the same
    * proposal again while it is approved returns the same promise; another
    * proposal is refused until it settles.
    */
   approve(proposal: OrchestrationProposal): Promise<OrchestrationRun> {
-    const busy = this.approving.get(proposal.workspace);
+    const busy = this.approving.get(proposal.project);
     if (busy) {
       if (busy.id === proposal.id) return busy.promise;
       return Promise.reject(
@@ -2068,10 +2069,10 @@ export class Orchestrator {
       );
     }
     const promise = this.approveOnce(proposal).finally(() => {
-      if (this.approving.get(proposal.workspace)?.promise === promise)
-        this.approving.delete(proposal.workspace);
+      if (this.approving.get(proposal.project)?.promise === promise)
+        this.approving.delete(proposal.project);
     });
-    this.approving.set(proposal.workspace, { id: proposal.id, promise });
+    this.approving.set(proposal.project, { id: proposal.id, promise });
     return promise;
   }
 
@@ -2086,7 +2087,7 @@ export class Orchestrator {
       );
     const existing = this.records.get(proposal.id);
     if (existing) {
-      if (existing.run.workspace !== proposal.workspace)
+      if (existing.run.project !== proposal.project)
         throw new Error("That proposal belongs to another project.");
       return this.shown(existing);
     }
@@ -2095,7 +2096,7 @@ export class Orchestrator {
     // conversation holds one open run: its control env names that run.
     const open = [...this.records.values()].find(
       (record) =>
-        record.run.workspace === proposal.workspace &&
+        record.run.project === proposal.project &&
         record.run.lead === proposal.lead &&
         (record.run.status === "active" || record.run.status === "paused"),
     );
@@ -2103,17 +2104,14 @@ export class Orchestrator {
       throw new Error(
         `This conversation already leads a run that is ${open.run.status === "active" ? "running" : "paused"}. Stop or finish it first, or plan this from another conductor.`,
       );
-    const folder = await this.deps.folderOf(proposal.workspace);
+    const folder = await this.deps.folderOf(proposal.project);
     if (!folder) throw new Error("This project has no folder here.");
     const top = await checkoutTop(folder);
     let teamLead: TeamLead | null = null;
     if (proposal.teamLead) {
       if (!this.deps.teamLead)
         throw new Error("Team leads are not available here. Pick none.");
-      teamLead = await this.deps.teamLead(
-        proposal.workspace,
-        proposal.teamLead,
-      );
+      teamLead = await this.deps.teamLead(proposal.project, proposal.teamLead);
     }
     // A team lead's workers are the run's only choices (FE-88/D5), so a task
     // on any other model is refused here and by `delegate` later. A lead with
@@ -2144,7 +2142,7 @@ export class Orchestrator {
     const now = Date.now();
     const run: OrchestrationRun = {
       id: proposal.id,
-      workspace: proposal.workspace,
+      project: proposal.project,
       lead: proposal.lead,
       leadAgent: proposal.leadAgent,
       teamLead: proposal.teamLead,
@@ -2226,11 +2224,11 @@ export class Orchestrator {
 
   /** The user approves the scopes a queued task waits on (FE-89/D11). */
   async approveScope(
-    workspace: string,
+    project: string,
     runId: string,
     taskId: string,
   ): Promise<OrchestrationRun> {
-    const record = await this.recordIn(workspace, runId);
+    const record = await this.recordIn(project, runId);
     await this.serial(runId, async () => {
       const task = this.task(record, taskId);
       const scopes = task.scopeApproval ?? [];
@@ -2245,8 +2243,8 @@ export class Orchestrator {
     return this.shown(record);
   }
 
-  async pause(workspace: string, runId: string): Promise<OrchestrationRun> {
-    const record = await this.recordIn(workspace, runId);
+  async pause(project: string, runId: string): Promise<OrchestrationRun> {
+    const record = await this.recordIn(project, runId);
     await this.serial(runId, async () => {
       const { run } = record;
       if (run.status !== "active") return;
@@ -2256,7 +2254,7 @@ export class Orchestrator {
       await this.stopWorkers(record, "interrupted", "the user paused the run");
       await this.deps
         .engines()
-        ?.stop(run.workspace, run.lead)
+        ?.stop(run.project, run.lead)
         .catch(() => {});
       this.touch(
         record,
@@ -2266,8 +2264,8 @@ export class Orchestrator {
     return this.shown(record);
   }
 
-  async resume(workspace: string, runId: string): Promise<OrchestrationRun> {
-    const record = await this.recordIn(workspace, runId);
+  async resume(project: string, runId: string): Promise<OrchestrationRun> {
+    const record = await this.recordIn(project, runId);
     const run = await this.serial(runId, async () => {
       const { run } = record;
       if (run.status !== "paused") return run;
@@ -2299,8 +2297,8 @@ export class Orchestrator {
     return this.shown(record);
   }
 
-  async stop(workspace: string, runId: string): Promise<OrchestrationRun> {
-    const record = await this.recordIn(workspace, runId);
+  async stop(project: string, runId: string): Promise<OrchestrationRun> {
+    const record = await this.recordIn(project, runId);
     await this.serial(runId, async () => {
       const { run } = record;
       if (run.status === "stopped" || run.status === "finished") return;
@@ -2313,7 +2311,7 @@ export class Orchestrator {
           Object.assign(task, { status: "cancelled", updatedAt: Date.now() });
       await this.deps
         .engines()
-        ?.stop(run.workspace, run.lead)
+        ?.stop(run.project, run.lead)
         .catch(() => {});
       await this.cleanup(record, false);
       this.touch(
@@ -2328,8 +2326,8 @@ export class Orchestrator {
    * What a stopped run left in the project's git (FE-100/O2): the worktrees
    * it kept with unreviewed work, its branches, its baseline and saved refs.
    */
-  async leftovers(workspace: string, runId: string): Promise<RunLeftovers> {
-    const record = await this.recordIn(workspace, runId);
+  async leftovers(project: string, runId: string): Promise<RunLeftovers> {
+    const record = await this.recordIn(project, runId);
     if (record.run.status !== "stopped")
       throw new Error("Only a stopped run can be cleaned up.");
     return this.serial(runId, () => this.leftoversOf(record));
@@ -2366,8 +2364,8 @@ export class Orchestrator {
    *
    * @throws Naming what could not be removed; the rest is gone.
    */
-  async cleanUp(workspace: string, runId: string): Promise<OrchestrationRun> {
-    const record = await this.recordIn(workspace, runId);
+  async cleanUp(project: string, runId: string): Promise<OrchestrationRun> {
+    const record = await this.recordIn(project, runId);
     await this.serial(runId, async () => {
       const { run } = record;
       if (run.status !== "stopped")
@@ -2412,11 +2410,11 @@ export class Orchestrator {
   }
 
   async cancelTask(
-    workspace: string,
+    project: string,
     runId: string,
     taskId: string,
   ): Promise<OrchestrationRun> {
-    const record = await this.recordIn(workspace, runId);
+    const record = await this.recordIn(project, runId);
     await this.serial(runId, () =>
       this.cancel(record, this.task(record, taskId)),
     );
@@ -2452,7 +2450,7 @@ export class Orchestrator {
       if (next === "interrupted" && reason) own.turn = recoveryTurn(reason);
       if (task.conversation)
         await engines
-          ?.stop(record.run.workspace, task.conversation)
+          ?.stop(record.run.project, task.conversation)
           .catch(() => {});
     }
   }
@@ -2469,7 +2467,7 @@ export class Orchestrator {
       const own = this.own(record, task);
       if (task.conversation)
         await engines
-          ?.close(record.run.workspace, task.conversation)
+          ?.close(record.run.project, task.conversation)
           .catch(() => {});
       if (own.scratch) {
         await rm(own.scratch, { recursive: true, force: true }).catch(() => {});
@@ -2522,7 +2520,7 @@ export class Orchestrator {
     const { run } = record;
     if (!this.tokenOf.has(run.id)) refuse("Connection revoked or unauthorized");
     const engines = this.engines();
-    const lead = await engines.state(run.workspace, run.lead);
+    const lead = await engines.state(run.project, run.lead);
     if (lead.state !== "running" && lead.state !== "starting")
       refuse(
         "The control CLI only works while the lead's turn runs. Retrying outside a turn will not help.",
@@ -2711,7 +2709,7 @@ export class Orchestrator {
         });
         if (!settings) refuse("The worker's model is not available any more.");
         await this.engines().send(
-          run.workspace,
+          run.project,
           task.conversation,
           own.worktree,
           outgoing(call.input.text, settings),
@@ -2864,7 +2862,7 @@ export class Orchestrator {
     }
     this.patch(record, task, { status: "cancelling", needsInput: null });
     await this.engines()
-      .stop(record.run.workspace, task.conversation)
+      .stop(record.run.project, task.conversation)
       .catch(() => {});
     // A worker that never says it stopped is cancelled anyway.
     setTimeout(() => {

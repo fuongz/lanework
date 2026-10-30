@@ -49,17 +49,17 @@ const DRAG_PX = 6;
  *   away, so there is no "no terminal" state to draw here.
  */
 export function TerminalPanel({
-  workspace,
+  project,
   usage,
 }: {
-  workspace: string;
+  project: string;
   /** What sits left of + and hide: Claude's usage strip. */
   usage?: ReactNode;
 }) {
   const sessions = useTerminal(
-    (state) => state.sessions[workspace] ?? NO_SESSIONS,
+    (state) => state.sessions[project] ?? NO_SESSIONS,
   );
-  const activeId = useTerminal((state) => state.active[workspace]);
+  const activeId = useTerminal((state) => state.active[project]);
   const error = useTerminal((state) => state.error);
   const spawning = useTerminal((state) => state.spawning);
   const spawn = useTerminal((state) => state.spawn);
@@ -71,7 +71,7 @@ export function TerminalPanel({
 
   const active =
     sessions.find((session) => session.id === activeId) ?? sessions.at(-1);
-  const full = sessions.length >= TERMINAL_LIMITS.perWorkspace;
+  const full = sessions.length >= TERMINAL_LIMITS.perProject;
   // Shells only (FE-26/D3). Claude and Codex start from the rail's
   // Agents group and run full size in the main view, not as tabs down here.
   const kinds: TerminalKind[] = ["shell"];
@@ -84,9 +84,9 @@ export function TerminalPanel({
     (event: DragEndEvent) => {
       const over = event.over?.id;
       if (over && over !== event.active.id)
-        reorderTab(workspace, String(event.active.id), String(over));
+        reorderTab(project, String(event.active.id), String(over));
     },
-    [workspace, reorderTab],
+    [project, reorderTab],
   );
   const stripRef = useRef<HTMLUListElement>(null);
   // Along the strip and inside it: a diagonal pointer cannot lift a tab out
@@ -132,9 +132,9 @@ export function TerminalPanel({
                 session={session}
                 index={index}
                 current={session.id === active?.id}
-                onSelect={() => select(workspace, session.id)}
-                onClose={() => void close(workspace, session.id)}
-                onMove={(delta) => moveTab(workspace, session.id, delta)}
+                onSelect={() => select(project, session.id)}
+                onClose={() => void close(project, session.id)}
+                onMove={(delta) => moveTab(project, session.id, delta)}
               />
             ))}
           </ul>
@@ -150,7 +150,7 @@ export function TerminalPanel({
                 aria-label="New terminal"
                 title={
                   full
-                    ? `At most ${TERMINAL_LIMITS.perWorkspace} terminals per project`
+                    ? `At most ${TERMINAL_LIMITS.perProject} terminals per project`
                     : "New terminal"
                 }
                 disabled={spawning || full}
@@ -167,7 +167,7 @@ export function TerminalPanel({
             {kinds.map((kind) => (
               <DropdownMenuItem
                 key={kind}
-                onClick={() => void spawn(workspace, kind)}
+                onClick={() => void spawn(project, kind)}
               >
                 <TerminalKindIcon kind={kind} className="size-4 shrink-0" />
                 {TERMINAL_KIND_LABELS[kind]}
@@ -184,7 +184,7 @@ export function TerminalPanel({
           className="size-6"
           aria-label="Hide terminal"
           title="Hide terminal (⌘`)"
-          onClick={() => setOpen(workspace, false)}
+          onClick={() => setOpen(project, false)}
         >
           <HugeiconsIcon
             icon={ArrowDown01Icon}

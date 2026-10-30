@@ -23,7 +23,7 @@ import { CONTROL_ENV } from "../../../shared/orchestration";
 
 /** Which process an engine is about to start. */
 export interface EngineTarget {
-  workspace: string;
+  project: string;
   /** Null for a Codex conversation Codex has not named yet. */
   conversation: string | null;
   /** The folder it runs in: a worker's is its own worktree. */

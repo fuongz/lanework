@@ -22,11 +22,11 @@ import { useAgentSessions } from "#/stores/agent-sessions";
  * placeholder says what that would be.
  */
 export function RenameAgentDialog({
-  workspace,
+  project,
   session,
   onClose,
 }: {
-  workspace: string;
+  project: string;
   /** The conversation being renamed; null keeps the dialog shut. */
   session: AgentSession | null;
   onClose: () => void;
@@ -48,7 +48,7 @@ export function RenameAgentDialog({
     setBusy(true);
     setError(null);
     try {
-      await rename(workspace, session, value);
+      await rename(project, session, value);
       onClose();
     } catch (failure) {
       setError(ipcMessage(failure, "That name could not be saved."));

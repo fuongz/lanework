@@ -10,7 +10,7 @@ import {
   test,
 } from "@playwright/test";
 import type { MachineRecord } from "../electron/main/auth/store";
-import { writeFolders } from "../electron/main/workspaces/store";
+import { writeFolders } from "../electron/main/projects/store";
 import {
   launchEnv,
   removeProfile,
@@ -441,7 +441,7 @@ async function open(
   } = {},
 ) {
   const plane = await startStubPlane({
-    workspaces: [
+    projects: [
       {
         id: "ws-1",
         slug: SLUG,

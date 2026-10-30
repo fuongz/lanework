@@ -17,7 +17,7 @@ import type {
   BoardColumn,
   BoardLabel,
   BoardMember,
-} from "#/../shared/workspaces";
+} from "#/../shared/projects";
 import { labelOf } from "#/components/shared/board/label-chip";
 import { Avatar, memberOf, personName } from "#/components/shared/board/people";
 import { ComposerCard } from "#/components/shared/common/composer-card";

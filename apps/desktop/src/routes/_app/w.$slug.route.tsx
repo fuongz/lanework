@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { WorkspaceLayout } from "#/components/features/workspaces/workspace-layout";
+import { ProjectLayout } from "#/components/features/projects/project-layout";
 export const Route = createFileRoute("/_app/w/$slug")({
-  component: WorkspaceLayout,
+  component: ProjectLayout,
 });

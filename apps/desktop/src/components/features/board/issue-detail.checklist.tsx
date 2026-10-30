@@ -1,5 +1,5 @@
 import { useId, useMemo } from "react";
-import type { BoardCard, BoardChecklistItem } from "#/../shared/workspaces";
+import type { BoardCard, BoardChecklistItem } from "#/../shared/projects";
 import { InlineMarkdown } from "#/components/shared/common/markdown-body";
 import { Checkbox } from "#/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "#/components/ui/radio-group";

@@ -37,10 +37,10 @@ export function ProjectPicker({
   slug: string;
   to: "/settings/memory" | "/settings/instructions";
 }) {
-  const workspaces = useBoard((state) => state.workspaces);
+  const projects = useBoard((state) => state.projects);
   const navigate = useNavigate();
   const name = (value: string) =>
-    workspaces.find((workspace) => workspace.slug === value)?.name ?? value;
+    projects.find((project) => project.slug === value)?.name ?? value;
 
   return (
     <Select
@@ -63,9 +63,9 @@ export function ProjectPicker({
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
-        {workspaces.map((workspace) => (
-          <SelectItem key={workspace.slug} value={workspace.slug}>
-            {workspace.name}
+        {projects.map((project) => (
+          <SelectItem key={project.slug} value={project.slug}>
+            {project.name}
           </SelectItem>
         ))}
       </SelectContent>

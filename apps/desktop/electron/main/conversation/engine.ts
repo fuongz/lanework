@@ -66,7 +66,7 @@ interface EngineDeps {
   emit: (event: ConversationEvent) => void;
   /** The id of a live pty running Claude on this conversation, or null. */
   terminalOn: (
-    workspace: string,
+    project: string,
     conversation: string,
     ours: ReadonlySet<number>,
   ) => Promise<string | null>;
@@ -247,7 +247,7 @@ class Engine implements ConversationEngine {
   stale = false;
 
   constructor(
-    readonly workspace: string,
+    readonly project: string,
     readonly conversation: string,
     readonly folder: string,
     readonly deps: EngineDeps,
@@ -301,7 +301,7 @@ class Engine implements ConversationEngine {
   emit(event: Record<string, unknown> & { type: ConversationEvent["type"] }) {
     const full = {
       ...event,
-      workspace: this.workspace,
+      project: this.project,
       conversation: this.conversation,
     } as ConversationEvent;
     this.deps.emit(full);
@@ -376,7 +376,7 @@ class Engine implements ConversationEngine {
         // FE-87: a lead's control endpoint, a worker's scratch; never the
         // control variables for anyone else.
         env: agentEnv(cli.env, {
-          workspace: this.workspace,
+          project: this.project,
           conversation: this.conversation,
           folder: this.folder,
         }),
@@ -539,7 +539,7 @@ class Engine implements ConversationEngine {
       case "result":
         safely(() =>
           engineTap().result?.({
-            workspace: this.workspace,
+            project: this.project,
             conversation: this.conversation,
             folder: this.folder,
             text: resultText(line),
@@ -562,7 +562,7 @@ class Engine implements ConversationEngine {
       if (!paths) continue;
       safely(() =>
         tap({
-          workspace: this.workspace,
+          project: this.project,
           conversation: this.conversation,
           folder: this.folder,
           tool: String((block as { name?: unknown }).name),
@@ -901,7 +901,7 @@ export type Engines = ReturnType<typeof createEngines>;
 /** The CLIs that name a new conversation themselves (FE-104). */
 export type NamingAgent = Exclude<ConversationAgent, "claude">;
 
-/** Every conversation's engine, by workspace and id. */
+/** Every conversation's engine, by project and id. */
 export function createEngines(input: EngineDeps) {
   const engines = new Map<string, ConversationEngine>();
   // The settings each conversation last ran with here, so orchestration can
@@ -932,8 +932,8 @@ export function createEngines(input: EngineDeps) {
     emit: deps.emit,
     remember: deps.remember,
   });
-  const keyOf = (workspace: string, conversation: string) =>
-    `${workspace}\0${conversation}`;
+  const keyOf = (project: string, conversation: string) =>
+    `${project}\0${conversation}`;
 
   /**
    * A new engine for `agent`'s conversation.
@@ -943,23 +943,23 @@ export function createEngines(input: EngineDeps) {
    */
   function make(
     agent: ConversationAgent,
-    workspace: string,
+    project: string,
     conversation: string | null,
     folder: string,
   ): ConversationEngine {
     switch (agent) {
       case "codex":
-        return new CodexEngine(workspace, conversation, folder, codexDeps());
+        return new CodexEngine(project, conversation, folder, codexDeps());
       case "opencode":
         return new OpenCodeEngine(
-          workspace,
+          project,
           conversation,
           folder,
           opencodeDeps(),
         );
       case "claude":
         if (!conversation) throw new Error("A conversation is required.");
-        return new Engine(workspace, conversation, folder, deps);
+        return new Engine(project, conversation, folder, deps);
     }
   }
 
@@ -974,23 +974,23 @@ export function createEngines(input: EngineDeps) {
   }
 
   async function terminalState(
-    workspace: string,
+    project: string,
     conversation: string,
   ): Promise<EngineState | null> {
     const terminalId = await deps
-      .terminalOn(workspace, conversation, pids())
+      .terminalOn(project, conversation, pids())
       .catch(() => null);
     return terminalId ? { state: "terminal", terminalId } : null;
   }
 
   async function state(
-    workspace: string,
+    project: string,
     conversation: string,
   ): Promise<EngineState> {
-    const engine = engines.get(keyOf(workspace, conversation));
+    const engine = engines.get(keyOf(project, conversation));
     if (engine?.alive() || engine?.busy) return engine.state();
     return (
-      (await terminalState(workspace, conversation)) ??
+      (await terminalState(project, conversation)) ??
       engine?.state() ?? { state: "idle" }
     );
   }
@@ -1004,11 +1004,11 @@ export function createEngines(input: EngineDeps) {
    */
   async function startNamed(
     agent: NamingAgent,
-    workspace: string,
+    project: string,
     folder: string,
     out: Outgoing,
   ): Promise<{ conversation: string; engine: EngineState }> {
-    const engine = make(agent, workspace, null, folder);
+    const engine = make(agent, project, null, folder);
     await engine.deliver(out);
     let timer: NodeJS.Timeout | undefined;
     const conversation = await Promise.race([
@@ -1030,7 +1030,7 @@ export function createEngines(input: EngineDeps) {
         throw error;
       })
       .finally(() => clearTimeout(timer));
-    engines.set(keyOf(workspace, conversation), engine);
+    engines.set(keyOf(project, conversation), engine);
     engine.emitState();
     return { conversation, engine: engine.state() };
   }
@@ -1056,13 +1056,13 @@ export function createEngines(input: EngineDeps) {
      *   the send fails.
      */
     async send(
-      workspace: string,
+      project: string,
       conversation: string,
       folder: string,
       out: Outgoing,
       agent: ConversationAgent = "claude",
     ): Promise<EngineState> {
-      const key = keyOf(workspace, conversation);
+      const key = keyOf(project, conversation);
       let engine = engines.get(key);
       if (engine && (engine.folder !== folder || engine.agent !== agent)) {
         if (engine.busy) throw new Error("A turn is still running.");
@@ -1076,11 +1076,11 @@ export function createEngines(input: EngineDeps) {
       }
       if (!engine?.alive()) {
         // NOTE: Single writer: a pty already running Claude on it wins.
-        const terminal = await terminalState(workspace, conversation);
+        const terminal = await terminalState(project, conversation);
         if (terminal) return terminal;
       }
       if (!engine) {
-        engine = make(agent, workspace, conversation, folder);
+        engine = make(agent, project, conversation, folder);
         engines.set(key, engine);
       }
       const running = engine;
@@ -1098,11 +1098,11 @@ export function createEngines(input: EngineDeps) {
      * Kept for orchestration, which starts Codex workers by this name.
      */
     startCodex(
-      workspace: string,
+      project: string,
       folder: string,
       out: Outgoing,
     ): Promise<{ conversation: string; engine: EngineState }> {
-      return startNamed("codex", workspace, folder, out);
+      return startNamed("codex", project, folder, out);
     },
 
     /**
@@ -1112,14 +1112,14 @@ export function createEngines(input: EngineDeps) {
      * @throws When that conversation exists, or the first turn fails.
      */
     async start(
-      workspace: string,
+      project: string,
       conversation: string,
       folder: string,
       out: Outgoing,
     ): Promise<EngineState> {
-      const key = keyOf(workspace, conversation);
+      const key = keyOf(project, conversation);
       if (engines.has(key)) throw new Error("That conversation exists.");
-      const engine = new Engine(workspace, conversation, folder, deps, true);
+      const engine = new Engine(project, conversation, folder, deps, true);
       engines.set(key, engine);
       await engine.deliver(out).catch((error: Error) => {
         engine.error = error.message;
@@ -1137,10 +1137,10 @@ export function createEngines(input: EngineDeps) {
      * down only as each step ends.
      */
     pending(
-      workspace: string,
+      project: string,
       conversation: string,
     ): { agent: ConversationAgent; turns: Turn[]; working: boolean } | null {
-      const engine = engines.get(keyOf(workspace, conversation));
+      const engine = engines.get(keyOf(project, conversation));
       if (!engine) return null;
       return {
         agent: engine.agent,
@@ -1150,8 +1150,8 @@ export function createEngines(input: EngineDeps) {
     },
 
     /** The requests the engine is still waiting on, oldest first. */
-    permissions(workspace: string, conversation: string): PermissionRequest[] {
-      const engine = engines.get(keyOf(workspace, conversation));
+    permissions(project: string, conversation: string): PermissionRequest[] {
+      const engine = engines.get(keyOf(project, conversation));
       return engine ? [...engine.permissions.values()] : [];
     },
 
@@ -1159,18 +1159,18 @@ export function createEngines(input: EngineDeps) {
      * The conversation's Claude process runs without the project's settings:
      * Claude has no trust on record for its folder (FE-77/D3).
      */
-    untrusted(workspace: string, conversation: string): boolean {
-      const engine = engines.get(keyOf(workspace, conversation));
+    untrusted(project: string, conversation: string): boolean {
+      const engine = engines.get(keyOf(project, conversation));
       return Boolean(engine?.alive() && engine.untrusted);
     },
 
-    async stop(workspace: string, conversation: string): Promise<void> {
-      await engines.get(keyOf(workspace, conversation))?.stop();
+    async stop(project: string, conversation: string): Promise<void> {
+      await engines.get(keyOf(project, conversation))?.stop();
     },
 
     /** Drop every queued message; returns how many went. */
-    clearQueue(workspace: string, conversation: string): number {
-      const engine = engines.get(keyOf(workspace, conversation));
+    clearQueue(project: string, conversation: string): number {
+      const engine = engines.get(keyOf(project, conversation));
       if (!engine) return 0;
       const dropped = engine.held.clear();
       engine.emitState();
@@ -1183,18 +1183,18 @@ export function createEngines(input: EngineDeps) {
      * @returns null when it already went.
      */
     takeQueued(
-      workspace: string,
+      project: string,
       conversation: string,
       id: string,
     ): Outgoing | null {
-      const engine = engines.get(keyOf(workspace, conversation));
+      const engine = engines.get(keyOf(project, conversation));
       const taken = engine?.held.remove(id) ?? null;
       engine?.emitState();
       return taken;
     },
 
-    resumeQueue(workspace: string, conversation: string): void {
-      engines.get(keyOf(workspace, conversation))?.resume();
+    resumeQueue(project: string, conversation: string): void {
+      engines.get(keyOf(project, conversation))?.resume();
     },
 
     /**
@@ -1203,12 +1203,12 @@ export function createEngines(input: EngineDeps) {
      * @throws When the request was already answered.
      */
     answer(
-      workspace: string,
+      project: string,
       conversation: string,
       id: string,
       answer: PermissionAnswer,
     ): void {
-      const engine = engines.get(keyOf(workspace, conversation));
+      const engine = engines.get(keyOf(project, conversation));
       if (!engine) throw new Error("That request was already answered.");
       engine.answer(id, answer);
     },
@@ -1219,27 +1219,27 @@ export function createEngines(input: EngineDeps) {
      * @throws When the terminal still runs it after about three seconds.
      */
     async takeOver(
-      workspace: string,
+      project: string,
       conversation: string,
     ): Promise<EngineState> {
       const terminalId = await deps
-        .terminalOn(workspace, conversation, pids())
+        .terminalOn(project, conversation, pids())
         .catch(() => null);
       if (terminalId) {
         await deps.killTerminal(terminalId);
         // The CLI needs a moment to let go of the file.
         for (let tries = 0; tries < 20; tries++) {
           const still = await deps
-            .terminalOn(workspace, conversation, pids())
+            .terminalOn(project, conversation, pids())
             .catch(() => null);
           if (!still) break;
           await new Promise((resolve) => setTimeout(resolve, 150));
         }
       }
-      const now = await state(workspace, conversation);
+      const now = await state(project, conversation);
       if (now.state === "terminal")
         throw new Error("The terminal is still running this conversation.");
-      deps.emit({ type: "state", workspace, conversation, engine: now });
+      deps.emit({ type: "state", project, conversation, engine: now });
       return now;
     },
 
@@ -1249,8 +1249,8 @@ export function createEngines(input: EngineDeps) {
      *
      * @throws When a turn is still running.
      */
-    async release(workspace: string, conversation: string): Promise<void> {
-      const key = keyOf(workspace, conversation);
+    async release(project: string, conversation: string): Promise<void> {
+      const key = keyOf(project, conversation);
       const engine = engines.get(key);
       if (!engine) return;
       if (engine.busy) throw new Error("Stop the running turn first.");
@@ -1271,7 +1271,7 @@ export function createEngines(input: EngineDeps) {
      * none of its engines is ever matched here.
      */
     async retrust(
-      workspace: string,
+      project: string,
       folder: string,
       agent: ConversationAgent,
     ): Promise<void> {
@@ -1280,7 +1280,7 @@ export function createEngines(input: EngineDeps) {
         [...engines.values()]
           .filter(
             (engine) =>
-              engine.workspace === workspace &&
+              engine.project === project &&
               engine.folder === folder &&
               engine.agent === agent &&
               engine.alive(),
@@ -1296,10 +1296,10 @@ export function createEngines(input: EngineDeps) {
       );
     },
 
-    /** The conversations of `workspace` whose engine process is alive. */
-    alive(workspace: string): string[] {
+    /** The conversations of `project` whose engine process is alive. */
+    alive(project: string): string[] {
       return [...engines.values()]
-        .filter((engine) => engine.workspace === workspace && engine.alive())
+        .filter((engine) => engine.project === project && engine.alive())
         .flatMap((engine) =>
           engine.conversation ? [engine.conversation] : [],
         );
@@ -1310,8 +1310,8 @@ export function createEngines(input: EngineDeps) {
      *
      * Whatever turn runs is cut off, the queue dropped, and the process ended.
      */
-    async close(workspace: string, conversation: string): Promise<void> {
-      const key = keyOf(workspace, conversation);
+    async close(project: string, conversation: string): Promise<void> {
+      const key = keyOf(project, conversation);
       const engine = engines.get(key);
       if (!engine) return;
       engine.held.clear();

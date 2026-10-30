@@ -32,17 +32,17 @@ const IDLE: ConductorStatus = {
 };
 
 /**
- * The conversations of `workspace` that wait on a permission answer, from
+ * The conversations of `project` that wait on a permission answer, from
  * the engine's events since the rail mounted.
  */
-function useWaitingPermissions(workspace: string): ReadonlySet<string> {
+function useWaitingPermissions(project: string): ReadonlySet<string> {
   const [waiting, setWaiting] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     setWaiting(new Set());
     const surface = window.desktop?.conversation;
     if (!surface) return;
     return surface.onEvent((event) => {
-      if (event.workspace !== workspace) return;
+      if (event.project !== project) return;
       if (event.type === "permission")
         setWaiting((current) => new Set(current).add(event.conversation));
       else if (
@@ -56,7 +56,7 @@ function useWaitingPermissions(workspace: string): ReadonlySet<string> {
           return next;
         });
     });
-  }, [workspace]);
+  }, [project]);
   return waiting;
 }
 
@@ -69,7 +69,7 @@ function useWaitingPermissions(workspace: string): ReadonlySet<string> {
  * nowhere else.
  */
 function useWaitingProposals(
-  workspace: string,
+  project: string,
   conversations: readonly string[],
   leads: readonly TeamLead[],
 ): ReadonlySet<string> {
@@ -84,7 +84,7 @@ function useWaitingProposals(
     let gone = false;
     const read = (id: string) =>
       surface
-        .read(workspace, id)
+        .read(project, id)
         .then((conversation) => {
           if (gone) return;
           const ready = deriveProposals(conversation.turns, false, leads).at(
@@ -100,7 +100,7 @@ function useWaitingProposals(
     const off = surface.onEvent((event) => {
       if (
         event.type === "state" &&
-        event.workspace === workspace &&
+        event.project === project &&
         event.engine.state === "idle" &&
         conversations.includes(event.conversation)
       )
@@ -110,7 +110,7 @@ function useWaitingProposals(
       gone = true;
       off();
     };
-  }, [workspace, key, leads]);
+  }, [project, key, leads]);
   return useMemo(() => {
     const waiting = new Set<string>();
     for (const [id, proposal] of Object.entries(latest)) {
@@ -121,17 +121,17 @@ function useWaitingProposals(
   }, [latest, edits]);
 }
 
-/** Every conductor's status in `workspace`, by its id. */
+/** Every conductor's status in `project`, by its id. */
 export function useConductorStatuses(
-  workspace: string,
+  project: string,
   conductors: readonly TeamLead[],
 ): Record<string, ConductorStatus> {
-  const sessions = useAgentSessions((state) => state.byWorkspace[workspace]);
+  const sessions = useAgentSessions((state) => state.byProject[project]);
   const live = useAgentSessions((state) => state.live);
   const started = useNewChats((state) => state.started);
-  const starting = useNewChats((state) => state.starting[workspace]);
-  const runs = useOrchestrationRuns(workspace);
-  const permissions = useWaitingPermissions(workspace);
+  const starting = useNewChats((state) => state.starting[project]);
+  const runs = useOrchestrationRuns(project);
+  const permissions = useWaitingPermissions(project);
 
   const own = useMemo(() => {
     const out: Record<string, string | null> = {};
@@ -139,16 +139,16 @@ export function useConductorStatuses(
       out[conductor.id] = conductorConversation(
         sessions,
         started,
-        workspace,
+        project,
         conductor.id,
       );
     return out;
-  }, [conductors, sessions, started, workspace]);
+  }, [conductors, sessions, started, project]);
   const conversations = useMemo(
     () => Object.values(own).filter((id): id is string => id !== null),
     [own],
   );
-  const proposals = useWaitingProposals(workspace, conversations, conductors);
+  const proposals = useWaitingProposals(project, conversations, conductors);
 
   const out: Record<string, ConductorStatus> = {};
   for (const conductor of conductors) {

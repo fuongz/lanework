@@ -123,7 +123,7 @@ async function firstProject() {
   await page
     .getByRole("button", { name: /^Switch project/ })
     .waitFor({ timeout: 15_000 });
-  await page.goto("app://lanework/settings/workspaces");
+  await page.goto("app://lanework/settings/projects");
   await page
     .getByRole("button", { name: "Source folders for Lanework" })
     .click();

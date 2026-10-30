@@ -237,14 +237,14 @@ function LeftoverList({ left }: { left: RunLeftovers }) {
  */
 export function RunPanel({
   slug,
-  workspace,
+  project,
   run,
   title,
   focusKey = null,
   onRun,
 }: {
   slug: string;
-  workspace: string;
+  project: string;
   run: OrchestrationRun;
   /** The approved proposal's title; null for a run no card points to. */
   title: string | null;
@@ -318,7 +318,7 @@ export function RunPanel({
     setLeft(null);
     setLeftError(null);
     surface
-      .leftovers(workspace, run.id)
+      .leftovers(project, run.id)
       .then((found) => {
         if (!gone) setLeft(found);
       })
@@ -329,7 +329,7 @@ export function RunPanel({
     return () => {
       gone = true;
     };
-  }, [confirmClean, surface, workspace, run.id]);
+  }, [confirmClean, surface, project, run.id]);
 
   const accepted = run.tasks.filter((task) => task.accepted).length;
   const running = run.tasks.filter((task) => task.status === "running").length;
@@ -405,7 +405,7 @@ export function RunPanel({
                 onClick={() =>
                   void act(
                     "pause",
-                    () => surface.pause(workspace, run.id),
+                    () => surface.pause(project, run.id),
                     "Could not pause the run.",
                   )
                 }
@@ -426,7 +426,7 @@ export function RunPanel({
                 onClick={() =>
                   void act(
                     "resume",
-                    () => surface.resume(workspace, run.id),
+                    () => surface.resume(project, run.id),
                     "Could not resume the run.",
                   )
                 }
@@ -551,8 +551,7 @@ export function RunPanel({
                       onClick={() =>
                         void act(
                           `scope:${task.id}`,
-                          () =>
-                            surface.approveScope(workspace, run.id, task.id),
+                          () => surface.approveScope(project, run.id, task.id),
                           "Could not approve the write scope.",
                         )
                       }
@@ -570,7 +569,7 @@ export function RunPanel({
                       onClick={() =>
                         void act(
                           `cancel:${task.id}`,
-                          () => surface.cancelTask(workspace, run.id, task.id),
+                          () => surface.cancelTask(project, run.id, task.id),
                           "Could not cancel the worker.",
                         )
                       }
@@ -725,7 +724,7 @@ export function RunPanel({
                 onClick={async () => {
                   await act(
                     "stop",
-                    () => surface.stop(workspace, run.id),
+                    () => surface.stop(project, run.id),
                     "Could not stop the run.",
                   );
                   setConfirmStop(false);
@@ -777,7 +776,7 @@ export function RunPanel({
                 onClick={async () => {
                   await act(
                     "clean",
-                    () => surface.cleanUp(workspace, run.id),
+                    () => surface.cleanUp(project, run.id),
                     "Could not clean up the run.",
                   );
                   setConfirmClean(false);

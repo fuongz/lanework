@@ -13,7 +13,7 @@
  *   plugin bundle, imports `electron`;
  * - a source file in an Electron-free folder imports `electron`;
  * - a main-process file runs `git` itself instead of through `git/runner.ts`;
- * - `workspaces/client.ts` builds a `/v1` path by hand.
+ * - `projects/client.ts` builds a `/v1` path by hand.
  *
  * It prints every source file that imports `electron`, by name.
  */
@@ -57,7 +57,7 @@ const GIT_RUNNER = "apps/desktop/electron/main/git/runner.ts";
 const GIT_CALL =
   /\b(?:execFile|execFileSync|spawn|spawnSync)\s*\(\s*["'`]git["'`]/g;
 
-const CLIENT = "apps/desktop/electron/main/workspaces/client.ts";
+const CLIENT = "apps/desktop/electron/main/projects/client.ts";
 const V1_LITERAL = /["'`][^"'`\n]*\/v1(?:\/|["'`])/;
 
 const problems = [];

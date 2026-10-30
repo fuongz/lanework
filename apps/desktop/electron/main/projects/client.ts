@@ -28,11 +28,11 @@ import {
   type ColumnRole,
   matchesSearch,
   normalizeTag,
+  type Project,
   parseDispatch,
   parseItemStream,
   parseStreams,
-  type Workspace,
-} from "../../../shared/workspaces";
+} from "../../../shared/projects";
 import { resolveApi } from "../auth/client";
 import type { MachineRecord } from "../auth/store";
 import {
@@ -55,20 +55,18 @@ function text(value: unknown): value is string {
  *
  * @throws when the list or any row in it is malformed, or a slug repeats.
  */
-export function parseWorkspaces(value: unknown): Workspace[] {
+export function parseProjects(value: unknown): Project[] {
   if (
     !value ||
     typeof value !== "object" ||
     !("workspaces" in value) ||
     !Array.isArray(value.workspaces)
   )
-    throw new Error(
-      "The service returned an invalid workspace list. Try again.",
-    );
+    throw new Error("The service returned an invalid project list. Try again.");
   const slugs = new Set<string>();
   return value.workspaces.map((entry: unknown) => {
     if (!entry || typeof entry !== "object")
-      throw new Error("The service returned an invalid workspace. Try again.");
+      throw new Error("The service returned an invalid project. Try again.");
     const row = entry as Record<string, unknown>;
     if (
       !text(row.slug) ||
@@ -77,11 +75,11 @@ export function parseWorkspaces(value: unknown): Workspace[] {
       !(row.path === null || text(row.path)) ||
       !(row.baseBranch === null || text(row.baseBranch))
     )
-      throw new Error("The service returned an invalid workspace. Try again.");
+      throw new Error("The service returned an invalid project. Try again.");
     slugs.add(row.slug);
     return {
       // NOTE: Absent, not invalid, on a control plane older than the field.
-      // Requiring it refuses every real workspace with "invalid workspace": a
+      // Requiring it refuses every real project with "invalid project": a
       // strict reader turns a deploy-order problem into a broken app. The
       // board is what needs an id; the list is not.
       id: text(row.id) ? row.id : null,
@@ -159,18 +157,16 @@ async function body(response: Response): Promise<unknown> {
 }
 
 /** The account's projects, as this machine's credential may read them. */
-export async function fetchWorkspaces(
-  record: MachineRecord,
-): Promise<Workspace[]> {
+export async function fetchProjects(record: MachineRecord): Promise<Project[]> {
   // NOTE: `/v1/sync/state`, the MACHINE surface. `/v1/workspaces` is
   // `sessionAuth` end to end and answers this app's credential with 401 by
   // design.
   const response = await call(record, paths.syncState());
   if (!response.ok)
     throw new Error(
-      `Could not load your workspaces (HTTP ${response.status}). Try again.`,
+      `Could not load your projects (HTTP ${response.status}). Try again.`,
     );
-  return parseWorkspaces(await body(response));
+  return parseProjects(await body(response));
 }
 
 const priority = (value: unknown): BoardCard["priority"] =>
@@ -440,7 +436,7 @@ export function parseBoardConfig(value: unknown): {
 /** Every card on a board, following the cursor rather than one page. */
 export async function fetchCards(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
 ): Promise<BoardCard[]> {
   const cards: BoardCard[] = [];
   let cursor: string | null = null;
@@ -451,7 +447,7 @@ export async function fetchCards(
     const response = await call(
       record,
       paths.items(
-        workspaceId,
+        projectId,
         `limit=${PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       ),
     );
@@ -483,11 +479,11 @@ export async function fetchCards(
  */
 export async function searchCards(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   query: string,
 ): Promise<BoardCard[]> {
   const params = new URLSearchParams({ q: query, limit: "20" });
-  const response = await call(record, paths.items(workspaceId, params));
+  const response = await call(record, paths.items(projectId, params));
   if (!response.ok)
     throw new Error(`Could not search this board (HTTP ${response.status}).`);
   const payload = (await body(response)) as { items?: unknown[] };
@@ -558,14 +554,14 @@ export function groupSpecs(
  */
 export async function fetchGroup(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   group: GroupSpec,
   cursor: string | null = null,
 ): Promise<BoardGroupPage> {
   const params = new URLSearchParams(group.params);
   params.set("limit", String(group.limit));
   if (cursor) params.set("cursor", cursor);
-  const response = await call(record, paths.items(workspaceId, params));
+  const response = await call(record, paths.items(projectId, params));
   if (!response.ok)
     throw new Error(
       `Could not load this board (HTTP ${response.status}). Try again.`,
@@ -607,7 +603,7 @@ function parseCounts(value: unknown): Record<string, number> {
  */
 export async function fetchStats(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   filters: BoardQuery["filters"],
 ): Promise<BoardStats | null> {
   const params = new URLSearchParams();
@@ -615,7 +611,7 @@ export async function fetchStats(
   if (filters.category) params.set("category", filters.category);
   if (filters.priority) params.set("priority", filters.priority);
   if (filters.tag) params.set("tag", filters.tag);
-  const response = await call(record, paths.boardStats(workspaceId, params));
+  const response = await call(record, paths.boardStats(projectId, params));
   if (response.status === 404) {
     // NOTE: 404 is ALSO what an unknown board answers. That board's own reads
     // fail right after this and say so; here it only means "no counts".
@@ -648,13 +644,10 @@ const str = (value: unknown): string | null =>
  */
 export async function fetchCheckpoint(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
 ): Promise<CardCheckpoint | null> {
-  const response = await call(
-    record,
-    paths.itemCheckpoints(workspaceId, cardId),
-  );
+  const response = await call(record, paths.itemCheckpoints(projectId, cardId));
   if (response.status === 404) return null;
   if (!response.ok)
     throw new Error(
@@ -709,9 +702,9 @@ export async function fetchCheckpoint(
  */
 export async function fetchPresence(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
 ): Promise<BoardPresence[]> {
-  const response = await call(record, paths.boardPresence(workspaceId));
+  const response = await call(record, paths.boardPresence(projectId));
   if (response.status === 404) return [];
   if (!response.ok)
     throw new Error(
@@ -744,9 +737,9 @@ export async function fetchPresence(
 /** A board's configuration, read through {@link parseBoardConfig}. */
 export async function fetchBoardConfig(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
 ): Promise<ReturnType<typeof parseBoardConfig>> {
-  const response = await call(record, paths.boardConfig(workspaceId));
+  const response = await call(record, paths.boardConfig(projectId));
   if (!response.ok)
     throw new Error(
       `Could not load this board (HTTP ${response.status}). Try again.`,
@@ -839,13 +832,13 @@ async function readWrite(
  */
 export async function moveCard(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   columnKey: string | null,
   placement?: BoardPlacement,
 ): Promise<BoardWrite> {
   return readWrite(
-    await call(record, paths.itemMove(workspaceId, cardId), {
+    await call(record, paths.itemMove(projectId, cardId), {
       method: "POST",
       body: JSON.stringify({
         // NOTE: The key is OMITTED rather than sent as null for a reorder.
@@ -868,13 +861,13 @@ export async function moveCard(
  */
 export async function updateCard(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   patch: BoardCardPatch,
   revision: number,
 ): Promise<BoardWrite> {
   return readWrite(
-    await call(record, paths.item(workspaceId, cardId), {
+    await call(record, paths.item(projectId, cardId), {
       method: "PATCH",
       headers: { "if-match": String(revision) },
       body: JSON.stringify(patch),
@@ -886,10 +879,10 @@ export async function updateCard(
 /** One card with its checklist and assignees: the read a list cannot give. */
 export async function fetchCard(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
 ): Promise<BoardCard> {
-  const response = await call(record, paths.item(workspaceId, cardId));
+  const response = await call(record, paths.item(projectId, cardId));
   if (!response.ok)
     throw new Error(
       `Could not load this card (HTTP ${response.status}). Try again.`,
@@ -909,13 +902,10 @@ export async function fetchCard(
  */
 export async function lookupCard(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   taskId: string,
 ): Promise<BoardCard | null> {
-  const response = await call(
-    record,
-    paths.boardLookup(workspaceId, { taskId }),
-  );
+  const response = await call(record, paths.boardLookup(projectId, { taskId }));
   if (response.status === 404) return null;
   if (!response.ok)
     throw new Error(
@@ -936,12 +926,12 @@ export async function lookupCard(
  */
 export async function fetchChanges(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   since: number,
 ): Promise<BoardChanges> {
   const response = await call(
     record,
-    paths.boardChanges(workspaceId, since, PAGE),
+    paths.boardChanges(projectId, since, PAGE),
   );
   if (!response.ok)
     throw new Error(
@@ -983,14 +973,14 @@ export async function fetchChanges(
 /** Tick or untick one checklist box, against the revision on screen. */
 export async function toggleChecklistItem(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   key: string,
   checked: boolean,
   revision: number,
 ): Promise<BoardWrite> {
   return readWrite(
-    await call(record, paths.itemChecklistItem(workspaceId, cardId, key), {
+    await call(record, paths.itemChecklistItem(projectId, cardId, key), {
       method: "PATCH",
       // NOTE: Sent even though this endpoint treats it as optional: the user
       // is looking at a specific revision of this card, and a tick that
@@ -1010,13 +1000,13 @@ export async function toggleChecklistItem(
  */
 export async function replaceChecklist(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   items: BoardChecklistDraft[],
   revision: number,
 ): Promise<BoardWrite> {
   return readWrite(
-    await call(record, paths.itemChecklist(workspaceId, cardId), {
+    await call(record, paths.itemChecklist(projectId, cardId), {
       method: "PUT",
       headers: { "if-match": String(revision) },
       body: JSON.stringify({ items }),
@@ -1038,11 +1028,11 @@ export async function replaceChecklist(
  */
 export async function createCard(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   draft: BoardCardDraft,
 ): Promise<BoardWrite> {
   return readWrite(
-    await call(record, paths.items(workspaceId), {
+    await call(record, paths.items(projectId), {
       method: "POST",
       body: JSON.stringify({
         title: draft.title,
@@ -1112,14 +1102,14 @@ function parseActivity(value: unknown): BoardActivity | null {
  */
 export async function fetchActivity(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   cursor?: string | null,
 ): Promise<BoardActivityPage> {
   const response = await call(
     record,
     paths.itemActivity(
-      workspaceId,
+      projectId,
       cardId,
       cursor ? `cursor=${encodeURIComponent(cursor)}` : undefined,
     ),
@@ -1150,11 +1140,11 @@ export async function fetchActivity(
  */
 export async function createComment(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   text_: string,
 ): Promise<{ id: string }> {
-  const response = await call(record, paths.itemComments(workspaceId, cardId), {
+  const response = await call(record, paths.itemComments(projectId, cardId), {
     method: "POST",
     body: JSON.stringify({ body: text_ }),
   });
@@ -1176,14 +1166,14 @@ export async function createComment(
  */
 export async function editComment(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   commentId: string,
   text_: string,
 ): Promise<void> {
   const response = await call(
     record,
-    paths.itemComment(workspaceId, cardId, commentId),
+    paths.itemComment(projectId, cardId, commentId),
     { method: "PATCH", body: JSON.stringify({ body: text_ }) },
   );
   if (response.status === 403)
@@ -1204,13 +1194,13 @@ export async function editComment(
  */
 export async function deleteComment(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   commentId: string,
 ): Promise<void> {
   const response = await call(
     record,
-    paths.itemComment(workspaceId, cardId, commentId),
+    paths.itemComment(projectId, cardId, commentId),
     { method: "DELETE" },
   );
   if (response.status === 403)
@@ -1232,7 +1222,7 @@ export async function deleteComment(
  */
 async function setFlag(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   path: "subscription" | "favorite",
   on: boolean,
@@ -1242,8 +1232,8 @@ async function setFlag(
   const response = await call(
     record,
     path === "subscription"
-      ? paths.itemSubscription(workspaceId, cardId)
-      : paths.itemFavorite(workspaceId, cardId),
+      ? paths.itemSubscription(projectId, cardId)
+      : paths.itemFavorite(projectId, cardId),
     { method: on ? "PUT" : "DELETE" },
   );
   if (!response.ok)
@@ -1257,13 +1247,13 @@ async function setFlag(
 /** Follow or unfollow a card; answers whether it is now followed. */
 export const setSubscription = (
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   subscribed: boolean,
 ): Promise<boolean> =>
   setFlag(
     record,
-    workspaceId,
+    projectId,
     cardId,
     "subscription",
     subscribed,
@@ -1274,19 +1264,11 @@ export const setSubscription = (
 /** Star or unstar a card; answers whether it is now starred. */
 export const setFavorite = (
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   favorite: boolean,
 ): Promise<boolean> =>
-  setFlag(
-    record,
-    workspaceId,
-    cardId,
-    "favorite",
-    favorite,
-    "favorite",
-    "star",
-  );
+  setFlag(record, projectId, cardId, "favorite", favorite, "favorite", "star");
 
 /**
  * Record a file this card refers to.
@@ -1297,13 +1279,13 @@ export const setFavorite = (
  */
 export async function attachFile(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   file: BoardAttachmentDraft,
 ): Promise<BoardAttachment> {
   const response = await call(
     record,
-    paths.itemAttachments(workspaceId, cardId),
+    paths.itemAttachments(projectId, cardId),
     {
       method: "POST",
       body: JSON.stringify({
@@ -1330,13 +1312,13 @@ export async function attachFile(
 /** Remove one attachment record from a card. */
 export async function detachFile(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
   attachmentId: string,
 ): Promise<void> {
   const response = await call(
     record,
-    paths.itemAttachment(workspaceId, cardId, attachmentId),
+    paths.itemAttachment(projectId, cardId, attachmentId),
     { method: "DELETE" },
   );
   if (!response.ok)
@@ -1358,10 +1340,10 @@ export async function detachFile(
  */
 export async function purgeIssues(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   slug: string,
 ): Promise<{ deleted: number }> {
-  const response = await call(record, paths.boardPurge(workspaceId), {
+  const response = await call(record, paths.boardPurge(projectId), {
     method: "POST",
     body: JSON.stringify({ confirm: slug }),
   });
@@ -1399,10 +1381,10 @@ export async function purgeIssues(
  */
 export async function archiveCard(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   cardId: string,
 ): Promise<void> {
-  const response = await call(record, paths.item(workspaceId, cardId), {
+  const response = await call(record, paths.item(projectId, cardId), {
     method: "DELETE",
   });
   if (response.status === 404)
@@ -1427,20 +1409,20 @@ export async function archiveCard(
  *
  * @param input `path` is the PRIMARY source folder: sending it is what makes
  * the account record where this project lives on this machine, the same
- * field every other surface reads back as `workspace.path`. Omitted when the
+ * field every other surface reads back as `project.path`. Omitted when the
  * project was created without folders: the column is `NOT NULL` on the
  * service's side, so an empty string would put a path nobody chose into the
  * one place clients look to find the code.
- * @returns the project, its `id` never null, unlike {@link Workspace}'s. The
+ * @returns the project, its `id` never null, unlike {@link Project}'s. The
  * caller opens its board with that id straight after, so a nullable id here
  * would push the check into the caller.
  * @throws when the service is too old, the slug is taken, the name is
  * refused, or the answer is malformed.
  */
-export async function createWorkspace(
+export async function createProject(
   record: MachineRecord,
   input: { slug: string; name: string; path?: string },
-): Promise<Workspace & { id: string }> {
+): Promise<Project & { id: string }> {
   const response = await call(record, paths.syncWorkspace(), {
     method: "POST",
     body: JSON.stringify(input),
@@ -1466,14 +1448,14 @@ export async function createWorkspace(
     !payload.workspace ||
     typeof payload.workspace !== "object"
   )
-    throw new Error("The service returned an invalid workspace. Try again.");
+    throw new Error("The service returned an invalid project. Try again.");
   const row = payload.workspace as Record<string, unknown>;
   // NOTE: Validated as strictly as a listed row, and the id is REQUIRED here
-  // unlike in `parseWorkspaces`: a service that just created a project on
+  // unlike in `parseProjects`: a service that just created a project on
   // request has no older-shape excuse for not naming it, and the id is what
   // the next call (opening its board) is addressed by.
   if (!text(row.id) || !text(row.slug) || !text(row.name))
-    throw new Error("The service returned an invalid workspace. Try again.");
+    throw new Error("The service returned an invalid project. Try again.");
   return {
     id: row.id,
     slug: row.slug,
@@ -1484,7 +1466,7 @@ export async function createWorkspace(
 }
 
 /**
- * Rename one project on the account, by CLOUD WORKSPACE ID.
+ * Rename one project on the account, by CLOUD PROJECT ID.
  *
  * NOTE:
  * - `PATCH /v1/sync/state/workspace/:id`, the MACHINE surface.
@@ -1503,7 +1485,7 @@ export async function createWorkspace(
  * failed: the id was read from this account's own state, so the only way it
  * misses is a project deleted from somewhere else in the meantime.
  */
-export async function renameWorkspace(
+export async function renameProject(
   record: MachineRecord,
   id: string,
   name: string,
@@ -1527,12 +1509,12 @@ export async function renameWorkspace(
 /**
  * Put the account's projects in this order, first to last (FE-32).
  *
- * ⚠️ `PUT /v1/sync/state/workspace-order`, by CLOUD ID like `renameWorkspace`.
+ * ⚠️ `PUT /v1/sync/state/workspace-order`, by CLOUD ID like `renameProject`.
  * The service refuses the whole order with a 400 if any id is not one of this
  * account's live projects — most likely one deleted from another machine since
  * this list was read — so that is reported as a stale list, not a bad request.
  */
-export async function reorderWorkspaces(
+export async function reorderProjects(
   record: MachineRecord,
   ids: string[],
 ): Promise<void> {
@@ -1551,14 +1533,14 @@ export async function reorderWorkspaces(
 }
 
 /**
- * Delete one project from the account, by CLOUD WORKSPACE ID.
+ * Delete one project from the account, by CLOUD PROJECT ID.
  *
  * ⚠️ `DELETE /v1/sync/state/workspace/:id`, the machine surface, and a real
  * delete: the service cascades the paths every machine reported for it. The
  * human surface (`DELETE /v1/workspaces/:id`) archives and can be restored —
  * this one cannot, which is why the only caller is behind a confirmation.
  *
- * ⚠️ Keyed by ID, the same keyspace as `renameWorkspace` above. This route took
+ * ⚠️ Keyed by ID, the same keyspace as `renameProject` above. This route took
  * the SLUG until the service moved it, and that history is why a stale service
  * is DANGEROUS here rather than merely unsupported: the old handler validated
  * its key against a slug pattern, and a uuid matches that pattern, so an id sent
@@ -1578,7 +1560,7 @@ export async function reorderWorkspaces(
  * ⚠️ Nothing here stops another machine still syncing the same project from
  * pushing it back. The project is the account's, not this machine's.
  */
-export async function deleteWorkspace(
+export async function deleteProject(
   record: MachineRecord,
   id: string,
 ): Promise<void> {
@@ -1604,10 +1586,10 @@ export async function deleteWorkspace(
  */
 export async function putBoardConfig(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   config: unknown,
 ): Promise<void> {
-  const response = await call(record, paths.boardConfig(workspaceId), {
+  const response = await call(record, paths.boardConfig(projectId), {
     method: "PUT",
     body: JSON.stringify(config),
   });
@@ -1627,7 +1609,7 @@ export async function putBoardConfig(
  */
 export async function importRecords(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   records: unknown[],
 ): Promise<{
   receipts: {
@@ -1638,7 +1620,7 @@ export async function importRecords(
   }[];
   summary: Record<string, number>;
 }> {
-  const response = await call(record, paths.boardImport(workspaceId), {
+  const response = await call(record, paths.boardImport(projectId), {
     method: "POST",
     body: JSON.stringify({ records }),
   });
@@ -1692,11 +1674,11 @@ export async function importRecords(
  */
 export async function sealBoardMigration(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   items: number,
   manifest: string,
 ): Promise<{ migratedAt: string | null; error?: string }> {
-  const response = await call(record, paths.boardMigrated(workspaceId), {
+  const response = await call(record, paths.boardMigrated(projectId), {
     method: "POST",
     body: JSON.stringify({ items, manifest }),
   });
@@ -1736,10 +1718,10 @@ type IconAnswer =
  */
 export async function fetchIcon(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   held: string | null,
 ): Promise<IconAnswer> {
-  const response = await call(record, paths.boardIcon(workspaceId), {
+  const response = await call(record, paths.boardIcon(projectId), {
     headers: held ? { "if-none-match": `"${held}"` } : {},
   });
   if (response.status === 304) return { kind: "same" };

@@ -49,8 +49,8 @@ function headline(entry: Waiting): string {
  */
 export function useAwaitingElsewhere(): Waiting[] {
   const byKey = useAwaiting((state) => state.byKey);
-  const workspaces = useBoard((state) => state.workspaces);
-  const sessions = useAgentSessions((state) => state.byWorkspace);
+  const projects = useBoard((state) => state.projects);
+  const sessions = useAgentSessions((state) => state.byProject);
   const terminals = useAgentTerminals((state) => state.sessions);
   const {
     slug: viewingSlug,
@@ -68,18 +68,18 @@ export function useAwaitingElsewhere(): Waiting[] {
   return useMemo(() => {
     const out: Waiting[] = [];
     for (const entry of Object.values(byKey)) {
-      const project = workspaces.find(
-        (item) => (item.id ?? item.slug) === entry.workspace,
+      const project = projects.find(
+        (item) => (item.id ?? item.slug) === entry.project,
       );
       if (!project) continue;
       if (project.slug === viewingSlug) {
         if (viewing === entry.conversation && !sub && !task) continue;
         const tab = terminalId
-          ? terminals[entry.workspace]?.find((item) => item.id === terminalId)
+          ? terminals[entry.project]?.find((item) => item.id === terminalId)
           : undefined;
         if (tab?.resume === entry.conversation) continue;
       }
-      const listed = sessions[entry.workspace]?.find(
+      const listed = sessions[entry.project]?.find(
         (session) => session.id === entry.conversation,
       );
       out.push({
@@ -92,7 +92,7 @@ export function useAwaitingElsewhere(): Waiting[] {
     return out.sort((a, b) => a.since.localeCompare(b.since));
   }, [
     byKey,
-    workspaces,
+    projects,
     sessions,
     terminals,
     viewingSlug,

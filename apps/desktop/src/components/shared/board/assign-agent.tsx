@@ -2,12 +2,12 @@ import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
+import type { BoardCard } from "#/../shared/projects";
 import type {
   CardBriefMode,
   TerminalAgent,
   TerminalSession,
 } from "#/../shared/terminal";
-import type { BoardCard } from "#/../shared/workspaces";
 import { useCardAgents } from "#/components/shared/board/card-agents";
 import { InlineMarkdown } from "#/components/shared/common/markdown-body";
 import {
@@ -36,7 +36,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { type ChecklistGate, checklistGate } from "#/lib/checklist-gate";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
@@ -75,7 +75,7 @@ interface Asking {
  */
 export function useAssignAgent(card: BoardCard) {
   const { slug } = useParams({ strict: false }) as { slug?: string };
-  const workspace = useWorkspaceKey(slug);
+  const project = useProjectKey(slug);
   const navigate = useNavigate();
   const agents = useTerminal((state) => state.agents);
   const loadAgents = useTerminal((state) => state.loadAgents);
@@ -95,8 +95,8 @@ export function useAssignAgent(card: BoardCard) {
   // time (FE-34/D8). Its own tab first (the one this app started for it), then
   // any conversation on this machine whose latest MCP call named it.
   const tab = useAgentTerminals((state) =>
-    workspace
-      ? (state.sessions[workspace] ?? []).find(
+    project
+      ? (state.sessions[project] ?? []).find(
           (entry) =>
             !entry.exit &&
             entry.card !== null &&
@@ -122,8 +122,8 @@ export function useAssignAgent(card: BoardCard) {
     tab || working?.from === "local"
       ? () => {
           if (tab) go(tab);
-          else if (working?.from === "local" && workspace)
-            void resume(workspace, working.session).then(go);
+          else if (working?.from === "local" && project)
+            void resume(project, working.session).then(go);
         }
       : null;
 
@@ -134,7 +134,7 @@ export function useAssignAgent(card: BoardCard) {
     mode: CardBriefMode,
     picks: string[],
   ): Promise<string | null> {
-    if (!workspace) return "This project is not open here.";
+    if (!project) return "This project is not open here.";
     let current = full;
     if (picks.length) {
       const approved = await approve(
@@ -165,7 +165,7 @@ export function useAssignAgent(card: BoardCard) {
         },
         current.revision,
       );
-    const terminal = await start(workspace, agent, {
+    const terminal = await start(project, agent, {
       card: current.taskId ?? current.id,
       mode,
     });
@@ -232,7 +232,7 @@ export function useAssignAgent(card: BoardCard) {
     /** Ask the machine which agents it has: starts the pty host, so lazily. */
     load: () => void loadAgents(),
     /** Nothing can be handed: finished, a saved copy, or mid-start. */
-    disabled: closed || stale || !workspace || starting || busy,
+    disabled: closed || stale || !project || starting || busy,
     /** Hidden rather than disabled: done or archived. */
     closed,
     openExisting,

@@ -15,12 +15,12 @@ import {
 } from "../../shared/terminal";
 
 /**
- * The agent conversations each workspace's folder has on disk.
+ * The agent conversations each project's folder has on disk.
  *
  * As the rail's Agents group last read them.
  */
 interface AgentSessionsState {
-  byWorkspace: Record<string, AgentSession[]>;
+  byProject: Record<string, AgentSession[]>;
   /**
    * Whether each conversation's agent is working, by `agent:id`.
    *
@@ -39,19 +39,19 @@ interface AgentSessionsState {
   setOpen: (session: AgentSession, open: boolean) => void;
   /** The card each is on, by `agent:id`, as `live` is to `working`. */
   cards: Record<string, AgentCard | null>;
-  load: (workspace: string) => Promise<void>;
+  load: (project: string) => Promise<void>;
   /**
    * Name a conversation in Lanework.
    *
    * @param name Empty goes back to the CLI's title.
    */
   rename: (
-    workspace: string,
+    project: string,
     session: AgentSession,
     name: string,
   ) => Promise<void>;
   pin: (
-    workspace: string,
+    project: string,
     session: AgentSession,
     pinned: boolean,
   ) => Promise<void>;
@@ -61,19 +61,19 @@ interface AgentSessionsState {
    *
    * @throws What main refused, when it did.
    */
-  releaseConductor: (workspace: string, session: AgentSession) => Promise<void>;
+  releaseConductor: (project: string, session: AgentSession) => Promise<void>;
   /**
    * Delete a conversation's transcript for good.
    *
    * @throws What main refused, when it did.
    */
-  remove: (workspace: string, session: AgentSession) => Promise<void>;
+  remove: (project: string, session: AgentSession) => Promise<void>;
   /**
    * Archive it in its CLI's own archive; it leaves the rail.
    *
    * @throws what main refused, e.g. a conversation a tab is running.
    */
-  archive: (workspace: string, session: AgentSession) => Promise<void>;
+  archive: (project: string, session: AgentSession) => Promise<void>;
   /**
    * Start listening for transcript writes.
    *
@@ -110,23 +110,23 @@ interface AgentSessionsState {
    * what was shown.
    */
   refreshClaudeUsage: () => Promise<void>;
-  /** Each workspace's Codex conversations' goals, by thread id (FE-41/D4). */
+  /** Each project's Codex conversations' goals, by thread id (FE-41/D4). */
   codexGoals: Record<string, Record<string, CodexGoal>>;
-  /** Read the usage and goals again, for `workspace`'s conversations. */
-  loadCodexUsage: (workspace: string) => Promise<void>;
+  /** Read the usage and goals again, for `project`'s conversations. */
+  loadCodexUsage: (project: string) => Promise<void>;
   /**
    * Ask Codex itself for the account's limits and banked resets, then read
    * them (FE-74). `force` asks even when the last answer is under a minute
    * old — ⟳; the popover opening does not. Never throws.
    */
-  refreshCodexUsage: (workspace: string, force: boolean) => Promise<void>;
+  refreshCodexUsage: (project: string, force: boolean) => Promise<void>;
   /**
    * Spend the banked reset `creditId`, then read the usage again (FE-74).
    * ⚠️ Not undoable: only on the user's confirmed click. Rejects with
    * Codex's message when it fails.
    */
   consumeCodexReset: (
-    workspace: string,
+    project: string,
     creditId: string,
   ) => Promise<CodexResetOutcome>;
 }
@@ -172,7 +172,7 @@ function sameCard(
 }
 
 /**
- * The conversations of `workspace` working on `card` right now.
+ * The conversations of `project` working on `card` right now.
  *
  * The ones whose latest Lanework MCP call named it, on this board.
  *
@@ -181,21 +181,21 @@ function sameCard(
  * board. Selected with `useShallow`, so a card no agent is on keeps one empty
  * list and does not redraw.
  *
- * @param workspace The cloud workspace id, which is also the board's.
+ * @param project The cloud project id, which is also the board's.
  */
 export function workingOn(
-  state: Pick<AgentSessionsState, "byWorkspace" | "live" | "cards">,
-  workspace: string,
+  state: Pick<AgentSessionsState, "byProject" | "live" | "cards">,
+  project: string,
   card: { id: string; taskId: string | null },
 ): AgentSession[] {
   const out: AgentSession[] = [];
-  for (const session of state.byWorkspace[workspace] ?? []) {
+  for (const session of state.byProject[project] ?? []) {
     const key = agentKey(session);
     if (!(state.live[key] ?? session.working)) continue;
     const on = key in state.cards ? state.cards[key] : session.card;
     if (
       on &&
-      on.boardId === workspace &&
+      on.boardId === project &&
       (on.card === card.id ||
         (card.taskId !== null &&
           on.card.toUpperCase() === card.taskId.toUpperCase()))
@@ -206,7 +206,7 @@ export function workingOn(
 }
 
 /**
- * Request tickets for listings, by workspace.
+ * Request tickets for listings, by project.
  *
  * A read that started before a later one must not land after it, or the rail
  * would flip back to the older list. The same counter as the terminal's.
@@ -257,7 +257,7 @@ const olderAttempt = (next: ClaudeUsage | null, shown: ClaudeUsage | null) =>
   (next?.fetchedAt ?? 0) < (shown?.fetchedAt ?? 0);
 
 /**
- * How often a workspace is listed again while one of its sub-agents shows
+ * How often a project is listed again while one of its sub-agents shows
  * working (FE-100/S2).
  *
  * NOTE: A background sub-agent can end, or go still, without a write the
@@ -285,7 +285,7 @@ const sameJson = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
 
 export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
-  byWorkspace: {},
+  byProject: {},
   live: {},
   cards: {},
   open: {},
@@ -321,36 +321,36 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   setOpen: (session, open) =>
     set((state) => ({ open: { ...state.open, [agentKey(session)]: open } })),
 
-  rename: async (workspace, session, name) => {
+  rename: async (project, session, name) => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
     const listed = await surface.renameAgentSession(
-      workspace,
+      project,
       session.agent,
       session.id,
       name,
     );
-    latest.set(workspace, (latest.get(workspace) ?? 0) + 1);
+    latest.set(project, (latest.get(project) ?? 0) + 1);
     set((state) => ({
-      byWorkspace: { ...state.byWorkspace, [workspace]: listed },
+      byProject: { ...state.byProject, [project]: listed },
     }));
   },
 
-  pin: async (workspace, session, pinned) => {
+  pin: async (project, session, pinned) => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
     // NOTE: Pinned in the list at once, saved behind it: a slow write must not
     // hold the row where it was. Bumping `latest` drops a read already in
     // flight, which would put the old pin back.
-    const mine = (latest.get(workspace) ?? 0) + 1;
-    latest.set(workspace, mine);
+    const mine = (latest.get(project) ?? 0) + 1;
+    latest.set(project, mine);
     set((state) => {
-      const listed = state.byWorkspace[workspace];
+      const listed = state.byProject[project];
       if (!listed) return {};
       return {
-        byWorkspace: {
-          ...state.byWorkspace,
-          [workspace]: listed.map((entry) =>
+        byProject: {
+          ...state.byProject,
+          [project]: listed.map((entry) =>
             entry.agent === session.agent && entry.id === session.id
               ? { ...entry, pinnedAt: pinned ? Date.now() : null }
               : entry,
@@ -360,101 +360,101 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     });
     try {
       const listed = await surface.pinAgentSession(
-        workspace,
+        project,
         session.agent,
         session.id,
         pinned,
       );
       // A later pin or read already drew a newer list.
-      if (latest.get(workspace) !== mine) return;
-      latest.set(workspace, mine + 1);
+      if (latest.get(project) !== mine) return;
+      latest.set(project, mine + 1);
       set((state) => ({
-        byWorkspace: { ...state.byWorkspace, [workspace]: listed },
+        byProject: { ...state.byProject, [project]: listed },
       }));
     } catch (error) {
       // Not saved: the list as main has it puts the row back.
-      void get().load(workspace);
+      void get().load(project);
       throw error;
     }
   },
 
-  releaseConductor: async (workspace, session) => {
+  releaseConductor: async (project, session) => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
     const listed = await surface.releaseAgentSessionConductor(
-      workspace,
+      project,
       session.agent,
       session.id,
     );
-    latest.set(workspace, (latest.get(workspace) ?? 0) + 1);
+    latest.set(project, (latest.get(project) ?? 0) + 1);
     set((state) => ({
-      byWorkspace: { ...state.byWorkspace, [workspace]: listed },
+      byProject: { ...state.byProject, [project]: listed },
     }));
   },
 
-  archive: async (workspace, session) => {
+  archive: async (project, session) => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
     const listed = await surface.archiveAgentSession(
-      workspace,
+      project,
       session.agent,
       session.id,
     );
-    latest.set(workspace, (latest.get(workspace) ?? 0) + 1);
+    latest.set(project, (latest.get(project) ?? 0) + 1);
     set((state) => ({
-      byWorkspace: { ...state.byWorkspace, [workspace]: listed },
+      byProject: { ...state.byProject, [project]: listed },
     }));
   },
 
-  remove: async (workspace, session) => {
+  remove: async (project, session) => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
     const listed = await surface.deleteAgentSession(
-      workspace,
+      project,
       session.agent,
       session.id,
     );
     forgetDraft(session.id);
-    latest.set(workspace, (latest.get(workspace) ?? 0) + 1);
+    latest.set(project, (latest.get(project) ?? 0) + 1);
     set((state) => ({
-      byWorkspace: { ...state.byWorkspace, [workspace]: listed },
+      byProject: { ...state.byProject, [project]: listed },
     }));
   },
 
   watchActivity: () => {
     const surface = window.desktop?.terminal;
     if (!surface) return () => {};
-    /** List `workspace` again, but not on every write that asks. */
-    const relistSoon = (workspace: string) => {
+    /** List `project` again, but not on every write that asks. */
+    const relistSoon = (project: string) => {
       const relist = () => {
-        relistLater.delete(workspace);
-        relisted.set(workspace, Date.now());
-        void get().load(workspace);
+        relistLater.delete(project);
+        relisted.set(project, Date.now());
+        void get().load(project);
       };
-      const wait = RELIST_MS - (Date.now() - (relisted.get(workspace) ?? 0));
+      const wait = RELIST_MS - (Date.now() - (relisted.get(project) ?? 0));
       if (wait <= 0) relist();
-      else if (!relistLater.has(workspace))
-        relistLater.set(workspace, setTimeout(relist, wait));
+      else if (!relistLater.has(project))
+        relistLater.set(project, setTimeout(relist, wait));
     };
     /** Read the usage again, but not on every write that asks. */
-    const usageSoon = (workspace: string) => {
+    const usageSoon = (project: string) => {
       const read = () => {
-        usageLater.delete(workspace);
-        usageRead.set(workspace, Date.now());
-        void get().loadCodexUsage(workspace);
+        usageLater.delete(project);
+        usageRead.set(project, Date.now());
+        void get().loadCodexUsage(project);
       };
-      const wait = USAGE_MS - (Date.now() - (usageRead.get(workspace) ?? 0));
+      const wait = USAGE_MS - (Date.now() - (usageRead.get(project) ?? 0));
       if (wait <= 0) read();
-      else if (!usageLater.has(workspace))
-        usageLater.set(workspace, setTimeout(read, wait));
+      else if (!usageLater.has(project))
+        usageLater.set(project, setTimeout(read, wait));
     };
     const stopWritten = surface.onAgentWritten((write) => {
-      if (write.agent === "claude") usageSoon(write.workspace);
+      if (write.agent === "claude") usageSoon(write.project);
     });
     const stopActivity = surface.onAgentActivity((activity: AgentActivity) => {
       // A settled write may carry new usage, or move a Codex goal on.
-      usageSoon(activity.workspace);
-      const known = get().byWorkspace[activity.workspace] ?? [];
+      usageSoon(activity.project);
+      const known = get().byProject[activity.project] ?? [];
       const parent = known.find(
         (entry) => agentKey(entry) === agentKey(activity),
       );
@@ -471,7 +471,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
         // A sub-agent the rail has not listed was just spawned: list again,
         // as for a new conversation.
         if (!parent?.subagents.some((entry) => entry.id === activity.subagent))
-          relistSoon(activity.workspace);
+          relistSoon(activity.project);
         return;
       }
       const key = agentKey(activity);
@@ -486,26 +486,26 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       );
       // A conversation the rail has not listed yet just started: list again,
       // but not on every write of it.
-      if (!parent) relistSoon(activity.workspace);
+      if (!parent) relistSoon(activity.project);
     });
     // Listed again every SUBAGENT_POLL_MS while a sub-agent shows working.
     const polls = new Map<string, ReturnType<typeof setInterval>>();
     const poll = (state: AgentSessionsState) => {
-      for (const [workspace, sessions] of Object.entries(state.byWorkspace)) {
+      for (const [project, sessions] of Object.entries(state.byProject)) {
         const busy = subagentWorking(sessions, state.live);
-        const timer = polls.get(workspace);
+        const timer = polls.get(project);
         if (busy && !timer)
           polls.set(
-            workspace,
+            project,
             setInterval(() => {
               // A hidden window is listed again when it is shown.
               if (document.visibilityState !== "hidden")
-                void get().load(workspace);
+                void get().load(project);
             }, SUBAGENT_POLL_MS),
           );
         else if (!busy && timer) {
           clearInterval(timer);
-          polls.delete(workspace);
+          polls.delete(project);
         }
       }
     };
@@ -520,17 +520,17 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     };
   },
 
-  load: async (workspace) => {
+  load: async (project) => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
-    const mine = (latest.get(workspace) ?? 0) + 1;
-    latest.set(workspace, mine);
+    const mine = (latest.get(project) ?? 0) + 1;
+    latest.set(project, mine);
     try {
-      const listed = await surface.agentSessions(workspace);
-      if (latest.get(workspace) !== mine) return;
+      const listed = await surface.agentSessions(project);
+      if (latest.get(project) !== mine) return;
       // With every listing, changed or not: the goals are its threads'.
-      void get().loadCodexUsage(workspace);
-      const previous = get().byWorkspace[workspace];
+      void get().loadCodexUsage(project);
+      const previous = get().byProject[project];
       // Unchanged: keep the old array, so the rail does not redraw.
       const unchanged =
         previous &&
@@ -567,9 +567,9 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
         for (const key of stale) delete live[key];
         for (const entry of listed) delete cards[agentKey(entry)];
         return {
-          byWorkspace: unchanged
-            ? state.byWorkspace
-            : { ...state.byWorkspace, [workspace]: listed },
+          byProject: unchanged
+            ? state.byProject
+            : { ...state.byProject, [project]: listed },
           live: liveStale ? live : state.live,
           cards: cardsStale ? cards : state.cards,
         };
@@ -579,24 +579,24 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
       // showed, or stays hidden (FE-23/D9). A first read that failed reads
       // as none, so the rail's skeleton does not wait forever.
       if (
-        latest.get(workspace) === mine &&
-        get().byWorkspace[workspace] === undefined
+        latest.get(project) === mine &&
+        get().byProject[project] === undefined
       )
         set((state) => ({
-          byWorkspace: { ...state.byWorkspace, [workspace]: [] },
+          byProject: { ...state.byProject, [project]: [] },
         }));
     }
   },
 
-  loadCodexUsage: async (workspace) => {
+  loadCodexUsage: async (project) => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
-    const mine = (usageLatest.get(workspace) ?? 0) + 1;
-    usageLatest.set(workspace, mine);
+    const mine = (usageLatest.get(project) ?? 0) + 1;
+    usageLatest.set(project, mine);
     const answers = claudeAnswers;
     try {
-      const usage = await surface.codexUsage(workspace);
-      if (usageLatest.get(workspace) !== mine) return;
+      const usage = await surface.codexUsage(project);
+      if (usageLatest.get(project) !== mine) return;
       // Unchanged: keep the old objects, so nothing redraws.
       set((state) => {
         const quota = sameJson(state.codexQuota, usage.quota)
@@ -612,9 +612,9 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
         const opencode = sameJson(state.opencodeUsage, usage.opencode ?? null)
           ? state.opencodeUsage
           : (usage.opencode ?? null);
-        const goals = sameJson(state.codexGoals[workspace], usage.goals)
+        const goals = sameJson(state.codexGoals[project], usage.goals)
           ? state.codexGoals
-          : { ...state.codexGoals, [workspace]: usage.goals };
+          : { ...state.codexGoals, [project]: usage.goals };
         return quota === state.codexQuota &&
           claude === state.claudeUsage &&
           opencode === state.opencodeUsage &&
@@ -633,7 +633,7 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     }
   },
 
-  refreshCodexUsage: async (workspace, force) => {
+  refreshCodexUsage: async (project, force) => {
     const surface = window.desktop?.terminal;
     if (!surface?.refreshCodexUsage) return;
     try {
@@ -641,17 +641,17 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     } catch {
       // Codex not there, or signed out: what the rollouts said stands.
     }
-    await get().loadCodexUsage(workspace);
+    await get().loadCodexUsage(project);
   },
 
-  consumeCodexReset: async (workspace, creditId) => {
+  consumeCodexReset: async (project, creditId) => {
     const surface = window.desktop?.terminal;
     if (!surface?.consumeCodexReset)
       throw new Error("Codex resets are not available here.");
     try {
       return await surface.consumeCodexReset(creditId);
     } finally {
-      await get().loadCodexUsage(workspace);
+      await get().loadCodexUsage(project);
     }
   },
 }));

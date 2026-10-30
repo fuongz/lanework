@@ -22,7 +22,7 @@ import {
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
 import { Kbd } from "#/components/ui/kbd";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
 import { useCommandPalette } from "#/stores/command-palette";
@@ -150,7 +150,7 @@ export function AppSidebar({
       : `${unseenPulls} new pull requests`;
   // The terminal's key for this project (the cloud id, or the slug), which
   // the Agents group resumes into.
-  const workspaceKey = useWorkspaceKey(slug);
+  const projectKey = useProjectKey(slug);
   const hasFolder = useWorktree(
     (state) =>
       state.slug === slug &&
@@ -233,10 +233,10 @@ export function AppSidebar({
         accountSeed={accountSeed}
         projectSwitcher={<ProjectSwitcher compact />}
         agents={
-          workspaceKey && slug ? (
+          projectKey && slug ? (
             <>
               <ConductorsNav
-                workspace={workspaceKey}
+                project={projectKey}
                 slug={slug}
                 hasFolder={hasFolder}
                 row={ROW}
@@ -244,7 +244,7 @@ export function AppSidebar({
                 mini
               />
               <AgentSessionsNav
-                workspace={workspaceKey}
+                project={projectKey}
                 slug={slug}
                 hasFolder={hasFolder}
                 row={ROW}
@@ -435,18 +435,18 @@ export function AppSidebar({
         )}
         {/* Conductors (FE-95/D2): under Repository, above Pinned and
             Running. */}
-        {workspaceKey && slug && (
+        {projectKey && slug && (
           <ConductorsNav
-            workspace={workspaceKey}
+            project={projectKey}
             slug={slug}
             hasFolder={hasFolder}
             row={ROW}
             active={ACTIVE.className}
           />
         )}
-        {workspaceKey && slug && (
+        {projectKey && slug && (
           <AgentSessionsNav
-            workspace={workspaceKey}
+            project={projectKey}
             slug={slug}
             // The group shows for a project with a folder even before its
             // first conversation, so its + has somewhere to live (FE-25/D3).

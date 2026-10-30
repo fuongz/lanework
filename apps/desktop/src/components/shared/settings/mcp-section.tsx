@@ -7,7 +7,7 @@ import type {
   SetupMcpServer,
   SetupScope,
 } from "#/../shared/agent-setup";
-import type { Workspace } from "#/../shared/workspaces";
+import type { Project } from "#/../shared/projects";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   SettingsCard,
@@ -299,7 +299,7 @@ function Nothing({
   );
 }
 
-function ProjectMcp({ project }: { project: Workspace }) {
+function ProjectMcp({ project }: { project: Project }) {
   // Read again when the project's folder changes, like Projects › General.
   const { setup, error } = useAgentSetup(project.slug, [project.path ?? ""]);
   const mine = (setup?.mcp ?? []).filter((server) =>

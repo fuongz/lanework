@@ -3,7 +3,7 @@ import { basename, join, relative } from "node:path";
 import type {
   LocalFolderCard,
   LocalFolderSummary,
-} from "../../../shared/workspaces";
+} from "../../../shared/projects";
 import { resolveCardLocation } from "./review-location";
 
 // Reads a project folder well enough to say what is in it, and no further.

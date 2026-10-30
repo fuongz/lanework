@@ -16,8 +16,8 @@ import type {
   ImportPreview,
   ImportReport,
   LocalFolderSummary,
-  Workspace,
-} from "../../../../shared/workspaces";
+  Project,
+} from "../../../../shared/projects";
 
 /** Strip Electron's IPC wrapper, so a user reads the message main sent. */
 function message(cause: unknown, fallback: string): string {
@@ -58,7 +58,7 @@ type FolderState =
   | { kind: "missing"; path: string };
 
 /**
- * The folder holding this workspace's cards, and the way to put them on the
+ * The folder holding this project's cards, and the way to put them on the
  * cloud board.
  *
  * NOTE: THREE steps, and the middle one is not the last: read what would
@@ -73,11 +73,11 @@ type FolderState =
  * safe: the cloud keys every card on the file it came from.
  */
 export function LocalFolderPanel({
-  workspace,
+  project,
   boardMigrated = false,
   onMigrated,
 }: {
-  workspace: Workspace;
+  project: Project;
   /**
    * Whether the CLOUD already owns this project's cards.
    *
@@ -97,28 +97,28 @@ export function LocalFolderPanel({
   const [confirming, setConfirming] = useState<"run" | "seal" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const folderApi = window.desktop?.workspaces.folder;
-  const boardApi = window.desktop?.workspaces.board;
-  const workspaceId = workspace.id;
+  const folderApi = window.desktop?.projects.folder;
+  const boardApi = window.desktop?.projects.board;
+  const projectId = project.id;
 
   const read = useCallback(async () => {
     if (!folderApi) return;
     try {
-      const next = await folderApi.state(workspace.slug);
+      const next = await folderApi.state(project.slug);
       setState(next);
       // The preview reads the folder with the board's own parsers, so it can
-      // only be asked for once a folder is linked AND the workspace has a
+      // only be asked for once a folder is linked AND the project has a
       // cloud id to import into.
       setPreview(
-        next.kind === "linked" && boardApi && workspaceId
-          ? await boardApi.importPreview(workspaceId)
+        next.kind === "linked" && boardApi && projectId
+          ? await boardApi.importPreview(projectId)
           : null,
       );
     } catch (cause) {
       setState({ kind: "none" });
-      setError(message(cause, "Could not check this workspace's folder."));
+      setError(message(cause, "Could not check this project's folder."));
     }
-  }, [folderApi, boardApi, workspace.slug, workspaceId]);
+  }, [folderApi, boardApi, project.slug, projectId]);
 
   useEffect(() => {
     void read();
@@ -144,7 +144,7 @@ export function LocalFolderPanel({
 
   const canMigrate =
     state.kind === "linked" &&
-    !!workspaceId &&
+    !!projectId &&
     !!boardApi &&
     (preview?.cards ?? 0) > 0 &&
     !preview?.blocked;
@@ -168,8 +168,8 @@ export function LocalFolderPanel({
             ? // The account's own path is named when it has one: it is the
               // folder the user is most likely to pick, and saying it turns a
               // file chooser into a confirmation.
-              workspace.path
-              ? `Your account records this project at ${workspace.path}. Choose that folder to see what it holds.`
+              project.path
+              ? `Your account records this project at ${project.path}. Choose that folder to see what it holds.`
               : "Choose the folder that holds this project's .agents/reviews to see what is in it."
             : state.kind === "missing"
               ? `${state.path} is no longer on this machine.`
@@ -198,7 +198,7 @@ export function LocalFolderPanel({
       {state.kind === "linked" && state.summary.cards > 0 && (
         <MigrateLines
           preview={preview}
-          workspaceHasId={!!workspaceId}
+          projectHasId={!!projectId}
           migratedAt={migratedAt}
           handedOver={handedOver}
           report={report}
@@ -219,7 +219,7 @@ export function LocalFolderPanel({
           disabled={busy !== null}
           onClick={() =>
             void act("folder", async () => {
-              setState(await folderApi.pick(workspace.slug));
+              setState(await folderApi.pick(project.slug));
               setPreview(null);
               setReport(null);
               await read();
@@ -264,7 +264,7 @@ export function LocalFolderPanel({
             size="sm"
             disabled={busy !== null}
             onClick={() =>
-              void act("folder", () => folderApi.reveal(workspace.slug))
+              void act("folder", () => folderApi.reveal(project.slug))
             }
           >
             Open in file manager
@@ -278,7 +278,7 @@ export function LocalFolderPanel({
             disabled={busy !== null}
             onClick={() =>
               void act("folder", async () => {
-                setState(await folderApi.forget(workspace.slug));
+                setState(await folderApi.forget(project.slug));
                 setPreview(null);
                 setReport(null);
               })
@@ -310,8 +310,8 @@ export function LocalFolderPanel({
             <AlertDialogAction
               onClick={() =>
                 void act("run", async () => {
-                  if (!boardApi || !workspaceId) return;
-                  setReport(await boardApi.importRun(workspaceId));
+                  if (!boardApi || !projectId) return;
+                  setReport(await boardApi.importRun(projectId));
                 })
               }
             >
@@ -346,8 +346,8 @@ export function LocalFolderPanel({
               variant="destructive"
               onClick={() =>
                 void act("seal", async () => {
-                  if (!boardApi || !workspaceId) return;
-                  const sealed = await boardApi.importSeal(workspaceId);
+                  if (!boardApi || !projectId) return;
+                  const sealed = await boardApi.importSeal(projectId);
                   setReport(sealed);
                   if (sealed.migratedAt) onMigrated?.();
                 })
@@ -438,13 +438,13 @@ function FolderFacts({ summary }: { summary: LocalFolderSummary }) {
  */
 function MigrateLines({
   preview,
-  workspaceHasId,
+  projectHasId,
   migratedAt,
   handedOver,
   report,
 }: {
   preview: ImportPreview | null;
-  workspaceHasId: boolean;
+  projectHasId: boolean;
   migratedAt: string | null;
   /** True when the cloud owns these cards, whoever sealed it and whenever. */
   handedOver: boolean;
@@ -461,12 +461,12 @@ function MigrateLines({
       </p>
     );
 
-  if (!workspaceHasId)
+  if (!projectHasId)
     return (
       <p className="text-xs text-muted-foreground">
-        These cards are still files. Sending them needs this workspace's cloud
-        id, which this service has not sent yet — update it, then reopen this
-        workspace.
+        These cards are still files. Sending them needs this project's cloud id,
+        which this service has not sent yet — update it, then reopen this
+        project.
       </p>
     );
 

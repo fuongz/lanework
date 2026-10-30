@@ -606,6 +606,25 @@ var MIGRATIONS = [
     value TEXT
   );
   INSERT INTO meta(key, value) VALUES ('change_seq', '0');
+  `,
+  `
+  ALTER TABLE workspace RENAME TO projects;
+  ALTER TABLE work_item RENAME TO project_issues;
+  ALTER TABLE project_issues RENAME COLUMN workspace_id TO project_id;
+
+  DROP INDEX workspace_slug_live;
+  DROP INDEX workspace_repo;
+  CREATE UNIQUE INDEX projects_slug_live ON projects(slug) WHERE deleted_at IS NULL;
+  CREATE INDEX projects_repo ON projects(repo_url) WHERE deleted_at IS NULL;
+
+  DROP INDEX work_item_task_id;
+  DROP INDEX work_item_lane;
+  DROP INDEX work_item_changes;
+  DROP INDEX work_item_parent;
+  CREATE UNIQUE INDEX project_issues_task_id ON project_issues(project_id, task_id) WHERE task_id IS NOT NULL;
+  CREATE INDEX project_issues_lane ON project_issues(project_id, status, sort_key);
+  CREATE INDEX project_issues_changes ON project_issues(project_id, change_seq);
+  CREATE INDEX project_issues_parent ON project_issues(parent_id);
   `
 ];
 var SCHEMA_VERSION = MIGRATIONS.length;
@@ -644,7 +663,7 @@ function appHomeDir() {
   return process.env.LANEWORK_HOME || import_node_path2.join(import_node_os2.homedir(), APP_HOME_NAME);
 }
 
-// apps/desktop/electron/main/workspaces/review-defaults.ts
+// apps/desktop/electron/main/projects/review-defaults.ts
 var DEFAULT_COLUMNS = [
   {
     key: "backlog",
@@ -1034,7 +1053,7 @@ function toCard(row) {
   const checklist = parseJson(row.checklist, []);
   return {
     id: row.id,
-    workspaceId: row.workspace_id,
+    workspaceId: row.project_id,
     seq: Number(row.change_seq),
     revision: Number(row.revision),
     type: row.type,
@@ -1099,7 +1118,7 @@ function defaultBoardConfig() {
     tags: { max: TAG_MAX, allowed: [] }
   };
 }
-function toWorkspace(row) {
+function toProject(row) {
   const stored = parseJson(row.config, {});
   return {
     id: row.id,
@@ -1174,30 +1193,30 @@ class LocalStore {
   #now() {
     return new Date().toISOString();
   }
-  listWorkspaces(options = {}) {
-    const rows = this.#all(options.includeDeleted ? "SELECT * FROM workspace ORDER BY created_at, id" : "SELECT * FROM workspace WHERE deleted_at IS NULL ORDER BY created_at, id");
-    return rows.map(toWorkspace);
+  listProjects(options = {}) {
+    const rows = this.#all(options.includeDeleted ? "SELECT * FROM projects ORDER BY created_at, id" : "SELECT * FROM projects WHERE deleted_at IS NULL ORDER BY created_at, id");
+    return rows.map(toProject);
   }
-  getWorkspace(ref) {
-    const row = this.#get("SELECT * FROM workspace WHERE (id = ? OR slug = ?) AND deleted_at IS NULL", ref, ref);
-    return row ? toWorkspace(row) : null;
+  getProject(ref) {
+    const row = this.#get("SELECT * FROM projects WHERE (id = ? OR slug = ?) AND deleted_at IS NULL", ref, ref);
+    return row ? toProject(row) : null;
   }
-  #workspace(ref) {
-    return this.getWorkspace(ref) ?? notFound(`workspace ${ref}`);
+  #project(ref) {
+    return this.getProject(ref) ?? notFound(`project ${ref}`);
   }
   #uniqueSlug(base, except) {
     let slug = base;
     for (let n = 2;; n += 1) {
-      const clash = this.#get("SELECT id FROM workspace WHERE slug = ? AND deleted_at IS NULL", slug);
+      const clash = this.#get("SELECT id FROM projects WHERE slug = ? AND deleted_at IS NULL", slug);
       if (!clash || clash.id === except)
         return slug;
       slug = `${base}-${n}`;
     }
   }
-  createWorkspace(input) {
+  createProject(input) {
     const name = input.name?.trim();
     if (!name)
-      invalid2("a workspace needs a name");
+      invalid2("a project needs a name");
     const repo = input.repo ? normalizeRepo(input.repo) : null;
     if (input.repo && !repo)
       invalid2(`not a git remote: ${input.repo}`);
@@ -1209,107 +1228,107 @@ class LocalStore {
       const slug = this.#uniqueSlug(slugify(input.slug || name));
       if (repo)
         this.#releaseRepo(repo, now);
-      this.#run(`INSERT INTO workspace (id, slug, name, repo_url, config, task_heads, created_at, updated_at)
+      this.#run(`INSERT INTO projects (id, slug, name, repo_url, config, task_heads, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, '{}', ?, ?)`, id, slug, name, repo, JSON.stringify(config), now, now);
-      return this.#workspace(id);
+      return this.#project(id);
     });
   }
-  updateWorkspace(ref, input) {
+  updateProject(ref, input) {
     return this.#write(() => {
-      const current = this.#workspace(ref);
+      const current = this.#project(ref);
       const name = input.name === undefined ? current.name : input.name.trim();
       if (!name)
-        invalid2("a workspace needs a name");
+        invalid2("a project needs a name");
       const slug = input.slug === undefined ? current.slug : this.#uniqueSlug(slugify(input.slug), current.id);
       const config = input.config ? { ...current.config, ...input.config } : current.config;
       checkConfig(config);
-      this.#run(`UPDATE workspace SET name = ?, slug = ?, config = ?, cloud_id = ?, synced_at = ?, updated_at = ?
+      this.#run(`UPDATE projects SET name = ?, slug = ?, config = ?, cloud_id = ?, synced_at = ?, updated_at = ?
          WHERE id = ?`, name, slug, JSON.stringify(config), input.cloudId === undefined ? current.cloudId : input.cloudId, input.syncedAt === undefined ? current.syncedAt : input.syncedAt, this.#now(), current.id);
-      return this.#workspace(current.id);
+      return this.#project(current.id);
     });
   }
-  deleteWorkspace(ref) {
+  deleteProject(ref) {
     this.#write(() => {
-      const current = this.#workspace(ref);
+      const current = this.#project(ref);
       const now = this.#now();
-      this.#run("UPDATE workspace SET deleted_at = ?, updated_at = ? WHERE id = ?", now, now, current.id);
+      this.#run("UPDATE projects SET deleted_at = ?, updated_at = ? WHERE id = ?", now, now, current.id);
     });
   }
   #releaseRepo(repo, now) {
-    this.#run("UPDATE workspace SET repo_url = NULL, updated_at = ? WHERE repo_url = ? AND deleted_at IS NULL", now, repo);
+    this.#run("UPDATE projects SET repo_url = NULL, updated_at = ? WHERE repo_url = ? AND deleted_at IS NULL", now, repo);
   }
   linkRepo(ref, remote) {
     const repo = remote === null ? null : normalizeRepo(remote);
     if (remote !== null && !repo)
       invalid2(`not a git remote: ${remote}`);
     return this.#write(() => {
-      const current = this.#workspace(ref);
+      const current = this.#project(ref);
       const now = this.#now();
       if (repo)
         this.#releaseRepo(repo, now);
-      this.#run("UPDATE workspace SET repo_url = ?, updated_at = ? WHERE id = ?", repo, now, current.id);
-      return this.#workspace(current.id);
+      this.#run("UPDATE projects SET repo_url = ?, updated_at = ? WHERE id = ?", repo, now, current.id);
+      return this.#project(current.id);
     });
   }
-  findWorkspacesByRepo(remote) {
+  findProjectsByRepo(remote) {
     const repo = normalizeRepo(remote);
     if (!repo)
       return [];
-    return this.#all("SELECT * FROM workspace WHERE repo_url = ? AND deleted_at IS NULL ORDER BY created_at, id", repo).map(toWorkspace);
+    return this.#all("SELECT * FROM projects WHERE repo_url = ? AND deleted_at IS NULL ORDER BY created_at, id", repo).map(toProject);
   }
   boardSummaries(remote) {
-    const list = remote === undefined ? this.listWorkspaces() : this.findWorkspacesByRepo(remote);
+    const list = remote === undefined ? this.listProjects() : this.findProjectsByRepo(remote);
     const head = this.dataVersion();
-    return list.map((workspace) => ({
-      workspaceId: workspace.id,
-      name: workspace.name,
+    return list.map((project) => ({
+      workspaceId: project.id,
+      name: project.name,
       role: "owner",
       changeSeq: head,
-      repo: workspace.repo
+      repo: project.repo
     }));
   }
   boardConfig(ref) {
-    const workspace = this.#workspace(ref);
+    const project = this.#project(ref);
     return {
-      workspaceId: workspace.id,
+      workspaceId: project.id,
       role: "owner",
       changeSeq: this.dataVersion(),
       migratedAt: null,
-      tags: workspace.config.tags,
-      columns: workspace.config.columns,
-      categories: workspace.config.categories,
-      labels: workspace.config.labels,
+      tags: project.config.tags,
+      columns: project.config.columns,
+      categories: project.config.categories,
+      labels: project.config.labels,
       members: []
     };
   }
-  #taskIdTaken(workspaceId, taskId) {
-    return !!this.#get("SELECT 1 AS hit FROM work_item WHERE workspace_id = ? AND task_id = ?", workspaceId, taskId);
+  #taskIdTaken(projectId, taskId) {
+    return !!this.#get("SELECT 1 AS hit FROM project_issues WHERE project_id = ? AND task_id = ?", projectId, taskId);
   }
-  #setHead(workspace, category, seq) {
-    const heads = { ...workspace.taskHeads };
+  #setHead(project, category, seq) {
+    const heads = { ...project.taskHeads };
     if ((heads[category] ?? 0) >= seq)
       return;
     heads[category] = seq;
-    workspace.taskHeads = heads;
-    this.#run("UPDATE workspace SET task_heads = ? WHERE id = ?", JSON.stringify(heads), workspace.id);
+    project.taskHeads = heads;
+    this.#run("UPDATE projects SET task_heads = ? WHERE id = ?", JSON.stringify(heads), project.id);
   }
-  #mintTaskId(workspace, categoryKey) {
-    const category = workspace.config.categories.find((entry) => entry.key === categoryKey);
+  #mintTaskId(project, categoryKey) {
+    const category = project.config.categories.find((entry) => entry.key === categoryKey);
     if (!category)
       invalid2(`unknown category "${categoryKey}"`);
-    let seq = (workspace.taskHeads[categoryKey] ?? 0) + 1;
-    while (this.#taskIdTaken(workspace.id, formatTaskId(category, seq)))
+    let seq = (project.taskHeads[categoryKey] ?? 0) + 1;
+    while (this.#taskIdTaken(project.id, formatTaskId(category, seq)))
       seq += 1;
-    this.#setHead(workspace, categoryKey, seq);
+    this.#setHead(project, categoryKey, seq);
     return { taskId: formatTaskId(category, seq), taskSeq: seq };
   }
-  #lane(workspaceId, status, except) {
-    return this.#all(`SELECT * FROM work_item WHERE workspace_id = ? AND status = ? AND deleted_at IS NULL AND id != ?
-       ORDER BY sort_key, id`, workspaceId, status, except ?? "");
+  #lane(projectId, status, except) {
+    return this.#all(`SELECT * FROM project_issues WHERE project_id = ? AND status = ? AND deleted_at IS NULL AND id != ?
+       ORDER BY sort_key, id`, projectId, status, except ?? "");
   }
-  #rankFor(workspaceId, status, placement, self) {
+  #rankFor(projectId, status, placement, self) {
     for (let attempt = 0;attempt < 2; attempt += 1) {
-      const lane = this.#lane(workspaceId, status, self);
+      const lane = this.#lane(projectId, status, self);
       const values = lane.map((row) => rankValue(row.sort_key));
       let low;
       let high;
@@ -1335,31 +1354,31 @@ class LocalStore {
       if (high - from > 1)
         return rankString(Math.floor((from + high) / 2));
       lane.forEach((row, index) => {
-        this.#run("UPDATE work_item SET sort_key = ?, change_seq = ? WHERE id = ?", rankString((index + 1) * RANK_STEP), this.#seq, row.id);
+        this.#run("UPDATE project_issues SET sort_key = ?, change_seq = ? WHERE id = ?", rankString((index + 1) * RANK_STEP), this.#seq, row.id);
       });
     }
     return invalid2("could not place the card");
   }
   #row(id) {
-    return this.#get("SELECT * FROM work_item WHERE id = ?", id);
+    return this.#get("SELECT * FROM project_issues WHERE id = ?", id);
   }
   #resolve(ref, options = {}) {
     let row;
     if (isUuid(ref))
       row = this.#row(ref);
     else {
-      if (!options.workspace)
-        invalid2(`task id ${ref} needs a workspace`);
-      const workspace = this.#workspace(options.workspace);
-      row = this.#get("SELECT * FROM work_item WHERE workspace_id = ? AND task_id = ?", workspace.id, ref.toUpperCase());
+      if (!options.project)
+        invalid2(`task id ${ref} needs a project`);
+      const project = this.#project(options.project);
+      row = this.#get("SELECT * FROM project_issues WHERE project_id = ? AND task_id = ?", project.id, ref.toUpperCase());
     }
     if (!row || row.deleted_at && !options.includeDeleted)
       return notFound(`card ${ref}`);
-    if (options.workspace) {
-      const workspace = this.#workspace(options.workspace);
-      if (row.workspace_id !== workspace.id)
+    if (options.project) {
+      const project = this.#project(options.project);
+      if (row.project_id !== project.id)
         return notFound(`card ${ref}`);
-    } else if (!this.getWorkspace(row.workspace_id)) {
+    } else if (!this.getProject(row.project_id)) {
       return notFound(`card ${ref}`);
     }
     return row;
@@ -1373,10 +1392,10 @@ class LocalStore {
       throw error;
     }
   }
-  listWorkItems(workspaceRef, query = {}) {
-    const workspace = this.#workspace(workspaceRef);
-    const where = ["workspace_id = ?"];
-    const params = [workspace.id];
+  listWorkItems(projectRef, query = {}) {
+    const project = this.#project(projectRef);
+    const where = ["project_id = ?"];
+    const params = [project.id];
     if (!query.includeDeleted)
       where.push("deleted_at IS NULL");
     if (query.column) {
@@ -1405,15 +1424,15 @@ class LocalStore {
       where.push("EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?)");
       params.push(query.tag.toLowerCase());
     }
-    return this.#all(`SELECT * FROM work_item WHERE ${where.join(" AND ")} ORDER BY status, sort_key, id`, ...params).map(toCard);
+    return this.#all(`SELECT * FROM project_issues WHERE ${where.join(" AND ")} ORDER BY status, sort_key, id`, ...params).map(toCard);
   }
-  listChanges(workspaceRef, since) {
-    const workspace = this.#workspace(workspaceRef);
+  listChanges(projectRef, since) {
+    const project = this.#project(projectRef);
     const head = this.dataVersion();
-    const items = this.#all("SELECT * FROM work_item WHERE workspace_id = ? AND change_seq > ? ORDER BY change_seq, id", workspace.id, since).map(toCard);
+    const items = this.#all("SELECT * FROM project_issues WHERE project_id = ? AND change_seq > ? ORDER BY change_seq, id", project.id, since).map(toCard);
     return { head, items };
   }
-  #checkParent(workspaceId, parentId, self) {
+  #checkParent(projectId, parentId, self) {
     if (!parentId)
       return null;
     let cursor = parentId;
@@ -1421,16 +1440,16 @@ class LocalStore {
       if (cursor === self || depth > 100)
         invalid2("a card cannot hang under itself");
       const row = this.#row(cursor);
-      if (!row || row.deleted_at || row.workspace_id !== workspaceId)
+      if (!row || row.deleted_at || row.project_id !== projectId)
         notFound(`parent card ${cursor}`);
       cursor = row.parent_id;
     }
     return parentId;
   }
-  createWorkItem(workspaceRef, input) {
+  createWorkItem(projectRef, input) {
     return this.#write(() => {
-      const workspace = this.#workspace(workspaceRef);
-      const { config } = workspace;
+      const project = this.#project(projectRef);
+      const { config } = project;
       const now = this.#now();
       const title = checkTitle(input.title);
       const type = checkType(input.type ?? "issue");
@@ -1444,7 +1463,7 @@ class LocalStore {
         now,
         streams
       });
-      const parentId = this.#checkParent(workspace.id, input.parentId ?? null);
+      const parentId = this.#checkParent(project.id, input.parentId ?? null);
       let taskId = null;
       let taskSeq = null;
       if (restore && (restore.taskId || restore.taskSeq)) {
@@ -1456,18 +1475,18 @@ class LocalStore {
           invalid2("restore.taskSeq must be a positive integer");
         taskId = restore.taskId.toUpperCase();
         taskSeq = restore.taskSeq;
-        if (this.#taskIdTaken(workspace.id, taskId))
+        if (this.#taskIdTaken(project.id, taskId))
           throw new LocalStoreError("conflict", `task id ${taskId} is taken`);
-        this.#setHead(workspace, category, taskSeq);
+        this.#setHead(project, category, taskSeq);
       } else if (category) {
-        ({ taskId, taskSeq } = this.#mintTaskId(workspace, category));
+        ({ taskId, taskSeq } = this.#mintTaskId(project, category));
       }
       const id = uuidv7();
-      const rank = this.#rankFor(workspace.id, status, input.placement);
-      this.#run(`INSERT INTO work_item (id, workspace_id, parent_id, task_id, task_seq, category, type, title, body,
+      const rank = this.#rankFor(project.id, status, input.placement);
+      this.#run(`INSERT INTO project_issues (id, project_id, parent_id, task_id, task_seq, category, type, title, body,
            status, priority, tags, checklist, streams, checkpoint, sort_key, revision, change_seq,
            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?)`, id, workspace.id, parentId, taskId, taskSeq, category, type, title, input.body ?? "", status, priority, JSON.stringify(tags), JSON.stringify(checklist), JSON.stringify(streams), rank, this.#seq, restore?.createdAt ?? now, restore?.updatedAt ?? now);
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?)`, id, project.id, parentId, taskId, taskSeq, category, type, title, input.body ?? "", status, priority, JSON.stringify(tags), JSON.stringify(checklist), JSON.stringify(streams), rank, this.#seq, restore?.createdAt ?? now, restore?.updatedAt ?? now);
       return toCardDetail(this.#row(id));
     });
   }
@@ -1476,7 +1495,7 @@ class LocalStore {
       throw new LocalStoreError("conflict", `card is at revision ${row.revision}, not ${options.ifRevision}`);
   }
   #touch(id, sets, params) {
-    this.#run(`UPDATE work_item SET ${[...sets, "revision = revision + 1", "change_seq = ?", "updated_at = ?"].join(", ")}
+    this.#run(`UPDATE project_issues SET ${[...sets, "revision = revision + 1", "change_seq = ?", "updated_at = ?"].join(", ")}
        WHERE id = ?`, ...params, this.#seq, this.#now(), id);
     return toCardDetail(this.#row(id));
   }
@@ -1484,8 +1503,8 @@ class LocalStore {
     return this.#write(() => {
       const row = this.#resolve(ref, options);
       this.#checkRevision(row, options);
-      const workspace = this.#workspace(row.workspace_id);
-      const { config } = workspace;
+      const project = this.#project(row.project_id);
+      const { config } = project;
       const sets = [];
       const params = [];
       const set = (column, value) => {
@@ -1503,14 +1522,14 @@ class LocalStore {
       if (input.tags !== undefined)
         set("tags", JSON.stringify(normalizeTags(config, input.tags)));
       if (input.parentId !== undefined)
-        set("parent_id", this.#checkParent(workspace.id, input.parentId, row.id));
+        set("parent_id", this.#checkParent(project.id, input.parentId, row.id));
       if (input.cloudId !== undefined)
         set("cloud_id", input.cloudId);
       if (input.categoryKey !== undefined) {
         const category = checkCategory(config, input.categoryKey);
         set("category", category);
         if (category && !row.task_id) {
-          const minted = this.#mintTaskId(workspace, category);
+          const minted = this.#mintTaskId(project, category);
           set("task_id", minted.taskId);
           set("task_seq", minted.taskSeq);
         }
@@ -1542,7 +1561,7 @@ class LocalStore {
       const row = this.#resolve(ref, { ...options, includeDeleted: true });
       if (!row.deleted_at)
         return toCardDetail(row);
-      const rank = this.#rankFor(row.workspace_id, row.status, null, row.id);
+      const rank = this.#rankFor(row.project_id, row.status, null, row.id);
       return this.#touch(row.id, ["deleted_at = NULL", "sort_key = ?"], [rank]);
     });
   }
@@ -1550,11 +1569,11 @@ class LocalStore {
     return this.#write(() => {
       const row = this.#resolve(ref, options);
       this.#checkRevision(row, options);
-      const { config } = this.#workspace(row.workspace_id);
+      const { config } = this.#project(row.project_id);
       const status = columnKey ? checkColumn(config, columnKey) : row.status;
       if (status === row.status && !options.placement)
         return toCardDetail(row);
-      const rank = this.#rankFor(row.workspace_id, status, options.placement, row.id);
+      const rank = this.#rankFor(row.project_id, status, options.placement, row.id);
       const sets = ["status = ?", "sort_key = ?"];
       if (isClosedColumn(config, status))
         sets.push("checkpoint = NULL");
@@ -1593,8 +1612,8 @@ class LocalStore {
   addCheckpoint(ref, request, writer = {}) {
     const content = normalizeCheckpoint(request);
     return this.#write(() => {
-      const row = this.#resolve(ref, { workspace: writer.workspace });
-      const { config } = this.#workspace(row.workspace_id);
+      const row = this.#resolve(ref, { project: writer.project });
+      const { config } = this.#project(row.project_id);
       if (isClosedColumn(config, row.status))
         throw new LocalStoreError("conflict", "a finished or archived card takes no checkpoints");
       const checkpoint = {
@@ -1609,7 +1628,7 @@ class LocalStore {
         checkpoint,
         ...parseJson(row.checkpoint, [])
       ]);
-      this.#run("UPDATE work_item SET checkpoint = ?, change_seq = ? WHERE id = ?", JSON.stringify(list), this.#seq, row.id);
+      this.#run("UPDATE project_issues SET checkpoint = ?, change_seq = ? WHERE id = ?", JSON.stringify(list), this.#seq, row.id);
       return checkpoint;
     });
   }
@@ -1779,7 +1798,7 @@ function checkShape(shape, args, prefix = "") {
 // apps/desktop/electron/mcp-local/tools.ts
 var BOARD_ID = {
   type: "string",
-  description: "The board's id (the local workspace id) from list_boards. There is no default."
+  description: "The board's id (the local project id) from list_boards. There is no default."
 };
 var CARD = {
   type: "string",
@@ -1841,13 +1860,13 @@ function fail(code, message) {
   throw new LocalStoreError(code, message);
 }
 function boardOf(store, boardId) {
-  const workspace = store.getWorkspace(String(boardId));
-  if (!workspace)
+  const project = store.getProject(String(boardId));
+  if (!project)
     fail("not_found", `board ${String(boardId)} not found; call list_boards for its id`);
-  return workspace;
+  return project;
 }
 function cardOf(store, board, card) {
-  const detail = store.getWorkItem(String(card), { workspace: board.id });
+  const detail = store.getWorkItem(String(card), { project: board.id });
   if (!detail)
     fail("not_found", `card ${String(card)} not found on this board`);
   return detail;
@@ -1953,18 +1972,18 @@ var TOOLS = [
     },
     required: ["name", "repo"],
     run(args, { store }) {
-      const workspace = store.createWorkspace({
+      const project = store.createProject({
         name: String(args.name),
         slug: str2(args.slug),
         repo: String(args.repo)
       });
       return {
-        board_id: workspace.id,
+        board_id: project.id,
         board: {
-          workspaceId: workspace.id,
-          name: workspace.name,
-          slug: workspace.slug,
-          repo: workspace.repo
+          workspaceId: project.id,
+          name: project.name,
+          slug: project.slug,
+          repo: project.repo
         },
         next: "Use this board_id for every other tool. Read board_summary before creating a card."
       };
@@ -2089,7 +2108,7 @@ var TOOLS = [
       const board = boardOf(store, args.board_id);
       const item = cardOf(store, board, args.card);
       const { latest } = store.listCheckpoints(item.id, {
-        workspace: board.id
+        project: board.id
       });
       return { item, checkpoint: latest, dispatch: item.dispatch };
     }
@@ -2197,7 +2216,7 @@ var TOOLS = [
         tags: args.tags,
         streams,
         checklist
-      }, { workspace: board.id, ifRevision: current.revision });
+      }, { project: board.id, ifRevision: current.revision });
       return { item };
     }
   },
@@ -2235,7 +2254,7 @@ var TOOLS = [
         patch.text = args.text;
       if (args.stream !== undefined)
         patch.stream = args.stream;
-      const item = store.toggleChecklistItem(String(args.card), String(args.key), patch, { workspace: board.id });
+      const item = store.toggleChecklistItem(String(args.card), String(args.key), patch, { project: board.id });
       return { item, ...decisionState(item.checklist) };
     }
   },
@@ -2289,7 +2308,7 @@ var TOOLS = [
           if (item.group === group && item.key !== key)
             item.checked = false;
       const item = store.updateWorkItem(current.id, { checklist: items }, {
-        workspace: board.id,
+        project: board.id,
         ifRevision: typeof args.revision === "number" ? args.revision : current.revision
       });
       const state = decisionState(item.checklist);
@@ -2317,7 +2336,7 @@ var TOOLS = [
     run(args, { store }) {
       const board = boardOf(store, args.board_id);
       const item = store.setStatus(String(args.card), String(args.status), {
-        workspace: board.id
+        project: board.id
       });
       return { item: brief(item) };
     }
@@ -2331,7 +2350,7 @@ var TOOLS = [
     run(args, { store }) {
       const board = boardOf(store, args.board_id);
       const item = store.deleteWorkItem(String(args.card), {
-        workspace: board.id
+        project: board.id
       });
       return { archived: item.id, item: brief(item) };
     }
@@ -2384,7 +2403,7 @@ var TOOLS = [
         } : null
       };
       const checkpoint = store.addCheckpoint(String(args.card), request, {
-        workspace: board.id,
+        project: board.id,
         agent
       });
       return { checkpoint };
@@ -2950,13 +2969,13 @@ function localBoardFor(remote, path = localStorePath()) {
     return null;
   const store = openLocalStore({ path });
   try {
-    const boards = store.findWorkspacesByRepo(remote).filter((workspace) => !workspace.cloudId);
+    const boards = store.findProjectsByRepo(remote).filter((project) => !project.cloudId);
     const board = boards.length === 1 ? boards[0] : undefined;
     if (!board) {
       store.close();
       return null;
     }
-    return { store, workspaceId: board.id };
+    return { store, projectId: board.id };
   } catch (error) {
     store.close();
     throw error;
@@ -2964,7 +2983,7 @@ function localBoardFor(remote, path = localStorePath()) {
 }
 function writeLocalCheckpoint(board, taskId, body, agent) {
   return board.store.addCheckpoint(taskId, body, {
-    workspace: board.workspaceId,
+    project: board.projectId,
     agent
   }).id;
 }

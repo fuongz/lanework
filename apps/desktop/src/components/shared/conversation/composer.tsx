@@ -251,13 +251,13 @@ function orchestrateRequest(text: string): string | null {
 const NO_LEADS: LeadsList = { leads: [], defaultId: null, errors: [] };
 
 /**
- * The team leads `workspace` sees (FE-88), kept current; null until read.
+ * The team leads `project` sees (FE-88), kept current; null until read.
  *
  * No leads surface, or a read that fails, is an empty list: `/orchestrate`
  * then runs without one, as in FE-87.
  */
 export function useTeamLeads(
-  workspace: string | null,
+  project: string | null,
   enabled = true,
 ): LeadsList | null {
   const [list, setList] = useState<LeadsList | null>(null);
@@ -272,7 +272,7 @@ export function useTeamLeads(
     let gone = false;
     const read = () =>
       surface
-        .list(workspace)
+        .list(project)
         .then((next) => {
           if (!gone) setList(next);
         })
@@ -281,14 +281,13 @@ export function useTeamLeads(
         });
     void read();
     const off = surface.onChange((event) => {
-      if (event.workspace === null || event.workspace === workspace)
-        void read();
+      if (event.project === null || event.project === project) void read();
     });
     return () => {
       gone = true;
       off();
     };
-  }, [workspace, enabled]);
+  }, [project, enabled]);
   return list;
 }
 
@@ -337,7 +336,7 @@ export const Composer = forwardRef<
     autoFocus?: boolean;
     /** The top row's right corner: the conversation's context ring. */
     corner?: ReactNode;
-    workspace: string;
+    project: string;
     /**
      * The CLI the conversation is on, whose models alone are offered.
      *
@@ -376,7 +375,7 @@ export const Composer = forwardRef<
     draftKey,
     autoFocus,
     corner,
-    workspace,
+    project,
     agent = null,
     settings,
     onSettings,
@@ -399,7 +398,7 @@ export const Composer = forwardRef<
     sending,
     setSending,
     isSending,
-  } = useComposerDraft(workspace, draftKey);
+  } = useComposerDraft(project, draftKey);
   const [dragging, setDragging] = useState(false);
   const [suggest, setSuggest] = useState<{
     kind: Kind;
@@ -409,7 +408,7 @@ export const Composer = forwardRef<
     index: number;
   } | null>(null);
   // Team leads, read only where `/orchestrate` is handled.
-  const leads = useTeamLeads(workspace, Boolean(onOrchestrate));
+  const leads = useTeamLeads(project, Boolean(onOrchestrate));
   const leadsRef = useRef(leads);
   leadsRef.current = leads;
   const field = useRef<ChipEditorHandle>(null);
@@ -468,10 +467,10 @@ export const Composer = forwardRef<
   // The `/` list read ahead, so the first `/` opens it at once (FE-92).
   useEffect(() => {
     void window.desktop?.conversation
-      ?.suggest(workspace, "command", "", agent)
+      ?.suggest(project, "command", "", agent)
       .then(remember)
       .catch(() => {});
-  }, [workspace, agent]);
+  }, [project, agent]);
   // A restored draft's commands and paths nobody has listed yet: each asked
   // for once.
   const unknown = [
@@ -494,7 +493,7 @@ export const Composer = forwardRef<
       looked.add(token);
       const path = token.startsWith("@");
       void surface
-        .suggest(workspace, path ? "file" : "command", token.slice(1), agent)
+        .suggest(project, path ? "file" : "command", token.slice(1), agent)
         .then((listed) => {
           remember(listed.filter((item) => item.value === token));
           // Each answer redraws: the others may still be on their way.
@@ -502,7 +501,7 @@ export const Composer = forwardRef<
         })
         .catch(() => {});
     }
-  }, [unknownKey, workspace]);
+  }, [unknownKey, project]);
 
   // Dictation: the words heard go in where the caret was when the microphone
   // opened, replacing what was selected — shown live, kept on ✓.
@@ -617,7 +616,7 @@ export const Composer = forwardRef<
         ? [ORCHESTRATE]
         : [];
     void surface
-      .suggest(workspace, kind, found.query, agent)
+      .suggest(project, kind, found.query, agent)
       .catch(() => [] as Suggestion[])
       .then((listed) => {
         remember(listed);
@@ -749,7 +748,7 @@ export const Composer = forwardRef<
     if (!list) {
       const surface = window.desktop?.leads;
       list = surface
-        ? await surface.list(workspace).catch(() => NO_LEADS)
+        ? await surface.list(project).catch(() => NO_LEADS)
         : NO_LEADS;
     }
     if (named) {

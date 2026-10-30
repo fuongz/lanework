@@ -22,9 +22,9 @@ export {
   type StreamRole,
 } from "@lanework/protocol";
 
-export interface Workspace {
+export interface Project {
   /**
-   * The cloud workspace id, the key every board call is addressed by.
+   * The cloud project id, the key every board call is addressed by.
    *
    * NOTE: Not the slug. Every board endpoint is `/v1/boards/:workspaceId/…`,
    * and so is a rename (`PATCH /v1/sync/state/workspace/:id`). It arrives on
@@ -32,9 +32,9 @@ export interface Workspace {
    * and refuses this app's credential by design.
    *
    * NOTE: Null against a control plane that predates the field. This app once
-   * shipped a version that required it and refused every workspace a live
+   * shipped a version that required it and refused every project a live
    * service returned. A missing id means "no board yet", never "no
-   * workspace": the picker still works, the selection is still remembered by
+   * project": the picker still works, the selection is still remembered by
    * slug, and only opening a board says what is wrong.
    */
   id: string | null;
@@ -43,8 +43,8 @@ export interface Workspace {
   /**
    * Where this machine keeps a checkout, or null.
    *
-   * NOTE: Display and code execution only. A workspace with no path is a
-   * complete, openable workspace (its cards live in the cloud), so nothing
+   * NOTE: Display and code execution only. A project with no path is a
+   * complete, openable project (its cards live in the cloud), so nothing
    * about the board may gate on this being set.
    */
   path: string | null;
@@ -66,7 +66,7 @@ export interface Workspace {
    */
   origin?: "cloud" | "local";
   /**
-   * The cloud workspace id a synced local board moved to, or null/absent.
+   * The cloud project id a synced local board moved to, or null/absent.
    *
    * A local board that was synced is read-only and points here (FE-52/D7a).
    */
@@ -75,30 +75,30 @@ export interface Workspace {
 
 /** What "Sync to cloud" answers. */
 export interface LocalSyncResult {
-  /** The local workspace id that was moved. */
+  /** The local project id that was moved. */
   localId: string;
-  /** The cloud workspace it now lives in. */
+  /** The cloud project it now lives in. */
   cloudId: string;
   /** Cards uploaded. */
   cards: number;
-  snapshot: WorkspaceSnapshot;
+  snapshot: ProjectSnapshot;
 }
 
-export interface WorkspaceSnapshot {
-  workspaces: Workspace[];
-  active: Workspace | null;
+export interface ProjectSnapshot {
+  projects: Project[];
+  active: Project | null;
 }
 
 /**
- * What `workspaces.load` and `workspaces.select` answer.
+ * What `projects.load` and `projects.select` answer.
  *
  * The board being unreachable is a normal state the person in front of the
  * app reads on screen, so it is a RESULT, not a rejection: a thrown invoke
  * makes Electron print `Error occurred in handler` in the main console for
  * a renderer that has already handled it.
  */
-export type WorkspaceAnswer =
-  | { ok: true; snapshot: WorkspaceSnapshot }
+export type ProjectAnswer =
+  | { ok: true; snapshot: ProjectSnapshot }
   | { ok: false; message: string };
 
 /** One lane of a board, as the cloud states it. */
@@ -571,7 +571,7 @@ export interface BoardCardPatch {
 export type BoardPlacement = { after: string } | { before: string };
 
 export interface BoardView {
-  workspaceId: string;
+  projectId: string;
   columns: BoardColumn[];
   categories: BoardCategory[];
   /** The label vocabulary. Empty is normal; see {@link BoardLabel}. */
@@ -801,7 +801,7 @@ export interface BoardChanges {
  * one that says a board has no cards.
  */
 export interface ImportPreview {
-  workspaceId: string;
+  projectId: string;
   /** The folder these numbers came from, or null when none is linked. */
   folder: string | null;
   cards: number;
@@ -899,7 +899,7 @@ export interface LocalFolderSummary {
 }
 
 /**
- * Whether this workspace has a folder on this machine, and what is in it.
+ * Whether this project has a folder on this machine, and what is in it.
  *
  * `missing` is its own case rather than falling back to `none`. A linked
  * folder that has since moved or been deleted is worth saying: "no folder
@@ -932,58 +932,58 @@ export interface PickedFolder {
   name: string;
 }
 
-export const workspaceChannels = {
-  load: "workspaces:load",
-  select: "workspaces:select",
-  icon: "workspaces:icon",
-  board: "workspaces:board",
-  more: "workspaces:board:more",
-  stats: "workspaces:board:stats",
-  presence: "workspaces:board:presence",
-  checkpoint: "workspaces:board:checkpoint",
-  move: "workspaces:board:move",
-  toggle: "workspaces:board:toggle",
-  setChecklist: "workspaces:board:checklist",
-  create: "workspaces:board:create",
-  archive: "workspaces:board:archive",
-  purge: "workspaces:board:purge",
-  importPreview: "workspaces:import:preview",
-  importRun: "workspaces:import:run",
-  importSeal: "workspaces:import:seal",
-  update: "workspaces:board:update",
-  activity: "workspaces:board:activity",
-  comment: "workspaces:board:comment",
-  commentEdit: "workspaces:board:comment:edit",
-  commentDelete: "workspaces:board:comment:delete",
-  subscribe: "workspaces:board:subscribe",
-  favorite: "workspaces:board:favorite",
-  attach: "workspaces:board:attach",
-  detach: "workspaces:board:detach",
-  card: "workspaces:board:card",
-  lookup: "workspaces:board:lookup",
-  search: "workspaces:board:search",
-  changes: "workspaces:board:changes",
-  createWorkspace: "workspaces:new",
-  renameWorkspace: "workspaces:rename",
-  reorderWorkspaces: "workspaces:reorder",
-  deleteWorkspace: "workspaces:delete",
-  folderState: "workspaces:folder:state",
-  folderPick: "workspaces:folder:pick",
-  folderChoose: "workspaces:folder:choose",
-  folderDrop: "workspaces:folder:drop",
-  folderList: "workspaces:folder:list",
-  folderLink: "workspaces:folder:link",
-  folderForget: "workspaces:folder:forget",
-  folderReveal: "workspaces:folder:reveal",
+export const projectChannels = {
+  load: "projects:load",
+  select: "projects:select",
+  icon: "projects:icon",
+  board: "projects:board",
+  more: "projects:board:more",
+  stats: "projects:board:stats",
+  presence: "projects:board:presence",
+  checkpoint: "projects:board:checkpoint",
+  move: "projects:board:move",
+  toggle: "projects:board:toggle",
+  setChecklist: "projects:board:checklist",
+  create: "projects:board:create",
+  archive: "projects:board:archive",
+  purge: "projects:board:purge",
+  importPreview: "projects:import:preview",
+  importRun: "projects:import:run",
+  importSeal: "projects:import:seal",
+  update: "projects:board:update",
+  activity: "projects:board:activity",
+  comment: "projects:board:comment",
+  commentEdit: "projects:board:comment:edit",
+  commentDelete: "projects:board:comment:delete",
+  subscribe: "projects:board:subscribe",
+  favorite: "projects:board:favorite",
+  attach: "projects:board:attach",
+  detach: "projects:board:detach",
+  card: "projects:board:card",
+  lookup: "projects:board:lookup",
+  search: "projects:board:search",
+  changes: "projects:board:changes",
+  createProject: "projects:new",
+  renameProject: "projects:rename",
+  reorderProjects: "projects:reorder",
+  deleteProject: "projects:delete",
+  folderState: "projects:folder:state",
+  folderPick: "projects:folder:pick",
+  folderChoose: "projects:folder:choose",
+  folderDrop: "projects:folder:drop",
+  folderList: "projects:folder:list",
+  folderLink: "projects:folder:link",
+  folderForget: "projects:folder:forget",
+  folderReveal: "projects:folder:reveal",
   /** Move a local board to the cloud, in one click (FE-52/D7a). */
-  syncToCloud: "workspaces:local:sync",
+  syncToCloud: "projects:local:sync",
   /**
    * Main → renderer: the local store changed under this window.
    *
-   * The offline MCP or the hook wrote. Payload: the local workspace ids that
+   * The offline MCP or the hook wrote. Payload: the local project ids that
    * changed, or empty for "re-read everything local".
    */
-  localChanged: "workspaces:local:changed",
+  localChanged: "projects:local:changed",
 } as const;
 
 export interface DesktopBoardApi {
@@ -992,17 +992,17 @@ export interface DesktopBoardApi {
    *
    * Answers the counts and the first page of every group the query draws.
    */
-  load: (workspaceId: string, query?: BoardQuery) => Promise<BoardView>;
+  load: (projectId: string, query?: BoardQuery) => Promise<BoardView>;
   /** The next page of one group, from where the last one stopped. */
   more: (
-    workspaceId: string,
+    projectId: string,
     query: BoardQuery,
     group: string,
     cursor: string,
   ) => Promise<BoardGroupPage>;
   /** The counts again, after something changed. Null from an older service. */
   stats: (
-    workspaceId: string,
+    projectId: string,
     query: BoardQuery,
   ) => Promise<{ stats: BoardStats; total: number } | null>;
   /**
@@ -1010,14 +1010,14 @@ export interface DesktopBoardApi {
    *
    * Empty from a service older than `/presence`.
    */
-  presence: (workspaceId: string) => Promise<BoardPresence[]>;
+  presence: (projectId: string) => Promise<BoardPresence[]>;
   /**
    * Where the last agent on this card stopped, or null.
    *
    * Null when none is left, or from a service older than BE-17.
    */
   checkpoint: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
   ) => Promise<CardCheckpoint | null>;
   /**
@@ -1027,7 +1027,7 @@ export interface DesktopBoardApi {
    * `GET /items`, which serializes without parts. Every screen that shows a
    * card's decisions has to ask for that card by itself.
    */
-  card: (workspaceId: string, cardId: string) => Promise<BoardCard>;
+  card: (projectId: string, cardId: string) => Promise<BoardCard>;
   /**
    * The same card, addressed the way a human says it: `FE-06`.
    *
@@ -1035,13 +1035,13 @@ export interface DesktopBoardApi {
    * deep link can name a task id that was never minted, and the board's route
    * makes that a 404 so it cannot be confused with a failed read.
    */
-  lookup: (workspaceId: string, taskId: string) => Promise<BoardCard | null>;
+  lookup: (projectId: string, taskId: string) => Promise<BoardCard | null>;
   /**
    * Cards whose title or task id answer `query`, at most 20.
    *
    * From the SERVICE, not only the cards this window has loaded.
    */
-  search: (workspaceId: string, query: string) => Promise<BoardCard[]>;
+  search: (projectId: string, query: string) => Promise<BoardCard[]>;
   /**
    * Edit a card, against the revision the caller is looking at.
    *
@@ -1050,7 +1050,7 @@ export interface DesktopBoardApi {
    * silently landing on somebody else's newer card.
    */
   update: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     patch: BoardCardPatch,
     revision: number,
@@ -1063,15 +1063,15 @@ export interface DesktopBoardApi {
    * would be two writes a second client could interleave with.
    */
   move: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     columnKey: string | null,
     placement?: BoardPlacement,
   ) => Promise<BoardWrite>;
   /** What changed since `since`; pass 0 for a first read. */
-  changes: (workspaceId: string, since: number) => Promise<BoardChanges>;
+  changes: (projectId: string, since: number) => Promise<BoardChanges>;
   toggle: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     key: string,
     checked: boolean,
@@ -1087,7 +1087,7 @@ export interface DesktopBoardApi {
    * boxes survive the rewrite.
    */
   setChecklist: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     items: BoardChecklistDraft[],
     revision: number,
@@ -1101,7 +1101,7 @@ export interface DesktopBoardApi {
    * Every field is one `POST /items` already accepts; only `title` is
    * required, and the board picks its first lane when `columnKey` is absent.
    */
-  create: (workspaceId: string, draft: BoardCardDraft) => Promise<BoardWrite>;
+  create: (projectId: string, draft: BoardCardDraft) => Promise<BoardWrite>;
   /**
    * Take a card off the board.
    *
@@ -1115,7 +1115,7 @@ export interface DesktopBoardApi {
    * archive changes every lane's ranks and counts, and a client that spliced
    * one row out of its own copy would be guessing at the rest.
    */
-  archive: (workspaceId: string, cardId: string) => Promise<void>;
+  archive: (projectId: string, cardId: string) => Promise<void>;
   /**
    * Permanently remove EVERY card on a board.
    *
@@ -1127,7 +1127,7 @@ export interface DesktopBoardApi {
    * Takes the SLUG as well as the id, and the service checks it: the id says
    * which board, the slug says the person meant that one.
    */
-  purge: (workspaceId: string, slug: string) => Promise<{ deleted: number }>;
+  purge: (projectId: string, slug: string) => Promise<{ deleted: number }>;
   /**
    * One page of a card's history and thread, oldest first.
    *
@@ -1136,7 +1136,7 @@ export interface DesktopBoardApi {
    * the next one from what it just read.
    */
   activity: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     cursor?: string | null,
   ) => Promise<BoardActivityPage>;
@@ -1148,13 +1148,13 @@ export interface DesktopBoardApi {
    * version for either to overwrite.
    */
   comment: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     body: string,
   ) => Promise<{ id: string }>;
   /** Reword your own comment. The service refuses anybody else's. */
   editComment: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     commentId: string,
     body: string,
@@ -1166,7 +1166,7 @@ export interface DesktopBoardApi {
    * gone, so a thread that referred to it still reads as a conversation.
    */
   deleteComment: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     commentId: string,
   ) => Promise<void>;
@@ -1178,12 +1178,12 @@ export interface DesktopBoardApi {
    * same value gives the state the caller asked for, not an error.
    */
   subscribe: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     subscribed: boolean,
   ) => Promise<boolean>;
   favorite: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     favorite: boolean,
   ) => Promise<boolean>;
@@ -1195,17 +1195,17 @@ export interface DesktopBoardApi {
    * own storage, quota and signed URLs.
    */
   attach: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     file: BoardAttachmentDraft,
   ) => Promise<BoardAttachment>;
   detach: (
-    workspaceId: string,
+    projectId: string,
     cardId: string,
     attachmentId: string,
   ) => Promise<void>;
-  importPreview: (workspaceId: string) => Promise<ImportPreview>;
-  importRun: (workspaceId: string) => Promise<ImportReport>;
+  importPreview: (projectId: string) => Promise<ImportPreview>;
+  importRun: (projectId: string) => Promise<ImportReport>;
   /**
    * Hand the board over: the cloud owns these cards from now on.
    *
@@ -1214,13 +1214,13 @@ export interface DesktopBoardApi {
    * screen. One button doing both would change a board's source of truth
    * while somebody was still reading whether it worked.
    */
-  importSeal: (workspaceId: string) => Promise<ImportReport>;
+  importSeal: (projectId: string) => Promise<ImportReport>;
 }
 
 /**
- * The folder on this machine a workspace's cards still live in.
+ * The folder on this machine a project's cards still live in.
  *
- * Every method is keyed by SLUG, not by the cloud workspace id. The id is
+ * Every method is keyed by SLUG, not by the cloud project id. The id is
  * absent exactly when this surface matters most: a service that predates the
  * field sends none, and that is the screen that says the board cannot be
  * opened. A slug is also STABLE: no route on the service can change one (the
@@ -1235,7 +1235,7 @@ export interface DesktopFolderApi {
   /**
    * Open the OS chooser and answer with what was picked, many folders at once.
    *
-   * Bound to no workspace, because the main caller is the create dialog: the
+   * Bound to no project, because the main caller is the create dialog: the
    * folders are chosen BEFORE their project exists. Nothing is written down
    * here; `create` spends the ids.
    */
@@ -1251,7 +1251,7 @@ export interface DesktopFolderApi {
    */
   drop: (files: File[]) => Promise<PickedFolder[]>;
   /**
-   * The folders linked to a workspace, primary first, as addressable ids.
+   * The folders linked to a project, primary first, as addressable ids.
    *
    * The same shape `choose` answers with, so an editor works on ONE list
    * (what is linked plus what was just picked) and hands it all back to
@@ -1260,10 +1260,10 @@ export interface DesktopFolderApi {
    */
   list: (slug: string) => Promise<PickedFolder[]>;
   /**
-   * Replace a workspace's folders with exactly these, primary first.
+   * Replace a project's folders with exactly these, primary first.
    *
    * A REPLACE: stating the whole set is what makes remove and reorder
-   * expressible. An empty list unlinks the workspace, as `forget` does.
+   * expressible. An empty list unlinks the project, as `forget` does.
    */
   link: (slug: string, folders: string[]) => Promise<LocalFolderState>;
   pick: (slug: string) => Promise<LocalFolderState>;
@@ -1271,15 +1271,15 @@ export interface DesktopFolderApi {
   reveal: (slug: string) => Promise<void>;
 }
 
-export interface DesktopWorkspacesApi {
-  load: () => Promise<WorkspaceAnswer>;
-  select: (id: string) => Promise<WorkspaceAnswer>;
+export interface DesktopProjectsApi {
+  load: () => Promise<ProjectAnswer>;
+  select: (id: string) => Promise<ProjectAnswer>;
   /**
    * A project's icon as a `data:` URL, or null for the letter tile.
    *
    * Pass the `iconKey` the list gave; main draws from its disk cache first.
    */
-  icon: (workspaceId: string, iconKey: string | null) => Promise<string | null>;
+  icon: (projectId: string, iconKey: string | null) => Promise<string | null>;
   /**
    * Create a project on the account and open it.
    *
@@ -1292,9 +1292,9 @@ export interface DesktopWorkspacesApi {
    * in file manager") means. Ids rather than paths, so this channel cannot be
    * asked to link a folder the user never chose.
    */
-  create: (name: string, folders?: string[]) => Promise<WorkspaceSnapshot>;
+  create: (name: string, folders?: string[]) => Promise<ProjectSnapshot>;
   /**
-   * Rename a project on the account, by CLOUD WORKSPACE ID.
+   * Rename a project on the account, by CLOUD PROJECT ID.
    *
    * Only the display name changes. The SLUG is immutable service-wide (the
    * rename validator refuses the field rather than ignoring it), so the
@@ -1302,17 +1302,17 @@ export interface DesktopWorkspacesApi {
    * survive. The rename is on the account, for every machine, not a local
    * one.
    *
-   * A workspace whose `id` is null cannot be renamed: a service too old to
+   * A project whose `id` is null cannot be renamed: a service too old to
    * send an id has no route for it. The screen says so rather than calling.
    */
-  rename: (id: string, name: string) => Promise<WorkspaceSnapshot>;
+  rename: (id: string, name: string) => Promise<ProjectSnapshot>;
   /**
    * Put the account's projects in this order, first to last, by CLOUD ID.
    *
    * Answers the list as the service now orders it. The switcher and ⌘1…⌘9
    * follow that order.
    */
-  reorder: (ids: string[]) => Promise<WorkspaceSnapshot>;
+  reorder: (ids: string[]) => Promise<ProjectSnapshot>;
   /**
    * Delete a project from the ACCOUNT, and answer with what is left.
    *
@@ -1330,7 +1330,7 @@ export interface DesktopWorkspacesApi {
    * is disabled with that reason on it. That is a service older than the `id`
    * field, the same state that stops the project's board from opening.
    */
-  remove: (id: string, slug: string) => Promise<WorkspaceSnapshot>;
+  remove: (id: string, slug: string) => Promise<ProjectSnapshot>;
   /**
    * Upload a LOCAL board to the signed-in account (FE-52/D7a).
    *
@@ -1339,7 +1339,7 @@ export interface DesktopWorkspacesApi {
    */
   syncToCloud: (localId: string) => Promise<LocalSyncResult>;
   /** The local store changed from outside this window (MCP, hook). */
-  onLocalChange: (listener: (workspaceIds: string[]) => void) => () => void;
+  onLocalChange: (listener: (projectIds: string[]) => void) => () => void;
   board: DesktopBoardApi;
   folder: DesktopFolderApi;
 }

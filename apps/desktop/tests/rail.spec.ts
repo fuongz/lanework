@@ -11,7 +11,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import type { Workspace } from "../shared/workspaces";
+import type { Project } from "../shared/projects";
 import {
   launchEnv,
   removeProfile,
@@ -19,7 +19,7 @@ import {
   startStubPlane,
 } from "./auth-fixtures";
 
-const workspaces: Workspace[] = [
+const projects: Project[] = [
   {
     id: "ws-alpha",
     slug: "alpha",
@@ -54,8 +54,8 @@ const board = {
   })),
 };
 
-async function seed(projects = workspaces) {
-  const plane = await startStubPlane({ workspaces: projects });
+async function seed(list = projects) {
+  const plane = await startStubPlane({ projects: list });
   plane.setBoard("ws-alpha", board);
   const profile = await mkdtemp(join(tmpdir(), "lanew-rail-"));
   const home = join(profile, "home");
@@ -402,8 +402,8 @@ test("one hover background slides from row to row, and fades once the pointer le
 
 test("shared hover follows project, settings, select, filter and issue rows", async () => {
   const { plane, profile, boot } = await seed([
-    ...workspaces,
-    { ...workspaces[0], id: "ws-beta", slug: "beta", name: "Beta" },
+    ...projects,
+    { ...projects[0], id: "ws-beta", slug: "beta", name: "Beta" },
   ]);
   const app = await boot();
   try {

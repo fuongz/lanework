@@ -9,7 +9,7 @@ import {
   type OutgoingAttachment,
 } from "#/../shared/conversation";
 import { canLead, type TeamLead } from "#/../shared/orchestration";
-import type { BoardCard } from "#/../shared/workspaces";
+import type { BoardCard } from "#/../shared/projects";
 import { setChatAgent } from "#/components/shared/conversation/chat-agent";
 import {
   Composer,
@@ -20,7 +20,7 @@ import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { conductorConversation, orderConductors } from "#/lib/conductors";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
@@ -70,7 +70,7 @@ export function NewConversationPage({
   slug: string;
   conductor?: TeamLead | null;
 }) {
-  const workspace = useWorkspaceKey(slug);
+  const project = useProjectKey(slug);
   const composer = useRef<ComposerHandle>(null);
   // A conductor picked under "Hand it to" (FE-98/D3a): this page becomes its
   // own, the draft kept. The settings before it, to go back to on unpick.
@@ -78,9 +78,9 @@ export function NewConversationPage({
   const before = useRef<ComposerSettings | null>(null);
   const conductor = own ?? handTo;
   const offers = own === null;
-  const leads = useTeamLeads(workspace, offers);
+  const leads = useTeamLeads(project, offers);
   const sessions = useAgentSessions((state) =>
-    workspace ? state.byWorkspace[workspace] : undefined,
+    project ? state.byProject[project] : undefined,
   );
   const started = useNewChats((state) => state.started);
   const board = useBoard((state) =>
@@ -97,14 +97,14 @@ export function NewConversationPage({
   }, []);
   // The checkout's folder name, as the person knows the project on disk.
   const name = useBoard((state) => {
-    const found = state.workspaces.find((entry) => entry.slug === slug);
+    const found = state.projects.find((entry) => entry.slug === slug);
     if (!found) return slug;
     return found.path?.split(/[\\/]/).filter(Boolean).at(-1) ?? found.name;
   });
   // Named in a planning prompt so the lead writes project-relative scopes.
   const cwd = useBoard(
     (state) =>
-      state.workspaces.find((entry) => entry.slug === slug)?.path ?? null,
+      state.projects.find((entry) => entry.slug === slug)?.path ?? null,
   );
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -140,7 +140,7 @@ export function NewConversationPage({
   ): Promise<boolean> => {
     const surface = window.desktop?.conversation;
     const chosen = override ?? settings;
-    if (!workspace || !surface || !chosen) return false;
+    if (!project || !surface || !chosen) return false;
     setError(null);
     // A conductor's message carries who it is; a planning prompt already
     // names it.
@@ -148,7 +148,7 @@ export function NewConversationPage({
       conductor && !readEnvelope(text)
         ? conductorTurn(
             text,
-            await withLiveContext(workspace, conductor),
+            await withLiveContext(project, conductor),
             agentOfModel(chosen.model),
             cwd,
             null,
@@ -158,20 +158,20 @@ export function NewConversationPage({
     // The rail's row for it, from Enter on: the CLI takes a while to answer
     // with an id, and longer to write a transcript the rail can list.
     begin({
-      workspace,
+      project,
       agent: agentOfModel(chosen.model),
       text: orchestrationText(outgoing),
       ...(conductor ? { conductor: conductor.id } : {}),
     });
     try {
       const { conversation } = await surface.start({
-        workspace,
+        project,
         text: outgoing,
         attachments,
         settings: chosen,
         ...(conductor ? { conductor: conductor.id } : {}),
       });
-      end(workspace, conversation);
+      end(project, conversation);
       handSentMessage(JSON.stringify([slug, conversation]), {
         key: "first",
         since: null,
@@ -191,7 +191,7 @@ export function NewConversationPage({
         });
       return true;
     } catch (caught) {
-      end(workspace, null);
+      end(project, null);
       setError(ipcMessage(caught, "Could not start the conversation."));
       return false;
     }
@@ -213,8 +213,8 @@ export function NewConversationPage({
     // with its context files as they stand now (FE-96).
     const chosenLead = picked ?? conductor;
     const teamLead =
-      chosenLead && workspace
-        ? await withLiveContext(workspace, chosenLead)
+      chosenLead && project
+        ? await withLiveContext(project, chosenLead)
         : chosenLead;
     const own = teamLead?.lead;
     const started: ComposerSettings =
@@ -247,9 +247,7 @@ export function NewConversationPage({
   };
 
   const conversationOf = (lead: TeamLead) =>
-    workspace
-      ? conductorConversation(sessions, started, workspace, lead.id)
-      : null;
+    project ? conductorConversation(sessions, started, project, lead.id) : null;
   const pickConductor = (lead: TeamLead | null) => {
     // One conversation per conductor: one it already has is opened, not
     // started again beside it.
@@ -309,13 +307,13 @@ export function NewConversationPage({
               {error}
             </p>
           )}
-          {workspace && settings && (
+          {project && settings && (
             <Composer
               ref={composer}
               slug={slug}
               draftKey={own ? `conductor:${slug}:${own.id}` : `new:${slug}`}
               autoFocus
-              workspace={workspace}
+              project={project}
               settings={settings}
               onSettings={(next) =>
                 setSettings((previous) =>

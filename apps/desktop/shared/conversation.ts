@@ -3,7 +3,7 @@
 // next turn through the user's own `claude` CLI, headless.
 //
 // NOTE: As with the terminal (FE-19), the renderer never names a command, a
-// binary or a folder. It names a workspace and a conversation id. Main
+// binary or a folder. It names a project and a conversation id. Main
 // resolves the folder from the links it wrote itself and runs the one CLI it
 // stands for. Settings are names picked from the lists below, checked again
 // in main before they become a flag.
@@ -533,7 +533,7 @@ export function commandLabel(value: string): string {
 }
 
 export interface SendRequest {
-  workspace: string;
+  project: string;
   conversation: string;
   /**
    * The page's name for this message, so it keeps it while it waits in the
@@ -582,7 +582,7 @@ export interface PermissionRequest {
 
 /** A conversation whose engine waits on the person: a tool, or questions. */
 export interface Awaiting {
-  workspace: string;
+  project: string;
   conversation: string;
   agent: ConversationAgent;
   /** Oldest first. */
@@ -669,30 +669,30 @@ export type EngineState =
 export type ConversationEvent =
   | {
       type: "state";
-      workspace: string;
+      project: string;
       conversation: string;
       engine: EngineState;
     }
   /** The transcript moved on: read it again (or patch from `turn`). */
-  | { type: "turn"; workspace: string; conversation: string; turn: Turn }
+  | { type: "turn"; project: string; conversation: string; turn: Turn }
   /**
    * The engine saw the transcript move on (a Codex item finished).
    *
    * The page reads it again without waiting for the file watcher.
    */
-  | { type: "moved"; workspace: string; conversation: string }
+  | { type: "moved"; project: string; conversation: string }
   /** Text for the open turn's last text block, before its line lands. */
-  | { type: "delta"; workspace: string; conversation: string; text: string }
+  | { type: "delta"; project: string; conversation: string; text: string }
   | {
       type: "permission";
-      workspace: string;
+      project: string;
       conversation: string;
       request: PermissionRequest;
     }
   /** A pending permission was answered (here or because the turn ended). */
   | {
       type: "permission-done";
-      workspace: string;
+      project: string;
       conversation: string;
       id: string;
     };
@@ -781,12 +781,12 @@ export const conversationChannels = {
   release: "conversation:release",
   /** The rail's Stop: end the engine, cutting off a running turn. */
   close: "conversation:close",
-  /** A workspace's conversations whose engine process is alive (Running). */
+  /** A project's conversations whose engine process is alive (Running). */
   alive: "conversation:alive",
   engineState: "conversation:engine-state",
   /** What the engine is waiting on the person for: a tool, or questions. */
   permissions: "conversation:permissions",
-  /** Every conversation, in every workspace, waiting on the person (FE-97). */
+  /** Every conversation, in every project, waiting on the person (FE-97). */
   awaiting: "conversation:awaiting",
   /** The last settings used anywhere, for one never sent from chat. */
   lastSettings: "conversation:last-settings",
@@ -795,7 +795,7 @@ export const conversationChannels = {
   /** OpenCode's models, as its service lists them (FE-104). */
   opencodeModels: "conversation:opencode-models",
   linkPreview: "conversation:link-preview",
-  /** Slash commands, or files in the workspace's folder, matching a query. */
+  /** Slash commands, or files in the project's folder, matching a query. */
   suggest: "conversation:suggest",
   /** Open a link the person clicked in the chat in the OS browser. */
   openLink: "conversation:open-link",
@@ -808,7 +808,7 @@ export const conversationChannels = {
 } as const;
 
 export interface DesktopConversationApi {
-  read: (workspace: string, conversation: string) => Promise<Conversation>;
+  read: (project: string, conversation: string) => Promise<Conversation>;
   /**
    * Start a new conversation with `request` as its first message.
    *
@@ -819,36 +819,33 @@ export interface DesktopConversationApi {
   ) => Promise<{ conversation: string; engine: EngineState }>;
   /** Resolves once queued or started, not when the turn ends. */
   send: (request: SendRequest) => Promise<EngineState>;
-  stop: (workspace: string, conversation: string) => Promise<void>;
+  stop: (project: string, conversation: string) => Promise<void>;
   /** Answers how many were dropped: one may have started meanwhile. */
-  clearQueue: (workspace: string, conversation: string) => Promise<number>;
+  clearQueue: (project: string, conversation: string) => Promise<number>;
   /** Null when it is no longer queued: it went meanwhile. */
   takeQueued: (
-    workspace: string,
+    project: string,
     conversation: string,
     id: string,
   ) => Promise<{ text: string; attachments: OutgoingAttachment[] } | null>;
   removeQueued: (
-    workspace: string,
+    project: string,
     conversation: string,
     id: string,
   ) => Promise<boolean>;
-  resumeQueue: (workspace: string, conversation: string) => Promise<void>;
+  resumeQueue: (project: string, conversation: string) => Promise<void>;
   answerPermission: (
-    workspace: string,
+    project: string,
     conversation: string,
     id: string,
     answer: PermissionAnswer,
   ) => Promise<void>;
-  fork: (workspace: string, conversation: string) => Promise<string>;
-  takeOver: (workspace: string, conversation: string) => Promise<EngineState>;
-  release: (workspace: string, conversation: string) => Promise<void>;
-  close: (workspace: string, conversation: string) => Promise<void>;
-  alive: (workspace: string) => Promise<string[]>;
-  engineState: (
-    workspace: string,
-    conversation: string,
-  ) => Promise<EngineState>;
+  fork: (project: string, conversation: string) => Promise<string>;
+  takeOver: (project: string, conversation: string) => Promise<EngineState>;
+  release: (project: string, conversation: string) => Promise<void>;
+  close: (project: string, conversation: string) => Promise<void>;
+  alive: (project: string) => Promise<string[]>;
+  engineState: (project: string, conversation: string) => Promise<EngineState>;
   /**
    * The requests the engine is still waiting on.
    *
@@ -856,7 +853,7 @@ export interface DesktopConversationApi {
    * only the pages already open.
    */
   permissions: (
-    workspace: string,
+    project: string,
     conversation: string,
   ) => Promise<PermissionRequest[]>;
   /**
@@ -878,7 +875,7 @@ export interface DesktopConversationApi {
    * Claude's.
    */
   suggest: (
-    workspace: string,
+    project: string,
     kind: SuggestionKind,
     query: string,
     agent?: ConversationAgent | null,
@@ -896,17 +893,17 @@ export interface DesktopConversationApi {
    * The image a chat badge names, as a `data:` URL.
    *
    * The name may be `details.png`, `assets/x.png` or an attached
-   * `/tmp/…/1.png`. Main reads only the workspace's folder and the
+   * `/tmp/…/1.png`. Main reads only the project's folder and the
    * conversation's own attachments.
    */
   image: (
-    workspace: string,
+    project: string,
     conversation: string,
     path: string,
   ) => Promise<ImagePreview>;
   /** That image in the OS's default app; the same scope as `image`. */
   openImage: (
-    workspace: string,
+    project: string,
     conversation: string,
     path: string,
   ) => Promise<void>;

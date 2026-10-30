@@ -23,12 +23,12 @@ import { createSessions, type SpawnRequest, type Subscriber } from "./sessions";
 
 /** A request from main; the reply carries the same `reqId`. */
 type Request = { reqId: number } & (
-  | { t: "list"; workspace?: string }
+  | { t: "list"; project?: string }
   | ({ t: "spawn" } & SpawnRequest)
   | { t: "kill"; id: string }
-  | { t: "reorder"; workspace: string; ids: unknown }
-  | { t: "bind"; workspace: string; bindings: unknown }
-  | { t: "touch"; workspace: string }
+  | { t: "reorder"; project: string; ids: unknown }
+  | { t: "bind"; project: string; bindings: unknown }
+  | { t: "touch"; project: string }
   | { t: "agents" }
   | { t: "killAll" }
   | { t: "count" }
@@ -76,9 +76,9 @@ function agents(): Promise<TerminalAgent[]> {
   );
 }
 
-sessions.onChanged((workspace) => {
+sessions.onChanged((project) => {
   process.parentPort?.postMessage({ t: "changed" });
-  for (const client of clients) client.send({ t: "changed", workspace });
+  for (const client of clients) client.send({ t: "changed", project });
 });
 
 /**
@@ -89,17 +89,17 @@ sessions.onChanged((workspace) => {
 function run(request: Request): unknown {
   switch (request.t) {
     case "list":
-      return sessions.list(request.workspace);
+      return sessions.list(request.project);
     case "spawn":
       return sessions.spawn(request);
     case "kill":
       return sessions.kill(request.id);
     case "reorder":
-      return sessions.reorder(request.workspace, request.ids);
+      return sessions.reorder(request.project, request.ids);
     case "bind":
-      return sessions.bind(request.workspace, request.bindings);
+      return sessions.bind(request.project, request.bindings);
     case "touch":
-      return sessions.touch(request.workspace);
+      return sessions.touch(request.project);
     case "agents":
       return agents();
     case "killAll":

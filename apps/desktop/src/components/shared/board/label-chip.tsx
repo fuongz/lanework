@@ -4,7 +4,7 @@
 // tag as its own text. The vocabulary is a palette, not a whitelist: the
 // service accepts any tag, imports bring over tags nobody has coloured, and a
 // chip that appeared only for known labels would hide data the board stores.
-import type { BoardLabel } from "#/../shared/workspaces";
+import type { BoardLabel } from "#/../shared/projects";
 import { cn } from "#/lib/utils";
 
 export const labelOf = (

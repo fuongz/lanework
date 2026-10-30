@@ -172,13 +172,13 @@ function claudeTranscriptPath(
 }
 
 /**
- * The workspace slug the renderer sent.
+ * The project slug the renderer sent.
  *
  * @throws when `value` is not a slug.
  */
-function workspaceArg(value: unknown): string {
+function projectArg(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
-    throw new Error("A valid workspace is required");
+    throw new Error("A valid project is required");
   return value;
 }
 
@@ -188,15 +188,15 @@ function workspaceArg(value: unknown): string {
  * @throws when an argument is missing or invalid.
  */
 export function backgroundRequest(args: unknown[]): {
-  workspace: string;
+  project: string;
   conversation: string;
 } {
   if (args.length !== 2)
-    throw new Error("A workspace and a conversation are required");
-  const workspace = workspaceArg(args[0]);
+    throw new Error("A project and a conversation are required");
+  const project = projectArg(args[0]);
   if (!isAgentSessionId(args[1]))
     throw new Error("A valid conversation is required");
-  return { workspace, conversation: args[1] };
+  return { project, conversation: args[1] };
 }
 
 /**
@@ -205,17 +205,17 @@ export function backgroundRequest(args: unknown[]): {
  * @throws when an argument is missing or invalid.
  */
 export function taskOutputRequest(args: unknown[]): {
-  workspace: string;
+  project: string;
   conversation: string;
   task: string;
 } {
   if (args.length !== 3)
-    throw new Error("A workspace, a conversation and a task are required");
-  const workspace = workspaceArg(args[0]);
+    throw new Error("A project, a conversation and a task are required");
+  const project = projectArg(args[0]);
   if (!isAgentSessionId(args[1]))
     throw new Error("A valid conversation is required");
   if (!isBackgroundTaskId(args[2])) throw new Error("A valid task is required");
-  return { workspace, conversation: args[1], task: args[2] };
+  return { project, conversation: args[1], task: args[2] };
 }
 
 /** A non-blank string, as it is, or null. */

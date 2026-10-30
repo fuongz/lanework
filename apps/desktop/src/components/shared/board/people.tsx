@@ -7,7 +7,7 @@
 // every surface instead of each one inventing its own fallback.
 import { UserIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { BoardMember } from "#/../shared/workspaces";
+import type { BoardMember } from "#/../shared/projects";
 import { UserAvatar } from "#/components/shared/common/user-avatar";
 import { cn } from "#/lib/utils";
 

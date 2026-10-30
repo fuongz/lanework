@@ -1,9 +1,9 @@
 // The main process's side of the conversation view: an agent conversation
 // read as a chat, and the composer's headless engine.
 //
-// NOTE: As with the terminal, the page names a WORKSPACE and a conversation
+// NOTE: As with the terminal, the page names a PROJECT and a conversation
 // id, never a folder or a command:
-// - the folder is the one main wrote down for the workspace
+// - the folder is the one main wrote down for the project
 //   (`terminalFolder`);
 // - the id is a UUID whose transcript is in the CLI's folder for it, or an
 //   OpenCode `ses_` id its database has for that folder (FE-104);
@@ -56,6 +56,7 @@ import {
   workerFolderOf,
 } from "../orchestration";
 import { setSessionsEnv } from "../orchestration/engine-tap";
+import { knownProject, terminalFolder } from "../projects";
 import {
   bindConductorConversation,
   conductorOfConversation,
@@ -67,7 +68,6 @@ import {
   opencodeServiceUsage,
 } from "../terminal/opencode-usage";
 import { agentHomeDir } from "../test-seams";
-import { knownWorkspace, terminalFolder } from "../workspaces";
 import { awaitingNotice, createAwaitingLedger } from "./awaiting";
 import { createAgentCli, createClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
@@ -91,9 +91,9 @@ import type { Outgoing } from "./queue";
 import { createSettingsStore } from "./settings-store";
 import {
   listCommands,
+  projectFiles,
   rankCommands,
   suggestFiles,
-  workspaceFiles,
 } from "./suggest";
 import { readConversation, transcriptPath } from "./transcript";
 
@@ -105,7 +105,7 @@ import { readConversation, transcriptPath } from "./transcript";
  */
 interface TerminalBridge {
   terminalOn: (
-    workspace: string,
+    project: string,
     conversation: string,
     ours: ReadonlySet<number>,
   ) => Promise<string | null>;
@@ -179,29 +179,29 @@ export const conductorSessionsControl = {
 /** How long a project's `/` commands are reused before they are read again. */
 const COMMANDS_MS = 30_000;
 
-/** The last `/` commands read, by workspace. */
+/** The last `/` commands read, by project. */
 const commandCache = new Map<
   string,
   { at: number; all: Promise<Suggestion[]> }
 >();
 
 /**
- * Every `/` command `workspace` offers, for each key the composer sends.
+ * Every `/` command `project` offers, for each key the composer sends.
  *
  * Read once and kept (FE-92): finding the project's folder may wait on the
  * network, and `/` must open at once. Older than {@link COMMANDS_MS}, the
  * list kept still answers while a new one is read behind it.
  */
 function commandsOf(
-  workspace: string,
+  project: string,
   agent: ConversationAgent = "claude",
 ): Promise<Suggestion[]> {
   const read = () =>
-    terminalFolder(workspace).then((folder) =>
+    terminalFolder(project).then((folder) =>
       listCommands(agentHome(), folder, agent),
     );
   // By agent too: OpenCode's list is not Claude's (FE-105/D3).
-  const cacheKey = `${workspace}\0${agent}`;
+  const cacheKey = `${project}\0${agent}`;
   const cached = commandCache.get(cacheKey);
   if (!cached) {
     const all = read();
@@ -227,7 +227,7 @@ function commandsOf(
  */
 export function pidFileBridge(): TerminalBridge {
   return {
-    async terminalOn(_workspace, conversation, ours) {
+    async terminalOn(_project, conversation, ours) {
       const [pid] = await claudePidsOn(agentHome(), conversation, ours);
       return pid ? `pid:${pid}` : null;
     },
@@ -262,15 +262,15 @@ function key(value: unknown, what: string): string {
  * @throws When either is missing or invalid.
  */
 function conversationOf(args: unknown[]): {
-  workspace: string;
+  project: string;
   conversation: string;
 } {
   if (args.length < 2)
-    throw new Error("A workspace and a conversation are required");
-  const workspace = key(args[0], "workspace");
+    throw new Error("A project and a conversation are required");
+  const project = key(args[0], "project");
   if (!isConversationId(args[1]))
     throw new Error("A valid conversation is required");
-  return { workspace, conversation: args[1] };
+  return { project, conversation: args[1] };
 }
 
 /**
@@ -279,15 +279,15 @@ function conversationOf(args: unknown[]): {
  * @throws When the call does not have exactly those three arguments.
  */
 function queuedOf(args: unknown[]): {
-  workspace: string;
+  project: string;
   conversation: string;
   message: string;
 } {
   if (args.length !== 3)
-    throw new Error("A workspace, a conversation and a message are required");
-  const { workspace, conversation } = conversationOf(args);
+    throw new Error("A project, a conversation and a message are required");
+  const { project, conversation } = conversationOf(args);
   if (!isMessageId(args[2])) throw new Error("A valid message is required");
-  return { workspace, conversation, message: args[2] };
+  return { project, conversation, message: args[2] };
 }
 
 /** A checked request as the message an engine sends, or holds. */
@@ -302,12 +302,12 @@ async function outgoingOf(request: SendRequest): Promise<Outgoing> {
 }
 
 /**
- * The folder main wrote down for `workspace`.
+ * The folder main wrote down for `project`.
  *
- * @throws When the workspace has no folder on this machine.
+ * @throws When the project has no folder on this machine.
  */
-async function folderOf(workspace: string): Promise<string> {
-  const folder = await terminalFolder(workspace);
+async function folderOf(project: string): Promise<string> {
+  const folder = await terminalFolder(project);
   if (!folder) throw new Error("This project has no folder here.");
   return folder;
 }
@@ -352,7 +352,7 @@ async function readAny(folder: string, id: string): Promise<Conversation> {
 /**
  * The path a chat badge names, and what its image may be read from.
  *
- * The scope is the workspace's folder, the images attached to the
+ * The scope is the project's folder, the images attached to the
  * conversation, and the files its tool calls read or wrote by absolute path
  * (a screenshot under `/tmp`). They are read from its transcript here, never
  * taken from the page; `openableImage` still keeps only images.
@@ -364,8 +364,8 @@ async function imageScope(args: unknown[]): Promise<{
   scope: ImageScope;
 }> {
   if (args.length !== 3)
-    throw new Error("A workspace, a conversation and a path are required");
-  const { workspace, conversation } = conversationOf(args);
+    throw new Error("A project, a conversation and a path are required");
+  const { project, conversation } = conversationOf(args);
   const path = args[2];
   if (
     typeof path !== "string" ||
@@ -374,7 +374,7 @@ async function imageScope(args: unknown[]): Promise<{
     path.includes("\0")
   )
     throw new Error("A valid path is required");
-  const folder = await folderOf(workspace);
+  const folder = await folderOf(project);
   const read = await readAny(folder, conversation).catch(() => null);
   const attachments = (read?.turns ?? []).flatMap((turn) =>
     turn.role === "user"
@@ -391,7 +391,7 @@ async function imageScope(args: unknown[]): Promise<{
   );
   return {
     path: path.trim(),
-    scope: { folder, attachments, files: () => workspaceFiles(folder) },
+    scope: { folder, attachments, files: () => projectFiles(folder) },
   };
 }
 
@@ -527,19 +527,18 @@ export function registerConversation(
       // no island, no notification, no ping (FE-100/O1).
       if (
         typeof event.conversation === "string" &&
-        isWorkerConversation(event.workspace, event.conversation)
+        isWorkerConversation(event.project, event.conversation)
       ) {
-        awaiting.clear(event.workspace, event.conversation);
+        awaiting.clear(event.project, event.conversation);
         return;
       }
       const asked = awaiting.apply(
         event,
         () =>
-          engines.pending(event.workspace, event.conversation)?.agent ??
-          "claude",
+          engines.pending(event.project, event.conversation)?.agent ?? "claude",
       );
       if (asked && event.type === "permission")
-        void notifyAsked(event.workspace, event.conversation, asked);
+        void notifyAsked(event.project, event.conversation, asked);
     });
   };
   /**
@@ -547,26 +546,26 @@ export function registerConversation(
    * a focused window already on it is not told.
    */
   const notifyAsked = async (
-    workspace: string,
+    project: string,
     conversation: string,
     request: PermissionRequest,
   ): Promise<void> => {
-    const { workspace: project } = await knownWorkspace(workspace).catch(
-      () => ({ workspace: null }),
-    );
+    const { project: found } = await knownProject(project).catch(() => ({
+      project: null,
+    }));
     // Answered, or the engine closed, while the project was looked up.
     const still = awaiting
       .list()
       .find(
         (entry) =>
-          entry.workspace === workspace && entry.conversation === conversation,
+          entry.project === project && entry.conversation === conversation,
       );
-    if (!project || !still?.requests.some((entry) => entry.id === request.id))
+    if (!found || !still?.requests.some((entry) => entry.id === request.id))
       return;
     await notify({
       kind: "input",
       ...awaitingNotice(still.agent, request),
-      target: { kind: "session", slug: project.slug, conversation },
+      target: { kind: "session", slug: found.slug, conversation },
     }).catch(() => {});
   };
   const engines = createEngines({
@@ -608,23 +607,23 @@ export function registerConversation(
 
   // The conversations whose engine last answered `terminal`: when a tab
   // stops, the composer hears it may write again, without polling.
-  const paused = new Map<string, { workspace: string; conversation: string }>();
+  const paused = new Map<string, { project: string; conversation: string }>();
   const noted = async (
-    workspace: string,
+    project: string,
     conversation: string,
     state: Promise<EngineState>,
   ): Promise<EngineState> => {
     const now = await state;
-    const id = `${workspace}\0${conversation}`;
+    const id = `${project}\0${conversation}`;
     if (now.state === "terminal") {
-      paused.set(id, { workspace, conversation });
+      paused.set(id, { project, conversation });
       if (paused.size > 64) paused.delete(paused.keys().next().value as string);
     } else paused.delete(id);
     return now;
   };
   bridge.onRunningChanged?.(() => {
     for (const [id, which] of [...paused]) {
-      void engines.state(which.workspace, which.conversation).then((engine) => {
+      void engines.state(which.project, which.conversation).then((engine) => {
         if (engine.state === "terminal") return;
         paused.delete(id);
         tell({ type: "state", ...which, engine });
@@ -638,16 +637,16 @@ export function registerConversation(
     async (args): Promise<Conversation> => {
       await ready;
       if (args.length !== 2)
-        throw new Error("A workspace and a conversation are required");
-      const { workspace, conversation } = conversationOf(args);
+        throw new Error("A project and a conversation are required");
+      const { project, conversation } = conversationOf(args);
       // A worker of an orchestration run (FE-87) keeps its transcript under
       // its own worktree, not the project's folder.
       const folder =
-        workerFolderOf(workspace, conversation) ?? (await folderOf(workspace));
+        workerFolderOf(project, conversation) ?? (await folderOf(project));
       const agent = await agentOf(folder, conversation);
       // A conversation started here whose first line the CLI has not
       // written yet: what its engine holds so far.
-      const pending = engines.pending(workspace, conversation);
+      const pending = engines.pending(project, conversation);
       if (pending && !agent)
         return {
           id: conversation,
@@ -697,18 +696,18 @@ export function registerConversation(
         throw new Error("A valid conductor is required");
       if (!request.text.trim() && request.attachments.length === 0)
         throw new Error("Write something first.");
-      const folder = await folderOf(request.workspace);
+      const folder = await folderOf(request.project);
       const out = await outgoingOf(request);
       // The model picks the CLI: Codex and OpenCode name their conversation
       // themselves.
       const agent = agentOfModel(request.settings.model);
       const started =
         agent !== "claude"
-          ? await engines.startNamed(agent, request.workspace, folder, out)
+          ? await engines.startNamed(agent, request.project, folder, out)
           : {
               conversation,
               engine: await engines.start(
-                request.workspace,
+                request.project,
                 conversation,
                 folder,
                 out,
@@ -716,7 +715,7 @@ export function registerConversation(
             };
       if (conductor)
         await bindConductorConversation(
-          request.workspace,
+          request.project,
           agent,
           started.conversation,
           conductor,
@@ -737,16 +736,16 @@ export function registerConversation(
       const request = sendRequest(args[0]);
       // A worker is the lead's to talk to; a send from here would start a
       // second engine on its conversation in the project's folder (FE-87).
-      if (workerFolderOf(request.workspace, request.conversation))
+      if (workerFolderOf(request.project, request.conversation))
         throw new Error(
           "This conversation is a worker of an orchestration run. Message it through its lead.",
         );
-      const folder = await folderOf(request.workspace);
+      const folder = await folderOf(request.project);
       // NOTE: Only a conversation this folder has: its transcript is where
       // the CLI keeps this folder's, under the id it was asked for.
       const agent =
         (await agentOf(folder, request.conversation)) ??
-        engines.pending(request.workspace, request.conversation)?.agent;
+        engines.pending(request.project, request.conversation)?.agent;
       if (!agent) throw new Error("That conversation is not in this project.");
       // A conversation stays on the CLI that wrote it.
       if (agentOfModel(request.settings.model) !== agent)
@@ -754,10 +753,10 @@ export function registerConversation(
           `Pick ${agent === "opencode" ? "an" : "a"} ${AGENT_LABELS[agent]} model for this conversation.`,
         );
       return noted(
-        request.workspace,
+        request.project,
         request.conversation,
         engines.send(
-          request.workspace,
+          request.project,
           request.conversation,
           folder,
           await outgoingOf(request),
@@ -769,9 +768,9 @@ export function registerConversation(
 
   handle(conversationChannels.stop, devUrl, async (args): Promise<void> => {
     if (args.length !== 2)
-      throw new Error("A workspace and a conversation are required");
-    const { workspace, conversation } = conversationOf(args);
-    await engines.stop(workspace, conversation);
+      throw new Error("A project and a conversation are required");
+    const { project, conversation } = conversationOf(args);
+    await engines.stop(project, conversation);
   });
 
   handle(
@@ -779,9 +778,9 @@ export function registerConversation(
     devUrl,
     async (args): Promise<number> => {
       if (args.length !== 2)
-        throw new Error("A workspace and a conversation are required");
-      const { workspace, conversation } = conversationOf(args);
-      return engines.clearQueue(workspace, conversation);
+        throw new Error("A project and a conversation are required");
+      const { project, conversation } = conversationOf(args);
+      return engines.clearQueue(project, conversation);
     },
   );
 
@@ -791,8 +790,8 @@ export function registerConversation(
     async (
       args,
     ): Promise<{ text: string; attachments: OutgoingAttachment[] } | null> => {
-      const { workspace, conversation, message } = queuedOf(args);
-      const taken = engines.takeQueued(workspace, conversation, message);
+      const { project, conversation, message } = queuedOf(args);
+      const taken = engines.takeQueued(project, conversation, message);
       return taken
         ? { text: taken.text, attachments: taken.attachments }
         : null;
@@ -803,8 +802,8 @@ export function registerConversation(
     conversationChannels.removeQueued,
     devUrl,
     async (args): Promise<boolean> => {
-      const { workspace, conversation, message } = queuedOf(args);
-      return engines.takeQueued(workspace, conversation, message) !== null;
+      const { project, conversation, message } = queuedOf(args);
+      return engines.takeQueued(project, conversation, message) !== null;
     },
   );
 
@@ -813,9 +812,9 @@ export function registerConversation(
     devUrl,
     async (args): Promise<void> => {
       if (args.length !== 2)
-        throw new Error("A workspace and a conversation are required");
-      const { workspace, conversation } = conversationOf(args);
-      engines.resumeQueue(workspace, conversation);
+        throw new Error("A project and a conversation are required");
+      const { project, conversation } = conversationOf(args);
+      engines.resumeQueue(project, conversation);
     },
   );
 
@@ -825,17 +824,17 @@ export function registerConversation(
     async (args): Promise<void> => {
       if (args.length !== 4)
         throw new Error("A conversation, a request and an answer are required");
-      const { workspace, conversation } = conversationOf(args);
+      const { project, conversation } = conversationOf(args);
       const id = key(args[2], "request");
-      engines.answer(workspace, conversation, id, permissionAnswer(args[3]));
+      engines.answer(project, conversation, id, permissionAnswer(args[3]));
     },
   );
 
   handle(conversationChannels.fork, devUrl, async (args): Promise<string> => {
     if (args.length !== 2)
-      throw new Error("A workspace and a conversation are required");
-    const { workspace, conversation } = conversationOf(args);
-    const folder = await folderOf(workspace);
+      throw new Error("A project and a conversation are required");
+    const { project, conversation } = conversationOf(args);
+    const folder = await folderOf(project);
     const agent = await agentOf(folder, conversation);
     if (agent === "codex" || agent === "opencode")
       throw new Error(
@@ -852,40 +851,40 @@ export function registerConversation(
     devUrl,
     async (args): Promise<EngineState> => {
       if (args.length !== 2)
-        throw new Error("A workspace and a conversation are required");
-      const { workspace, conversation } = conversationOf(args);
-      await folderOf(workspace);
+        throw new Error("A project and a conversation are required");
+      const { project, conversation } = conversationOf(args);
+      await folderOf(project);
       return noted(
-        workspace,
+        project,
         conversation,
-        engines.takeOver(workspace, conversation),
+        engines.takeOver(project, conversation),
       );
     },
   );
 
   handle(conversationChannels.close, devUrl, async (args): Promise<void> => {
     if (args.length !== 2)
-      throw new Error("A workspace and a conversation are required");
-    const { workspace, conversation } = conversationOf(args);
-    await engines.close(workspace, conversation);
-    awaiting.clear(workspace, conversation);
+      throw new Error("A project and a conversation are required");
+    const { project, conversation } = conversationOf(args);
+    await engines.close(project, conversation);
+    awaiting.clear(project, conversation);
   });
 
   handle(
     conversationChannels.alive,
     devUrl,
     async (args): Promise<string[]> => {
-      if (args.length !== 1) throw new Error("A workspace is required");
-      return engines.alive(key(args[0], "workspace"));
+      if (args.length !== 1) throw new Error("A project is required");
+      return engines.alive(key(args[0], "project"));
     },
   );
 
   handle(conversationChannels.release, devUrl, async (args): Promise<void> => {
     if (args.length !== 2)
-      throw new Error("A workspace and a conversation are required");
-    const { workspace, conversation } = conversationOf(args);
-    await engines.release(workspace, conversation);
-    awaiting.clear(workspace, conversation);
+      throw new Error("A project and a conversation are required");
+    const { project, conversation } = conversationOf(args);
+    await engines.release(project, conversation);
+    awaiting.clear(project, conversation);
   });
 
   handle(
@@ -893,13 +892,9 @@ export function registerConversation(
     devUrl,
     async (args): Promise<EngineState> => {
       if (args.length !== 2)
-        throw new Error("A workspace and a conversation are required");
-      const { workspace, conversation } = conversationOf(args);
-      return noted(
-        workspace,
-        conversation,
-        engines.state(workspace, conversation),
-      );
+        throw new Error("A project and a conversation are required");
+      const { project, conversation } = conversationOf(args);
+      return noted(project, conversation, engines.state(project, conversation));
     },
   );
 
@@ -908,9 +903,9 @@ export function registerConversation(
     devUrl,
     async (args): Promise<PermissionRequest[]> => {
       if (args.length !== 2)
-        throw new Error("A workspace and a conversation are required");
-      const { workspace, conversation } = conversationOf(args);
-      return engines.permissions(workspace, conversation);
+        throw new Error("A project and a conversation are required");
+      const { project, conversation } = conversationOf(args);
+      return engines.permissions(project, conversation);
     },
   );
 
@@ -992,8 +987,8 @@ export function registerConversation(
     devUrl,
     async (args): Promise<Suggestion[]> => {
       if (args.length !== 3 && args.length !== 4)
-        throw new Error("A workspace, a kind and a query are required");
-      const workspace = key(args[0], "workspace");
+        throw new Error("A project, a kind and a query are required");
+      const project = key(args[0], "project");
       const [, kind, query, agent = null] = args;
       if (typeof query !== "string" || query.length > 200)
         throw new Error("A valid query is required");
@@ -1006,11 +1001,10 @@ export function registerConversation(
         throw new Error("A valid agent is required");
       if (kind === "command")
         return rankCommands(
-          await commandsOf(workspace, agent ?? undefined),
+          await commandsOf(project, agent ?? undefined),
           query,
         );
-      if (kind === "file")
-        return suggestFiles(await folderOf(workspace), query);
+      if (kind === "file") return suggestFiles(await folderOf(project), query);
       throw new Error("Unknown kind");
     },
   );

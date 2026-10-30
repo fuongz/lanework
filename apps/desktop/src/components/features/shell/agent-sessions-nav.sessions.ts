@@ -39,15 +39,15 @@ export interface PendingChat {
  * machine, or no folder and no conversation (FE-23/D9).
  */
 export function useAgentRail(
-  workspace: string,
+  project: string,
   slug: string,
   hasFolder: boolean,
 ) {
-  const all = useAgentSessions((state) => state.byWorkspace[workspace] ?? NONE);
+  const all = useAgentSessions((state) => state.byProject[project] ?? NONE);
   // Not listed yet, or the CLIs not asked for: the rail draws its groups'
   // skeleton, not nothing.
   const listing = useAgentSessions(
-    (state) => state.byWorkspace[workspace] === undefined,
+    (state) => state.byProject[project] === undefined,
   );
   const asked = useTerminal((state) => state.agentsAsked);
   const loading = listing || !asked;
@@ -55,13 +55,13 @@ export function useAgentRail(
   const agents = useTerminal((state) => state.agents);
   const loadAgents = useTerminal((state) => state.loadAgents);
   const running = useAgentTerminals(
-    (state) => state.sessions[workspace] ?? NO_TERMINALS,
+    (state) => state.sessions[project] ?? NO_TERMINALS,
   );
   const refreshRunning = useAgentTerminals((state) => state.refresh);
   // Conversations the chat runs count as Running too, like a live tab.
-  const chats = useChatEngines((state) => state.alive[workspace] ?? NO_CHATS);
+  const chats = useChatEngines((state) => state.alive[project] ?? NO_CHATS);
   // Orchestration runs (FE-87): a lead's workers nest under its row.
-  const runs = useOrchestrationRuns(workspace);
+  const runs = useOrchestrationRuns(project);
   const refreshChats = useChatEngines((state) => state.refresh);
   const watchChats = useChatEngines((state) => state.watch);
   const navigate = useNavigate();
@@ -86,34 +86,34 @@ export function useAgentRail(
     select: (state) => state.location.pathname === `/w/${slug}/agents/chat/new`,
   });
   const chatAgent = useChatAgent();
-  const starting = useNewChats((state) => state.starting[workspace]);
+  const starting = useNewChats((state) => state.starting[project]);
   const started = useNewChats((state) => state.started);
   const forgetStarted = useNewChats((state) => state.forget);
 
   useEffect(() => watchActivity(), [watchActivity]);
   useEffect(() => watchChats(), [watchChats]);
   useEffect(() => {
-    void refreshChats(workspace);
-  }, [refreshChats, workspace]);
+    void refreshChats(project);
+  }, [refreshChats, project]);
 
   // Re-read on entering the project, on focus, and when its terminals change:
   // an agent tab exiting is when a conversation gets its last words and its
   // title. Never on a timer, the Changes badge's rule.
   useEffect(() => {
-    void load(workspace);
-    void refreshRunning(workspace);
-    const onFocus = () => void load(workspace);
+    void load(project);
+    void refreshRunning(project);
+    const onFocus = () => void load(project);
     window.addEventListener("focus", onFocus);
     const off = window.desktop?.terminal.onChange((changed) => {
-      if (changed !== workspace && changed !== "*") return;
-      void load(workspace);
-      void refreshRunning(workspace);
+      if (changed !== project && changed !== "*") return;
+      void load(project);
+      void refreshRunning(project);
     });
     return () => {
       window.removeEventListener("focus", onFocus);
       off?.();
     };
-  }, [load, refreshRunning, workspace]);
+  }, [load, refreshRunning, project]);
 
   // A started conversation stops standing in once the listing has it.
   useEffect(() => {
@@ -126,7 +126,7 @@ export function useAgentRail(
   // And the listing is read again as its first turn lands, not only on focus
   // or a terminal change: that is when its transcript (and title) appears.
   const waiting = Object.values(started).some(
-    (chat) => chat.workspace === workspace,
+    (chat) => chat.project === project,
   );
   useEffect(() => {
     const surface = window.desktop?.conversation;
@@ -137,21 +137,21 @@ export function useAgentRail(
         (event.type !== "state" &&
           event.type !== "turn" &&
           event.type !== "moved") ||
-        event.workspace !== workspace ||
+        event.project !== project ||
         !(event.conversation in useNewChats.getState().started) ||
         timer
       )
         return;
       timer = setTimeout(() => {
         timer = null;
-        void load(workspace);
+        void load(project);
       }, 500);
     });
     return () => {
       off();
       if (timer) clearTimeout(timer);
     };
-  }, [waiting, load, workspace]);
+  }, [waiting, load, project]);
 
   // Asked only once there is something to filter (FE-23/D8): the probe starts
   // the pty host and a shell, which a project with no conversation has no
@@ -165,7 +165,7 @@ export function useAgentRail(
   // (FE-95/D13): Reset brings it back, and so does its conductor going away
   // (deleted, or its repo file removed). Until the list is read it stays out,
   // so it never flashes here first.
-  const leads = useTeamLeads(workspace);
+  const leads = useTeamLeads(project);
   const sessions = useMemo(() => {
     const known = leads ? new Set(leads.leads.map((lead) => lead.id)) : null;
     return all.filter(
@@ -240,7 +240,7 @@ export function useAgentRail(
     });
   for (const [id, chat] of Object.entries(started)) {
     if (
-      chat.workspace !== workspace ||
+      chat.project !== project ||
       chat.conductor ||
       all.some((session) => session.id === id)
     )

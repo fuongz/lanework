@@ -9,18 +9,18 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import type { Project } from "#/../shared/projects";
 import type { TerminalSession } from "#/../shared/terminal";
-import type { Workspace } from "#/../shared/workspaces";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
+import { CreateProjectDialog } from "#/components/shared/projects/create-project-dialog";
+import { ProjectTile } from "#/components/shared/projects/project-tile";
+import { RenameProjectDialog } from "#/components/shared/projects/rename-project-dialog";
+import { SourceFoldersDialog } from "#/components/shared/projects/source-folders-dialog";
 import {
   TERMINAL_KIND_LABELS,
   TerminalKindIcon,
 } from "#/components/shared/terminal/terminal-kind-icon";
-import { CreateProjectDialog } from "#/components/shared/workspaces/create-project-dialog";
-import { ProjectTile } from "#/components/shared/workspaces/project-tile";
-import { RenameProjectDialog } from "#/components/shared/workspaces/rename-project-dialog";
-import { SourceFoldersDialog } from "#/components/shared/workspaces/source-folders-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -50,11 +50,11 @@ import { useBoard } from "#/stores/board";
 import { NO_CHATS, useChatEngines } from "#/stores/chat-engines";
 import { useOpenProject } from "#/stores/last-route";
 import { type ProjectSort, usePreferences } from "#/stores/preferences";
-import { isLocalWorkspace } from "#/stores/session";
+import { isLocalProject } from "#/stores/session";
 import { ProjectReorderList } from "./project-reorder-list";
 
 /** The terminal key a project's agents are filed under. */
-const keyOf = (workspace: Workspace) => workspace.id ?? workspace.slug;
+const keyOf = (project: Project) => project.id ?? project.slug;
 
 const NO_AGENTS: TerminalSession[] = [];
 
@@ -122,10 +122,10 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
   // Opened from a row's context menu; outside the popover, like `creating`.
-  const [renaming, setRenaming] = useState<(Workspace & { id: string }) | null>(
+  const [renaming, setRenaming] = useState<(Project & { id: string }) | null>(
     null,
   );
-  const [editing, setEditing] = useState<Workspace | null>(null);
+  const [editing, setEditing] = useState<Project | null>(null);
   // The Reorder entry in the sort menu turns the list into a drag-to-reorder
   // one until Done, or until the menu closes.
   const [reordering, setReordering] = useState(false);
@@ -135,7 +135,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const list = useRef<HTMLDivElement>(null);
   const sort = usePreferences((state) => state.projectSort);
   const setSort = usePreferences((state) => state.setProjectSort);
-  const workspaces = useBoard((state) => state.workspaces);
+  const projects = useBoard((state) => state.projects);
   const active = useBoard((state) => state.active);
   const openProject = useOpenProject();
   const navigate = useNavigate();
@@ -151,20 +151,20 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
    * runs there has no agent tab at all; counting tabs alone would leave its
    * row blank while the rail lists it under Running.
    */
-  const runningIn = (workspace: Workspace): RunningAgent[] => {
-    const tabs = (agentsByKey[keyOf(workspace)] ?? NO_AGENTS).filter(
+  const runningIn = (project: Project): RunningAgent[] => {
+    const tabs = (agentsByKey[keyOf(project)] ?? NO_AGENTS).filter(
       (agent) => !agent.exit,
     );
-    const chats = (chatsByKey[keyOf(workspace)] ?? NO_CHATS)
+    const chats = (chatsByKey[keyOf(project)] ?? NO_CHATS)
       .filter((id) => !tabs.some((tab) => tab.resume === id))
       .map((id): RunningAgent => ({ id, kind: "claude" }));
     return [...tabs, ...chats];
   };
-  const hasAgents = (workspace: Workspace) => runningIn(workspace).length > 0;
-  const sortedWorkspaces =
+  const hasAgents = (project: Project) => runningIn(project).length > 0;
+  const sortedProjects =
     sort === "default"
-      ? workspaces
-      : [...workspaces].sort((a, b) =>
+      ? projects
+      : [...projects].sort((a, b) =>
           sort === "name"
             ? a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
             : Number(hasAgents(b)) - Number(hasAgents(a)),
@@ -172,28 +172,28 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
 
   // By name or slug. ⌘1…⌘9 keep the whole list's order, whatever is typed.
   const needle = fold(query.trim());
-  const shownWorkspaces = needle
-    ? sortedWorkspaces.filter(
-        (workspace) =>
-          fold(workspace.name).includes(needle) ||
-          fold(workspace.slug).includes(needle),
+  const shownProjects = needle
+    ? sortedProjects.filter(
+        (project) =>
+          fold(project.name).includes(needle) ||
+          fold(project.slug).includes(needle),
       )
-    : sortedWorkspaces;
+    : sortedProjects;
 
   // Asked for every project each time the menu opens. The rail only lists the
   // open project's agents, so without this the other rows would show whatever
   // was running the last time each one was open, or nothing.
   useEffect(() => {
     if (!open) return;
-    for (const workspace of workspaces) {
-      void refreshAgents(keyOf(workspace));
-      void refreshChats(keyOf(workspace));
+    for (const project of projects) {
+      void refreshAgents(keyOf(project));
+      void refreshChats(keyOf(project));
     }
-  }, [open, workspaces, refreshAgents, refreshChats]);
+  }, [open, projects, refreshAgents, refreshChats]);
 
   // Saved by cloud id, so a project the service sent no id for holds them all.
   const canReorder =
-    workspaces.length > 1 && workspaces.every((entry) => entry.id !== null);
+    projects.length > 1 && projects.every((entry) => entry.id !== null);
   const reorder = (slugs: string[]) => {
     setReorderFailed(null);
     void reorderProjects(slugs).then(
@@ -218,10 +218,10 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
       if (!event.metaKey && !event.ctrlKey) return;
       const at = Number(event.key) - 1;
       if (!Number.isInteger(at) || at < 0 || at > 8) return;
-      const workspace = sortedWorkspaces[at];
-      if (!workspace) return;
+      const project = sortedProjects[at];
+      if (!project) return;
       event.preventDefault();
-      go(workspace.slug);
+      go(project.slug);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -257,7 +257,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                   : "hover:bg-foreground/[0.05] flex h-8 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left transition-colors duration-150"
               }
             >
-              <ProjectTile workspace={active} className="size-6 text-[11px]" />
+              <ProjectTile project={active} className="size-6 text-[11px]" />
               {!compact && (
                 <>
                   <span className="truncate text-[13px] font-medium">
@@ -305,7 +305,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
               {reorderFailed}
             </p>
           )}
-          {!reordering && workspaces.length > 0 && (
+          {!reordering && projects.length > 0 && (
             <div className="border-foreground/10 mb-1 flex h-8 shrink-0 items-center gap-2 border-b px-2 pb-1">
               <HugeiconsIcon
                 icon={Search01Icon}
@@ -319,9 +319,9 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && shownWorkspaces[0]) {
+                  if (event.key === "Enter" && shownProjects[0]) {
                     event.preventDefault();
-                    go(shownWorkspaces[0].slug);
+                    go(shownProjects[0].slug);
                   } else if (event.key === "ArrowDown") {
                     event.preventDefault();
                     list.current
@@ -339,7 +339,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
           )}
           {reordering ? (
             <div className="max-h-80 overflow-y-auto">
-              <ProjectReorderList workspaces={workspaces} onReorder={reorder} />
+              <ProjectReorderList projects={projects} onReorder={reorder} />
             </div>
           ) : (
             <RailHover className="max-h-80 overflow-y-auto">
@@ -367,7 +367,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                   else rows[Math.min(next, rows.length - 1)]?.focus();
                 }}
               >
-                {workspaces.length === 0 && (
+                {projects.length === 0 && (
                   <Empty className="px-2 py-4">
                     <EmptyHeader>
                       <EmptyTitle>No projects yet</EmptyTitle>
@@ -377,7 +377,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                     </EmptyHeader>
                   </Empty>
                 )}
-                {workspaces.length > 0 && shownWorkspaces.length === 0 && (
+                {projects.length > 0 && shownProjects.length === 0 && (
                   <Empty className="px-2 py-4">
                     <EmptyHeader>
                       <EmptyTitle>No matches</EmptyTitle>
@@ -387,26 +387,26 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                     </EmptyHeader>
                   </Empty>
                 )}
-                {shownWorkspaces.map((workspace) => (
-                  <ContextMenu key={workspace.slug}>
+                {shownProjects.map((project) => (
+                  <ContextMenu key={project.slug}>
                     <ContextMenuTrigger
                       render={
                         <button
                           type="button"
                           role="option"
-                          aria-selected={workspace.slug === active?.slug}
-                          onClick={() => go(workspace.slug)}
+                          aria-selected={project.slug === active?.slug}
+                          onClick={() => go(project.slug)}
                           className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
                         />
                       }
                     >
                       <ProjectTile
-                        workspace={workspace}
+                        project={project}
                         className="size-5 rounded-[5px] text-[10px]"
                       />
-                      <span className="truncate">{workspace.name}</span>
-                      {isLocalWorkspace(workspace) && <LocalBadge />}
-                      <RunningAgents agents={runningIn(workspace)} />
+                      <span className="truncate">{project.name}</span>
+                      {isLocalProject(project) && <LocalBadge />}
+                      <RunningAgents agents={runningIn(project)} />
                     </ContextMenuTrigger>
                     {/* The two everyday edits from Settings → Projects,
                         without leaving the switcher. Rename is addressed by
@@ -416,12 +416,12 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                         stays highlighted beside the one under the pointer. */}
                     <ContextMenuContent finalFocus={false}>
                       <ContextMenuItem
-                        disabled={workspace.id === null}
+                        disabled={project.id === null}
                         onClick={() => {
-                          const id = workspace.id;
+                          const id = project.id;
                           if (!id) return;
                           setOpen(false);
-                          setRenaming({ ...workspace, id });
+                          setRenaming({ ...project, id });
                         }}
                       >
                         Rename
@@ -429,7 +429,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                       <ContextMenuItem
                         onClick={() => {
                           setOpen(false);
-                          setEditing(workspace);
+                          setEditing(project);
                         }}
                       >
                         Edit folders
@@ -467,7 +467,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
               title="Project settings"
               onClick={() => {
                 setOpen(false);
-                void navigate({ to: "/settings/workspaces" });
+                void navigate({ to: "/settings/projects" });
               }}
               className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] text-muted-foreground hover:text-foreground grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-150 focus:outline-none`}
             >
@@ -486,7 +486,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
               aria-label="Reorder projects"
               aria-pressed={reordering}
               title={
-                workspaces.length > 1 && !canReorder
+                projects.length > 1 && !canReorder
                   ? "A project here has no cloud id yet, so the order cannot be saved."
                   : "Reorder projects"
               }
@@ -558,14 +558,14 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
       />
       {renaming && (
         <RenameProjectDialog
-          workspace={renaming}
+          project={renaming}
           open
           onOpenChange={(next) => !next && setRenaming(null)}
         />
       )}
       {editing && (
         <SourceFoldersDialog
-          workspace={editing}
+          project={editing}
           open
           onOpenChange={(next) => !next && setEditing(null)}
         />

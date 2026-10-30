@@ -33,7 +33,7 @@ import {
  */
 const OUT = "../../.agents/artifacts/ui-gallery";
 
-const workspaces = [
+const projects = [
   {
     id: "ws-lanework",
     slug: "lanework",
@@ -302,7 +302,7 @@ async function capture(page: Page, label: string) {
 async function open(options: {
   apiUrl?: string;
   seed?: (plane: Awaited<ReturnType<typeof startStubPlane>>) => void;
-  planeWorkspaces?: typeof workspaces;
+  planeProjects?: typeof projects;
   /**
    * Folders the OS chooser will "return", so the create dialog can be shot
    * with a list in it.
@@ -318,7 +318,7 @@ async function open(options: {
   close: () => Promise<void>;
 }> {
   const plane = await startStubPlane({
-    workspaces: options.planeWorkspaces ?? workspaces,
+    projects: options.planeProjects ?? projects,
   });
   options.seed?.(plane);
   const profile = await mkdtemp(join(tmpdir(), "lanework-gallery-"));
@@ -458,7 +458,7 @@ test("ui gallery", async () => {
       await page.waitForTimeout(400);
       await capture(page, "new issue filled");
 
-      await page.goto("app://lanework/settings/workspaces");
+      await page.goto("app://lanework/settings/projects");
       await page.waitForTimeout(700);
       await page
         .getByRole("button", { name: /^Import from local into / })
@@ -534,7 +534,7 @@ test("ui gallery", async () => {
 
   // ── An account with no projects ────────────────────────────────────────────
   {
-    const { page, close } = await open({ planeWorkspaces: [] });
+    const { page, close } = await open({ planeProjects: [] });
     try {
       await page.getByRole("button", { name: /^Switch project/ }).waitFor();
       await page.waitForTimeout(900);
@@ -559,7 +559,7 @@ test("ui gallery", async () => {
   // ── The control plane is down ──────────────────────────────────────────────
   {
     const { page, close } = await open({
-      seed: (p) => p.setWorkspaceResponse(503),
+      seed: (p) => p.setProjectResponse(503),
     });
     try {
       await page.getByRole("button", { name: /^Switch project/ }).waitFor();
@@ -572,13 +572,13 @@ test("ui gallery", async () => {
 
   // ── A service too old to name a board ──────────────────────────────────────
   {
-    const older = workspaces.map(({ slug, name, path, baseBranch }) => ({
+    const older = projects.map(({ slug, name, path, baseBranch }) => ({
       slug,
       name,
       path,
       baseBranch,
-    })) as unknown as typeof workspaces;
-    const { page, close } = await open({ planeWorkspaces: older });
+    })) as unknown as typeof projects;
+    const { page, close } = await open({ planeProjects: older });
     try {
       await page.getByRole("button", { name: /^Switch project/ }).waitFor();
       await page

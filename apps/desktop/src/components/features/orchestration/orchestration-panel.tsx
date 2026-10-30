@@ -40,7 +40,7 @@ type Send = (
  * request and the proposal JSON stays out of the reply.
  */
 export function useOrchestration({
-  workspace,
+  project,
   lead,
   leadAgent,
   turns,
@@ -48,7 +48,7 @@ export function useOrchestration({
   cwd,
   send,
 }: {
-  workspace: string | null;
+  project: string | null;
   /** The lead's conversation id. */
   lead: string;
   /** Its CLI; null until the conversation is read. */
@@ -70,7 +70,7 @@ export function useOrchestration({
   const models = useModels();
   // The team leads (FE-88): a proposal made under one is checked against its
   // workers, and its card offers only them.
-  const leadsList = useTeamLeads(workspace);
+  const leadsList = useTeamLeads(project);
   const leads = leadsList?.leads;
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-checked when the model list arrives.
   const proposals = useMemo(
@@ -102,8 +102,8 @@ export function useOrchestration({
       setPending({ id, request, teamLead: teamLead?.id ?? null });
       // Its context files as they stand now (FE-96).
       const planner =
-        teamLead && workspace
-          ? await withLiveContext(workspace, teamLead)
+        teamLead && project
+          ? await withLiveContext(project, teamLead)
           : teamLead;
       const ok = await sendRef.current(
         planningPrompt(id, request.trim(), leadAgent, cwd, planner),
@@ -113,7 +113,7 @@ export function useOrchestration({
       if (!ok) setPending((current) => (current?.id === id ? null : current));
       return ok;
     },
-    [leadAgent, cwd, workspace],
+    [leadAgent, cwd, project],
   );
 
   const repair = useCallback(
@@ -123,7 +123,7 @@ export function useOrchestration({
       const found =
         leads?.find((entry) => entry.id === proposal.teamLead) ?? null;
       const teamLead =
-        found && workspace ? await withLiveContext(workspace, found) : found;
+        found && project ? await withLiveContext(project, found) : found;
       return sendRef.current(
         repairPrompt(
           proposal.id,
@@ -138,7 +138,7 @@ export function useOrchestration({
         [],
       );
     },
-    [leadAgent, cwd, leads, workspace],
+    [leadAgent, cwd, leads, project],
   );
 
   // ─── The lead's runs ──────────────────────────────────────────────────────
@@ -160,11 +160,11 @@ export function useOrchestration({
   );
   useEffect(() => {
     const surface = window.desktop?.orchestration;
-    if (!workspace || !surface) return;
+    if (!project || !surface) return;
     let gone = false;
     setRuns(null);
     void surface
-      .runs(workspace)
+      .runs(project)
       .then((list) => {
         if (!gone)
           setRuns(
@@ -178,16 +178,16 @@ export function useOrchestration({
         if (!gone) setRuns([]);
       });
     const off = surface.onChange((event) => {
-      if (event.workspace === workspace) upsert(event.run);
+      if (event.project === project) upsert(event.run);
     });
     return () => {
       gone = true;
       off();
     };
-  }, [workspace, lead, upsert]);
+  }, [project, lead, upsert]);
 
   return {
-    workspace,
+    project,
     lead,
     leadAgent,
     /** The turns to draw: see {@link visibleTurns}. */
@@ -228,11 +228,11 @@ export function AwaitingProposal({
   orchestration: Orchestration;
   proposal: DerivedProposal;
 }) {
-  const { workspace, lead, leadAgent, leads } = orchestration;
-  if (!workspace || !leadAgent) return null;
+  const { project, lead, leadAgent, leads } = orchestration;
+  if (!project || !leadAgent) return null;
   return (
     <ProposalCard
-      workspace={workspace}
+      project={project}
       lead={lead}
       leadAgent={leadAgent}
       proposal={proposal}
@@ -263,13 +263,13 @@ export function OrchestrationPanel({
   slug: string;
   orchestration: Orchestration;
 }) {
-  const { workspace, lead, leadAgent, proposals, pending, runs, leads } =
+  const { project, lead, leadAgent, proposals, pending, runs, leads } =
     orchestration;
   const teamLeadOf = (id: string | null) =>
     id ? (leads?.find((entry) => entry.id === id) ?? null) : null;
   const edits = useProposalEdits((state) => state.edits);
   const awaiting = useAwaitingProposal(orchestration);
-  if (!workspace || !leadAgent) return null;
+  if (!project || !leadAgent) return null;
 
   const latest = proposals.at(-1);
   const linked = new Set<string>();
@@ -283,7 +283,7 @@ export function OrchestrationPanel({
           <RunPanel
             key={proposal.id}
             slug={slug}
-            workspace={workspace}
+            project={project}
             run={run}
             title={proposal.title}
             focusKey={proposal.id}
@@ -306,7 +306,7 @@ export function OrchestrationPanel({
     return [
       <ProposalCard
         key={proposal.id}
-        workspace={workspace}
+        project={project}
         lead={lead}
         leadAgent={leadAgent}
         proposal={proposal}
@@ -325,7 +325,7 @@ export function OrchestrationPanel({
     items.push(
       <ProposalCard
         key={pending.id}
-        workspace={workspace}
+        project={project}
         lead={lead}
         leadAgent={leadAgent}
         proposal={{
@@ -353,7 +353,7 @@ export function OrchestrationPanel({
         <RunPanel
           key={run.id}
           slug={slug}
-          workspace={workspace}
+          project={project}
           run={run}
           title={null}
           onRun={orchestration.upsert}

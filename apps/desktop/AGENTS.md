@@ -32,7 +32,7 @@ Details: [process boundaries](../../docs/standards/process-boundaries.md),
 | --- | --- | --- |
 | The credential lives only in main (`electron/main/auth/`); the renderer gets a redacted session. Only `auth/store.ts` and `auth/index.ts` import Electron. | Not gated | [What each side may import](../../docs/standards/process-boundaries.md#what-each-side-may-import) |
 | `shared/policy.ts` `can()` is the authorization rule. Main enforces it on cloud and credential operations; local surfaces (terminal, conversation, worktree, agent-config, dictation, local boards) are intentionally not session-gated. The renderer calls it only to hide what would be refused. | Not gated | [Authorization](../../docs/standards/process-boundaries.md#authorization) |
-| The app home is named once, in `electron/main/paths.ts` (`~/.lanew`, overridden by `LANEWORK_HOME`). | Not gated | `paths.ts` |
+| The app home is named once, in `electron/main/paths.ts` (`~/.lanew`, overridden by `LANEWORK_HOME`), and so is its `projects/` state folder, moved from `workspaces/` at startup (FE-107). | Not gated | `paths.ts` |
 | A config file another tool owns is written through `electron/main/config-file.ts` (atomic, keeps mode and symlinks). | Not gated | `config-file.ts` |
 
 ## Renderer

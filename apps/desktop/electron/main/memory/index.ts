@@ -13,9 +13,9 @@ import {
   memoryChannels,
 } from "../../../shared/memory";
 import { broadcast, handle } from "../ipc";
+import { terminalFolder } from "../projects";
+import { revealFolder } from "../projects/folder-chooser";
 import { agentHomeDir } from "../test-seams";
-import { terminalFolder } from "../workspaces";
-import { revealFolder } from "../workspaces/folder-chooser";
 import { listMemory, memoryDir, readMemory, watchMemory } from "./read";
 
 /**
@@ -31,9 +31,9 @@ function claudeHome(): string {
 
 /** The project's folder here and its memory folder. Nulls without a folder. */
 async function resolveDir(
-  workspace: string,
+  project: string,
 ): Promise<{ folder: string | null; dir: string | null }> {
-  const folder = await terminalFolder(workspace);
+  const folder = await terminalFolder(project);
   return folder
     ? { folder, dir: await memoryDir(claudeHome(), folder) }
     : { folder: null, dir: null };
@@ -57,33 +57,33 @@ const watching = new Map<
 >();
 const WATCH_LIMIT = 4;
 
-function unwatch(workspace: string): void {
-  watching.get(workspace)?.stop();
-  watching.delete(workspace);
+function unwatch(project: string): void {
+  watching.get(project)?.stop();
+  watching.delete(project);
 }
 
-function watchWorkspace(workspace: string, dir: string, existed: boolean) {
-  const current = watching.get(workspace);
+function watchProject(project: string, dir: string, existed: boolean) {
+  const current = watching.get(project);
   if (current?.dir === dir && current.existed === existed) return;
-  unwatch(workspace);
+  unwatch(project);
   if (watching.size >= WATCH_LIMIT) {
     const [oldest] = watching.keys();
     if (oldest !== undefined) unwatch(oldest);
   }
   const stop = watchMemory(dir, () =>
-    broadcast(memoryChannels.changed, { workspace }),
+    broadcast(memoryChannels.changed, { project }),
   );
-  watching.set(workspace, { dir, existed, stop });
+  watching.set(project, { dir, existed, stop });
 }
 
-async function list(workspace: string): Promise<MemoryList> {
-  const { folder, dir } = await resolveDir(workspace);
+async function list(project: string): Promise<MemoryList> {
+  const { folder, dir } = await resolveDir(project);
   if (!folder || !dir) {
-    unwatch(workspace);
+    unwatch(project);
     return { folder: null, dir: null, entries: [], truncated: false };
   }
   const listed = await listMemory(dir);
-  watchWorkspace(workspace, dir, listed !== null);
+  watchProject(project, dir, listed !== null);
   return {
     folder,
     dir,
@@ -92,20 +92,20 @@ async function list(workspace: string): Promise<MemoryList> {
   };
 }
 
-async function read(workspace: string, file: string): Promise<MemoryFile> {
-  const { dir } = await resolveDir(workspace);
+async function read(project: string, file: string): Promise<MemoryFile> {
+  const { dir } = await resolveDir(project);
   if (!dir) throw new Error("This project has no folder on this machine.");
   return readMemory(dir, file);
 }
 
-async function reveal(workspace: string): Promise<void> {
-  const { dir } = await resolveDir(workspace);
+async function reveal(project: string): Promise<void> {
+  const { dir } = await resolveDir(project);
   if (!dir || !(await exists(dir)))
     throw new Error("Claude has not saved any memory for this project yet.");
   await revealFolder(dir);
 }
 
-function workspaceArg(value: unknown): string {
+function projectArg(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
     throw new Error("A project is required");
   return value;
@@ -114,15 +114,15 @@ function workspaceArg(value: unknown): string {
 export function registerMemory(devUrl?: string): void {
   handle(memoryChannels.list, devUrl, (args) => {
     if (args.length !== 1) throw new Error("list takes one project");
-    return list(workspaceArg(args[0]));
+    return list(projectArg(args[0]));
   });
   handle(memoryChannels.read, devUrl, (args) => {
     if (args.length !== 2) throw new Error("read takes a project and a file");
     if (!isMemoryFile(args[1])) throw new Error("That is not a memory file.");
-    return read(workspaceArg(args[0]), args[1]);
+    return read(projectArg(args[0]), args[1]);
   });
   handle(memoryChannels.reveal, devUrl, (args) => {
     if (args.length !== 1) throw new Error("reveal takes one project");
-    return reveal(workspaceArg(args[0]));
+    return reveal(projectArg(args[0]));
   });
 }

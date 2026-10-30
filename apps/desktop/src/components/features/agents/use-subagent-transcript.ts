@@ -18,7 +18,7 @@ import { ipcMessage } from "#/lib/ipc-error";
  * first must not land after a later one.
  */
 export function useSubagentTranscript(
-  workspace: string | null,
+  project: string | null,
   agent: TerminalAgent,
   conversation: string,
   sub: string,
@@ -27,7 +27,7 @@ export function useSubagentTranscript(
 ): { transcript: SubagentTranscript | null; error: string | null } {
   // What its activity names it: a workflow's agent by its run too.
   const which = run ? workflowAgentKey(run, sub) : sub;
-  const key = `${workspace}:${agent}:${conversation}/${which}`;
+  const key = `${project}:${agent}:${conversation}/${which}`;
   const [state, setState] = useState<{
     key: string;
     transcript: SubagentTranscript | null;
@@ -36,7 +36,7 @@ export function useSubagentTranscript(
 
   useEffect(() => {
     const surface = window.desktop?.terminal;
-    if (!workspace || !surface) return;
+    if (!project || !surface) return;
     let gone = false;
     let reading = false;
     let again = false;
@@ -47,7 +47,7 @@ export function useSubagentTranscript(
       }
       reading = true;
       surface
-        .agentSubagent(workspace, agent, conversation, sub, run)
+        .agentSubagent(project, agent, conversation, sub, run)
         .then((transcript) => {
           if (!gone) setState({ key, transcript, error: null });
         })
@@ -71,7 +71,7 @@ export function useSubagentTranscript(
     read();
     const off = surface.onAgentActivity((activity) => {
       if (
-        activity.workspace === workspace &&
+        activity.project === project &&
         activity.agent === agent &&
         activity.id === conversation &&
         activity.subagent === which
@@ -82,7 +82,7 @@ export function useSubagentTranscript(
       gone = true;
       off();
     };
-  }, [key, workspace, agent, conversation, sub, run, which]);
+  }, [key, project, agent, conversation, sub, run, which]);
 
   // Another sub-agent's, still on screen from before: none yet.
   return state.key === key

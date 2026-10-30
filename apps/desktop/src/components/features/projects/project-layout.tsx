@@ -26,7 +26,7 @@ import { useLastRoute } from "#/stores/last-route";
  * the board notice island in the shell (FE-63), because they are a property
  * of the board, not of the screen looking at it.
  */
-export function WorkspaceLayout() {
+export function ProjectLayout() {
   const { slug } = useParams({ from: "/_app/w/$slug" });
   const open = useBoard((state) => state.open);
   const poll = useBoard((state) => state.poll);
@@ -73,7 +73,7 @@ export function WorkspaceLayout() {
   const activeId = active?.id ?? null;
   const activeIsLocal = active?.origin === "local";
   useEffect(() => {
-    const api = window.desktop?.workspaces;
+    const api = window.desktop?.projects;
     if (!api?.onLocalChange || !activeIsLocal || !activeId) return;
     return api.onLocalChange((ids) => {
       if (ids.length === 0 || ids.includes(activeId)) void reload();
@@ -97,8 +97,8 @@ export function WorkspaceLayout() {
       </div>
     );
 
-  // A workspace whose id the service never sent. Not a failure and not an
-  // empty board: this app once refused the whole workspace list over it, so
+  // A project whose id the service never sent. Not a failure and not an
+  // empty board: this app once refused the whole project list over it, so
   // the project stays openable and the screen says which half is missing. The
   // folder in the sidebar is the other half; the cards are on disk.
   if (active && active.id === null)
@@ -131,7 +131,7 @@ export function WorkspaceLayout() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {active && <LocalBoardBar workspace={active} />}
+      {active && <LocalBoardBar project={active} />}
       <Outlet />
     </div>
   );

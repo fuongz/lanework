@@ -18,6 +18,7 @@ import {
   test,
 } from "@playwright/test";
 import type { MachineRecord } from "../electron/main/auth/store";
+import { writeFolders } from "../electron/main/projects/store";
 import {
   applyFix,
   buildReport,
@@ -27,9 +28,8 @@ import {
   importsAgentsMd,
   type ReadinessFacts,
 } from "../electron/main/readiness/checks";
-import { writeFolders } from "../electron/main/workspaces/store";
 import { AGENT_NOTES, MCP_URL } from "../shared/agent-notes";
-import type { Workspace } from "../shared/workspaces";
+import type { Project } from "../shared/projects";
 import {
   launchEnv,
   removeProfile,
@@ -222,7 +222,7 @@ test("fixes append or add one key, and never rewrite what is there", () => {
 // ── The app ─────────────────────────────────────────────────────────────────
 
 test.describe("in the app", () => {
-  const workspaces: Workspace[] = [
+  const projects: Project[] = [
     {
       id: "ws-alpha",
       slug: "alpha",
@@ -244,9 +244,9 @@ test.describe("in the app", () => {
   }
 
   async function open(folders: Record<string, string>) {
-    const plane = await startStubPlane({ workspaces });
-    for (const workspace of workspaces)
-      plane.setBoard(workspace.id as string, {
+    const plane = await startStubPlane({ projects });
+    for (const project of projects)
+      plane.setBoard(project.id as string, {
         columns: [{ key: "todo", name: "To-Do", role: "start" }],
         cards: [],
       });
@@ -305,7 +305,7 @@ test.describe("in the app", () => {
   /** Settings › Projects, managing the project `slug` (the open one). */
   async function openReadiness(page: Page, slug: string) {
     await page.goto(`app://lanework/w/${slug}/issues`);
-    await page.goto("app://lanework/settings/workspaces");
+    await page.goto("app://lanework/settings/projects");
     await expect(
       page.getByRole("heading", { name: "Ready for agents" }),
     ).toBeVisible({ timeout: 15_000 });

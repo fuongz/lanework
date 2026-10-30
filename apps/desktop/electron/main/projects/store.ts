@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { BoardView } from "../../../shared/workspaces";
+import type { BoardView } from "../../../shared/projects";
 import { resolveApi } from "../auth/client";
 import type { MachineRecord } from "../auth/store";
-import { appHomeDir } from "../paths";
+import { projectsDir } from "../paths";
 
 /**
  * The file key for one Lanework account on one API origin.
@@ -28,19 +28,19 @@ function accountKey(record: MachineRecord): string {
 }
 
 function activeFile(record: MachineRecord): string {
-  return join(appHomeDir(), "workspaces", `${accountKey(record)}.json`);
+  return join(projectsDir(), `${accountKey(record)}.json`);
 }
 
 /**
  * What the last selection named.
  *
  * NOTE: Two shapes, and a `v2` file may carry either key.
- * - The cloud workspace id is preferred: every board call is addressed by it,
+ * - The cloud project id is preferred: every board call is addressed by it,
  *   and a rename cannot move it.
  * - A service that predates the id field gives the app only the slug, and
  *   "no id" must not mean "no selection".
  * - A `v1` file (a bare slug) is read for the same reason. Dropping it would
- *   move every existing user back to "no workspace selected" on upgrade.
+ *   move every existing user back to "no project selected" on upgrade.
  */
 type ActiveSelection =
   | { by: "id"; value: string }
@@ -73,7 +73,7 @@ export async function readActive(
       (error as NodeJS.ErrnoException).code === "ENOENT"
     )
       return null;
-    throw new Error("Could not read your workspace selection. Try again.");
+    throw new Error("Could not read your project selection. Try again.");
   }
 }
 
@@ -99,7 +99,7 @@ export async function writeAtomic(
  *
  * NOTE: Both keys are written, because only one of them may exist. The board
  * needs the id. An older service can only be matched on the slug; without it
- * the app asks "choose a workspace" every time it opens against one.
+ * the app asks "choose a project" every time it opens against one.
  */
 export async function writeActive(
   record: MachineRecord,
@@ -115,17 +115,26 @@ export async function writeActive(
   );
 }
 
-function boardFile(record: MachineRecord, workspaceId: string): string {
-  // The workspace id is hashed too: it comes from the service, and a value
+/**
+ * A {@link BoardView} as `board-<key>.json` holds it.
+ *
+ * NOTE: The file keeps `workspaceId`, the field's name before projects were
+ * called projects (FE-107). Renaming it on disk would make every cache a miss
+ * once, on the one launch that may have no network to refill it.
+ */
+type DiskBoardView = Omit<BoardView, "projectId"> & { workspaceId: string };
+
+function boardFile(record: MachineRecord, projectId: string): string {
+  // The project id is hashed too: it comes from the service, and a value
   // with a slash in it must not be able to choose a path.
   const key = createHash("sha256")
-    .update(`${accountKey(record)}:${workspaceId}`)
+    .update(`${accountKey(record)}:${projectId}`)
     .digest("hex");
-  return join(appHomeDir(), "workspaces", `board-${key}.json`);
+  return join(projectsDir(), `board-${key}.json`);
 }
 
 /**
- * The last board read that succeeded, per account and per workspace.
+ * The last board read that succeeded, per account and per project.
  *
  * Derived and deletable. It exists only so a failed read can show the last
  * good copy, labelled, instead of an empty board. "Nothing here" and "I could
@@ -134,14 +143,16 @@ function boardFile(record: MachineRecord, workspaceId: string): string {
  */
 export async function readBoardCache(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
 ): Promise<BoardView | null> {
   try {
     const data = JSON.parse(
-      await readFile(boardFile(record, workspaceId), "utf8"),
-    ) as { v?: unknown; view?: BoardView };
-    if (data?.v !== 1 || !data.view || data.view.workspaceId !== workspaceId)
-      return null;
+      await readFile(boardFile(record, projectId), "utf8"),
+    ) as { v?: unknown; view?: DiskBoardView };
+    if (!data?.view) return null;
+    const { workspaceId, ...rest } = data.view;
+    if (data.v !== 1 || workspaceId !== projectId) return null;
+    const view: BoardView = { ...rest, projectId: workspaceId };
     // NOTE: Fields added to `BoardView` after a cache was written are absent
     // from it, and the read above is a cast, not a parse. `labels` would come
     // back `undefined` and the first `.map` on it would take the offline board
@@ -153,10 +164,10 @@ export async function readBoardCache(
     // cached board is a list read, where those five mean "not asked", and
     // `false` would draw "Subscribe" on a card the reader follows.
     return {
-      ...data.view,
-      labels: data.view.labels ?? [],
-      members: data.view.members ?? [],
-      cards: (data.view.cards ?? []).map((card) => ({
+      ...view,
+      labels: view.labels ?? [],
+      members: view.members ?? [],
+      cards: (view.cards ?? []).map((card) => ({
         ...card,
         subscribers: card.subscribers ?? null,
         subscribed: card.subscribed ?? null,
@@ -176,12 +187,14 @@ export async function readBoardCache(
 
 export async function writeBoardCache(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   view: BoardView,
 ): Promise<void> {
+  const { projectId: workspaceId, ...rest } = view;
+  const disk: DiskBoardView = { ...rest, workspaceId };
   await writeAtomic(
-    boardFile(record, workspaceId),
-    JSON.stringify({ v: 1, view }),
+    boardFile(record, projectId),
+    JSON.stringify({ v: 1, view: disk }),
   ).catch(() => {
     // A board that cannot be cached still works. Failing the read over it
     // would trade a real answer for a housekeeping error.
@@ -189,11 +202,11 @@ export async function writeBoardCache(
 }
 
 function foldersFile(record: MachineRecord): string {
-  return join(appHomeDir(), "workspaces", `folders-${accountKey(record)}.json`);
+  return join(projectsDir(), `folders-${accountKey(record)}.json`);
 }
 
 /**
- * Which folders on this machine each workspace is made of, by slug.
+ * Which folders on this machine each project is made of, by slug.
  *
  * - A list, primary first. A project is created against the folders picked in
  *   one chooser (several, for a repo split across checkouts). `paths[0]` is
@@ -202,7 +215,7 @@ function foldersFile(record: MachineRecord): string {
  *   not in the list cannot be stored.
  * - A `v1` file holds one path per slug and is read as a list of one.
  *   Dropping it would unlink every folder existing users have chosen.
- * - By slug, unlike {@link readActive}. A service that predates the workspace
+ * - By slug, unlike {@link readActive}. A service that predates the project
  *   id sends none, and that is the case this link matters most for: the
  *   screen that says the board cannot be opened. The slug is safe to key on:
  *   no route on the service can change one.
@@ -247,7 +260,7 @@ export async function readFolders(
 }
 
 /**
- * Link folders to a workspace, primary first, or unlink it with `null`.
+ * Link folders to a project, primary first, or unlink it with `null`.
  *
  * A replace, not an append. Every caller states the whole set: the create
  * dialog knows what was picked, and "Change folder" means one folder now. An
@@ -267,11 +280,11 @@ export async function writeFolders(
   return folders;
 }
 
-function runFile(record: MachineRecord, workspaceId: string): string {
+function runFile(record: MachineRecord, projectId: string): string {
   const key = createHash("sha256")
-    .update(`${accountKey(record)}:${workspaceId}:migration`)
+    .update(`${accountKey(record)}:${projectId}:migration`)
     .digest("hex");
-  return join(appHomeDir(), "workspaces", `migration-${key}.json`);
+  return join(projectsDir(), `migration-${key}.json`);
 }
 
 /**
@@ -286,7 +299,7 @@ function runFile(record: MachineRecord, workspaceId: string): string {
  *   history. The import promises to leave the source folder as it was.
  */
 interface MigrationRun {
-  workspaceId: string;
+  projectId: string;
   /** When the run finished, as an ISO timestamp. */
   at: string;
   summary: Record<string, number>;
@@ -301,17 +314,29 @@ interface MigrationRun {
   migratedAt: string | null;
 }
 
+/**
+ * A {@link MigrationRun} as `migration-<key>.json` holds it.
+ *
+ * NOTE: `workspaceId` on disk, as before FE-107: a receipt is what a resumed
+ * migration reads to know which cards already landed, so it must survive the
+ * rename.
+ */
+type DiskMigrationRun = Omit<MigrationRun, "projectId"> & {
+  workspaceId: string;
+};
+
 export async function readMigrationRun(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
 ): Promise<MigrationRun | null> {
   try {
     const data = JSON.parse(
-      await readFile(runFile(record, workspaceId), "utf8"),
-    ) as { v?: unknown; run?: MigrationRun };
-    if (data?.v !== 1 || !data.run || data.run.workspaceId !== workspaceId)
-      return null;
-    return data.run;
+      await readFile(runFile(record, projectId), "utf8"),
+    ) as { v?: unknown; run?: DiskMigrationRun };
+    if (!data?.run) return null;
+    const { workspaceId, ...rest } = data.run;
+    if (data.v !== 1 || workspaceId !== projectId) return null;
+    return { ...rest, projectId: workspaceId };
   } catch {
     // A missing or truncated receipt must not break the next run; what it
     // described is still discoverable from the board's own audit.
@@ -329,9 +354,11 @@ export async function writeMigrationRun(
       run.digest ??
       createHash("sha256").update(JSON.stringify(run.receipts)).digest("hex"),
   };
+  const { projectId, ...rest } = stored;
+  const disk: DiskMigrationRun = { ...rest, workspaceId: projectId };
   await writeAtomic(
-    runFile(record, run.workspaceId),
-    JSON.stringify({ v: 1, run: stored }),
+    runFile(record, projectId),
+    JSON.stringify({ v: 1, run: disk }),
   );
   return stored;
 }

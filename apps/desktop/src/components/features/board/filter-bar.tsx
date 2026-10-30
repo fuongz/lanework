@@ -1,7 +1,7 @@
 import { Cancel01Icon, Tag01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import type { BoardCard } from "#/../shared/workspaces";
+import type { BoardCard } from "#/../shared/projects";
 import {
   CategoryDot,
   PriorityIcon,

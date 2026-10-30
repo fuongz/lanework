@@ -70,17 +70,17 @@ function patched(turns: Turn[], turn: Turn): Turn[] {
  * read that started first must not land after a later one.
  */
 export function useConversation(
-  workspace: string | null,
+  project: string | null,
   id: string,
 ): ConversationState {
-  const key = `${workspace}:${id}`;
+  const key = `${project}:${id}`;
   const [state, setState] = useState<Inner>(() => empty(key));
   const readRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const surface = window.desktop?.conversation;
     const terminal = window.desktop?.terminal;
-    if (!workspace || !surface) return;
+    if (!project || !surface) return;
     let gone = false;
     let reading = false;
     let again = false;
@@ -93,7 +93,7 @@ export function useConversation(
       }
       reading = true;
       surface
-        .read(workspace, id)
+        .read(project, id)
         .then((conversation) => {
           if (gone) return;
           setState((previous) => ({
@@ -124,7 +124,7 @@ export function useConversation(
     readRef.current = read;
 
     void surface
-      .engineState(workspace, id)
+      .engineState(project, id)
       .then((engine) => {
         if (!gone)
           setState((previous) =>
@@ -139,7 +139,7 @@ export function useConversation(
     // nobody heard, and the CLI waits on it for as long as it takes, so read
     // what the engine is still waiting on. `?.`: an older preload has none.
     void surface
-      .permissions?.(workspace, id)
+      .permissions?.(project, id)
       .then((waiting) => {
         if (gone || waiting.length === 0) return;
         setState((previous) => {
@@ -160,7 +160,7 @@ export function useConversation(
     // rollout or an OpenCode session moves the way a Claude transcript does.
     const offActivity = terminal?.onAgentActivity((activity) => {
       if (
-        activity.workspace === workspace &&
+        activity.project === project &&
         activity.id === id &&
         activity.subagent === null
       )
@@ -168,7 +168,7 @@ export function useConversation(
     });
 
     const offEvent = surface.onEvent((event) => {
-      if (event.workspace !== workspace || event.conversation !== id) return;
+      if (event.project !== project || event.conversation !== id) return;
       switch (event.type) {
         case "state":
           setState((previous) =>
@@ -250,7 +250,7 @@ export function useConversation(
       offActivity?.();
       offEvent();
     };
-  }, [key, workspace, id]);
+  }, [key, project, id]);
 
   const setEngine = useCallback(
     (engine: EngineState) =>

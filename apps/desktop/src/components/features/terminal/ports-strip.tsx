@@ -61,19 +61,19 @@ function uptime(port: ListeningPort, now: number): string | null {
  * Read every {@link POLL_MS} only while the window has focus, and at once
  * when it gets it back: `lsof` is cheap, not free.
  */
-export function PortsStrip({ workspace }: { workspace: string }) {
+export function PortsStrip({ project }: { project: string }) {
   const [ports, setPorts] = useState<ListeningPort[]>([]);
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState<Confirm | null>(null);
   const [stopping, setStopping] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const current = useRef(workspace);
-  current.current = workspace;
+  const current = useRef(project);
+  current.current = project;
 
   const load = useCallback(async () => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
-    const asked = workspace;
+    const asked = project;
     setLoading(true);
     try {
       const found = await surface.ports(asked);
@@ -84,14 +84,14 @@ export function PortsStrip({ workspace }: { workspace: string }) {
     } finally {
       if (current.current === asked) setLoading(false);
     }
-  }, [workspace]);
+  }, [project]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new project starts empty
   useEffect(() => {
     setPorts([]);
     setNotice(null);
     setConfirming(null);
-  }, [workspace]);
+  }, [project]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
@@ -118,7 +118,7 @@ export function PortsStrip({ workspace }: { workspace: string }) {
   const stop = async () => {
     const surface = window.desktop?.terminal;
     if (!surface || !confirming || stopping) return;
-    const asked = workspace;
+    const asked = project;
     const targets =
       confirming.kind === "one"
         ? [confirming.port]

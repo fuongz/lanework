@@ -66,7 +66,7 @@ apps/desktop/
 │   │   ├── paths.ts         # The app home (~/.lanew or LANEWORK_HOME)
 │   │   ├── config-file.ts   # Atomic writes to other tools' config files
 │   │   ├── http-body.ts     # Size-capped response bodies
-│   │   ├── auth/, workspaces/, git/, terminal/, conversation/, …
+│   │   ├── auth/, projects/, git/, terminal/, conversation/, …
 │   │   │                    # One folder per feature; index.ts registers its IPC
 │   │   └── terminal/host.ts # The pty host, a separate utility process
 │   ├── preload/index.ts     # contextBridge: one typed window.desktop

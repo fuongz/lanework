@@ -165,7 +165,7 @@ test("Claude launch and resume receive process settings with the production host
     for (const resume of [undefined, "11111111-2222-4333-8444-555555555555"]) {
       await writeFile(capture, "");
       const session = sessions.spawn({
-        workspace: "test",
+        project: "test",
         cwd: home,
         kind: "claude",
         cols: 80,

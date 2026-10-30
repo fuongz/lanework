@@ -20,10 +20,10 @@ import {
   readMemory,
   watchMemory,
 } from "../electron/main/memory/read";
+import { writeFolders } from "../electron/main/projects/store";
 import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
-import { writeFolders } from "../electron/main/workspaces/store";
 import type { MemoryEntry } from "../shared/memory";
-import type { Workspace } from "../shared/workspaces";
+import type { Project } from "../shared/projects";
 import { type Inline, parseMarkdown } from "../src/lib/markdown";
 import { memoryTarget } from "../src/lib/memory";
 import {
@@ -311,7 +311,7 @@ test("FE-36: links are read only where asked — a card body keeps them as writt
   expect(link("../elsewhere/x.md", false)).toBeUndefined();
 });
 
-const workspaces: Workspace[] = [
+const projects: Project[] = [
   {
     id: "ws-alpha",
     slug: "alpha",
@@ -362,8 +362,8 @@ test("FE-36: Memory lists what Claude saved by kind, opens the index, follows li
     process.platform === "win32",
     "Memory folders are a POSIX path here.",
   );
-  const plane = await startStubPlane({ workspaces });
-  for (const workspace of workspaces) plane.setBoard(workspace.id ?? "", board);
+  const plane = await startStubPlane({ projects });
+  for (const project of projects) plane.setBoard(project.id ?? "", board);
   const profile = await mkdtemp(join(tmpdir(), "lanew-memory-app-"));
   const home = join(profile, "home");
   await mkdir(home, { recursive: true });

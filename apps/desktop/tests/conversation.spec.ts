@@ -20,10 +20,10 @@ import {
   test,
 } from "@playwright/test";
 import type { MachineRecord } from "../electron/main/auth/store";
+import { writeFolders } from "../electron/main/projects/store";
 import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
-import { writeFolders } from "../electron/main/workspaces/store";
 import { conversationChannels } from "../shared/conversation";
-import type { Workspace } from "../shared/workspaces";
+import type { Project } from "../shared/projects";
 import { claudeRowName } from "./agent-fixtures";
 import {
   launchEnv,
@@ -50,7 +50,7 @@ const LONG_ID = "99999999-2222-4333-8444-555555555555";
 const TITLE = "Flaky login test on CI";
 const LONG_TITLE = "Six hundred turns";
 
-const workspaces: Workspace[] = [
+const projects: Project[] = [
   {
     id: "ws-alpha",
     slug: "alpha",
@@ -531,7 +531,7 @@ async function setTheme(
 
 test("V5: a Claude conversation opens as a chat, sends a prompt and switches to the terminal and back", async () => {
   test.setTimeout(90_000);
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   const { profile, home, repo, agentHome } = await seedProfile(plane.origin);
   const transcript = await seedChat(agentHome, repo);
@@ -749,7 +749,7 @@ function appendTurn(transcript: string, repo: string) {
 
 /** Boot on a profile holding a long conversation of `prompts` prompts. */
 async function openLong(prompts: number) {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   const { profile, home, repo, agentHome } = await seedProfile(plane.origin);
   const transcript = await seedLong(agentHome, repo, prompts);

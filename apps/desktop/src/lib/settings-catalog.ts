@@ -135,7 +135,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     label: "Project",
     items: [
       {
-        to: "/settings/workspaces",
+        to: "/settings/projects",
         label: "General",
         icon: DashboardSquare02Icon,
         keywords:

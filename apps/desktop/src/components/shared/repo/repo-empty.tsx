@@ -69,7 +69,7 @@ export function RepoEmpty({
     <RepoMessage title={title} description={description}>
       {settings && (
         <Link
-          to="/settings/workspaces"
+          to="/settings/projects"
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
           Open Settings

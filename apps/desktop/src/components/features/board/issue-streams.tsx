@@ -8,8 +8,8 @@ import type {
   BoardCard,
   BoardChecklistItem,
   BoardStream,
-} from "#/../shared/workspaces";
-import { streamWaves } from "#/../shared/workspaces";
+} from "#/../shared/projects";
+import { streamWaves } from "#/../shared/projects";
 
 const ROLE_NAME: Record<BoardStream["role"], string> = {
   research: "Research",

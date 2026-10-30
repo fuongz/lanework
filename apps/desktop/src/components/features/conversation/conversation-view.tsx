@@ -68,7 +68,7 @@ import {
 } from "#/components/ui/empty";
 import { TooltipProvider } from "#/components/ui/tooltip";
 import { useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { firstLine } from "#/lib/conversation-format";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
@@ -152,7 +152,7 @@ export function ConversationView() {
 }
 
 function ConversationPage({ slug, id }: { slug: string; id: string }) {
-  const workspace = useWorkspaceKey(slug);
+  const project = useProjectKey(slug);
   const navigate = useNavigate();
   const {
     conversation,
@@ -162,7 +162,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     delta,
     permissions,
     setEngine,
-  } = useConversation(workspace, id);
+  } = useConversation(project, id);
   // The CLI whose conversation it is — Claude Code or Codex — once read.
   const agent = conversation?.agent ?? null;
   const label = AGENT_LABELS[agent ?? "claude"];
@@ -172,7 +172,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   }, [agent]);
   // A worker of an orchestration run (FE-87): read-only here, its title bar
   // leads back to the lead's conversation.
-  const runs = useOrchestrationRuns(workspace);
+  const runs = useOrchestrationRuns(project);
   const asWorker = useMemo(() => {
     for (const run of runs) {
       const task = run.tasks.find((entry) => entry.conversation === id);
@@ -181,8 +181,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     return null;
   }, [runs, id]);
   const leadTitle = useAgentSessions((state) =>
-    asWorker && workspace
-      ? state.byWorkspace[workspace]?.find(
+    asWorker && project
+      ? state.byProject[project]?.find(
           (entry) =>
             entry.agent === asWorker.run.leadAgent &&
             entry.id === asWorker.run.lead,
@@ -197,8 +197,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       });
   };
   const listed = useAgentSessions((state) =>
-    workspace && agent
-      ? state.byWorkspace[workspace]?.find(
+    project && agent
+      ? state.byProject[project]?.find(
           (entry) => entry.agent === agent && entry.id === id,
         )
       : undefined,
@@ -208,7 +208,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   // transcript lands ("claude" fused with an OpenCode `ses_…` id) is refused
   // (terminal:agent-facts "A valid conversation is required"). The hook
   // skips until the agent is known, then reads with the right pair.
-  const facts = useConversationFacts(workspace, agent, id);
+  const facts = useConversationFacts(project, agent, id);
 
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
   // A conversation just started from the new page: its first message,
@@ -281,7 +281,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     busy: trusting,
     error: trustError,
     set: setTrust,
-  } = useProjectTrust(workspace ?? null);
+  } = useProjectTrust(project ?? null);
   const [trustAsk, setTrustAsk] = useState<TrustAsk | null>(null);
   // OpenCode asks no trust question for a folder (FE-104): no banner.
   const untrusted =
@@ -375,7 +375,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   // `/orchestrate` (FE-87): its planning prompt and proposal JSON stay out of
   // what is drawn; `turns` itself keeps them so sends still match on landing.
   const orchestration = useOrchestration({
-    workspace,
+    project,
     lead: id,
     // OpenCode never leads (FE-105/D5): no planning turn it would be refused.
     leadAgent: canLead(agent) ? agent : null,
@@ -523,10 +523,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   // ─── Actions ──────────────────────────────────────────────────────────────
   const answer = useCallback(
     async (request: string, value: PermissionAnswer) => {
-      if (!workspace) return;
+      if (!project) return;
       try {
         await window.desktop?.conversation.answerPermission(
-          workspace,
+          project,
           id,
           request,
           value,
@@ -535,7 +535,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         setActionError(ipcMessage(caught, "Could not answer the request."));
       }
     },
-    [workspace, id, setActionError],
+    [project, id, setActionError],
   );
 
   const handlers = useMemo<TurnHandlers>(
@@ -546,11 +546,11 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         agent === "codex" || agent === "opencode"
           ? undefined
           : () => {
-              if (!workspace || forking) return;
+              if (!project || forking) return;
               setForking(true);
               setActionError(null);
               void window.desktop?.conversation
-                .fork(workspace, id)
+                .fork(project, id)
                 .then((next) =>
                   navigate({
                     to: "/w/$slug/agents/chat/$conversation",
@@ -580,7 +580,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       kind: agent ?? "claude",
     }),
     [
-      workspace,
+      project,
       id,
       forking,
       navigate,
@@ -599,7 +599,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     names: { name: string; image: boolean }[],
   ): Promise<boolean> => {
     const surface = window.desktop?.conversation;
-    if (!workspace || !surface || !settings) return false;
+    if (!project || !surface || !settings) return false;
     setActionError(null);
     // A conductor's message carries who it is (FE-95); a planning or repair
     // prompt already names its lead.
@@ -610,7 +610,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       !readConductorEnvelope(typed)
         ? conductorTurn(
             typed,
-            await withLiveContext(workspace, conductor),
+            await withLiveContext(project, conductor),
             agent,
             conversation?.cwd ?? null,
             lastConductorContext(turns),
@@ -636,7 +636,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     requestAnimationFrame(() => toBottom(true));
     try {
       const next = await surface.send({
-        workspace,
+        project,
         conversation: id,
         id: key,
         text,
@@ -668,9 +668,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   };
 
   const stop = () => {
-    if (!workspace) return;
+    if (!project) return;
     void window.desktop?.conversation
-      .stop(workspace, id)
+      .stop(project, id)
       .catch((caught: unknown) =>
         setActionError(ipcMessage(caught, "Could not stop.")),
       );
@@ -698,10 +698,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
 
   const clearQueue = () => {
     const surface = window.desktop?.conversation;
-    if (!workspace || !surface) return;
+    if (!project || !surface) return;
     const keys = [...held];
     void unqueue(keys, async () =>
-      (await surface.clearQueue(workspace, id)) ? keys : [],
+      (await surface.clearQueue(project, id)) ? keys : [],
     ).catch((caught: unknown) =>
       setActionError(ipcMessage(caught, "Could not clear the queue.")),
     );
@@ -709,9 +709,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
 
   const removeQueued = (key: string) => {
     const surface = window.desktop?.conversation;
-    if (!workspace || !surface) return;
+    if (!project || !surface) return;
     void unqueue([key], async () =>
-      (await surface.removeQueued(workspace, id, key)) ? [key] : [],
+      (await surface.removeQueued(project, id, key)) ? [key] : [],
     ).catch((caught: unknown) =>
       setActionError(ipcMessage(caught, "Could not remove it.")),
     );
@@ -720,9 +720,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   /** Back to the composer to be edited; sent again, it queues again (D3). */
   const editQueued = (key: string) => {
     const surface = window.desktop?.conversation;
-    if (!workspace || !surface) return;
+    if (!project || !surface) return;
     void unqueue([key], async () => {
-      const taken = await surface.takeQueued(workspace, id, key);
+      const taken = await surface.takeQueued(project, id, key);
       if (!taken) return [];
       composer.current?.restore(unqueued(taken));
       return [key];
@@ -732,9 +732,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   };
 
   const resumeQueue = () => {
-    if (!workspace) return;
+    if (!project) return;
     void window.desktop?.conversation
-      .resumeQueue(workspace, id)
+      .resumeQueue(project, id)
       .catch((caught: unknown) =>
         setActionError(ipcMessage(caught, "Could not resume.")),
       );
@@ -914,7 +914,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 <ConductorNames.Provider value={conductorNames}>
                   <FileOpenerProvider
                     slug={slug}
-                    workspace={workspace}
+                    project={project}
                     conversation={id}
                   >
                     {shown.map((turn) => (
@@ -1044,10 +1044,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               void setTrust(request.agent, request.on);
             }}
           />
-          {workspace && (
+          {project && (
             <JobCapsules
               slug={slug}
-              workspace={workspace}
+              project={project}
               session={listed}
               since={lastPromptAt}
             />
@@ -1090,7 +1090,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               , which answers its questions and reviews its work.
             </p>
           )}
-          {workspace && settings && !asWorker && (
+          {project && settings && !asWorker && (
             <div className={asking.length ? "hidden" : "flex flex-col"}>
               <MessageQueue
                 queue={queue}
@@ -1105,7 +1105,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 slug={slug}
                 draftKey={id}
                 corner={<ContextButton facts={facts} />}
-                workspace={workspace}
+                project={project}
                 agent={agent}
                 settings={settings}
                 onSettings={(next) =>

@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { matchesSearch, type Workspace } from "../shared/workspaces";
+import { matchesSearch, type Project } from "../shared/projects";
 
 /** A port nothing listens on, so a probe fails fast instead of reaching prod. */
 export const DEAD_API = "http://127.0.0.1:1";
@@ -260,23 +260,23 @@ export async function startStubPlane(
   options: {
     /** Omit the owner block, standing in for a control plane older than it. */
     owner?: boolean;
-    workspaces?: Workspace[];
+    projects?: Project[];
   } = {},
 ): Promise<{
   origin: string;
   setRevoked: (value: boolean) => void;
   /** Every request seen, as `METHOD /path` — so a test can prove a call happened. */
   calls: string[];
-  setWorkspaces: (value: Workspace[]) => void;
-  setWorkspaceResponse: (
+  setProjects: (value: Project[]) => void;
+  setProjectResponse: (
     status: number,
     body?: unknown,
     delayMs?: number,
   ) => void;
-  workspaceAuth: string[];
-  /** Seed the board one workspace id serves. */
+  projectAuth: string[];
+  /** Seed the board one project id serves. */
   setBoard: (
-    workspaceId: string,
+    projectId: string,
     board: {
       migratedAt?: string | null;
       columns: { key: string; name: string; role?: string | null }[];
@@ -290,16 +290,16 @@ export async function startStubPlane(
    * A card written by someone else — it lands on the change feed with a new
    * seq, the way another machine's create does.
    */
-  addCard: (workspaceId: string, card: StubCard) => void;
+  addCard: (projectId: string, card: StubCard) => void;
   /** One card as the stub now holds it, so a test can assert what a write did. */
-  readCard: (workspaceId: string, cardId: string) => StubCard | undefined;
+  readCard: (projectId: string, cardId: string) => StubCard | undefined;
   /** Make the next checklist write answer 409 with the server's copy. */
   setChecklistConflict: (value: boolean) => void;
   /** Fail every board read, so the app has to fall back to its saved copy. */
   setBoardOffline: (value: boolean) => void;
   /**
    * What `GET /v1/boards?repo=` answers (FE-30): the boards linked to any
-   * repo, by workspace id. Empty — linked to nothing — until set. `delayMs`
+   * repo, by project id. Empty — linked to nothing — until set. `delayMs`
    * holds the answer back, to prove nothing else waits for it.
    */
   setRepoBoards: (
@@ -313,16 +313,16 @@ export async function startStubPlane(
    */
   setBoardRepo: (repo: string | null) => void;
   /** Every `PUT /v1/boards/:id/repo` so far, in order. */
-  repoMoves: () => { workspaceId: string; repo: string; replace: boolean }[];
+  repoMoves: () => { projectId: string; repo: string; replace: boolean }[];
   /** Answer `POST /purge` with 404, the way a service older than FE-14 does. */
   setPurgeMissing: (value: boolean) => void;
   /** Answer `GET /stats` with 404, the way a service older than FE-17 does. */
   setStatsMissing: (value: boolean) => void;
   /** The agents `GET /presence` reports on one board (BE-16). */
-  setPresence: (workspaceId: string, rows: StubPresence[]) => void;
+  setPresence: (projectId: string, rows: StubPresence[]) => void;
   /** What `GET /icon` serves for one board (BE-18); null is no icon. */
   setIcon: (
-    workspaceId: string,
+    projectId: string,
     icon: { key: string; bytes: Buffer } | null,
   ) => void;
   /**
@@ -352,7 +352,7 @@ export async function startStubPlane(
   close: () => Promise<void>;
 }> {
   let revoked = false;
-  let workspaces = options.workspaces ?? [];
+  let projects = options.projects ?? [];
   const boards = new Map<
     string,
     {
@@ -374,11 +374,10 @@ export async function startStubPlane(
   let repoBoards: { workspaceId: string; name: string }[] = [];
   let repoBoardsDelay = 0;
   let boardRepo: string | null = null;
-  const repoMoves: { workspaceId: string; repo: string; replace: boolean }[] =
-    [];
+  const repoMoves: { projectId: string; repo: string; replace: boolean }[] = [];
   let purgeMissing = false;
   let statsMissing = false;
-  // BE-18's icons, by workspace id: the key the service names it by and its bytes.
+  // BE-18's icons, by project id: the key the service names it by and its bytes.
   const icons = new Map<string, { key: string; bytes: Buffer }>();
   const presence = new Map<string, StubPresence[]>();
   const checkpoints = new Map<string, Record<string, unknown>>();
@@ -397,24 +396,24 @@ export async function startStubPlane(
     tagMax: number;
   } | null = null;
   const boardPreconditions: string[] = [];
-  let workspaceStatus = 200;
-  let workspaceBody: unknown;
-  let workspaceDelay = 0;
-  const workspaceAuth: string[] = [];
+  let projectStatus = 200;
+  let projectBody: unknown;
+  let projectDelay = 0;
+  const projectAuth: string[] = [];
   const calls: string[] = [];
   const server = createServer((req, res) => {
     calls.push(`${req.method} ${req.url}`);
 
     if (req.method === "GET" && req.url === "/v1/sync/state") {
-      workspaceAuth.push(req.headers.authorization ?? "");
-      const status = revoked ? 401 : workspaceStatus;
-      const body = workspaceBody ?? { workspaces };
+      projectAuth.push(req.headers.authorization ?? "");
+      const status = revoked ? 401 : projectStatus;
+      const body = projectBody ?? { workspaces: projects };
       setTimeout(
         () =>
           res
             .writeHead(status, { "Content-Type": "application/json" })
             .end(JSON.stringify(body)),
-        workspaceDelay,
+        projectDelay,
       );
       return;
     }
@@ -445,12 +444,12 @@ export async function startStubPlane(
         json(401, { error: "revoked" });
         return;
       }
-      const gone = workspaces.find((entry) => entry.id === key) ?? null;
-      if (!gone && workspaces.some((entry) => entry.slug === key)) {
+      const gone = projects.find((entry) => entry.id === key) ?? null;
+      if (!gone && projects.some((entry) => entry.slug === key)) {
         json(400, { error: "a workspace id is required, not a slug" });
         return;
       }
-      workspaces = workspaces.filter((entry) => entry.id !== key);
+      projects = projects.filter((entry) => entry.id !== key);
       // The SLUG comes back, not the id the caller already sent: it is the one
       // fact a registry keyed by slug may not have.
       json(200, { deleted: gone?.slug ?? null, id: key });
@@ -473,14 +472,12 @@ export async function startStubPlane(
         if (revoked) return json(401, { error: "revoked" });
         const { ids } = JSON.parse(raw || "{}") as { ids?: string[] };
         const placed = (ids ?? []).map((id) =>
-          workspaces.find((entry) => entry.id === id),
+          projects.find((entry) => entry.id === id),
         );
         if (!ids?.length || placed.some((entry) => !entry))
           return json(400, { error: "not every id is one of your projects" });
-        const rest = workspaces.filter(
-          (entry) => !ids.includes(entry.id ?? ""),
-        );
-        workspaces = [...(placed as Workspace[]), ...rest];
+        const rest = projects.filter((entry) => !ids.includes(entry.id ?? ""));
+        projects = [...(placed as Project[]), ...rest];
         json(200, { ids });
       });
       return;
@@ -518,17 +515,17 @@ export async function startStubPlane(
           return json(400, { error: "slug cannot be changed" });
         const name = input.name?.trim();
         if (!name) return json(400, { error: "name must be 1-200 characters" });
-        const target = workspaces.find((entry) => entry.id === id);
+        const target = projects.find((entry) => entry.id === id);
         if (!target) {
           // The real service checks the uuid SHAPE; these ids are readable, so
           // the stub catches the one mix-up a test can actually make instead.
-          return workspaces.some((entry) => entry.slug === id)
+          return projects.some((entry) => entry.slug === id)
             ? json(400, { error: "a workspace id is required, not a slug" })
             : json(404, { error: "not found" });
         }
         // The account's list really changes, so the app's next read sees the new
         // name — and the SLUG stays put, which is the fact the app relies on.
-        workspaces = workspaces.map((entry) =>
+        projects = projects.map((entry) =>
           entry.id === id ? { ...entry, name } : entry,
         );
         return json(200, {
@@ -561,7 +558,7 @@ export async function startStubPlane(
         };
         if (!input.slug || !input.name)
           return json(400, { error: "a slug and a name are required" });
-        const clash = workspaces.find((entry) => entry.slug === input.slug);
+        const clash = projects.find((entry) => entry.slug === input.slug);
         if (clash) return json(409, { error: "taken", id: clash.id });
         const created = {
           id: `ws-${input.slug}`,
@@ -572,7 +569,7 @@ export async function startStubPlane(
         };
         // The account's list really grows, so the app's next read sees it —
         // which is what makes "created and opened" testable end to end.
-        workspaces = [...workspaces, created];
+        projects = [...projects, created];
         return json(201, { workspace: created });
       });
       return;
@@ -605,9 +602,9 @@ export async function startStubPlane(
           repo: string;
           replace?: boolean;
         };
-        const workspaceId = moving[1];
+        const projectId = moving[1];
         repoMoves.push({
-          workspaceId,
+          projectId,
           repo: input.repo,
           replace: input.replace === true,
         });
@@ -618,12 +615,11 @@ export async function startStubPlane(
             linked: boardRepo,
           });
         const unlinked = repoBoards.filter(
-          (row) => row.workspaceId !== workspaceId,
+          (row) => row.workspaceId !== projectId,
         );
         const name =
-          workspaces.find((entry) => entry.id === workspaceId)?.name ??
-          workspaceId;
-        repoBoards = [{ workspaceId, name }];
+          projects.find((entry) => entry.id === projectId)?.name ?? projectId;
+        repoBoards = [{ workspaceId: projectId, name }];
         boardRepo = null;
         return json(200, { repo: input.repo, previous: null, unlinked });
       });
@@ -826,7 +822,7 @@ export async function startStubPlane(
         req.on("data", (chunk) => (raw += chunk));
         req.on("end", () => {
           if (purgeMissing) return json(404, { error: "not found" });
-          const slug = workspaces.find((entry) => entry.id === board[1])?.slug;
+          const slug = projects.find((entry) => entry.id === board[1])?.slug;
           const confirm = (JSON.parse(raw || "{}") as { confirm?: unknown })
             .confirm;
           if (!slug || confirm !== slug)
@@ -1374,22 +1370,22 @@ export async function startStubPlane(
   return {
     origin: `http://127.0.0.1:${port}`,
     calls,
-    workspaceAuth,
-    setWorkspaces: (value) => {
-      workspaces = value;
-      workspaceStatus = 200;
-      workspaceBody = undefined;
-      workspaceDelay = 0;
+    projectAuth,
+    setProjects: (value) => {
+      projects = value;
+      projectStatus = 200;
+      projectBody = undefined;
+      projectDelay = 0;
     },
-    addCard: (workspaceId, card) => {
-      const state = boards.get(workspaceId);
-      if (!state) throw new Error(`no board seeded for ${workspaceId}`);
+    addCard: (projectId, card) => {
+      const state = boards.get(projectId);
+      if (!state) throw new Error(`no board seeded for ${projectId}`);
       state.cards.push({ ...card, seq: ++state.seq });
     },
-    readCard: (workspaceId, cardId) =>
-      boards.get(workspaceId)?.cards.find((card) => card.id === cardId),
-    setBoard: (workspaceId, board) => {
-      boards.set(workspaceId, {
+    readCard: (projectId, cardId) =>
+      boards.get(projectId)?.cards.find((card) => card.id === cardId),
+    setBoard: (projectId, board) => {
+      boards.set(projectId, {
         migratedAt: board.migratedAt ?? null,
         columns: board.columns,
         categories: board.categories ?? [],
@@ -1423,12 +1419,12 @@ export async function startStubPlane(
     setStatsMissing: (value) => {
       statsMissing = value;
     },
-    setPresence: (workspaceId, rows) => {
-      presence.set(workspaceId, rows);
+    setPresence: (projectId, rows) => {
+      presence.set(projectId, rows);
     },
-    setIcon: (workspaceId, icon) => {
-      if (icon) icons.set(workspaceId, icon);
-      else icons.delete(workspaceId);
+    setIcon: (projectId, icon) => {
+      if (icon) icons.set(projectId, icon);
+      else icons.delete(projectId);
     },
     setCheckpoint: (card, latest) => {
       if (latest) checkpoints.set(card, latest);
@@ -1452,10 +1448,10 @@ export async function startStubPlane(
       sealMismatch = value;
     },
     boardPreconditions,
-    setWorkspaceResponse: (status, body, delayMs = 0) => {
-      workspaceStatus = status;
-      workspaceBody = body;
-      workspaceDelay = delayMs;
+    setProjectResponse: (status, body, delayMs = 0) => {
+      projectStatus = status;
+      projectBody = body;
+      projectDelay = delayMs;
     },
     setRevoked: (value) => {
       revoked = value;

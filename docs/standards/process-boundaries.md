@@ -43,7 +43,7 @@ from the asar (`electron-builder.yml` `asarUnpack`).
   checks: not gated.
 - **Main never bundles** node-pty, xterm, the Stop hook (apart from
   `hook/redact.ts`) or the offline MCP server; only `git/runner.ts` runs
-  `git`; `workspaces/client.ts` never builds a `/v1` path by hand. Gate:
+  `git`; `projects/client.ts` never builds a `/v1` path by hand. Gate:
   `scripts/audit-electron.mjs`, which reads the build's metafile.
 - **Electron-free folders**: `electron/hook/`, `electron/mcp-local/`,
   `electron/local-store/`, `electron/statusline/`, `electron/control/` and
@@ -76,10 +76,10 @@ screen from it, so the renderer and main read the same answer.
 
 - **Main enforces `can()` on cloud and credential operations.** `auth/index.ts`
   checks it to sign in, sign out and revoke this machine.
-  `workspaces/session.ts` `authorizedRecord()` checks `cloud:use` before any
+  `projects/session.ts` `authorizedRecord()` checks `cloud:use` before any
   control-plane call made with the machine credential, and
   `assertCanUse()` there admits a local-mode session too. The terminal and
-  workspace handlers reach the cloud through these two.
+  project handlers reach the cloud through these two.
 - **Local surfaces are intentionally not session-gated**: terminal,
   conversation, worktree, agent-config, dictation and local boards. They act
   on the user's own files as the same local user, so a lock screen in front of
@@ -95,7 +95,7 @@ Not gated.
 A feature lives in `electron/main/<feature>/`. Its `index.ts` registers the
 IPC handlers (`register<Feature>(devUrl)`) and is imported only by
 `electron/main/index.ts` and `electron/main/menu.ts`. Another feature imports
-the named service file it needs (`workspaces/session.ts`, `git/runner.ts`),
+the named service file it needs (`projects/session.ts`, `git/runner.ts`),
 never the `index.ts`, so it does not pull in the first feature's IPC module
 and Electron with it.
 
@@ -103,8 +103,8 @@ Current exceptions, each with what removes it:
 
 | `index.ts` | Imported by | Goes away when |
 | --- | --- | --- |
-| `workspaces` (re-exports `session.ts`) | agent-setup, conversation, git, instructions, memory, orchestration, readiness, terminal | Those import `workspaces/session.ts` and the re-export is dropped |
-| `auth` (`currentSession`) | agent-setup, `workspaces/session.ts` | `currentSession` moves to its own auth service file |
+| `projects` (re-exports `session.ts`) | agent-setup, conversation, git, instructions, memory, orchestration, readiness, terminal | Those import `projects/session.ts` and the re-export is dropped |
+| `auth` (`currentSession`) | agent-setup, `projects/session.ts` | `currentSession` moves to its own auth service file |
 | `handoff` (`forgetHookCredential`, `forgetBoardsCache`, `syncHandoff`) | auth | Those move to a handoff service file |
 | `terminal` (`onRunningChanged`, `runningProjects`, `sendTerminalCommand`) | menu-bar | The running-project registry moves out of `index.ts` |
 | `orchestration` (`workerFolderOf`) | conversation | `workerFolderOf` moves to an orchestration service file |

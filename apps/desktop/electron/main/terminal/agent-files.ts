@@ -48,7 +48,7 @@ export const AGENT_FILES_READ_MAX = 32 * 1024 * 1024;
 
 /** What the agent view asks for, checked. */
 interface AgentFilesRequest {
-  workspace: string;
+  project: string;
   agent: TerminalAgent;
   id: string;
 }
@@ -64,18 +64,14 @@ interface AgentFilesRequest {
  */
 export function agentFilesRequest(args: unknown[]): AgentFilesRequest {
   if (args.length !== 3)
-    throw new Error("A workspace, an agent and a conversation are required");
-  const [workspace, agent, id] = args;
-  if (
-    typeof workspace !== "string" ||
-    !workspace.trim() ||
-    workspace.length > 200
-  )
-    throw new Error("A valid workspace is required");
+    throw new Error("A project, an agent and a conversation are required");
+  const [project, agent, id] = args;
+  if (typeof project !== "string" || !project.trim() || project.length > 200)
+    throw new Error("A valid project is required");
   if (!isTerminalAgent(agent)) throw new Error("A valid agent is required");
   if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
-  return { workspace, agent, id };
+  return { project, agent, id };
 }
 
 /** Claude's file tools: each call edits the file its input names. */
@@ -717,7 +713,7 @@ async function opencodeScanned(
 export async function readAgentFiles(
   home: string,
   folder: string,
-  { agent, id }: Omit<AgentFilesRequest, "workspace">,
+  { agent, id }: Omit<AgentFilesRequest, "project">,
   known?: RepoRoots,
 ): Promise<AgentFiles> {
   agentFilesRequest(["-", agent, id]);

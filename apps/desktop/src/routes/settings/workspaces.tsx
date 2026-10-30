@@ -1,5 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { WorkspacesSection } from "#/components/features/settings/workspaces-section";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 export const Route = createFileRoute("/settings/workspaces")({
-  component: WorkspacesSection,
+  // Kept as a redirect, not deleted (FE-107): the section was renamed to
+  // Projects, and a link or a bookmark to the old address still lands there.
+  beforeLoad: () => {
+    throw redirect({ to: "/settings/projects", replace: true });
+  },
 });

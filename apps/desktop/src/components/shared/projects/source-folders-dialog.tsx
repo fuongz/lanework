@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import type { PickedFolder, Workspace } from "#/../shared/workspaces";
+import type { PickedFolder, Project } from "#/../shared/projects";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   PrimaryFolderHint,
   SourceFolders,
-} from "#/components/shared/workspaces/source-folders";
+} from "#/components/shared/projects/source-folders";
 import { Button } from "#/components/ui/button";
 import {
   Dialog,
@@ -29,12 +29,12 @@ import { ipcMessage } from "#/lib/ipc-error";
  *   goes back in one write.
  */
 export function SourceFoldersDialog({
-  workspace,
+  project,
   open,
   onOpenChange,
   onSaved,
 }: {
-  workspace: Workspace;
+  project: Project;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved?: () => void;
@@ -52,8 +52,8 @@ export function SourceFoldersDialog({
     let alive = true;
     setLoading(true);
     setFailed(null);
-    void window.desktop?.workspaces.folder
-      .list(workspace.slug)
+    void window.desktop?.projects.folder
+      .list(project.slug)
       .then((current) => {
         if (!alive) return;
         setFolders(current);
@@ -67,16 +67,16 @@ export function SourceFoldersDialog({
     return () => {
       alive = false;
     };
-  }, [open, workspace.slug]);
+  }, [open, project.slug]);
 
   function save() {
-    const api = window.desktop?.workspaces.folder;
+    const api = window.desktop?.projects.folder;
     if (!api) return;
     setSaving(true);
     setFailed(null);
     void api
       .link(
-        workspace.slug,
+        project.slug,
         folders.map((folder) => folder.id),
       )
       .then(() => {
@@ -95,8 +95,8 @@ export function SourceFoldersDialog({
         <DialogHeader>
           <DialogTitle>Source folders</DialogTitle>
           <DialogDescription>
-            Where {workspace.name} lives on this machine. This list is
-            remembered here only — changing it sends nothing to your account.
+            Where {project.name} lives on this machine. This list is remembered
+            here only — changing it sends nothing to your account.
           </DialogDescription>
         </DialogHeader>
 

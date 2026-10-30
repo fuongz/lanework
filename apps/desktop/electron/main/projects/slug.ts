@@ -1,7 +1,7 @@
 // Turns a name a human typed into a slug the service accepts.
 //
 // The slug is minted here. The control plane does not derive one from the name
-// (`lib/workspace-input.ts` says why: it never sees a folder, and a second
+// (its `lib/workspace-input.ts` says why: it never sees a folder, and a second
 // derivation would give a second, disagreeing answer for the same project). A
 // client that creates a project must supply one that matches
 // `^[a-z0-9]+(-[a-z0-9]+)*$`.

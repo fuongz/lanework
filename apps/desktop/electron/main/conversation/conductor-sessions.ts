@@ -54,7 +54,7 @@ import type { Outgoing } from "./queue";
 /** The engines' calls this needs. */
 export interface SessionEngines {
   start(
-    workspace: string,
+    project: string,
     conversation: string,
     folder: string,
     out: Outgoing,
@@ -62,21 +62,21 @@ export interface SessionEngines {
   /** A new Codex or OpenCode conversation, named by its CLI (FE-104). */
   startNamed(
     agent: Exclude<ConversationAgent, "claude">,
-    workspace: string,
+    project: string,
     folder: string,
     out: Outgoing,
   ): Promise<{ conversation: string; engine: EngineState }>;
   send(
-    workspace: string,
+    project: string,
     conversation: string,
     folder: string,
     out: Outgoing,
     agent?: ConversationAgent,
   ): Promise<EngineState>;
-  state(workspace: string, conversation: string): Promise<EngineState>;
-  permissions(workspace: string, conversation: string): PermissionRequest[];
+  state(project: string, conversation: string): Promise<EngineState>;
+  permissions(project: string, conversation: string): PermissionRequest[];
   pending(
-    workspace: string,
+    project: string,
     conversation: string,
   ): { agent: ConversationAgent; turns: Turn[]; working: boolean } | null;
   settingsOf(conversation: string): ComposerSettings | null;
@@ -85,7 +85,7 @@ export interface SessionEngines {
 export interface ConductorSessionsDeps {
   engines: () => SessionEngines;
   /** The project's checkout; throws when it has none here. */
-  folderOf: (workspace: string) => Promise<string>;
+  folderOf: (project: string) => Promise<string>;
   /** Which CLI wrote a conversation of `folder`, or null for neither. */
   agentOf: (folder: string, id: string) => Promise<ConversationAgent | null>;
   /** A conversation of `folder`, as the chat reads it. */
@@ -94,7 +94,7 @@ export interface ConductorSessionsDeps {
   storedSettings: (conversation: string) => Promise<ComposerSettings | null>;
   /** The conductor whose own conversation this is, or null. */
   conductorOf: (
-    workspace: string,
+    project: string,
     agent: ConversationAgent,
     id: string,
   ) => Promise<string | null>;
@@ -112,7 +112,7 @@ export interface ConductorSessionsDeps {
 
 /** A session a conductor started. */
 interface Launch {
-  workspace: string;
+  project: string;
   /** The conductor's own conversation. */
   conductor: string;
   conductorAgent: ConversationAgent;
@@ -125,7 +125,7 @@ interface Launch {
 
 /** A process's credential: the conversation it runs. */
 interface Caller {
-  workspace: string;
+  project: string;
   conversation: () => string | null;
 }
 
@@ -153,8 +153,8 @@ const REPORT_REPLY_MAX = 3000;
 
 const hash = (token: string) =>
   createHash("sha256").update(token).digest("hex");
-const keyOf = (workspace: string, conversation: string) =>
-  `${workspace}\0${conversation}`;
+const keyOf = (project: string, conversation: string) =>
+  `${project}\0${conversation}`;
 
 function refuse(message: string): never {
   throw new ControlInputError(message);
@@ -229,7 +229,7 @@ export class ConductorSessions {
     const token = randomBytes(32).toString("hex");
     const fixed = target.conversation;
     this.callers.set(hash(token), {
-      workspace: target.workspace,
+      project: target.project,
       conversation: () => fixed ?? target.named?.() ?? null,
     });
     if (this.callers.size > TOKENS_MAX)
@@ -260,7 +260,7 @@ export class ConductorSessions {
     requestId: string,
   ): Promise<SessionResults[SessionAction]> {
     // One conversation's ids never answer another's.
-    const key = `${keyOf(caller.workspace, caller.conversation() ?? "")}\0${requestId}`;
+    const key = `${keyOf(caller.project, caller.conversation() ?? "")}\0${requestId}`;
     const seen = this.requests.get(key);
     if (seen) return seen as Promise<SessionResults[SessionAction]>;
     const answer = this.run(caller, call);
@@ -291,48 +291,48 @@ export class ConductorSessions {
 
   /** The caller as a conductor, or refused. */
   private async conductorOf(caller: Caller): Promise<{
-    workspace: string;
+    project: string;
     conversation: string;
     agent: ConversationAgent;
   }> {
     const conversation = caller.conversation();
     if (!conversation)
       refuse("This conversation has no id yet. Try again in a moment.");
-    const { workspace } = caller;
+    const { project } = caller;
     const agent =
-      this.deps.engines().pending(workspace, conversation)?.agent ??
+      this.deps.engines().pending(project, conversation)?.agent ??
       (await this.deps
-        .agentOf(await this.deps.folderOf(workspace), conversation)
+        .agentOf(await this.deps.folderOf(project), conversation)
         .catch(() => null)) ??
       "claude";
     const lead = await this.deps
-      .conductorOf(workspace, agent, conversation)
+      .conductorOf(project, agent, conversation)
       .catch(() => null);
     if (!lead)
       refuse(
         "Only a conductor's own conversation can start sessions. Do the work here, or ask the user to hand it to a conductor.",
       );
-    return { workspace, conversation, agent };
+    return { project, conversation, agent };
   }
 
   private async start(
     conductor: {
-      workspace: string;
+      project: string;
       conversation: string;
       agent: ConversationAgent;
     },
     input: SessionInputs["sessions.start"],
   ): Promise<SessionResults["sessions.start"]> {
-    const { workspace } = conductor;
+    const { project } = conductor;
     const engines = this.deps.engines();
     const mine = (await this.all()).filter(
       (launch) =>
-        launch.workspace === workspace &&
+        launch.project === project &&
         launch.conductor === conductor.conversation,
     );
     let working = 0;
     for (const launch of mine.slice(-SESSIONS_LIST_MAX)) {
-      const state = await engines.state(workspace, launch.session);
+      const state = await engines.state(project, launch.session);
       if (state.state === "running" || state.state === "starting") working++;
     }
     if (working >= SESSIONS_RUNNING_MAX)
@@ -358,13 +358,13 @@ export class ConductorSessions {
       fast: agent === conductor.agent ? base.fast : false,
     });
     if (!settings) refuse(`model "${model}" cannot run with these settings.`);
-    const folder = await this.deps.folderOf(workspace);
+    const folder = await this.deps.folderOf(project);
     const text = input.taskId
       ? `Work on ${input.taskId}.\n\n${input.prompt}`
       : input.prompt;
     const out = outgoing(text, settings);
     const launch: Omit<Launch, "session"> = {
-      workspace,
+      project,
       conductor: conductor.conversation,
       conductorAgent: conductor.agent,
       agent,
@@ -374,7 +374,7 @@ export class ConductorSessions {
     };
     let session: string;
     if (agent !== "claude") {
-      session = (await engines.startNamed(agent, workspace, folder, out))
+      session = (await engines.startNamed(agent, project, folder, out))
         .conversation;
       if (input.notifyOnComplete)
         await this.watch({ ...launch, session }, true);
@@ -383,9 +383,9 @@ export class ConductorSessions {
       // Watched before it starts: its turn may end before start answers.
       if (input.notifyOnComplete) this.arm({ ...launch, session }, false);
       try {
-        await engines.start(workspace, session, folder, out);
+        await engines.start(project, session, folder, out);
       } catch (error) {
-        this.watches.delete(keyOf(workspace, session));
+        this.watches.delete(keyOf(project, session));
         throw error;
       }
     }
@@ -401,13 +401,13 @@ export class ConductorSessions {
   }
 
   private async list(conductor: {
-    workspace: string;
+    project: string;
     conversation: string;
   }): Promise<SessionResults["sessions.list"]> {
     const mine = (await this.all())
       .filter(
         (launch) =>
-          launch.workspace === conductor.workspace &&
+          launch.project === conductor.project &&
           launch.conductor === conductor.conversation,
       )
       .slice(-SESSIONS_LIST_MAX)
@@ -419,9 +419,9 @@ export class ConductorSessions {
         title: launch.title,
         agent: launch.agent,
         model: launch.model,
-        status: await this.status(launch.workspace, launch.session),
+        status: await this.status(launch.project, launch.session),
         notifyOnComplete: this.watches.has(
-          keyOf(launch.workspace, launch.session),
+          keyOf(launch.project, launch.session),
         ),
         createdAt: launch.createdAt,
       });
@@ -429,7 +429,7 @@ export class ConductorSessions {
   }
 
   private async read(
-    conductor: { workspace: string; conversation: string },
+    conductor: { project: string; conversation: string },
     input: SessionInputs["sessions.read"],
   ): Promise<SessionResults["sessions.read"]> {
     const launch = await this.own(conductor, input.sessionId);
@@ -438,7 +438,7 @@ export class ConductorSessions {
     return {
       sessionId: launch.session,
       title: launch.title,
-      status: await this.status(launch.workspace, launch.session),
+      status: await this.status(launch.project, launch.session),
       exchanges: exchangesOf(turns)
         .slice(-input.limit)
         .map((entry) => ({
@@ -449,11 +449,11 @@ export class ConductorSessions {
   }
 
   private async send(
-    conductor: { workspace: string; conversation: string },
+    conductor: { project: string; conversation: string },
     input: SessionInputs["sessions.send"],
   ): Promise<SessionResults["sessions.send"]> {
     const launch = await this.own(conductor, input.sessionId);
-    const status = await this.status(launch.workspace, launch.session);
+    const status = await this.status(launch.project, launch.session);
     if (status === "working" || status === "waiting")
       refuse(
         `Session ${launch.session} is ${status === "working" ? "still working" : "waiting for the user"}. Send it a follow-up once it is idle.`,
@@ -464,11 +464,11 @@ export class ConductorSessions {
       );
     const engines = this.deps.engines();
     const settings = await this.settingsOf(launch.session, launch.agent);
-    const folder = await this.deps.folderOf(launch.workspace);
+    const folder = await this.deps.folderOf(launch.project);
     if (input.notifyOnComplete) this.arm(launch, false);
     try {
       const next = await engines.send(
-        launch.workspace,
+        launch.project,
         launch.session,
         folder,
         outgoing(input.prompt, settings),
@@ -479,7 +479,7 @@ export class ConductorSessions {
           `Session ${launch.session} is open in a terminal, which Lanework cannot send to.`,
         );
     } catch (error) {
-      this.watches.delete(keyOf(launch.workspace, launch.session));
+      this.watches.delete(keyOf(launch.project, launch.session));
       throw error;
     }
     return {
@@ -492,12 +492,12 @@ export class ConductorSessions {
 
   /** One of the conductor's sessions, or refused. */
   private async own(
-    conductor: { workspace: string; conversation: string },
+    conductor: { project: string; conversation: string },
     session: string,
   ): Promise<Launch> {
     const launch = (await this.all()).find(
       (entry) =>
-        entry.workspace === conductor.workspace &&
+        entry.project === conductor.project &&
         entry.conductor === conductor.conversation &&
         entry.session === session,
     );
@@ -509,13 +509,13 @@ export class ConductorSessions {
   }
 
   private async status(
-    workspace: string,
+    project: string,
     session: string,
   ): Promise<SessionStatus> {
     const engines = this.deps.engines();
-    const state = await engines.state(workspace, session);
+    const state = await engines.state(project, session);
     if (state.state === "terminal") return "terminal";
-    if (engines.permissions(workspace, session).length) return "waiting";
+    if (engines.permissions(project, session).length) return "waiting";
     if (state.state === "running" || state.state === "starting")
       return "working";
     return state.state === "error" ? "failed" : "idle";
@@ -533,10 +533,8 @@ export class ConductorSessions {
   }
 
   private async turnsOf(launch: Launch): Promise<Turn[]> {
-    const pending = this.deps
-      .engines()
-      .pending(launch.workspace, launch.session);
-    const folder = await this.deps.folderOf(launch.workspace);
+    const pending = this.deps.engines().pending(launch.project, launch.session);
+    const folder = await this.deps.folderOf(launch.project);
     const read = await this.deps.read(folder, launch.session).catch(() => null);
     return read?.turns.length ? read.turns : (pending?.turns ?? []);
   }
@@ -545,7 +543,7 @@ export class ConductorSessions {
 
   /** Watch a session's turn; `started` when it is known to run already. */
   private arm(launch: Launch, started: boolean): void {
-    this.watches.set(keyOf(launch.workspace, launch.session), {
+    this.watches.set(keyOf(launch.project, launch.session), {
       launch,
       started,
     });
@@ -556,23 +554,23 @@ export class ConductorSessions {
     this.arm(launch, started);
     const state = await this.deps
       .engines()
-      .state(launch.workspace, launch.session);
-    this.onState(launch.workspace, launch.session, state);
+      .state(launch.project, launch.session);
+    this.onState(launch.project, launch.session, state);
   }
 
   /** Every engine event, as the chat's own listener hears it. */
   onEvent(event: ConversationEvent): void {
     if (event.type !== "state" || typeof event.conversation !== "string")
       return;
-    this.onState(event.workspace, event.conversation, event.engine);
+    this.onState(event.project, event.conversation, event.engine);
   }
 
   private onState(
-    workspace: string,
+    project: string,
     conversation: string,
     engine: EngineState,
   ): void {
-    const key = keyOf(workspace, conversation);
+    const key = keyOf(project, conversation);
     const watch = this.watches.get(key);
     if (watch) {
       if (engine.state === "running" || engine.state === "starting")
@@ -581,41 +579,41 @@ export class ConductorSessions {
       else if (watch.started) {
         this.watches.delete(key);
         const { launch } = watch;
-        const owed = keyOf(launch.workspace, launch.conductor);
+        const owed = keyOf(launch.project, launch.conductor);
         const list = this.reports.get(owed) ?? [];
         list.push({
           launch,
           error: engine.state === "error" ? engine.message : null,
         });
         this.reports.set(owed, list);
-        void this.flush(launch.workspace, launch.conductor);
+        void this.flush(launch.project, launch.conductor);
       }
     }
     if (
       (engine.state === "idle" || engine.state === "error") &&
       this.reports.has(key)
     )
-      void this.flush(workspace, conversation);
+      void this.flush(project, conversation);
   }
 
   /** Tell an idle conductor what its sessions did; a busy one hears later. */
-  private async flush(workspace: string, conductor: string): Promise<void> {
-    const key = keyOf(workspace, conductor);
+  private async flush(project: string, conductor: string): Promise<void> {
+    const key = keyOf(project, conductor);
     const owed = this.reports.get(key);
     if (!owed?.length || this.sending.has(key)) return;
     this.sending.add(key);
     try {
       const engines = this.deps.engines();
-      const state = await engines.state(workspace, conductor);
+      const state = await engines.state(project, conductor);
       if (state.state !== "idle" && state.state !== "error") return;
       const taken = owed.splice(0);
       this.reports.delete(key);
       const agent = taken[0]?.launch.conductorAgent ?? "claude";
       try {
         const next = await engines.send(
-          workspace,
+          project,
           conductor,
-          await this.deps.folderOf(workspace),
+          await this.deps.folderOf(project),
           outgoing(
             await this.reportTurn(taken),
             await this.settingsOf(conductor, agent),
@@ -663,12 +661,23 @@ Review the result (${cli} sessions.read for more), then tell the user in a few l
       .then((text) => {
         const data = JSON.parse(text) as { v?: unknown; launches?: unknown };
         return data?.v === 1 && Array.isArray(data.launches)
-          ? (data.launches as Launch[]).filter(
-              (entry) =>
-                typeof entry?.session === "string" &&
-                typeof entry.conductor === "string" &&
-                typeof entry.workspace === "string",
-            )
+          ? (data.launches as (Launch & { workspace?: unknown })[])
+              // NOTE: A launch saved before FE-107 names its project
+              // `workspace`; it is read as `project` and saved that way.
+              .map((raw) => {
+                if (!raw || typeof raw !== "object") return raw;
+                const { workspace, ...entry } = raw;
+                return entry.project === undefined &&
+                  typeof workspace === "string"
+                  ? { ...entry, project: workspace }
+                  : entry;
+              })
+              .filter(
+                (entry) =>
+                  typeof entry?.session === "string" &&
+                  typeof entry.conductor === "string" &&
+                  typeof entry.project === "string",
+              )
           : [];
       })
       .catch(() => []);

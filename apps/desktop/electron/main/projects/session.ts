@@ -1,20 +1,20 @@
-// Who may act on the workspaces, and which projects this process knows of:
+// Who may act on the projects, and which projects this process knows of:
 // the session gate, local mode's stand-in "account", and the list the last
 // `load` read. Split out of `index.ts` (FE-82/D1); every feature that resolves
 // a project to its folder goes through here.
 import { can } from "../../../shared/policy";
-import type { Workspace, WorkspaceSnapshot } from "../../../shared/workspaces";
+import type { Project, ProjectSnapshot } from "../../../shared/projects";
 import { currentSession } from "../auth";
 import { resolveApi } from "../auth/client";
 import { readLocalMode } from "../auth/local-mode";
 import { type MachineRecord, readRecord } from "../auth/store";
-import { fetchWorkspaces } from "./client";
+import { fetchProjects } from "./client";
 import {
-  findLocalWorkspace,
+  findLocalProject,
   type LocalBoard,
-  listLocalWorkspaces,
+  listLocalProjects,
   localBoard,
-  toWorkspace as localToWorkspace,
+  toProject as localToProject,
 } from "./local-backend";
 import { folderExists } from "./local-folder";
 import { readActive, readFolders, writeActive } from "./store";
@@ -38,7 +38,7 @@ export async function authorizedRecord(): Promise<MachineRecord> {
     !can(session.principal, "cloud:use") ||
     session.principal.kind !== "machine"
   )
-    throw new Error("Sign in to load your workspaces.");
+    throw new Error("Sign in to load your projects.");
   const record = await readRecord();
   if (
     !record ||
@@ -106,27 +106,27 @@ export async function assertCanUse(): Promise<void> {
   await authorizedRecord();
 }
 
-/** Local boards as the workspace list carries them, each with its folder. */
-export async function localList(): Promise<Workspace[]> {
-  const locals = listLocalWorkspaces();
+/** Local boards as the project list carries them, each with its folder. */
+export async function localList(): Promise<Project[]> {
+  const locals = listLocalProjects();
   if (!locals.length) return [];
   const folders = await readFolders(LOCAL_RECORD);
-  return locals.map((workspace) =>
-    localToWorkspace(workspace, folders[workspace.slug]?.[0] ?? null),
+  return locals.map((project) =>
+    localToProject(project, folders[project.slug]?.[0] ?? null),
   );
 }
 
 /**
  * The local board a board call names, or null when it names a cloud one.
  *
- * NOTE: Matched by ID only (see `findLocalWorkspace`), and only once the
+ * NOTE: Matched by ID only (see `findLocalProject`), and only once the
  * session may use the app at all: a signed-out window reads no board, local
  * or not.
  */
 export async function localTarget(
-  workspaceId: string,
+  projectId: string,
 ): Promise<LocalBoard | null> {
-  const board = localBoard(workspaceId);
+  const board = localBoard(projectId);
   if (!board) return null;
   await assertCanUse();
   return board;
@@ -135,7 +135,7 @@ export async function localTarget(
 /**
  * Which account a folder link keyed by `slug` is filed under.
  *
- * NOTE: The folder channels name a workspace by slug alone, and a local board
+ * NOTE: The folder channels name a project by slug alone, and a local board
  * and a cloud one can share a slug (a moved board and its cloud copy usually
  * do). The cloud project wins that tie when signed in: it is the one the rest
  * of the app — terminals, pull requests — already resolves that slug to.
@@ -145,8 +145,8 @@ export async function folderRecordFor(slug: string): Promise<MachineRecord> {
   const record = await authorizedRecord();
   const cloud = cachedList(record);
   if (
-    !cloud?.some((workspace) => workspace.slug === slug) &&
-    findLocalWorkspace(slug, { bySlug: true })
+    !cloud?.some((project) => project.slug === slug) &&
+    findLocalProject(slug, { bySlug: true })
   )
     return LOCAL_RECORD;
   return record;
@@ -156,35 +156,34 @@ export async function folderRecordFor(slug: string): Promise<MachineRecord> {
 async function localKnown(
   key: string,
   bySlug: boolean,
-): Promise<Workspace | null> {
-  const found = findLocalWorkspace(key, { bySlug });
+): Promise<Project | null> {
+  const found = findLocalProject(key, { bySlug });
   if (!found) return null;
   const folders = await readFolders(LOCAL_RECORD);
-  return localToWorkspace(found, folders[found.slug]?.[0] ?? null);
+  return localToProject(found, folders[found.slug]?.[0] ?? null);
 }
 
 /** Local mode's `load`: the local list, and the selection filed under it. */
-export async function loadLocal(id?: string): Promise<WorkspaceSnapshot> {
-  const workspaces = await localList();
+export async function loadLocal(id?: string): Promise<ProjectSnapshot> {
+  const projects = await localList();
   const saved = await readActive(LOCAL_RECORD);
   const selector = id ?? saved?.value;
   const active =
     (selector
-      ? workspaces.find(
-          (workspace) =>
-            workspace.id === selector || workspace.slug === selector,
+      ? projects.find(
+          (project) => project.id === selector || project.slug === selector,
         )
       : undefined) ?? null;
   if (id !== undefined && !active)
     throw new Error(
-      "This workspace is no longer available. Refresh the list and choose another.",
+      "This project is no longer available. Refresh the list and choose another.",
     );
   if (id !== undefined || saved?.by === "slug" || (saved !== null && !active))
     await writeActive(LOCAL_RECORD, {
       id: active?.id ?? null,
       slug: active?.slug ?? null,
     });
-  return { workspaces, active };
+  return { projects, active };
 }
 
 /**
@@ -196,22 +195,19 @@ export async function loadLocal(id?: string): Promise<WorkspaceSnapshot> {
  * read still asks the service, and the session key means a different account
  * never sees it.
  */
-let lastList: { session: string; workspaces: Workspace[] } | null = null;
+let lastList: { session: string; projects: Project[] } | null = null;
 
 const sessionKey = (record: MachineRecord) =>
   [record.apiUrl, record.machineId, record.userId, record.secret].join("\n");
 
 /** The list the last `load` read, when it was read under `record`'s session. */
-export function cachedList(record: MachineRecord): Workspace[] | null {
-  return lastList?.session === sessionKey(record) ? lastList.workspaces : null;
+export function cachedList(record: MachineRecord): Project[] | null {
+  return lastList?.session === sessionKey(record) ? lastList.projects : null;
 }
 
 /** Remember the account's list, as `load` just read it under `record`. */
-export function rememberList(
-  record: MachineRecord,
-  workspaces: Workspace[],
-): void {
-  lastList = { session: sessionKey(record), workspaces };
+export function rememberList(record: MachineRecord, projects: Project[]): void {
+  lastList = { session: sessionKey(record), projects };
 }
 
 /** Drop the remembered list, so the next read asks the service. */
@@ -223,17 +219,17 @@ export function forgetList(): void {
  * The folder a terminal for `key` opens in (FE-19/D7).
  *
  * NOTE: Resolved HERE, from the links this process wrote down, never from the
- * renderer. The terminal panel names a workspace and nothing else, so a
+ * renderer. The terminal panel names a project and nothing else, so a
  * renderer cannot open a shell in a folder of its choosing.
  *
  * @param key The cloud id or, for a service that sends none, the slug — the
  *   same either-or `load(id)` accepts. The folder link is keyed by slug.
- * @returns The workspace's PRIMARY folder on this machine, or null — the home
+ * @returns The project's PRIMARY folder on this machine, or null — the home
  *   folder — when it has none here or it has moved.
  */
 export async function terminalFolder(key: string): Promise<string | null> {
-  const { record, workspace } = await knownWorkspace(key);
-  const [primary] = (await readFolders(record))[workspace.slug] ?? [];
+  const { record, project } = await knownProject(key);
+  const [primary] = (await readFolders(record))[project.slug] ?? [];
   return primary && (await folderExists(primary)) ? primary : null;
 }
 
@@ -244,8 +240,8 @@ export async function terminalFolder(key: string): Promise<string | null> {
  * Resolved here, like {@link terminalFolder}, never from the renderer.
  */
 export async function projectFolders(key: string): Promise<string[]> {
-  const { record, workspace } = await knownWorkspace(key);
-  const folders = (await readFolders(record))[workspace.slug] ?? [];
+  const { record, project } = await knownProject(key);
+  const folders = (await readFolders(record))[project.slug] ?? [];
   const present = await Promise.all(
     folders.map(async (folder) =>
       (await folderExists(folder)) ? folder : null,
@@ -255,7 +251,7 @@ export async function projectFolders(key: string): Promise<string[]> {
 }
 
 /**
- * The workspace `key` (id or slug) names on this account, and the credential
+ * The project `key` (id or slug) names on this account, and the credential
  * that read it.
  *
  * Found in the list this process last read, or a fresh one.
@@ -263,26 +259,24 @@ export async function projectFolders(key: string): Promise<string[]> {
  * NOTE: Exported for `../readiness`, which resolves a slug the same way the
  * terminal does rather than trusting anything the renderer says about it.
  */
-export async function knownWorkspace(
+export async function knownProject(
   key: string,
-): Promise<{ record: MachineRecord; workspace: Workspace }> {
+): Promise<{ record: MachineRecord; project: Project }> {
   // A local board answers with `LOCAL_RECORD`, whose folder links are the
   // local ones and whose origin no request can reach.
   if (await inLocalMode()) {
     const local = await localKnown(key, true);
     if (!local) throw new Error("That project is not on this machine.");
-    return { record: LOCAL_RECORD, workspace: local };
+    return { record: LOCAL_RECORD, project: local };
   }
   const byId = await localKnown(key, false);
-  if (byId) return { record: LOCAL_RECORD, workspace: byId };
+  if (byId) return { record: LOCAL_RECORD, project: byId };
   const record = await authorizedRecord();
-  const known = cachedList(record) ?? (await fetchWorkspaces(record));
-  const workspace = known.find(
-    (entry) => entry.id === key || entry.slug === key,
-  );
-  if (workspace) return { record, workspace };
+  const known = cachedList(record) ?? (await fetchProjects(record));
+  const project = known.find((entry) => entry.id === key || entry.slug === key);
+  if (project) return { record, project };
   const bySlug = await localKnown(key, true);
-  if (bySlug) return { record: LOCAL_RECORD, workspace: bySlug };
+  if (bySlug) return { record: LOCAL_RECORD, project: bySlug };
   throw new Error("That project is not on this account.");
 }
 
@@ -291,9 +285,9 @@ export async function knownWorkspace(
  *
  * Never reuses another account's list.
  */
-export async function menuBarWorkspaces(): Promise<Workspace[]> {
+export async function menuBarProjects(): Promise<Project[]> {
   if (await inLocalMode()) return localList();
   const record = await authorizedRecord();
-  const cloud = cachedList(record) ?? (await fetchWorkspaces(record));
+  const cloud = cachedList(record) ?? (await fetchProjects(record));
   return [...cloud, ...(await localList())];
 }

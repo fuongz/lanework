@@ -74,7 +74,7 @@ export function pidText(task: BackgroundTask): string | null {
 
 /** One confirmation flow shared by all three Stop entry points. */
 export function useStopBackgroundTask(
-  workspace: string | null,
+  project: string | null,
   conversation: string,
 ) {
   const [confirming, setConfirming] = useState<BackgroundTask | null>(null);
@@ -82,7 +82,7 @@ export function useStopBackgroundTask(
   const pendingIdentity = useRef<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
-  const identity = `${workspace}:${conversation}`;
+  const identity = `${project}:${conversation}`;
   const currentIdentity = useRef(identity);
   currentIdentity.current = identity;
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new conversation resets its confirmation and feedback
@@ -95,7 +95,7 @@ export function useStopBackgroundTask(
   const stop = async () => {
     const startedFor = identity;
     if (
-      !workspace ||
+      !project ||
       !confirming ||
       !window.desktop ||
       pendingIdentity.current === identity
@@ -105,7 +105,7 @@ export function useStopBackgroundTask(
     setPending(true);
     try {
       const result = await window.desktop.terminal.agentStopTask(
-        workspace,
+        project,
         conversation,
         confirming.id,
       );
@@ -464,11 +464,11 @@ function TaskRow({
  */
 export function BackgroundTasksButton({
   slug,
-  workspace,
+  project,
   session,
 }: {
   slug: string;
-  workspace: string;
+  project: string;
   session: AgentSession;
 }) {
   const navigate = useNavigate();
@@ -479,10 +479,10 @@ export function BackgroundTasksButton({
    * Null follows the default (FE-42/D2): folded unless nothing runs.
    */
   const [finishedChoice, setFinishedChoice] = useState<boolean | null>(null);
-  const stopping = useStopBackgroundTask(workspace, session.id);
+  const stopping = useStopBackgroundTask(project, session.id);
   const any = session.agent === "claude" && session.background.total > 0;
   const { tasks, error } = useBackgroundTasks(
-    workspace,
+    project,
     session.id,
     `${backgroundCue(session)}:${stopping.revision}`,
     any,

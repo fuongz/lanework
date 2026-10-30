@@ -6,7 +6,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { BoardCard, CardCheckpoint } from "#/../shared/workspaces";
+import type { BoardCard, CardCheckpoint } from "#/../shared/projects";
 import { Button } from "#/components/ui/button";
 import { useCopy } from "#/hooks/use-copy";
 import { relativeTime } from "#/lib/relative-time";
@@ -57,7 +57,7 @@ const RESUMERS = [
  *   says one arrived.
  */
 export function IssueCheckpoint({ card }: { card: BoardCard }) {
-  const workspaceId = useBoard((state) => state.active?.id ?? null);
+  const projectId = useBoard((state) => state.active?.id ?? null);
   const [checkpoint, setCheckpoint] = useState<CardCheckpoint | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -74,12 +74,12 @@ export function IssueCheckpoint({ card }: { card: BoardCard }) {
   }, [summary, expanded]);
 
   useEffect(() => {
-    const surface = window.desktop?.workspaces;
-    if (!surface || !workspaceId) return;
+    const surface = window.desktop?.projects;
+    if (!surface || !projectId) return;
     let cancelled = false;
     const load = () =>
       surface.board
-        .checkpoint(workspaceId, card.id)
+        .checkpoint(projectId, card.id)
         // A hint beside the card: a failed read shows nothing, not an error.
         .catch(() => null)
         .then((next) => {
@@ -93,7 +93,7 @@ export function IssueCheckpoint({ card }: { card: BoardCard }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [workspaceId, card.id]);
+  }, [projectId, card.id]);
 
   if (!checkpoint) return null;
   const id = card.taskId ?? card.id;

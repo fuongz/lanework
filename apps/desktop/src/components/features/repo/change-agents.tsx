@@ -15,7 +15,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useWorktree } from "#/stores/worktree";
@@ -63,24 +63,24 @@ function Stack({ marks }: { marks: AgentFileMark[] }) {
  */
 export function ChangeAgents({ path }: { path: string }) {
   const { slug } = useParams({ from: "/_app/w/$slug/changes" });
-  const workspace = useWorkspaceKey(slug);
+  const project = useProjectKey(slug);
   const navigate = useNavigate();
   const resume = useAgentTerminals((state) => state.resume);
   const marks = useWorktree((state) => state.agentMarks?.files[path] ?? NONE);
-  if (!workspace || marks.length === 0) return null;
+  if (!project || marks.length === 0) return null;
 
   /** Resume it, or go to its agent if one runs (FE-23/D6). */
   const open = async (mark: AgentFileMark) => {
     const find = () =>
       useAgentSessions
         .getState()
-        .byWorkspace[workspace]?.find(
+        .byProject[project]?.find(
           (entry) => entry.agent === mark.agent && entry.id === mark.id,
         );
-    if (!find()) await useAgentSessions.getState().load(workspace);
+    if (!find()) await useAgentSessions.getState().load(project);
     const session = find();
     if (!session) return;
-    const terminal = await resume(workspace, session);
+    const terminal = await resume(project, session);
     if (terminal)
       void navigate({
         to: "/w/$slug/agents/$terminalId",

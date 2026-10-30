@@ -13,13 +13,13 @@ import { useTerminal } from "#/stores/terminal";
  * and the bar that stands in for it still has to count this project's
  * terminals, including on a project the window has only just switched to.
  */
-export function useTerminalSessions(workspace: string | null) {
+export function useTerminalSessions(project: string | null) {
   const refresh = useTerminal((state) => state.refresh);
   useEffect(() => {
-    if (!workspace) return;
-    void refresh(workspace);
+    if (!project) return;
+    void refresh(project);
     return window.desktop?.terminal.onChange((changed) => {
-      if (changed === workspace || changed === "*") void refresh(workspace);
+      if (changed === project || changed === "*") void refresh(project);
     });
-  }, [workspace, refresh]);
+  }, [project, refresh]);
 }

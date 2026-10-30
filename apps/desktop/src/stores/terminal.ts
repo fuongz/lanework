@@ -10,15 +10,15 @@ import {
 } from "../../shared/terminal";
 
 /**
- * Per-workspace revision of the tab list.
+ * Per-project revision of the tab list.
  *
  * NOTE: A list read that started before an open or a close must not land
  * after it. It would bring back the tab just closed, or drop the one just
  * opened. Every local change bumps the counter; a read checks it on return.
  */
 const revision = new Map<string, number>();
-const bump = (workspace: string) =>
-  revision.set(workspace, (revision.get(workspace) ?? 0) + 1);
+const bump = (project: string) =>
+  revision.set(project, (revision.get(project) ?? 0) + 1);
 
 /** The storage key of the panel's height (percent of the content column). */
 const HEIGHT_KEY = "lanework:terminal-height";
@@ -42,35 +42,35 @@ function readHeight(): number {
 /**
  * Whether the panel is on screen, rather than the bar that stands in for it.
  *
- * @param workspace Null is never shown.
+ * @param project Null is never shown.
  */
 export function terminalShown(
   state: Pick<TerminalState, "open" | "sessions" | "spawning">,
-  workspace: string | null,
+  project: string | null,
 ): boolean {
-  if (!workspace || !state.open[workspace]) return false;
+  if (!project || !state.open[project]) return false;
   // No empty panel: a project with no terminal shows the bar. The panel comes
   // up with the first terminal, which opening it starts.
-  return (state.sessions[workspace]?.length ?? 0) > 0 || state.spawning;
+  return (state.sessions[project]?.length ?? 0) > 0 || state.spawning;
 }
 
 interface TerminalState {
   /**
-   * Whether each workspace's panel was asked for.
+   * Whether each project's panel was asked for.
    *
    * Hiding it stops nothing. Whether it is on screen is
    * {@link terminalShown}, which also needs a terminal to show.
    *
-   * Per workspace, not one flag: a panel opened in one project must not come
+   * Per project, not one flag: a panel opened in one project must not come
    * up in the next one you switch to.
    */
   open: Record<string, boolean | undefined>;
   /** The height the panel opens at, in percent of the content column. */
   height: number;
   setHeight: (height: number) => void;
-  /** Each workspace's terminals, as the host last listed them. */
+  /** Each project's terminals, as the host last listed them. */
   sessions: Record<string, TerminalSession[]>;
-  /** The tab each workspace shows. */
+  /** The tab each project shows. */
   active: Record<string, string | undefined>;
   error: string | null;
   /** A spawn in flight, so the + button cannot start two. */
@@ -80,30 +80,30 @@ interface TerminalState {
   /** The CLIs were asked for once, answered or not: the rail stops waiting. */
   agentsAsked: boolean;
   loadAgents: () => Promise<void>;
-  setOpen: (workspace: string, open: boolean) => void;
-  refresh: (workspace: string) => Promise<void>;
+  setOpen: (project: string, open: boolean) => void;
+  refresh: (project: string) => Promise<void>;
   spawn: (
-    workspace: string,
+    project: string,
     kind?: TerminalKind,
     resume?: string,
   ) => Promise<void>;
-  close: (workspace: string, id: string) => Promise<void>;
-  select: (workspace: string, id: string) => void;
+  close: (project: string, id: string) => Promise<void>;
+  select: (project: string, id: string) => void;
   /** Move a tab dropped on another into that tab's place (drag, at drop). */
-  reorderTab: (workspace: string, dragId: string, overId: string) => void;
+  reorderTab: (project: string, dragId: string, overId: string) => void;
   /** Move a tab one place left or right: the keyboard path for a drag. */
-  moveTab: (workspace: string, id: string, delta: -1 | 1) => void;
+  moveTab: (project: string, id: string, delta: -1 | 1) => void;
   /** Mark a session whose shell exited, keeping its tab. */
-  markExited: (workspace: string, id: string, code: number) => void;
+  markExited: (project: string, id: string, code: number) => void;
   /**
    * View › Toggle Terminal: hide the panel, or show it.
    *
    * Showing it starts a terminal when the project has none, so the shortcut
    * always ends at a prompt.
    */
-  toggle: (workspace: string | null) => Promise<void>;
+  toggle: (project: string | null) => Promise<void>;
   /** View › New Terminal: show the panel and start one. */
-  newTerminal: (workspace: string | null) => Promise<void>;
+  newTerminal: (project: string | null) => Promise<void>;
 }
 
 /**
@@ -112,10 +112,10 @@ interface TerminalState {
  * Back to the bar, which says why, rather than a panel held open around no
  * terminal.
  */
-function settle(workspace: string) {
-  if (!(useTerminal.getState().sessions[workspace]?.length ?? 0))
+function settle(project: string) {
+  if (!(useTerminal.getState().sessions[project]?.length ?? 0))
     useTerminal.setState((state) => ({
-      open: { ...state.open, [workspace]: false },
+      open: { ...state.open, [project]: false },
     }));
 }
 
@@ -125,16 +125,16 @@ function settle(workspace: string) {
  * The active tab is left alone. Dragging a tab says where it should sit, not
  * which shell you want to type into.
  */
-function applyOrder(workspace: string, ids: string[]) {
-  bump(workspace);
+function applyOrder(project: string, ids: string[]) {
+  bump(project);
   useTerminal.setState((state) => {
     const byId = new Map(
-      (state.sessions[workspace] ?? []).map((session) => [session.id, session]),
+      (state.sessions[project] ?? []).map((session) => [session.id, session]),
     );
     return {
       sessions: {
         ...state.sessions,
-        [workspace]: ids.flatMap((id) => {
+        [project]: ids.flatMap((id) => {
           const session = byId.get(id);
           return session ? [session] : [];
         }),
@@ -142,7 +142,7 @@ function applyOrder(workspace: string, ids: string[]) {
     };
   });
   desktopSurface("terminal")
-    .reorder(workspace, ids)
+    .reorder(project, ids)
     .catch((error: unknown) =>
       useTerminal.setState({
         error: ipcMessage(error, "Could not move that terminal."),
@@ -171,9 +171,9 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     }
   },
 
-  setOpen: (workspace, open) =>
+  setOpen: (project, open) =>
     set((state) => ({
-      open: { ...state.open, [workspace]: open },
+      open: { ...state.open, [project]: open },
       error: open ? state.error : null,
     })),
 
@@ -184,24 +184,24 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     writeStored(HEIGHT_KEY, String(height));
   },
 
-  refresh: async (workspace) => {
-    const mine = revision.get(workspace) ?? 0;
+  refresh: async (project) => {
+    const mine = revision.get(project) ?? 0;
     try {
       // NOTE: Shells only (FE-26/D6). The host runs agents too, but they
       // belong to the main view and `useAgentTerminals` lists them. A Claude
       // started from the rail must never turn up as a tab here.
-      const listed = (await desktopSurface("terminal").list(workspace)).filter(
+      const listed = (await desktopSurface("terminal").list(project)).filter(
         (session) => session.kind === "shell",
       );
-      if ((revision.get(workspace) ?? 0) !== mine) return;
+      if ((revision.get(project) ?? 0) !== mine) return;
       set((state) => {
-        const current = state.active[workspace];
+        const current = state.active[project];
         const keep = listed.some((session) => session.id === current);
         return {
-          sessions: { ...state.sessions, [workspace]: listed },
+          sessions: { ...state.sessions, [project]: listed },
           active: {
             ...state.active,
-            [workspace]: keep ? current : listed.at(-1)?.id,
+            [project]: keep ? current : listed.at(-1)?.id,
           },
         };
       });
@@ -212,12 +212,12 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     }
   },
 
-  spawn: async (workspace, kind = "shell", resume) => {
+  spawn: async (project, kind = "shell", resume) => {
     if (get().spawning) return;
-    const count = get().sessions[workspace]?.length ?? 0;
-    if (count >= TERMINAL_LIMITS.perWorkspace) {
+    const count = get().sessions[project]?.length ?? 0;
+    if (count >= TERMINAL_LIMITS.perProject) {
       set({
-        error: `A project can have at most ${TERMINAL_LIMITS.perWorkspace} terminals. Close one first.`,
+        error: `A project can have at most ${TERMINAL_LIMITS.perProject} terminals. Close one first.`,
       });
       return;
     }
@@ -226,24 +226,24 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
       // A first guess at the size; the view's attach sets the real one before
       // anything is drawn.
       const session = await desktopSurface("terminal").spawn(
-        workspace,
+        project,
         80,
         24,
         kind,
         resume,
       );
-      bump(workspace);
+      bump(project);
       set((state) => ({
         sessions: {
           ...state.sessions,
-          [workspace]: [
-            ...(state.sessions[workspace] ?? []).filter(
+          [project]: [
+            ...(state.sessions[project] ?? []).filter(
               (entry) => entry.id !== session.id,
             ),
             session,
           ],
         },
-        active: { ...state.active, [workspace]: session.id },
+        active: { ...state.active, [project]: session.id },
       }));
     } catch (error) {
       set({ error: ipcMessage(error, "Could not start a terminal.") });
@@ -252,23 +252,23 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     }
   },
 
-  close: async (workspace, id) => {
-    bump(workspace);
+  close: async (project, id) => {
+    bump(project);
     set((state) => {
-      const list = state.sessions[workspace] ?? [];
+      const list = state.sessions[project] ?? [];
       const at = list.findIndex((session) => session.id === id);
       const rest = list.filter((session) => session.id !== id);
       const active =
-        state.active[workspace] === id
+        state.active[project] === id
           ? (rest[Math.min(at, rest.length - 1)]?.id ?? undefined)
-          : state.active[workspace];
+          : state.active[project];
       return {
-        sessions: { ...state.sessions, [workspace]: rest },
-        active: { ...state.active, [workspace]: active },
+        sessions: { ...state.sessions, [project]: rest },
+        active: { ...state.active, [project]: active },
         // The last one closed: back to the bar, not an empty panel.
         open: {
           ...state.open,
-          [workspace]: rest.length > 0 && !!state.open[workspace],
+          [project]: rest.length > 0 && !!state.open[project],
         },
       };
     });
@@ -279,22 +279,22 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     }
   },
 
-  select: (workspace, id) =>
-    set((state) => ({ active: { ...state.active, [workspace]: id } })),
+  select: (project, id) =>
+    set((state) => ({ active: { ...state.active, [project]: id } })),
 
-  reorderTab: (workspace, dragId, overId) => {
-    const ids = (get().sessions[workspace] ?? []).map((session) => session.id);
+  reorderTab: (project, dragId, overId) => {
+    const ids = (get().sessions[project] ?? []).map((session) => session.id);
     const from = ids.indexOf(dragId);
     const to = ids.indexOf(overId);
     if (from === -1 || to === -1 || from === to) return;
     const next = [...ids];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved as string);
-    applyOrder(workspace, next);
+    applyOrder(project, next);
   },
 
-  moveTab: (workspace, id, delta) => {
-    const ids = (get().sessions[workspace] ?? []).map((session) => session.id);
+  moveTab: (project, id, delta) => {
+    const ids = (get().sessions[project] ?? []).map((session) => session.id);
     const at = ids.indexOf(id);
     const to = at + delta;
     // The ends are walls, not a wrap: a tab that jumps from last to first on
@@ -303,14 +303,14 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
     const next = [...ids];
     const [moved] = next.splice(at, 1);
     next.splice(to, 0, moved as string);
-    applyOrder(workspace, next);
+    applyOrder(project, next);
   },
 
-  markExited: (workspace, id, code) =>
+  markExited: (project, id, code) =>
     set((state) => ({
       sessions: {
         ...state.sessions,
-        [workspace]: (state.sessions[workspace] ?? []).map((session) =>
+        [project]: (state.sessions[project] ?? []).map((session) =>
           session.id === id && !session.exit
             ? { ...session, exit: { code, signal: null } }
             : session,
@@ -318,27 +318,27 @@ export const useTerminal = create<TerminalState>()((set, get) => ({
       },
     })),
 
-  toggle: async (workspace) => {
+  toggle: async (project) => {
     // NOTE: What is on screen decides, not the flag. A panel asked for whose
     // project has no terminal shows as the bar, and the key must open it.
-    if (!workspace) return;
-    if (terminalShown(get(), workspace)) {
-      get().setOpen(workspace, false);
+    if (!project) return;
+    if (terminalShown(get(), project)) {
+      get().setOpen(project, false);
       return;
     }
     set((state) => ({
-      open: { ...state.open, [workspace]: true },
+      open: { ...state.open, [project]: true },
       error: null,
     }));
-    await get().refresh(workspace);
-    if (!(get().sessions[workspace]?.length ?? 0)) await get().spawn(workspace);
-    settle(workspace);
+    await get().refresh(project);
+    if (!(get().sessions[project]?.length ?? 0)) await get().spawn(project);
+    settle(project);
   },
 
-  newTerminal: async (workspace) => {
-    if (!workspace) return;
-    set((state) => ({ open: { ...state.open, [workspace]: true } }));
-    await get().spawn(workspace);
-    settle(workspace);
+  newTerminal: async (project) => {
+    if (!project) return;
+    set((state) => ({ open: { ...state.open, [project]: true } }));
+    await get().spawn(project);
+    settle(project);
   },
 }));

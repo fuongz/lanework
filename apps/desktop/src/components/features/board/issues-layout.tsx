@@ -26,12 +26,12 @@ import { IssuesList } from "./issues-list";
  */
 export function IssuesLayout() {
   const { slug } = useParams({ from: "/_app/w/$slug/issues" });
-  const workspace = useBoard(
-    (state) => state.workspaces.find((entry) => entry.slug === slug) ?? null,
+  const project = useBoard(
+    (state) => state.projects.find((entry) => entry.slug === slug) ?? null,
   );
   // Nobody else is on a local board, so there is nothing to poll (FE-52/D10).
-  const { presence } = useCloudFeatures(workspace);
-  usePresencePoll(presence ? (workspace?.id ?? null) : null);
+  const { presence } = useCloudFeatures(project);
+  usePresencePoll(presence ? (project?.id ?? null) : null);
 
   const openGitHub = useGitHubIssues((state) => state.open);
   const refreshGitHub = useGitHubIssues((state) => state.refresh);

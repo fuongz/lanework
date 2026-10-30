@@ -23,8 +23,8 @@ import {
   worktreeChannels,
 } from "../../../shared/worktree";
 import { handle as handleIpc } from "../ipc";
-import { knownWorkspace } from "../workspaces";
-import { readFolders } from "../workspaces/store";
+import { knownProject } from "../projects";
+import { readFolders } from "../projects/store";
 import type { TrustFinding } from "./repo-trust";
 import { askAgain, restrictTrust, trustState } from "./trust-gate";
 import {
@@ -91,13 +91,13 @@ async function repoTrust(slug: string, folder = 0): Promise<RepoTrust> {
 /**
  * Folder `index` of the project `slug`, as this machine linked it.
  *
- * NOTE: Resolved through {@link knownWorkspace}, which knows local boards.
+ * NOTE: Resolved through {@link knownProject}, which knows local boards.
  * A plain `authorizedRecord` refuses every project in local mode, where a
  * local board files its folders under no credential.
  */
 async function folderAt(slug: string, index: number): Promise<string | null> {
-  const { record, workspace } = await knownWorkspace(slug);
-  return (await readFolders(record))[workspace.slug]?.[index] ?? null;
+  const { record, project } = await knownProject(slug);
+  return (await readFolders(record))[project.slug]?.[index] ?? null;
 }
 
 /**

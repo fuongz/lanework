@@ -38,8 +38,8 @@ import { readCodexTrust, setCodexTrust } from "../conversation/codex-trust";
 import { sharedEngines } from "../conversation/engine";
 import { projectRoot } from "../instructions/read";
 import { handle } from "../ipc";
+import { terminalFolder } from "../projects";
 import { agentHomeDir } from "../test-seams";
-import { terminalFolder } from "../workspaces";
 import {
   cancelLaneworkMcpLogin,
   laneworkMcpAuth,

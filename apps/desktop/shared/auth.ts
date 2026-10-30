@@ -4,7 +4,7 @@ import type { MachineOwner } from "@lanework/protocol";
  * Who the account belongs to, as much of it as a machine credential may read.
  *
  * The control plane returns it from `GET /v1/machines/me`. Account editing
- * stays behind a browser session this app never holds. Workspace discovery
+ * stays behind a browser session this app never holds. Project discovery
  * uses the separate machine-authenticated sync surface. Fields are nullable so
  * a client can say "we do not know" rather than render `undefined`.
  */

@@ -28,9 +28,9 @@ export type AwaitingEntry = Omit<Awaiting, "agent"> & {
   agent: Awaiting["agent"] | null;
 };
 
-/** The store's key for a conversation in a workspace. */
-export function awaitingKey(workspace: string, conversation: string): string {
-  return `${workspace}:${conversation}`;
+/** The store's key for a conversation in a project. */
+export function awaitingKey(project: string, conversation: string): string {
+  return `${project}:${conversation}`;
 }
 
 /** What one request says: `AskUserQuestion`'s first question, or null. */
@@ -45,12 +45,12 @@ function requestOf(request: PermissionRequest): AwaitingEntry["requests"][0] {
 
 /** Which CLI runs a conversation, as far as this window knows. */
 function agentOf(
-  workspace: string,
+  project: string,
   conversation: string,
 ): AwaitingEntry["agent"] {
   const listed = useAgentSessions
     .getState()
-    .byWorkspace[workspace]?.find((session) => session.id === conversation);
+    .byProject[project]?.find((session) => session.id === conversation);
   if (listed) return listed.agent;
   const started = useNewChats.getState().started[conversation];
   return started?.agent ?? null;
@@ -85,7 +85,7 @@ export const useAwaiting = create<AwaitingState>((set) => {
       event.type !== "state"
     )
       return byKey;
-    const key = awaitingKey(event.workspace, event.conversation);
+    const key = awaitingKey(event.project, event.conversation);
     const entry = byKey[key];
     if (event.type === "permission") {
       // A worker asks its lead, never the person (FE-100/D3).
@@ -97,14 +97,13 @@ export const useAwaiting = create<AwaitingState>((set) => {
         [key]: entry
           ? {
               ...entry,
-              agent:
-                entry.agent ?? agentOf(event.workspace, event.conversation),
+              agent: entry.agent ?? agentOf(event.project, event.conversation),
               requests: [...entry.requests, request],
             }
           : {
-              workspace: event.workspace,
+              project: event.project,
               conversation: event.conversation,
-              agent: agentOf(event.workspace, event.conversation),
+              agent: agentOf(event.project, event.conversation),
               requests: [request],
               since: new Date().toISOString(),
             },
@@ -143,7 +142,7 @@ export const useAwaiting = create<AwaitingState>((set) => {
       const named: string[] = [];
       for (const task of event.run.tasks) {
         if (!task.conversation) continue;
-        const key = awaitingKey(event.workspace, task.conversation);
+        const key = awaitingKey(event.project, task.conversation);
         if (workers.has(key)) continue;
         workers.add(key);
         named.push(key);
@@ -169,7 +168,7 @@ export const useAwaiting = create<AwaitingState>((set) => {
         if (disposed) return;
         let byKey: Record<string, AwaitingEntry> = {};
         for (const entry of list)
-          byKey[awaitingKey(entry.workspace, entry.conversation)] = entry;
+          byKey[awaitingKey(entry.project, entry.conversation)] = entry;
         for (const event of early ?? []) byKey = apply(byKey, event);
         early = null;
         set({ byKey });

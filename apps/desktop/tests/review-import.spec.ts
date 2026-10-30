@@ -14,19 +14,19 @@ import { expect, test } from "@playwright/test";
 import {
   buildReviewFileCard,
   parseCardItems,
-} from "../electron/main/workspaces/review-card";
+} from "../electron/main/projects/review-card";
 import {
   contentSha,
   DEFAULT_CATEGORIES,
   DEFAULT_COLUMNS,
   parseTaskSeq,
   planMigration,
-} from "../electron/main/workspaces/review-import";
+} from "../electron/main/projects/review-import";
 import {
   canonicalStatus,
   resolveCardLocation,
-} from "../electron/main/workspaces/review-location";
-import { scanTaskBlocks } from "../electron/main/workspaces/review-scan";
+} from "../electron/main/projects/review-location";
+import { scanTaskBlocks } from "../electron/main/projects/review-scan";
 
 /**
  * THIS repo's own `.agents/reviews/**` as it stood when the board moved to the

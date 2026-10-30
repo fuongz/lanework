@@ -49,7 +49,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { AgentFilesButton } from "./agent-files";
@@ -71,10 +71,10 @@ export function AgentView() {
   const { slug, terminalId } = useParams({
     from: "/_app/w/$slug/agents/$terminalId",
   });
-  const workspace = useWorkspaceKey(slug);
+  const project = useProjectKey(slug);
   const navigate = useNavigate();
   const sessions = useAgentTerminals((state) =>
-    workspace ? (state.sessions[workspace] ?? NO_TERMINALS) : NO_TERMINALS,
+    project ? (state.sessions[project] ?? NO_TERMINALS) : NO_TERMINALS,
   );
   const refresh = useAgentTerminals((state) => state.refresh);
   const resume = useAgentTerminals((state) => state.resume);
@@ -83,9 +83,7 @@ export function AgentView() {
   const markExited = useAgentTerminals((state) => state.markExited);
   const error = useAgentTerminals((state) => state.error);
   const conversations = useAgentSessions((state) =>
-    workspace
-      ? (state.byWorkspace[workspace] ?? NO_CONVERSATIONS)
-      : NO_CONVERSATIONS,
+    project ? (state.byProject[project] ?? NO_CONVERSATIONS) : NO_CONVERSATIONS,
   );
   const live = useAgentSessions((state) => state.live);
   const [listed, setListed] = useState(false);
@@ -94,10 +92,10 @@ export function AgentView() {
   const [drawn, setDrawn] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!workspace) return;
+    if (!project) return;
     setListed(false);
-    void refresh(workspace).then(() => setListed(true));
-  }, [refresh, workspace]);
+    void refresh(project).then(() => setListed(true));
+  }, [refresh, project]);
 
   const session = sessions.find((entry) => entry.id === terminalId);
 
@@ -123,11 +121,11 @@ export function AgentView() {
   // By the tab's own conversation, listed or not: a new one has numbers from
   // its first answer, before the rail has its title.
   const goal = useAgentSessions((state) =>
-    workspace && conversation?.agent === "codex"
-      ? state.codexGoals[workspace]?.[conversation.id]
+    project && conversation?.agent === "codex"
+      ? state.codexGoals[project]?.[conversation.id]
       : undefined,
   );
-  const facts = useConversationFacts(workspace, agent, session?.resume ?? null);
+  const facts = useConversationFacts(project, agent, session?.resume ?? null);
 
   const open = (next: TerminalSession | null) => {
     if (next)
@@ -141,11 +139,11 @@ export function AgentView() {
   // Stop this tab, then open its conversation as a chat (FE-62/D3).
   const openChat = async () => {
     const id = session?.resume;
-    if (!workspace || !id || toChat || working) return;
+    if (!project || !id || toChat || working) return;
     setToChat(true);
     try {
       if (!session?.exit)
-        await window.desktop?.conversation.takeOver(workspace, id);
+        await window.desktop?.conversation.takeOver(project, id);
       void navigate({
         to: "/w/$slug/agents/chat/$conversation",
         params: { slug, conversation: id },
@@ -158,18 +156,18 @@ export function AgentView() {
   };
 
   const again = async (kind: TerminalAgent) => {
-    if (!workspace) return;
+    if (!project) return;
     open(
       conversation
-        ? await resume(workspace, conversation)
-        : await start(workspace, kind),
+        ? await resume(project, conversation)
+        : await start(project, kind),
     );
   };
 
   const end = async () => {
-    if (!workspace || !session) return;
+    if (!project || !session) return;
     setConfirming(false);
-    await stop(workspace, session.id);
+    await stop(project, session.id);
     void navigate({ to: "/w/$slug/issues", params: { slug }, search: {} });
   };
 
@@ -239,18 +237,18 @@ export function AgentView() {
         <ModelButton facts={facts} />
         {/* What it left running in the background (FE-42/D1): only when it
             started anything there. */}
-        {conversation && workspace && (
+        {conversation && project && (
           <BackgroundTasksButton
             slug={slug}
-            workspace={workspace}
+            project={project}
             session={conversation}
           />
         )}
         {/* What this conversation edited (FE-39/D1), once there is one. */}
-        {conversation && workspace && (
+        {conversation && project && (
           <AgentFilesButton
             slug={slug}
-            workspace={workspace}
+            project={project}
             agent={conversation.agent}
             id={conversation.id}
             working={working}

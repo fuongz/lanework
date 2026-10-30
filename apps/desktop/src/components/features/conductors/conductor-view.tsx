@@ -2,7 +2,7 @@ import { Navigate, useParams } from "@tanstack/react-router";
 import { useTeamLeads } from "#/components/shared/conversation/composer";
 import { NewConversationPage } from "#/components/shared/conversation/new-conversation-view";
 import { ConversationSkeleton } from "#/components/shared/loading/skeletons";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { conductorConversation } from "#/lib/conductors";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useNewChats } from "#/stores/new-chats";
@@ -16,16 +16,16 @@ const ROUTE = "/_app/w/$slug/conductors/$lead" as const;
  */
 export function ConductorView() {
   const { slug, lead: id } = useParams({ from: ROUTE });
-  const workspace = useWorkspaceKey(slug);
-  const leads = useTeamLeads(workspace);
+  const project = useProjectKey(slug);
+  const leads = useTeamLeads(project);
   const sessions = useAgentSessions((state) =>
-    workspace ? state.byWorkspace[workspace] : undefined,
+    project ? state.byProject[project] : undefined,
   );
   const started = useNewChats((state) => state.started);
 
   // The listing decides between the chat and the composer: wait for it, so
   // the composer never flashes before the chat it should have been.
-  if (!workspace || !leads || !sessions)
+  if (!project || !leads || !sessions)
     return <ConversationSkeleton label="Opening the conductor" />;
   const conductor = leads.leads.find((entry) => entry.id === id) ?? null;
   if (!conductor)
@@ -38,7 +38,7 @@ export function ConductorView() {
   const conversation = conductorConversation(
     sessions,
     started,
-    workspace,
+    project,
     conductor.id,
   );
   if (conversation)

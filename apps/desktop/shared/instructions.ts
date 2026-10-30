@@ -204,7 +204,7 @@ export const instructionChannels = {
 } as const;
 
 export interface InstructionChange {
-  workspace: string;
+  project: string;
 }
 
 /**
@@ -215,13 +215,13 @@ export interface InstructionChange {
  */
 export interface DesktopInstructionsApi {
   /** The project's instruction files, and from then on `onChange` for it. */
-  list: (workspace: string) => Promise<InstructionList>;
-  read: (workspace: string, id: string) => Promise<InstructionContent>;
+  list: (project: string) => Promise<InstructionList>;
+  read: (project: string, id: string) => Promise<InstructionContent>;
   effective: (
-    workspace: string,
+    project: string,
     agent: InstructionAgent,
   ) => Promise<EffectiveInstructions>;
   /** Show the file in Finder (FE-37/D8). */
-  reveal: (workspace: string, id: string) => Promise<void>;
+  reveal: (project: string, id: string) => Promise<void>;
   onChange: (listener: (change: InstructionChange) => void) => () => void;
 }

@@ -16,10 +16,10 @@ import {
 } from "../../../shared/harness";
 import { TERMINAL_AGENTS } from "../../../shared/terminal";
 import { broadcast, handle } from "../ipc";
+import { writeAtomic } from "../projects/store";
 import { defaultShell } from "../terminal/shell-env";
 import { opencodeUsageNow } from "../terminal/usage";
 import { agentHomeDir } from "../test-seams";
-import { writeAtomic } from "../workspaces/store";
 import { harnessAccounts } from "./accounts";
 import { latestVersion } from "./latest";
 import { probeAgent } from "./probe";
@@ -248,7 +248,7 @@ function update(agent: HarnessAgent): HarnessInfo[] {
  * Run the update command in Terminal, where its output can be read.
  *
  * A `.command` file that Terminal opens. Not the app's own terminal tabs:
- * those belong to a workspace, and the app never types a command into one.
+ * those belong to a project, and the app never types a command into one.
  * Not AppleScript either, which would ask for Automation permission.
  *
  * NOTE: The file holds only the command `rules.ts` chose, and only this user

@@ -216,14 +216,14 @@ function LineCounts({ added, removed }: { added: number; removed: number }) {
  */
 export function AgentFilesButton({
   slug,
-  workspace,
+  project,
   agent,
   id,
   working,
   facts,
 }: {
   slug: string;
-  workspace: string;
+  project: string;
   agent: TerminalAgent;
   id: string;
   working: boolean;
@@ -251,7 +251,7 @@ export function AgentFilesButton({
     if (!surface) return;
     const mine = ++asked.current;
     try {
-      const next = await surface.agentFiles(workspace, agent, id);
+      const next = await surface.agentFiles(project, agent, id);
       if (mine !== asked.current) return;
       setFound(next);
       setError(null);
@@ -261,7 +261,7 @@ export function AgentFilesButton({
         ipcMessage(failure, "The conversation's files could not be read."),
       );
     }
-  }, [workspace, agent, id]);
+  }, [project, agent, id]);
 
   // Another conversation: nothing of the last one's stays on screen.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on a new conversation
@@ -269,7 +269,7 @@ export function AgentFilesButton({
     setFound(null);
     setError(null);
     setShut(new Set());
-  }, [workspace, agent, id]);
+  }, [project, agent, id]);
 
   // On a turn opening or closing too: one that closed may have edited more.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `working` is the cue

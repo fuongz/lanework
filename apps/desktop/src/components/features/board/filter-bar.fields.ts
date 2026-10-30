@@ -4,7 +4,7 @@ import {
   Tag01Icon,
   UserAccountIcon,
 } from "@hugeicons/core-free-icons";
-import type { BoardView } from "#/../shared/workspaces";
+import type { BoardView } from "#/../shared/projects";
 import {
   byStatusOrder,
   PRIORITY_GROUPS,

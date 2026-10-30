@@ -15,22 +15,22 @@ export const liveRun = (run: OrchestrationRun) =>
  * project's listing never has it.
  */
 export function useOrchestrationRuns(
-  workspace: string | null,
+  project: string | null,
 ): readonly OrchestrationRun[] {
   const [runs, setRuns] = useState<readonly OrchestrationRun[]>(NO_RUNS);
   useEffect(() => {
     setRuns(NO_RUNS);
     const surface = window.desktop?.orchestration;
-    if (!surface || !workspace) return;
+    if (!surface || !project) return;
     let gone = false;
     void surface
-      .runs(workspace)
+      .runs(project)
       .then((list) => {
         if (!gone) setRuns(list);
       })
       .catch(() => {});
     const off = surface.onChange((event) => {
-      if (event.workspace !== workspace) return;
+      if (event.project !== project) return;
       setRuns((current) => {
         const at = current.findIndex((run) => run.id === event.run.id);
         if (at === -1) return [event.run, ...current];
@@ -43,6 +43,6 @@ export function useOrchestrationRuns(
       gone = true;
       off();
     };
-  }, [workspace]);
+  }, [project]);
   return runs;
 }

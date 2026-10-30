@@ -39,12 +39,12 @@ test("a real shell starts in the project folder and echoes what it is given", as
   try {
     const cwd = await folder();
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd,
       cols: 80,
       rows: 24,
     });
-    expect(session).toMatchObject({ workspace: "ws", shell: "sh", cwd });
+    expect(session).toMatchObject({ project: "ws", shell: "sh", cwd });
     expect(session.pid).toBeGreaterThan(0);
     const view = viewer();
     sessions.attach(view.sub, session.id, 80, 24);
@@ -63,7 +63,7 @@ test("attach resizes the shell before anything is drawn", async () => {
   const sessions = createSessions({ shell: SH });
   try {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await folder(),
       cols: 80,
       rows: 24,
@@ -85,7 +85,7 @@ test("a viewer that comes back later is shown the screen, with nothing lost or d
   const sessions = createSessions({ shell: SH });
   try {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await folder(),
       cols: 80,
       rows: 24,
@@ -127,7 +127,7 @@ test("a shell never sees the app's own environment", async () => {
   });
   try {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await folder(),
       cols: 200,
       rows: 24,
@@ -148,15 +148,15 @@ test("a project holds at most 8 terminals, and closing one makes room", async ()
   const sessions = createSessions({ shell: SH });
   try {
     const cwd = await folder();
-    const spawn = (workspace: string) =>
-      sessions.spawn({ workspace, cwd, cols: 80, rows: 24 });
+    const spawn = (project: string) =>
+      sessions.spawn({ project, cwd, cols: 80, rows: 24 });
     const first = spawn("a");
     for (let i = 1; i < 8; i++) spawn("a");
     expect(() => spawn("a")).toThrow(/at most 8 terminals/);
     // Another project has its own allowance.
-    expect(spawn("b").workspace).toBe("b");
+    expect(spawn("b").project).toBe("b");
     expect(sessions.kill(first.id)).toBe(true);
-    expect(spawn("a").workspace).toBe("a");
+    expect(spawn("a").project).toBe("a");
     expect(sessions.list("a")).toHaveLength(8);
     expect(sessions.list("b")).toHaveLength(1);
   } finally {
@@ -168,16 +168,16 @@ test("a project's tabs stay in the order they were dragged into", async () => {
   const sessions = createSessions({ shell: SH });
   try {
     const cwd = await folder();
-    const spawn = (workspace: string) =>
-      sessions.spawn({ workspace, cwd, cols: 80, rows: 24 });
-    const ids = (workspace: string) =>
-      sessions.list(workspace).map((session) => session.id);
+    const spawn = (project: string) =>
+      sessions.spawn({ project, cwd, cols: 80, rows: 24 });
+    const ids = (project: string) =>
+      sessions.list(project).map((session) => session.id);
     const a = spawn("ws").id;
     const b = spawn("ws").id;
     const c = spawn("ws").id;
     const elsewhere = spawn("other").id;
     const changed: string[] = [];
-    sessions.onChanged((workspace) => changed.push(workspace));
+    sessions.onChanged((project) => changed.push(project));
 
     expect(sessions.reorder("ws", [c, a, b])).toBe(true);
     expect(ids("ws")).toEqual([c, a, b]);
@@ -213,7 +213,7 @@ test("an agent tab types its CLI once a view is attached — never before, never
   });
   try {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await folder(),
       cols: 80,
       rows: 24,
@@ -255,7 +255,7 @@ test("an agent whose CLI never starts shows what its shell said, instead of hidi
   });
   try {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await folder(),
       cols: 80,
       rows: 24,
@@ -280,7 +280,7 @@ test("a kind it does not know opens a plain shell, and types nothing", async () 
   });
   try {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await folder(),
       cols: 80,
       rows: 24,
@@ -323,7 +323,7 @@ test("a shell that exits keeps its tab, and says so to whoever comes back", asyn
   const sessions = createSessions({ shell: SH });
   try {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await folder(),
       cols: 80,
       rows: 24,
@@ -349,7 +349,7 @@ test("closing a terminal stops its shell and forgets it", async () => {
   const sessions = createSessions({ shell: SH });
   try {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await folder(),
       cols: 80,
       rows: 24,
@@ -377,7 +377,7 @@ test("a late viewer gets the program's SGR mouse encoding back, or its wheel rea
   const sessions = createSessions({ shell: SH });
   try {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await folder(),
       cols: 80,
       rows: 24,

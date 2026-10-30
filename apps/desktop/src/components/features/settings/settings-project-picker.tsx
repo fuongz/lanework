@@ -7,8 +7,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useRef, useState } from "react";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
-import { CreateProjectDialog } from "#/components/shared/workspaces/create-project-dialog";
-import { ProjectTile } from "#/components/shared/workspaces/project-tile";
+import { CreateProjectDialog } from "#/components/shared/projects/create-project-dialog";
+import { ProjectTile } from "#/components/shared/projects/project-tile";
 import {
   Empty,
   EmptyDescription,
@@ -21,7 +21,7 @@ import {
   PopoverTrigger,
 } from "#/components/ui/popover";
 import { useBoard } from "#/stores/board";
-import { isLocalWorkspace } from "#/stores/session";
+import { isLocalProject } from "#/stores/session";
 import {
   useSettingsProject,
   useSettingsProjectPick,
@@ -43,7 +43,7 @@ const fold = (text: string) =>
  * project), but picking only chooses what these pages show.
  */
 export function SettingsProjectPicker() {
-  const workspaces = useBoard((state) => state.workspaces);
+  const projects = useBoard((state) => state.projects);
   const selected = useSettingsProject();
   const pick = useSettingsProjectPick((state) => state.pick);
   const [open, setOpen] = useState(false);
@@ -54,12 +54,12 @@ export function SettingsProjectPicker() {
 
   const needle = fold(query.trim());
   const shown = needle
-    ? workspaces.filter(
-        (workspace) =>
-          fold(workspace.name).includes(needle) ||
-          fold(workspace.slug).includes(needle),
+    ? projects.filter(
+        (project) =>
+          fold(project.name).includes(needle) ||
+          fold(project.slug).includes(needle),
       )
-    : workspaces;
+    : projects;
 
   const choose = (slug: string) => {
     setOpen(false);
@@ -88,7 +88,7 @@ export function SettingsProjectPicker() {
               className="hover:bg-foreground/[0.05] -ml-3.5 mr-3 flex h-7 min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-md px-1.5 text-left transition-colors duration-150"
             >
               <ProjectTile
-                workspace={selected}
+                project={selected}
                 className="size-4 rounded-[4px] text-[9px]"
               />
               <span className="truncate text-[13px] font-medium">
@@ -111,7 +111,7 @@ export function SettingsProjectPicker() {
           // letter typed.
           className="w-72 p-1"
         >
-          {workspaces.length > 0 && (
+          {projects.length > 0 && (
             <div className="border-foreground/10 mb-1 flex h-8 shrink-0 items-center gap-2 border-b px-2 pb-1">
               <HugeiconsIcon
                 icon={Search01Icon}
@@ -168,14 +168,14 @@ export function SettingsProjectPicker() {
                 else rows[Math.min(next, rows.length - 1)]?.focus();
               }}
             >
-              {workspaces.length === 0 && (
+              {projects.length === 0 && (
                 <Empty className="px-2 py-4">
                   <EmptyHeader>
                     <EmptyTitle>No projects yet</EmptyTitle>
                   </EmptyHeader>
                 </Empty>
               )}
-              {workspaces.length > 0 && shown.length === 0 && (
+              {projects.length > 0 && shown.length === 0 && (
                 <Empty className="px-2 py-4">
                   <EmptyHeader>
                     <EmptyTitle>No matches</EmptyTitle>
@@ -185,21 +185,21 @@ export function SettingsProjectPicker() {
                   </EmptyHeader>
                 </Empty>
               )}
-              {shown.map((workspace) => (
+              {shown.map((project) => (
                 <button
-                  key={workspace.slug}
+                  key={project.slug}
                   type="button"
                   role="option"
-                  aria-selected={workspace.slug === selected?.slug}
-                  onClick={() => choose(workspace.slug)}
+                  aria-selected={project.slug === selected?.slug}
+                  onClick={() => choose(project.slug)}
                   className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
                 >
                   <ProjectTile
-                    workspace={workspace}
+                    project={project}
                     className="size-5 rounded-[5px] text-[10px]"
                   />
-                  <span className="truncate">{workspace.name}</span>
-                  {isLocalWorkspace(workspace) && <LocalBadge />}
+                  <span className="truncate">{project.name}</span>
+                  {isLocalProject(project) && <LocalBadge />}
                 </button>
               ))}
             </div>

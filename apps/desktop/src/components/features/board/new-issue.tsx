@@ -1,6 +1,6 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useId, useState } from "react";
-import type { BoardCard } from "#/../shared/workspaces";
+import type { BoardCard } from "#/../shared/projects";
 import {
   CategoryDot,
   PriorityIcon,
@@ -92,7 +92,7 @@ export function NewIssue() {
       ...(tags.length ? { tags } : {}),
     });
     // Stays put on failure, with the draft intact. The reason is already on
-    // screen (`WorkspaceLayout` renders the store's error across every view),
+    // screen (`ProjectLayout` renders the store's error across every view),
     // and navigating away would take a person's unsaved paragraph with it.
     if (result.error || !result.card) return;
 

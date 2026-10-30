@@ -14,11 +14,11 @@ import { DragDropVerticalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { useCallback, useRef, useState } from "react";
-import type { Workspace } from "#/../shared/workspaces";
+import type { Project } from "#/../shared/projects";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
-import { ProjectTile } from "#/components/shared/workspaces/project-tile";
+import { ProjectTile } from "#/components/shared/projects/project-tile";
 import { cn } from "#/lib/utils";
-import { isLocalWorkspace } from "#/stores/session";
+import { isLocalProject } from "#/stores/session";
 import { moveSlug, shiftFor } from "./project-reorder-list.order";
 
 const glide = { duration: 0.2, ease: [0.22, 1, 0.36, 1] } as const;
@@ -31,19 +31,19 @@ const glide = { duration: 0.2, ease: [0.22, 1, 0.36, 1] } as const;
  * open the project), so there is no click for a drag to steal.
  */
 function ReorderRow({
-  workspace,
+  project,
   index,
   shift,
   onMove,
 }: {
-  workspace: Workspace;
+  project: Project;
   index: number;
   shift: number;
   onMove: (delta: -1 | 1) => void;
 }) {
-  const drag = useDraggable({ id: workspace.slug });
+  const drag = useDraggable({ id: project.slug });
   const { setNodeRef: setDragNode } = drag;
-  const { setNodeRef: setDropNode } = useDroppable({ id: workspace.slug });
+  const { setNodeRef: setDropNode } = useDroppable({ id: project.slug });
   const setRefs = useCallback(
     (node: HTMLDivElement | null) => {
       setDragNode(node);
@@ -61,7 +61,7 @@ function ReorderRow({
       initial={false}
       animate={{ y: drag.isDragging ? (drag.transform?.y ?? 0) : shift }}
       transition={drag.isDragging ? { duration: 0 } : glide}
-      aria-label={`Move ${workspace.name}, position ${index + 1}`}
+      aria-label={`Move ${project.name}, position ${index + 1}`}
       aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
       onKeyDown={(event) => {
         if (!event.altKey) return;
@@ -77,11 +77,11 @@ function ReorderRow({
       )}
     >
       <ProjectTile
-        workspace={workspace}
+        project={project}
         className="size-5 rounded-[5px] text-[10px]"
       />
-      <span className="truncate">{workspace.name}</span>
-      {isLocalWorkspace(workspace) && <LocalBadge />}
+      <span className="truncate">{project.name}</span>
+      {isLocalProject(project) && <LocalBadge />}
       <HugeiconsIcon
         icon={DragDropVerticalIcon}
         className="text-muted-foreground ml-auto size-3.5 shrink-0"
@@ -100,13 +100,13 @@ function ReorderRow({
  * sort shows. It is saved at each drop.
  */
 export function ProjectReorderList({
-  workspaces,
+  projects,
   onReorder,
 }: {
-  workspaces: Workspace[];
+  projects: Project[];
   onReorder: (slugs: string[]) => void;
 }) {
-  const slugs = workspaces.map((entry) => entry.slug);
+  const slugs = projects.map((entry) => entry.slug);
   // A small threshold, so a press that does not move is not a drag.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -122,7 +122,7 @@ export function ProjectReorderList({
   };
   const onDragOver = (event: DragOverEvent) => {
     const over = event.over ? slugs.indexOf(String(event.over.id)) : -1;
-    // NOTE: Measured here, not in `onDragStart`; see `workspaces-section.tsx`.
+    // NOTE: Measured here, not in `onDragStart`; see `projects-section.tsx`.
     // Plus the list's 2px gap, so the rows step aside by a whole slot.
     const height = (event.active.rect.current.initial?.height ?? 0) + 2;
     setDragging(
@@ -157,15 +157,15 @@ export function ProjectReorderList({
       modifiers={[alongList]}
     >
       <div ref={listRef} className="flex flex-col gap-0.5">
-        {workspaces.map((workspace, index) => (
+        {projects.map((project, index) => (
           <ReorderRow
-            key={workspace.slug}
-            workspace={workspace}
+            key={project.slug}
+            project={project}
             index={index}
             shift={shiftFor(index, dragging)}
             onMove={(delta) => {
               const to = slugs[index + delta];
-              if (to) onReorder(moveSlug(slugs, workspace.slug, to));
+              if (to) onReorder(moveSlug(slugs, project.slug, to));
             }}
           />
         ))}

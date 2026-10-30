@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Workspace } from "#/../shared/workspaces";
+import type { Project } from "#/../shared/projects";
 import { cn } from "#/lib/utils";
 
 /**
@@ -10,8 +10,8 @@ import { cn } from "#/lib/utils";
  */
 const answers = new Map<string, string | null>();
 
-const iconKeyOf = (workspace: Workspace | null) =>
-  workspace?.id ? `${workspace.id}|${workspace.iconKey ?? ""}` : null;
+const iconKeyOf = (project: Project | null) =>
+  project?.id ? `${project.id}|${project.iconKey ?? ""}` : null;
 
 /**
  * A project's icon as a `data:` URL.
@@ -19,14 +19,14 @@ const iconKeyOf = (workspace: Workspace | null) =>
  * @returns null for the letter tile: no GitHub repo, not read yet, or a
  *   project with no cloud id.
  */
-function useWorkspaceIcon(workspace: Workspace | null): string | null {
-  const key = iconKeyOf(workspace);
+function useProjectIcon(project: Project | null): string | null {
+  const key = iconKeyOf(project);
   const [url, setUrl] = useState(() =>
     key ? (answers.get(key) ?? null) : null,
   );
 
   useEffect(() => {
-    if (!key || !workspace?.id) {
+    if (!key || !project?.id) {
       setUrl(null);
       return;
     }
@@ -35,10 +35,10 @@ function useWorkspaceIcon(workspace: Workspace | null): string | null {
       return;
     }
     let live = true;
-    const surface = window.desktop?.workspaces;
+    const surface = window.desktop?.projects;
     if (!surface) return;
     surface
-      .icon(workspace.id, workspace.iconKey ?? null)
+      .icon(project.id, project.iconKey ?? null)
       .then((answer) => {
         answers.set(key, answer);
         if (live) setUrl(answer);
@@ -49,7 +49,7 @@ function useWorkspaceIcon(workspace: Workspace | null): string | null {
     return () => {
       live = false;
     };
-  }, [key, workspace?.id, workspace?.iconKey]);
+  }, [key, project?.id, project?.iconKey]);
 
   return url;
 }
@@ -85,13 +85,13 @@ function tile(slug: string): string {
  * one face in both.
  */
 export function ProjectTile({
-  workspace,
+  project,
   className,
 }: {
-  workspace: Workspace | null;
+  project: Project | null;
   className?: string;
 }) {
-  const icon = useWorkspaceIcon(workspace);
+  const icon = useProjectIcon(project);
   if (icon)
     return (
       <img
@@ -111,11 +111,11 @@ export function ProjectTile({
       aria-hidden="true"
       className={cn(
         "grid shrink-0 place-items-center rounded-md font-semibold text-white",
-        workspace ? tile(workspace.slug) : "bg-muted-foreground",
+        project ? tile(project.slug) : "bg-muted-foreground",
         className,
       )}
     >
-      {(workspace?.name ?? "?").slice(0, 1).toUpperCase()}
+      {(project?.name ?? "?").slice(0, 1).toUpperCase()}
     </span>
   );
 }

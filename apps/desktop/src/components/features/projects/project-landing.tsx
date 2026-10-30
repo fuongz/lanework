@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { LocalBadge } from "#/components/shared/auth/local-mode";
 import { ProjectListSkeleton } from "#/components/shared/board/skeletons";
 import { ErrorState } from "#/components/shared/common/error-state";
-import { CreateProjectDialog } from "#/components/shared/workspaces/create-project-dialog";
+import { CreateProjectDialog } from "#/components/shared/projects/create-project-dialog";
 import { Button } from "#/components/ui/button";
 import {
   Empty,
@@ -16,7 +16,7 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { useBoard } from "#/stores/board";
-import { isLocalWorkspace, useSession } from "#/stores/session";
+import { isLocalProject, useSession } from "#/stores/session";
 
 /**
  * The app's front door, which nobody should ever see for long.
@@ -25,7 +25,7 @@ import { isLocalWorkspace, useSession } from "#/stores/session";
  * wrote the choice down, so a picker here would ask a question the app can
  * answer, on every launch.
  */
-export function WorkspaceLanding() {
+export function ProjectLanding() {
   const session = useSession((state) => state.session);
   const principal = session?.principal;
   // A new identity gets a fresh board, even if the auth gate never unmounted.
@@ -39,7 +39,7 @@ export function WorkspaceLanding() {
 function Landing() {
   const [creating, setCreating] = useState(false);
   const ready = useBoard((state) => state.ready);
-  const workspaces = useBoard((state) => state.workspaces);
+  const projects = useBoard((state) => state.projects);
   const active = useBoard((state) => state.active);
   const error = useBoard((state) => state.error);
   const hydrate = useBoard((state) => state.hydrate);
@@ -49,7 +49,7 @@ function Landing() {
     void hydrate();
   }, [hydrate]);
 
-  // NOTE: ONLY the remembered project, never `workspaces[0]`. Main clears the
+  // NOTE: ONLY the remembered project, never `projects[0]`. Main clears the
   // saved selection when that project stops existing, and falling back to
   // whichever is first would drop somebody into a different project's board
   // with nothing on screen saying so. No selection is a question, not a
@@ -83,24 +83,24 @@ function Landing() {
           >
             Opening your project…
           </p>
-        ) : workspaces.length > 0 ? (
+        ) : projects.length > 0 ? (
           <div className="flex flex-col gap-3">
             <h1 className="text-[15px] font-semibold tracking-tight">
               Choose a project
             </h1>
             <ul aria-label="Projects" className="flex flex-col">
-              {workspaces.map((workspace) => (
-                <li key={workspace.slug}>
+              {projects.map((project) => (
+                <li key={project.slug}>
                   <Link
                     to="/w/$slug/issues"
-                    params={{ slug: workspace.slug }}
+                    params={{ slug: project.slug }}
                     search={{}}
                     className="hover:bg-foreground/[0.04] focus-visible:ring-accent-brand flex h-9 items-center gap-2.5 rounded-md px-2 text-[13px] outline-none focus-visible:ring-2"
                   >
-                    <span className="truncate">{workspace.name}</span>
-                    {isLocalWorkspace(workspace) && <LocalBadge />}
+                    <span className="truncate">{project.name}</span>
+                    {isLocalProject(project) && <LocalBadge />}
                     <span className="text-muted-foreground ml-auto font-mono text-xs">
-                      {workspace.slug}
+                      {project.slug}
                     </span>
                   </Link>
                 </li>

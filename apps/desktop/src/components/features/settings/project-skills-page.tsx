@@ -7,7 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import type { SetupDoc, SetupFile } from "#/../shared/agent-setup";
-import type { Workspace } from "#/../shared/workspaces";
+import type { Project } from "#/../shared/projects";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
 import { EditorTabs } from "#/components/shared/editor/editor-tabs";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
@@ -153,7 +153,7 @@ function Placeholder({
 const NO_SKILLS =
   "Skills in the project's .claude, .agents or .codex folder show here.";
 
-function Skills({ project }: { project: Workspace }) {
+function Skills({ project }: { project: Project }) {
   // Read again when the project's folder changes, like Projects › General.
   const { setup, error } = useAgentSetup(project.slug, [project.path ?? ""]);
   // NOTE: Open tabs by id. An id is stable across reads, so a tab survives
@@ -191,7 +191,7 @@ function Skills({ project }: { project: Workspace }) {
         description="Link a folder to see its skills."
       >
         <Link
-          to="/settings/workspaces"
+          to="/settings/projects"
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
           Open General

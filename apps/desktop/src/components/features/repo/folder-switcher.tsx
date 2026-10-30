@@ -7,7 +7,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
-import type { PickedFolder } from "../../../../shared/workspaces";
+import type { PickedFolder } from "../../../../shared/projects";
 
 /**
  * Picks which of the project's linked folders the Files tree reads.

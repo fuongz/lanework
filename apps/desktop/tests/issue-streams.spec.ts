@@ -15,7 +15,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import type { Workspace } from "../shared/workspaces";
+import type { Project } from "../shared/projects";
 import {
   launchEnv,
   removeProfile,
@@ -24,7 +24,7 @@ import {
   startStubPlane,
 } from "./auth-fixtures";
 
-const workspaces: Workspace[] = [
+const projects: Project[] = [
   {
     id: "ws-cloud-project",
     slug: "cloud-project",
@@ -117,7 +117,7 @@ const board = {
         }),
         stream("W2", 2, {
           title: "Desktop",
-          owns: ["apps/desktop/shared/workspaces.ts"],
+          owns: ["apps/desktop/shared/projects.ts"],
           dependsOn: ["W0"],
         }),
         stream("W3", 3, {
@@ -165,7 +165,7 @@ async function openIssue(page: Page, taskId: string, title: string) {
 }
 
 test("a card's streams render as a work breakdown, wave by wave", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", board);
   const profile = await mkdtemp(join(tmpdir(), "lanew-issue-streams-"));
   const home = join(profile, "home");

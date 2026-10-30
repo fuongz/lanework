@@ -33,32 +33,32 @@ async function readCached(key: string): Promise<Cached | null> {
 
 const url = (icon: Cached) => `data:${icon.type};base64,${icon.data}`;
 
-/** What this launch already answered, by workspace id. */
+/** What this launch already answered, by project id. */
 const answered = new Map<string, { key: string | null; url: string | null }>();
-/** The ask per workspace in flight, so a list of tiles makes one request. */
+/** The ask per project in flight, so a list of tiles makes one request. */
 const inFlight = new Map<string, Promise<string | null>>();
 
 /** Ask the service, keep what is new, and return what to draw. */
 async function ask(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   held: string | null,
   heldUrl: string | null,
 ): Promise<string | null> {
-  const answer = await fetchIcon(record, workspaceId, held).catch(() => null);
+  const answer = await fetchIcon(record, projectId, held).catch(() => null);
   // Unreachable: what is on disk stands, and the next launch asks again.
   if (!answer) return heldUrl;
   if (answer.kind === "same") {
-    answered.set(workspaceId, { key: held, url: heldUrl });
+    answered.set(projectId, { key: held, url: heldUrl });
     return heldUrl;
   }
   if (answer.kind === "none") {
-    answered.set(workspaceId, { key: null, url: null });
+    answered.set(projectId, { key: null, url: null });
     return null;
   }
   const icon = { type: answer.type, data: answer.bytes.toString("base64") };
   await writeAtomic(fileFor(answer.key), JSON.stringify(icon)).catch(() => {});
-  answered.set(workspaceId, { key: answer.key, url: url(icon) });
+  answered.set(projectId, { key: answer.key, url: url(icon) });
   return url(icon);
 }
 
@@ -68,32 +68,32 @@ async function ask(
  * @param iconKey What `/v1/sync/state` said the project's icon is.
  * @returns null for the letter tile.
  */
-export async function workspaceIcon(
+export async function projectIcon(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   iconKey: string | null,
 ): Promise<string | null> {
-  const known = answered.get(workspaceId);
+  const known = answered.get(projectId);
   // Answered this launch, and the list names no newer icon than that answer.
   if (known && (!iconKey || iconKey === known.key)) return known.url;
 
   const cached = iconKey ? await readCached(iconKey) : null;
   if (cached) {
     // Drawn from disk now; the one ask of this launch runs behind it.
-    if (!inFlight.has(workspaceId)) {
-      const pending = ask(record, workspaceId, iconKey, url(cached)).finally(
-        () => inFlight.delete(workspaceId),
+    if (!inFlight.has(projectId)) {
+      const pending = ask(record, projectId, iconKey, url(cached)).finally(() =>
+        inFlight.delete(projectId),
       );
-      inFlight.set(workspaceId, pending);
+      inFlight.set(projectId, pending);
     }
     return url(cached);
   }
 
   const pending =
-    inFlight.get(workspaceId) ??
-    ask(record, workspaceId, null, null).finally(() =>
-      inFlight.delete(workspaceId),
+    inFlight.get(projectId) ??
+    ask(record, projectId, null, null).finally(() =>
+      inFlight.delete(projectId),
     );
-  inFlight.set(workspaceId, pending);
+  inFlight.set(projectId, pending);
   return pending;
 }

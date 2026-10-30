@@ -23,8 +23,8 @@ export interface LocalBoardConfig {
   tags: TagPolicy;
 }
 
-/** A row of `workspace`, decoded. */
-export interface LocalWorkspace {
+/** A row of `project`, decoded. */
+export interface LocalProject {
   id: string;
   slug: string;
   name: string;
@@ -40,7 +40,7 @@ export interface LocalWorkspace {
   deletedAt: IsoDate | null;
 }
 
-export interface WorkspaceCreateInput {
+export interface ProjectCreateInput {
   name: string;
   /** Derived from `name` when absent; made unique with `-2`, `-3`, … */
   slug?: string;
@@ -49,7 +49,7 @@ export interface WorkspaceCreateInput {
   config?: Partial<LocalBoardConfig>;
 }
 
-export interface WorkspaceUpdateInput {
+export interface ProjectUpdateInput {
   name?: string;
   slug?: string;
   config?: Partial<LocalBoardConfig>;

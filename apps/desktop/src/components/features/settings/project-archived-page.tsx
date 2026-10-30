@@ -1,8 +1,8 @@
 import { Archive02Icon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useState } from "react";
+import type { Project } from "#/../shared/projects";
 import type { ArchivedAgentSession } from "#/../shared/terminal";
-import type { Workspace } from "#/../shared/workspaces";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   SETTINGS_BUTTON,
@@ -28,7 +28,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { ipcMessage } from "#/lib/ipc-error";
 import { matches } from "#/lib/settings-catalog";
 import { useAgentSessions } from "#/stores/agent-sessions";
@@ -77,8 +77,8 @@ const when = (iso: string) =>
     timeStyle: "short",
   });
 
-function Archived({ project }: { project: Workspace }) {
-  const workspace = useWorkspaceKey(project.slug);
+function Archived({ project }: { project: Project }) {
+  const projectKey = useProjectKey(project.slug);
   const reload = useAgentSessions((state) => state.load);
   const [archived, setArchived] = useState<ArchivedAgentSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -96,8 +96,8 @@ function Archived({ project }: { project: Workspace }) {
   // when somebody archives, here or from a terminal.
   const read = useCallback(() => {
     const surface = window.desktop?.terminal;
-    if (!surface || !workspace) return;
-    surface.archivedAgentSessions(workspace).then(
+    if (!surface || !projectKey) return;
+    surface.archivedAgentSessions(projectKey).then(
       (next) => {
         setArchived(next);
         setError(null);
@@ -105,7 +105,7 @@ function Archived({ project }: { project: Workspace }) {
       (failure: unknown) =>
         setError(ipcMessage(failure, "Could not read the archive.")),
     );
-  }, [workspace]);
+  }, [projectKey]);
 
   useEffect(() => {
     read();
@@ -115,15 +115,15 @@ function Archived({ project }: { project: Workspace }) {
 
   async function unarchive(entry: ArchivedAgentSession) {
     const surface = window.desktop?.terminal;
-    if (!surface || !workspace) return;
+    if (!surface || !projectKey) return;
     setBusy(keyOf(entry));
     try {
       setArchived(
-        await surface.unarchiveAgentSession(workspace, entry.agent, entry.id),
+        await surface.unarchiveAgentSession(projectKey, entry.agent, entry.id),
       );
       setError(null);
       // The rail lists it again without waiting for a focus.
-      void reload(workspace);
+      void reload(projectKey);
     } catch (failure) {
       setError(ipcMessage(failure, "Could not unarchive it."));
     } finally {
@@ -284,11 +284,11 @@ function Archived({ project }: { project: Workspace }) {
                 // Kept open until main answers, so a refusal is shown here.
                 event.preventDefault();
                 const surface = window.desktop?.terminal;
-                if (!deleting || !surface || !workspace) return;
+                if (!deleting || !surface || !projectKey) return;
                 const { entry } = deleting;
                 setDeleting({ entry, busy: true, error: null });
                 surface
-                  .deleteArchivedAgentSession(workspace, entry.agent, entry.id)
+                  .deleteArchivedAgentSession(projectKey, entry.agent, entry.id)
                   .then(
                     (next) => {
                       setArchived(next);

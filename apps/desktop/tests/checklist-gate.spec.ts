@@ -1,7 +1,7 @@
 // Whether a card may be handed to an agent as it is, and what approving its
 // recommendations would tick (FE-34) — the pure part, under plain Node.
 import { expect, test } from "@playwright/test";
-import type { BoardChecklistItem } from "../shared/workspaces";
+import type { BoardChecklistItem } from "../shared/projects";
 import { checklistGate } from "../src/lib/checklist-gate";
 
 function box(

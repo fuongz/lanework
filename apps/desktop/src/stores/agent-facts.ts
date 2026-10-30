@@ -17,7 +17,7 @@ interface AgentFactsState {
    * A read that fails keeps the last one.
    */
   read: (
-    workspace: string,
+    project: string,
     session: { agent: TerminalAgent; id: string },
   ) => void;
 }
@@ -35,7 +35,7 @@ const again = new Set<string>();
 export const useAgentFacts = create<AgentFactsState>()((set, get) => ({
   byKey: {},
 
-  read: (workspace, session) => {
+  read: (project, session) => {
     const surface = window.desktop?.terminal;
     if (!surface) return;
     const key = agentKey(session);
@@ -45,7 +45,7 @@ export const useAgentFacts = create<AgentFactsState>()((set, get) => ({
     }
     reading.add(key);
     void surface
-      .agentFacts(workspace, session.agent, session.id)
+      .agentFacts(project, session.agent, session.id)
       .then((facts) =>
         set((state) => ({
           byKey: { ...state.byKey, [key]: { facts, at: Date.now() } },
@@ -54,7 +54,7 @@ export const useAgentFacts = create<AgentFactsState>()((set, get) => ({
       .catch(() => undefined)
       .finally(() => {
         reading.delete(key);
-        if (again.delete(key)) get().read(workspace, session);
+        if (again.delete(key)) get().read(project, session);
       });
   },
 }));

@@ -35,11 +35,11 @@ import {
 import { codexConfigPath, codexHome, codexHooksPath } from "../handoff/codex";
 import { opencodePluginPath, readOpencodePlugin } from "../handoff/opencode";
 import { handle } from "../ipc";
+import { knownProject } from "../projects";
+import { folderExists } from "../projects/local-folder";
+import { readFolders } from "../projects/store";
 import { opencodeDataDir } from "../terminal/opencode-sessions";
 import { agentHomeDir } from "../test-seams";
-import { knownWorkspace } from "../workspaces";
-import { folderExists } from "../workspaces/local-folder";
-import { readFolders } from "../workspaces/store";
 import {
   applyFix,
   buildReport,
@@ -72,14 +72,14 @@ async function hasLegacyReviews(folder: string): Promise<boolean> {
 }
 
 /**
- * The workspace and its primary folder on this machine.
+ * The project and its primary folder on this machine.
  *
- * @returns `path: null` when the workspace has no folder here.
+ * @returns `path: null` when the project has no folder here.
  */
 async function resolve(slug: string) {
-  const { record, workspace } = await knownWorkspace(slug);
-  const [path] = (await readFolders(record))[workspace.slug] ?? [];
-  return { workspace, path: path ?? null };
+  const { record, project } = await knownProject(slug);
+  const [path] = (await readFolders(record))[project.slug] ?? [];
+  return { project, path: path ?? null };
 }
 
 /**
@@ -119,7 +119,7 @@ async function opencodeFacts(folder: string | null) {
 }
 
 async function gather(slug: string): Promise<ReadinessFacts> {
-  const { workspace, path } = await resolve(slug);
+  const { project, path } = await resolve(slug);
   const [claudeUsed, codexUsed] = await Promise.all([
     Promise.all([exists(claudeDir()), exists(claudeJsonPath())]).then((found) =>
       found.some(Boolean),
@@ -154,7 +154,7 @@ async function gather(slug: string): Promise<ReadinessFacts> {
   }
 
   return {
-    slug: workspace.slug,
+    slug: project.slug,
     folder,
     claude: { used: claudeUsed, hook: claudeHook },
     codex: {

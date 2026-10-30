@@ -3,7 +3,7 @@
 //
 // NOTE:
 // - There is no global "local mode" switch. The repo decides: its origin
-//   remote maps to exactly one live local workspace that has not been moved
+//   remote maps to exactly one live local project that has not been moved
 //   to the cloud (`cloudId` null) → local. Anything else (no file, no such
 //   board, a board already on the cloud) takes the cloud path, untouched.
 // - This never creates the file. A machine that never used the local board
@@ -22,7 +22,7 @@ import {
 
 export interface LocalBoard {
   store: LocalStore;
-  workspaceId: string;
+  projectId: string;
 }
 
 /**
@@ -39,14 +39,14 @@ export function localBoardFor(
   const store = openLocalStore({ path });
   try {
     const boards = store
-      .findWorkspacesByRepo(remote)
-      .filter((workspace) => !workspace.cloudId);
+      .findProjectsByRepo(remote)
+      .filter((project) => !project.cloudId);
     const board = boards.length === 1 ? boards[0] : undefined;
     if (!board) {
       store.close();
       return null;
     }
-    return { store, workspaceId: board.id };
+    return { store, projectId: board.id };
   } catch (error) {
     store.close();
     throw error;
@@ -66,7 +66,7 @@ export function writeLocalCheckpoint(
   agent: string,
 ): string {
   return board.store.addCheckpoint(taskId, body, {
-    workspace: board.workspaceId,
+    project: board.projectId,
     agent,
   }).id;
 }

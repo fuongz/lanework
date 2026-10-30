@@ -553,7 +553,7 @@ function ProposalStatus({
  * card (or to the title, when the run is gone).
  */
 export function ProposalCard({
-  workspace,
+  project,
   lead,
   leadAgent,
   proposal,
@@ -563,7 +563,7 @@ export function ProposalCard({
   onRepair,
   onApproved,
 }: {
-  workspace: string;
+  project: string;
   lead: string;
   leadAgent: ConversationAgent;
   proposal: DerivedProposal;
@@ -683,7 +683,7 @@ export function ProposalCard({
     const draft: OrchestrationProposal = {
       version: 1,
       id: proposal.id,
-      workspace,
+      project,
       lead,
       leadAgent,
       teamLead: proposal.teamLead,

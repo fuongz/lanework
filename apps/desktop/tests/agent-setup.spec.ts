@@ -19,10 +19,10 @@ import {
 } from "../electron/main/agent-setup/read";
 import { tomlEntries } from "../electron/main/agent-setup/toml";
 import type { MachineRecord } from "../electron/main/auth/store";
-import { writeFolders } from "../electron/main/workspaces/store";
+import { writeFolders } from "../electron/main/projects/store";
 import { MCP_URL } from "../shared/agent-notes";
 import type { SetupOrigin } from "../shared/agent-setup";
-import type { Workspace } from "../shared/workspaces";
+import type { Project } from "../shared/projects";
 import {
   launchEnv,
   removeProfile,
@@ -687,7 +687,7 @@ test("Codex rules are read as text: prefix and network rules, defaults and comme
 // ── The app ─────────────────────────────────────────────────────────────────
 
 test.describe("in the app", () => {
-  const workspaces: Workspace[] = [
+  const projects: Project[] = [
     {
       id: "ws-alpha",
       slug: "alpha",
@@ -699,9 +699,9 @@ test.describe("in the app", () => {
   ];
 
   test("Settings › Projects shows the setup: every group, dimmed entries, a command opened, no secret", async () => {
-    const plane = await startStubPlane({ workspaces });
-    for (const workspace of workspaces)
-      plane.setBoard(workspace.id as string, {
+    const plane = await startStubPlane({ projects });
+    for (const project of projects)
+      plane.setBoard(project.id as string, {
         columns: [{ key: "todo", name: "To-Do", role: "start" }],
         cards: [],
       });
@@ -751,7 +751,7 @@ test.describe("in the app", () => {
       await page
         .getByRole("button", { name: /^Switch project/ })
         .waitFor({ state: "visible", timeout: 15_000 });
-      await page.goto("app://lanework/settings/workspaces");
+      await page.goto("app://lanework/settings/projects");
       await page.getByRole("button", { name: "Select Alpha" }).click();
 
       const section = page.getByRole("region", { name: "Agent setup" });

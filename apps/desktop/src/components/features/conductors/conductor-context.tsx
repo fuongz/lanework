@@ -28,7 +28,7 @@ const KIND_ICONS = {
 
 /** What each path is in the checkout now, by path; absent while it is read. */
 function useContextKinds(
-  workspace: string,
+  project: string,
   paths: readonly string[],
 ): Map<string, ContextEntry["kind"]> {
   const [kinds, setKinds] = useState(
@@ -41,7 +41,7 @@ function useContextKinds(
     if (!surface || !wanted.length) return;
     let gone = false;
     void surface
-      .inspectContext(workspace, wanted)
+      .inspectContext(project, wanted)
       .then((entries) => {
         if (!gone)
           setKinds(new Map(entries.map((entry) => [entry.path, entry.kind])));
@@ -50,20 +50,20 @@ function useContextKinds(
     return () => {
       gone = true;
     };
-  }, [workspace, key]);
+  }, [project, key]);
   return kinds;
 }
 
 export function ConductorContext({
-  workspace,
+  project,
   paths,
   onChange,
 }: {
-  workspace: string;
+  project: string;
   paths: string[];
   onChange: (paths: string[]) => void;
 }) {
-  const kinds = useContextKinds(workspace, paths);
+  const kinds = useContextKinds(project, paths);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const full = paths.length >= LEAD_CONTEXT_FILES_MAX;
@@ -73,7 +73,7 @@ export function ConductorContext({
     if (!surface) return;
     setBusy(true);
     try {
-      const { paths: picked, outside } = await surface.pickContext(workspace);
+      const { paths: picked, outside } = await surface.pickContext(project);
       const fresh = picked.filter((path) => !paths.includes(path));
       const room = LEAD_CONTEXT_FILES_MAX - paths.length;
       if (fresh.length) onChange([...paths, ...fresh.slice(0, room)]);

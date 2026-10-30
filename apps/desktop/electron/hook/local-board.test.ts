@@ -166,11 +166,11 @@ describe("checkpoint hook, local board", () => {
       const store = openLocalStore({
         path: join(home, ".lanew", "data.sqlite"),
       });
-      const workspace = store.createWorkspace({
+      const project = store.createProject({
         name: "acme/widgets",
         repo: "git@example.com:acme/widgets",
       });
-      const card = store.createWorkItem(workspace.id, {
+      const card = store.createWorkItem(project.id, {
         title: "Offline",
         categoryKey: "frontend",
       });
@@ -192,7 +192,7 @@ describe("checkpoint hook, local board", () => {
       });
       try {
         const { checkpoints, latest } = after.listCheckpoints("FE-01", {
-          workspace: workspace.id,
+          project: project.id,
         });
         assert.equal(checkpoints.length, 1, log);
         assert.equal(latest?.agent, "claude-code");
@@ -209,12 +209,12 @@ describe("checkpoint hook, local board", () => {
   test("a board already moved to the cloud is not local", () => {
     const path = join(dir, "moved.sqlite");
     const store = openLocalStore({ path });
-    const workspace = store.createWorkspace({ name: "moved", repo: REMOTE });
-    store.updateWorkspace(workspace.id, { cloudId: "cloud-1" });
+    const project = store.createProject({ name: "moved", repo: REMOTE });
+    store.updateProject(project.id, { cloudId: "cloud-1" });
     store.close();
     assert.equal(localBoardFor(REMOTE, path), null);
     const other = openLocalStore({ path: join(dir, "kept.sqlite") });
-    other.createWorkspace({ name: "kept", repo: REMOTE });
+    other.createProject({ name: "kept", repo: REMOTE });
     other.close();
     const board = localBoardFor(REMOTE, join(dir, "kept.sqlite"));
     assert.ok(board);

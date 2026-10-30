@@ -17,10 +17,10 @@ interface AgentMark {
   /** Epoch ms it was pinned; absent means not pinned. */
   pinnedAt?: number;
   /**
-   * The conductor whose own conversation this is, and the workspace it is
-   * that in: one per conductor per workspace (FE-95). Absent means none.
+   * The conductor whose own conversation this is, and the project it is
+   * that in: one per conductor per project (FE-95). Absent means none.
    */
-  conductor?: { id: string; workspace: string };
+  conductor?: { id: string; project: string };
 }
 
 /** Every mark, by `agent:id`. */
@@ -48,14 +48,20 @@ export async function readAgentMarks(file: string): Promise<AgentMarks> {
       if (typeof mark?.name === "string" && mark.name) next.name = mark.name;
       if (typeof mark?.pinnedAt === "number" && Number.isFinite(mark.pinnedAt))
         next.pinnedAt = mark.pinnedAt;
-      const conductor = mark?.conductor;
+      const conductor = mark?.conductor as
+        | { id?: unknown; project?: unknown; workspace?: unknown }
+        | undefined;
+      // NOTE: A mark written before FE-107 names its project `workspace`. It
+      // is read here and written back as `project`, so no conductor loses
+      // its conversation over the rename.
+      const project = conductor?.project ?? conductor?.workspace;
       if (
         typeof conductor?.id === "string" &&
         LEAD_REF_PATTERN.test(conductor.id) &&
-        typeof conductor.workspace === "string" &&
-        conductor.workspace
+        typeof project === "string" &&
+        project
       )
-        next.conductor = { id: conductor.id, workspace: conductor.workspace };
+        next.conductor = { id: conductor.id, project };
       if (!isEmpty(next)) out[key] = next;
     }
     return out;
@@ -130,13 +136,13 @@ function isEmpty(mark: AgentMark): boolean {
 }
 
 /**
- * Make `key` the conductor's own conversation in `workspace`, and let go the
- * one it had there before (FE-95): one per conductor per workspace.
+ * Make `key` the conductor's own conversation in `project`, and let go the
+ * one it had there before (FE-95): one per conductor per project.
  */
 export async function bindConductor(
   file: string,
   key: string,
-  conductor: { id: string; workspace: string },
+  conductor: { id: string; project: string },
 ): Promise<void> {
   if (!LEAD_REF_PATTERN.test(conductor.id))
     throw new Error("A valid conductor is required");
@@ -145,7 +151,7 @@ export async function bindConductor(
     if (
       other === key ||
       mark.conductor?.id !== conductor.id ||
-      mark.conductor.workspace !== conductor.workspace
+      mark.conductor.project !== conductor.project
     )
       continue;
     const next = tidy({ ...mark, conductor: undefined });

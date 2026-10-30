@@ -9,7 +9,7 @@ import {
 } from "#/../shared/terminal";
 import { StatusPing } from "#/components/shared/agents/status-ping";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { cn } from "#/lib/utils";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { awaitingKey, useAwaiting } from "#/stores/awaiting";
@@ -81,10 +81,10 @@ export function LaunchedSessionCard({
   slug: string;
 }) {
   const navigate = useNavigate();
-  const workspace = useWorkspaceKey(slug);
+  const project = useProjectKey(slug);
   const listed = useAgentSessions((state) =>
-    workspace
-      ? state.byWorkspace[workspace]?.find(
+    project
+      ? state.byProject[project]?.find(
           (entry) => entry.id === session.sessionId,
         )
       : undefined,
@@ -94,8 +94,8 @@ export function LaunchedSessionCard({
     (state) => state.live[agentKey({ agent, id: session.sessionId })],
   );
   const awaiting = useAwaiting((state) =>
-    workspace
-      ? Boolean(state.byKey[awaitingKey(workspace, session.sessionId)])
+    project
+      ? Boolean(state.byKey[awaitingKey(project, session.sessionId)])
       : false,
   );
   const working = !awaiting && (live ?? listed?.working ?? false);

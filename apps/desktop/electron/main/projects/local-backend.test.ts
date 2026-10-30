@@ -1,4 +1,4 @@
-// Run with `bun test apps/desktop/electron/main/workspaces`. Written against
+// Run with `bun test apps/desktop/electron/main/projects`. Written against
 // `node:test`/`node:assert`, like the local store's own tests, so the desktop
 // typecheck needs no Bun types.
 //
@@ -13,11 +13,11 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import { localStorePath } from "../../local-store";
 import {
   closeLocalStore,
-  findLocalWorkspace,
+  findLocalProject,
   localBoard,
   localStore,
   MOVED_MESSAGE,
-  toWorkspace,
+  toProject,
   watchLocalStore,
   writeLocal,
 } from "./local-backend";
@@ -49,10 +49,10 @@ beforeEach(() => {
 });
 
 function board() {
-  const workspace = writeLocal((store) =>
-    store.createWorkspace({ name: "Local project" }),
+  const project = writeLocal((store) =>
+    store.createProject({ name: "Local project" }),
   );
-  const target = localBoard(workspace.id);
+  const target = localBoard(project.id);
   assert.ok(target, "a local id resolves to a local board");
   return target;
 }
@@ -66,12 +66,12 @@ describe("local backend", () => {
 
   test("a board resolves by id only, never by a slug a cloud board may share", () => {
     const target = board();
-    assert.equal(findLocalWorkspace(target.workspace.slug), null);
+    assert.equal(findLocalProject(target.project.slug), null);
     assert.equal(
-      findLocalWorkspace(target.workspace.slug, { bySlug: true })?.id,
-      target.workspace.id,
+      findLocalProject(target.project.slug, { bySlug: true })?.id,
+      target.project.id,
     );
-    const row = toWorkspace(target.workspace, "/tmp/project");
+    const row = toProject(target.project, "/tmp/project");
     assert.equal(row.origin, "local");
     assert.equal(row.movedTo, null);
     assert.equal(row.path, "/tmp/project");
@@ -177,17 +177,17 @@ describe("local backend", () => {
     const created = target.create({ title: "Before the move" });
     assert.equal(created.kind, "ok");
     writeLocal((store) =>
-      store.updateWorkspace(target.workspace.id, {
+      store.updateProject(target.project.id, {
         cloudId: "ws-cloud",
         syncedAt: new Date().toISOString(),
       }),
     );
-    const moved = localBoard(target.workspace.id);
+    const moved = localBoard(target.project.id);
     assert.ok(moved?.moved);
-    assert.equal(toWorkspace(moved.workspace).movedTo, "ws-cloud");
+    assert.equal(toProject(moved.project).movedTo, "ws-cloud");
     const write = moved.create({ title: "After the move" });
     assert.deepEqual(write, { kind: "error", message: MOVED_MESSAGE });
-    assert.throws(() => moved.purge(moved.workspace.slug), /moved/);
+    assert.throws(() => moved.purge(moved.project.slug), /moved/);
     // Reads still work: the old board stays readable.
     assert.equal(moved.view().cards.length, 1);
   });
@@ -203,9 +203,9 @@ describe("local backend", () => {
       await new Promise((resolve) => setTimeout(resolve, 60));
       assert.deepEqual(seen, []);
       // Somebody else's (straight to the store, as the MCP server would).
-      target.store.createWorkItem(target.workspace.id, { title: "Theirs" });
+      target.store.createWorkItem(target.project.id, { title: "Theirs" });
       await new Promise((resolve) => setTimeout(resolve, 80));
-      assert.deepEqual(seen, [[target.workspace.id]]);
+      assert.deepEqual(seen, [[target.project.id]]);
     } finally {
       stop();
     }

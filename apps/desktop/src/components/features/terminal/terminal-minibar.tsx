@@ -20,14 +20,14 @@ import { useTerminal } from "#/stores/terminal";
  *   panel left open to carry the error.
  */
 export function TerminalMinibar({
-  workspace,
+  project,
   usage,
 }: {
-  workspace: string;
+  project: string;
   /** What sits at the bar's right end: Claude's usage strip. */
   usage?: ReactNode;
 }) {
-  const count = useTerminal((state) => state.sessions[workspace]?.length ?? 0);
+  const count = useTerminal((state) => state.sessions[project]?.length ?? 0);
   const error = useTerminal((state) => state.error);
   const toggle = useTerminal((state) => state.toggle);
 
@@ -38,7 +38,7 @@ export function TerminalMinibar({
       <button
         type="button"
         title="Show terminal (⌘`)"
-        onClick={() => void toggle(workspace)}
+        onClick={() => void toggle(project)}
         className="text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground flex h-6 items-center gap-1.5 rounded-md px-2 text-xs transition-colors"
       >
         <HugeiconsIcon

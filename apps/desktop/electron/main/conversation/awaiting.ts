@@ -1,5 +1,5 @@
 // The conversations an engine is waiting on the person in (FE-97), across
-// every workspace: what the rail's ping and the island read first, and what
+// every project: what the rail's ping and the island read first, and what
 // decides when a desktop notification goes out.
 //
 // NOTE: Pure. It only follows the engines' events; it never asks an engine.
@@ -18,7 +18,7 @@ const LIMIT = 64;
 const BODY_MAX = 140;
 
 interface Open {
-  workspace: string;
+  project: string;
   conversation: string;
   agent: ConversationAgent;
   /** By id, in the order they were asked. */
@@ -26,18 +26,18 @@ interface Open {
 }
 
 /**
- * A ledger of the requests engines are waiting on, by workspace and
+ * A ledger of the requests engines are waiting on, by project and
  * conversation.
  *
  * @param now The clock, for `since`.
  */
 export function createAwaitingLedger(now: () => number = Date.now) {
   const open = new Map<string, Open>();
-  const keyOf = (workspace: string, conversation: string) =>
-    `${workspace}\0${conversation}`;
+  const keyOf = (project: string, conversation: string) =>
+    `${project}\0${conversation}`;
 
-  function clear(workspace: string, conversation: string): void {
-    open.delete(keyOf(workspace, conversation));
+  function clear(project: string, conversation: string): void {
+    open.delete(keyOf(project, conversation));
   }
 
   return {
@@ -60,7 +60,7 @@ export function createAwaitingLedger(now: () => number = Date.now) {
     ): PermissionRequest | null {
       // A new Codex conversation has no id until Codex names it.
       if (typeof event.conversation !== "string") return null;
-      const key = keyOf(event.workspace, event.conversation);
+      const key = keyOf(event.project, event.conversation);
       if (event.type === "state") {
         if (
           event.engine.state !== "running" &&
@@ -81,7 +81,7 @@ export function createAwaitingLedger(now: () => number = Date.now) {
       if (entry?.requests.has(request.id)) return null;
       if (!entry) {
         entry = {
-          workspace: event.workspace,
+          project: event.project,
           conversation: event.conversation,
           agent: agent(),
           requests: new Map(),
@@ -107,7 +107,7 @@ export function createAwaitingLedger(now: () => number = Date.now) {
       return [...open.values()].map((entry) => {
         const requests = [...entry.requests.values()];
         return {
-          workspace: entry.workspace,
+          project: entry.project,
           conversation: entry.conversation,
           agent: entry.agent,
           requests: requests.map(({ at: _, ...request }) => request),

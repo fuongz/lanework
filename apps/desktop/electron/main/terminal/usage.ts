@@ -3,7 +3,7 @@
 // the polling, its timers, and the IPC that reads and refreshes them.
 //
 // NOTE: Split out of `terminal/index.ts` (FE-82/D2). It needs to know which
-// conversations each workspace's listing last answered, which is the
+// conversations each project's listing last answered, which is the
 // listing's state, so `registerUsage` is handed that rather than importing
 // the module that owns it.
 import { type FSWatcher, watch } from "node:fs";
@@ -59,10 +59,10 @@ export function opencodeUsageNow(): Promise<OpenCodeUsage | null> {
 
 /** What the usage reads need from the terminal's conversation listing. */
 export interface UsageListing {
-  /** Each listed workspace's conversation keys, as its listing last answered. */
+  /** Each listed project's conversation keys, as its listing last answered. */
   listed: () => Iterable<[string, Set<string>]>;
-  /** One workspace's conversation keys, listing it if it has not been yet. */
-  keysOf: (workspace: string) => Promise<Set<string>>;
+  /** One project's conversation keys, listing it if it has not been yet. */
+  keysOf: (project: string) => Promise<Set<string>>;
 }
 
 /** Set by {@link registerUsage}; nothing is listed before it. */
@@ -183,16 +183,16 @@ let lastClaudeMode: string | undefined;
 let claudeAccountChangedAt = 0;
 let quotaWatch: FSWatcher | null = null;
 /**
- * Tell every listed workspace to ask `codexUsage` again.
+ * Tell every listed project to ask `codexUsage` again.
  *
  * Sent as an `agentWritten` on one of its Claude conversations, or on a
  * placeholder id when it has none.
  */
 function notifyClaudeUsage(): void {
-  for (const [workspace, keys] of deps?.listed() ?? []) {
+  for (const [project, keys] of deps?.listed() ?? []) {
     const id = [...keys].find((key) => key.startsWith("claude:"))?.slice(7);
     broadcast(terminalChannels.agentWritten, {
-      workspace,
+      project,
       agent: "claude",
       id: id ?? "00000000-0000-4000-8000-000000000000",
       at: Date.now(),
@@ -361,16 +361,16 @@ export function registerUsage(
 ): void {
   deps = listing;
   startClaudeUsagePoll();
-  // NOTE: By workspace alone (FE-41): the goals are those of the Codex
+  // NOTE: By project alone (FE-41): the goals are those of the Codex
   // conversations its own listing last answered, and the quota is the
   // account's. A page names no file and no thread.
   handle(
     terminalChannels.codexUsage,
     devUrl,
     async (args): Promise<CodexUsage> => {
-      const [workspace] = arity(args, 1, "A workspace is required");
+      const [project] = arity(args, 1, "A project is required");
       const listed = await listing.keysOf(
-        slug(workspace, "A valid workspace is required"),
+        slug(project, "A valid project is required"),
       );
       const ids = [...listed]
         .filter((entry) => entry.startsWith("codex:"))

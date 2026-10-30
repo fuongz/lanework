@@ -25,10 +25,10 @@ import {
 } from "@playwright/test";
 import type { MenuItem } from "electron";
 import type { MachineRecord } from "../electron/main/auth/store";
+import { writeFolders } from "../electron/main/projects/store";
 import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
-import { writeFolders } from "../electron/main/workspaces/store";
+import type { Project } from "../shared/projects";
 import type { DesktopTerminalApi } from "../shared/terminal";
-import type { Workspace } from "../shared/workspaces";
 import {
   CLAUDE_BG_ID,
   CLAUDE_ID,
@@ -101,7 +101,7 @@ async function standIn(dir: string, name: string, format: string) {
 
 test.skip(process.platform === "win32", "These drive a POSIX shell.");
 
-const workspaces: Workspace[] = [
+const projects: Project[] = [
   {
     id: "ws-alpha",
     slug: "alpha",
@@ -208,7 +208,7 @@ async function shellPid(page: Page, tag: string): Promise<string> {
 }
 
 test("⌘` opens a terminal in the project's folder, and hiding it folds it into the bar", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -292,7 +292,7 @@ test("⌘` opens a terminal in the project's folder, and hiding it folds it into
 });
 
 test("switching projects keeps a running shell running, and coming back shows it as it was", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home } = await seedProfile(plane.origin);
@@ -326,7 +326,7 @@ test("switching projects keeps a running shell running, and coming back shows it
 });
 
 test("a reloaded window finds its terminals again", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home } = await seedProfile(plane.origin);
@@ -355,7 +355,7 @@ test("a reloaded window finds its terminals again", async () => {
 });
 
 test("a closed tab stops its shell, and + starts another", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home } = await seedProfile(plane.origin);
@@ -406,7 +406,7 @@ test("a closed tab stops its shell, and + starts another", async () => {
 
 /** Drag one tab by its label and let go over another's far half. */
 test("⇧↩ sends a new line without submitting, and a dropped file is typed as its quoted path", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home } = await seedProfile(plane.origin);
@@ -499,7 +499,7 @@ async function dragTab(page: Page, from: number, to: number) {
 }
 
 test("dragging a tab moves it, leaves the shown one alone, and outlives a reload", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home } = await seedProfile(plane.origin);
@@ -553,7 +553,7 @@ test("dragging a tab moves it, leaves the shown one alone, and outlives a reload
 });
 
 test("the Agents + offers only the CLIs this machine has, and a new agent opens in the main view — never as a panel tab", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -685,7 +685,7 @@ done
 }
 
 test("a running agent keeps ONE row as its CLI moves between conversations (FE-31)", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -789,7 +789,7 @@ test("a running agent keeps ONE row as its CLI moves between conversations (FE-3
 });
 
 test("an agent whose CLI cannot start stays on screen to say why — only a clean exit closes it", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home } = await seedProfile(plane.origin);
@@ -822,7 +822,7 @@ test("an agent whose CLI cannot start stays on screen to say why — only a clea
 });
 
 test("an Agents row resumes its conversation in the main view, which outlives leaving it — and Stop ends it", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -1013,7 +1013,7 @@ test("an Agents row resumes its conversation in the main view, which outlives le
 });
 
 test("an Agents row is renamed and pinned from its context menu, and spins while its transcript is written", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -1118,7 +1118,7 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
 });
 
 test("FE-57: an Agents row's transcript is deleted for good from its context menu", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -1229,7 +1229,7 @@ test("FE-57: an Agents row's transcript is deleted for good from its context men
 });
 
 test("a conversation's sub-agents sit under its row — folded until one works (FE-33)", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -1352,7 +1352,7 @@ test("a conversation's sub-agents sit under its row — folded until one works (
 });
 
 test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool calls, report — starts no agent, follows it live, and links back to its conversation", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -1542,7 +1542,7 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
 });
 
 test("FE-38: an agent's view shows its conversation's numbers and Claude's recap, and follows its writes — a row's tooltip and Settings read them too", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -1714,7 +1714,7 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
     await expect(codex.getByRole("region", { name: "Recap" })).toHaveCount(0);
 
     // Settings → Projects totals the folder's conversations (D6).
-    await page.goto("app://lanework/settings/workspaces");
+    await page.goto("app://lanework/settings/projects");
     const usage = page.getByTestId("agent-usage");
     await expect(usage).toContainText("Last 7 days");
     await expect(usage).toContainText("Last 30 days");
@@ -1732,7 +1732,7 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
 });
 
 test("FE-42: an agent's header counts its background tasks; a shell opens its command and output, an agent its transcript — and the rail lists the shells still running", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -1831,7 +1831,7 @@ test("FE-42: an agent's header counts its background tasks; a shell opens its co
 });
 
 test("FE-43: shell Stop confirms all entry points, cancels safely, reports races and errors, and re-reads killed state", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -1949,7 +1949,7 @@ test("FE-43: shell Stop confirms all entry points, cancels safely, reports races
 });
 
 test("FE-56: running shells and monitors show their pid, and a found monitor can be stopped", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);
@@ -2083,7 +2083,7 @@ const height = async (page: Page) =>
   (await panel(page).boundingBox())?.height ?? 0;
 
 test("the panel opens tall, and at the height it was dragged to — after a hide and a relaunch too", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home } = await seedProfile(plane.origin);
@@ -2143,7 +2143,7 @@ test("the panel opens tall, and at the height it was dragged to — after a hide
 });
 
 test("a card an agent is working on carries its spinner, on the board and in the issue, until the turn closes (FE-27)", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", {
     columns: [{ key: "todo", name: "To-Do", role: "start" }],
     cards: [
@@ -2259,7 +2259,7 @@ test("a card an agent is working on carries its spinner, on the board and in the
 });
 
 test("an agent on another machine marks its card too, and this machine's own is not shown twice (BE-16)", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   const card = (
     id: string,
     taskId: string,
@@ -2376,11 +2376,11 @@ test("an agent on another machine marks its card too, and this machine's own is 
 // ── FE-34: hand a card to an agent ─────────────────────────────────────────
 
 /**
- * A board whose id is a UUID, as every cloud workspace's is: the host puts
+ * A board whose id is a UUID, as every cloud project's is: the host puts
  * the board's id in the agent's prompt, and takes nothing else.
  */
 const handBoardId = "6a1c0d3e-5b7f-4c2a-9d1e-0f3b2a4c5d6e";
-const handWorkspaces: Workspace[] = [
+const handProjects: Project[] = [
   {
     id: handBoardId,
     slug: "alpha",
@@ -2388,7 +2388,7 @@ const handWorkspaces: Workspace[] = [
     path: null,
     baseBranch: null,
   },
-  workspaces[1],
+  projects[1],
 ];
 
 type Box = NonNullable<StubCard["checklist"]>[number];
@@ -2431,7 +2431,7 @@ function handCard(
 }
 
 async function bootHanding(cards: StubCard[]) {
-  const plane = await startStubPlane({ workspaces: handWorkspaces });
+  const plane = await startStubPlane({ projects: handProjects });
   plane.setBoard(handBoardId, {
     columns: [
       { key: "todo", name: "To-Do", role: "start" },
@@ -2645,7 +2645,7 @@ test("FE-34: a group with no recommendation can only be reviewed in session — 
 });
 
 test("folded, the window gets a title bar and the rail shows each agent as an icon, without its sub-agents", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-alpha", board);
   plane.setBoard("ws-beta", board);
   const { profile, home, repo } = await seedProfile(plane.origin);

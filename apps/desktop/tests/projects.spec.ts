@@ -8,20 +8,21 @@ import {
   test,
 } from "@playwright/test";
 import type { MachineRecord } from "../electron/main/auth/store";
+import { moveLegacyProjectsDir } from "../electron/main/paths";
 import {
   parseBoardConfig,
   parseCard,
-  parseWorkspaces,
-} from "../electron/main/workspaces/client";
-import { readLocalFolder } from "../electron/main/workspaces/local-folder";
-import { slugify } from "../electron/main/workspaces/slug";
+  parseProjects,
+} from "../electron/main/projects/client";
+import { readLocalFolder } from "../electron/main/projects/local-folder";
+import { slugify } from "../electron/main/projects/slug";
 import {
   readActive,
   writeActive,
   writeFolders,
-} from "../electron/main/workspaces/store";
+} from "../electron/main/projects/store";
 import type { DesktopApi } from "../shared/desktop";
-import type { Workspace } from "../shared/workspaces";
+import type { Project } from "../shared/projects";
 import {
   launchEnv,
   removeProfile,
@@ -29,7 +30,7 @@ import {
   startStubPlane,
 } from "./auth-fixtures";
 
-const workspaces: Workspace[] = [
+const projects: Project[] = [
   {
     id: "ws-lanework",
     slug: "lanework",
@@ -77,39 +78,39 @@ async function switchTo(page: Page, name: string): Promise<void> {
  * rail comes through here.
  */
 async function openImport(page: Page, project: string): Promise<void> {
-  await page.goto("app://lanework/settings/workspaces");
+  await page.goto("app://lanework/settings/projects");
   await page
     .getByRole("button", { name: `Import from local into ${project}` })
     .click();
 }
 
-test("workspace responses reject malformed lists and only return display fields", () => {
-  expect(parseWorkspaces({ workspaces: [] })).toEqual([]);
+test("project responses reject malformed lists and only return display fields", () => {
+  expect(parseProjects({ workspaces: [] })).toEqual([]);
   expect(
-    parseWorkspaces({
+    parseProjects({
       profile: { name: "Private" },
-      workspaces: [{ ...workspaces[0], secret: "ignored" }],
+      workspaces: [{ ...projects[0], secret: "ignored" }],
     }),
-  ).toEqual([workspaces[0]]);
+  ).toEqual([projects[0]]);
   for (const value of [
     null,
     {},
     { workspaces: null },
     { workspaces: [null] },
-    { workspaces: [{ ...workspaces[0], path: 42 }] },
-    { workspaces: [{ ...workspaces[0], slug: "" }] },
-    { workspaces: [workspaces[0], workspaces[0]] },
+    { workspaces: [{ ...projects[0], path: 42 }] },
+    { workspaces: [{ ...projects[0], slug: "" }] },
+    { workspaces: [projects[0], projects[0]] },
   ])
-    expect(() => parseWorkspaces(value)).toThrow(/invalid workspace/);
+    expect(() => parseProjects(value)).toThrow(/invalid project/);
 });
 
-test("a control plane with no workspace ids is usable, and says which half is missing", () => {
+test("a control plane with no project ids is usable, and says which half is missing", () => {
   // ⚠️ The regression this pins down shipped and was caught in the app: the
   // parser required `id`, the deployed service did not send it yet, and every
-  // real workspace came back as "invalid workspace" — a strict reader turning a
+  // real project came back as "invalid project" — a strict reader turning a
   // deploy-order problem into a broken screen. A missing id means "no board
-  // yet", never "no workspace".
-  const older = parseWorkspaces({
+  // yet", never "no project".
+  const older = parseProjects({
     workspaces: [
       { slug: "lanework", name: "Lanework", path: null, baseBranch: null },
     ],
@@ -129,11 +130,11 @@ test("a control plane with no workspace ids is usable, and says which half is mi
     { workspaces: [{ slug: "", name: "x", path: null, baseBranch: null }] },
     { workspaces: [{ slug: "x", name: "", path: null, baseBranch: null }] },
   ])
-    expect(() => parseWorkspaces(value)).toThrow(/invalid workspace/);
+    expect(() => parseProjects(value)).toThrow(/invalid project/);
 });
 
-test("active workspace persists separately for each account, machine and API origin", async () => {
-  const home = await mkdtemp(join(tmpdir(), "lanew-workspace-store-"));
+test("active project persists separately for each account, machine and API origin", async () => {
+  const home = await mkdtemp(join(tmpdir(), "lanew-project-store-"));
   const previous = process.env.LANEWORK_HOME;
   process.env.LANEWORK_HOME = home;
   const record: MachineRecord = {
@@ -147,7 +148,7 @@ test("active workspace persists separately for each account, machine and API ori
   try {
     expect(await readActive(record)).toBeNull();
     await writeActive(record, { id: "ws-lanework", slug: "lanework" });
-    // ⚠️ By cloud workspace ID, not slug: a slug is a display key a rename can
+    // ⚠️ By cloud project ID, not slug: a slug is a display key a rename can
     // move, and every board call is `/v1/boards/:workspaceId/…`.
     expect(await readActive(record)).toEqual({
       by: "id",
@@ -168,9 +169,9 @@ test("active workspace persists separately for each account, machine and API ori
         value: "ws-lanework",
       });
     }
-    for (const file of await readdir(join(home, "workspaces")))
+    for (const file of await readdir(join(home, "projects")))
       expect(
-        await readFile(join(home, "workspaces", file), "utf8"),
+        await readFile(join(home, "projects", file), "utf8"),
       ).not.toContain(record.secret);
     await writeActive(record, { id: null, slug: null });
     expect(await readActive(record)).toBeNull();
@@ -182,10 +183,10 @@ test("active workspace persists separately for each account, machine and API ori
 });
 
 test("the rail remembers a project across relaunch, and never falls back silently", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   // Keep the loading state observable without slowing every request.
-  plane.setWorkspaceResponse(200, undefined, 400);
-  const profile = await mkdtemp(join(tmpdir(), "lanew-workspaces-"));
+  plane.setProjectResponse(200, undefined, 400);
+  const profile = await mkdtemp(join(tmpdir(), "lanew-projects-"));
   const home = join(profile, "home");
   await seedCredential(home, plane.origin);
   const env = launchEnv({ profile, home, apiUrl: plane.origin });
@@ -206,9 +207,9 @@ test("the rail remembers a project across relaunch, and never falls back silentl
       page.getByText("cloud-project", { exact: true }),
     ).toBeVisible();
     expect(plane.calls).toContain("GET /v1/sync/state");
-    expect(plane.workspaceAuth).toEqual(["Bearer lw_mch_test-secret"]);
+    expect(plane.projectAuth).toEqual(["Bearer lw_mch_test-secret"]);
     await page.screenshot({
-      path: "../../.agents/artifacts/2026-09-08-workspace-picker.png",
+      path: "../../.agents/artifacts/2026-09-08-project-picker.png",
       // Native macOS vibrancy is outside the renderer capture. Flatten only
       // the screenshot so the light theme is reviewable against its backdrop.
       style: "html { background: var(--background) !important; }",
@@ -222,13 +223,13 @@ test("the rail remembers a project across relaunch, and never falls back silentl
     ).toBeVisible();
     expect(errors).toEqual([]);
     await page.screenshot({
-      path: "../../.agents/artifacts/2026-09-08-workspace-active.png",
+      path: "../../.agents/artifacts/2026-09-08-project-active.png",
       style: "html { background: var(--background) !important; }",
     });
     await app.close();
 
     // The choice survives a relaunch — that is what remembering it buys.
-    plane.setWorkspaces(workspaces);
+    plane.setProjects(projects);
     app = await electron.launch({ args: [process.cwd()], env });
     page = await app.firstWindow();
     await expect(
@@ -241,13 +242,13 @@ test("the rail remembers a project across relaunch, and never falls back silentl
 
     // ⚠️ A selection whose project has been removed becomes a QUESTION, not a
     // different project. Main clears the pointer; the app asks again.
-    plane.setWorkspaces([workspaces[1]]);
+    plane.setProjects([projects[1]]);
     await page.reload();
     await expect(
       page.getByRole("heading", { name: "Choose a project" }),
     ).toBeVisible();
     // Restoring it does not resurrect a stale pointer either.
-    plane.setWorkspaces(workspaces);
+    plane.setProjects(projects);
     await page.reload();
     await expect(
       page.getByRole("heading", { name: "Choose a project" }),
@@ -266,11 +267,8 @@ test("the switcher draws a project's GitHub icon, keeps it on disk, and letters 
     "base64",
   );
   const key = `owner-avatars/fuongz/${"a".repeat(64)}.png`;
-  const withIcon: Workspace[] = [
-    { ...workspaces[0], iconKey: key },
-    workspaces[1],
-  ];
-  const plane = await startStubPlane({ workspaces: withIcon });
+  const withIcon: Project[] = [{ ...projects[0], iconKey: key }, projects[1]];
+  const plane = await startStubPlane({ projects: withIcon });
   for (const id of ["ws-lanework", "ws-cloud-project"])
     plane.setBoard(id, {
       columns: [{ key: "todo", name: "To-Do", role: "start" }],
@@ -324,9 +322,9 @@ test("the switcher draws a project's GitHub icon, keeps it on disk, and letters 
 });
 
 test("a service error is told apart from an empty account, and a bad selection keeps the old one", async () => {
-  const plane = await startStubPlane({ workspaces });
-  plane.setWorkspaceResponse(503);
-  const profile = await mkdtemp(join(tmpdir(), "lanew-workspace-errors-"));
+  const plane = await startStubPlane({ projects });
+  plane.setProjectResponse(503);
+  const profile = await mkdtemp(join(tmpdir(), "lanew-project-errors-"));
   const home = join(profile, "home");
   await seedCredential(home, plane.origin);
   const app = await electron.launch({
@@ -346,20 +344,20 @@ test("a service error is told apart from an empty account, and a bad selection k
       page.getByText("No projects yet", { exact: true }),
     ).toBeHidden();
 
-    plane.setWorkspaces([]);
+    plane.setProjects([]);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(
       page.getByText("No projects yet", { exact: true }),
     ).toBeVisible();
 
-    plane.setWorkspaceResponse(200, { workspaces: "invalid" });
+    plane.setProjectResponse(200, { workspaces: "invalid" });
     await page.getByRole("button", { name: "Try again" }).click();
-    await expect(page.getByText(/invalid workspace list/)).toBeVisible();
+    await expect(page.getByText(/invalid project list/)).toBeVisible();
     await expect(
       page.getByText("No projects yet", { exact: true }),
     ).toBeHidden();
 
-    plane.setWorkspaces(workspaces);
+    plane.setProjects(projects);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(page.getByRole("list", { name: "Projects" })).toBeVisible();
     await page.getByRole("link", { name: /Lanework/ }).click();
@@ -368,7 +366,7 @@ test("a service error is told apart from an empty account, and a bad selection k
     ).toBeVisible();
 
     // An offline relaunch reports the failure and keeps the saved selection.
-    plane.setWorkspaceResponse(503);
+    plane.setProjectResponse(503);
     await page.reload();
     // ⚠️ The failure is the whole screen now, not a banner on one — so it is
     // addressed by what it SAYS rather than by `role="alert"`, which belongs to
@@ -381,8 +379,8 @@ test("a service error is told apart from an empty account, and a bad selection k
     await expect(page.getByText("Could not open this project")).toBeVisible();
     await expect(page.getByText(/HTTP 503/)).toBeVisible();
     expect(page.url()).toContain("/w/lanework/issues");
-    plane.setWorkspaceResponse(200);
-    plane.setWorkspaces(workspaces);
+    plane.setProjectResponse(200);
+    plane.setProjects(projects);
     await page.reload();
     await expect(
       page.getByRole("button", { name: "Switch project — currently Lanework" }),
@@ -394,8 +392,8 @@ test("a service error is told apart from an empty account, and a bad selection k
   }
 });
 
-test("workspace IPC rejects invalid selections and signed-out callers", async () => {
-  const profile = await mkdtemp(join(tmpdir(), "lanew-workspace-ipc-"));
+test("project IPC rejects invalid selections and signed-out callers", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "lanew-project-ipc-"));
   const app = await electron.launch({
     args: [process.cwd()],
     env: launchEnv({ profile, home: join(profile, "home") }),
@@ -409,7 +407,7 @@ test("workspace IPC rejects invalid selections and signed-out callers", async ()
     ).toBeVisible();
     const failures = await page.evaluate(async () => {
       const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
-        .workspaces;
+        .projects;
       const result: string[] = [];
       for (const call of [
         () => api.load(),
@@ -467,8 +465,8 @@ test("workspace IPC rejects invalid selections and signed-out callers", async ()
     });
     expect(failures[0]).toContain("Sign in");
     expect(failures[1]).toContain("Sign in");
-    expect(failures[2]).toContain("valid workspace");
-    expect(failures[3]).toContain("valid workspace");
+    expect(failures[2]).toContain("valid project");
+    expect(failures[3]).toContain("valid project");
     for (const message of failures.slice(4, 10))
       expect(message).toContain("Sign in");
     expect(failures[10]).toContain("must change something");
@@ -486,10 +484,10 @@ test("workspace IPC rejects invalid selections and signed-out callers", async ()
 
 test("a v1 selection file (a slug) is honoured once and rewritten as an id", async () => {
   // ⚠️ Upgrade behaviour, and the reason `readActive` has two shapes. Dropping
-  // the old file would silently move every existing user back to "no workspace
+  // the old file would silently move every existing user back to "no project
   // selected"; resolving it once and rewriting keeps their choice without
   // leaving a slug in a field the board is addressed by.
-  const home = await mkdtemp(join(tmpdir(), "lanew-workspace-v1-"));
+  const home = await mkdtemp(join(tmpdir(), "lanew-project-v1-"));
   const previous = process.env.LANEWORK_HOME;
   process.env.LANEWORK_HOME = home;
   const record: MachineRecord = {
@@ -506,12 +504,16 @@ test("a v1 selection file (a slug) is honoured once and rewritten as an id", asy
       .update(JSON.stringify([record.apiUrl, record.userId, record.machineId]))
       .digest("hex");
     const { mkdir, writeFile } = await import("node:fs/promises");
+    // Written where a build before FE-107 kept it: the startup move must
+    // carry it to `projects/` before it is read.
     await mkdir(join(home, "workspaces"), { recursive: true });
     await writeFile(
       join(home, "workspaces", `${key}.json`),
       JSON.stringify({ v: 1, active: "lanework" }),
       "utf8",
     );
+    expect(moveLegacyProjectsDir(home)).toBe(true);
+    expect(moveLegacyProjectsDir(home)).toBe(false);
 
     expect(await readActive(record)).toEqual({ by: "slug", value: "lanework" });
     // Once resolved, the caller writes the id and the slug never comes back.
@@ -647,11 +649,11 @@ test("a board with no columns is an error, not an empty screen", () => {
   expect(parsed.categories[0]?.prefix).toBe("BE");
 });
 
-test("opening a workspace shows its cloud board, and a tick carries the revision", async () => {
-  // ⚠️ The point of FE-06 D1: the workspace being opened here has NO local
+test("opening a project shows its cloud board, and a tick carries the revision", async () => {
+  // ⚠️ The point of FE-06 D1: the project being opened here has NO local
   // folder, and its board renders anyway. Every earlier version of this screen
-  // showed a path and called a folderless workspace unlinked.
-  const plane = await startStubPlane({ workspaces });
+  // showed a path and called a folderless project unlinked.
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", {
     migratedAt: "2026-09-08T05:00:00.000Z",
     columns: [
@@ -813,7 +815,7 @@ test("opening a workspace shows its cloud board, and a tick carries the revision
 });
 
 test("the board write surface edits, reorders, looks up and follows changes", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", {
     migratedAt: "2026-09-08T05:00:00.000Z",
     columns: [
@@ -878,7 +880,7 @@ test("the board write surface edits, reorders, looks up and follows changes", as
 
     const result = await page.evaluate(async () => {
       const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
-        .workspaces.board;
+        .projects.board;
       const ws = "ws-cloud-project";
       const fail = async (run: () => Promise<unknown>) => {
         try {
@@ -1007,7 +1009,7 @@ test("the board write surface edits, reorders, looks up and follows changes", as
 });
 
 test("a checklist is rewritten whole, and ticked boxes survive the rewrite", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", {
     migratedAt: "2026-09-08T05:00:00.000Z",
     columns: [{ key: "todo", name: "To-Do", role: "start" }],
@@ -1062,7 +1064,7 @@ test("a checklist is rewritten whole, and ticked boxes survive the rewrite", asy
 
     const result = await page.evaluate(async () => {
       const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
-        .workspaces.board;
+        .projects.board;
       const ws = "ws-cloud-project";
       const before = await api.card(ws, "card-a");
 
@@ -1139,16 +1141,16 @@ test("a selection is honoured whether the service sends ids or not", async () =>
   // ⚠️ The regression this pins down was visible on the first click: the
   // renderer sends `id ?? slug`, and against a service that predates the id
   // field every id is null — so matching on the id alone made every Open button
-  // answer "this workspace is no longer available", about a row it had just
+  // answer "this project is no longer available", about a row it had just
   // listed.
   const plane = await startStubPlane({
-    workspaces: workspaces.map(({ slug, name, path, baseBranch }) => ({
+    projects: projects.map(({ slug, name, path, baseBranch }) => ({
       // The older shape, exactly: no `id` anywhere.
       slug,
       name,
       path,
       baseBranch,
-    })) as unknown as Workspace[],
+    })) as unknown as Project[],
   });
   const profile = await mkdtemp(join(tmpdir(), "lanew-older-plane-"));
   const home = join(profile, "home");
@@ -1183,7 +1185,7 @@ test("a selection is honoured whether the service sends ids or not", async () =>
 });
 
 test("switching projects and back returns to where the project was left", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   for (const id of ["ws-lanework", "ws-cloud-project"])
     plane.setBoard(id, {
       columns: [{ key: "todo", name: "To-Do", role: "start" }],
@@ -1233,7 +1235,7 @@ test("switching projects and back returns to where the project was left", async 
     // The menu's gear, beside New project, opens Settings → Projects.
     await page.getByRole("button", { name: /^Switch project/ }).click();
     await page.getByRole("button", { name: "Project settings" }).click();
-    await expect.poll(() => page.url()).toContain("/settings/workspaces");
+    await expect.poll(() => page.url()).toContain("/settings/projects");
     await expect(page.getByRole("option")).toHaveCount(0);
   } finally {
     await app.close();
@@ -1244,7 +1246,7 @@ test("switching projects and back returns to where the project was left", async 
 
 test("the project menu shows the agents running in each project", async () => {
   test.skip(process.platform === "win32", "The stand-in CLI is a POSIX shell.");
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   for (const id of ["ws-lanework", "ws-cloud-project"])
     plane.setBoard(id, {
       columns: [{ key: "todo", name: "To-Do", role: "start" }],
@@ -1373,7 +1375,7 @@ test("the project menu shows the agents running in each project", async () => {
 });
 
 test("projects are put in order from Settings, and the switcher and ⌘1 follow it (FE-32)", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   for (const id of ["ws-lanework", "ws-cloud-project"])
     plane.setBoard(id, {
       columns: [{ key: "todo", name: "To-Do", role: "start" }],
@@ -1400,7 +1402,7 @@ test("projects are put in order from Settings, and the switcher and ⌘1 follow 
   try {
     let page = await app.firstWindow();
     await switchTo(page, "Lanework");
-    await page.goto("app://lanework/settings/workspaces");
+    await page.goto("app://lanework/settings/projects");
     await expect.poll(() => rows(page)).toEqual(["lanework", "cloud-project"]);
 
     // Dragged by its grip onto the first row: it takes that place.
@@ -1459,7 +1461,7 @@ test("an issue is written on its own page, and the board mints its key", async (
   // title, and the board mints `taskId` from a card's CATEGORY — so every card
   // made in this app was unkeyed: blank in the column each list reserves for it,
   // unreachable by ⌘K, and impossible to deep-link.
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", bigBoard(2));
   const profile = await mkdtemp(join(tmpdir(), "lanew-new-issue-"));
   const home = join(profile, "home");
@@ -1568,7 +1570,7 @@ test("the description is a markdown editor: lists continue, ⌘↵ saves, Escape
   // default keymap binds BOTH — Mod-Enter inserts a blank line, Escape
   // simplifies the selection — so without the bindings this pins, the field a
   // person types in would be the one field those two keys stopped working in.
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", bigBoard(2));
   const profile = await mkdtemp(join(tmpdir(), "lanew-md-editor-"));
   const home = join(profile, "home");
@@ -1624,7 +1626,7 @@ test("labels are picked from the board's vocabulary, and free text still lands",
   // ⚠️ Driven on the NEW ISSUE page, where the same control sits. Labels are one
   // field with one control on both rails — `properties.tsx` states why — so this
   // covers the composer and `issue-detail.spec.ts` covers the card that exists.
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", {
     ...bigBoard(2),
     labels: [{ key: "ui-polish", name: "UI Polish", tone: "violet" }],
@@ -1684,7 +1686,7 @@ test("labels are picked from the board's vocabulary, and free text still lands",
 });
 
 test("a card is deleted from its context menu, in the list and on the board", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", bigBoard(4));
   const profile = await mkdtemp(join(tmpdir(), "lanew-delete-card-"));
   const home = join(profile, "home");
@@ -1770,7 +1772,7 @@ function bigBoard(count: number) {
 }
 
 test("a long board is readable: groups fold, filters cut, and ⌘K jumps by key", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", bigBoard(33));
   const profile = await mkdtemp(join(tmpdir(), "lanew-long-board-"));
   const home = join(profile, "home");
@@ -1860,7 +1862,7 @@ test("a long board is readable: groups fold, filters cut, and ⌘K jumps by key"
 });
 
 test("issues read as list and detail: j/k move, Properties folds away, /board lands on the list", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", bigBoard(6));
   const profile = await mkdtemp(join(tmpdir(), "lanew-list-detail-"));
   const home = join(profile, "home");
@@ -2083,18 +2085,18 @@ test("a folder that is not a project says so, rather than failing", async () => 
   }
 });
 
-test("a workspace with no cloud board can still be read from its folder", async () => {
-  // The screenshot this exists for: a service that predates the workspace id
+test("a project with no cloud board can still be read from its folder", async () => {
+  // The screenshot this exists for: a service that predates the project id
   // sends none, so the board cannot be addressed — while the cards are sitting
   // in a folder on this machine the whole time. The board still says which half
   // is missing; the folder panel says what the project holds.
   const plane = await startStubPlane({
-    workspaces: workspaces.map(({ slug, name, path, baseBranch }) => ({
+    projects: projects.map(({ slug, name, path, baseBranch }) => ({
       slug,
       name,
       path,
       baseBranch,
-    })) as unknown as Workspace[],
+    })) as unknown as Project[],
   });
   const profile = await mkdtemp(join(tmpdir(), "lanew-folder-panel-"));
   const home = join(profile, "home");
@@ -2187,7 +2189,7 @@ test("a project name becomes a slug the service will accept", () => {
 });
 
 test("a project can be created from the app, and opens straight away", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   const profile = await mkdtemp(join(tmpdir(), "lanew-create-"));
   const home = join(profile, "home");
   await seedCredential(home, plane.origin);
@@ -2235,7 +2237,7 @@ test("a project can be created from the app, and opens straight away", async () 
 });
 
 test("a project is created from the folders a person picked, primary first", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   const profile = await mkdtemp(join(tmpdir(), "lanew-create-folders-"));
   const home = join(profile, "home");
   const repo = join(profile, "repo");
@@ -2304,7 +2306,7 @@ test("a project is created from the folders a person picked, primary first", asy
     await page
       .getByRole("button", { name: /^Switch project/ })
       .waitFor({ state: "visible", timeout: 15_000 });
-    await page.goto("app://lanework/settings/workspaces");
+    await page.goto("app://lanework/settings/projects");
     await expect(page.getByText(`${extra} + 1 more`)).toHaveCount(2);
 
     expect(errors).toEqual([]);
@@ -2316,7 +2318,7 @@ test("a project is created from the folders a person picked, primary first", asy
 });
 
 test("projects are managed from settings: folders changed, deleted, created", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   const profile = await mkdtemp(join(tmpdir(), "lanew-settings-projects-"));
   const home = join(profile, "home");
   const repo = join(profile, "repo");
@@ -2335,7 +2337,7 @@ test("projects are managed from settings: folders changed, deleted, created", as
       .getByRole("button", { name: /^Switch project/ })
       .waitFor({ state: "visible", timeout: 15_000 });
 
-    await page.goto("app://lanework/settings/workspaces");
+    await page.goto("app://lanework/settings/projects");
     await expect(
       page.getByRole("heading", { name: "Projects", exact: true }),
     ).toBeVisible();
@@ -2400,8 +2402,8 @@ test("a project with no cloud id says why it cannot be renamed or deleted", asyn
   // answering 200. Losing this row's delete is the price of that being loud, and
   // a button that quietly vanished would leave nothing to explain why.
   const plane = await startStubPlane({
-    workspaces: [
-      ...workspaces,
+    projects: [
+      ...projects,
       {
         id: null,
         slug: "legacy",
@@ -2424,7 +2426,7 @@ test("a project with no cloud id says why it cannot be renamed or deleted", asyn
       .getByRole("button", { name: /^Switch project/ })
       .waitFor({ state: "visible", timeout: 15_000 });
 
-    await page.goto("app://lanework/settings/workspaces");
+    await page.goto("app://lanework/settings/projects");
     await page.getByRole("button", { name: "Select Legacy project" }).click();
     const remove = page.getByRole("button", { name: "Delete Legacy project" });
     await expect(remove).toBeDisabled();
@@ -2456,7 +2458,7 @@ test("a project with no cloud id says why it cannot be renamed or deleted", asyn
 });
 
 test("every issue is removed from settings, once the key is typed", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", bigBoard(3));
   const profile = await mkdtemp(join(tmpdir(), "lanew-purge-"));
   const home = join(profile, "home");
@@ -2513,7 +2515,7 @@ test("every issue is removed from settings, once the key is typed", async () => 
     // ⚠️ A service older than the route answers 404, and the page says what
     // that means rather than "not found" about a board that is right there.
     plane.setPurgeMissing(true);
-    await page.goto("app://lanework/settings/workspaces");
+    await page.goto("app://lanework/settings/projects");
     await page
       .getByRole("button", { name: "Remove all issues in Cloud project" })
       .click();
@@ -2538,7 +2540,7 @@ test("every issue is removed from settings, once the key is typed", async () => 
 });
 
 test("a project is renamed from settings, and its key does not move", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   const profile = await mkdtemp(join(tmpdir(), "lanew-rename-"));
   const home = join(profile, "home");
   await seedCredential(home, plane.origin);
@@ -2556,7 +2558,7 @@ test("a project is renamed from settings, and its key does not move", async () =
     // not move the selection — the whole reason main answers with `load()`.
     await switchTo(page, "Lanework");
 
-    await page.goto("app://lanework/settings/workspaces");
+    await page.goto("app://lanework/settings/projects");
     await page.getByRole("button", { name: "Select Cloud project" }).click();
     await page.getByRole("button", { name: "Rename Cloud project" }).click();
 
@@ -2625,7 +2627,7 @@ test("a project is renamed from settings, and its key does not move", async () =
 });
 
 test("a taken key and an old service are told apart, and the name is kept", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   const profile = await mkdtemp(join(tmpdir(), "lanew-create-fail-"));
   const home = join(profile, "home");
   await seedCredential(home, plane.origin);
@@ -2662,7 +2664,7 @@ test("a taken key and an old service are told apart, and the name is kept", asyn
 
 /** A plane, a profile and a linked folder — the state a migration starts from. */
 async function migrationFixture(name: string) {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", {
     migratedAt: null,
     columns: [{ key: "todo", name: "To-Do", role: "start" }],
@@ -2813,8 +2815,8 @@ test("a stopped run keeps what landed, and a refused seal names both numbers", a
 });
 
 test("a project URL whose list will not load asks once and stays put", async () => {
-  const plane = await startStubPlane({ workspaces });
-  const profile = await mkdtemp(join(tmpdir(), "lanew-workspace-loop-"));
+  const plane = await startStubPlane({ projects });
+  const profile = await mkdtemp(join(tmpdir(), "lanew-project-loop-"));
   const home = join(profile, "home");
   await seedCredential(home, plane.origin);
   const app = await electron.launch({
@@ -2828,7 +2830,7 @@ test("a project URL whose list will not load asks once and stays put", async () 
     const reads = () =>
       plane.calls.filter((call) => call === "GET /v1/sync/state").length;
 
-    plane.setWorkspaceResponse(500);
+    plane.setProjectResponse(500);
     const before = reads();
     await page.goto("app://lanework/w/lanework/issues");
 
@@ -2851,7 +2853,7 @@ test("a project URL whose list will not load asks once and stays put", async () 
     expect(page.url()).toContain("/w/lanework/issues");
 
     // Try again is the way out, and it is the only thing that asks again.
-    plane.setWorkspaceResponse(200);
+    plane.setProjectResponse(200);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(
       page.getByRole("button", { name: "Switch project — currently Lanework" }),
@@ -2890,7 +2892,7 @@ const sawReload = (page: Page) =>
   page.evaluate<{ skeleton: boolean; fade: boolean }>("globalThis.__reload");
 
 test("coming back to a project draws its board at once and reads only what changed", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   // Every Cloud card is To-Do, so the list shows them all unfolded, and named
   // so nothing on Lanework's board can match them.
   const cloud = bigBoard(2);
@@ -2953,7 +2955,7 @@ test("coming back to a project draws its board at once and reads only what chang
 });
 
 test("a card opens with one activity read, and the list does not load again on the way back", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", bigBoard(3));
   const profile = await mkdtemp(join(tmpdir(), "lanew-board-back-"));
   const home = join(profile, "home");
@@ -3001,7 +3003,7 @@ test("a card opens with one activity read, and the list does not load again on t
 });
 
 test("a big board opens one group at a time, counted by the service", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   // 300 cards, 100 a lane: To-Do is the start lane, so it reads 50; the
   // others 20.
   plane.setBoard("ws-cloud-project", bigBoard(300));
@@ -3063,7 +3065,7 @@ test("a big board opens one group at a time, counted by the service", async () =
 });
 
 test("a filter is the service's, and ⌘K opens a card that is not loaded", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   const big = bigBoard(300);
   // Deep in a lane, far past its first page.
   big.cards[298] = { ...big.cards[298], tags: ["needle"] };
@@ -3112,7 +3114,7 @@ test("a filter is the service's, and ⌘K opens a card that is not loaded", asyn
 });
 
 test("a service without stats still gets the whole board", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setStatsMissing(true);
   plane.setBoard("ws-cloud-project", bigBoard(150));
   const profile = await mkdtemp(join(tmpdir(), "lanew-old-stats-"));
@@ -3148,7 +3150,7 @@ test("a service without stats still gets the whole board", async () => {
 });
 
 test("⌘K finds a card that is not loaded, asking the service once per pause", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   const big = bigBoard(300);
   // Far past its lane's first page, so only the service can find it.
   big.cards[289] = { ...big.cards[289], title: "Zebra migration plan" };
@@ -3192,7 +3194,7 @@ test("⌘K finds a card that is not loaded, asking the service once per pause", 
 });
 
 test("a search the service cannot answer keeps the loaded matches, and says so", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", bigBoard(3));
   plane.setSearchFailing(true);
   const profile = await mkdtemp(join(tmpdir(), "lanew-search-down-"));

@@ -8,7 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type BoardCard, matchesSearch } from "#/../shared/workspaces";
+import { type BoardCard, matchesSearch } from "#/../shared/projects";
 import { StatusIcon } from "#/components/shared/board/glyphs";
 import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
 import {
@@ -51,7 +51,7 @@ export function CommandPalette() {
   const close = useCommandPalette((state) => state.close);
   const toggle = useCommandPalette((state) => state.toggle);
   const view = useBoard((state) => state.view);
-  const workspaces = useBoard((state) => state.workspaces);
+  const projects = useBoard((state) => state.projects);
   const setTheme = usePreferences((state) => state.setTheme);
   const theme = usePreferences((state) => state.theme);
   const params = useParams({ strict: false }) as { slug?: string };
@@ -60,25 +60,25 @@ export function CommandPalette() {
   const openProject = useOpenProject();
   const [query, setQuery] = useState("");
   const [at, setAt] = useState(0);
-  const workspaceId = useBoard((state) => state.active?.id ?? null);
+  const projectId = useBoard((state) => state.active?.id ?? null);
   /** The service's answer, for the query it answered; never a stale one. */
   const [remote, setRemote] = useState<{
     query: string;
     cards: BoardCard[] | null;
   } | null>(null);
   const trimmed = query.trim();
-  const searching = Boolean(slug && workspaceId) && trimmed.length >= 2;
+  const searching = Boolean(slug && projectId) && trimmed.length >= 2;
 
   // One request per pause, not per keystroke, and an answer counts only for
   // the query it was asked for: typing on drops whatever was in flight.
   useEffect(() => {
-    if (!isOpen || !searching || !workspaceId) return;
+    if (!isOpen || !searching || !projectId) return;
     let live = true;
     const timer = setTimeout(() => {
-      const surface = window.desktop?.workspaces;
+      const surface = window.desktop?.projects;
       if (!surface) return;
       surface.board
-        .search(workspaceId, trimmed)
+        .search(projectId, trimmed)
         .then((cards) => live && setRemote({ query: trimmed, cards }))
         .catch(() => live && setRemote({ query: trimmed, cards: null }));
     }, SEARCH_DEBOUNCE_MS);
@@ -86,7 +86,7 @@ export function CommandPalette() {
       live = false;
       clearTimeout(timer);
     };
-  }, [isOpen, searching, trimmed, workspaceId]);
+  }, [isOpen, searching, trimmed, projectId]);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -136,13 +136,13 @@ export function CommandPalette() {
         },
       );
     }
-    for (const workspace of workspaces)
+    for (const project of projects)
       out.push({
-        id: `project:${workspace.slug}`,
-        label: `Open ${workspace.name}`,
+        id: `project:${project.slug}`,
+        label: `Open ${project.name}`,
         hint: "Project",
         icon: Grid2X2Icon,
-        run: () => openProject(workspace.slug),
+        run: () => openProject(project.slug),
       });
     out.push(
       {
@@ -159,7 +159,7 @@ export function CommandPalette() {
       },
     );
     return out;
-  }, [navigate, openProject, setTheme, slug, theme, workspaces]);
+  }, [navigate, openProject, setTheme, slug, theme, projects]);
 
   const answered = remote?.query === trimmed ? remote : null;
   const cardCommands = useMemo<Command[]>(() => {

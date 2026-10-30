@@ -1,7 +1,7 @@
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import type { TeamLead } from "#/../shared/orchestration";
-import type { BoardCard, BoardView } from "#/../shared/workspaces";
+import type { BoardCard, BoardView } from "#/../shared/projects";
 import {
   ChecklistProgress,
   PriorityIcon,

@@ -66,7 +66,7 @@ test("the packaged app runs a real terminal from outside the asar", async () => 
   );
   const directory = process.arch === "arm64" ? "mac-arm64" : "mac";
   const plane = await startStubPlane({
-    workspaces: [
+    projects: [
       {
         id: "ws-alpha",
         slug: "alpha",

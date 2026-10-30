@@ -1,5 +1,5 @@
 // What `/` and `@` offer in the composer (FE-62/D8): slash commands and
-// skills, or files in the workspace's folder, fuzzy-matched. A conversation
+// skills, or files in the project's folder, fuzzy-matched. A conversation
 // on OpenCode is offered OpenCode's, read from its config folders, no
 // OpenCode service needed (FE-105/D3). Nothing here imports Electron.
 import { constants } from "node:fs";
@@ -310,7 +310,7 @@ function claudeGroups(home: string, folder: string | null) {
  * ones. OpenCode's are read from its own folders (FE-105/D3); Claude's and
  * Codex's as before.
  *
- * @param folder The workspace's folder; null leaves out the project's own.
+ * @param folder The project's folder; null leaves out the project's own.
  * @param agent The conversation's agent; Claude's list when not known.
  */
 export async function listCommands(
@@ -400,7 +400,7 @@ const fileCache = new Map<string, { at: number; files: Promise<string[]> }>();
  *
  * Git's list, else a walk; reused for {@link CACHE_MS}.
  */
-export function workspaceFiles(folder: string): Promise<string[]> {
+export function projectFiles(folder: string): Promise<string[]> {
   const cached = fileCache.get(folder);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.files;
   const files = gitFiles(folder).then((listed) => listed ?? walkFiles(folder));
@@ -430,14 +430,14 @@ function foldersOf(files: string[]): string[] {
 }
 
 /**
- * The workspace's files and folders that match `query`: `@path`, and a
+ * The project's files and folders that match `query`: `@path`, and a
  * folder as `@path/` (FE-93/D2).
  */
 export async function suggestFiles(
   folder: string,
   query: string,
 ): Promise<Suggestion[]> {
-  const files = await workspaceFiles(folder);
+  const files = await projectFiles(folder);
   const clean = query.replace(/^@/, "");
   const parent = (path: string) =>
     dirname(path) === "." ? null : dirname(path);

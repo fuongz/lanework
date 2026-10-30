@@ -338,7 +338,7 @@ export class OpenCodeEngine implements ConversationEngine {
   private stopTimer: NodeJS.Timeout | null = null;
 
   constructor(
-    readonly workspace: string,
+    readonly project: string,
     /** Null until a new conversation's `POST /api/session` names it. */
     public conversation: string | null,
     readonly folder: string,
@@ -388,7 +388,7 @@ export class OpenCodeEngine implements ConversationEngine {
     if (!this.conversation) return;
     const full = {
       ...event,
-      workspace: this.workspace,
+      project: this.project,
       conversation: this.conversation,
     } as ConversationEvent;
     this.deps.emit(full);
@@ -761,7 +761,7 @@ export class OpenCodeEngine implements ConversationEngine {
     this.lastText = "";
     safely(() =>
       engineTap().result?.({
-        workspace: this.workspace,
+        project: this.project,
         conversation: this.conversation,
         folder: this.folder,
         text,
@@ -838,7 +838,7 @@ export class OpenCodeEngine implements ConversationEngine {
     const path = isAbsolute(file) ? file : join(this.folder, file);
     safely(() =>
       tap({
-        workspace: this.workspace,
+        project: this.project,
         conversation: this.conversation,
         folder: this.folder,
         tool,

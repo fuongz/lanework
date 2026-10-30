@@ -89,14 +89,14 @@ function startDraft(mode: ConductorDialogMode, taken: Set<string>): Draft {
  */
 export function ConductorDialog({
   mode,
-  workspace,
+  project,
   list,
   onClose,
   onSaved,
 }: {
   mode: ConductorDialogMode;
   /** The project it belongs to (FE-95). */
-  workspace: string;
+  project: string;
   list: LeadsList | null;
   onClose: () => void;
   /** Saved: the conductor as it was saved. */
@@ -152,7 +152,7 @@ export function ConductorDialog({
     if (!surface) return;
     setBusy(true);
     try {
-      await surface.savePersonal(workspace, input);
+      await surface.savePersonal(project, input);
       setError(null);
       onSaved(input);
     } catch (failure) {
@@ -230,7 +230,7 @@ export function ConductorDialog({
             </div>
           ) : page === "context" ? (
             <ConductorContext
-              workspace={workspace}
+              project={project}
               paths={draft.input.contextFiles}
               onChange={(contextFiles) =>
                 setDraft({

@@ -20,8 +20,8 @@ import {
 } from "@playwright/test";
 import type { MachineRecord } from "../electron/main/auth/store";
 import * as worktree from "../electron/main/git/worktree";
-import { writeFolders } from "../electron/main/workspaces/store";
-import type { Workspace } from "../shared/workspaces";
+import { writeFolders } from "../electron/main/projects/store";
+import type { Project } from "../shared/projects";
 import {
   agentStandIn,
   CLAUDE_EDITS_ID,
@@ -217,7 +217,7 @@ test("sync publishes a new branch, pushes, pulls and refuses bad remotes", async
   }
 });
 
-const workspaces: Workspace[] = [
+const projects: Project[] = [
   {
     id: "ws-alpha",
     slug: "alpha",
@@ -227,7 +227,7 @@ const workspaces: Workspace[] = [
   },
 ];
 
-const beta: Workspace = {
+const beta: Project = {
   id: "ws-beta",
   slug: "beta",
   name: "Beta",
@@ -245,7 +245,7 @@ async function open(
   env: Record<string, string> = {},
 ) {
   const plane = await startStubPlane({
-    workspaces: betaFolder ? [...workspaces, beta] : workspaces,
+    projects: betaFolder ? [...projects, beta] : projects,
   });
   for (const id of betaFolder ? ["ws-alpha", "ws-beta"] : ["ws-alpha"])
     plane.setBoard(id, {

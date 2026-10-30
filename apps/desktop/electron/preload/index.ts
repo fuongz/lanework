@@ -58,6 +58,10 @@ import {
   orchestrationChannels,
 } from "../../shared/orchestration";
 import {
+  type DesktopProjectsApi,
+  projectChannels,
+} from "../../shared/projects";
+import {
   type DesktopReadinessApi,
   readinessChannels,
 } from "../../shared/readiness";
@@ -69,10 +73,6 @@ import {
   type TerminalViewHandlers,
   terminalChannels,
 } from "../../shared/terminal";
-import {
-  type DesktopWorkspacesApi,
-  workspaceChannels,
-} from "../../shared/workspaces";
 import {
   type DesktopWorktreeApi,
   isHeldRead,
@@ -199,71 +199,65 @@ const handoff: DesktopHandoffApi = {
 /**
  * The conversation view.
  *
- * Every call names a workspace and a conversation id, never a folder or a
+ * Every call names a project and a conversation id, never a folder or a
  * command. Main checks the settings against its own lists before any of them
  * becomes a flag.
  */
 const conversation: DesktopConversationApi = {
-  read: (workspace, id) =>
-    ipcRenderer.invoke(conversationChannels.read, workspace, id),
+  read: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.read, project, id),
   start: (request) => ipcRenderer.invoke(conversationChannels.start, request),
   send: (request) => ipcRenderer.invoke(conversationChannels.send, request),
-  stop: (workspace, id) =>
-    ipcRenderer.invoke(conversationChannels.stop, workspace, id),
-  clearQueue: (workspace, id) =>
-    ipcRenderer.invoke(conversationChannels.clearQueue, workspace, id),
-  takeQueued: (workspace, id, message) =>
-    ipcRenderer.invoke(conversationChannels.takeQueued, workspace, id, message),
-  removeQueued: (workspace, id, message) =>
-    ipcRenderer.invoke(
-      conversationChannels.removeQueued,
-      workspace,
-      id,
-      message,
-    ),
-  resumeQueue: (workspace, id) =>
-    ipcRenderer.invoke(conversationChannels.resumeQueue, workspace, id),
-  answerPermission: (workspace, id, request, answer) =>
+  stop: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.stop, project, id),
+  clearQueue: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.clearQueue, project, id),
+  takeQueued: (project, id, message) =>
+    ipcRenderer.invoke(conversationChannels.takeQueued, project, id, message),
+  removeQueued: (project, id, message) =>
+    ipcRenderer.invoke(conversationChannels.removeQueued, project, id, message),
+  resumeQueue: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.resumeQueue, project, id),
+  answerPermission: (project, id, request, answer) =>
     ipcRenderer.invoke(
       conversationChannels.answerPermission,
-      workspace,
+      project,
       id,
       request,
       answer,
     ),
-  fork: (workspace, id) =>
-    ipcRenderer.invoke(conversationChannels.fork, workspace, id),
-  takeOver: (workspace, id) =>
-    ipcRenderer.invoke(conversationChannels.takeOver, workspace, id),
-  release: (workspace, id) =>
-    ipcRenderer.invoke(conversationChannels.release, workspace, id),
-  close: (workspace, id) =>
-    ipcRenderer.invoke(conversationChannels.close, workspace, id),
-  alive: (workspace) =>
-    ipcRenderer.invoke(conversationChannels.alive, workspace),
-  engineState: (workspace, id) =>
-    ipcRenderer.invoke(conversationChannels.engineState, workspace, id),
-  permissions: (workspace, id) =>
-    ipcRenderer.invoke(conversationChannels.permissions, workspace, id),
+  fork: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.fork, project, id),
+  takeOver: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.takeOver, project, id),
+  release: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.release, project, id),
+  close: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.close, project, id),
+  alive: (project) => ipcRenderer.invoke(conversationChannels.alive, project),
+  engineState: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.engineState, project, id),
+  permissions: (project, id) =>
+    ipcRenderer.invoke(conversationChannels.permissions, project, id),
   awaiting: () => ipcRenderer.invoke(conversationChannels.awaiting),
   lastSettings: () => ipcRenderer.invoke(conversationChannels.lastSettings),
   codexModels: () => ipcRenderer.invoke(conversationChannels.codexModels),
   opencodeModels: () => ipcRenderer.invoke(conversationChannels.opencodeModels),
   linkPreview: (url) =>
     ipcRenderer.invoke(conversationChannels.linkPreview, url),
-  suggest: (workspace, kind, query, agent) =>
+  suggest: (project, kind, query, agent) =>
     ipcRenderer.invoke(
       conversationChannels.suggest,
-      workspace,
+      project,
       kind,
       query,
       agent ?? null,
     ),
   openLink: (url) => ipcRenderer.invoke(conversationChannels.openLink, url),
-  image: (workspace, id, path) =>
-    ipcRenderer.invoke(conversationChannels.image, workspace, id, path),
-  openImage: (workspace, id, path) =>
-    ipcRenderer.invoke(conversationChannels.openImage, workspace, id, path),
+  image: (project, id, path) =>
+    ipcRenderer.invoke(conversationChannels.image, project, id, path),
+  openImage: (project, id, path) =>
+    ipcRenderer.invoke(conversationChannels.openImage, project, id, path),
   pathForFile: (file) => webUtils.getPathForFile(file),
   onEvent: (listener) =>
     subscribe<ConversationEvent>(conversationChannels.event, listener),
@@ -289,39 +283,38 @@ const harness: DesktopHarnessApi = {
  * NOTE: The lead's CLI talks to main's control server, not to this. The page
  * only reads runs and asks for what the user does: approve, pause, resume,
  * stop, cancel a task, approve a task's wider write scope, clean up a
- * stopped run. Every call names a workspace slug and ids.
+ * stopped run. Every call names a project slug and ids.
  */
 const orchestration: DesktopOrchestrationApi = {
-  runs: (workspace) =>
-    ipcRenderer.invoke(orchestrationChannels.runs, workspace),
-  run: (workspace, runId) =>
-    ipcRenderer.invoke(orchestrationChannels.run, workspace, runId),
+  runs: (project) => ipcRenderer.invoke(orchestrationChannels.runs, project),
+  run: (project, runId) =>
+    ipcRenderer.invoke(orchestrationChannels.run, project, runId),
   approve: (proposal) =>
     ipcRenderer.invoke(orchestrationChannels.approve, proposal),
-  pause: (workspace, runId) =>
-    ipcRenderer.invoke(orchestrationChannels.pause, workspace, runId),
-  resume: (workspace, runId) =>
-    ipcRenderer.invoke(orchestrationChannels.resume, workspace, runId),
-  stop: (workspace, runId) =>
-    ipcRenderer.invoke(orchestrationChannels.stop, workspace, runId),
-  cancelTask: (workspace, runId, taskId) =>
+  pause: (project, runId) =>
+    ipcRenderer.invoke(orchestrationChannels.pause, project, runId),
+  resume: (project, runId) =>
+    ipcRenderer.invoke(orchestrationChannels.resume, project, runId),
+  stop: (project, runId) =>
+    ipcRenderer.invoke(orchestrationChannels.stop, project, runId),
+  cancelTask: (project, runId, taskId) =>
     ipcRenderer.invoke(
       orchestrationChannels.cancelTask,
-      workspace,
+      project,
       runId,
       taskId,
     ),
-  approveScope: (workspace, runId, taskId) =>
+  approveScope: (project, runId, taskId) =>
     ipcRenderer.invoke(
       orchestrationChannels.approveScope,
-      workspace,
+      project,
       runId,
       taskId,
     ),
-  leftovers: (workspace, runId) =>
-    ipcRenderer.invoke(orchestrationChannels.leftovers, workspace, runId),
-  cleanUp: (workspace, runId) =>
-    ipcRenderer.invoke(orchestrationChannels.cleanUp, workspace, runId),
+  leftovers: (project, runId) =>
+    ipcRenderer.invoke(orchestrationChannels.leftovers, project, runId),
+  cleanUp: (project, runId) =>
+    ipcRenderer.invoke(orchestrationChannels.cleanUp, project, runId),
   onChange: (listener) =>
     subscribe<OrchestrationEvent>(orchestrationChannels.changed, listener),
 };
@@ -341,21 +334,21 @@ const jev: DesktopJevApi = {
 };
 
 /**
- * Team lead presets (FE-88): built-in, personal and the workspace's repo
+ * Team lead presets (FE-88): built-in, personal and the project's repo
  * leads. The page writes only personal ones, by id.
  */
 const leads: DesktopLeadsApi = {
-  list: (workspace) => ipcRenderer.invoke(leadsChannels.list, workspace),
-  savePersonal: (workspace, lead) =>
-    ipcRenderer.invoke(leadsChannels.savePersonal, workspace, lead),
-  removePersonal: (workspace, id) =>
-    ipcRenderer.invoke(leadsChannels.removePersonal, workspace, id),
-  setDefault: (workspace, id) =>
-    ipcRenderer.invoke(leadsChannels.setDefault, workspace, id),
-  pickContext: (workspace) =>
-    ipcRenderer.invoke(leadsChannels.pickContext, workspace),
-  inspectContext: (workspace, paths) =>
-    ipcRenderer.invoke(leadsChannels.inspectContext, workspace, paths),
+  list: (project) => ipcRenderer.invoke(leadsChannels.list, project),
+  savePersonal: (project, lead) =>
+    ipcRenderer.invoke(leadsChannels.savePersonal, project, lead),
+  removePersonal: (project, id) =>
+    ipcRenderer.invoke(leadsChannels.removePersonal, project, id),
+  setDefault: (project, id) =>
+    ipcRenderer.invoke(leadsChannels.setDefault, project, id),
+  pickContext: (project) =>
+    ipcRenderer.invoke(leadsChannels.pickContext, project),
+  inspectContext: (project, paths) =>
+    ipcRenderer.invoke(leadsChannels.inspectContext, project, paths),
   onChange: (listener) =>
     subscribe<LeadsEvent>(leadsChannels.changed, listener),
 };
@@ -382,23 +375,23 @@ const readiness: DesktopReadinessApi = {
 
 /** What Claude remembers about a project: read-only, by file NAME. */
 const memory: DesktopMemoryApi = {
-  list: (workspace) => ipcRenderer.invoke(memoryChannels.list, workspace),
-  read: (workspace, file) =>
-    ipcRenderer.invoke(memoryChannels.read, workspace, file),
-  reveal: (workspace) => ipcRenderer.invoke(memoryChannels.reveal, workspace),
+  list: (project) => ipcRenderer.invoke(memoryChannels.list, project),
+  read: (project, file) =>
+    ipcRenderer.invoke(memoryChannels.read, project, file),
+  reveal: (project) => ipcRenderer.invoke(memoryChannels.reveal, project),
   onChange: (listener) =>
     subscribe<MemoryChange>(memoryChannels.changed, listener),
 };
 
 /** What a project's agents are told: read-only, by an id main minted. */
 const instructions: DesktopInstructionsApi = {
-  list: (workspace) => ipcRenderer.invoke(instructionChannels.list, workspace),
-  read: (workspace, id) =>
-    ipcRenderer.invoke(instructionChannels.read, workspace, id),
-  effective: (workspace, agent) =>
-    ipcRenderer.invoke(instructionChannels.effective, workspace, agent),
-  reveal: (workspace, id) =>
-    ipcRenderer.invoke(instructionChannels.reveal, workspace, id),
+  list: (project) => ipcRenderer.invoke(instructionChannels.list, project),
+  read: (project, id) =>
+    ipcRenderer.invoke(instructionChannels.read, project, id),
+  effective: (project, agent) =>
+    ipcRenderer.invoke(instructionChannels.effective, project, agent),
+  reveal: (project, id) =>
+    ipcRenderer.invoke(instructionChannels.reveal, project, id),
   onChange: (listener) =>
     subscribe<InstructionChange>(instructionChannels.changed, listener),
 };
@@ -500,16 +493,16 @@ function createTerminal(): DesktopTerminalApi {
   let port: MessagePort | null = null;
   let connecting: Promise<MessagePort> | null = null;
   const views = new Map<string, TerminalViewHandlers>();
-  const changeListeners = new Set<(workspace: string) => void>();
+  const changeListeners = new Set<(project: string) => void>();
 
-  const notify = (workspace: string) => {
-    for (const listener of changeListeners) listener(workspace);
+  const notify = (project: string) => {
+    for (const listener of changeListeners) listener(project);
   };
 
   const route = (event: MessageEvent) => {
     const message = event.data as TerminalHostMessage | null;
     if (!message || typeof message !== "object") return;
-    if (message.t === "changed") return notify(message.workspace);
+    if (message.t === "changed") return notify(message.project);
     const view = views.get(message.id);
     if (!view) return;
     if (message.t === "snapshot") view.onSnapshot(message.data);
@@ -558,126 +551,126 @@ function createTerminal(): DesktopTerminalApi {
   };
 
   return {
-    list: (workspace) => ipcRenderer.invoke(terminalChannels.list, workspace),
-    spawn: (workspace, cols, rows, kind = "shell", resume, card) => {
-      const args: unknown[] = [workspace, cols, rows, kind];
+    list: (project) => ipcRenderer.invoke(terminalChannels.list, project),
+    spawn: (project, cols, rows, kind = "shell", resume, card) => {
+      const args: unknown[] = [project, cols, rows, kind];
       // NOTE: A card goes sixth, behind an explicit `null` resume: main counts
       // its arguments, and a hole would read as a resume of `undefined`.
       if (card !== undefined) args.push(resume ?? null, card);
       else if (resume !== undefined) args.push(resume);
       return ipcRenderer.invoke(terminalChannels.spawn, ...args);
     },
-    agentSessions: (workspace) =>
-      ipcRenderer.invoke(terminalChannels.agentSessions, workspace),
-    renameAgentSession: (workspace, agent, id, name) =>
+    agentSessions: (project) =>
+      ipcRenderer.invoke(terminalChannels.agentSessions, project),
+    renameAgentSession: (project, agent, id, name) =>
       ipcRenderer.invoke(
         terminalChannels.agentSessionRename,
-        workspace,
+        project,
         agent,
         id,
         name,
       ),
-    pinAgentSession: (workspace, agent, id, pinned) =>
+    pinAgentSession: (project, agent, id, pinned) =>
       ipcRenderer.invoke(
         terminalChannels.agentSessionPin,
-        workspace,
+        project,
         agent,
         id,
         pinned,
       ),
-    releaseAgentSessionConductor: (workspace, agent, id) =>
+    releaseAgentSessionConductor: (project, agent, id) =>
       ipcRenderer.invoke(
         terminalChannels.agentSessionConductor,
-        workspace,
+        project,
         agent,
         id,
       ),
-    deleteAgentSession: (workspace, agent, id) =>
+    deleteAgentSession: (project, agent, id) =>
       ipcRenderer.invoke(
         terminalChannels.agentSessionDelete,
-        workspace,
+        project,
         agent,
         id,
       ),
-    archiveAgentSession: (workspace, agent, id) =>
+    archiveAgentSession: (project, agent, id) =>
       ipcRenderer.invoke(
         terminalChannels.agentSessionArchive,
-        workspace,
+        project,
         agent,
         id,
       ),
-    archivedAgentSessions: (workspace) =>
-      ipcRenderer.invoke(terminalChannels.agentArchivedSessions, workspace),
-    unarchiveAgentSession: (workspace, agent, id) =>
+    archivedAgentSessions: (project) =>
+      ipcRenderer.invoke(terminalChannels.agentArchivedSessions, project),
+    unarchiveAgentSession: (project, agent, id) =>
       ipcRenderer.invoke(
         terminalChannels.agentSessionUnarchive,
-        workspace,
+        project,
         agent,
         id,
       ),
-    deleteArchivedAgentSession: (workspace, agent, id) =>
+    deleteArchivedAgentSession: (project, agent, id) =>
       ipcRenderer.invoke(
         terminalChannels.agentArchivedDelete,
-        workspace,
+        project,
         agent,
         id,
       ),
-    agentSubagent: (workspace, agent, conversation, sub, run = null) =>
+    agentSubagent: (project, agent, conversation, sub, run = null) =>
       ipcRenderer.invoke(
         terminalChannels.agentSubagent,
-        workspace,
+        project,
         agent,
         conversation,
         sub,
         run,
       ),
-    agentBackgroundTasks: (workspace, conversation) =>
+    agentBackgroundTasks: (project, conversation) =>
       ipcRenderer.invoke(
         terminalChannels.agentBackgroundTasks,
-        workspace,
+        project,
         conversation,
       ),
-    agentTaskOutput: (workspace, conversation, task) =>
+    agentTaskOutput: (project, conversation, task) =>
       ipcRenderer.invoke(
         terminalChannels.agentTaskOutput,
-        workspace,
+        project,
         conversation,
         task,
       ),
-    agentStopTask: (workspace, conversation, task) =>
+    agentStopTask: (project, conversation, task) =>
       ipcRenderer.invoke(
         terminalChannels.agentStopTask,
-        workspace,
+        project,
         conversation,
         task,
       ),
-    ports: (workspace) => ipcRenderer.invoke(terminalChannels.ports, workspace),
-    stopPort: (workspace, pid, start) =>
-      ipcRenderer.invoke(terminalChannels.stopPort, workspace, pid, start),
-    agentFiles: (workspace, agent, id) =>
-      ipcRenderer.invoke(terminalChannels.agentFiles, workspace, agent, id),
-    agentFilesForWorktree: (workspace) =>
-      ipcRenderer.invoke(terminalChannels.agentFilesForWorktree, workspace),
+    ports: (project) => ipcRenderer.invoke(terminalChannels.ports, project),
+    stopPort: (project, pid, start) =>
+      ipcRenderer.invoke(terminalChannels.stopPort, project, pid, start),
+    agentFiles: (project, agent, id) =>
+      ipcRenderer.invoke(terminalChannels.agentFiles, project, agent, id),
+    agentFilesForWorktree: (project) =>
+      ipcRenderer.invoke(terminalChannels.agentFilesForWorktree, project),
     onAgentActivity: (listener) =>
       subscribe(terminalChannels.agentActivity, listener),
-    codexUsage: (workspace) =>
-      ipcRenderer.invoke(terminalChannels.codexUsage, workspace),
+    codexUsage: (project) =>
+      ipcRenderer.invoke(terminalChannels.codexUsage, project),
     refreshClaudeUsage: () =>
       ipcRenderer.invoke(terminalChannels.refreshClaudeUsage),
     refreshCodexUsage: (force) =>
       ipcRenderer.invoke(terminalChannels.refreshCodexUsage, force),
     consumeCodexReset: (creditId) =>
       ipcRenderer.invoke(terminalChannels.consumeCodexReset, creditId),
-    agentFacts: (workspace, agent, id) =>
-      ipcRenderer.invoke(terminalChannels.agentFacts, workspace, agent, id),
-    agentUsage: (workspace) =>
-      ipcRenderer.invoke(terminalChannels.agentUsage, workspace),
+    agentFacts: (project, agent, id) =>
+      ipcRenderer.invoke(terminalChannels.agentFacts, project, agent, id),
+    agentUsage: (project) =>
+      ipcRenderer.invoke(terminalChannels.agentUsage, project),
     onAgentWritten: (listener) =>
       subscribe(terminalChannels.agentWritten, listener),
     agents: () => ipcRenderer.invoke(terminalChannels.agents),
     kill: (id) => ipcRenderer.invoke(terminalChannels.kill, id),
-    reorder: (workspace, ids) =>
-      ipcRenderer.invoke(terminalChannels.reorder, workspace, ids),
+    reorder: (project, ids) =>
+      ipcRenderer.invoke(terminalChannels.reorder, project, ids),
     attach: (id, cols, rows, handlers) => {
       views.set(id, handlers);
       post({ t: "attach", id, cols, rows });
@@ -714,64 +707,57 @@ function createTerminal(): DesktopTerminalApi {
 }
 
 /**
- * The workspaces surface: projects, their boards and their linked folders.
+ * The projects surface: projects, their boards and their linked folders.
  *
- * Every board call is addressed by the cloud workspace id, never the slug.
+ * Every board call is addressed by the cloud project id, never the slug.
  */
-const workspaces: DesktopWorkspacesApi = {
-  load: () => ipcRenderer.invoke(workspaceChannels.load),
-  // NOTE: The cloud workspace id, not the slug: every board call is
+const projects: DesktopProjectsApi = {
+  load: () => ipcRenderer.invoke(projectChannels.load),
+  // NOTE: The cloud project id, not the slug: every board call is
   // addressed by it.
-  select: (id) => ipcRenderer.invoke(workspaceChannels.select, id),
-  icon: (workspaceId, iconKey) =>
-    ipcRenderer.invoke(workspaceChannels.icon, workspaceId, iconKey),
+  select: (id) => ipcRenderer.invoke(projectChannels.select, id),
+  icon: (projectId, iconKey) =>
+    ipcRenderer.invoke(projectChannels.icon, projectId, iconKey),
   // The NAME a human typed; main derives the slug the service demands. The
   // folders are pick IDS, primary first. Main resolves them to paths it
   // handed out itself, so no path ever travels this way.
   create: (name, folders) =>
-    ipcRenderer.invoke(workspaceChannels.createWorkspace, name, folders ?? []),
+    ipcRenderer.invoke(projectChannels.createProject, name, folders ?? []),
   // NOTE: By cloud ID, never the slug. A uuid matches the service's slug
   // shape, so only the service, not anything here, would catch a mix-up.
   rename: (id, name) =>
-    ipcRenderer.invoke(workspaceChannels.renameWorkspace, id, name),
-  reorder: (ids) =>
-    ipcRenderer.invoke(workspaceChannels.reorderWorkspaces, ids),
+    ipcRenderer.invoke(projectChannels.renameProject, id, name),
+  reorder: (ids) => ipcRenderer.invoke(projectChannels.reorderProjects, ids),
   // NOTE: By ID for the service and by SLUG for this machine, and both must
   // travel. The machine surface deletes by cloud id (it refuses a slug with
   // a 400), while the folder link main drops afterwards is keyed by slug.
   remove: (id, slug) =>
-    ipcRenderer.invoke(workspaceChannels.deleteWorkspace, id, slug),
+    ipcRenderer.invoke(projectChannels.deleteProject, id, slug),
   syncToCloud: (localId) =>
-    ipcRenderer.invoke(workspaceChannels.syncToCloud, localId),
+    ipcRenderer.invoke(projectChannels.syncToCloud, localId),
   onLocalChange: (listener) =>
-    subscribe(workspaceChannels.localChanged, listener),
+    subscribe(projectChannels.localChanged, listener),
   board: {
-    load: (workspaceId, query) =>
-      ipcRenderer.invoke(workspaceChannels.board, workspaceId, query),
-    more: (workspaceId, query, group, cursor) =>
+    load: (projectId, query) =>
+      ipcRenderer.invoke(projectChannels.board, projectId, query),
+    more: (projectId, query, group, cursor) =>
+      ipcRenderer.invoke(projectChannels.more, projectId, query, group, cursor),
+    stats: (projectId, query) =>
+      ipcRenderer.invoke(projectChannels.stats, projectId, query),
+    presence: (projectId) =>
+      ipcRenderer.invoke(projectChannels.presence, projectId),
+    checkpoint: (projectId, cardId) =>
+      ipcRenderer.invoke(projectChannels.checkpoint, projectId, cardId),
+    card: (projectId, cardId) =>
+      ipcRenderer.invoke(projectChannels.card, projectId, cardId),
+    lookup: (projectId, taskId) =>
+      ipcRenderer.invoke(projectChannels.lookup, projectId, taskId),
+    search: (projectId, query) =>
+      ipcRenderer.invoke(projectChannels.search, projectId, query),
+    update: (projectId, cardId, patch, revision) =>
       ipcRenderer.invoke(
-        workspaceChannels.more,
-        workspaceId,
-        query,
-        group,
-        cursor,
-      ),
-    stats: (workspaceId, query) =>
-      ipcRenderer.invoke(workspaceChannels.stats, workspaceId, query),
-    presence: (workspaceId) =>
-      ipcRenderer.invoke(workspaceChannels.presence, workspaceId),
-    checkpoint: (workspaceId, cardId) =>
-      ipcRenderer.invoke(workspaceChannels.checkpoint, workspaceId, cardId),
-    card: (workspaceId, cardId) =>
-      ipcRenderer.invoke(workspaceChannels.card, workspaceId, cardId),
-    lookup: (workspaceId, taskId) =>
-      ipcRenderer.invoke(workspaceChannels.lookup, workspaceId, taskId),
-    search: (workspaceId, query) =>
-      ipcRenderer.invoke(workspaceChannels.search, workspaceId, query),
-    update: (workspaceId, cardId, patch, revision) =>
-      ipcRenderer.invoke(
-        workspaceChannels.update,
-        workspaceId,
+        projectChannels.update,
+        projectId,
         cardId,
         patch,
         revision,
@@ -780,115 +766,110 @@ const workspaces: DesktopWorkspacesApi = {
     // handler validates on argument COUNT, and the sender check cannot
     // state a rule for a call that sends four arguments one time and five
     // the next.
-    move: (workspaceId, cardId, columnKey, placement) =>
+    move: (projectId, cardId, columnKey, placement) =>
       ipcRenderer.invoke(
-        workspaceChannels.move,
-        workspaceId,
+        projectChannels.move,
+        projectId,
         cardId,
         columnKey,
         placement ?? null,
       ),
-    changes: (workspaceId, since) =>
-      ipcRenderer.invoke(workspaceChannels.changes, workspaceId, since),
-    toggle: (workspaceId, cardId, key, checked, revision) =>
+    changes: (projectId, since) =>
+      ipcRenderer.invoke(projectChannels.changes, projectId, since),
+    toggle: (projectId, cardId, key, checked, revision) =>
       ipcRenderer.invoke(
-        workspaceChannels.toggle,
-        workspaceId,
+        projectChannels.toggle,
+        projectId,
         cardId,
         key,
         checked,
         revision,
       ),
-    setChecklist: (workspaceId, cardId, items, revision) =>
+    setChecklist: (projectId, cardId, items, revision) =>
       ipcRenderer.invoke(
-        workspaceChannels.setChecklist,
-        workspaceId,
+        projectChannels.setChecklist,
+        projectId,
         cardId,
         items,
         revision,
       ),
     // NOTE: `cursor` is sent as `null` when absent, never omitted, as `move`
     // does with placement: the handler validates on argument COUNT.
-    activity: (workspaceId, cardId, cursor) =>
+    activity: (projectId, cardId, cursor) =>
       ipcRenderer.invoke(
-        workspaceChannels.activity,
-        workspaceId,
+        projectChannels.activity,
+        projectId,
         cardId,
         cursor ?? null,
       ),
-    comment: (workspaceId, cardId, body) =>
-      ipcRenderer.invoke(workspaceChannels.comment, workspaceId, cardId, body),
-    editComment: (workspaceId, cardId, commentId, body) =>
+    comment: (projectId, cardId, body) =>
+      ipcRenderer.invoke(projectChannels.comment, projectId, cardId, body),
+    editComment: (projectId, cardId, commentId, body) =>
       ipcRenderer.invoke(
-        workspaceChannels.commentEdit,
-        workspaceId,
+        projectChannels.commentEdit,
+        projectId,
         cardId,
         commentId,
         body,
       ),
-    deleteComment: (workspaceId, cardId, commentId) =>
+    deleteComment: (projectId, cardId, commentId) =>
       ipcRenderer.invoke(
-        workspaceChannels.commentDelete,
-        workspaceId,
+        projectChannels.commentDelete,
+        projectId,
         cardId,
         commentId,
       ),
-    subscribe: (workspaceId, cardId, subscribed) =>
+    subscribe: (projectId, cardId, subscribed) =>
       ipcRenderer.invoke(
-        workspaceChannels.subscribe,
-        workspaceId,
+        projectChannels.subscribe,
+        projectId,
         cardId,
         subscribed,
       ),
-    favorite: (workspaceId, cardId, favorite) =>
-      ipcRenderer.invoke(
-        workspaceChannels.favorite,
-        workspaceId,
-        cardId,
-        favorite,
-      ),
+    favorite: (projectId, cardId, favorite) =>
+      ipcRenderer.invoke(projectChannels.favorite, projectId, cardId, favorite),
     // NOTE: A file REFERENCE (a path or a URL), never bytes or a handle.
     // Main does not open what is named here; the service stores the string.
-    attach: (workspaceId, cardId, file) =>
-      ipcRenderer.invoke(workspaceChannels.attach, workspaceId, cardId, file),
-    detach: (workspaceId, cardId, attachmentId) =>
+    attach: (projectId, cardId, file) =>
+      ipcRenderer.invoke(projectChannels.attach, projectId, cardId, file),
+    detach: (projectId, cardId, attachmentId) =>
       ipcRenderer.invoke(
-        workspaceChannels.detach,
-        workspaceId,
+        projectChannels.detach,
+        projectId,
         cardId,
         attachmentId,
       ),
-    create: (workspaceId, draft) =>
-      ipcRenderer.invoke(workspaceChannels.create, workspaceId, draft),
-    archive: (workspaceId, cardId) =>
-      ipcRenderer.invoke(workspaceChannels.archive, workspaceId, cardId),
-    purge: (workspaceId, slug) =>
-      ipcRenderer.invoke(workspaceChannels.purge, workspaceId, slug),
-    importPreview: (workspaceId) =>
-      ipcRenderer.invoke(workspaceChannels.importPreview, workspaceId),
-    importRun: (workspaceId) =>
-      ipcRenderer.invoke(workspaceChannels.importRun, workspaceId),
-    importSeal: (workspaceId) =>
-      ipcRenderer.invoke(workspaceChannels.importSeal, workspaceId),
+    create: (projectId, draft) =>
+      ipcRenderer.invoke(projectChannels.create, projectId, draft),
+    archive: (projectId, cardId) =>
+      ipcRenderer.invoke(projectChannels.archive, projectId, cardId),
+    purge: (projectId, slug) =>
+      ipcRenderer.invoke(projectChannels.purge, projectId, slug),
+    importPreview: (projectId) =>
+      ipcRenderer.invoke(projectChannels.importPreview, projectId),
+    importRun: (projectId) =>
+      ipcRenderer.invoke(projectChannels.importRun, projectId),
+    importSeal: (projectId) =>
+      ipcRenderer.invoke(projectChannels.importSeal, projectId),
   },
-  // NOTE: Keyed by SLUG, not by the workspace id: an older service has no
+  // NOTE: Keyed by SLUG, not by the project id: an older service has no
   // id, and that is the very screen this surface serves.
   folder: {
-    state: (slug) => ipcRenderer.invoke(workspaceChannels.folderState, slug),
-    choose: () => ipcRenderer.invoke(workspaceChannels.folderChoose),
+    state: (slug) => ipcRenderer.invoke(projectChannels.folderState, slug),
+    choose: () => ipcRenderer.invoke(projectChannels.folderChoose),
     // FE-106: the path is read here, from a File the OS dropped. A script's
     // own `new File(...)` answers "", and is left out.
     drop: (files) =>
       ipcRenderer.invoke(
-        workspaceChannels.folderDrop,
+        projectChannels.folderDrop,
         files.map((file) => webUtils.getPathForFile(file)).filter(Boolean),
       ),
-    list: (slug) => ipcRenderer.invoke(workspaceChannels.folderList, slug),
+    list: (slug) => ipcRenderer.invoke(projectChannels.folderList, slug),
     link: (slug, folders) =>
-      ipcRenderer.invoke(workspaceChannels.folderLink, slug, folders),
-    pick: (slug) => ipcRenderer.invoke(workspaceChannels.folderPick, slug),
-    forget: (slug) => ipcRenderer.invoke(workspaceChannels.folderForget, slug),
-    reveal: (slug) => ipcRenderer.invoke(workspaceChannels.folderReveal, slug),
+      ipcRenderer.invoke(projectChannels.folderLink, slug, folders),
+    pick: (slug) => ipcRenderer.invoke(projectChannels.folderPick, slug),
+    forget: (slug) => ipcRenderer.invoke(projectChannels.folderForget, slug),
+    reveal: (slug) => ipcRenderer.invoke(projectChannels.folderReveal, slug),
   },
 };
 
@@ -899,7 +880,7 @@ const desktop: DesktopApi = {
   onViewCommand: (listener) => subscribe(channels.viewCommand, listener),
   zoomFactor: () => webFrame.getZoomFactor(),
   auth,
-  workspaces,
+  projects,
   git,
   worktree,
   terminal: createTerminal(),

@@ -41,14 +41,14 @@ import {
 } from "../../../shared/terminal";
 import { assertTrustedSender, broadcast, handle } from "../ipc";
 import { appHomeDir } from "../paths";
-import { agentHomeDir } from "../test-seams";
 import {
   authorizedRecord,
-  knownWorkspace,
-  menuBarWorkspaces,
+  knownProject,
+  menuBarProjects,
   projectFolders,
   terminalFolder,
-} from "../workspaces";
+} from "../projects";
+import { agentHomeDir } from "../test-seams";
 import { watchAgentActivity } from "./agent-activity";
 import {
   archiveAgentTranscript,
@@ -181,7 +181,7 @@ function request<T>(
   });
 }
 
-/** A workspace key or session id off the wire. */
+/** A project key or session id off the wire. */
 function key(value: unknown, what: string): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200)
     throw new Error(`A valid ${what} is required`);
@@ -191,18 +191,18 @@ function key(value: unknown, what: string): string {
 /**
  * The card a new agent tab is for, with the board it is on (FE-34/D3).
  *
- * NOTE: The board is the WORKSPACE's own id, looked up here, never one the
+ * NOTE: The board is the PROJECT's own id, looked up here, never one the
  * renderer names. A page can only start an agent on the board of the project
  * it is already allowed to open a terminal for.
  *
  * @throws when the card is malformed or the project has no board.
  */
 async function cardFor(
-  workspace: string,
+  project: string,
   value: unknown,
 ): Promise<CardBrief & { boardId: string }> {
   if (!isCardBrief(value)) throw new Error("Unknown card");
-  const { workspace: known } = await knownWorkspace(workspace);
+  const { project: known } = await knownProject(project);
   if (!isBoardId(known.id))
     throw new Error("This project has no board to take a card from.");
   return { boardId: known.id, card: value.card, mode: value.mode };
@@ -252,7 +252,7 @@ function agentMarksFile(): string {
 }
 
 /**
- * Make a conversation main just started a conductor's own in `workspace`
+ * Make a conversation main just started a conductor's own in `project`
  * (FE-95).
  *
  * NOTE: Not through `markable`: a conversation this new has no transcript
@@ -260,7 +260,7 @@ function agentMarksFile(): string {
  * the page's.
  */
 export async function bindConductorConversation(
-  workspace: string,
+  project: string,
   agent: TerminalAgent,
   id: string,
   conductor: string,
@@ -269,22 +269,22 @@ export async function bindConductorConversation(
     throw new Error("A valid conversation is required");
   await bindConductor(agentMarksFile(), agentKey({ agent, id }), {
     id: conductor,
-    workspace,
+    project,
   });
 }
 
 /**
- * The conductor whose own conversation `id` is in `workspace`, or null.
+ * The conductor whose own conversation `id` is in `project`, or null.
  */
 export async function conductorOfConversation(
-  workspace: string,
+  project: string,
   agent: TerminalAgent,
   id: string,
 ): Promise<string | null> {
   const mark = (await readAgentMarks(agentMarksFile()))[
     agentKey({ agent, id })
   ];
-  return mark?.conductor?.workspace === workspace ? mark.conductor.id : null;
+  return mark?.conductor?.project === project ? mark.conductor.id : null;
 }
 
 /**
@@ -311,7 +311,7 @@ export async function nameConversation(
 }
 
 /**
- * One transcript watcher per workspace that has been listed, restarted when
+ * One transcript watcher per project that has been listed, restarted when
  * its folder changes (FE-25/D3).
  *
  * Started by the LISTING, not by a subscribe call: the rail lists a project
@@ -322,11 +322,11 @@ export async function nameConversation(
 const watching = new Map<string, { folder: string; stop: () => void }>();
 const WATCH_LIMIT = 8;
 
-function watchWorkspace(workspace: string, folder: string): void {
-  const current = watching.get(workspace);
+function watchProject(project: string, folder: string): void {
+  const current = watching.get(project);
   if (current?.folder === folder) return;
   current?.stop();
-  watching.delete(workspace);
+  watching.delete(project);
   if (watching.size >= WATCH_LIMIT) {
     const [oldest] = watching.keys();
     if (oldest !== undefined) {
@@ -339,7 +339,7 @@ function watchWorkspace(workspace: string, folder: string): void {
     folder,
     (agent, id, working, card, subagent) =>
       broadcast(terminalChannels.agentActivity, {
-        workspace,
+        project,
         agent,
         id,
         working,
@@ -351,65 +351,65 @@ function watchWorkspace(workspace: string, folder: string): void {
     // first rollout can be caught before its `session_meta` is whole, and
     // the next writes of that turn are no news (FE-31/D5).
     (agent, id) => {
-      rebind(workspace, agentKey({ agent, id }));
+      rebind(project, agentKey({ agent, id }));
       // Also for a view showing its numbers, which move on every write of a
       // turn, most of which change no state.
       broadcast(terminalChannels.agentWritten, {
-        workspace,
+        project,
         agent,
         id,
         at: Date.now(),
       } satisfies AgentWrite);
     },
     (agent, id) => {
-      void knownWorkspace(workspace)
-        .then(async ({ workspace: project }) => {
+      void knownProject(project)
+        .then(async ({ project: found }) => {
           const tabs = host
-            ? await agentTerminals(workspace).catch((): TerminalSession[] => [])
+            ? await agentTerminals(project).catch((): TerminalSession[] => [])
             : [];
           const tab = tabs.find(
             (entry) =>
               entry.kind === agent && !entry.exit && entry.resume === id,
           );
-          // A workspace removed or rebound since must not deliver a late
+          // A project removed or rebound since must not deliver a late
           // notification.
-          if (watching.get(workspace)?.folder === folder)
-            notifyAgentCompleted(agent, project, id, tab?.id ?? null);
+          if (watching.get(project)?.folder === folder)
+            notifyAgentCompleted(agent, found, id, tab?.id ?? null);
         })
         .catch(() => {});
     },
   );
-  watching.set(workspace, { folder, stop });
+  watching.set(project, { folder, stop });
 }
 
 /**
- * The conversations `workspace`'s folder has, with Lanework's names and pins
+ * The conversations `project`'s folder has, with Lanework's names and pins
  * laid over them; none without a folder here.
  */
-async function agentSessionsOf(workspace: string): Promise<AgentSession[]> {
-  const folder = await terminalFolder(workspace);
+async function agentSessionsOf(project: string): Promise<AgentSession[]> {
+  const folder = await terminalFolder(project);
   if (!folder) return [];
-  watchWorkspace(workspace, folder);
+  watchProject(project, folder);
   const marks = await readAgentMarks(agentMarksFile());
   const listed = await listAgentSessions(agentHome(), folder, keptKeys(marks));
-  listedKeys.set(workspace, new Set(listed.map(agentKey)));
+  listedKeys.set(project, new Set(listed.map(agentKey)));
   return applyAgentMarks(listed, marks);
 }
 
-/** Per workspace with a re-check in flight: the keys written meanwhile. */
+/** Per project with a re-check in flight: the keys written meanwhile. */
 const rebinding = new Map<string, Set<string>>();
 /**
- * Re-check which conversation `workspace`'s agent tabs are on (FE-31/D5).
+ * Re-check which conversation `project`'s agent tabs are on (FE-31/D5).
  *
  * The host tells every window if one moved. One run at a time per
- * workspace, and at most one more queued behind it: a turn writes its
+ * project, and at most one more queued behind it: a turn writes its
  * transcript many times a second.
  *
  * @param written the agent key of the transcript just written, if any.
  */
-function rebind(workspace: string, written?: string): void {
+function rebind(project: string, written?: string): void {
   if (!host) return;
-  const queued = rebinding.get(workspace);
+  const queued = rebinding.get(project);
   if (queued) {
     // "" is a run asked for with no write behind it (a Claude move).
     queued.add(written ?? "");
@@ -417,40 +417,40 @@ function rebind(workspace: string, written?: string): void {
   }
   const writes = new Set(written ? [written] : []);
   // The next run's writes collect here while this one is in flight.
-  rebinding.set(workspace, new Set());
-  void agentTerminals(workspace)
+  rebinding.set(project, new Set());
+  void agentTerminals(project)
     .then((terminals) => {
       // NOTE: A tab on a conversation the rail has not been shown, whose
       // transcript was just written: list again. A new Codex's first write
       // is its `session_meta`, before the prompt that titles it, and the
       // rest of that turn is no news to the activity watcher. Without this
       // its row stays "New Codex session" until something else moves.
-      const shown = listedKeys.get(workspace);
+      const shown = listedKeys.get(project);
       const untitled = terminals.some((entry) => {
         if (entry.kind === "shell" || entry.exit || entry.resume === null)
           return false;
         const key = agentKey({ agent: entry.kind, id: entry.resume });
         return writes.has(key) && !shown?.has(key);
       });
-      if (untitled) return request({ t: "touch", workspace });
+      if (untitled) return request({ t: "touch", project });
     })
     .catch(() => undefined)
     .finally(() => {
-      const next = rebinding.get(workspace);
-      rebinding.delete(workspace);
+      const next = rebinding.get(project);
+      rebinding.delete(project);
       // One run for all that queued: the first starts it, the rest join.
-      for (const key of next ?? []) rebind(workspace, key || undefined);
+      for (const key of next ?? []) rebind(project, key || undefined);
     });
 }
 
-/** The conversations each workspace's listing last answered, as keys. */
+/** The conversations each project's listing last answered, as keys. */
 const listedKeys = new Map<string, Set<string>>();
 
 let movesWatch: FSWatcher | null = null;
 let movesTimer: NodeJS.Timeout | null = null;
 /**
  * Watch Claude's own record of which conversation each of its processes is
- * on, and re-check every listed workspace when it changes.
+ * on, and re-check every listed project when it changes.
  *
  * `/resume` moves a tab by changing only that record, writing nothing to
  * any transcript. Started once the host runs.
@@ -462,7 +462,7 @@ function watchMoves(): void {
       if (movesTimer) return;
       movesTimer = setTimeout(() => {
         movesTimer = null;
-        for (const workspace of watching.keys()) rebind(workspace);
+        for (const project of watching.keys()) rebind(project);
       }, 300);
     });
     movesWatch.on("error", () => {
@@ -474,31 +474,31 @@ function watchMoves(): void {
   }
 }
 
-/** The pty pids of `workspace`'s open terminals; none before any started. */
-async function liveTerminalPids(workspace: string): Promise<number[]> {
+/** The pty pids of `project`'s open terminals; none before any started. */
+async function liveTerminalPids(project: string): Promise<number[]> {
   if (!host) return [];
-  const listed = await request<TerminalSession[]>({ t: "list", workspace });
+  const listed = await request<TerminalSession[]>({ t: "list", project });
   return listed.filter((entry) => !entry.exit).map((entry) => entry.pid);
 }
 
 /**
- * `workspace`'s tabs, each agent tab on the conversation it is on NOW.
+ * `project`'s tabs, each agent tab on the conversation it is on NOW.
  *
  * A tab that moved is moved in the host too, which tells every window, so
  * the rail regroups without polling (FE-31/D5). Best effort: a folder that
  * cannot be read keeps what the host had.
  */
-async function agentTerminals(workspace: string): Promise<TerminalSession[]> {
-  const listed = await request<TerminalSession[]>({ t: "list", workspace });
+async function agentTerminals(project: string): Promise<TerminalSession[]> {
+  const listed = await request<TerminalSession[]>({ t: "list", project });
   if (!listed.some((entry) => entry.kind !== "shell" && !entry.exit))
     return listed;
-  const folder = await terminalFolder(workspace);
+  const folder = await terminalFolder(project);
   if (!folder) return listed;
   const bindings = await agentBindings(agentHome(), folder, listed).catch(
     () => [],
   );
   if (bindings.length === 0) return listed;
-  await request({ t: "bind", workspace, bindings });
+  await request({ t: "bind", project, bindings });
   const moved = new Map(bindings.map((entry) => [entry.id, entry.resume]));
   return listed.map((entry) => ({
     ...entry,
@@ -509,31 +509,31 @@ async function agentTerminals(workspace: string): Promise<TerminalSession[]> {
 /**
  * The conversation a rename or pin names, checked against the listing.
  *
- * NOTE: The same rule a resume follows: an id this workspace's own listing
+ * NOTE: The same rule a resume follows: an id this project's own listing
  * does not have is refused, so nothing can be written about a conversation
  * the rail was never shown.
  *
  * @throws when the arguments are malformed or the id is not listed here.
  */
 async function markable(args: unknown[]): Promise<{
-  workspace: string;
+  project: string;
   key: string;
 }> {
-  const workspace = key(args[0], "workspace");
+  const project = key(args[0], "project");
   const agent = args[1];
   const id = args[2];
   if (!isTerminalAgent(agent)) throw new Error("A valid agent is required");
   if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
-  const known = await agentSessionsOf(workspace);
+  const known = await agentSessionsOf(project);
   if (!known.some((entry) => entry.agent === agent && entry.id === id))
     throw new Error("That conversation is not one of this project's");
-  return { workspace, key: agentKey({ agent, id }) };
+  return { project, key: agentKey({ agent, id }) };
 }
 
-/** The workspace's archived conversations, with Lanework's names. */
-async function archivedOf(workspace: string): Promise<ArchivedAgentSession[]> {
-  const folder = await terminalFolder(workspace);
+/** The project's archived conversations, with Lanework's names. */
+async function archivedOf(project: string): Promise<ArchivedAgentSession[]> {
+  const folder = await terminalFolder(project);
   if (!folder) return [];
   const [archived, marks] = await Promise.all([
     listArchivedAgentSessions(agentHome(), folder),
@@ -548,32 +548,32 @@ async function archivedOf(workspace: string): Promise<ArchivedAgentSession[]> {
 /**
  * The archived conversation an unarchive or a delete names.
  *
- * Checked against the workspace's archived list: {@link markable}'s rule, for
+ * Checked against the project's archived list: {@link markable}'s rule, for
  * the archive.
  *
  * @throws when the arguments are malformed or the id is not archived here.
  */
 async function archivedOne(args: unknown[]): Promise<{
-  workspace: string;
+  project: string;
   folder: string;
   agent: TerminalAgent;
   id: string;
 }> {
   if (args.length !== 3)
-    throw new Error("A workspace and a conversation are required");
-  const workspace = key(args[0], "workspace");
+    throw new Error("A project and a conversation are required");
+  const project = key(args[0], "project");
   const agent = args[1];
   const id = args[2];
   if (agent !== "claude" && agent !== "codex")
     throw new Error("A valid agent is required");
   if (!isAgentSessionId(id))
     throw new Error("A valid conversation is required");
-  const folder = await terminalFolder(workspace);
+  const folder = await terminalFolder(project);
   if (!folder) throw new Error("This project has no folder here.");
   const archived = await listArchivedAgentSessions(agentHome(), folder);
   if (!archived.some((entry) => entry.agent === agent && entry.id === id))
     throw new Error("That conversation is not in this project's archive");
-  return { workspace, folder, agent, id };
+  return { project, folder, agent, id };
 }
 
 /** Tell the focused window the View menu asked for something. */
@@ -589,7 +589,7 @@ export function sendTerminalCommand(command: TerminalCommand): void {
 
 interface RunningProject {
   name: string;
-  workspace: string;
+  project: string;
   slug: string;
   items: { label: string; href: string; shellId?: string }[];
 }
@@ -603,18 +603,18 @@ interface RunningProject {
  */
 export async function runningProjects(): Promise<RunningProject[]> {
   const account = await authorizedRecord();
-  const workspaces = await menuBarWorkspaces();
+  const projects = await menuBarProjects();
   const terminals = host ? await request<TerminalSession[]>({ t: "list" }) : [];
   const marks = await readAgentMarks(agentMarksFile());
   const results: RunningProject[] = [];
   // Sequential reads bound disk work, even with many linked projects.
-  for (const project of workspaces) {
-    const workspace = project.id ?? project.slug;
-    const prefix = `/w/${encodeURIComponent(project.slug)}`;
+  for (const listed of projects) {
+    const project = listed.id ?? listed.slug;
+    const prefix = `/w/${encodeURIComponent(listed.slug)}`;
     const live = terminals.filter(
-      (entry) => entry.workspace === workspace && !entry.exit,
+      (entry) => entry.project === project && !entry.exit,
     );
-    const folder = await terminalFolder(workspace);
+    const folder = await terminalFolder(project);
     const conversations = folder
       ? applyAgentMarks(
           await listAgentSessions(
@@ -704,9 +704,9 @@ export async function runningProjects(): Promise<RunningProject[]> {
     }
     if (items.length)
       results.push({
-        name: project.name,
-        workspace,
-        slug: project.slug,
+        name: listed.name,
+        project,
+        slug: listed.slug,
         items,
       });
   }
@@ -730,17 +730,17 @@ async function liveTerminalsText(): Promise<string> {
   const tabs = await request<TerminalSession[]>({ t: "list" }, 2_000).catch(
     (): TerminalSession[] => [],
   );
-  const byWorkspace = new Map<string, string[]>();
+  const byProject = new Map<string, string[]>();
   for (const tab of tabs) {
     if (tab.exit) continue;
-    const kinds = byWorkspace.get(tab.workspace) ?? [];
+    const kinds = byProject.get(tab.project) ?? [];
     kinds.push(tab.kind === "shell" ? tab.shell : tab.kind);
-    byWorkspace.set(tab.workspace, kinds);
+    byProject.set(tab.project, kinds);
   }
   const lines = await Promise.all(
-    [...byWorkspace].map(async ([key, kinds]) => {
-      const name = await knownWorkspace(key)
-        .then(({ workspace }) => workspace.name)
+    [...byProject].map(async ([key, kinds]) => {
+      const name = await knownProject(key)
+        .then(({ project }) => project.name)
         .catch(() => key);
       return `${name}: ${kinds.join(", ")}`;
     }),
@@ -787,13 +787,11 @@ async function confirmQuit(): Promise<boolean> {
  * active writer"), so a `codex resume` tab must count as well.
  */
 export async function agentTerminalOn(
-  workspace: string,
+  project: string,
   conversation: string,
 ): Promise<string | null> {
   if (!host) return null;
-  const tabs = await agentTerminals(workspace).catch(
-    (): TerminalSession[] => [],
-  );
+  const tabs = await agentTerminals(project).catch((): TerminalSession[] => []);
   return (
     tabs.find(
       (entry) =>
@@ -813,9 +811,9 @@ export function registerTerminal(devUrl?: string): void {
   // Claude's are known before the footer first asks.
   registerUsage(devUrl, {
     listed: () => listedKeys,
-    keysOf: async (workspace) =>
-      listedKeys.get(workspace) ??
-      new Set((await agentSessionsOf(workspace)).map(agentKey)),
+    keysOf: async (project) =>
+      listedKeys.get(project) ??
+      new Set((await agentSessionsOf(project)).map(agentKey)),
   });
   // NOTE: Not `handle()`: the port goes back to THIS sender, so the handler
   // needs the event. The sender check is the same one `handle()` applies.
@@ -830,11 +828,11 @@ export function registerTerminal(devUrl?: string): void {
     terminalChannels.list,
     devUrl,
     async (args): Promise<TerminalSession[]> => {
-      if (args.length !== 1) throw new Error("A workspace is required");
-      const workspace = key(args[0], "workspace");
+      if (args.length !== 1) throw new Error("A project is required");
+      const project = key(args[0], "project");
       // Nothing was ever started: no reason to start a process to say so.
       if (!host) return [];
-      return agentTerminals(workspace);
+      return agentTerminals(project);
     },
   );
   handle(
@@ -842,8 +840,8 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<TerminalSession> => {
       if (args.length < 3 || args.length > 6)
-        throw new Error("A workspace and a size are required");
-      const workspace = key(args[0], "workspace");
+        throw new Error("A project and a size are required");
+      const project = key(args[0], "project");
       const cols = clampGeometry(args[1], 80);
       const rows = clampGeometry(args[2], 24);
       // NOTE: One of three names, checked here: what an agent tab types is
@@ -857,17 +855,17 @@ export function registerTerminal(devUrl?: string): void {
       if (resume !== undefined) {
         if (kind === "shell" || !isAgentSessionIdOf(kind, resume))
           throw new Error("Unknown conversation");
-        const known = await agentSessionsOf(workspace);
+        const known = await agentSessionsOf(project);
         if (!known.some((entry) => entry.id === resume && entry.agent === kind))
           throw new Error("That conversation is not in this project.");
       }
-      const card = args.length === 6 ? await cardFor(workspace, args[5]) : null;
+      const card = args.length === 6 ? await cardFor(project, args[5]) : null;
       if (card && (kind === "shell" || resume !== undefined))
         throw new Error("A card starts a new agent.");
-      const cwd = await terminalFolder(workspace);
+      const cwd = await terminalFolder(project);
       return request<TerminalSession>({
         t: "spawn",
-        workspace,
+        project,
         cwd,
         cols,
         rows,
@@ -893,8 +891,8 @@ export function registerTerminal(devUrl?: string): void {
     terminalChannels.agentSessions,
     devUrl,
     async (args): Promise<AgentSession[]> => {
-      if (args.length !== 1) throw new Error("A workspace is required");
-      return agentSessionsOf(key(args[0], "workspace"));
+      if (args.length !== 1) throw new Error("A project is required");
+      return agentSessionsOf(key(args[0], "project"));
     },
   );
   handle(
@@ -902,15 +900,15 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<AgentSession[]> => {
       if (args.length !== 4)
-        throw new Error("A workspace, a conversation and a name are required");
-      const { workspace, key: mark } = await markable(args);
+        throw new Error("A project, a conversation and a name are required");
+      const { project, key: mark } = await markable(args);
       const name = cleanAgentName(args[3]);
       await updateAgentMark(agentMarksFile(), mark, (current) => ({
         ...current,
         // Empty is "back to the CLI's own title".
         name: name || undefined,
       }));
-      return agentSessionsOf(workspace);
+      return agentSessionsOf(project);
     },
   );
   handle(
@@ -918,14 +916,14 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<AgentSession[]> => {
       if (args.length !== 4 || typeof args[3] !== "boolean")
-        throw new Error("A workspace, a conversation and a pin are required");
-      const { workspace, key: mark } = await markable(args);
+        throw new Error("A project, a conversation and a pin are required");
+      const { project, key: mark } = await markable(args);
       const pinned = args[3];
       await updateAgentMark(agentMarksFile(), mark, (current) => ({
         ...current,
         pinnedAt: pinned ? (current.pinnedAt ?? Date.now()) : undefined,
       }));
-      return agentSessionsOf(workspace);
+      return agentSessionsOf(project);
     },
   );
   handle(
@@ -933,13 +931,13 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<AgentSession[]> => {
       if (args.length !== 3)
-        throw new Error("A workspace and a conversation are required");
-      const { workspace, key: mark } = await markable(args);
+        throw new Error("A project and a conversation are required");
+      const { project, key: mark } = await markable(args);
       await updateAgentMark(agentMarksFile(), mark, (current) => ({
         ...current,
         conductor: undefined,
       }));
-      return agentSessionsOf(workspace);
+      return agentSessionsOf(project);
     },
   );
   // NOTE: Deletes the CLI's own files for good (FE-57). The id must be one
@@ -950,12 +948,12 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<AgentSession[]> => {
       if (args.length !== 3)
-        throw new Error("A workspace and a conversation are required");
-      const { workspace, key: mark } = await markable(args);
+        throw new Error("A project and a conversation are required");
+      const { project, key: mark } = await markable(args);
       const agent = args[1] as TerminalAgent;
       const id = args[2] as string;
       const terminals = host
-        ? await request<TerminalSession[]>({ t: "list", workspace })
+        ? await request<TerminalSession[]>({ t: "list", project })
         : [];
       if (
         terminals.some(
@@ -963,11 +961,11 @@ export function registerTerminal(devUrl?: string): void {
         )
       )
         throw new Error("Stop this conversation before deleting it.");
-      const folder = await terminalFolder(workspace);
+      const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
       await deleteAgentTranscript(agentHome(), folder, agent, id, runOpencode);
       await updateAgentMark(agentMarksFile(), mark, () => ({}));
-      return agentSessionsOf(workspace);
+      return agentSessionsOf(project);
     },
   );
   // NOTE: Into the CLI's own archive. `markable` first, and refused while a
@@ -978,12 +976,12 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<AgentSession[]> => {
       if (args.length !== 3)
-        throw new Error("A workspace and a conversation are required");
-      const { workspace, key: mark } = await markable(args);
+        throw new Error("A project and a conversation are required");
+      const { project, key: mark } = await markable(args);
       const agent = args[1] as TerminalAgent;
       const id = args[2] as string;
       const terminals = host
-        ? await request<TerminalSession[]>({ t: "list", workspace })
+        ? await request<TerminalSession[]>({ t: "list", project })
         : [];
       if (
         terminals.some(
@@ -991,56 +989,56 @@ export function registerTerminal(devUrl?: string): void {
         )
       )
         throw new Error("Stop this conversation before archiving it.");
-      const folder = await terminalFolder(workspace);
+      const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
       await archiveAgentTranscript(agentHome(), folder, agent, id, runCodex);
       await updateAgentMark(agentMarksFile(), mark, (current) => ({
         ...current,
         pinnedAt: undefined,
       }));
-      return agentSessionsOf(workspace);
+      return agentSessionsOf(project);
     },
   );
   handle(
     terminalChannels.agentArchivedSessions,
     devUrl,
     async (args): Promise<ArchivedAgentSession[]> => {
-      if (args.length !== 1) throw new Error("A workspace is required");
-      return archivedOf(key(args[0], "workspace"));
+      if (args.length !== 1) throw new Error("A project is required");
+      return archivedOf(key(args[0], "project"));
     },
   );
   handle(
     terminalChannels.agentSessionUnarchive,
     devUrl,
     async (args): Promise<ArchivedAgentSession[]> => {
-      const { workspace, folder, agent, id } = await archivedOne(args);
+      const { project, folder, agent, id } = await archivedOne(args);
       await unarchiveAgentTranscript(agentHome(), folder, agent, id, runCodex);
-      return archivedOf(workspace);
+      return archivedOf(project);
     },
   );
   handle(
     terminalChannels.agentArchivedDelete,
     devUrl,
     async (args): Promise<ArchivedAgentSession[]> => {
-      const { workspace, folder, agent, id } = await archivedOne(args);
+      const { project, folder, agent, id } = await archivedOne(args);
       await deleteArchivedTranscript(agentHome(), folder, agent, id);
       await updateAgentMark(
         agentMarksFile(),
         agentKey({ agent, id }),
         () => ({}),
       );
-      return archivedOf(workspace);
+      return archivedOf(project);
     },
   );
   // NOTE: By ids alone (FE-35/D10): `subagentRequest` refuses any of another
   // shape, and the path is built from them inside the CLI's folder for this
-  // workspace's own folder. A page cannot name a file to read.
+  // project's own folder. A page cannot name a file to read.
   handle(
     terminalChannels.agentSubagent,
     devUrl,
     async (args): Promise<SubagentTranscript> => {
-      const { workspace, ...which } = subagentRequest(args);
-      const folder = await terminalFolder(workspace);
+      const { project, ...which } = subagentRequest(args);
+      const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
       return readSubagentTranscript(agentHome(), folder, which);
     },
@@ -1052,8 +1050,8 @@ export function registerTerminal(devUrl?: string): void {
     terminalChannels.agentBackgroundTasks,
     devUrl,
     async (args): Promise<BackgroundTask[]> => {
-      const { workspace, conversation } = backgroundRequest(args);
-      const folder = await terminalFolder(workspace);
+      const { project, conversation } = backgroundRequest(args);
+      const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
       return readBackgroundTasksWithPids(agentHome(), folder, conversation);
     },
@@ -1062,8 +1060,8 @@ export function registerTerminal(devUrl?: string): void {
     terminalChannels.agentTaskOutput,
     devUrl,
     async (args): Promise<BackgroundTaskOutput> => {
-      const { workspace, conversation, task } = taskOutputRequest(args);
-      const folder = await terminalFolder(workspace);
+      const { project, conversation, task } = taskOutputRequest(args);
+      const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
       return readTaskOutput(agentHome(), folder, conversation, task);
     },
@@ -1072,24 +1070,24 @@ export function registerTerminal(devUrl?: string): void {
     terminalChannels.agentStopTask,
     devUrl,
     async (args): Promise<{ stopped: number }> => {
-      const { workspace, conversation, task } = taskOutputRequest(args);
-      const folder = await terminalFolder(workspace);
+      const { project, conversation, task } = taskOutputRequest(args);
+      const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
       return stopBackgroundTask(agentHome(), folder, conversation, task);
     },
   );
-  // NOTE: By workspace alone (FE-68): the folders and the terminals whose
+  // NOTE: By project alone (FE-68): the folders and the terminals whose
   // processes count are main's to resolve; Stop names a pid, and main checks
   // it still listens in this project before anything is signalled.
   handle(
     terminalChannels.ports,
     devUrl,
     async (args): Promise<ListeningPort[]> => {
-      if (args.length !== 1) throw new Error("A workspace is required");
-      const workspace = key(args[0], "workspace");
+      if (args.length !== 1) throw new Error("A project is required");
+      const project = key(args[0], "project");
       return listPorts(
-        await projectFolders(workspace),
-        await liveTerminalPids(workspace),
+        await projectFolders(project),
+        await liveTerminalPids(project),
       );
     },
   );
@@ -1098,11 +1096,11 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<{ stopped: number }> => {
       if (args.length !== 3)
-        throw new Error("A workspace and a pid are required");
-      const workspace = key(args[0], "workspace");
+        throw new Error("A project and a pid are required");
+      const project = key(args[0], "project");
       return stopPort(
-        await projectFolders(workspace),
-        await liveTerminalPids(workspace),
+        await projectFolders(project),
+        await liveTerminalPids(project),
         args[1] as number,
         args[2] as string,
       );
@@ -1110,14 +1108,14 @@ export function registerTerminal(devUrl?: string): void {
   );
   // NOTE: By ids alone, as a sub-agent is read (FE-38): `factsRequest` refuses
   // any other shape, and the path is built inside the CLI's folder for this
-  // workspace's own folder. Never part of the listing: the rail would pay
+  // project's own folder. Never part of the listing: the rail would pay
   // for every row's numbers to show none of them.
   handle(
     terminalChannels.agentFacts,
     devUrl,
     async (args): Promise<AgentFacts> => {
-      const { workspace, agent, id } = factsRequest(args);
-      const folder = await terminalFolder(workspace);
+      const { project, agent, id } = factsRequest(args);
+      const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
       return readAgentFacts(agentHome(), folder, agent, id);
     },
@@ -1128,54 +1126,54 @@ export function registerTerminal(devUrl?: string): void {
     terminalChannels.agentUsage,
     devUrl,
     async (args): Promise<AgentUsage | null> => {
-      if (args.length !== 1) throw new Error("A workspace is required");
-      const folder = await terminalFolder(key(args[0], "workspace"));
+      if (args.length !== 1) throw new Error("A project is required");
+      const folder = await terminalFolder(key(args[0], "project"));
       if (!folder) return null;
       return readAgentUsage(agentHome(), folder);
     },
   );
   // NOTE: By ids alone, as a sub-agent is (FE-39): `agentFilesRequest` refuses
   // any other shape, and every transcript's path is built inside the CLI's
-  // folder for this workspace's own folder.
+  // folder for this project's own folder.
   handle(
     terminalChannels.agentFiles,
     devUrl,
     async (args): Promise<AgentFiles> => {
-      const { workspace, ...which } = agentFilesRequest(args);
-      const folder = await terminalFolder(workspace);
+      const { project, ...which } = agentFilesRequest(args);
+      const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
       return readAgentFiles(agentHome(), folder, which);
     },
   );
-  // Only the conversations this workspace's own listing has (FE-39/D2).
+  // Only the conversations this project's own listing has (FE-39/D2).
   handle(
     terminalChannels.agentFilesForWorktree,
     devUrl,
     async (args): Promise<AgentFileMarks> => {
-      if (args.length !== 1) throw new Error("A workspace is required");
-      const workspace = key(args[0], "workspace");
-      const folder = await terminalFolder(workspace);
+      if (args.length !== 1) throw new Error("A project is required");
+      const project = key(args[0], "project");
+      const folder = await terminalFolder(project);
       if (!folder) return { files: {}, partial: false };
       return agentFileMarks(
         agentHome(),
         folder,
-        await agentSessionsOf(workspace),
+        await agentSessionsOf(project),
       );
     },
   );
   handle(terminalChannels.reorder, devUrl, async (args): Promise<void> => {
     if (args.length !== 2)
-      throw new Error("A workspace and an order are required");
-    const workspace = key(args[0], "workspace");
+      throw new Error("A project and an order are required");
+    const project = key(args[0], "project");
     const ids = args[1];
     if (
       !Array.isArray(ids) ||
-      ids.length > TERMINAL_LIMITS.perWorkspace ||
+      ids.length > TERMINAL_LIMITS.perProject ||
       !ids.every((id) => typeof id === "string" && id.length <= 200)
     )
       throw new Error("A valid order is required");
     if (!host) return;
-    await request({ t: "reorder", workspace, ids });
+    await request({ t: "reorder", project, ids });
   });
   handle(terminalChannels.kill, devUrl, async (args): Promise<void> => {
     if (args.length !== 1) throw new Error("A terminal is required");

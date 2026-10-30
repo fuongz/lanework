@@ -25,9 +25,9 @@ import {
   readInstruction,
   splitRule,
 } from "../electron/main/instructions/read";
-import { writeFolders } from "../electron/main/workspaces/store";
+import { writeFolders } from "../electron/main/projects/store";
 import { findImports, type InstructionNode } from "../shared/instructions";
-import type { Workspace } from "../shared/workspaces";
+import type { Project } from "../shared/projects";
 import { linkImports } from "../src/lib/instructions";
 import {
   launchEnv,
@@ -367,7 +367,7 @@ test("FE-37: a file is read by an id from the listing alone — an unknown id, a
   expect(json?.text).toBeNull();
 });
 
-const workspaces: Workspace[] = [
+const projects: Project[] = [
   {
     id: "ws-alpha",
     slug: "alpha",
@@ -415,8 +415,8 @@ async function pickProject(page: Page, name: string) {
 
 test("FE-37: Instructions shows what each agent reads, follows an @import, shows the raw file and keeps up with new files", async () => {
   test.skip(process.platform === "win32", "Folders are a POSIX path here.");
-  const plane = await startStubPlane({ workspaces });
-  for (const workspace of workspaces) plane.setBoard(workspace.id ?? "", board);
+  const plane = await startStubPlane({ projects });
+  for (const project of projects) plane.setBoard(project.id ?? "", board);
   const profile = await mkdtemp(join(tmpdir(), "lanew-instructions-app-"));
   const home = join(profile, "home");
   await mkdir(home, { recursive: true });

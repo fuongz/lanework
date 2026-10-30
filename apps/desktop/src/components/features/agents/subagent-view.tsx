@@ -43,7 +43,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
@@ -227,18 +227,18 @@ function SubagentPage({
   /** The workflow run it is an agent of (FE-01), or null. */
   run: string | null;
 }) {
-  const workspace = useWorkspaceKey(slug);
+  const project = useProjectKey(slug);
   const navigate = useNavigate();
   const { transcript, error } = useSubagentTranscript(
-    workspace,
+    project,
     agent,
     conversation,
     sub,
     run,
   );
   const parent = useAgentSessions((state) =>
-    workspace
-      ? state.byWorkspace[workspace]?.find(
+    project
+      ? state.byProject[project]?.find(
           (entry) => entry.agent === agent && entry.id === conversation,
         )
       : undefined,
@@ -253,8 +253,8 @@ function SubagentPage({
   const label = TERMINAL_KIND_LABELS[agent];
 
   const openParent = () => {
-    if (!workspace || !parent) return;
-    void liveTab(workspace, parent).then((tab) => {
+    if (!project || !parent) return;
+    void liveTab(project, parent).then((tab) => {
       if (tab)
         void navigate({
           to: "/w/$slug/agents/$terminalId",

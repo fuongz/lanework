@@ -6,7 +6,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import type { Workspace } from "#/../shared/workspaces";
+import type { Project } from "#/../shared/projects";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -20,7 +20,7 @@ import {
 import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
-import { isLocalWorkspace, useSession } from "#/stores/session";
+import { isLocalProject, useSession } from "#/stores/session";
 
 // Everything a local board shows that a cloud one does not: the badge, the
 // one-click move to the account (FE-52/D7a), and the way back to signing in
@@ -31,10 +31,10 @@ import { isLocalWorkspace, useSession } from "#/stores/session";
 // never a new colour.
 
 /** A synced local board: read-only, pointing at the cloud board (FE-52/D7a). */
-export function isMovedWorkspace(
-  workspace: Pick<Workspace, "origin" | "movedTo"> | null | undefined,
+export function isMovedProject(
+  project: Pick<Project, "origin" | "movedTo"> | null | undefined,
 ): boolean {
-  return isLocalWorkspace(workspace) && !!workspace?.movedTo;
+  return isLocalProject(project) && !!project?.movedTo;
 }
 
 /** The "Local" badge: saved on this machine only. */
@@ -60,13 +60,13 @@ export function useSyncToCloud() {
   const [syncing, setSyncing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function sync(workspace: Workspace) {
-    const api = window.desktop?.workspaces;
-    if (!api || !workspace.id) return null;
-    setSyncing(workspace.id);
+  async function sync(project: Project) {
+    const api = window.desktop?.projects;
+    if (!api || !project.id) return null;
+    setSyncing(project.id);
     setError(null);
     try {
-      const result = await api.syncToCloud(workspace.id);
+      const result = await api.syncToCloud(project.id);
       // The snapshot main answered with already holds both entries. Reading
       // the list again keeps the store's own bookkeeping (`listLoaded`, the
       // active project) the one place that decides them.
@@ -87,12 +87,12 @@ export function useSyncToCloud() {
 
 /** Where a moved board lives now, if this machine can see it. */
 function useMovedTarget(
-  workspace: Pick<Workspace, "movedTo"> | null | undefined,
-): Workspace | null {
+  project: Pick<Project, "movedTo"> | null | undefined,
+): Project | null {
   return useBoard(
     (state) =>
-      (workspace?.movedTo &&
-        state.workspaces.find((entry) => entry.id === workspace.movedTo)) ||
+      (project?.movedTo &&
+        state.projects.find((entry) => entry.id === project.movedTo)) ||
       null,
   );
 }
@@ -163,16 +163,16 @@ export function SignInButton({
  * Signed out it draws nothing: in local mode every board is local, and the
  * rail's badge already offers Sign in. A bar on every board said it again.
  */
-export function LocalBoardBar({ workspace }: { workspace: Workspace }) {
+export function LocalBoardBar({ project }: { project: Project }) {
   const signedIn = useSession(
     (state) => state.session?.principal.kind === "machine",
   );
   const { sync, syncing, error, clearError } = useSyncToCloud();
-  const target = useMovedTarget(workspace);
+  const target = useMovedTarget(project);
   const navigate = useNavigate();
 
-  if (!isLocalWorkspace(workspace)) return null;
-  const moved = isMovedWorkspace(workspace);
+  if (!isLocalProject(project)) return null;
+  const moved = isMovedProject(project);
   if (!moved && !signedIn) return null;
 
   return (
@@ -217,9 +217,9 @@ export function LocalBoardBar({ workspace }: { workspace: Workspace }) {
               size="sm"
               disabled={syncing !== null}
               onClick={() =>
-                void sync(workspace).then((result) => {
+                void sync(project).then((result) => {
                   if (!result) return;
-                  const cloud = result.snapshot.workspaces.find(
+                  const cloud = result.snapshot.projects.find(
                     (entry) => entry.id === result.cloudId,
                   );
                   if (cloud)

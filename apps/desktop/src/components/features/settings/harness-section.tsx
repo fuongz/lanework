@@ -20,7 +20,7 @@ import { Button } from "#/components/ui/button";
 import { Switch } from "#/components/ui/switch";
 import { useClock } from "#/hooks/use-clock";
 import { useCopy } from "#/hooks/use-copy";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import {
   claudeView,
   codexView,
@@ -118,7 +118,7 @@ export function HarnessSection() {
   // last open, so its hook review is one keypress away rather than a trip to
   // another window. The approval itself is still Codex's (FE-29/D7).
   const project = useBoard((state) => state.active);
-  const projectKey = useWorkspaceKey(project?.slug);
+  const projectKey = useProjectKey(project?.slug);
   const startAgent = useAgentTerminals((state) => state.start);
   const navigate = useNavigate();
   const { signedIn } = useCloudFeatures();

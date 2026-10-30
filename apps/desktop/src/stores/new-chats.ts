@@ -11,7 +11,7 @@ import type { ConversationAgent } from "#/../shared/conversation";
  * its id until the listing has it.
  */
 export interface NewChat {
-  workspace: string;
+  project: string;
   agent: ConversationAgent;
   /** The first message, which stands in for its title. */
   text: string;
@@ -20,13 +20,13 @@ export interface NewChat {
 }
 
 interface NewChatsState {
-  /** Each workspace's conversation being started: Enter pressed, no id yet. */
+  /** Each project's conversation being started: Enter pressed, no id yet. */
   starting: Record<string, NewChat>;
   /** Started ones by conversation id, until the rail lists them. */
   started: Record<string, NewChat>;
   begin: (chat: NewChat) => void;
   /** The start answered: its id, or `null` when it failed. */
-  end: (workspace: string, conversation: string | null) => void;
+  end: (project: string, conversation: string | null) => void;
   /** Listed now: its own row takes over. */
   forget: (conversations: string[]) => void;
 }
@@ -37,12 +37,12 @@ export const useNewChats = create<NewChatsState>((set) => ({
 
   begin: (chat) =>
     set((state) => ({
-      starting: { ...state.starting, [chat.workspace]: chat },
+      starting: { ...state.starting, [chat.project]: chat },
     })),
 
-  end: (workspace, conversation) =>
+  end: (project, conversation) =>
     set((state) => {
-      const { [workspace]: chat, ...starting } = state.starting;
+      const { [project]: chat, ...starting } = state.starting;
       if (!chat || !conversation) return { starting };
       return { starting, started: { ...state.started, [conversation]: chat } };
     }),

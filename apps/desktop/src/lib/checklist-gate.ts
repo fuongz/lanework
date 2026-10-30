@@ -1,6 +1,6 @@
 // Whether a card may be worked yet, and what "approve the recommended options"
 // would tick on it. No React, so a spec can hold it still.
-import type { BoardChecklistItem } from "../../shared/workspaces";
+import type { BoardChecklistItem } from "../../shared/projects";
 
 /**
  * The mark an agent writes on the option it recommends: `(Recommended)` at

@@ -3,7 +3,7 @@
 //
 // NOTE: No Electron here, ever: the MCP and hook entries import this module
 // and run under plain Node. `../main/paths` and
-// `../main/workspaces/review-defaults` are the only app files it reads, and
+// `../main/projects/review-defaults` are the only app files it reads, and
 // both are Electron-free.
 
 export { openDatabase } from "./driver";

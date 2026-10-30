@@ -20,7 +20,7 @@ import {
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
-import type { BoardConflict } from "../../../../shared/workspaces";
+import type { BoardConflict } from "../../../../shared/projects";
 
 /** How long a notice stays open before it folds into its pill (FE-63/D2a). */
 const OPEN_MS = 5000;

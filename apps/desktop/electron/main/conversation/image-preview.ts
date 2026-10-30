@@ -2,7 +2,7 @@
 // Nothing here imports Electron.
 //
 // NOTE: The page sends a path as Claude wrote it, so main decides what it may
-// read: a file inside the workspace's folder, or an image attached to this
+// read: a file inside the project's folder, or an image attached to this
 // conversation or read/written by one of its tool calls, with an image's extension and at most `IMAGE_MAX` bytes.
 // Symlinks are resolved first, and a path never `..`s out of either.
 import { readFile, realpath, stat } from "node:fs/promises";
@@ -32,7 +32,7 @@ const IMAGE_TYPES: Record<string, string> = {
 
 /** What a conversation's images may be read from. */
 export interface ImageScope {
-  /** The workspace's folder. */
+  /** The project's folder. */
   folder: string;
   /**
    * Absolute paths the conversation itself holds: images attached to it, and

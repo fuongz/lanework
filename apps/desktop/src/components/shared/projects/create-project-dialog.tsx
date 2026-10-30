@@ -1,11 +1,11 @@
 import { Folder01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import type { PickedFolder } from "#/../shared/workspaces";
+import type { PickedFolder } from "#/../shared/projects";
 import {
   PrimaryFolderHint,
   SourceFolders,
-} from "#/components/shared/workspaces/source-folders";
+} from "#/components/shared/projects/source-folders";
 import { Button } from "#/components/ui/button";
 import {
   Dialog,
@@ -79,7 +79,7 @@ export function CreateProjectDialog({
         return;
       }
       close(false);
-      if (result.workspace) onCreated(result.workspace.slug);
+      if (result.project) onCreated(result.project.slug);
     });
   }
 

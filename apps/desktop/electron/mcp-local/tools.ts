@@ -2,7 +2,7 @@
 // same names and parameters, run against the local SQLite board instead of the
 // API.
 //
-// `board_id` is the local workspace id. There are no accounts, machines,
+// `board_id` is the local project id. There are no accounts, machines,
 // members, comments, attachments or subscriptions offline, so those tools do
 // not exist here and `assignees.users` is accepted and ignored.
 //
@@ -28,9 +28,9 @@ import type {
 } from "@lanework/protocol";
 import { normalizeStreams, streamWaves } from "../local-store/cards";
 import {
+  type LocalProject,
   type LocalStore,
   LocalStoreError,
-  type LocalWorkspace,
   normalizeRepo,
 } from "../local-store/index";
 import type { Param, Shape } from "./schema";
@@ -55,7 +55,7 @@ interface ToolSpec extends Shape {
 const BOARD_ID: Param = {
   type: "string",
   description:
-    "The board's id (the local workspace id) from list_boards. There is no default.",
+    "The board's id (the local project id) from list_boards. There is no default.",
 };
 const CARD: Param = {
   type: "string",
@@ -127,18 +127,18 @@ function fail(
   throw new LocalStoreError(code, message);
 }
 
-function boardOf(store: LocalStore, boardId: unknown): LocalWorkspace {
-  const workspace = store.getWorkspace(String(boardId));
-  if (!workspace)
+function boardOf(store: LocalStore, boardId: unknown): LocalProject {
+  const project = store.getProject(String(boardId));
+  if (!project)
     fail(
       "not_found",
       `board ${String(boardId)} not found; call list_boards for its id`,
     );
-  return workspace;
+  return project;
 }
 
-function cardOf(store: LocalStore, board: LocalWorkspace, card: unknown) {
-  const detail = store.getWorkItem(String(card), { workspace: board.id });
+function cardOf(store: LocalStore, board: LocalProject, card: unknown) {
+  const detail = store.getWorkItem(String(card), { project: board.id });
   if (!detail)
     fail("not_found", `card ${String(card)} not found on this board`);
   return detail;
@@ -148,11 +148,11 @@ const str = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined;
 
 /** The start lane, where `create_review` lands a card when none is named. */
-function startColumn(board: LocalWorkspace): string | undefined {
+function startColumn(board: LocalProject): string | undefined {
   return board.config.columns.find((column) => column.role === "start")?.key;
 }
 
-function columnOrder(board: LocalWorkspace): Map<string, BoardColumn> {
+function columnOrder(board: LocalProject): Map<string, BoardColumn> {
   return new Map(board.config.columns.map((column) => [column.key, column]));
 }
 
@@ -295,18 +295,20 @@ export const TOOLS: ToolSpec[] = [
     },
     required: ["name", "repo"],
     run(args, { store }) {
-      const workspace = store.createWorkspace({
+      const project = store.createProject({
         name: String(args.name),
         slug: str(args.slug),
         repo: String(args.repo),
       });
       return {
-        board_id: workspace.id,
+        board_id: project.id,
+        // NOTE: `workspaceId`, as the cloud MCP's output names a board's id:
+        // an agent reads either server the same way.
         board: {
-          workspaceId: workspace.id,
-          name: workspace.name,
-          slug: workspace.slug,
-          repo: workspace.repo,
+          workspaceId: project.id,
+          name: project.name,
+          slug: project.slug,
+          repo: project.repo,
         },
         next: "Use this board_id for every other tool. Read board_summary before creating a card.",
       };
@@ -451,7 +453,7 @@ export const TOOLS: ToolSpec[] = [
       const board = boardOf(store, args.board_id);
       const item = cardOf(store, board, args.card);
       const { latest } = store.listCheckpoints(item.id, {
-        workspace: board.id,
+        project: board.id,
       });
       return { item, checkpoint: latest, dispatch: item.dispatch };
     },
@@ -578,7 +580,7 @@ export const TOOLS: ToolSpec[] = [
           streams,
           checklist,
         },
-        { workspace: board.id, ifRevision: current.revision },
+        { project: board.id, ifRevision: current.revision },
       );
       return { item };
     },
@@ -619,7 +621,7 @@ export const TOOLS: ToolSpec[] = [
         String(args.card),
         String(args.key),
         patch,
-        { workspace: board.id },
+        { project: board.id },
       );
       return { item, ...decisionState(item.checklist) };
     },
@@ -686,7 +688,7 @@ export const TOOLS: ToolSpec[] = [
         current.id,
         { checklist: items },
         {
-          workspace: board.id,
+          project: board.id,
           ifRevision:
             typeof args.revision === "number"
               ? args.revision
@@ -721,7 +723,7 @@ export const TOOLS: ToolSpec[] = [
     run(args, { store }) {
       const board = boardOf(store, args.board_id);
       const item = store.setStatus(String(args.card), String(args.status), {
-        workspace: board.id,
+        project: board.id,
       });
       return { item: brief(item) };
     },
@@ -736,7 +738,7 @@ export const TOOLS: ToolSpec[] = [
     run(args, { store }) {
       const board = boardOf(store, args.board_id);
       const item = store.deleteWorkItem(String(args.card), {
-        workspace: board.id,
+        project: board.id,
       });
       return { archived: item.id, item: brief(item) };
     },
@@ -792,7 +794,7 @@ export const TOOLS: ToolSpec[] = [
           : null,
       };
       const checkpoint = store.addCheckpoint(String(args.card), request, {
-        workspace: board.id,
+        project: board.id,
         agent,
       });
       return { checkpoint };

@@ -40,12 +40,12 @@ const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
  */
 export function FileOpenerProvider({
   slug,
-  workspace,
+  project,
   conversation,
   children,
 }: {
   slug: string;
-  workspace: string | null;
+  project: string | null;
   conversation: string;
   children: ReactNode;
 }) {
@@ -62,18 +62,18 @@ export function FileOpenerProvider({
       const surface = window.desktop?.conversation;
       setAsked(path);
       setPreview(null);
-      if (!surface || !workspace || !IMAGE_FILE.test(path)) {
+      if (!surface || !project || !IMAGE_FILE.test(path)) {
         setPreview({ found: false, path });
         return;
       }
       void surface
-        .image(workspace, conversation, path)
+        .image(project, conversation, path)
         .catch((): ImagePreview => ({ found: false, path }))
         .then((found) => {
           if (mine === latest.current) setPreview(found);
         });
     },
-    [workspace, conversation],
+    [project, conversation],
   );
 
   const open = useCallback(
@@ -147,12 +147,12 @@ export function FileOpenerProvider({
       cached: (path) => read.get(path),
       read: (path) => {
         const surface = window.desktop?.conversation;
-        if (!surface || !workspace || !IMAGE_FILE.test(path))
+        if (!surface || !project || !IMAGE_FILE.test(path))
           return Promise.resolve({ found: false, path });
         let pending = asking.get(path);
         if (!pending) {
           pending = surface
-            .image(workspace, conversation, path)
+            .image(project, conversation, path)
             .catch((): ImagePreview => ({ found: false, path }))
             .then((found) => {
               asking.delete(path);
@@ -164,14 +164,14 @@ export function FileOpenerProvider({
         return pending;
       },
     };
-  }, [workspace, conversation]);
+  }, [project, conversation]);
 
   const openInApp = () => {
     const surface = window.desktop?.conversation;
-    if (!surface || !workspace || !asked || opening) return;
+    if (!surface || !project || !asked || opening) return;
     setOpening(true);
     void surface
-      .openImage(workspace, conversation, asked)
+      .openImage(project, conversation, asked)
       .catch(() => undefined)
       .finally(() => setOpening(false));
   };

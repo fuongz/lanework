@@ -52,7 +52,7 @@ export function XtermPane({
    * Who is told the shell exited. The panel's store by default; an agent's
    * view keeps its sessions in a store of its own.
    */
-  onExit?: (workspace: string, id: string, code: number) => void;
+  onExit?: (project: string, id: string, code: number) => void;
   /**
    * Told when the screen has something on it: a snapshot with content, or
    * live output. An agent's view keeps its spinner up until then.
@@ -126,7 +126,7 @@ export function XtermPane({
             term.write(data);
             if (data) outputRef.current?.();
           },
-          onExit: (code) => markExited(session.workspace, session.id, code),
+          onExit: (code) => markExited(session.project, session.id, code),
         }),
       );
 
@@ -244,7 +244,7 @@ export function XtermPane({
       disposed = true;
       for (const undo of cleanup.reverse()) undo();
     };
-  }, [session.id, session.workspace, markExited]);
+  }, [session.id, session.project, markExited]);
 
   // NOTE: The padding is on the wrapper. FitAddon measures the element xterm
   // was opened in, and padding on that element would count as room for text:

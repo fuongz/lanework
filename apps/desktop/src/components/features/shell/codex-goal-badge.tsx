@@ -12,17 +12,17 @@ import { useAgentSessions } from "#/stores/agent-sessions";
  * Nothing for any other state, or any other conversation.
  */
 export function CodexGoalBadge({
-  workspace,
+  project,
   session,
   className,
 }: {
-  workspace: string;
+  project: string;
   session: AgentSession;
   className?: string;
 }) {
   const goal = useAgentSessions((state) =>
     session.agent === "codex"
-      ? state.codexGoals[workspace]?.[session.id]
+      ? state.codexGoals[project]?.[session.id]
       : undefined,
   );
   if (!goal || !goalStuck(goal)) return null;

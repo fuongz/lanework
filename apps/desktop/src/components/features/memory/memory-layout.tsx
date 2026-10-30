@@ -82,7 +82,7 @@ export function MemoryLayout() {
           description="Link this project to a folder on this machine to see what Claude remembers about it."
         >
           <Link
-            to="/settings/workspaces"
+            to="/settings/projects"
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             Open Projects

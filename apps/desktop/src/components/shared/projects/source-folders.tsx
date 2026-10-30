@@ -5,7 +5,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type DragEvent, useState } from "react";
-import type { PickedFolder } from "#/../shared/workspaces";
+import type { PickedFolder } from "#/../shared/projects";
 import { Button } from "#/components/ui/button";
 import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
@@ -17,7 +17,7 @@ import { cn } from "#/lib/utils";
  *   Both follow the same rules (primary is first, a folder appears once,
  *   removing the last one is allowed), so one copy keeps them from drifting.
  * - NOTE: Every row is a {@link PickedFolder}, never a bare path, including
- *   rows read back from an existing workspace. Main mints the ids and resolves
+ *   rows read back from an existing project. Main mints the ids and resolves
  *   them itself, so no screen can ask this app to read a folder nobody chose.
  */
 export function SourceFolders({
@@ -46,7 +46,7 @@ export function SourceFolders({
   }
 
   async function add() {
-    const api = window.desktop?.workspaces.folder;
+    const api = window.desktop?.projects.folder;
     if (!api) return;
     setPicking(true);
     try {
@@ -83,7 +83,7 @@ export function SourceFolders({
       if (disabled || !carriesFiles(event)) return;
       event.preventDefault();
       setDragging(false);
-      const api = window.desktop?.workspaces.folder;
+      const api = window.desktop?.projects.folder;
       const files = Array.from(event.dataTransfer.files);
       if (!api || !files.length) return;
       try {

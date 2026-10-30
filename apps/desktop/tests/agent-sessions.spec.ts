@@ -27,6 +27,7 @@ import {
   test,
 } from "@playwright/test";
 import type { MachineRecord } from "../electron/main/auth/store";
+import { writeFolders } from "../electron/main/projects/store";
 import { watchAgentActivity } from "../electron/main/terminal/agent-activity";
 import { agentBindings } from "../electron/main/terminal/agent-binding";
 import {
@@ -78,7 +79,6 @@ import {
   readSubagentTranscript,
   subagentRequest,
 } from "../electron/main/terminal/subagent-transcript";
-import { writeFolders } from "../electron/main/workspaces/store";
 import {
   AGENT_FACTS_READ_MAX,
   BACKGROUND_OUTPUT_MAX,
@@ -153,7 +153,7 @@ test("an agent tab resumes a conversation by its id — and never types anything
   });
   const run = async (kind: "claude" | "codex", resume: unknown) => {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await tempDir("lanew-term-"),
       cols: 80,
       rows: 24,
@@ -216,7 +216,7 @@ test("FE-34: an agent handed a card is briefed by the host's own prompt, as one 
     resume?: unknown,
   ) => {
     const session = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd: await tempDir("lanew-term-"),
       // Wide, so a long prompt is never wrapped into the screen's next row.
       cols: 1000,
@@ -863,7 +863,7 @@ test("FE-35: a sub-agent is read by ids alone — a path, `..` or any other shap
   );
 
   expect(subagentRequest(["ws-alpha", "claude", CLAUDE_ID, "done"])).toEqual({
-    workspace: "ws-alpha",
+    project: "ws-alpha",
     agent: "claude",
     conversation: CLAUDE_ID,
     sub: "done",
@@ -1143,7 +1143,7 @@ test("FE-38: a conversation's numbers are read by ids alone — another shape, a
   const outside = await tempDir("lanew-outside-");
 
   expect(factsRequest(["ws-alpha", "claude", CLAUDE_ID])).toEqual({
-    workspace: "ws-alpha",
+    project: "ws-alpha",
     agent: "claude",
     id: CLAUDE_ID,
   });
@@ -1448,7 +1448,7 @@ function tab(
   fields: Partial<TerminalSession> & Pick<TerminalSession, "id" | "kind">,
 ): TerminalSession {
   return {
-    workspace: "ws",
+    project: "ws",
     shell: "zsh",
     cwd: null,
     pid: 4242,
@@ -1562,17 +1562,17 @@ test("the host moves a live agent tab onto its conversation, and tells its watch
     agentCommand: () => "true",
   });
   const changes: string[] = [];
-  const off = sessions.onChanged((workspace) => changes.push(workspace));
+  const off = sessions.onChanged((project) => changes.push(project));
   try {
     const cwd = await tempDir("lanew-term-");
     const agent = sessions.spawn({
-      workspace: "ws",
+      project: "ws",
       cwd,
       cols: 80,
       rows: 24,
       kind: "codex",
     });
-    const shell = sessions.spawn({ workspace: "ws", cwd, cols: 80, rows: 24 });
+    const shell = sessions.spawn({ project: "ws", cwd, cols: 80, rows: 24 });
     changes.length = 0;
     expect(
       sessions.bind("ws", [
@@ -1586,7 +1586,7 @@ test("the host moves a live agent tab onto its conversation, and tells its watch
       CODEX_ID,
       null,
     ]);
-    // Another workspace's tab is not this one's to move.
+    // Another project's tab is not this one's to move.
     expect(sessions.bind("other", [{ id: agent.id, resume: CLAUDE_ID }])).toBe(
       false,
     );
@@ -1780,7 +1780,7 @@ test("FE-41: a goal is read for its own thread from Codex's newest goals databas
   expect(await readCodexGoals(sqlite, [CODEX_ID])).toEqual({});
 });
 
-const FE41_WORKSPACES = [
+const FE41_PROJECTS = [
   {
     id: "ws-alpha",
     slug: "alpha",
@@ -1913,7 +1913,7 @@ async function openProject(page: Page, name: string) {
 }
 
 test("FE-49: completed main-agent turns notify once with sound and restore the window", async () => {
-  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  const plane = await startStubPlane({ projects: FE41_PROJECTS });
   plane.setBoard("ws-alpha", {
     columns: [{ key: "todo", name: "To-Do", role: "start" }],
     cards: [],
@@ -2100,7 +2100,7 @@ test("FE-49: completed main-agent turns notify once with sound and restore the w
 
 test("FE-41: the terminal bar shows Codex's usage until each window resets, and a goal's status on its conversation", async () => {
   test.skip(process.platform === "win32", "This drives a POSIX shell.");
-  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  const plane = await startStubPlane({ projects: FE41_PROJECTS });
   const board = {
     columns: [{ key: "todo", name: "To-Do", role: "start" }],
     cards: [],
@@ -2284,7 +2284,7 @@ function gitRepo(folder: string, committedAt: string) {
 
 test("FE-74: Codex's banked usage limit resets, asked of its app-server, spent only after Confirm", async () => {
   test.skip(process.platform === "win32", "This drives a POSIX shell.");
-  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  const plane = await startStubPlane({ projects: FE41_PROJECTS });
   const board = {
     columns: [{ key: "todo", name: "To-Do", role: "start" }],
     cards: [],
@@ -2627,7 +2627,7 @@ test("FE-39: Changes marks only what a conversation edited since HEAD's commit �
   ])
     expect(() => agentFilesRequest(args)).toThrow();
   expect(agentFilesRequest(["ws", "codex", CODEX_EDITS_ID])).toEqual({
-    workspace: "ws",
+    project: "ws",
     agent: "codex",
     id: CODEX_EDITS_ID,
   });
@@ -2813,7 +2813,7 @@ test("FE-42: a conversation's background tasks are read from its transcript — 
   for (const args of [["ws"], ["ws", "../../etc/passwd"], ["", CLAUDE_BG_ID]])
     expect(() => backgroundRequest(args)).toThrow();
   expect(backgroundRequest(["ws", CLAUDE_BG_ID])).toEqual({
-    workspace: "ws",
+    project: "ws",
     conversation: CLAUDE_BG_ID,
   });
 });
@@ -2986,7 +2986,7 @@ async function answerClaudeRefresh(
 
 test("FE-53/FE-54: the terminal bar shows the usage of the agent on screen — Claude's limits and popover, Codex's, none for no agent", async () => {
   test.skip(process.platform === "win32", "This drives a POSIX shell.");
-  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  const plane = await startStubPlane({ projects: FE41_PROJECTS });
   plane.setBoard("ws-alpha", {
     columns: [{ key: "todo", name: "To-Do", role: "start" }],
     cards: [],
@@ -3108,7 +3108,7 @@ test("FE-53/FE-54: the terminal bar shows the usage of the agent on screen — C
 
 test("FE-53: with no Claude usage the strip stays hidden, and a focus refresh's expired sign-in brings it back with no numbers", async () => {
   test.skip(process.platform === "win32", "This drives a POSIX shell.");
-  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  const plane = await startStubPlane({ projects: FE41_PROJECTS });
   plane.setBoard("ws-alpha", {
     columns: [{ key: "todo", name: "To-Do", role: "start" }],
     cards: [],
@@ -3168,7 +3168,7 @@ test("FE-53: with no Claude usage the strip stays hidden, and a focus refresh's 
 
 test("FE-53: refresh asks main through IPC, spins while it waits, and an error keeps the last snapshot", async () => {
   test.skip(process.platform === "win32", "This drives a POSIX shell.");
-  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  const plane = await startStubPlane({ projects: FE41_PROJECTS });
   plane.setBoard("ws-alpha", {
     columns: [{ key: "todo", name: "To-Do", role: "start" }],
     cards: [],
@@ -3269,7 +3269,7 @@ test("FE-53: refresh asks main through IPC, spins while it waits, and an error k
 
 test("FE-46: new and resumed Claude launches install the default statusLine bridge and update the strip", async () => {
   test.skip(process.platform === "win32", "This drives a POSIX shell.");
-  const plane = await startStubPlane({ workspaces: FE41_WORKSPACES });
+  const plane = await startStubPlane({ projects: FE41_PROJECTS });
   plane.setBoard("ws-alpha", {
     columns: [{ key: "todo", name: "To-Do", role: "start" }],
     cards: [],

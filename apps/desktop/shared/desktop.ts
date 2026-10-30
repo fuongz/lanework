@@ -14,9 +14,9 @@ import type {
   DesktopLeadsApi,
   DesktopOrchestrationApi,
 } from "./orchestration";
+import type { DesktopProjectsApi } from "./projects";
 import type { DesktopReadinessApi } from "./readiness";
 import type { DesktopTerminalApi } from "./terminal";
-import type { DesktopWorkspacesApi } from "./workspaces";
 import type { DesktopWorktreeApi } from "./worktree";
 
 export const channels = {
@@ -75,7 +75,7 @@ export interface DesktopApi {
    */
   zoomFactor: () => number;
   auth: DesktopAuthApi;
-  workspaces: DesktopWorkspacesApi;
+  projects: DesktopProjectsApi;
   git: DesktopGitApi;
   /** The project's local repository: changes, commits, history. */
   worktree: DesktopWorktreeApi;

@@ -18,7 +18,7 @@ import type { Held, Outgoing } from "./queue";
 export interface ConversationEngine {
   /** The CLI this engine runs. */
   readonly agent: ConversationAgent;
-  readonly workspace: string;
+  readonly project: string;
   /** The folder it runs in. */
   readonly folder: string;
   /**

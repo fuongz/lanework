@@ -1,4 +1,4 @@
-import type { BoardCard, BoardMember } from "#/../shared/workspaces";
+import type { BoardCard, BoardMember } from "#/../shared/projects";
 import {
   CategoryDot,
   PriorityIcon,

@@ -84,7 +84,7 @@ export function InstructionsLayout() {
           description="Link this project to a folder on this machine to see what its agents are told."
         >
           <Link
-            to="/settings/workspaces"
+            to="/settings/projects"
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             Open Projects

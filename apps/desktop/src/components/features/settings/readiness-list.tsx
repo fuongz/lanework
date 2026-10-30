@@ -70,7 +70,7 @@ export function ReadinessList({
       to:
         action === "agent-settings"
           ? "/settings/harness"
-          : "/settings/workspaces",
+          : "/settings/projects",
     });
   }
 

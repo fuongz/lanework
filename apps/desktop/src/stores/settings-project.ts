@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { Workspace } from "#/../shared/workspaces";
+import type { Project } from "#/../shared/projects";
 import { useBoard } from "#/stores/board";
 
 /**
@@ -23,14 +23,14 @@ export const useSettingsProjectPick = create<{
 /**
  * The project Settings › Projects shows.
  *
- * Reads the workspace list from {@link useBoard} on a cold start.
+ * Reads the project list from {@link useBoard} on a cold start.
  *
  * @returns The picked project, else the one open in the app, else the
  * first. Null when there are none, or they are still being read.
  */
-export function useSettingsProject(): Workspace | null {
+export function useSettingsProject(): Project | null {
   const picked = useSettingsProjectPick((state) => state.picked);
-  const workspaces = useBoard((state) => state.workspaces);
+  const projects = useBoard((state) => state.projects);
   const active = useBoard((state) => state.active?.slug ?? null);
   const ready = useBoard((state) => state.ready);
   const hydrate = useBoard((state) => state.hydrate);
@@ -39,9 +39,9 @@ export function useSettingsProject(): Workspace | null {
     if (!ready) void hydrate();
   }, [ready, hydrate]);
   return (
-    workspaces.find((workspace) => workspace.slug === picked) ??
-    workspaces.find((workspace) => workspace.slug === active) ??
-    workspaces[0] ??
+    projects.find((project) => project.slug === picked) ??
+    projects.find((project) => project.slug === active) ??
+    projects[0] ??
     null
   );
 }

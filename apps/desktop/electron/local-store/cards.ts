@@ -465,7 +465,7 @@ export function latestCheckpoint(list: Checkpoint[]): LatestCheckpoint | null {
 
 export interface WorkItemRow {
   id: string;
-  workspace_id: string;
+  project_id: string;
   parent_id: string | null;
   task_id: string | null;
   task_seq: number | null;
@@ -492,7 +492,7 @@ export function toCard(row: WorkItemRow): Card {
   const checklist = parseJson<ChecklistItem[]>(row.checklist, []);
   return {
     id: row.id,
-    workspaceId: row.workspace_id,
+    workspaceId: row.project_id,
     seq: Number(row.change_seq),
     revision: Number(row.revision),
     type: row.type as WorkItemType,

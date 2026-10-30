@@ -12,7 +12,7 @@ import type {
   BoardCard,
   BoardCategory,
   BoardColumn,
-} from "#/../shared/workspaces";
+} from "#/../shared/projects";
 import { checklistProgress } from "#/lib/board-view";
 import { cn } from "#/lib/utils";
 

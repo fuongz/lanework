@@ -22,7 +22,7 @@ import {
 import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { savedFolder, saveFolder, useFiles } from "#/stores/files";
 import { useWorktree } from "#/stores/worktree";
-import type { PickedFolder } from "../../../../shared/workspaces";
+import type { PickedFolder } from "../../../../shared/projects";
 import { FileTabs, FileView } from "./file-view";
 import { FilesTree } from "./files-tree";
 import { FolderSwitcher } from "./folder-switcher";
@@ -68,7 +68,7 @@ export function FilesLayout() {
   const [folders, setFolders] = useState<PickedFolder[] | null>(null);
   const [chosen, setChosen] = useState<string | null>(() => savedFolder(slug));
   const readFolders = useCallback(async () => {
-    const api = window.desktop?.workspaces.folder;
+    const api = window.desktop?.projects.folder;
     const list = api ? await api.list(slug).catch(() => []) : [];
     setFolders(list);
   }, [slug]);

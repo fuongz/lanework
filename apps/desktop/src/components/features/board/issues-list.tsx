@@ -11,7 +11,7 @@ import {
   type BoardCard,
   type BoardView,
   matchesSearch,
-} from "#/../shared/workspaces";
+} from "#/../shared/projects";
 import { CardAgentsMark } from "#/components/shared/board/card-agents";
 import {
   PriorityIcon,

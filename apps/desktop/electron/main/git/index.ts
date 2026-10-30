@@ -25,7 +25,7 @@ import {
 } from "../../../shared/git";
 import { broadcast, handle } from "../ipc";
 import { observePulls } from "../notifications/unseen-pulls";
-import { menuBarWorkspaces, projectFolders } from "../workspaces";
+import { menuBarProjects, projectFolders } from "../projects";
 import {
   addComment,
   fetchCommitDiff,
@@ -426,7 +426,7 @@ export async function readLinkedOpenPulls(): Promise<
   { slug: string; view: PullsView }[]
 > {
   if (ghBlocked()) return [];
-  const projects = await menuBarWorkspaces().catch(() => null);
+  const projects = await menuBarProjects().catch(() => null);
   if (!projects) return [];
   const known = await currentAccount(false).catch(() => null);
   if (known?.kind !== "ok") return [];

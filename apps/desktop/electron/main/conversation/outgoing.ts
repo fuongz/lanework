@@ -49,11 +49,11 @@ export function sendRequest(value: unknown): SendRequest {
     throw new Error("A request is required");
   const v = value as Record<string, unknown>;
   if (
-    typeof v.workspace !== "string" ||
-    !v.workspace.trim() ||
-    v.workspace.length > 200
+    typeof v.project !== "string" ||
+    !v.project.trim() ||
+    v.project.length > 200
   )
-    throw new Error("A valid workspace is required");
+    throw new Error("A valid project is required");
   // A UUID, or OpenCode's own `ses_` id (FE-104).
   if (
     !isAgentSessionId(v.conversation) &&
@@ -98,7 +98,7 @@ export function sendRequest(value: unknown): SendRequest {
   if (v.id !== undefined && !isMessageId(v.id))
     throw new Error("A valid message id is required");
   return {
-    workspace: v.workspace,
+    project: v.project,
     conversation: v.conversation,
     ...(v.id === undefined ? {} : { id: v.id }),
     text: v.text,

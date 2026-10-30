@@ -88,14 +88,14 @@ function ConductorIcon({
  * conversation runs in it.
  */
 export function ConductorsNav({
-  workspace,
+  project,
   slug,
   hasFolder,
   row,
   active,
   mini = false,
 }: {
-  workspace: string;
+  project: string;
   slug: string;
   hasFolder: boolean;
   row: string;
@@ -104,11 +104,11 @@ export function ConductorsNav({
   mini?: boolean;
 }) {
   const navigate = useNavigate();
-  const list = useTeamLeads(workspace, hasFolder);
+  const list = useTeamLeads(project, hasFolder);
   const conductors = orderConductors(list);
-  const statuses = useConductorStatuses(workspace, conductors);
+  const statuses = useConductorStatuses(project, conductors);
   const releaseConductor = useAgentSessions((state) => state.releaseConductor);
-  const openInTerminal = useOpenInTerminal(slug, workspace);
+  const openInTerminal = useOpenInTerminal(slug, project);
   const [dialog, setDialog] = useState<{
     key: number;
     mode: ConductorDialogMode;
@@ -151,12 +151,10 @@ export function ConductorsNav({
   const reset = async (lead: TeamLead, status: ConductorStatus) => {
     const session = useAgentSessions
       .getState()
-      .byWorkspace[workspace]?.find(
-        (entry) => entry.id === status.conversation,
-      );
+      .byProject[project]?.find((entry) => entry.id === status.conversation);
     if (!session) return;
     try {
-      await releaseConductor(workspace, session);
+      await releaseConductor(project, session);
       setError(null);
       if (viewing === session.id) open(lead);
     } catch (failure) {
@@ -166,7 +164,7 @@ export function ConductorsNav({
 
   const setDefault = async (lead: TeamLead | null) => {
     try {
-      await window.desktop?.leads.setDefault(workspace, lead?.id ?? null);
+      await window.desktop?.leads.setDefault(project, lead?.id ?? null);
       setError(null);
     } catch (failure) {
       setError(ipcMessage(failure, "Could not change the default."));
@@ -182,11 +180,11 @@ export function ConductorsNav({
     const session = conversation
       ? useAgentSessions
           .getState()
-          .byWorkspace[workspace]?.find((entry) => entry.id === conversation)
+          .byProject[project]?.find((entry) => entry.id === conversation)
       : undefined;
     try {
-      if (session) await releaseConductor(workspace, session);
-      await window.desktop?.leads.removePersonal(workspace, lead.id);
+      if (session) await releaseConductor(project, session);
+      await window.desktop?.leads.removePersonal(project, lead.id);
       setError(null);
       if (viewingLead === lead.id || (conversation && viewing === conversation))
         void navigate({ to: "/w/$slug/issues", params: { slug } });
@@ -227,7 +225,7 @@ export function ConductorsNav({
         onClick={() => {
           const session = useAgentSessions
             .getState()
-            .byWorkspace[workspace]?.find(
+            .byProject[project]?.find(
               (entry) => entry.id === status.conversation,
             );
           if (session)
@@ -261,7 +259,7 @@ export function ConductorsNav({
     <ConductorDialog
       key={dialog.key}
       mode={dialog.mode}
-      workspace={workspace}
+      project={project}
       list={list}
       onClose={() => setDialog(null)}
       onSaved={(input) => {

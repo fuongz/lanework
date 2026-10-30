@@ -66,7 +66,7 @@ describe("open + migrate", () => {
       )
       .all()
       .map((row) => row.name);
-    assert.deepEqual(tables, ["meta", "work_item", "workspace"]);
+    assert.deepEqual(tables, ["meta", "project_issues", "projects"]);
     const mode = store.db.prepare("PRAGMA journal_mode").get();
     assert.equal(String(mode?.journal_mode).toLowerCase(), "wal");
     const timeout = store.db.prepare("PRAGMA busy_timeout").get();
@@ -88,10 +88,10 @@ describe("open + migrate", () => {
   });
 });
 
-describe("workspaces", () => {
+describe("projects", () => {
   test("create, slug, update, link repo, find by any remote spelling, tombstone", () => {
     const store = open(join(home, "ws.sqlite"));
-    const a = store.createWorkspace({
+    const a = store.createProject({
       name: "My Board",
       repo: "git@github.com:Fuongz/Lanework.git",
     });
@@ -104,7 +104,7 @@ describe("workspaces", () => {
     );
     assert.deepEqual(a.taskHeads, {});
 
-    const b = store.createWorkspace({ name: "My Board" });
+    const b = store.createProject({ name: "My Board" });
     assert.equal(b.slug, "my-board-2");
 
     for (const remote of [
@@ -113,13 +113,13 @@ describe("workspaces", () => {
       "ssh://git@github.com/fuongz/lanework.git",
     ])
       assert.deepEqual(
-        store.findWorkspacesByRepo(remote).map((workspace) => workspace.id),
+        store.findProjectsByRepo(remote).map((project) => project.id),
         [a.id],
       );
 
     // A repo links to one board: linking it elsewhere moves it.
     store.linkRepo(b.id, "https://github.com/fuongz/lanework");
-    assert.equal(store.getWorkspace(a.id)?.repo, null);
+    assert.equal(store.getProject(a.id)?.repo, null);
     assert.deepEqual(
       store
         .boardSummaries("git@github.com:fuongz/lanework.git")
@@ -131,12 +131,12 @@ describe("workspaces", () => {
       "invalid",
     );
 
-    const renamed = store.updateWorkspace(a.id, {
+    const renamed = store.updateProject(a.id, {
       name: "Renamed",
       slug: "renamed",
     });
     assert.equal(renamed.name, "Renamed");
-    assert.equal(store.getWorkspace("renamed")?.id, a.id);
+    assert.equal(store.getProject("renamed")?.id, a.id);
 
     const config = store.boardConfig(a.id);
     assert.equal(config.workspaceId, a.id);
@@ -145,16 +145,16 @@ describe("workspaces", () => {
       "FE",
     );
 
-    store.deleteWorkspace(a.id);
-    assert.equal(store.getWorkspace(a.id), null);
+    store.deleteProject(a.id);
+    assert.equal(store.getProject(a.id), null);
     assert.deepEqual(
-      store.listWorkspaces().map((w) => w.id),
+      store.listProjects().map((w) => w.id),
       [b.id],
     );
-    assert.equal(store.listWorkspaces({ includeDeleted: true }).length, 2);
-    // The slug of a tombstoned workspace is free again.
+    assert.equal(store.listProjects({ includeDeleted: true }).length, 2);
+    // The slug of a tombstoned project is free again.
     assert.equal(
-      store.createWorkspace({ name: "x", slug: "renamed" }).slug,
+      store.createProject({ name: "x", slug: "renamed" }).slug,
       "renamed",
     );
     assert.equal(
@@ -169,7 +169,7 @@ describe("work items", () => {
   let ws: string;
   before(() => {
     store = open(join(home, "items.sqlite"));
-    ws = store.createWorkspace({ name: "Items" }).id;
+    ws = store.createProject({ name: "Items" }).id;
   });
 
   test("create lands in the intake lane, in order, with protocol shapes", () => {
@@ -241,16 +241,16 @@ describe("work items", () => {
     });
     assert.equal(store.getWorkItem(card.id)?.title, "Edit me");
     assert.equal(
-      store.getWorkItem(card.taskId as string, { workspace: ws })?.id,
+      store.getWorkItem(card.taskId as string, { project: ws })?.id,
       card.id,
     );
     assert.equal(
       store.getWorkItem((card.taskId as string).toLowerCase(), {
-        workspace: ws,
+        project: ws,
       })?.id,
       card.id,
     );
-    assert.equal(store.getWorkItem("BE-99", { workspace: ws }), null);
+    assert.equal(store.getWorkItem("BE-99", { project: ws }), null);
 
     const updated = store.updateWorkItem(
       card.id,
@@ -408,7 +408,7 @@ describe("work items", () => {
 describe("task ids", () => {
   test("minted per category, restore-compatible, never reused", () => {
     const store = open(join(home, "ids.sqlite"));
-    const ws = store.createWorkspace({ name: "Ids" }).id;
+    const ws = store.createProject({ name: "Ids" }).id;
     const mint = (categoryKey: string | null) =>
       store.createWorkItem(ws, { title: "t", categoryKey }).taskId;
 
@@ -441,7 +441,7 @@ describe("task ids", () => {
     assert.equal(restored.createdAt, "2026-01-02T00:00:00.000Z");
     assert.equal(restored.checklist[0]?.checkedAt, "2026-01-03T00:00:00.000Z");
     assert.equal(mint("frontend"), "FE-08");
-    assert.deepEqual(store.getWorkspace(ws)?.taskHeads, {
+    assert.deepEqual(store.getProject(ws)?.taskHeads, {
       frontend: 8,
       backend: 1,
       infrastructure: 1,
@@ -497,8 +497,8 @@ describe("task ids", () => {
     store.deleteWorkItem(gone.id);
     assert.equal(mint("backend"), "BE-03");
 
-    // Separate workspaces count separately.
-    const other = store.createWorkspace({ name: "Other" }).id;
+    // Separate projects count separately.
+    const other = store.createProject({ name: "Other" }).id;
     assert.equal(
       store.createWorkItem(other, { title: "t", categoryKey: "frontend" })
         .taskId,
@@ -510,7 +510,7 @@ describe("task ids", () => {
 describe("tombstones + change feed", () => {
   test("delete hides a card, keeps the row, shows in the feed, and restores", () => {
     const store = open(join(home, "tomb.sqlite"));
-    const ws = store.createWorkspace({ name: "Tomb" }).id;
+    const ws = store.createProject({ name: "Tomb" }).id;
     const card = store.createWorkItem(ws, {
       title: "doomed",
       categoryKey: "frontend",
@@ -521,7 +521,7 @@ describe("tombstones + change feed", () => {
     const deleted = store.deleteWorkItem(card.id, { ifRevision: 1 });
     assert.ok(deleted.archivedAt);
     assert.equal(store.getWorkItem(card.id), null);
-    assert.equal(store.getWorkItem("FE-01", { workspace: ws }), null);
+    assert.equal(store.getWorkItem("FE-01", { project: ws }), null);
     assert.deepEqual(store.listWorkItems(ws), []);
     const listed = store.listWorkItems(ws, { includeDeleted: true });
     assert.equal(listed.length, 1);
@@ -551,7 +551,7 @@ describe("concurrency (WAL)", () => {
     const path = join(home, "version.sqlite");
     const a = open(path);
     const b = open(path);
-    const ws = a.createWorkspace({ name: "V" }).id;
+    const ws = a.createProject({ name: "V" }).id;
     const seen = b.dataVersion();
     a.createWorkItem(ws, { title: "x" });
     assert.ok(b.dataVersion() > seen);
@@ -561,7 +561,7 @@ describe("concurrency (WAL)", () => {
   test("two processes and this one write the same file at once without SQLITE_BUSY", async () => {
     const path = join(home, "busy.sqlite");
     const store = open(path);
-    const ws = store.createWorkspace({ name: "Busy" }).id;
+    const ws = store.createProject({ name: "Busy" }).id;
     const perWriter = 60;
     const fixture = join(import.meta.dirname, "writer.fixture.ts");
     const run = (label: string) =>
@@ -615,7 +615,7 @@ describe("concurrency (WAL)", () => {
       Array.from({ length: seqs.length }, (_, index) => index + 1),
       "no gaps: FE-01 … FE-n",
     );
-    assert.equal(store.getWorkspace(ws)?.taskHeads.frontend, seqs.length);
+    assert.equal(store.getProject(ws)?.taskHeads.frontend, seqs.length);
     const withCheckpoint = cards.filter(
       (card) => store.listCheckpoints(card.id).checkpoints.length === 1,
     );

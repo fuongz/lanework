@@ -14,7 +14,7 @@ import { PullsList } from "./pulls-list";
 /**
  * The pull request screen: a list that stays, and one pull request beside it.
  *
- * Refreshed on focus, never on a timer, as `WorkspaceLayout` does for the
+ * Refreshed on focus, never on a timer, as `ProjectLayout` does for the
  * board. A window nobody is looking at has nobody to show a change to, and a
  * poll costs a request per interval per window against an hourly budget.
  */

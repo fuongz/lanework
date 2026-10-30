@@ -1,5 +1,5 @@
 // The board's IPC payloads off the wire, checked field by field: every
-// argument a renderer sends to a workspace channel is read through here
+// argument a renderer sends to a project channel is read through here
 // before it reaches the board under this machine's credential.
 //
 // NOTE: Electron-free (FE-82/D1), so these checks can be unit-tested without
@@ -14,7 +14,7 @@ import {
   CHECKLIST_LIMITS,
   CHECKLIST_SECTIONS,
   DEFAULT_BOARD_QUERY,
-} from "../../../shared/workspaces";
+} from "../../../shared/projects";
 import { arity, id } from "../ipc-args";
 
 /** A tuple of `Count` strings, so `const [a, b] = requireId(args, 2)` is typed. */
@@ -210,7 +210,7 @@ export function parsePatch(value: unknown): BoardCardPatch {
 /**
  * A comment body from the renderer.
  *
- * - Its own check rather than `requireId`, whose message names a workspace
+ * - Its own check rather than `requireId`, whose message names a project
  *   and a card. This argument is a sentence somebody typed, and "a card is
  *   required" for an empty comment box explains nothing.
  * - The cap mirrors the service's `MAX_COMMENT`. Refusing here is the same
@@ -436,7 +436,7 @@ export function requireId<Count extends number>(
   args: unknown[],
   count: Count,
 ): Ids<Count> {
-  const message = "A valid workspace and card are required";
+  const message = "A valid project and card are required";
   arity(args, count, message);
   for (const arg of args) id(arg, message);
   return args as Ids<Count>;

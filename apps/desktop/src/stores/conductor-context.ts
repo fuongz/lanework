@@ -8,18 +8,18 @@ import type { TeamLead } from "#/../shared/orchestration";
 // comes back is sent again.
 
 /**
- * `lead` with only the context files still in `workspace`'s checkout. Without
+ * `lead` with only the context files still in `project`'s checkout. Without
  * a preload, or when main cannot answer, it is sent with none rather than not
  * at all.
  */
 export async function withLiveContext(
-  workspace: string,
+  project: string,
   lead: TeamLead,
 ): Promise<TeamLead> {
   if (!lead.contextFiles.length) return lead;
   const surface = window.desktop?.leads;
   const entries = surface
-    ? await surface.inspectContext(workspace, lead.contextFiles).catch(() => [])
+    ? await surface.inspectContext(project, lead.contextFiles).catch(() => [])
     : [];
   return {
     ...lead,

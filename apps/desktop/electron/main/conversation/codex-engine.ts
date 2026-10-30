@@ -257,7 +257,7 @@ export class CodexEngine implements ConversationEngine {
   private ready: Promise<void> | null = null;
 
   constructor(
-    readonly workspace: string,
+    readonly project: string,
     /** Null until a new conversation's `thread/start` names it. */
     public conversation: string | null,
     readonly folder: string,
@@ -306,7 +306,7 @@ export class CodexEngine implements ConversationEngine {
     if (!this.conversation) return;
     const full = {
       ...event,
-      workspace: this.workspace,
+      project: this.project,
       conversation: this.conversation,
     } as ConversationEvent;
     this.deps.emit(full);
@@ -334,7 +334,7 @@ export class CodexEngine implements ConversationEngine {
     if (!paths.length) return;
     safely(() =>
       tap({
-        workspace: this.workspace,
+        project: this.project,
         conversation: this.conversation,
         folder: this.folder,
         tool: "apply_patch",
@@ -396,7 +396,7 @@ export class CodexEngine implements ConversationEngine {
       // FE-87: a lead's control endpoint, a worker's scratch; never the
       // control variables for anyone else.
       env: agentEnv(cli.env, {
-        workspace: this.workspace,
+        project: this.project,
         conversation: this.conversation,
         folder: this.folder,
         named: () => this.conversation,
@@ -598,7 +598,7 @@ export class CodexEngine implements ConversationEngine {
         this.lastText = "";
         safely(() =>
           engineTap().result?.({
-            workspace: this.workspace,
+            project: this.project,
             conversation: this.conversation,
             folder: this.folder,
             text,

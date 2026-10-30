@@ -10,7 +10,7 @@
 import { Add01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import { type BoardLabel, normalizeTag } from "#/../shared/workspaces";
+import { type BoardLabel, normalizeTag } from "#/../shared/projects";
 import {
   DropdownMenu,
   DropdownMenuContent,

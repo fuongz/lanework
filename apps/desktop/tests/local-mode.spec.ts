@@ -19,7 +19,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import type { Workspace } from "../shared/workspaces";
+import type { Project } from "../shared/projects";
 import {
   launchEnv,
   removeProfile,
@@ -126,7 +126,7 @@ test("cloud-only features are hidden in local mode and come back after sign-in",
   const profile = await mkdtemp(join(tmpdir(), "lanew-local-d10-"));
   const home = await mkdtemp(join(tmpdir(), "lanew-local-d10-home-"));
   let app: ElectronApplication | null = null;
-  const cloud: Workspace[] = [
+  const cloud: Project[] = [
     {
       id: "ws-cloud-project",
       slug: "cloud-project",
@@ -135,7 +135,7 @@ test("cloud-only features are hidden in local mode and come back after sign-in",
       baseBranch: null,
     },
   ];
-  const plane = await startStubPlane({ workspaces: cloud });
+  const plane = await startStubPlane({ projects: cloud });
   try {
     let page: Page;
     ({ app, page } = await launch(launchEnv({ profile, home })));
@@ -207,7 +207,7 @@ test("cloud-only features are hidden in local mode and come back after sign-in",
 
     // D6a: the local project stays, beside the account's, marked Local and
     // one click from the cloud. The rail no longer says "Local mode".
-    await page.goto("app://lanework/settings/workspaces");
+    await page.goto("app://lanework/settings/projects");
     await expect(
       page.getByRole("button", { name: `Select ${PROJECT}` }),
     ).toBeVisible();
@@ -247,7 +247,7 @@ test("the lanework MCP entry is stdio in local mode and HTTP after sign-in", asy
   const entry = async () =>
     JSON.parse(await readFile(claudeJson, "utf8")).mcpServers?.lanework;
   let app: ElectronApplication | null = null;
-  const plane = await startStubPlane({ workspaces: [] });
+  const plane = await startStubPlane({ projects: [] });
   try {
     let page: Page;
     ({ app, page } = await launch(launchEnv({ profile, home })));

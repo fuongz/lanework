@@ -4,7 +4,7 @@ import type {
   RedactedSession,
   SignInProgress,
 } from "../../shared/auth";
-import type { Workspace } from "../../shared/workspaces";
+import type { Project } from "../../shared/projects";
 
 /**
  * The renderer's view of who is signed in.
@@ -149,7 +149,7 @@ export const useSession = create<SessionState>()((set) => ({
  *   has no machine, no account and no credential for the checkpoint hook,
  *   whatever board is open.
  * - Per board (presence, subscribers, assignees other than yourself,
- *   comments, attachments) follow the workspace as well. A signed-in machine
+ *   comments, attachments) follow the project as well. A signed-in machine
  *   still has local boards (D6a), and those have none of it.
  *
  * Pure, like `policy.ts`, so a screen hides what main would refuse anyway.
@@ -176,18 +176,18 @@ interface CloudFeatures {
 }
 
 /** A board that lives in the SQLite store on this machine. */
-export function isLocalWorkspace(
-  workspace: Pick<Workspace, "origin"> | null | undefined,
+export function isLocalProject(
+  project: Pick<Project, "origin"> | null | undefined,
 ): boolean {
-  return workspace?.origin === "local";
+  return project?.origin === "local";
 }
 
 function cloudFeatures(
   principal: Pick<Principal, "kind"> | null | undefined,
-  workspace?: Pick<Workspace, "origin"> | null,
+  project?: Pick<Project, "origin"> | null,
 ): CloudFeatures {
   const signedIn = principal?.kind === "machine";
-  const board = signedIn && !isLocalWorkspace(workspace);
+  const board = signedIn && !isLocalProject(project);
   return {
     signedIn,
     machines: signedIn,
@@ -207,10 +207,10 @@ function cloudFeatures(
  * new object on every read is a new value to zustand and re-renders forever.
  */
 export function useCloudFeatures(
-  workspace?: Pick<Workspace, "origin"> | null,
+  project?: Pick<Project, "origin"> | null,
 ): CloudFeatures {
   const kind = useSession((state) => state.session?.principal.kind);
-  return cloudFeatures(kind ? { kind } : null, workspace);
+  return cloudFeatures(kind ? { kind } : null, project);
 }
 
 /** Whether the person chose "Skip for now" and has not signed in since. */

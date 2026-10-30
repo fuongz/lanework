@@ -17,10 +17,10 @@
 // Electron-free: `tests/` and `bun test` drive it against a stub plane.
 import { createHash } from "node:crypto";
 import type { CardDetail, ChecklistItem, Stream } from "@lanework/protocol";
-import type { LocalStore, LocalWorkspace } from "../../local-store";
+import type { LocalProject, LocalStore } from "../../local-store";
 import type { MachineRecord } from "../auth/store";
 import {
-  createWorkspace,
+  createProject,
   fetchBoardConfig,
   importRecords,
   putBoardConfig,
@@ -137,17 +137,17 @@ function streamsOf(streams: Stream[]): SyncRecord["streams"] {
  *   demands. One whose category was cleared after it was minted goes without
  *   it, and the cloud mints a new one when the card is next categorized.
  */
-function planSync(store: LocalStore, workspace: LocalWorkspace): PlannedCard[] {
+function planSync(store: LocalStore, project: LocalProject): PlannedCard[] {
   const categories = new Map(
-    workspace.config.categories.map((category) => [category.key, category]),
+    project.config.categories.map((category) => [category.key, category]),
   );
   const columns = new Map(
-    workspace.config.columns.map((column, index) => [
+    project.config.columns.map((column, index) => [
       column.key,
       column.position ?? index,
     ]),
   );
-  const cards = store.listWorkItems(workspace.id);
+  const cards = store.listWorkItems(project.id);
   const live = new Set(cards.map((card) => card.id));
   const ordered = [...cards].sort(
     (a, b) =>
@@ -156,7 +156,7 @@ function planSync(store: LocalStore, workspace: LocalWorkspace): PlannedCard[] {
       a.id.localeCompare(b.id),
   );
   return ordered.flatMap((card): PlannedCard[] => {
-    const detail = store.getWorkItem(card.id, { workspace: workspace.id });
+    const detail = store.getWorkItem(card.id, { project: project.id });
     if (!detail) return [];
     const category = detail.categoryKey
       ? categories.get(detail.categoryKey)
@@ -190,7 +190,9 @@ function planSync(store: LocalStore, workspace: LocalWorkspace): PlannedCard[] {
             import: {
               tool: "lanework-desktop",
               from: "local-board",
-              localWorkspaceId: workspace.id,
+              // NOTE: Card metadata the cloud keeps, so it keeps the name
+              // every card imported before FE-107 carries.
+              localWorkspaceId: project.id,
               localId: detail.id,
             },
           },
@@ -238,18 +240,18 @@ function byDepth(cards: PlannedCard[]): PlannedCard[][] {
 }
 
 /** The board config the cloud board is created with: the local one, as is. */
-function configOf(workspace: LocalWorkspace) {
+function configOf(project: LocalProject) {
   return {
-    columns: workspace.config.columns.map((column, position) => ({
+    columns: project.config.columns.map((column, position) => ({
       ...column,
       position: column.position ?? position,
     })),
-    categories: workspace.config.categories.map((category, position) => ({
+    categories: project.config.categories.map((category, position) => ({
       ...category,
       position: (category as { position?: number }).position ?? position,
     })),
-    labels: workspace.config.labels,
-    tags: workspace.config.tags,
+    labels: project.config.labels,
+    tags: project.config.tags,
   };
 }
 
@@ -262,24 +264,23 @@ function configOf(workspace: LocalWorkspace) {
 async function cloudTarget(
   store: LocalStore,
   record: MachineRecord,
-  workspace: LocalWorkspace,
+  project: LocalProject,
   path: string | null,
 ): Promise<{ id: string; slug: string }> {
-  if (workspace.cloudId) return { id: workspace.cloudId, slug: workspace.slug };
+  if (project.cloudId) return { id: project.cloudId, slug: project.slug };
   for (let attempt = 1; attempt <= 6; attempt += 1) {
-    const slug =
-      attempt === 1 ? workspace.slug : `${workspace.slug}-${attempt}`;
+    const slug = attempt === 1 ? project.slug : `${project.slug}-${attempt}`;
     try {
-      const created = await createWorkspace(record, {
+      const created = await createProject(record, {
         slug,
-        name: workspace.name,
+        name: project.name,
         ...(path ? { path } : {}),
       });
       // NOTE: Written down at once, before a single card is sent. This one
       // local write before the seal makes a stopped run resumable: the next
       // run continues into this board instead of making a second project with
       // half the cards in each.
-      store.updateWorkspace(workspace.id, { cloudId: created.id });
+      store.updateProject(project.id, { cloudId: created.id });
       return { id: created.id, slug: created.slug };
     } catch (error) {
       if (
@@ -312,40 +313,40 @@ const stopped = (reason: string) =>
  *
  * @throws On any failure before the seal, with the local board untouched.
  */
-export async function syncLocalWorkspace(
+export async function syncLocalProject(
   store: LocalStore,
   record: MachineRecord,
   localId: string,
   options: { path?: string | null } = {},
 ): Promise<SyncOutcome> {
-  const workspace = store.getWorkspace(localId);
-  if (!workspace || workspace.id !== localId)
+  const project = store.getProject(localId);
+  if (!project || project.id !== localId)
     throw new Error("That board is not on this machine.");
-  if (workspace.syncedAt && workspace.cloudId)
+  if (project.syncedAt && project.cloudId)
     throw new Error("This board was already moved to the cloud.");
 
   const target = await cloudTarget(
     store,
     record,
-    workspace,
+    project,
     options.path ?? null,
   );
 
   // A run that stopped after the seal, while marking the local copy, has
   // nothing left to send: the cloud owns the board already.
-  const sealedBefore = workspace.cloudId
+  const sealedBefore = project.cloudId
     ? await fetchBoardConfig(record, target.id)
         .then((config) => config.migratedAt)
         .catch(() => null)
     : null;
 
-  const planned = planSync(store, workspace);
+  const planned = planSync(store, project);
   const cloudIds = new Map<string, string>();
   let accounted = 0;
 
   if (!sealedBefore) {
     try {
-      await putBoardConfig(record, target.id, configOf(workspace));
+      await putBoardConfig(record, target.id, configOf(project));
     } catch (error) {
       throw stopped(error instanceof Error ? error.message : String(error));
     }
@@ -411,16 +412,12 @@ export async function syncLocalWorkspace(
     const cloudId = cloudIds.get(card.localId);
     if (!cloudId) continue;
     try {
-      store.updateWorkItem(
-        card.localId,
-        { cloudId },
-        { workspace: workspace.id },
-      );
+      store.updateWorkItem(card.localId, { cloudId }, { project: project.id });
     } catch {
       // A card's pointer is a convenience; the board's is what matters.
     }
   }
-  store.updateWorkspace(workspace.id, {
+  store.updateProject(project.id, {
     cloudId: target.id,
     syncedAt: new Date().toISOString(),
   });

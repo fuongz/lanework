@@ -161,7 +161,7 @@ interface SessionsOptions {
 }
 
 export interface SpawnRequest {
-  workspace: string;
+  project: string;
   /** The folder to start in, or null for the home folder. */
   cwd: string | null;
   cols: number;
@@ -263,13 +263,13 @@ function newSessionId(agent: TerminalAgent): string {
  */
 export function createSessions(options: SessionsOptions = {}) {
   const sessions = new Map<string, Session>();
-  const listeners = new Set<(workspace: string) => void>();
-  const limit = options.limit ?? TERMINAL_LIMITS.perWorkspace;
+  const listeners = new Set<(project: string) => void>();
+  const limit = options.limit ?? TERMINAL_LIMITS.perProject;
   const scrollback = options.scrollback ?? TERMINAL_LIMITS.scrollback;
   let seq = 0;
 
-  const changed = (workspace: string) => {
-    for (const listener of listeners) listener(workspace);
+  const changed = (project: string) => {
+    for (const listener of listeners) listener(project);
   };
 
   /**
@@ -347,7 +347,7 @@ export function createSessions(options: SessionsOptions = {}) {
     const agent = isTerminalKind(request.kind) && request.kind !== "shell";
     const count = [...sessions.values()].filter(
       (session) =>
-        session.info.workspace === request.workspace &&
+        session.info.project === request.project &&
         (session.info.kind !== "shell") === agent,
     ).length;
     if (count >= limit)
@@ -411,7 +411,7 @@ export function createSessions(options: SessionsOptions = {}) {
     const session: Session = {
       info: {
         id: randomUUID(),
-        workspace: request.workspace,
+        project: request.project,
         kind,
         shell: basename(shell.file),
         cwd: request.cwd,
@@ -484,9 +484,9 @@ export function createSessions(options: SessionsOptions = {}) {
               signal,
             });
       });
-      changed(session.info.workspace);
+      changed(session.info.project);
     });
-    changed(session.info.workspace);
+    changed(session.info.project);
     return copy(session);
   }
 
@@ -603,7 +603,7 @@ export function createSessions(options: SessionsOptions = {}) {
   }
 
   /**
-   * Put one workspace's tabs in the order given by a tab drag.
+   * Put one project's tabs in the order given by a tab drag.
    *
    * Kept HERE rather than in a window's memory: the host is what every view
    * lists from, so an order stored anywhere else would be lost to a reload
@@ -613,10 +613,10 @@ export function createSessions(options: SessionsOptions = {}) {
    *
    * @returns false when `ids` is not an array.
    */
-  function reorder(workspace: string, ids: unknown): boolean {
+  function reorder(project: string, ids: unknown): boolean {
     if (!Array.isArray(ids)) return false;
     const mine = [...sessions.values()]
-      .filter((session) => session.info.workspace === workspace)
+      .filter((session) => session.info.project === project)
       .sort((a, b) => a.seq - b.seq);
     const byId = new Map(mine.map((session) => [session.info.id, session]));
     const ordered: Session[] = [];
@@ -627,7 +627,7 @@ export function createSessions(options: SessionsOptions = {}) {
     for (const session of mine)
       if (!ordered.includes(session)) ordered.push(session);
     for (const session of ordered) session.seq = seq++;
-    changed(workspace);
+    changed(project);
     return true;
   }
 
@@ -645,7 +645,7 @@ export function createSessions(options: SessionsOptions = {}) {
     session.pty = null;
     session.viewers.clear();
     session.mirror.dispose();
-    changed(session.info.workspace);
+    changed(session.info.project);
     return true;
   }
 
@@ -653,9 +653,9 @@ export function createSessions(options: SessionsOptions = {}) {
     for (const id of [...sessions.keys()]) kill(id);
   }
 
-  function list(workspace?: string): TerminalSession[] {
+  function list(project?: string): TerminalSession[] {
     return [...sessions.values()]
-      .filter((session) => !workspace || session.info.workspace === workspace)
+      .filter((session) => !project || session.info.project === project)
       .sort((a, b) => a.seq - b.seq)
       .map(copy);
   }
@@ -665,12 +665,12 @@ export function createSessions(options: SessionsOptions = {}) {
    *
    * Main works that out from the CLIs' own files.
    *
-   * NOTE: Checked here as well: only a live agent tab of `workspace`, and
+   * NOTE: Checked here as well: only a live agent tab of `project`, and
    * only an id shaped like one. It is what a later resume is matched against.
    *
    * @returns whether any tab moved.
    */
-  function bind(workspace: string, bindings: unknown): boolean {
+  function bind(project: string, bindings: unknown): boolean {
     if (!Array.isArray(bindings)) return false;
     let moved = false;
     for (const binding of bindings as { id?: unknown; resume?: unknown }[]) {
@@ -678,7 +678,7 @@ export function createSessions(options: SessionsOptions = {}) {
         typeof binding?.id === "string" ? sessions.get(binding.id) : undefined;
       if (
         !session ||
-        session.info.workspace !== workspace ||
+        session.info.project !== project ||
         session.info.kind === "shell" ||
         session.info.exit ||
         !isAgentSessionIdOf(session.info.kind, binding.resume) ||
@@ -688,13 +688,13 @@ export function createSessions(options: SessionsOptions = {}) {
       session.info.resume = binding.resume;
       moved = true;
     }
-    if (moved) changed(workspace);
+    if (moved) changed(project);
     return moved;
   }
 
-  /** Tell `workspace`'s watchers to list again, though nothing moved here. */
-  function touch(workspace: string): true {
-    changed(workspace);
+  /** Tell `project`'s watchers to list again, though nothing moved here. */
+  function touch(project: string): true {
+    changed(project);
     return true;
   }
 
@@ -704,7 +704,7 @@ export function createSessions(options: SessionsOptions = {}) {
       .length;
   }
 
-  function onChanged(listener: (workspace: string) => void): () => void {
+  function onChanged(listener: (project: string) => void): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);
   }

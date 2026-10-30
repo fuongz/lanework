@@ -66,14 +66,14 @@ const FOLDED = 5;
  *   yet keeps the group, for its + (FE-26/D3).
  */
 export function AgentSessionsNav({
-  workspace,
+  project,
   slug,
   hasFolder,
   row,
   active,
   mini = false,
 }: {
-  workspace: string;
+  project: string;
   slug: string;
   /**
    * The folded rail's form: one icon per agent (running, then pinned, then
@@ -87,7 +87,7 @@ export function AgentSessionsNav({
   /** The rail's active-row classes. */
   active: string;
 }) {
-  const rail = useAgentRail(workspace, slug, hasFolder);
+  const rail = useAgentRail(project, slug, hasFolder);
   // Its conversations are still being read: the group's shape, so the rail
   // does not jump when they land.
   if (rail.loading && hasFolder && !mini)
@@ -125,7 +125,7 @@ export function AgentSessionsNav({
     );
   return (
     <AgentSessionsList
-      workspace={workspace}
+      project={project}
       slug={slug}
       hasFolder={hasFolder}
       row={row}
@@ -137,14 +137,14 @@ export function AgentSessionsNav({
 
 /** The full rail's Sessions group, and its dialogs. */
 function AgentSessionsList({
-  workspace,
+  project,
   slug,
   hasFolder,
   row,
   active: activeClass,
   rail,
 }: {
-  workspace: string;
+  project: string;
   slug: string;
   hasFolder: boolean;
   row: string;
@@ -204,7 +204,7 @@ function AgentSessionsList({
     return (
       <SessionRow
         key={key}
-        workspace={workspace}
+        project={project}
         slug={slug}
         session={session}
         running={rail.isRunning(session)}
@@ -343,7 +343,7 @@ function AgentSessionsList({
                     </span>
                   </ContextMenuTrigger>
                   <ContextMenuContent>
-                    <StopItem onStop={() => void stop(workspace, entry.id)} />
+                    <StopItem onStop={() => void stop(project, entry.id)} />
                   </ContextMenuContent>
                 </ContextMenu>
               </div>
@@ -431,7 +431,7 @@ function AgentSessionsList({
                 if (!deleting) return;
                 const { session } = deleting;
                 setDeleting({ session, busy: true, error: null });
-                remove(workspace, session).then(
+                remove(project, session).then(
                   () => {
                     setDeleting(null);
                     if (viewing === session.id)
@@ -469,7 +469,7 @@ function AgentSessionsList({
         </AlertDialogContent>
       </AlertDialog>
       <RenameAgentDialog
-        workspace={workspace}
+        project={project}
         session={renaming}
         onClose={() => setRenaming(null)}
       />

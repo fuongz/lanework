@@ -11,7 +11,7 @@ import { agentKey } from "#/stores/agent-sessions";
  * it is read once.
  */
 export function useConversationFacts(
-  workspace: string | null,
+  project: string | null,
   agent: TerminalAgent | null,
   id: string | null,
 ): AgentFacts | null {
@@ -22,17 +22,13 @@ export function useConversationFacts(
 
   useEffect(() => {
     const surface = window.desktop?.terminal;
-    if (!workspace || !agent || !id || !surface) return;
-    read(workspace, { agent, id });
+    if (!project || !agent || !id || !surface) return;
+    read(project, { agent, id });
     return surface.onAgentWritten((write) => {
-      if (
-        write.workspace === workspace &&
-        write.agent === agent &&
-        write.id === id
-      )
-        read(workspace, { agent, id });
+      if (write.project === project && write.agent === agent && write.id === id)
+        read(project, { agent, id });
     });
-  }, [read, workspace, agent, id]);
+  }, [read, project, agent, id]);
 
   return facts ?? null;
 }

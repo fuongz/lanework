@@ -20,7 +20,7 @@ import {
 import { sharedEngines } from "../conversation/engine";
 import { broadcast } from "../ipc";
 import { appHomeDir } from "../paths";
-import { terminalFolder } from "../workspaces";
+import { terminalFolder } from "../projects";
 import { listenControl, type SessionsControl } from "./control-server";
 import { setEngineTap } from "./engine-tap";
 import { teamLeadOf } from "./leads";
@@ -77,10 +77,10 @@ export function setJev(handlers: JevMainHandlers | null): void {
  * send to one directly.
  */
 export function workerFolderOf(
-  workspace: string,
+  project: string,
   conversation: string,
 ): string | null {
-  return orchestrator().workerFolder(workspace, conversation);
+  return orchestrator().workerFolder(project, conversation);
 }
 
 /** Whether an engine in `folder` runs a worker of a run: its own worktree. */
@@ -98,25 +98,25 @@ export function controlEndpoint(): string | null {
  * lead, never to the person (FE-100/O1).
  */
 export function isWorkerConversation(
-  workspace: string,
+  project: string,
   conversation: string,
 ): boolean {
-  return orchestrator().workerFolder(workspace, conversation) !== null;
+  return orchestrator().workerFolder(project, conversation) !== null;
 }
 
 export const orchestrationMain: OrchestrationMainHandlers = {
-  runs: (workspace) => orchestrator().runs(workspace),
-  run: (workspace, runId) => orchestrator().run(workspace, runId),
+  runs: (project) => orchestrator().runs(project),
+  run: (project, runId) => orchestrator().run(project, runId),
   approve: (proposal) => orchestrator().approve(proposal),
-  pause: (workspace, runId) => orchestrator().pause(workspace, runId),
-  resume: (workspace, runId) => orchestrator().resume(workspace, runId),
-  stop: (workspace, runId) => orchestrator().stop(workspace, runId),
-  cancelTask: (workspace, runId, taskId) =>
-    orchestrator().cancelTask(workspace, runId, taskId),
-  approveScope: (workspace, runId, taskId) =>
-    orchestrator().approveScope(workspace, runId, taskId),
-  leftovers: (workspace, runId) => orchestrator().leftovers(workspace, runId),
-  cleanUp: (workspace, runId) => orchestrator().cleanUp(workspace, runId),
+  pause: (project, runId) => orchestrator().pause(project, runId),
+  resume: (project, runId) => orchestrator().resume(project, runId),
+  stop: (project, runId) => orchestrator().stop(project, runId),
+  cancelTask: (project, runId, taskId) =>
+    orchestrator().cancelTask(project, runId, taskId),
+  approveScope: (project, runId, taskId) =>
+    orchestrator().approveScope(project, runId, taskId),
+  leftovers: (project, runId) => orchestrator().leftovers(project, runId),
+  cleanUp: (project, runId) => orchestrator().cleanUp(project, runId),
   control: (runId, call, requestId) =>
     orchestrator().control(runId, call, requestId),
 };

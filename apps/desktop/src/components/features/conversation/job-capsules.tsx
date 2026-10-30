@@ -173,12 +173,12 @@ function Capsule({
  */
 export function JobCapsules({
   slug,
-  workspace,
+  project,
   session,
   since,
 }: {
   slug: string;
-  workspace: string;
+  project: string;
   session: AgentSession | undefined;
   /** When the last prompt was sent, ISO: older finished jobs are not shown. */
   since: string | null;
@@ -187,7 +187,7 @@ export function JobCapsules({
   const live = useAgentSessions((state) => state.live);
   const any = (session?.background.total ?? 0) > 0;
   const { tasks } = useBackgroundTasks(
-    workspace,
+    project,
     session?.id ?? null,
     backgroundCue(session),
     any,

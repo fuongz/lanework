@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { basename, isAbsolute } from "node:path";
 import { app, BrowserWindow, dialog, shell } from "electron";
-import type { PickedFolder } from "../../../shared/workspaces";
+import type { PickedFolder } from "../../../shared/projects";
 import { folderExists } from "./local-folder";
 
 /**

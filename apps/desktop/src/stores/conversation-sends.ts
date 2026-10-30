@@ -90,18 +90,18 @@ export function useConversationSends(key: string) {
 }
 
 /** In-memory attachments and in-flight state survive navigation, not app exit. */
-export function useComposerDraft(workspace: string, draftKey?: string) {
+export function useComposerDraft(project: string, draftKey?: string) {
   const [local] = useState(() => newComposerStore());
   const store = useMemo(() => {
     if (!draftKey) return local;
-    const key = JSON.stringify([workspace, draftKey]);
+    const key = JSON.stringify([project, draftKey]);
     let found = drafts.get(key);
     if (!found) {
       found = newComposerStore(draftKey);
       drafts.set(key, found);
     }
     return found;
-  }, [workspace, draftKey, local]);
+  }, [project, draftKey, local]);
   const state = useStore(store);
   const setters = useMemo(() => {
     const field =

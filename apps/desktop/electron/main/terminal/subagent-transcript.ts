@@ -49,7 +49,7 @@ const META_MAX = 64 * 1024;
 
 /** What the viewer asks for, checked. */
 interface SubagentRequest {
-  workspace: string;
+  project: string;
   agent: TerminalAgent;
   conversation: string;
   sub: string;
@@ -71,14 +71,10 @@ interface SubagentRequest {
  */
 export function subagentRequest(args: unknown[]): SubagentRequest {
   if (args.length !== 4 && args.length !== 5)
-    throw new Error("A workspace, a conversation and a sub-agent are required");
-  const [workspace, agent, conversation, sub, run = null] = args;
-  if (
-    typeof workspace !== "string" ||
-    !workspace.trim() ||
-    workspace.length > 200
-  )
-    throw new Error("A valid workspace is required");
+    throw new Error("A project, a conversation and a sub-agent are required");
+  const [project, agent, conversation, sub, run = null] = args;
+  if (typeof project !== "string" || !project.trim() || project.length > 200)
+    throw new Error("A valid project is required");
   if (agent !== "claude" && agent !== "codex" && agent !== "opencode")
     throw new Error("A valid agent is required");
   if (!isAgentSessionIdOf(agent, conversation))
@@ -94,7 +90,7 @@ export function subagentRequest(args: unknown[]): SubagentRequest {
   if (run !== null && (agent !== "claude" || !isWorkflowRunId(run)))
     throw new Error("A valid workflow run is required");
   return {
-    workspace,
+    project,
     agent,
     conversation,
     sub,
@@ -669,7 +665,7 @@ async function codexSubagentFile(
 export async function readSubagentTranscript(
   home: string,
   folder: string,
-  { agent, conversation, sub, run }: Omit<SubagentRequest, "workspace">,
+  { agent, conversation, sub, run }: Omit<SubagentRequest, "project">,
 ): Promise<SubagentTranscript> {
   subagentRequest(["-", agent, conversation, sub, run ?? null]);
   if (agent === "opencode")

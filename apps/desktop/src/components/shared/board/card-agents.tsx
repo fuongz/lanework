@@ -3,8 +3,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
+import type { BoardMember, BoardPresence } from "#/../shared/projects";
 import type { AgentSession } from "#/../shared/terminal";
-import type { BoardMember, BoardPresence } from "#/../shared/workspaces";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import {
   TERMINAL_KIND_LABELS,
@@ -15,7 +15,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { relativeTime } from "#/lib/relative-time";
 import { useAgentSessions, workingOn } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
@@ -50,10 +50,10 @@ type CardAgent =
  */
 export function useCardAgents(card: CardRef): CardAgent[] {
   const { slug } = useParams({ strict: false }) as { slug?: string };
-  const workspace = useWorkspaceKey(slug);
+  const project = useProjectKey(slug);
   const sessions = useAgentSessions(
     useShallow((state) =>
-      workspace ? workingOn(state, workspace, card) : NO_SESSIONS,
+      project ? workingOn(state, project, card) : NO_SESSIONS,
     ),
   );
   const me = useSession(
@@ -66,10 +66,10 @@ export function useCardAgents(card: CardRef): CardAgent[] {
   );
   const rows = useBoardPresence(
     useShallow((state) =>
-      workspace
+      project
         ? cloudAgentsOn(
             state,
-            workspace,
+            project,
             card.id,
             me,
             sessions.map((session) => session.agent),
@@ -188,13 +188,13 @@ export function CardAgentsMark({
 export function CardAgentsLine({ card }: { card: CardRef }) {
   const agents = useCardAgents(card);
   const { slug } = useParams({ strict: false }) as { slug?: string };
-  const workspace = useWorkspaceKey(slug);
+  const project = useProjectKey(slug);
   const resume = useAgentTerminals((state) => state.resume);
   const navigate = useNavigate();
-  if (agents.length === 0 || !workspace || !slug) return null;
+  if (agents.length === 0 || !project || !slug) return null;
   const now = Date.now();
   const open = async (session: AgentSession) => {
-    const terminal = await resume(workspace, session);
+    const terminal = await resume(project, session);
     if (terminal)
       void navigate({
         to: "/w/$slug/agents/$terminalId",

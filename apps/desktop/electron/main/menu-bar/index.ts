@@ -60,7 +60,7 @@ export function installMenuBar(showWindow: () => void): void {
               showWindow();
               sendTerminalCommand({
                 type: "focus",
-                workspace: project.workspace,
+                project: project.project,
                 slug: project.slug,
                 href: item.href,
                 shellId: item.shellId,

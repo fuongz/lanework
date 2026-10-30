@@ -12,13 +12,13 @@ import { useAgentTerminals } from "#/stores/agent-terminals";
  *
  * @returns Why it could not, or null when the terminal is on screen.
  */
-export function useOpenInTerminal(slug: string, workspace: string) {
+export function useOpenInTerminal(slug: string, project: string) {
   const navigate = useNavigate();
   const resume = useAgentTerminals((state) => state.resume);
   return async (session: AgentSession): Promise<string | null> => {
     try {
-      await window.desktop?.conversation.release(workspace, session.id);
-      const next = await resume(workspace, session);
+      await window.desktop?.conversation.release(project, session.id);
+      const next = await resume(project, session);
       if (!next) return "Could not open a terminal.";
       void navigate({
         to: "/w/$slug/agents/$terminalId",

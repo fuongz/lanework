@@ -13,7 +13,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useBlocker, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import type { BoardAttachment, BoardCard } from "#/../shared/workspaces";
+import type { BoardAttachment, BoardCard } from "#/../shared/projects";
 import { AssignAgentButton } from "#/components/shared/board/assign-agent";
 import { CardAgentsLine } from "#/components/shared/board/card-agents";
 import { PriorityIcon, StatusIcon } from "#/components/shared/board/glyphs";
@@ -78,7 +78,7 @@ export function IssueDetail() {
   const filters = parseIssueSearch(useSearch({ from: "/_app/w/$slug/issues" }));
   const propertiesOpen = useIssueView((state) => state.propertiesOpen);
 
-  // NOTE: Keyed on the workspace too. Opening `FE-06` in one project and then
+  // NOTE: Keyed on the project too. Opening `FE-06` in one project and then
   // the same id in another would otherwise reuse the first project's card
   // while the second was still loading.
   useEffect(() => {

@@ -26,12 +26,12 @@ const RELIST_MS = 1_000;
  * one.
  */
 export function useBackgroundTasks(
-  workspace: string | null,
+  project: string | null,
   conversation: string | null,
   cue: string,
   enabled = true,
 ): { tasks: BackgroundTask[] | null; error: string | null } {
-  const key = `${workspace}:${conversation}`;
+  const key = `${project}:${conversation}`;
   const [state, setState] = useState<{
     key: string;
     tasks: BackgroundTask[] | null;
@@ -41,7 +41,7 @@ export function useBackgroundTasks(
   // biome-ignore lint/correctness/useExhaustiveDependencies: `cue` is the cue to read again
   useEffect(() => {
     const surface = window.desktop?.terminal;
-    if (!workspace || !conversation || !enabled || !surface) return;
+    if (!project || !conversation || !enabled || !surface) return;
     let gone = false;
     let reading = false;
     let again = false;
@@ -53,7 +53,7 @@ export function useBackgroundTasks(
       }
       reading = true;
       surface
-        .agentBackgroundTasks(workspace, conversation)
+        .agentBackgroundTasks(project, conversation)
         .then((tasks) => {
           if (!gone) setState({ key, tasks, error: null });
         })
@@ -77,7 +77,7 @@ export function useBackgroundTasks(
     read();
     const off = surface.onAgentActivity((activity) => {
       if (
-        activity.workspace !== workspace ||
+        activity.project !== project ||
         activity.agent !== "claude" ||
         activity.id !== conversation ||
         (activity.subagent && !isWorkflowAgentKey(activity.subagent)) ||
@@ -94,7 +94,7 @@ export function useBackgroundTasks(
       if (later) clearTimeout(later);
       off();
     };
-  }, [key, workspace, conversation, enabled, cue]);
+  }, [key, project, conversation, enabled, cue]);
 
   // Another conversation's, still on screen from before: none yet.
   return state.key === key
@@ -110,13 +110,13 @@ export function useBackgroundTasks(
  * `enabled`: a workflow has no output (FE-01).
  */
 export function useTaskOutput(
-  workspace: string | null,
+  project: string | null,
   conversation: string,
   task: string,
   running: boolean,
   enabled = true,
 ): { output: BackgroundTaskOutput | null; error: string | null } {
-  const key = `${workspace}:${conversation}/${task}`;
+  const key = `${project}:${conversation}/${task}`;
   const [state, setState] = useState<{
     key: string;
     output: BackgroundTaskOutput | null;
@@ -125,14 +125,14 @@ export function useTaskOutput(
 
   useEffect(() => {
     const surface = window.desktop?.terminal;
-    if (!workspace || !enabled || !surface) return;
+    if (!project || !enabled || !surface) return;
     let gone = false;
     let reading = false;
     const read = () => {
       if (reading) return;
       reading = true;
       surface
-        .agentTaskOutput(workspace, conversation, task)
+        .agentTaskOutput(project, conversation, task)
         .then((output) => {
           if (!gone) setState({ key, output, error: null });
         })
@@ -166,7 +166,7 @@ export function useTaskOutput(
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [key, workspace, conversation, task, running, enabled]);
+  }, [key, project, conversation, task, running, enabled]);
 
   return state.key === key
     ? { output: state.output, error: state.error }

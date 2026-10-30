@@ -2,7 +2,7 @@
 // and what comes back.
 //
 // NOTE: The renderer never names a command, a shell or a folder. It names a
-// workspace, and main resolves the folder a terminal opens in from the links
+// project, and main resolves the folder a terminal opens in from the links
 // it wrote down itself; the host picks the shell from the environment. A
 // compromised renderer can type into a terminal it was shown, which is what a
 // terminal is for. It cannot start one somewhere else.
@@ -44,10 +44,10 @@ export function isTerminalAgent(value: unknown): value is TerminalAgent {
 export interface TerminalSession {
   id: string;
   /**
-   * The workspace it belongs to: the cloud id, or the slug when there is
+   * The project it belongs to: the cloud id, or the slug when there is
    * none.
    */
-  workspace: string;
+  project: string;
   /** What it was opened as; an agent tab is still a shell underneath. */
   kind: TerminalKind;
   /** The shell's name for the tab: `zsh`, `bash`. */
@@ -91,7 +91,7 @@ export type CardBriefMode = (typeof CARD_BRIEFS)[number];
  *
  * NOTE: A card's name and a mode, never words for the prompt. The host writes
  * the prompt from a fixed template, and the board comes from main's own
- * knowledge of the workspace. Nothing typed into the CLI crosses from the
+ * knowledge of the project. Nothing typed into the CLI crosses from the
  * page except an id {@link isCardRef} accepts.
  */
 export interface CardBrief {
@@ -114,7 +114,7 @@ export function isCardRef(value: unknown): value is string {
   return typeof value === "string" && (TASK_ID.test(value) || UUID.test(value));
 }
 
-/** Whether `value` is a board's id (the cloud workspace's) for a prompt. */
+/** Whether `value` is a board's id (the cloud project's) for a prompt. */
 export function isBoardId(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
 }
@@ -646,7 +646,7 @@ export const AGENT_USAGE_DAYS = [7, 30] as const;
  * settle window.
  */
 export interface AgentWrite {
-  workspace: string;
+  project: string;
   agent: TerminalAgent;
   id: string;
   /** Epoch ms. */
@@ -674,7 +674,7 @@ export interface AgentCard {
  * row does not re-read the listing.
  */
 export interface AgentActivity {
-  workspace: string;
+  project: string;
   agent: TerminalAgent;
   id: string;
   working: boolean;
@@ -879,10 +879,10 @@ export interface OpenCodeUsage {
   error: "expired" | null;
 }
 
-/** What {@link DesktopTerminalApi.codexUsage} answers for a workspace. */
+/** What {@link DesktopTerminalApi.codexUsage} answers for a project. */
 export interface CodexUsage {
   quota: CodexQuota | null;
-  /** By thread id; only the workspace's listed Codex conversations'. */
+  /** By thread id; only the project's listed Codex conversations'. */
   goals: Record<string, CodexGoal>;
   /** Claude account metadata and limits, when available. */
   claude?: ClaudeUsage | null;
@@ -928,8 +928,8 @@ export function isAgentSessionIdOf(
 }
 
 export const TERMINAL_LIMITS = {
-  /** Tabs per workspace, exited ones included: they still hold a tab. */
-  perWorkspace: 8,
+  /** Tabs per project, exited ones included: they still hold a tab. */
+  perProject: 8,
   /** Columns and rows are clamped to 1…this. */
   maxGeometry: 1000,
   /** Lines the host keeps per terminal, and replays on re-attach. */
@@ -951,7 +951,7 @@ export const terminalChannels = {
   reorder: "terminal:reorder",
   /** Which agent CLIs this machine has, for the + menu. */
   agents: "terminal:agents",
-  /** The agent conversations kept for a workspace's folder. */
+  /** The agent conversations kept for a project's folder. */
   agentSessions: "terminal:agent-sessions",
   /** Name a conversation in Lanework only (FE-24/D1). */
   agentSessionRename: "terminal:agent-sessions:rename",
@@ -963,7 +963,7 @@ export const terminalChannels = {
   agentSessionDelete: "terminal:agent-sessions:delete",
   /** Archive a conversation in its CLI's own archive. */
   agentSessionArchive: "terminal:agent-sessions:archive",
-  /** The conversations archived for a workspace's folder. */
+  /** The conversations archived for a project's folder. */
   agentArchivedSessions: "terminal:agent-sessions:archived",
   /** Bring an archived conversation back. */
   agentSessionUnarchive: "terminal:agent-sessions:unarchive",
@@ -1011,7 +1011,7 @@ export type TerminalCommand =
   | "new"
   | {
       type: "focus";
-      workspace: string;
+      project: string;
       slug: string;
       href: string;
       shellId?: string;
@@ -1030,8 +1030,8 @@ export type TerminalHostMessage =
   | { t: "snapshot"; id: string; data: string }
   | { t: "data"; id: string; data: string }
   | { t: "exit"; id: string; code: number; signal: number | null }
-  /** A workspace's list changed: a spawn, an exit or a close. */
-  | { t: "changed"; workspace: string };
+  /** A project's list changed: a spawn, an exit or a close. */
+  | { t: "changed"; project: string };
 
 export interface TerminalViewHandlers {
   /** Replaces whatever the view drew: the screen as the host holds it. */
@@ -1041,21 +1041,21 @@ export interface TerminalViewHandlers {
 }
 
 export interface DesktopTerminalApi {
-  list: (workspace: string) => Promise<TerminalSession[]>;
+  list: (project: string) => Promise<TerminalSession[]>;
   /**
-   * Starts a shell for `workspace`, in its project folder.
+   * Starts a shell for `project`, in its project folder.
    *
    * An agent `kind` gets its CLI typed into the shell. The geometry is a
    * first guess; the view's attach sets the real one before anything is
    * drawn.
    *
-   * @param resume One of `agentSessions(workspace)` to continue; main refuses
+   * @param resume One of `agentSessions(project)` to continue; main refuses
    *   an id that listing does not have.
-   * @param card Starts a new agent on a card of this workspace's board, its
+   * @param card Starts a new agent on a card of this project's board, its
    *   first prompt written by the host. Never together with `resume`.
    */
   spawn: (
-    workspace: string,
+    project: string,
     cols: number,
     rows: number,
     kind?: TerminalKind,
@@ -1063,26 +1063,26 @@ export interface DesktopTerminalApi {
     card?: CardBrief,
   ) => Promise<TerminalSession>;
   /**
-   * The Claude and Codex conversations kept for `workspace`'s folder, newest
+   * The Claude and Codex conversations kept for `project`'s folder, newest
    * first; empty when the project has no folder here.
    */
-  agentSessions: (workspace: string) => Promise<AgentSession[]>;
+  agentSessions: (project: string) => Promise<AgentSession[]>;
   /**
    * Gives a conversation a name in Lanework, and answers the new listing.
    *
    * The CLI's files are never touched; an empty name goes back to the CLI's
-   * own title. Main refuses an id that `agentSessions(workspace)` does not
+   * own title. Main refuses an id that `agentSessions(project)` does not
    * have.
    */
   renameAgentSession: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     id: string,
     name: string,
   ) => Promise<AgentSession[]>;
   /** Pins or unpins a conversation, and answers the new listing. */
   pinAgentSession: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     id: string,
     pinned: boolean,
@@ -1092,7 +1092,7 @@ export interface DesktopTerminalApi {
    * listing. Binding is main's own, on `conversation.start`.
    */
   releaseAgentSessionConductor: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     id: string,
   ) => Promise<AgentSession[]>;
@@ -1102,7 +1102,7 @@ export interface DesktopTerminalApi {
    * Refused for one a tab is running. Answers the new listing.
    */
   deleteAgentSession: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     id: string,
   ) => Promise<AgentSession[]>;
@@ -1113,21 +1113,21 @@ export interface DesktopTerminalApi {
    * Refused for one a tab is running (FE-72/D5). Answers the new listing.
    */
   archiveAgentSession: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     id: string,
   ) => Promise<AgentSession[]>;
-  /** The conversations archived for `workspace`'s folder, newest first. */
-  archivedAgentSessions: (workspace: string) => Promise<ArchivedAgentSession[]>;
+  /** The conversations archived for `project`'s folder, newest first. */
+  archivedAgentSessions: (project: string) => Promise<ArchivedAgentSession[]>;
   /** Brings one back, and answers the new archived list. */
   unarchiveAgentSession: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     id: string,
   ) => Promise<ArchivedAgentSession[]>;
   /** Deletes an archived one for good, and answers the new archived list. */
   deleteArchivedAgentSession: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     id: string,
   ) => Promise<ArchivedAgentSession[]>;
@@ -1135,10 +1135,10 @@ export interface DesktopTerminalApi {
    * One of a conversation's sub-agents, read for the viewer.
    *
    * By ids only: main builds the path inside the CLI's own folder for
-   * `workspace`, and refuses an id of any other shape.
+   * `project`, and refuses an id of any other shape.
    */
   agentSubagent: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     conversation: string,
     sub: string,
@@ -1151,7 +1151,7 @@ export interface DesktopTerminalApi {
    * Running first, then newest first. By ids only, as `agentSubagent`.
    */
   agentBackgroundTasks: (
-    workspace: string,
+    project: string,
     conversation: string,
   ) => Promise<BackgroundTask[]>;
   /**
@@ -1162,7 +1162,7 @@ export interface DesktopTerminalApi {
    * it while running.
    */
   agentTaskOutput: (
-    workspace: string,
+    project: string,
     conversation: string,
     task: string,
   ) => Promise<BackgroundTaskOutput>;
@@ -1173,7 +1173,7 @@ export interface DesktopTerminalApi {
    *   longer running.
    */
   agentStopTask: (
-    workspace: string,
+    project: string,
     conversation: string,
     task: string,
   ) => Promise<{ stopped: number }>;
@@ -1182,14 +1182,14 @@ export interface DesktopTerminalApi {
    *
    * Main reads the folders and terminals itself; empty off macOS.
    */
-  ports: (workspace: string) => Promise<ListeningPort[]>;
+  ports: (project: string) => Promise<ListeningPort[]>;
   /**
    * Stops the process listening on a port of this project, and what it runs.
    *
    * Refused unless `pid` still listens there and started at `start`.
    */
   stopPort: (
-    workspace: string,
+    project: string,
     pid: number,
     start: string,
   ) => Promise<{ stopped: number }>;
@@ -1198,27 +1198,27 @@ export interface DesktopTerminalApi {
    * folded in.
    *
    * By ids only, as `agentSubagent`: main builds every path inside the CLI's
-   * own folder for `workspace`.
+   * own folder for `project`.
    */
   agentFiles: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     id: string,
   ) => Promise<AgentFiles>;
   /**
-   * Which of `workspace`'s conversations edited each file since HEAD's
+   * Which of `project`'s conversations edited each file since HEAD's
    * commit (FE-39/D2, D3); empty without a repository.
    */
-  agentFilesForWorktree: (workspace: string) => Promise<AgentFileMarks>;
+  agentFilesForWorktree: (project: string) => Promise<AgentFileMarks>;
   onAgentActivity: (listener: (activity: AgentActivity) => void) => () => void;
   /**
    * The Codex account's usage as its newest turn reported it, and the goals
-   * of `workspace`'s listed Codex conversations.
+   * of `project`'s listed Codex conversations.
    *
-   * By workspace only: main picks the files and the threads; a page names
+   * By project only: main picks the files and the threads; a page names
    * neither.
    */
-  codexUsage: (workspace: string) => Promise<CodexUsage>;
+  codexUsage: (project: string) => Promise<CodexUsage>;
   /**
    * Fetches Claude account usage now, skipping the cache: the popover's
    * refresh button.
@@ -1251,20 +1251,20 @@ export interface DesktopTerminalApi {
    * One conversation's numbers.
    *
    * By ids only, as `agentSubagent`: main builds the path inside the CLI's
-   * own folder for `workspace`.
+   * own folder for `project`.
    */
   agentFacts: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     id: string,
   ) => Promise<AgentFacts>;
   /**
-   * `workspace`'s agent usage over 7 and 30 days (FE-38/D6).
+   * `project`'s agent usage over 7 and 30 days (FE-38/D6).
    *
    * Reads the end of every recent transcript. Null when the project has no
    * folder here.
    */
-  agentUsage: (workspace: string) => Promise<AgentUsage | null>;
+  agentUsage: (project: string) => Promise<AgentUsage | null>;
   onAgentWritten: (listener: (write: AgentWrite) => void) => () => void;
   /**
    * The agent CLIs this machine has, asked of the user's own shell.
@@ -1276,13 +1276,13 @@ export interface DesktopTerminalApi {
   /** Stops a shell and drops its tab. */
   kill: (id: string) => Promise<void>;
   /**
-   * Puts a workspace's tabs in this order.
+   * Puts a project's tabs in this order.
    *
    * Kept by the host, so every window and every reload lists them the same
    * way. Ids it does not know are ignored, and a tab the list leaves out
    * keeps its place at the end.
    */
-  reorder: (workspace: string, ids: string[]) => Promise<void>;
+  reorder: (project: string, ids: string[]) => Promise<void>;
   /**
    * Streams one session into a view.
    *
@@ -1306,8 +1306,8 @@ export interface DesktopTerminalApi {
    */
   pathForFile: (file: File) => string;
   resize: (id: string, cols: number, rows: number) => void;
-  /** A workspace's sessions changed; `"*"` when every one may have. */
-  onChange: (listener: (workspace: string) => void) => () => void;
+  /** A project's sessions changed; `"*"` when every one may have. */
+  onChange: (listener: (project: string) => void) => () => void;
   onCommand: (listener: (command: TerminalCommand) => void) => () => void;
 }
 

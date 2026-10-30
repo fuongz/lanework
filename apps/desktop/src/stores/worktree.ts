@@ -304,7 +304,7 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       if (!slug || state?.kind !== "ready" || !surface) return;
       const mine = ++marksTicket;
       try {
-        // Main accepts the slug as a workspace key, as it does the cloud id.
+        // Main accepts the slug as a project key, as it does the cloud id.
         const agentMarks = await surface.agentFilesForWorktree(slug);
         if (mine !== marksTicket) return;
         set({ agentMarks });

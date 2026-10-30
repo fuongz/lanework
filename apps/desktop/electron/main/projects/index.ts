@@ -15,11 +15,11 @@ import {
   type LocalFolderState,
   type LocalSyncResult,
   type PickedFolder,
-  type Workspace,
-  type WorkspaceAnswer,
-  type WorkspaceSnapshot,
-  workspaceChannels,
-} from "../../../shared/workspaces";
+  type Project,
+  type ProjectAnswer,
+  type ProjectSnapshot,
+  projectChannels,
+} from "../../../shared/projects";
 import type { MachineRecord } from "../auth/store";
 import { broadcast, handle } from "../ipc";
 import {
@@ -27,9 +27,9 @@ import {
   attachFile,
   createCard,
   createComment,
-  createWorkspace,
+  createProject,
   deleteComment,
-  deleteWorkspace,
+  deleteProject,
   detachFile,
   editComment,
   fetchActivity,
@@ -40,8 +40,8 @@ import {
   fetchCheckpoint,
   fetchGroup,
   fetchPresence,
+  fetchProjects,
   fetchStats,
-  fetchWorkspaces,
   type GroupSpec,
   groupSpecs,
   importRecords,
@@ -49,8 +49,8 @@ import {
   moveCard,
   purgeIssues,
   putBoardConfig,
-  renameWorkspace,
-  reorderWorkspaces,
+  renameProject,
+  reorderProjects,
   replaceChecklist,
   sealBoardMigration,
   searchCards,
@@ -67,10 +67,10 @@ import {
   registerFolder,
   revealFolder,
 } from "./folder-chooser";
-import { workspaceIcon } from "./icon";
+import { projectIcon } from "./icon";
 import {
   cloudOnly,
-  findLocalWorkspace,
+  findLocalProject,
   localStore,
   watchLocalStore,
   writeLocal,
@@ -113,14 +113,14 @@ import {
   writeFolders,
   writeMigrationRun,
 } from "./store";
-import { syncLocalWorkspace } from "./sync-to-cloud";
+import { syncLocalProject } from "./sync-to-cloud";
 
 // Moved to `session.ts` (FE-82/D1); re-exported so the features that import
 // them from here keep compiling unchanged.
 export {
   authorizedRecord,
-  knownWorkspace,
-  menuBarWorkspaces,
+  knownProject,
+  menuBarProjects,
   projectFolders,
   terminalFolder,
 } from "./session";
@@ -138,22 +138,21 @@ const syncing = new Set<string>();
 async function syncToCloud(localId: string): Promise<LocalSyncResult> {
   const record = await authorizedRecord();
   const store = localStore();
-  const workspace = findLocalWorkspace(localId);
-  if (!store || !workspace)
-    throw new Error("That board is not on this machine.");
+  const project = findLocalProject(localId);
+  if (!store || !project) throw new Error("That board is not on this machine.");
   if (syncing.has(localId))
     throw new Error("This board is already being synced.");
   syncing.add(localId);
   try {
-    const paths = (await readFolders(LOCAL_RECORD))[workspace.slug] ?? [];
-    const outcome = await syncLocalWorkspace(store, record, localId, {
+    const paths = (await readFolders(LOCAL_RECORD))[project.slug] ?? [];
+    const outcome = await syncLocalProject(store, record, localId, {
       path: paths[0] ?? null,
     });
     await assertSameSession(record);
     // A fresh read: the account has a project it did not have a moment ago.
     forgetList();
     const listed = await load();
-    const cloud = listed.workspaces.find(
+    const cloud = listed.projects.find(
       (entry) => entry.id === outcome.cloudId && entry.origin !== "local",
     );
     const slug = cloud?.slug ?? outcome.cloudSlug;
@@ -172,21 +171,21 @@ async function syncToCloud(localId: string): Promise<LocalSyncResult> {
 }
 
 /**
- * The workspace list, and which one is selected.
+ * The project list, and which one is selected.
  *
- * NOTE: Selection is by CLOUD WORKSPACE ID, because every board call is
+ * NOTE: Selection is by CLOUD PROJECT ID, because every board call is
  * `/v1/boards/:workspaceId/…`. Remembering the slug instead would mean
  * resolving it to an id on every start, from a list that may not have loaded
  * yet. A `v1` file that still names a slug is resolved once and rewritten.
  */
-async function load(id?: string): Promise<WorkspaceSnapshot> {
+async function load(id?: string): Promise<ProjectSnapshot> {
   // Local mode lists the local boards and nothing else, and asks the control
   // plane nothing.
   if (await inLocalMode()) return loadLocal(id);
   const record = await authorizedRecord();
   // Local boards stay in the list, after the account's own (FE-52/D6a).
   const locals = await localList();
-  const matches = (entry: Workspace) => entry.id === id || entry.slug === id;
+  const matches = (entry: Project) => entry.id === id || entry.slug === id;
   const known = id !== undefined ? cachedList(record) : null;
   // A selection the remembered list does not know is read fresh: it may be a
   // project made on another machine since. A LOCAL selection needs no fresh
@@ -194,29 +193,28 @@ async function load(id?: string): Promise<WorkspaceSnapshot> {
   const cloud =
     known && (known.some(matches) || locals.some(matches))
       ? known
-      : await fetchWorkspaces(record);
+      : await fetchProjects(record);
   rememberList(record, cloud);
-  const workspaces = [...cloud, ...locals];
+  const projects = [...cloud, ...locals];
   const saved = await readActive(record);
   await assertSameSession(record);
 
   // NOTE: A selector is matched against the id AND the slug. The renderer
   // sends `id ?? slug`, and against a service that predates the id field
   // every id is null. Matching on the id alone would make every Open button
-  // answer "this workspace is no longer available", the one sentence that is
+  // answer "this project is no longer available", the one sentence that is
   // certainly false when the row was just listed.
   const selector = id ?? saved?.value;
   const active =
     (selector
-      ? workspaces.find(
-          (workspace) =>
-            workspace.id === selector || workspace.slug === selector,
+      ? projects.find(
+          (project) => project.id === selector || project.slug === selector,
         )
       : undefined) ?? null;
 
   if (id !== undefined && !active)
     throw new Error(
-      "This workspace is no longer available. Refresh the list and choose another.",
+      "This project is no longer available. Refresh the list and choose another.",
     );
   // Write when the caller chose one, when an older shape was just resolved,
   // or when what was saved no longer exists.
@@ -226,19 +224,19 @@ async function load(id?: string): Promise<WorkspaceSnapshot> {
       slug: active?.slug ?? null,
     });
   await assertSameSession(record);
-  return { workspaces, active };
+  return { projects, active };
 }
 
 /** The counts under `query`, and the unfiltered total the rail shows. */
 async function countsFor(
   record: MachineRecord,
-  workspaceId: string,
+  projectId: string,
   query: BoardQuery,
 ): Promise<{ stats: BoardStats; total: number } | null> {
   const filtered = Object.values(query.filters).some(Boolean);
   const [stats, all] = await Promise.all([
-    fetchStats(record, workspaceId, query.filters),
-    filtered ? fetchStats(record, workspaceId, {}) : null,
+    fetchStats(record, projectId, query.filters),
+    filtered ? fetchStats(record, projectId, {}) : null,
   ]);
   if (!stats) return null;
   return { stats, total: (all ?? stats).total };
@@ -262,15 +260,15 @@ async function countsFor(
  *   that has not been deployed yet.
  */
 async function board(
-  workspaceId: string,
+  projectId: string,
   query: BoardQuery = DEFAULT_BOARD_QUERY,
 ): Promise<BoardView> {
   const record = await authorizedRecord();
   const startedAt = Date.now();
   try {
-    const saved = await readBoardCache(record, workspaceId);
-    const configRead = fetchBoardConfig(record, workspaceId);
-    const countsRead = countsFor(record, workspaceId, query);
+    const saved = await readBoardCache(record, projectId);
+    const configRead = fetchBoardConfig(record, projectId);
+    const countsRead = countsFor(record, projectId, query);
     // Settled into the read below; a failure here must not go unhandled
     // while the groups are still out.
     configRead.catch(() => undefined);
@@ -280,7 +278,7 @@ async function board(
       Promise.all(
         specs.map(async (spec) => ({
           spec,
-          page: await fetchGroup(record, workspaceId, spec),
+          page: await fetchGroup(record, projectId, spec),
         })),
       );
     const planned = saved
@@ -322,12 +320,12 @@ async function board(
         ]),
       );
     } else {
-      cards = await fetchCards(record, workspaceId);
+      cards = await fetchCards(record, projectId);
       groups = undefined;
     }
     await assertSameSession(record);
     const view: BoardView = {
-      workspaceId,
+      projectId,
       columns: config.columns,
       categories: config.categories,
       labels: config.labels,
@@ -342,7 +340,7 @@ async function board(
       groups,
       head,
     };
-    await writeBoardCache(record, workspaceId, view);
+    await writeBoardCache(record, projectId, view);
     return view;
   } catch (error) {
     // Logged even though the caller is answered normally. Serving the cache
@@ -357,18 +355,18 @@ async function board(
     // message itself is the information, and a stack of normal code is to
     // find a bug, which nobody here believes happened.
     console.warn(
-      `[board] ${workspaceId.slice(0, 8)} fell back to the cache after ${
+      `[board] ${projectId.slice(0, 8)} fell back to the cache after ${
         Date.now() - startedAt
       }ms: ${error instanceof Error ? error.message : String(error)}`,
     );
-    const cached = await readBoardCache(record, workspaceId);
+    const cached = await readBoardCache(record, projectId);
     if (cached) return cached;
     throw error;
   }
 }
 
 /**
- * Whether this workspace has a folder on this machine, and what is in it.
+ * Whether this project has a folder on this machine, and what is in it.
  *
  * A linked folder that has since moved is `missing`, not `none`. Answering
  * "no folder linked" would invite the user to link it again, and tell them
@@ -388,23 +386,23 @@ async function folderState(slug: string): Promise<LocalFolderState> {
 }
 
 const NO_FOLDER =
-  "No folder is linked to this workspace on this machine. Choose one first.";
+  "No folder is linked to this project on this machine. Choose one first.";
 
-/** The migration plan for whichever folder is linked to this workspace. */
-async function planFor(workspaceId: string): Promise<{
+/** The migration plan for whichever folder is linked to this project. */
+async function planFor(projectId: string): Promise<{
   plan: Awaited<ReturnType<typeof planMigration>> | null;
   folder: string | null;
 }> {
   const record = await authorizedRecord();
-  const { workspaces } = await load();
+  const { projects } = await load();
   // NOTE: Matched on the id OR the slug, because the link is keyed by slug and
   // the caller addresses a board by id. Looking up one from the other here
   // keeps the renderer from having to know both.
-  const workspace = workspaces.find(
-    (entry) => entry.id === workspaceId || entry.slug === workspaceId,
+  const project = projects.find(
+    (entry) => entry.id === projectId || entry.slug === projectId,
   );
-  const folder = workspace
-    ? ((await readFolders(record))[workspace.slug]?.[0] ?? null)
+  const folder = project
+    ? ((await readFolders(record))[project.slug]?.[0] ?? null)
     : null;
   if (!folder) return { plan: null, folder: null };
   return { plan: await planMigration(folder), folder };
@@ -425,46 +423,46 @@ function sealableCount(summary: Record<string, number>): number {
   );
 }
 
-export function registerWorkspaces(devUrl?: string): void {
+export function registerProjects(devUrl?: string): void {
   // NOTE: The two reads answer a RESULT, not a rejection: the board being
   // unreachable is a normal state (offline, the laptop reading a local
   // board), and the renderer already turns `message` into what is on
   // screen. Thrown invokes would make Electron print `Error occurred in
   // handler` here for an error a person has already seen in the app.
-  const answer = async (snapshot: () => Promise<WorkspaceSnapshot>) => {
+  const answer = async (snapshot: () => Promise<ProjectSnapshot>) => {
     try {
-      return { ok: true, snapshot: await snapshot() } as WorkspaceAnswer;
+      return { ok: true, snapshot: await snapshot() } as ProjectAnswer;
     } catch (error) {
       return {
         ok: false,
         message: error instanceof Error ? error.message : String(error),
-      } as WorkspaceAnswer;
+      } as ProjectAnswer;
     }
   };
-  handle(workspaceChannels.load, devUrl, (args) => {
+  handle(projectChannels.load, devUrl, (args) => {
     if (args.length) throw new Error("This operation takes no arguments");
     return answer(load);
   });
-  handle(workspaceChannels.select, devUrl, (args) => {
+  handle(projectChannels.select, devUrl, (args) => {
     const [id] = requireId(args, 1);
     return answer(() => load(id));
   });
-  handle(workspaceChannels.icon, devUrl, async (args) => {
-    const [workspaceId] = requireId(args.slice(0, 1), 1);
+  handle(projectChannels.icon, devUrl, async (args) => {
+    const [projectId] = requireId(args.slice(0, 1), 1);
     const key = args[1];
     if (
       args.length !== 2 ||
       !(key === null || (typeof key === "string" && key.length <= 300))
     )
-      throw new Error("A valid workspace is required");
+      throw new Error("A valid project is required");
     // A local board has no icon: the service is what reads one.
-    if (await localTarget(workspaceId)) return null;
-    return workspaceIcon(await authorizedRecord(), workspaceId, key);
+    if (await localTarget(projectId)) return null;
+    return projectIcon(await authorizedRecord(), projectId, key);
   });
   handle(
-    workspaceChannels.createWorkspace,
+    projectChannels.createProject,
     devUrl,
-    async (args): Promise<WorkspaceSnapshot> => {
+    async (args): Promise<ProjectSnapshot> => {
       if (
         args.length > 2 ||
         typeof args[0] !== "string" ||
@@ -481,18 +479,18 @@ export function registerWorkspaces(devUrl?: string): void {
       // machine, linked to its folders, and opened, like the cloud one.
       if (await inLocalMode()) {
         const created = writeLocal((store) =>
-          store.createWorkspace({ name, slug: slugify(name) }),
+          store.createProject({ name, slug: slugify(name) }),
         );
         if (paths.length) await writeFolders(LOCAL_RECORD, created.slug, paths);
         return load(created.id);
       }
       const record = await authorizedRecord();
-      const created = await createWorkspace(record, {
+      const created = await createProject(record, {
         slug: slugify(name),
         name,
         // NOTE: The PRIMARY folder, so the account records where this project
         // lives on this machine from the moment it exists. Every other
-        // surface reads that back as `workspace.path`; leaving it unset would
+        // surface reads that back as `project.path`; leaving it unset would
         // make a project created here look, to a second machine, like one
         // nobody has a checkout of.
         ...(paths[0] ? { path: paths[0] } : {}),
@@ -511,11 +509,11 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.renameWorkspace,
+    projectChannels.renameProject,
     devUrl,
-    async (args): Promise<WorkspaceSnapshot> => {
+    async (args): Promise<ProjectSnapshot> => {
       // Its own check rather than `requireId`: that helper's message names a
-      // workspace and a card, and the second argument here is a human's typing.
+      // project and a card, and the second argument here is a human's typing.
       if (
         args.length !== 2 ||
         !args.every(
@@ -527,11 +525,11 @@ export function registerWorkspaces(devUrl?: string): void {
       if (await localTarget(id)) {
         // NOTE: The NAME only, as on the cloud: the folder link is keyed by
         // slug, and a rename that moved the slug would strand it.
-        writeLocal((store) => store.updateWorkspace(id, { name: name.trim() }));
+        writeLocal((store) => store.updateProject(id, { name: name.trim() }));
         return load();
       }
       const record = await authorizedRecord();
-      await renameWorkspace(record, id, name.trim());
+      await renameProject(record, id, name.trim());
       // NOTE: `load()`, NOT `load(id)`. Passing the id would write it down as
       // the selection, so renaming a project from Settings would quietly open
       // it — and the one being renamed is usually not the one on screen.
@@ -542,9 +540,9 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.reorderWorkspaces,
+    projectChannels.reorderProjects,
     devUrl,
-    async (args): Promise<WorkspaceSnapshot> => {
+    async (args): Promise<ProjectSnapshot> => {
       const [ids] = args;
       if (
         args.length !== 1 ||
@@ -558,20 +556,18 @@ export function registerWorkspaces(devUrl?: string): void {
       // projects, oldest first — and the service refuses an order naming an
       // id it does not hold, so only the cloud ids are sent.
       if (await inLocalMode()) return load();
-      const cloudIds = (ids as string[]).filter(
-        (id) => !findLocalWorkspace(id),
-      );
+      const cloudIds = (ids as string[]).filter((id) => !findLocalProject(id));
       const record = await authorizedRecord();
-      if (cloudIds.length) await reorderWorkspaces(record, cloudIds);
+      if (cloudIds.length) await reorderProjects(record, cloudIds);
       // `load()`, not `load(id)`: a fresh read, in the order the service now
       // answers with, and no change to which project is open.
       return load();
     },
   );
   handle(
-    workspaceChannels.deleteWorkspace,
+    projectChannels.deleteProject,
     devUrl,
-    async (args): Promise<WorkspaceSnapshot> => {
+    async (args): Promise<ProjectSnapshot> => {
       // NOTE: BOTH keys, and they are not redundant. The service deletes by
       // cloud id — a slug is refused with a 400 — while the folder link on
       // this machine is keyed by slug, and main holds no id→slug map to
@@ -581,12 +577,12 @@ export function registerWorkspaces(devUrl?: string): void {
       if (local) {
         // A tombstone: its cards stay in the file, unreachable, like the
         // cloud's own delete leaves an audit trail behind.
-        writeLocal((store) => store.deleteWorkspace(id));
-        await writeFolders(LOCAL_RECORD, local.workspace.slug, null);
+        writeLocal((store) => store.deleteProject(id));
+        await writeFolders(LOCAL_RECORD, local.project.slug, null);
         return load();
       }
       const record = await authorizedRecord();
-      await deleteWorkspace(record, id);
+      await deleteProject(record, id);
       // `load` re-reads the account and drops a saved selection that no longer
       // exists, which is the state deleting the open project leaves.
       const snapshot = await load();
@@ -596,7 +592,7 @@ export function registerWorkspaces(devUrl?: string): void {
       // nothing and replies 200. Trusting that would report a success that
       // never happened and take the folder link with it, leaving a project on
       // the account that this machine can no longer point at anything.
-      if (snapshot.workspaces.some((workspace) => workspace.id === id))
+      if (snapshot.projects.some((project) => project.id === id))
         throw new Error(
           "The service did not delete that project. Update it, then try again.",
         );
@@ -608,20 +604,20 @@ export function registerWorkspaces(devUrl?: string): void {
       return snapshot;
     },
   );
-  handle(workspaceChannels.board, devUrl, async (args) => {
+  handle(projectChannels.board, devUrl, async (args) => {
     if (args.length < 1 || args.length > 2)
-      throw new Error("A valid workspace is required");
-    const [workspaceId] = requireId(args.slice(0, 1), 1);
+      throw new Error("A valid project is required");
+    const [projectId] = requireId(args.slice(0, 1), 1);
     const query = requireQuery(args[1]);
-    const local = await localTarget(workspaceId);
+    const local = await localTarget(projectId);
     if (local) return local.view(query);
-    return board(workspaceId, query);
+    return board(projectId, query);
   });
-  handle(workspaceChannels.search, devUrl, async (args) => {
+  handle(projectChannels.search, devUrl, async (args) => {
     // The query is typing, not an id: `..` is a search like any other, so
-    // only the workspace goes through `requireId`.
-    if (args.length !== 2) throw new Error("A valid workspace is required");
-    const [workspaceId] = requireId(args.slice(0, 1), 1);
+    // only the project goes through `requireId`.
+    if (args.length !== 2) throw new Error("A valid project is required");
+    const [projectId] = requireId(args.slice(0, 1), 1);
     const query = args[1];
     if (
       typeof query !== "string" ||
@@ -629,95 +625,91 @@ export function registerWorkspaces(devUrl?: string): void {
       query.length > 100
     )
       throw new Error("A search is 2 to 100 characters");
-    const local = await localTarget(workspaceId);
+    const local = await localTarget(projectId);
     if (local) return local.search(query.trim());
-    return searchCards(await authorizedRecord(), workspaceId, query.trim());
+    return searchCards(await authorizedRecord(), projectId, query.trim());
   });
-  handle(workspaceChannels.more, devUrl, async (args) => {
+  handle(projectChannels.more, devUrl, async (args) => {
     if (args.length !== 4) throw new Error("A valid board group is required");
-    const [workspaceId, group, cursor] = requireId(
+    const [projectId, group, cursor] = requireId(
       [args[0], args[2], args[3]],
       3,
     );
     const query = requireQuery(args[1]);
-    const local = await localTarget(workspaceId);
+    const local = await localTarget(projectId);
     if (local) return local.more();
     const record = await authorizedRecord();
     // NOTE: The group is re-derived from the board's lanes rather than trusted
     // as a URL fragment: a renderer can only ask for a group its query draws.
-    const config = await readBoardCache(record, workspaceId);
+    const config = await readBoardCache(record, projectId);
     const spec = groupSpecs(
       query,
       config?.columns ?? [],
       config?.categories ?? [],
     ).find((entry) => entry.key === group);
     if (!spec) throw new Error("That group is not on this board");
-    return fetchGroup(record, workspaceId, spec, cursor);
+    return fetchGroup(record, projectId, spec, cursor);
   });
-  handle(workspaceChannels.stats, devUrl, async (args) => {
-    if (args.length !== 2) throw new Error("A valid workspace is required");
-    const [workspaceId] = requireId(args.slice(0, 1), 1);
+  handle(projectChannels.stats, devUrl, async (args) => {
+    if (args.length !== 2) throw new Error("A valid project is required");
+    const [projectId] = requireId(args.slice(0, 1), 1);
     const query = requireQuery(args[1]);
-    const local = await localTarget(workspaceId);
+    const local = await localTarget(projectId);
     if (local) return local.stats(query);
-    return countsFor(await authorizedRecord(), workspaceId, query);
+    return countsFor(await authorizedRecord(), projectId, query);
   });
-  handle(workspaceChannels.presence, devUrl, async (args) => {
-    const [workspaceId] = requireId(args, 1);
-    if (await localTarget(workspaceId)) cloudOnly("Agent presence");
-    return fetchPresence(await authorizedRecord(), workspaceId);
+  handle(projectChannels.presence, devUrl, async (args) => {
+    const [projectId] = requireId(args, 1);
+    if (await localTarget(projectId)) cloudOnly("Agent presence");
+    return fetchPresence(await authorizedRecord(), projectId);
   });
-  handle(workspaceChannels.checkpoint, devUrl, async (args) => {
-    const [workspaceId, cardId] = requireId(args, 2);
-    const local = await localTarget(workspaceId);
+  handle(projectChannels.checkpoint, devUrl, async (args) => {
+    const [projectId, cardId] = requireId(args, 2);
+    const local = await localTarget(projectId);
     if (local) return local.checkpoint(cardId);
-    return fetchCheckpoint(await authorizedRecord(), workspaceId, cardId);
+    return fetchCheckpoint(await authorizedRecord(), projectId, cardId);
   });
-  handle(workspaceChannels.card, devUrl, async (args): Promise<BoardCard> => {
-    const [workspaceId, cardId] = requireId(args, 2);
-    const local = await localTarget(workspaceId);
+  handle(projectChannels.card, devUrl, async (args): Promise<BoardCard> => {
+    const [projectId, cardId] = requireId(args, 2);
+    const local = await localTarget(projectId);
     if (local) return local.card(cardId);
-    return fetchCard(await authorizedRecord(), workspaceId, cardId);
+    return fetchCard(await authorizedRecord(), projectId, cardId);
   });
   handle(
-    workspaceChannels.lookup,
+    projectChannels.lookup,
     devUrl,
     async (args): Promise<BoardCard | null> => {
-      const [workspaceId, taskId] = requireId(args, 2);
-      const local = await localTarget(workspaceId);
+      const [projectId, taskId] = requireId(args, 2);
+      const local = await localTarget(projectId);
       if (local) return local.lookup(taskId);
-      return lookupCard(await authorizedRecord(), workspaceId, taskId);
+      return lookupCard(await authorizedRecord(), projectId, taskId);
     },
   );
-  handle(
-    workspaceChannels.update,
-    devUrl,
-    async (args): Promise<BoardWrite> => {
-      if (
-        args.length !== 4 ||
-        typeof args[3] !== "number" ||
-        !Number.isInteger(args[3])
-      )
-        throw new Error("A card, an edit and a revision are required");
-      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
-      // NOTE: Parsed BEFORE the session is resolved. Inline as an argument it
-      // would run after `await authorizedRecord()`, so a malformed edit from a
-      // signed-out window would be answered "sign in" — advice that cannot
-      // fix it, and which hides a caller's bug behind a state the caller will
-      // eventually leave.
-      const patch = parsePatch(args[2]);
-      const local = await localTarget(workspaceId);
-      if (local) return local.update(cardId, patch, args[3]);
-      return updateCard(
-        await authorizedRecord(),
-        workspaceId,
-        cardId,
-        patch,
-        args[3],
-      );
-    },
-  );
-  handle(workspaceChannels.move, devUrl, async (args): Promise<BoardWrite> => {
+  handle(projectChannels.update, devUrl, async (args): Promise<BoardWrite> => {
+    if (
+      args.length !== 4 ||
+      typeof args[3] !== "number" ||
+      !Number.isInteger(args[3])
+    )
+      throw new Error("A card, an edit and a revision are required");
+    const [projectId, cardId] = requireId(args.slice(0, 2), 2);
+    // NOTE: Parsed BEFORE the session is resolved. Inline as an argument it
+    // would run after `await authorizedRecord()`, so a malformed edit from a
+    // signed-out window would be answered "sign in" — advice that cannot
+    // fix it, and which hides a caller's bug behind a state the caller will
+    // eventually leave.
+    const patch = parsePatch(args[2]);
+    const local = await localTarget(projectId);
+    if (local) return local.update(cardId, patch, args[3]);
+    return updateCard(
+      await authorizedRecord(),
+      projectId,
+      cardId,
+      patch,
+      args[3],
+    );
+  });
+  handle(projectChannels.move, devUrl, async (args): Promise<BoardWrite> => {
     // NOTE: Four arguments always. `columnKey` is null for a reorder inside
     // one lane and `placement` is null for an append, and a channel whose
     // argument count varied would make "is this call well-formed?"
@@ -726,23 +718,23 @@ export function registerWorkspaces(devUrl?: string): void {
       throw new Error("A card and a destination are required");
     if (!(args[2] === null || typeof args[2] === "string"))
       throw new Error("A card and a destination are required");
-    const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+    const [projectId, cardId] = requireId(args.slice(0, 2), 2);
     const columnKey = args[2] === null ? null : requireId([args[2]], 1)[0];
     const placement = parsePlacement(args[3]);
     if (columnKey === null && !placement)
       throw new Error("A move needs a column or a placement");
-    const local = await localTarget(workspaceId);
+    const local = await localTarget(projectId);
     if (local) return local.move(cardId, columnKey, placement);
     return moveCard(
       await authorizedRecord(),
-      workspaceId,
+      projectId,
       cardId,
       columnKey,
       placement,
     );
   });
   handle(
-    workspaceChannels.changes,
+    projectChannels.changes,
     devUrl,
     async (args): Promise<BoardChanges> => {
       if (
@@ -751,41 +743,37 @@ export function registerWorkspaces(devUrl?: string): void {
         !Number.isInteger(args[1]) ||
         args[1] < 0
       )
-        throw new Error("A workspace and a cursor are required");
-      const [workspaceId] = requireId(args.slice(0, 1), 1);
-      const local = await localTarget(workspaceId);
+        throw new Error("A project and a cursor are required");
+      const [projectId] = requireId(args.slice(0, 1), 1);
+      const local = await localTarget(projectId);
       if (local) return local.changes(args[1]);
-      return fetchChanges(await authorizedRecord(), workspaceId, args[1]);
+      return fetchChanges(await authorizedRecord(), projectId, args[1]);
     },
   );
-  handle(
-    workspaceChannels.toggle,
-    devUrl,
-    async (args): Promise<BoardWrite> => {
-      if (
-        args.length !== 5 ||
-        typeof args[3] !== "boolean" ||
-        typeof args[4] !== "number" ||
-        !Number.isInteger(args[4])
-      )
-        throw new Error(
-          "A card, a checklist key, a state and a revision are required",
-        );
-      const [workspaceId, cardId, key] = requireId(args.slice(0, 3), 3);
-      const local = await localTarget(workspaceId);
-      if (local) return local.toggle(cardId, key, args[3], args[4]);
-      return toggleChecklistItem(
-        await authorizedRecord(),
-        workspaceId,
-        cardId,
-        key,
-        args[3],
-        args[4],
+  handle(projectChannels.toggle, devUrl, async (args): Promise<BoardWrite> => {
+    if (
+      args.length !== 5 ||
+      typeof args[3] !== "boolean" ||
+      typeof args[4] !== "number" ||
+      !Number.isInteger(args[4])
+    )
+      throw new Error(
+        "A card, a checklist key, a state and a revision are required",
       );
-    },
-  );
+    const [projectId, cardId, key] = requireId(args.slice(0, 3), 3);
+    const local = await localTarget(projectId);
+    if (local) return local.toggle(cardId, key, args[3], args[4]);
+    return toggleChecklistItem(
+      await authorizedRecord(),
+      projectId,
+      cardId,
+      key,
+      args[3],
+      args[4],
+    );
+  });
   handle(
-    workspaceChannels.setChecklist,
+    projectChannels.setChecklist,
     devUrl,
     async (args): Promise<BoardWrite> => {
       if (
@@ -794,15 +782,15 @@ export function registerWorkspaces(devUrl?: string): void {
         !Number.isInteger(args[3])
       )
         throw new Error("A card, a checklist and a revision are required");
-      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      const [projectId, cardId] = requireId(args.slice(0, 2), 2);
       // Shape first, session second: a malformed list is the caller's bug and
       // must not be reported as "sign in".
       const items = parseChecklistDraft(args[2]);
-      const local = await localTarget(workspaceId);
+      const local = await localTarget(projectId);
       if (local) return local.setChecklist(cardId, items, args[3]);
       return replaceChecklist(
         await authorizedRecord(),
-        workspaceId,
+        projectId,
         cardId,
         items,
         args[3],
@@ -810,7 +798,7 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.activity,
+    projectChannels.activity,
     devUrl,
     async (args): Promise<BoardActivityPage> => {
       // NOTE: Three arguments always, with `null` for "the first page". The
@@ -821,129 +809,117 @@ export function registerWorkspaces(devUrl?: string): void {
         !(args[2] === null || typeof args[2] === "string")
       )
         throw new Error("A card and a cursor are required");
-      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
-      if (await localTarget(workspaceId)) cloudOnly("A card's activity");
+      const [projectId, cardId] = requireId(args.slice(0, 2), 2);
+      if (await localTarget(projectId)) cloudOnly("A card's activity");
       return fetchActivity(
         await authorizedRecord(),
-        workspaceId,
+        projectId,
         cardId,
         args[2],
       );
     },
   );
   handle(
-    workspaceChannels.comment,
+    projectChannels.comment,
     devUrl,
     async (args): Promise<{ id: string }> => {
-      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
+      const [projectId, cardId] = requireId(args.slice(0, 2), 2);
       const body = commentBody(args, 3);
-      if (await localTarget(workspaceId)) cloudOnly("Commenting");
-      return createComment(await authorizedRecord(), workspaceId, cardId, body);
+      if (await localTarget(projectId)) cloudOnly("Commenting");
+      return createComment(await authorizedRecord(), projectId, cardId, body);
     },
   );
-  handle(workspaceChannels.commentEdit, devUrl, async (args): Promise<void> => {
-    const [workspaceId, cardId, commentId] = requireId(args.slice(0, 3), 3);
+  handle(projectChannels.commentEdit, devUrl, async (args): Promise<void> => {
+    const [projectId, cardId, commentId] = requireId(args.slice(0, 3), 3);
     const body = commentBody(args, 4);
-    if (await localTarget(workspaceId)) cloudOnly("Commenting");
+    if (await localTarget(projectId)) cloudOnly("Commenting");
     return editComment(
       await authorizedRecord(),
-      workspaceId,
+      projectId,
       cardId,
       commentId,
       body,
     );
   });
-  handle(
-    workspaceChannels.commentDelete,
-    devUrl,
-    async (args): Promise<void> => {
-      const [workspaceId, cardId, commentId] = requireId(args, 3);
-      if (await localTarget(workspaceId)) cloudOnly("Commenting");
-      return deleteComment(
-        await authorizedRecord(),
-        workspaceId,
-        cardId,
-        commentId,
-      );
-    },
-  );
-  handle(
-    workspaceChannels.subscribe,
-    devUrl,
-    async (args): Promise<boolean> => {
-      if (args.length !== 3 || typeof args[2] !== "boolean")
-        throw new Error("A card and a state are required");
-      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
-      if (await localTarget(workspaceId)) cloudOnly("Following a card");
-      return setSubscription(
-        await authorizedRecord(),
-        workspaceId,
-        cardId,
-        args[2],
-      );
-    },
-  );
-  handle(workspaceChannels.favorite, devUrl, async (args): Promise<boolean> => {
+  handle(projectChannels.commentDelete, devUrl, async (args): Promise<void> => {
+    const [projectId, cardId, commentId] = requireId(args, 3);
+    if (await localTarget(projectId)) cloudOnly("Commenting");
+    return deleteComment(
+      await authorizedRecord(),
+      projectId,
+      cardId,
+      commentId,
+    );
+  });
+  handle(projectChannels.subscribe, devUrl, async (args): Promise<boolean> => {
     if (args.length !== 3 || typeof args[2] !== "boolean")
       throw new Error("A card and a state are required");
-    const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
-    if (await localTarget(workspaceId)) cloudOnly("Starring a card");
-    return setFavorite(await authorizedRecord(), workspaceId, cardId, args[2]);
+    const [projectId, cardId] = requireId(args.slice(0, 2), 2);
+    if (await localTarget(projectId)) cloudOnly("Following a card");
+    return setSubscription(
+      await authorizedRecord(),
+      projectId,
+      cardId,
+      args[2],
+    );
+  });
+  handle(projectChannels.favorite, devUrl, async (args): Promise<boolean> => {
+    if (args.length !== 3 || typeof args[2] !== "boolean")
+      throw new Error("A card and a state are required");
+    const [projectId, cardId] = requireId(args.slice(0, 2), 2);
+    if (await localTarget(projectId)) cloudOnly("Starring a card");
+    return setFavorite(await authorizedRecord(), projectId, cardId, args[2]);
   });
   handle(
-    workspaceChannels.attach,
+    projectChannels.attach,
     devUrl,
     async (args): Promise<BoardAttachment> => {
       if (args.length !== 3) throw new Error("A card and a file are required");
-      const [workspaceId, cardId] = requireId(args.slice(0, 2), 2);
-      if (await localTarget(workspaceId)) cloudOnly("Attaching files");
+      const [projectId, cardId] = requireId(args.slice(0, 2), 2);
+      if (await localTarget(projectId)) cloudOnly("Attaching files");
       return attachFile(
         await authorizedRecord(),
-        workspaceId,
+        projectId,
         cardId,
         parseAttachmentDraft(args[2]),
       );
     },
   );
-  handle(workspaceChannels.detach, devUrl, async (args): Promise<void> => {
-    const [workspaceId, cardId, attachmentId] = requireId(args, 3);
-    if (await localTarget(workspaceId)) cloudOnly("Attaching files");
+  handle(projectChannels.detach, devUrl, async (args): Promise<void> => {
+    const [projectId, cardId, attachmentId] = requireId(args, 3);
+    if (await localTarget(projectId)) cloudOnly("Attaching files");
     return detachFile(
       await authorizedRecord(),
-      workspaceId,
+      projectId,
       cardId,
       attachmentId,
     );
   });
-  handle(workspaceChannels.archive, devUrl, async (args): Promise<void> => {
-    const [workspaceId, cardId] = requireId(args, 2);
-    const local = await localTarget(workspaceId);
+  handle(projectChannels.archive, devUrl, async (args): Promise<void> => {
+    const [projectId, cardId] = requireId(args, 2);
+    const local = await localTarget(projectId);
     if (local) return local.archive(cardId);
-    return archiveCard(await authorizedRecord(), workspaceId, cardId);
+    return archiveCard(await authorizedRecord(), projectId, cardId);
   });
-  handle(workspaceChannels.purge, devUrl, async (args) => {
-    const [workspaceId, slug] = requireId(args, 2);
-    const local = await localTarget(workspaceId);
+  handle(projectChannels.purge, devUrl, async (args) => {
+    const [projectId, slug] = requireId(args, 2);
+    const local = await localTarget(projectId);
     if (local) return local.purge(slug);
-    return purgeIssues(await authorizedRecord(), workspaceId, slug);
+    return purgeIssues(await authorizedRecord(), projectId, slug);
+  });
+  handle(projectChannels.create, devUrl, async (args): Promise<BoardWrite> => {
+    if (args.length !== 2)
+      throw new Error("A project and a title are required");
+    // FE-78/D7: the same 200-character, no-dot-segment check as every other
+    // handler; this one used to take any non-blank string.
+    const [projectId] = requireId(args.slice(0, 1), 1);
+    const draft = parseDraft(args[1]);
+    const local = await localTarget(projectId);
+    if (local) return local.create(draft);
+    return createCard(await authorizedRecord(), projectId, draft);
   });
   handle(
-    workspaceChannels.create,
-    devUrl,
-    async (args): Promise<BoardWrite> => {
-      if (args.length !== 2)
-        throw new Error("A workspace and a title are required");
-      // FE-78/D7: the same 200-character, no-dot-segment check as every other
-      // handler; this one used to take any non-blank string.
-      const [workspaceId] = requireId(args.slice(0, 1), 1);
-      const draft = parseDraft(args[1]);
-      const local = await localTarget(workspaceId);
-      if (local) return local.create(draft);
-      return createCard(await authorizedRecord(), workspaceId, draft);
-    },
-  );
-  handle(
-    workspaceChannels.syncToCloud,
+    projectChannels.syncToCloud,
     devUrl,
     async (args): Promise<LocalSyncResult> => {
       const [localId] = requireId(args, 1);
@@ -951,15 +927,14 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.importPreview,
+    projectChannels.importPreview,
     devUrl,
     async (args): Promise<ImportPreview> => {
-      const [workspaceId] = requireId(args, 1);
-      if (await localTarget(workspaceId))
-        cloudOnly("Importing a review folder");
-      const { plan, folder } = await planFor(workspaceId);
+      const [projectId] = requireId(args, 1);
+      if (await localTarget(projectId)) cloudOnly("Importing a review folder");
+      const { plan, folder } = await planFor(projectId);
       return {
-        workspaceId,
+        projectId,
         folder,
         cards: plan?.inventory.cards ?? 0,
         byColumn: plan?.inventory.byColumn ?? {},
@@ -980,14 +955,13 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.importRun,
+    projectChannels.importRun,
     devUrl,
     async (args): Promise<ImportReport> => {
-      const [workspaceId] = requireId(args, 1);
-      if (await localTarget(workspaceId))
-        cloudOnly("Importing a review folder");
+      const [projectId] = requireId(args, 1);
+      if (await localTarget(projectId)) cloudOnly("Importing a review folder");
       const record = await authorizedRecord();
-      const { plan, folder } = await planFor(workspaceId);
+      const { plan, folder } = await planFor(projectId);
       if (!plan || !folder)
         return { summary: {}, receipts: [], error: NO_FOLDER };
       if (plan.blocked)
@@ -1001,7 +975,7 @@ export function registerWorkspaces(devUrl?: string): void {
 
       // The lanes and categories go FIRST: a card cannot land in a lane the
       // board does not have yet.
-      await putBoardConfig(record, workspaceId, plan.config);
+      await putBoardConfig(record, projectId, plan.config);
 
       const receipts: ImportReport["receipts"] = [];
       const summary: Record<string, number> = {};
@@ -1010,7 +984,7 @@ export function registerWorkspaces(devUrl?: string): void {
         try {
           const batch = await importRecords(
             record,
-            workspaceId,
+            projectId,
             plan.records.slice(at, at + IMPORT_BATCH),
           );
           receipts.push(...batch.receipts);
@@ -1027,7 +1001,7 @@ export function registerWorkspaces(devUrl?: string): void {
       }
 
       const run = await writeMigrationRun(record, {
-        workspaceId,
+        projectId,
         at: new Date().toISOString(),
         summary,
         receipts,
@@ -1042,14 +1016,13 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.importSeal,
+    projectChannels.importSeal,
     devUrl,
     async (args): Promise<ImportReport> => {
-      const [workspaceId] = requireId(args, 1);
-      if (await localTarget(workspaceId))
-        cloudOnly("Importing a review folder");
+      const [projectId] = requireId(args, 1);
+      if (await localTarget(projectId)) cloudOnly("Importing a review folder");
       const record = await authorizedRecord();
-      const run = await readMigrationRun(record, workspaceId);
+      const run = await readMigrationRun(record, projectId);
       if (!run)
         return {
           summary: {},
@@ -1059,7 +1032,7 @@ export function registerWorkspaces(devUrl?: string): void {
 
       const sealed = await sealBoardMigration(
         record,
-        workspaceId,
+        projectId,
         sealableCount(run.summary),
         run.digest,
       );
@@ -1082,7 +1055,7 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.folderState,
+    projectChannels.folderState,
     devUrl,
     async (args): Promise<LocalFolderState> => {
       const [slug] = requireId(args, 1);
@@ -1090,7 +1063,7 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.folderChoose,
+    projectChannels.folderChoose,
     devUrl,
     async (args): Promise<PickedFolder[]> => {
       if (args.length) throw new Error("This operation takes no arguments");
@@ -1103,7 +1076,7 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.folderDrop,
+    projectChannels.folderDrop,
     devUrl,
     async (args): Promise<PickedFolder[]> => {
       // FE-106: paths the preload read from dropped files. Shape first, and
@@ -1122,7 +1095,7 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.folderPick,
+    projectChannels.folderPick,
     devUrl,
     async (args): Promise<LocalFolderState> => {
       const [slug] = requireId(args, 1);
@@ -1144,7 +1117,7 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.folderList,
+    projectChannels.folderList,
     devUrl,
     async (args): Promise<PickedFolder[]> => {
       const [slug] = requireId(args, 1);
@@ -1153,11 +1126,11 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.folderLink,
+    projectChannels.folderLink,
     devUrl,
     async (args): Promise<LocalFolderState> => {
       if (args.length !== 2)
-        throw new Error("A workspace and folders are required");
+        throw new Error("A project and folders are required");
       const [slug] = requireId(args.slice(0, 1), 1);
       // Shape first, session second: a malformed list is the caller's bug and
       // must not be reported as "sign in".
@@ -1167,7 +1140,7 @@ export function registerWorkspaces(devUrl?: string): void {
     },
   );
   handle(
-    workspaceChannels.folderForget,
+    projectChannels.folderForget,
     devUrl,
     async (args): Promise<LocalFolderState> => {
       const [slug] = requireId(args, 1);
@@ -1175,24 +1148,20 @@ export function registerWorkspaces(devUrl?: string): void {
       return { kind: "none" };
     },
   );
-  handle(
-    workspaceChannels.folderReveal,
-    devUrl,
-    async (args): Promise<void> => {
-      const [slug] = requireId(args, 1);
-      const path = (await readFolders(await folderRecordFor(slug)))[slug]?.[0];
-      // NOTE: The path comes from this app's own file, never from the
-      // renderer. A channel that opened a path it was handed is a channel
-      // that opens anything the user can read.
-      if (!path) throw new Error("No folder is linked to this workspace.");
-      await revealFolder(path);
-    },
-  );
+  handle(projectChannels.folderReveal, devUrl, async (args): Promise<void> => {
+    const [slug] = requireId(args, 1);
+    const path = (await readFolders(await folderRecordFor(slug)))[slug]?.[0];
+    // NOTE: The path comes from this app's own file, never from the
+    // renderer. A channel that opened a path it was handed is a channel
+    // that opens anything the user can read.
+    if (!path) throw new Error("No folder is linked to this project.");
+    await revealFolder(path);
+  });
 
   // The offline MCP server and the Stop hook write the local board from other
   // processes. Polled only while a window is open to show it.
   watchLocalStore(
-    (workspaceIds) => broadcast(workspaceChannels.localChanged, workspaceIds),
+    (projectIds) => broadcast(projectChannels.localChanged, projectIds),
     { active: () => BrowserWindow.getAllWindows().length > 0 },
   );
 }

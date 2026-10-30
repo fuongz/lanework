@@ -65,6 +65,28 @@ const MIGRATIONS: readonly string[] = [
   );
   INSERT INTO meta(key, value) VALUES ('change_seq', '0');
   `,
+  // 2: the tables say what the app calls them: projects and their issues.
+  // A rename keeps every row; SQLite carries the foreign keys and index
+  // definitions over, and the indexes are then renamed to match.
+  `
+  ALTER TABLE workspace RENAME TO projects;
+  ALTER TABLE work_item RENAME TO project_issues;
+  ALTER TABLE project_issues RENAME COLUMN workspace_id TO project_id;
+
+  DROP INDEX workspace_slug_live;
+  DROP INDEX workspace_repo;
+  CREATE UNIQUE INDEX projects_slug_live ON projects(slug) WHERE deleted_at IS NULL;
+  CREATE INDEX projects_repo ON projects(repo_url) WHERE deleted_at IS NULL;
+
+  DROP INDEX work_item_task_id;
+  DROP INDEX work_item_lane;
+  DROP INDEX work_item_changes;
+  DROP INDEX work_item_parent;
+  CREATE UNIQUE INDEX project_issues_task_id ON project_issues(project_id, task_id) WHERE task_id IS NOT NULL;
+  CREATE INDEX project_issues_lane ON project_issues(project_id, status, sort_key);
+  CREATE INDEX project_issues_changes ON project_issues(project_id, change_seq);
+  CREATE INDEX project_issues_parent ON project_issues(parent_id);
+  `,
 ];
 
 /** The version a fully migrated database reports. */

@@ -54,7 +54,7 @@ What setup does (skip with `--no-setup`):
 
 | Command | Does |
 | --- | --- |
-| `goto <path>` | `app://lanework<path>`, e.g. `/w/lanework/changes`, `/settings/workspaces` |
+| `goto <path>` | `app://lanework<path>`, e.g. `/w/lanework/changes`, `/settings/projects` |
 | `click <text>` | first element with that text (`/regex/i` works) |
 | `button <name>` / `tab <name>` | by ARIA role and accessible name |
 | `fill "<label>" <value>` | type into a labelled field |

@@ -1,5 +1,5 @@
 // The board IPCs, served from the local SQLite store instead of the control
-// plane. `index.ts` routes a call here when its workspace id names a local
+// plane. `index.ts` routes a call here when its project id names a local
 // board: in local mode, and signed in too (FE-52/D6a: local boards stay in the
 // list beside the cloud ones).
 //
@@ -8,7 +8,7 @@
 // plane", and the cheapest way to keep that true is a local path with nowhere
 // to send one from. It reuses only `client.ts`'s parsers, so it answers the
 // same `BoardCard` shape as the cloud path and the renderer tells the two
-// apart only by `Workspace.origin`.
+// apart only by `Project.origin`.
 import { existsSync } from "node:fs";
 import type { Card, CardDetail, LatestCheckpoint } from "@lanework/protocol";
 import {
@@ -28,12 +28,12 @@ import {
   DEFAULT_BOARD_QUERY,
   matchesSearch,
   normalizeTag,
-  type Workspace,
-} from "../../../shared/workspaces";
+  type Project,
+} from "../../../shared/projects";
 import {
+  type LocalProject,
   type LocalStore,
   LocalStoreError,
-  type LocalWorkspace,
   localStorePath,
   openLocalStore,
   type WorkItemListQuery,
@@ -75,45 +75,45 @@ function requireLocalStore(): LocalStore {
   return store;
 }
 
-// ── Workspaces ───────────────────────────────────────────────────────────────
+// ── Projects ───────────────────────────────────────────────────────────────
 
-/** A local board as the workspace list carries it. */
-export function toWorkspace(
-  workspace: LocalWorkspace,
+/** A local board as the project list carries it. */
+export function toProject(
+  project: LocalProject,
   path: string | null = null,
-): Workspace {
+): Project {
   return {
-    id: workspace.id,
-    slug: workspace.slug,
-    name: workspace.name,
+    id: project.id,
+    slug: project.slug,
+    name: project.name,
     path,
     baseBranch: null,
     origin: "local",
     // Moved only once the upload was sealed. A cloud id with no `syncedAt` is
     // a sync that stopped half way: the local board is still the real one.
-    movedTo: workspace.syncedAt ? workspace.cloudId : null,
+    movedTo: project.syncedAt ? project.cloudId : null,
   };
 }
 
-export function listLocalWorkspaces(): LocalWorkspace[] {
-  return localStore()?.listWorkspaces() ?? [];
+export function listLocalProjects(): LocalProject[] {
+  return localStore()?.listProjects() ?? [];
 }
 
 /**
  * The local board `key` names: by id always, by slug only when asked.
  *
- * NOTE: Board calls address a workspace by id, and a local id is a UUIDv7 no
+ * NOTE: Board calls address a project by id, and a local id is a UUIDv7 no
  * cloud board shares. A slug can be shared (a board and the cloud copy it
  * moved to usually have the same one), so the slug match is opt-in, for
  * callers that have nothing else: the folder links, keyed by slug.
  */
-export function findLocalWorkspace(
+export function findLocalProject(
   key: string,
   options: { bySlug?: boolean } = {},
-): LocalWorkspace | null {
+): LocalProject | null {
   const store = localStore();
   if (!store) return null;
-  const found = store.getWorkspace(key);
+  const found = store.getProject(key);
   if (!found) return null;
   if (found.id === key) return found;
   return options.bySlug ? found : null;
@@ -159,11 +159,10 @@ function noting<T>(store: LocalStore, write: () => T): T {
 }
 
 /** Live local boards with a card changed after `since`. */
-function changedWorkspaces(store: LocalStore, since: number): string[] {
+function changedProjects(store: LocalStore, since: number): string[] {
   const ids: string[] = [];
-  for (const workspace of store.listWorkspaces())
-    if (store.listChanges(workspace.id, since).items.length)
-      ids.push(workspace.id);
+  for (const project of store.listProjects())
+    if (store.listChanges(project.id, since).items.length) ids.push(project.id);
   return ids;
 }
 
@@ -180,7 +179,7 @@ function changedWorkspaces(store: LocalStore, since: number): string[] {
  * @returns A function that stops the watch.
  */
 export function watchLocalStore(
-  onChange: (workspaceIds: string[]) => void,
+  onChange: (projectIds: string[]) => void,
   options: { intervalMs?: number; active?: () => boolean } = {},
 ): () => void {
   const timer = setInterval(() => {
@@ -196,7 +195,7 @@ export function watchLocalStore(
       if (version === seen) return;
       const since = seen;
       seen = version;
-      onChange(changedWorkspaces(store, since));
+      onChange(changedProjects(store, since));
     } catch {
       // A busy or vanished file is a missed tick; the next one looks again.
     }
@@ -277,7 +276,7 @@ function countBy(cards: BoardCard[], key: (card: BoardCard) => string | null) {
 }
 
 /**
- * One local board, bound to the workspace row it was resolved from.
+ * One local board, bound to the project row it was resolved from.
  *
  * - Every write answers a {@link BoardWrite} as the cloud path does: a stale
  *   revision is a `conflict` carrying the card as it stands, never a thrown
@@ -288,11 +287,11 @@ function countBy(cards: BoardCard[], key: (card: BoardCard) => string | null) {
 export class LocalBoard {
   constructor(
     readonly store: LocalStore,
-    readonly workspace: LocalWorkspace,
+    readonly project: LocalProject,
   ) {}
 
   get moved(): boolean {
-    return this.workspace.syncedAt !== null;
+    return this.project.syncedAt !== null;
   }
 
   /**
@@ -305,7 +304,7 @@ export class LocalBoard {
    */
   #capTags(tags: string[] | undefined): string[] | undefined {
     if (!tags) return tags;
-    const max = this.workspace.config.tags.max;
+    const max = this.project.config.tags.max;
     const kept: string[] = [];
     for (const tag of tags) {
       const key = normalizeTag(tag);
@@ -317,13 +316,13 @@ export class LocalBoard {
 
   #config() {
     return parseBoardConfig({
-      board: this.store.boardConfig(this.workspace.id),
+      board: this.store.boardConfig(this.project.id),
     });
   }
 
   #cards(query: BoardQuery): BoardCard[] {
     return this.store
-      .listWorkItems(this.workspace.id, listQuery(query))
+      .listWorkItems(this.project.id, listQuery(query))
       .map(cardOf);
   }
 
@@ -338,7 +337,7 @@ export class LocalBoard {
         byPriority: countBy(cards, (card) => card.priority),
       },
       total: filtered
-        ? this.store.listWorkItems(this.workspace.id).length
+        ? this.store.listWorkItems(this.project.id).length
         : cards.length,
     };
   }
@@ -361,7 +360,7 @@ export class LocalBoard {
       ]),
     );
     return {
-      workspaceId: this.workspace.id,
+      projectId: this.project.id,
       columns: config.columns,
       categories: config.categories,
       labels: config.labels,
@@ -389,7 +388,7 @@ export class LocalBoard {
 
   search(query: string): BoardCard[] {
     return this.store
-      .listWorkItems(this.workspace.id)
+      .listWorkItems(this.project.id)
       .map(cardOf)
       .filter((card) => matchesSearch(card, query))
       .slice(0, 20);
@@ -397,7 +396,7 @@ export class LocalBoard {
 
   card(cardId: string): BoardCard {
     const detail = this.store.getWorkItem(cardId, {
-      workspace: this.workspace.id,
+      project: this.project.id,
     });
     if (!detail) throw new Error("That card is no longer on this board.");
     return cardOf(detail);
@@ -405,13 +404,13 @@ export class LocalBoard {
 
   lookup(taskId: string): BoardCard | null {
     const detail = this.store.getWorkItem(taskId, {
-      workspace: this.workspace.id,
+      project: this.project.id,
     });
     return detail ? cardOf(detail) : null;
   }
 
   changes(since: number): BoardChanges {
-    const { head, items } = this.store.listChanges(this.workspace.id, since);
+    const { head, items } = this.store.listChanges(this.project.id, since);
     return {
       head,
       nextSince: head,
@@ -424,8 +423,7 @@ export class LocalBoard {
   checkpoint(cardId: string): CardCheckpoint | null {
     try {
       return toCheckpoint(
-        this.store.listCheckpoints(cardId, { workspace: this.workspace.id })
-          .latest,
+        this.store.listCheckpoints(cardId, { project: this.project.id }).latest,
       );
     } catch (error) {
       if (error instanceof LocalStoreError && error.code === "not_found")
@@ -458,7 +456,7 @@ export class LocalBoard {
       if (error instanceof LocalStoreError) {
         if (error.code === "conflict" && cardId) {
           const current = this.store.getWorkItem(cardId, {
-            workspace: this.workspace.id,
+            project: this.project.id,
           });
           if (current)
             return {
@@ -482,7 +480,7 @@ export class LocalBoard {
     return this.#write(
       null,
       () =>
-        this.store.createWorkItem(this.workspace.id, {
+        this.store.createWorkItem(this.project.id, {
           title: draft.title,
           body: draft.body ?? null,
           categoryKey: draft.categoryKey ?? null,
@@ -529,7 +527,7 @@ export class LocalBoard {
               : {}),
             ...(type ? { type } : {}),
           },
-          { workspace: this.workspace.id, ifRevision: revision },
+          { project: this.project.id, ifRevision: revision },
         ),
       patch.tags,
     );
@@ -542,7 +540,7 @@ export class LocalBoard {
   ): BoardWrite {
     return this.#write(cardId, () =>
       this.store.setStatus(cardId, columnKey, {
-        workspace: this.workspace.id,
+        project: this.project.id,
         placement: placement ?? null,
       }),
     );
@@ -559,7 +557,7 @@ export class LocalBoard {
         cardId,
         key,
         { checked },
-        { workspace: this.workspace.id, ifRevision: revision },
+        { project: this.project.id, ifRevision: revision },
       ),
     );
   }
@@ -573,7 +571,7 @@ export class LocalBoard {
       this.store.updateWorkItem(
         cardId,
         { checklist: items },
-        { workspace: this.workspace.id, ifRevision: revision },
+        { project: this.project.id, ifRevision: revision },
       ),
     );
   }
@@ -582,43 +580,43 @@ export class LocalBoard {
   archive(cardId: string): void {
     if (this.moved) throw new Error(MOVED_MESSAGE);
     const live = this.store.getWorkItem(cardId, {
-      workspace: this.workspace.id,
+      project: this.project.id,
     });
     if (!live) {
       const gone = this.store.getWorkItem(cardId, {
-        workspace: this.workspace.id,
+        project: this.project.id,
         includeDeleted: true,
       });
       if (gone) return;
       throw new Error("That card is no longer on this board.");
     }
     noting(this.store, () =>
-      this.store.deleteWorkItem(live.id, { workspace: this.workspace.id }),
+      this.store.deleteWorkItem(live.id, { project: this.project.id }),
     );
   }
 
   /** Every card off the board, confirmed by the board's own slug. */
   purge(slug: string): { deleted: number } {
     if (this.moved) throw new Error(MOVED_MESSAGE);
-    if (slug !== this.workspace.slug)
+    if (slug !== this.project.slug)
       throw new Error("Type the project's key exactly to remove its issues.");
-    const cards = this.store.listWorkItems(this.workspace.id);
+    const cards = this.store.listWorkItems(this.project.id);
     for (const card of cards)
       noting(this.store, () =>
-        this.store.deleteWorkItem(card.id, { workspace: this.workspace.id }),
+        this.store.deleteWorkItem(card.id, { project: this.project.id }),
       );
     return { deleted: cards.length };
   }
 }
 
-/** The local board `workspaceId` names, or null when it is not a local id. */
-export function localBoard(workspaceId: string): LocalBoard | null {
-  const workspace = findLocalWorkspace(workspaceId);
+/** The local board `projectId` names, or null when it is not a local id. */
+export function localBoard(projectId: string): LocalBoard | null {
+  const project = findLocalProject(projectId);
   const store = localStore();
-  return workspace && store ? new LocalBoard(store, workspace) : null;
+  return project && store ? new LocalBoard(store, project) : null;
 }
 
-/** Workspace-level writes, with the watch moved past them like card writes. */
+/** Project-level writes, with the watch moved past them like card writes. */
 export function writeLocal<T>(write: (store: LocalStore) => T): T {
   const store = requireLocalStore();
   return noting(store, () => write(store));

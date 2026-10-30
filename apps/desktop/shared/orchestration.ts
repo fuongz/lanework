@@ -11,7 +11,7 @@
 //   name is refused, never ignored: a typo in `dependsOn` must not queue a
 //   worker with no dependencies.
 // - The renderer, through `desktop.orchestration` and `desktop.jev`. As with
-//   the conversation view, it names a workspace and ids, never a folder or a
+//   the conversation view, it names a project and ids, never a folder or a
 //   command.
 // - Main's own modules (the run engine and Jev), whose handler shapes are
 //   fixed here so `main/index.ts` can register them before they exist.
@@ -215,8 +215,8 @@ export interface OrchestrationTask {
 
 export interface OrchestrationRun {
   id: string;
-  /** The workspace slug the run belongs to. */
-  workspace: string;
+  /** The project slug the run belongs to. */
+  project: string;
   /** The lead's conversation id. */
   lead: string;
   leadAgent: ConversationAgent;
@@ -295,7 +295,7 @@ export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 export interface OrchestrationProposal {
   version: 1;
   id: string;
-  workspace: string;
+  project: string;
   lead: string;
   leadAgent: ConversationAgent;
   /** What the user asked for. */
@@ -850,7 +850,7 @@ export function parseProposal(value: unknown): OrchestrationProposal {
     [
       "version",
       "id",
-      "workspace",
+      "project",
       "lead",
       "leadAgent",
       "request",
@@ -869,8 +869,8 @@ export function parseProposal(value: unknown): OrchestrationProposal {
     input.teamLead == null ? null : leadRef(input.teamLead, "teamLead");
   if (input.version !== 1) fail("Unknown proposal version");
   if (input.status !== "ready") fail("Only a ready proposal can be approved");
-  if (typeof input.workspace !== "string" || !input.workspace)
-    fail("workspace must be a slug");
+  if (typeof input.project !== "string" || !input.project)
+    fail("project must be a slug");
   if (typeof input.lead !== "string" || !input.lead)
     fail("lead must be a conversation id");
   if (
@@ -882,7 +882,7 @@ export function parseProposal(value: unknown): OrchestrationProposal {
   return {
     version: 1,
     id: id(input.id, "id"),
-    workspace: input.workspace,
+    project: input.project,
     lead: input.lead,
     leadAgent: leadAgent(input.leadAgent),
     request: text(input.request, "request", PROMPT_MAX),
@@ -1370,7 +1370,7 @@ export function withoutComments(text: string): string {
 /** A team lead as the page saves it: the source is main's to set. */
 export type TeamLeadInput = Omit<TeamLead, "source">;
 
-/** Every team lead a workspace sees, and the repo files that were refused. */
+/** Every team lead a project sees, and the repo files that were refused. */
 export interface LeadsList {
   leads: TeamLead[];
   /** The one the proposal card starts on; null for none. */
@@ -1567,7 +1567,7 @@ export function parseTeamLead(value: unknown, source: LeadSource): TeamLead {
 // ─── IPC ────────────────────────────────────────────────────────────────────
 
 export const orchestrationChannels = {
-  /** The workspace's runs, newest first. */
+  /** The project's runs, newest first. */
   runs: "orchestration:runs",
   run: "orchestration:run",
   /** Approve a proposal: the run starts with its tasks queued. */
@@ -1602,7 +1602,7 @@ export const jevChannels = {
 } as const;
 
 export const leadsChannels = {
-  /** Built-in, personal and the workspace's repo leads, merged; null: no repo. */
+  /** Built-in, personal and the project's repo leads, merged; null: no repo. */
   list: "leads:list",
   /** Add or replace one of the user's own leads, by id. */
   savePersonal: "leads:save-personal",
@@ -1618,11 +1618,11 @@ export const leadsChannels = {
 } as const;
 
 /**
- * Main → renderer, on {@link leadsChannels.changed}: which workspace's repo
+ * Main → renderer, on {@link leadsChannels.changed}: which project's repo
  * leads changed, or null when the personal leads or the default did.
  */
 export interface LeadsEvent {
-  workspace: string | null;
+  project: string | null;
 }
 
 /** A context file as it stands in the checkout now (FE-96). */
@@ -1641,34 +1641,34 @@ export interface ContextPick {
 
 /** Main → renderer, on {@link orchestrationChannels.changed}. */
 export interface OrchestrationEvent {
-  workspace: string;
+  project: string;
   run: OrchestrationRun;
 }
 
 /**
  * The orchestration surface in the renderer.
  *
- * Every call names a workspace slug and ids main minted, never a folder.
+ * Every call names a project slug and ids main minted, never a folder.
  */
 export interface DesktopOrchestrationApi {
-  runs: (workspace: string) => Promise<OrchestrationRun[]>;
-  run: (workspace: string, runId: string) => Promise<OrchestrationRun | null>;
+  runs: (project: string) => Promise<OrchestrationRun[]>;
+  run: (project: string, runId: string) => Promise<OrchestrationRun | null>;
   approve: (proposal: OrchestrationProposal) => Promise<OrchestrationRun>;
-  pause: (workspace: string, runId: string) => Promise<OrchestrationRun>;
-  resume: (workspace: string, runId: string) => Promise<OrchestrationRun>;
-  stop: (workspace: string, runId: string) => Promise<OrchestrationRun>;
+  pause: (project: string, runId: string) => Promise<OrchestrationRun>;
+  resume: (project: string, runId: string) => Promise<OrchestrationRun>;
+  stop: (project: string, runId: string) => Promise<OrchestrationRun>;
   cancelTask: (
-    workspace: string,
+    project: string,
     runId: string,
     taskId: string,
   ) => Promise<OrchestrationRun>;
   approveScope: (
-    workspace: string,
+    project: string,
     runId: string,
     taskId: string,
   ) => Promise<OrchestrationRun>;
-  leftovers: (workspace: string, runId: string) => Promise<RunLeftovers>;
-  cleanUp: (workspace: string, runId: string) => Promise<OrchestrationRun>;
+  leftovers: (project: string, runId: string) => Promise<RunLeftovers>;
+  cleanUp: (project: string, runId: string) => Promise<OrchestrationRun>;
   onChange: (listener: (event: OrchestrationEvent) => void) => () => void;
 }
 
@@ -1690,17 +1690,14 @@ export interface DesktopJevApi {
  * something answers with the list as it now stands.
  */
 export interface DesktopLeadsApi {
-  list: (workspace: string | null) => Promise<LeadsList>;
+  list: (project: string | null) => Promise<LeadsList>;
   /** Conductors are the project's own (FE-95): every write names it. */
-  savePersonal: (workspace: string, lead: TeamLeadInput) => Promise<LeadsList>;
-  removePersonal: (workspace: string, id: string) => Promise<LeadsList>;
-  setDefault: (workspace: string, id: string | null) => Promise<LeadsList>;
+  savePersonal: (project: string, lead: TeamLeadInput) => Promise<LeadsList>;
+  removePersonal: (project: string, id: string) => Promise<LeadsList>;
+  setDefault: (project: string, id: string | null) => Promise<LeadsList>;
   /** The native chooser, opened on the project's folder (FE-96). */
-  pickContext: (workspace: string) => Promise<ContextPick>;
-  inspectContext: (
-    workspace: string,
-    paths: string[],
-  ) => Promise<ContextEntry[]>;
+  pickContext: (project: string) => Promise<ContextPick>;
+  inspectContext: (project: string, paths: string[]) => Promise<ContextEntry[]>;
   onChange: (listener: (event: LeadsEvent) => void) => () => void;
 }
 
@@ -1715,14 +1712,14 @@ export interface DesktopLeadsApi {
  * {@link parseControlInput}.
  */
 export interface OrchestrationMainHandlers {
-  runs: (workspace: string) => Promise<OrchestrationRun[]>;
-  run: (workspace: string, runId: string) => Promise<OrchestrationRun | null>;
+  runs: (project: string) => Promise<OrchestrationRun[]>;
+  run: (project: string, runId: string) => Promise<OrchestrationRun | null>;
   approve: (proposal: OrchestrationProposal) => Promise<OrchestrationRun>;
-  pause: (workspace: string, runId: string) => Promise<OrchestrationRun>;
-  resume: (workspace: string, runId: string) => Promise<OrchestrationRun>;
-  stop: (workspace: string, runId: string) => Promise<OrchestrationRun>;
+  pause: (project: string, runId: string) => Promise<OrchestrationRun>;
+  resume: (project: string, runId: string) => Promise<OrchestrationRun>;
+  stop: (project: string, runId: string) => Promise<OrchestrationRun>;
   cancelTask: (
-    workspace: string,
+    project: string,
     runId: string,
     taskId: string,
   ) => Promise<OrchestrationRun>;
@@ -1732,7 +1729,7 @@ export interface OrchestrationMainHandlers {
    * scopes and the task may start.
    */
   approveScope: (
-    workspace: string,
+    project: string,
     runId: string,
     taskId: string,
   ) => Promise<OrchestrationRun>;
@@ -1740,12 +1737,12 @@ export interface OrchestrationMainHandlers {
    * What a stopped run left behind (FE-100/O2); refused for a run that is
    * not stopped.
    */
-  leftovers: (workspace: string, runId: string) => Promise<RunLeftovers>;
+  leftovers: (project: string, runId: string) => Promise<RunLeftovers>;
   /**
    * Remove every worktree, branch and ref {@link leftovers} lists, then mark
    * the run cleaned; throws naming what could not be removed.
    */
-  cleanUp: (workspace: string, runId: string) => Promise<OrchestrationRun>;
+  cleanUp: (project: string, runId: string) => Promise<OrchestrationRun>;
   /**
    * One control call from a lead, already authenticated: `runId` is the run
    * its token belongs to.
@@ -1782,20 +1779,17 @@ export interface JevMainHandlers {
  * NOTE: A personal lead may reuse a built-in id to override it;
  * `removePersonal` refuses an id that is not personal, `setDefault` an id no
  * source holds. `list` answers with
- * only the built-in and personal leads for a null or unknown `workspace`
+ * only the built-in and personal leads for a null or unknown `project`
  * (Settings has none). The store, not the page, sends
  * {@link leadsChannels.changed}.
  */
 export interface LeadsMainHandlers {
-  list: (workspace: string | null) => Promise<LeadsList>;
-  savePersonal: (workspace: string, lead: TeamLead) => Promise<LeadsList>;
-  removePersonal: (workspace: string, id: string) => Promise<LeadsList>;
-  setDefault: (workspace: string, id: string | null) => Promise<LeadsList>;
-  pickContext: (workspace: string) => Promise<ContextPick>;
-  inspectContext: (
-    workspace: string,
-    paths: string[],
-  ) => Promise<ContextEntry[]>;
+  list: (project: string | null) => Promise<LeadsList>;
+  savePersonal: (project: string, lead: TeamLead) => Promise<LeadsList>;
+  removePersonal: (project: string, id: string) => Promise<LeadsList>;
+  setDefault: (project: string, id: string | null) => Promise<LeadsList>;
+  pickContext: (project: string) => Promise<ContextPick>;
+  inspectContext: (project: string, paths: string[]) => Promise<ContextEntry[]>;
 }
 
 /** The loopback control server, as main starts and stops it. */

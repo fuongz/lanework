@@ -1,4 +1,4 @@
-// Run with `bun test apps/desktop/electron/main/workspaces`.
+// Run with `bun test apps/desktop/electron/main/projects`.
 //
 // FE-52/V3: "Sync to cloud" moves every card (task id, checklist ticks, lane,
 // parent), and a failure part way through leaves the local board as it was,
@@ -25,7 +25,7 @@ import {
 } from "node:test";
 import { type LocalStore, openLocalStore } from "../../local-store";
 import type { MachineRecord } from "../auth/store";
-import { type SyncRecord, syncLocalWorkspace } from "./sync-to-cloud";
+import { type SyncRecord, syncLocalProject } from "./sync-to-cloud";
 
 type Item = {
   itemId: string;
@@ -78,7 +78,7 @@ before(async () => {
         plane.taken.add(body.slug);
         plane.created.push(body.slug);
         return json(res, 201, {
-          workspace: {
+          project: {
             id: `ws-${body.slug}`,
             slug: body.slug,
             name: body.name,
@@ -211,15 +211,15 @@ const record = (): MachineRecord => ({
 
 describe("sync to cloud", () => {
   test("moves every card with its task id, ticks, lane and parent, then goes read-only", async () => {
-    const workspace = store.createWorkspace({ name: "Taken" }); // slug `taken` clashes
-    const epic = store.createWorkItem(workspace.id, {
+    const project = store.createProject({ name: "Taken" }); // slug `taken` clashes
+    const epic = store.createWorkItem(project.id, {
       title: "Epic",
       type: "epic",
       categoryKey: "frontend",
       columnKey: "processing",
       restore: { taskId: "FE-07", taskSeq: 7 },
     });
-    const child = store.createWorkItem(workspace.id, {
+    const child = store.createWorkItem(project.id, {
       title: "Child",
       categoryKey: "frontend",
       columnKey: "todo",
@@ -230,12 +230,12 @@ describe("sync to cloud", () => {
       ],
     });
     store.toggleChecklistItem(child.id, "D1", { checked: true });
-    store.createWorkItem(workspace.id, {
+    store.createWorkItem(project.id, {
       title: "No category",
       columnKey: "done",
     });
 
-    const outcome = await syncLocalWorkspace(store, record(), workspace.id);
+    const outcome = await syncLocalProject(store, record(), project.id);
 
     // The account already had `taken`: the move found the next free key.
     assert.deepEqual(plane.created, ["taken-2"]);
@@ -260,36 +260,36 @@ describe("sync to cloud", () => {
       undefined,
     );
 
-    const after = store.getWorkspace(workspace.id);
+    const after = store.getProject(project.id);
     assert.equal(after?.cloudId, "ws-taken-2");
     assert.ok(after?.syncedAt, "the local board is marked as moved");
     const pointers = store.db
-      .prepare("SELECT id, cloud_id FROM work_item WHERE workspace_id = ?")
-      .all(workspace.id) as { id: string; cloud_id: string | null }[];
+      .prepare("SELECT id, cloud_id FROM project_issues WHERE project_id = ?")
+      .all(project.id) as { id: string; cloud_id: string | null }[];
     assert.ok(pointers.every((row) => row.cloud_id?.startsWith("cloud-")));
 
     await assert.rejects(
-      syncLocalWorkspace(store, record(), workspace.id),
+      syncLocalProject(store, record(), project.id),
       /already moved/,
     );
   });
 
   test("a failure part way leaves the local board intact, and a re-run finishes into the same board", async () => {
-    const workspace = store.createWorkspace({ name: "Big board" });
+    const project = store.createProject({ name: "Big board" });
     for (let n = 1; n <= 60; n += 1)
-      store.createWorkItem(workspace.id, {
+      store.createWorkItem(project.id, {
         title: `Card ${n}`,
         categoryKey: "backend",
         columnKey: "todo",
       });
     const before = store
-      .listWorkItems(workspace.id)
+      .listWorkItems(project.id)
       .map((card) => [card.id, card.revision]);
 
     // The second batch (cards 51-60) fails: the first 50 have landed.
     plane.failBatch = 2;
     await assert.rejects(
-      syncLocalWorkspace(store, record(), workspace.id),
+      syncLocalProject(store, record(), project.id),
       /Nothing on this machine was changed/,
     );
     assert.equal(plane.boards.get("ws-big-board")?.items.length, 50);
@@ -299,7 +299,7 @@ describe("sync to cloud", () => {
       "nothing is sealed over a partial upload",
     );
 
-    const stopped = store.getWorkspace(workspace.id);
+    const stopped = store.getProject(project.id);
     assert.equal(stopped?.syncedAt, null, "not marked as moved");
     assert.equal(
       stopped?.cloudId,
@@ -307,18 +307,18 @@ describe("sync to cloud", () => {
       "but remembers the board it was filling",
     );
     assert.deepEqual(
-      store.listWorkItems(workspace.id).map((card) => [card.id, card.revision]),
+      store.listWorkItems(project.id).map((card) => [card.id, card.revision]),
       before,
       "every local card is exactly as it was",
     );
     // …and still writable.
-    store.createWorkItem(workspace.id, {
+    store.createWorkItem(project.id, {
       title: "Written after the failure",
       categoryKey: "backend",
     });
 
     plane.failBatch = 0;
-    const outcome = await syncLocalWorkspace(store, record(), workspace.id);
+    const outcome = await syncLocalProject(store, record(), project.id);
     assert.deepEqual(plane.created, ["big-board"], "no second project");
     assert.equal(outcome.cloudId, "ws-big-board");
     const items = plane.boards.get("ws-big-board")?.items ?? [];
@@ -329,12 +329,12 @@ describe("sync to cloud", () => {
     );
     assert.equal(new Set(items.map((item) => item.ref)).size, 61);
     assert.deepEqual(plane.sealed, [61]);
-    assert.ok(store.getWorkspace(workspace.id)?.syncedAt);
+    assert.ok(store.getProject(project.id)?.syncedAt);
   });
 
   test("a seal the cloud refuses leaves the local board writable", async () => {
-    const workspace = store.createWorkspace({ name: "Sealed out" });
-    store.createWorkItem(workspace.id, { title: "One" });
+    const project = store.createProject({ name: "Sealed out" });
+    store.createWorkItem(project.id, { title: "One" });
     // Somebody else put a card on the cloud board between the import and the
     // seal.
     const originalSet = plane.boards.set.bind(plane.boards);
@@ -353,9 +353,9 @@ describe("sync to cloud", () => {
       return originalSet(key, value);
     };
     await assert.rejects(
-      syncLocalWorkspace(store, record(), workspace.id),
+      syncLocalProject(store, record(), project.id),
       /did not seal/,
     );
-    assert.equal(store.getWorkspace(workspace.id)?.syncedAt, null);
+    assert.equal(store.getProject(project.id)?.syncedAt, null);
   });
 });

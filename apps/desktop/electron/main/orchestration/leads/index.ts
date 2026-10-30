@@ -15,8 +15,8 @@ import {
   type TeamLead,
 } from "../../../../shared/orchestration";
 import { broadcast } from "../../ipc";
+import { terminalFolder } from "../../projects";
 import { testEnv } from "../../test-seams";
-import { terminalFolder } from "../../workspaces";
 import { contextPickIn, createLeadStore, type LeadStore } from "./store";
 
 let instance: LeadStore | null = null;
@@ -31,22 +31,22 @@ function store(): LeadStore {
 }
 
 /**
- * The lead a run in `workspace` starts under.
+ * The lead a run in `project` starts under.
  *
  * @throws {Error} When no source holds `id`, or its repo file is broken.
  */
-export function teamLeadOf(workspace: string, id: string): Promise<TeamLead> {
-  return store().resolve(workspace, id);
+export function teamLeadOf(project: string, id: string): Promise<TeamLead> {
+  return store().resolve(project, id);
 }
 
 /**
- * Ask for files and folders in `workspace`'s folder, as context files.
+ * Ask for files and folders in `project`'s folder, as context files.
  *
  * NOTE: The chooser runs here and the paths it returns never came from the
  * page; what lies outside the project is counted and left out.
  */
-async function pickContext(workspace: string): Promise<ContextPick> {
-  const folder = await terminalFolder(workspace).catch(() => null);
+async function pickContext(project: string): Promise<ContextPick> {
+  const folder = await terminalFolder(project).catch(() => null);
   if (!folder)
     throw new Error("This project has no folder on this machine to pick from.");
   // NOTE: A test seam: Playwright cannot drive a native chooser.
@@ -74,11 +74,10 @@ async function pickContext(workspace: string): Promise<ContextPick> {
 }
 
 export const leadsMain: LeadsMainHandlers = {
-  list: (workspace) => store().list(workspace),
-  savePersonal: (workspace, lead) => store().savePersonal(workspace, lead),
-  removePersonal: (workspace, id) => store().removePersonal(workspace, id),
-  setDefault: (workspace, id) => store().setDefault(workspace, id),
+  list: (project) => store().list(project),
+  savePersonal: (project, lead) => store().savePersonal(project, lead),
+  removePersonal: (project, id) => store().removePersonal(project, id),
+  setDefault: (project, id) => store().setDefault(project, id),
   pickContext,
-  inspectContext: (workspace, paths) =>
-    store().inspectContext(workspace, paths),
+  inspectContext: (project, paths) => store().inspectContext(project, paths),
 };

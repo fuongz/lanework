@@ -124,7 +124,7 @@ export function useMemoryWatch(slug: string | undefined): void {
     const onFocus = () => void load(slug);
     window.addEventListener("focus", onFocus);
     const off = window.desktop?.memory.onChange((change) => {
-      if (change.workspace === slug) void load(slug);
+      if (change.project === slug) void load(slug);
     });
     return () => {
       window.removeEventListener("focus", onFocus);

@@ -17,14 +17,14 @@ export function orderConductors(list: LeadsList | null): TeamLead[] {
 }
 
 /**
- * A conductor's own conversation in `workspace`: the listed session main
+ * A conductor's own conversation in `project`: the listed session main
  * marked as its own, else one just started that the listing has not caught
  * up with. Null when it has none yet.
  */
 export function conductorConversation(
   sessions: readonly AgentSession[] | undefined,
   started: Readonly<Record<string, NewChat>>,
-  workspace: string,
+  project: string,
   conductor: string,
 ): string | null {
   const own = (sessions ?? [])
@@ -32,6 +32,6 @@ export function conductorConversation(
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   if (own) return own.id;
   for (const [id, chat] of Object.entries(started))
-    if (chat.workspace === workspace && chat.conductor === conductor) return id;
+    if (chat.project === project && chat.conductor === conductor) return id;
   return null;
 }

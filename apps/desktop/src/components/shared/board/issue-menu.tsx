@@ -1,5 +1,5 @@
 import { type ReactElement, type ReactNode, useState } from "react";
-import type { BoardCard } from "#/../shared/workspaces";
+import type { BoardCard } from "#/../shared/projects";
 import {
   AlertDialog,
   AlertDialogAction,

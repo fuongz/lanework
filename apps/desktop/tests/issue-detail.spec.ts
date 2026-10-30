@@ -14,7 +14,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import type { Workspace } from "../shared/workspaces";
+import type { Project } from "../shared/projects";
 import {
   launchEnv,
   removeProfile,
@@ -23,7 +23,7 @@ import {
   startStubPlane,
 } from "./auth-fixtures";
 
-const workspaces: Workspace[] = [
+const projects: Project[] = [
   {
     id: "ws-cloud-project",
     slug: "cloud-project",
@@ -125,7 +125,7 @@ async function openIssue(page: Page): Promise<string[]> {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   // ⚠️ Choose the project FIRST. With nothing remembered the app asks rather
-  // than guessing, and a `goto` into a workspace route before that is aborted
+  // than guessing, and a `goto` into a project route before that is aborted
   // by the redirect back to the picker.
   await page.getByRole("link", { name: /Cloud project/ }).click();
   await expect(
@@ -139,7 +139,7 @@ async function openIssue(page: Page): Promise<string[]> {
 }
 
 test("the title stays in view as row two while the issue scrolls", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   const long = Array.from(
     { length: 80 },
     (_, i) => `Paragraph ${i + 1} of a long description.`,
@@ -200,7 +200,7 @@ test("the title stays in view as row two while the issue scrolls", async () => {
 });
 
 test("the issue page carries the card's labels, people, files and sub-issues", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", board);
   const profile = await mkdtemp(join(tmpdir(), "lanew-issue-detail-"));
   const home = join(profile, "home");
@@ -258,7 +258,7 @@ test("the issue page carries the card's labels, people, files and sub-issues", a
 });
 
 test("a comment can be written, reworded and retracted, and the thread keeps the gap", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", board);
   const profile = await mkdtemp(join(tmpdir(), "lanew-issue-comment-"));
   const home = join(profile, "home");
@@ -333,7 +333,7 @@ test("a comment can be written, reworded and retracted, and the thread keeps the
 });
 
 test("following, starring, assigning and labelling all reach the board", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", board);
   const profile = await mkdtemp(join(tmpdir(), "lanew-issue-props-"));
   const home = join(profile, "home");
@@ -406,7 +406,7 @@ test("following, starring, assigning and labelling all reach the board", async (
 // FE-28/V3: where the last agent stopped, and the command that hands the card
 // to the next one — and nothing at all on a card nobody handed over.
 test("a checkpoint shows where the agent stopped and copies the resume command", async () => {
-  const plane = await startStubPlane({ workspaces });
+  const plane = await startStubPlane({ projects });
   plane.setBoard("ws-cloud-project", board);
   plane.setCheckpoint("c-parent", {
     id: "cp-2",

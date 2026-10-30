@@ -7,7 +7,7 @@ import type {
   BoardCategory,
   BoardColumn,
   BoardView,
-} from "../../shared/workspaces";
+} from "../../shared/projects";
 
 /** The axes a board can be grouped along. All three are fields cards carry. */
 export const GROUP_BY = ["status", "category", "priority"] as const;

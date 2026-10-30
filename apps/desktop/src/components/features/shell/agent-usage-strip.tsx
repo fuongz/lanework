@@ -72,7 +72,7 @@ let focusRefreshed = 0;
  * picked model runs on. Skip them and a chat shows no usage at all unless the
  * terminal panel happens to have that agent's tab active.
  */
-function useUsageAgent(workspace: string): UsageAgent | null {
+function useUsageAgent(project: string): UsageAgent | null {
   const chat = useLocation({
     select: (location) => location.pathname.includes("/agents/chat/"),
   });
@@ -83,14 +83,13 @@ function useUsageAgent(workspace: string): UsageAgent | null {
   const { agent: subAgent } = useSearch({ strict: false });
   const viewed = useAgentTerminals((state) =>
     terminalId
-      ? state.sessions[workspace]?.find((entry) => entry.id === terminalId)
-          ?.kind
+      ? state.sessions[project]?.find((entry) => entry.id === terminalId)?.kind
       : undefined,
   );
   const chatAgent = useChatAgent();
   const tab = useTerminal((state) => {
-    const id = state.active[workspace];
-    return state.sessions[workspace]?.find((entry) => entry.id === id)?.kind;
+    const id = state.active[project];
+    return state.sessions[project]?.find((entry) => entry.id === id)?.kind;
   });
   if (terminalId) return usageAgent(viewed);
   if (sub) return usageAgent(subAgent);
@@ -116,8 +115,8 @@ function useUsageAgent(workspace: string): UsageAgent | null {
  *   subscription there is nothing to show. An error keeps the last snapshot
  *   and says why it is old.
  */
-export function AgentUsageStrip({ workspace }: { workspace: string }) {
-  const agent = useUsageAgent(workspace);
+export function AgentUsageStrip({ project }: { project: string }) {
+  const agent = useUsageAgent(project);
   const claudeUsage = useAgentSessions((state) => state.claudeUsage);
   const codexQuota = useAgentSessions((state) => state.codexQuota);
   const opencodeUsage = useAgentSessions((state) => state.opencodeUsage);
@@ -138,9 +137,9 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
     if (!agent) return;
     setLocalRefreshing(true);
     try {
-      if (agent === "codex") await refreshCodex(workspace, true);
+      if (agent === "codex") await refreshCodex(project, true);
       // OpenCode's limits are read with Codex's usage, from OpenCode Go.
-      else await loadCodexUsage(workspace);
+      else await loadCodexUsage(project);
     } finally {
       setLocalRefreshing(false);
     }
@@ -151,11 +150,11 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
     const onFocus = () => {
       if (Date.now() - focusRefreshed < FOCUS_REFRESH_MS) return;
       focusRefreshed = Date.now();
-      void (agent === "claude" ? refreshClaude() : loadCodexUsage(workspace));
+      void (agent === "claude" ? refreshClaude() : loadCodexUsage(project));
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [agent, workspace, refreshClaude, loadCodexUsage]);
+  }, [agent, project, refreshClaude, loadCodexUsage]);
 
   const view =
     agent === "claude"
@@ -197,8 +196,8 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
       onOpenChange={(open) => {
         // Codex is asked again on opening, at most once a minute; OpenCode's
         // limits are read again with it.
-        if (open && view.agent === "codex") void refreshCodex(workspace, false);
-        if (open && view.agent === "opencode") void loadCodexUsage(workspace);
+        if (open && view.agent === "codex") void refreshCodex(project, false);
+        if (open && view.agent === "opencode") void loadCodexUsage(project);
       }}
     >
       <PopoverTrigger
@@ -248,7 +247,7 @@ export function AgentUsageStrip({ workspace }: { workspace: string }) {
         <UsageDetails
           view={view}
           now={now}
-          onUseReset={(creditId) => consumeCodexReset(workspace, creditId)}
+          onUseReset={(creditId) => consumeCodexReset(project, creditId)}
           refresh={
             <Button
               variant="ghost"

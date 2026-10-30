@@ -34,7 +34,7 @@ test("local mode runs the whole board without a single request to the control pl
   try {
     const page = await app.firstWindow();
     const result = await page.evaluate(async () => {
-      const { auth, workspaces } = (globalThis as unknown as Desktop).desktop;
+      const { auth, projects } = (globalThis as unknown as Desktop).desktop;
       const fail = async (run: () => Promise<unknown>) => {
         try {
           await run();
@@ -44,9 +44,9 @@ test("local mode runs the whole board without a single request to the control pl
         }
       };
       const session = await auth.enterLocalMode();
-      const created = await workspaces.create("Offline board");
+      const created = await projects.create("Offline board");
       const ws = created.active?.id as string;
-      const board = workspaces.board;
+      const board = projects.board;
 
       const first = await board.create(ws, {
         title: "Plan the offline board",
@@ -98,8 +98,8 @@ test("local mode runs the whole board without a single request to the control pl
       const comment = await fail(() =>
         board.comment(ws, first.card.id, "hello"),
       );
-      const sync = await fail(() => workspaces.syncToCloud(ws));
-      const reloaded = await workspaces.load();
+      const sync = await fail(() => projects.syncToCloud(ws));
+      const reloaded = await projects.load();
       if (!reloaded.ok) throw new Error("read failed");
       const snapshot = reloaded.snapshot;
       return {
@@ -122,7 +122,7 @@ test("local mode runs the whole board without a single request to the control pl
         changed: changes.cards.length,
         comment,
         sync,
-        listed: snapshot.workspaces.map((entry) => entry.name),
+        listed: snapshot.projects.map((entry) => entry.name),
         active: snapshot.active?.id === ws,
       };
     });
@@ -174,22 +174,22 @@ test("signed in, Sync to cloud moves the local board, and a failed upload loses 
   try {
     const page = await app.firstWindow();
     localId = await page.evaluate(async () => {
-      const { auth, workspaces } = (globalThis as unknown as Desktop).desktop;
+      const { auth, projects } = (globalThis as unknown as Desktop).desktop;
       await auth.enterLocalMode();
-      const created = await workspaces.create("Offline board");
+      const created = await projects.create("Offline board");
       const ws = created.active?.id as string;
-      const card = await workspaces.board.create(ws, {
+      const card = await projects.board.create(ws, {
         title: "Carry me",
         categoryKey: "backend",
       });
       if (card.kind !== "ok") throw new Error("create failed");
-      await workspaces.board.setChecklist(
+      await projects.board.setChecklist(
         ws,
         card.card.id,
         [{ key: "D1", section: "decisions", text: "Moved", checked: true }],
         card.card.revision,
       );
-      await workspaces.board.create(ws, { title: "And me" });
+      await projects.board.create(ws, { title: "And me" });
       return ws;
     });
   } finally {
@@ -216,26 +216,26 @@ test("signed in, Sync to cloud moves the local board, and a failed upload loses 
     // The upload fails: nothing local changes, and the board stays writable.
     plane.setImportBroken(true);
     const failed = await page.evaluate(async (ws) => {
-      const { workspaces } = (globalThis as unknown as Desktop).desktop;
-      const listed = await workspaces.load();
+      const { projects } = (globalThis as unknown as Desktop).desktop;
+      const listed = await projects.load();
       if (!listed.ok) throw new Error("read failed");
       const snapshot = listed.snapshot;
       let error = "";
       try {
-        await workspaces.syncToCloud(ws);
+        await projects.syncToCloud(ws);
       } catch (caught) {
         error = (caught as Error).message;
       }
       // The view is read again only once the failure is over: nothing about
       // it should linger in this machine's own boards.
-      const view = await workspaces.board.load(ws);
-      const write = await workspaces.board.create(ws, {
+      const view = await projects.board.load(ws);
+      const write = await projects.board.create(ws, {
         title: "Written after the failure",
       });
       return {
-        local: snapshot.workspaces.find((entry) => entry.id === ws)?.origin,
+        local: snapshot.projects.find((entry) => entry.id === ws)?.origin,
         error,
-        movedTo: snapshot.workspaces.find((entry) => entry.id === ws)?.movedTo,
+        movedTo: snapshot.projects.find((entry) => entry.id === ws)?.movedTo,
         cards: view.cards.map((card) => card.title).sort(),
         write: write.kind,
       };
@@ -250,10 +250,10 @@ test("signed in, Sync to cloud moves the local board, and a failed upload loses 
     // Run again: it finishes, into the same project.
     plane.setImportBroken(false);
     const moved = await page.evaluate(async (ws) => {
-      const { workspaces } = (globalThis as unknown as Desktop).desktop;
-      const result = await workspaces.syncToCloud(ws);
-      const write = await workspaces.board.create(ws, { title: "Too late" });
-      const local = result.snapshot.workspaces.find((entry) => entry.id === ws);
+      const { projects } = (globalThis as unknown as Desktop).desktop;
+      const result = await projects.syncToCloud(ws);
+      const write = await projects.board.create(ws, { title: "Too late" });
+      const local = result.snapshot.projects.find((entry) => entry.id === ws);
       return {
         cloudId: result.cloudId,
         cards: result.cards,

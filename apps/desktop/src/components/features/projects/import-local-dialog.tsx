@@ -1,4 +1,4 @@
-import type { Workspace } from "#/../shared/workspaces";
+import type { Project } from "#/../shared/projects";
 import {
   Dialog,
   DialogContent,
@@ -18,18 +18,18 @@ import { LocalFolderPanel } from "./local-folder-panel";
  * holds on this machine, so the door belongs next to the project it acts on.
  */
 export function ImportLocalDialog({
-  workspace,
+  project,
   open,
   onOpenChange,
 }: {
-  workspace: Workspace;
+  project: Project;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const reload = useBoard((state) => state.reload);
   const activeSlug = useBoard((state) => state.active?.slug);
   const migrated = useBoard((state) => state.view?.migrated ?? false);
-  const isOpenBoard = workspace.slug === activeSlug;
+  const isOpenBoard = project.slug === activeSlug;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -37,12 +37,12 @@ export function ImportLocalDialog({
         <DialogHeader>
           <DialogTitle>Import from local</DialogTitle>
           <DialogDescription>
-            Where {workspace.name} lives on this machine, and how to put those
+            Where {project.name} lives on this machine, and how to put those
             files on its cloud board.
           </DialogDescription>
         </DialogHeader>
         <LocalFolderPanel
-          workspace={workspace}
+          project={project}
           // NOTE: Only the OPEN board's `migrated` flag says anything about
           // this project. The loaded view belongs to whatever is open, so
           // reading it for another project answers for the wrong board. The

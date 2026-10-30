@@ -31,20 +31,20 @@ function endedCleanly(code: number): boolean {
 }
 
 /**
- * Request tickets, by workspace.
+ * Request tickets, by project.
  *
  * A list read that started before a start or a stop must not land after it.
  */
 const revision = new Map<string, number>();
-const bump = (workspace: string) =>
-  revision.set(workspace, (revision.get(workspace) ?? 0) + 1);
+const bump = (project: string) =>
+  revision.set(project, (revision.get(project) ?? 0) + 1);
 
 interface AgentTerminalsState {
-  /** Each workspace's running agents, as the host last listed them. */
+  /** Each project's running agents, as the host last listed them. */
   sessions: Record<string, TerminalSession[]>;
   starting: boolean;
   error: string | null;
-  refresh: (workspace: string) => Promise<void>;
+  refresh: (project: string) => Promise<void>;
   /**
    * The agent resuming `conversation`, started if it is not running.
    *
@@ -54,7 +54,7 @@ interface AgentTerminalsState {
    * @returns Its terminal, or null when it could not start.
    */
   resume: (
-    workspace: string,
+    project: string,
     conversation: AgentSession,
   ) => Promise<TerminalSession | null>;
   /**
@@ -63,7 +63,7 @@ interface AgentTerminalsState {
    * @returns Its terminal, or null when no tab runs it.
    */
   liveTab: (
-    workspace: string,
+    project: string,
     conversation: AgentSession,
   ) => Promise<TerminalSession | null>;
   /**
@@ -74,18 +74,18 @@ interface AgentTerminalsState {
    * @returns Its terminal, or null when it could not start.
    */
   start: (
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     card?: CardBrief,
   ) => Promise<TerminalSession | null>;
-  stop: (workspace: string, id: string) => Promise<void>;
-  markExited: (workspace: string, id: string, code: number) => void;
+  stop: (project: string, id: string) => Promise<void>;
+  markExited: (project: string, id: string, code: number) => void;
   clearError: () => void;
 }
 
 export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
   async function spawn(
-    workspace: string,
+    project: string,
     agent: TerminalAgent,
     resume?: string,
     card?: CardBrief,
@@ -95,19 +95,19 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
     try {
       // A first guess at the size; the view's attach sets the real one.
       const session = await desktopSurface("terminal").spawn(
-        workspace,
+        project,
         120,
         36,
         agent,
         resume,
         card,
       );
-      bump(workspace);
+      bump(project);
       set((state) => ({
         sessions: {
           ...state.sessions,
-          [workspace]: [
-            ...(state.sessions[workspace] ?? []).filter(
+          [project]: [
+            ...(state.sessions[project] ?? []).filter(
               (entry) => entry.id !== session.id,
             ),
             session,
@@ -128,13 +128,13 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
     starting: false,
     error: null,
 
-    refresh: async (workspace) => {
-      const mine = revision.get(workspace) ?? 0;
+    refresh: async (project) => {
+      const mine = revision.get(project) ?? 0;
       try {
-        const all = (await desktopSurface("terminal").list(workspace)).filter(
+        const all = (await desktopSurface("terminal").list(project)).filter(
           (session) => session.kind !== "shell",
         );
-        if ((revision.get(workspace) ?? 0) !== mine) return;
+        if ((revision.get(project) ?? 0) !== mine) return;
         // Ended cleanly while nobody was looking: close them now, so they
         // neither linger on the rail nor hold one of the eight places.
         const ended = all.filter(
@@ -146,7 +146,7 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
             .catch(() => {});
         const listed = all.filter((session) => !ended.includes(session));
         set((state) => ({
-          sessions: { ...state.sessions, [workspace]: listed },
+          sessions: { ...state.sessions, [project]: listed },
         }));
       } catch (error) {
         set({
@@ -155,14 +155,14 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
       }
     },
 
-    resume: async (workspace, conversation) =>
-      (await get().liveTab(workspace, conversation)) ??
-      spawn(workspace, conversation.agent, conversation.id),
+    resume: async (project, conversation) =>
+      (await get().liveTab(project, conversation)) ??
+      spawn(project, conversation.agent, conversation.id),
 
-    liveTab: async (workspace, conversation) => {
-      await get().refresh(workspace);
+    liveTab: async (project, conversation) => {
+      await get().refresh(project);
       return (
-        (get().sessions[workspace] ?? []).find(
+        (get().sessions[project] ?? []).find(
           (entry) =>
             entry.resume === conversation.id &&
             entry.kind === conversation.agent &&
@@ -171,14 +171,14 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
       );
     },
 
-    start: (workspace, agent, card) => spawn(workspace, agent, undefined, card),
+    start: (project, agent, card) => spawn(project, agent, undefined, card),
 
-    stop: async (workspace, id) => {
-      bump(workspace);
+    stop: async (project, id) => {
+      bump(project);
       set((state) => ({
         sessions: {
           ...state.sessions,
-          [workspace]: (state.sessions[workspace] ?? []).filter(
+          [project]: (state.sessions[project] ?? []).filter(
             (entry) => entry.id !== id,
           ),
         },
@@ -190,15 +190,15 @@ export const useAgentTerminals = create<AgentTerminalsState>()((set, get) => {
       }
     },
 
-    markExited: (workspace, id, code) => {
+    markExited: (project, id, code) => {
       if (endedCleanly(code)) {
-        void get().stop(workspace, id);
+        void get().stop(project, id);
         return;
       }
       set((state) => ({
         sessions: {
           ...state.sessions,
-          [workspace]: (state.sessions[workspace] ?? []).map((entry) =>
+          [project]: (state.sessions[project] ?? []).map((entry) =>
             entry.id === id && !entry.exit
               ? { ...entry, exit: { code, signal: null } }
               : entry,

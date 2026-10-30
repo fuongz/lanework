@@ -53,7 +53,7 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { useCopy } from "#/hooks/use-copy";
-import { useWorkspaceKey } from "#/hooks/use-workspace-key";
+import { useProjectKey } from "#/hooks/use-project-key";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
@@ -121,19 +121,19 @@ function ShellTaskPage({
   conversation: string;
   taskId: string;
 }) {
-  const workspace = useWorkspaceKey(slug);
+  const project = useProjectKey(slug);
   const navigate = useNavigate();
   const parent: AgentSession | undefined = useAgentSessions((state) =>
-    workspace
-      ? state.byWorkspace[workspace]?.find(
+    project
+      ? state.byProject[project]?.find(
           (entry) => entry.agent === "claude" && entry.id === conversation,
         )
       : undefined,
   );
   const liveTab = useAgentTerminals((state) => state.liveTab);
-  const stopping = useStopBackgroundTask(workspace, conversation);
+  const stopping = useStopBackgroundTask(project, conversation);
   const { tasks, error } = useBackgroundTasks(
-    workspace,
+    project,
     conversation,
     `${backgroundCue(parent)}:${stopping.revision}`,
   );
@@ -143,7 +143,7 @@ function ShellTaskPage({
   const running = task?.status === "running";
   // A workflow has no output: its agents are its record.
   const { output, error: outputError } = useTaskOutput(
-    workspace,
+    project,
     conversation,
     taskId,
     running,
@@ -165,8 +165,8 @@ function ShellTaskPage({
   }, [text]);
 
   const openParent = () => {
-    if (!workspace || !parent) return;
-    void liveTab(workspace, parent).then((tab) => {
+    if (!project || !parent) return;
+    void liveTab(project, parent).then((tab) => {
       if (tab)
         void navigate({
           to: "/w/$slug/agents/$terminalId",

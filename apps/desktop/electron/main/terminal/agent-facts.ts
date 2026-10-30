@@ -36,7 +36,7 @@ const DAY = 24 * 60 * 60_000;
 
 /** What the agent view asks for, checked. */
 interface FactsRequest {
-  workspace: string;
+  project: string;
   agent: TerminalAgent;
   id: string;
 }
@@ -54,18 +54,14 @@ interface FactsRequest {
  */
 export function factsRequest(args: unknown[]): FactsRequest {
   if (args.length !== 3)
-    throw new Error("A workspace, an agent and a conversation are required");
-  const [workspace, agent, id] = args;
-  if (
-    typeof workspace !== "string" ||
-    !workspace.trim() ||
-    workspace.length > 200
-  )
-    throw new Error("A valid workspace is required");
+    throw new Error("A project, an agent and a conversation are required");
+  const [project, agent, id] = args;
+  if (typeof project !== "string" || !project.trim() || project.length > 200)
+    throw new Error("A valid project is required");
   if (!isTerminalAgent(agent)) throw new Error("A valid agent is required");
   if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
-  return { workspace, agent, id };
+  return { project, agent, id };
 }
 
 /**

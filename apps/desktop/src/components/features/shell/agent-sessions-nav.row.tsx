@@ -73,7 +73,7 @@ const FACTS_FRESH_MS = 15_000;
  * so the rail reads no task list for the rest.
  */
 function BackgroundShellRows({
-  workspace,
+  project,
   slug,
   session,
   row,
@@ -81,7 +81,7 @@ function BackgroundShellRows({
   viewingTask,
   now,
 }: {
-  workspace: string;
+  project: string;
   slug: string;
   session: AgentSession;
   row: string;
@@ -91,9 +91,9 @@ function BackgroundShellRows({
   now: number;
 }) {
   const navigate = useNavigate();
-  const stopping = useStopBackgroundTask(workspace, session.id);
+  const stopping = useStopBackgroundTask(project, session.id);
   const { tasks } = useBackgroundTasks(
-    workspace,
+    project,
     session.id,
     `${backgroundCue(session)}:${stopping.revision}`,
   );
@@ -196,7 +196,7 @@ export function StopItem({ onStop }: { onStop: () => void }) {
  * (its facts line, its open state) and redraws when they change.
  */
 export function SessionRow({
-  workspace,
+  project,
   slug,
   session,
   running,
@@ -216,7 +216,7 @@ export function SessionRow({
   onDelete,
   onConfirmStop,
 }: {
-  workspace: string;
+  project: string;
   slug: string;
   session: AgentSession;
   /** Its agent is running (a tab, the chat's engine, or a run it leads). */
@@ -267,7 +267,7 @@ export function SessionRow({
   const archive = useAgentSessions((state) => state.archive);
   const stop = useAgentTerminals((state) => state.stop);
   const refreshChats = useChatEngines((state) => state.refresh);
-  const openInTerminal = useOpenInTerminal(slug, workspace);
+  const openInTerminal = useOpenInTerminal(slug, project);
   // Known once its row was hovered, or its agent viewed (FE-38/D5). The
   // tooltip line, not the facts: a view open on an agent reads its facts on
   // every write, and the row redraws only when the line changes.
@@ -278,7 +278,7 @@ export function SessionRow({
   const readFacts = useAgentFacts((state) => state.read);
   // Its agent stopped on a question or a permission (FE-97).
   const awaiting = useAwaiting(
-    (state) => awaitingKey(workspace, session.id) in state.byKey,
+    (state) => awaitingKey(project, session.id) in state.byKey,
   );
   const peeking = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -298,7 +298,7 @@ export function SessionRow({
     peeking.current = setTimeout(() => {
       const known = useAgentFacts.getState().byKey[key];
       if (!known || Date.now() - known.at > FACTS_FRESH_MS)
-        readFacts(workspace, session);
+        readFacts(project, session);
     }, PEEK_MS);
   };
   const unpeek = () => {
@@ -339,17 +339,17 @@ export function SessionRow({
   // engine: the turn is cut off, the conversation kept.
   const stopChat = () =>
     void window.desktop?.conversation
-      .close(workspace, session.id)
+      .close(project, session.id)
       .catch(() => {})
-      .finally(() => void refreshChats(workspace));
+      .finally(() => void refreshChats(project));
   const onStop = tab
     ? () =>
         working
           ? onConfirmStop({
-              stop: () => void stop(workspace, tab.id),
+              stop: () => void stop(project, tab.id),
               label: agent,
             })
-          : void stop(workspace, tab.id)
+          : void stop(project, tab.id)
     : chat
       ? () =>
           working ? onConfirmStop({ stop: stopChat, label: agent }) : stopChat()
@@ -415,12 +415,12 @@ export function SessionRow({
               />
             )}
             {/* A Codex goal that stopped short says so (FE-41/D4). */}
-            <CodexGoalBadge workspace={workspace} session={session} />
+            <CodexGoalBadge project={project} session={session} />
           </ContextMenuTrigger>
           <ContextMenuContent>
             <ContextMenuItem onClick={onRename}>Rename</ContextMenuItem>
             <ContextMenuItem
-              onClick={() => void pin(workspace, session, !isPinned)}
+              onClick={() => void pin(project, session, !isPinned)}
             >
               {isPinned ? "Unpin" : "Pin"}
             </ContextMenuItem>
@@ -430,7 +430,7 @@ export function SessionRow({
               <ContextMenuItem
                 disabled={Boolean(onStop)}
                 onClick={() =>
-                  archive(workspace, session).then(
+                  archive(project, session).then(
                     () => {
                       if (viewing === session.id)
                         void navigate({
@@ -510,7 +510,7 @@ export function SessionRow({
       </div>
       {open && background > 0 && (
         <BackgroundShellRows
-          workspace={workspace}
+          project={project}
           slug={slug}
           session={session}
           row={row}

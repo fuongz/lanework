@@ -492,10 +492,10 @@ describe("built server.cjs over stdio", () => {
 
     // What the bundle wrote is in the file the app reads.
     const app = open(join(home, "data.sqlite"));
-    const [workspace] = app.listWorkspaces();
-    assert.ok(workspace);
+    const [project] = app.listProjects();
+    assert.ok(project);
     assert.equal(
-      app.getWorkItem("FE-01", { workspace: workspace.id })?.columnKey,
+      app.getWorkItem("FE-01", { project: project.id })?.columnKey,
       "processing",
     );
   });

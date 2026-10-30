@@ -95,7 +95,7 @@ export const memoryChannels = {
 
 export interface MemoryChange {
   /** The project, as `list` was asked for it. */
-  workspace: string;
+  project: string;
 }
 
 /**
@@ -106,9 +106,9 @@ export interface MemoryChange {
  */
 export interface DesktopMemoryApi {
   /** The project's memories — and, from then on, `onChange` for it. */
-  list: (workspace: string) => Promise<MemoryList>;
-  read: (workspace: string, file: string) => Promise<MemoryFile>;
+  list: (project: string) => Promise<MemoryList>;
+  read: (project: string, file: string) => Promise<MemoryFile>;
   /** Open the memory folder in Finder. */
-  reveal: (workspace: string) => Promise<void>;
+  reveal: (project: string) => Promise<void>;
   onChange: (listener: (change: MemoryChange) => void) => () => void;
 }

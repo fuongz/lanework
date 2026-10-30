@@ -200,20 +200,20 @@ export function AppShell() {
   // picker there is no project, so no terminal (neither the panel nor its
   // bar) rather than whichever project's was open last.
   const { slug } = useParams({ strict: false }) as { slug?: string };
-  const workspaceKey = useBoard((state) => {
+  const projectKey = useBoard((state) => {
     const found = slug
-      ? state.workspaces.find((entry) => entry.slug === slug)
+      ? state.projects.find((entry) => entry.slug === slug)
       : undefined;
     return found ? (found.id ?? found.slug) : null;
   });
-  const keyRef = useRef(workspaceKey);
-  keyRef.current = workspaceKey;
+  const keyRef = useRef(projectKey);
+  keyRef.current = projectKey;
   const terminalShowing = useTerminal((state) =>
-    terminalShown(state, workspaceKey),
+    terminalShown(state, projectKey),
   );
   const setTerminalHeight = useTerminal((state) => state.setHeight);
   const setTerminalOpen = useTerminal((state) => state.setOpen);
-  useTerminalSessions(workspaceKey);
+  useTerminalSessions(projectKey);
 
   // View › Toggle Terminal (⌘`, and ⌃`) and New Terminal (⌘T, and ⌃⇧`), from
   // the app menu.
@@ -223,8 +223,8 @@ export function AppShell() {
         const terminal = useTerminal.getState();
         if (typeof command === "object" && command.type === "focus") {
           if (command.shellId) {
-            terminal.select(command.workspace, command.shellId);
-            terminal.setOpen(command.workspace, true);
+            terminal.select(command.project, command.shellId);
+            terminal.setOpen(command.project, true);
           }
           void navigate({ href: command.href });
         } else if (command === "toggle") void terminal.toggle(keyRef.current);
@@ -417,7 +417,7 @@ export function AppShell() {
                     // Dragged shut past its minimum: that is a hide, and the
                     // bar takes over. Any other drag is the height to keep.
                     if (height < 1) {
-                      if (workspaceKey) setTerminalOpen(workspaceKey, false);
+                      if (projectKey) setTerminalOpen(projectKey, false);
                     } else setTerminalHeight(height);
                   }}
                 >
@@ -439,20 +439,20 @@ export function AppShell() {
                     collapsible
                     collapsedSize="0px"
                   >
-                    {terminalShowing && workspaceKey && (
+                    {terminalShowing && projectKey && (
                       <TerminalPanel
-                        workspace={workspaceKey}
-                        usage={<BarStrips workspace={workspaceKey} />}
+                        project={projectKey}
+                        usage={<BarStrips project={projectKey} />}
                       />
                     )}
                   </ResizablePanel>
                 </ResizablePanelGroup>
               </div>
             </div>
-            {!terminalShowing && workspaceKey && (
+            {!terminalShowing && projectKey && (
               <TerminalMinibar
-                workspace={workspaceKey}
-                usage={<BarStrips workspace={workspaceKey} />}
+                project={projectKey}
+                usage={<BarStrips project={projectKey} />}
               />
             )}
           </div>
@@ -519,11 +519,11 @@ export function AppShell() {
  * either strip draws nothing when it has nothing to say, and a line beside
  * one strip alone would divide nothing.
  */
-function BarStrips({ workspace }: { workspace: string }) {
+function BarStrips({ project }: { project: string }) {
   return (
     <div className="flex items-center gap-3 [&>*+*]:relative [&>*+*]:before:absolute [&>*+*]:before:top-1/2 [&>*+*]:before:-left-1.5 [&>*+*]:before:h-3.5 [&>*+*]:before:w-px [&>*+*]:before:-translate-y-1/2 [&>*+*]:before:bg-border">
-      <PortsStrip workspace={workspace} />
-      <AgentUsageStrip workspace={workspace} />
+      <PortsStrip project={project} />
+      <AgentUsageStrip project={project} />
     </div>
   );
 }
