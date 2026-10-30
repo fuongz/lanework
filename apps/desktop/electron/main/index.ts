@@ -53,6 +53,7 @@ import type { SessionsControl } from "./orchestration/control-server";
 import { leadsMain } from "./orchestration/leads";
 import { moveLegacyProjectsDir } from "./paths";
 import { registerProjects } from "./projects";
+import { migrateProjectsLayout } from "./projects/layout-migration";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { appOrigin, isTrustedUrl } from "./security";
@@ -235,8 +236,9 @@ if (devUrl && new URL(devUrl).origin !== "http://127.0.0.1:5175")
 if (!app.isPackaged && process.env.LANEWORK_TEST_USER_DATA)
   app.setPath("userData", process.env.LANEWORK_TEST_USER_DATA);
 // Before anything reads the project state: it lived in `workspaces/` until
-// FE-107.
+// FE-107, and in one flat folder until FE-108.
 moveLegacyProjectsDir();
+migrateProjectsLayout();
 /**
  * INF-05 (SR-07/SW-04): the production CSP (`protocol.ts`) on the Vite dev
  * origin too, so dev renders the same hostile content (PR bodies,

@@ -14,6 +14,7 @@ import {
   parseCard,
   parseProjects,
 } from "../electron/main/projects/client";
+import { migrateProjectsLayout } from "../electron/main/projects/layout-migration";
 import { readLocalFolder } from "../electron/main/projects/local-folder";
 import { slugify } from "../electron/main/projects/slug";
 import {
@@ -169,10 +170,15 @@ test("active project persists separately for each account, machine and API origi
         value: "ws-lanework",
       });
     }
-    for (const file of await readdir(join(home, "projects")))
-      expect(
-        await readFile(join(home, "projects", file), "utf8"),
-      ).not.toContain(record.secret);
+    // FE-108: one folder per account (and per project) under `projects/`.
+    for (const entry of await readdir(join(home, "projects"), {
+      recursive: true,
+      withFileTypes: true,
+    }))
+      if (entry.isFile())
+        expect(
+          await readFile(join(entry.parentPath, entry.name), "utf8"),
+        ).not.toContain(record.secret);
     await writeActive(record, { id: null, slug: null });
     expect(await readActive(record)).toBeNull();
   } finally {
@@ -514,6 +520,9 @@ test("a v1 selection file (a slug) is honoured once and rewritten as an id", asy
     );
     expect(moveLegacyProjectsDir(home)).toBe(true);
     expect(moveLegacyProjectsDir(home)).toBe(false);
+    // FE-108: then from the flat folder into the account's own.
+    expect(migrateProjectsLayout(join(home, "projects"))).toBe(1);
+    expect(migrateProjectsLayout(join(home, "projects"))).toBe(0);
 
     expect(await readActive(record)).toEqual({ by: "slug", value: "lanework" });
     // Once resolved, the caller writes the id and the slug never comes back.

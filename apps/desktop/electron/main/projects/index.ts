@@ -104,6 +104,7 @@ import {
 } from "./session";
 import { slugify } from "./slug";
 import {
+  indexProjects,
   readActive,
   readBoardCache,
   readFolders,
@@ -195,6 +196,9 @@ async function load(id?: string): Promise<ProjectSnapshot> {
       ? known
       : await fetchProjects(record);
   rememberList(record, cloud);
+  // FE-108: a fresh read is the account's whole list, so it names every
+  // project folder and settles what waited in `.pending`.
+  if (cloud !== known) await indexProjects(record, cloud);
   const projects = [...cloud, ...locals];
   const saved = await readActive(record);
   await assertSameSession(record);
