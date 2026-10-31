@@ -14,9 +14,12 @@ import {
   utilityProcess,
 } from "electron";
 import {
+  AGENT_SESSION_LIMIT,
   type AgentFacts,
   type AgentFileMarks,
   type AgentFiles,
+  type AgentPullProgress,
+  type AgentPullResult,
   type AgentSession,
   type AgentUsage,
   type AgentWrite,
@@ -25,6 +28,7 @@ import {
   type BackgroundTaskOutput,
   type CardBrief,
   clampGeometry,
+  isAgentPullList,
   isAgentSessionId,
   isAgentSessionIdOf,
   isBoardId,
@@ -39,17 +43,28 @@ import {
   type TerminalSession,
   terminalChannels,
 } from "../../../shared/terminal";
-import { assertTrustedSender, broadcast, handle } from "../ipc";
-import { appHomeDir } from "../paths";
 import {
-  authorizedRecord,
+  openSessionStore,
+  type SessionStore,
+  sessionKey,
+} from "../../session-store";
+import { assertTrustedSender, broadcast, handle } from "../ipc";
+import { appHomeDir, sessionStorePath } from "../paths";
+import {
   knownProject,
   menuBarProjects,
   projectFolders,
   terminalFolder,
 } from "../projects";
+import {
+  allCodexRollouts,
+  claudeTranscriptOf,
+  type IngestSource,
+  pullIntoStore,
+} from "../sessions";
 import { agentHomeDir } from "../test-seams";
-import { watchAgentActivity } from "./agent-activity";
+import { STALE_MS, SUBAGENT_STALE_MS } from "../transcripts/activity";
+import { ingestSession, watchAgentActivity } from "./agent-activity";
 import {
   archiveAgentTranscript,
   deleteArchivedTranscript,
@@ -65,18 +80,17 @@ import {
   readAgentFiles,
 } from "./agent-files";
 import {
-  applyAgentMarks,
   bindConductor,
-  cleanAgentName,
-  keptKeys,
-  readAgentMarks,
-  updateAgentMark,
+  conductorIn,
+  importLegacyMarksOnce,
+  nameSession,
+  pinSession,
+  releaseConductor,
 } from "./agent-marks";
 import { notifyAgentCompleted } from "./agent-notifications";
-import { agentKey, listAgentSessions } from "./agent-sessions";
+import { agentKey } from "./agent-sessions";
 import {
   backgroundRequest,
-  readBackgroundTasks,
   readBackgroundTasksWithPids,
   readTaskOutput,
   stopBackgroundTask,
@@ -246,18 +260,146 @@ async function runCodex(args: string[]): Promise<void> {
   });
 }
 
-/** The file of Lanework's names and pins for agent conversations. */
-function agentMarksFile(): string {
+// ── Lanework's session store (FE-112) ───────────────────────────────────────
+
+/** The file Lanework kept its names and pins in before FE-112. */
+function legacyMarksFile(): string {
   return join(appHomeDir(), "agent-sessions.json");
+}
+
+let store: SessionStore | null = null;
+let storeClosed = false;
+
+/**
+ * Lanework's session store, `<home>/lw.db`: opened on first use, closed when
+ * the app quits.
+ *
+ * Its first open carries `agent-sessions.json` over, once
+ * (`importLegacyMarksOnce`).
+ *
+ * @throws When it cannot be opened (a newer build's file), or once the app
+ *   is quitting.
+ */
+function sessionStore(): SessionStore {
+  if (store) return store;
+  if (storeClosed) throw new Error("Lanework is quitting.");
+  const opened = openSessionStore({ path: sessionStorePath() });
+  importLegacyMarksOnce(opened, legacyMarksFile());
+  store = opened;
+  return opened;
+}
+
+function closeSessionStore(): void {
+  storeClosed = true;
+  store?.close();
+  store = null;
+}
+
+/** Ask every window showing `project`'s rail to list it again. */
+function touchRail(project: string): void {
+  if (host) void request({ t: "touch", project }).catch(() => undefined);
+}
+
+/**
+ * Read one conversation's new bytes into the store, and have the rail list
+ * it again when that gave it its first title.
+ *
+ * @param create Read it in though the store has no row for it.
+ */
+async function readInto(
+  project: string,
+  folder: string,
+  key: string,
+  source: IngestSource,
+  create = false,
+): Promise<void> {
+  const read = await ingestSession(sessionStore(), key, source, {
+    project,
+    folder,
+    home: agentHome(),
+    create,
+  });
+  if (read.appeared) touchRail(project);
+}
+
+/**
+ * Make a conversation Lanework starts or resumes known to its session store
+ * (FE-112).
+ *
+ * The rail then lists it without a Pull, once its first prompt is in, and
+ * the transcript watcher reads its writes. A row the store already has is
+ * left as it is; a stub a legacy mark made, with no project yet, is placed
+ * in this one. Then its transcript is read, if there is one yet.
+ *
+ * NOTE: The id is main's own, the host's or the CLI's, never the page's.
+ *
+ * @param folder The folder it runs in; looked up when not given.
+ * @param source Its transcript, when known. A Claude one's is worked out.
+ * @throws When `id` is not `agent`'s, or the store cannot be opened.
+ */
+export async function registerAgentSession(
+  project: string,
+  agent: TerminalAgent,
+  id: string,
+  folder?: string | null,
+  source?: string | null,
+): Promise<void> {
+  if (!isAgentSessionIdOf(agent, id))
+    throw new Error("A valid conversation is required");
+  const where =
+    folder === undefined
+      ? await terminalFolder(project).catch(() => null)
+      : folder;
+  const sessions = sessionStore();
+  const key = sessionKey(agent, id);
+  const file =
+    source ??
+    (agent === "claude" && where
+      ? claudeTranscriptOf(agentHome(), where, id)
+      : null);
+  const row = sessions.getSession(key);
+  if (!row || row.project === null)
+    sessions.upsertSession({
+      agent,
+      id,
+      project,
+      folder: where,
+      // Untitled until its first prompt is read: the rail shows its tab as
+      // new until then.
+      cliTitle: "",
+      updatedAt: new Date().toISOString(),
+      origin: "lanework",
+      sourcePath: file,
+    });
+  if (!where) return;
+  watchProject(project, where);
+  const read = sourceOf(agent, id, file);
+  if (read) await readInto(project, where, key, read);
+}
+
+/**
+ * What a read of conversation `id` reads: its transcript, or for OpenCode,
+ * which keeps none as a file, its id. Null without a transcript to read.
+ */
+function sourceOf(
+  agent: TerminalAgent,
+  id: string,
+  file: string | null,
+): IngestSource | null {
+  if (agent === "opencode") return { agent: "opencode", id };
+  if (!file) return null;
+  return agent === "claude"
+    ? { agent: "claude", file }
+    : { agent: "codex", file };
 }
 
 /**
  * Make a conversation main just started a conductor's own in `project`
  * (FE-95).
  *
- * NOTE: Not through `markable`: a conversation this new has no transcript
- * the listing could show yet. The id is main's (`conversation.start`), never
- * the page's.
+ * NOTE: Not through `markable`: a conversation this new has no title the
+ * rail could show yet. The id is main's (`conversation.start`), never the
+ * page's.
  */
 export async function bindConductorConversation(
   project: string,
@@ -265,9 +407,8 @@ export async function bindConductorConversation(
   id: string,
   conductor: string,
 ): Promise<void> {
-  if (!isAgentSessionIdOf(agent, id))
-    throw new Error("A valid conversation is required");
-  await bindConductor(agentMarksFile(), agentKey({ agent, id }), {
+  await registerAgentSession(project, agent, id);
+  bindConductor(sessionStore(), sessionKey(agent, id), {
     id: conductor,
     project,
   });
@@ -281,16 +422,14 @@ export async function conductorOfConversation(
   agent: TerminalAgent,
   id: string,
 ): Promise<string | null> {
-  const mark = (await readAgentMarks(agentMarksFile()))[
-    agentKey({ agent, id })
-  ];
-  return mark?.conductor?.project === project ? mark.conductor.id : null;
+  return conductorIn(sessionStore(), sessionKey(agent, id), project);
 }
 
 /**
  * Name a conversation main just started, as the rail's Rename would.
  *
- * @throws When the name is not one line of at most `AGENT_NAME_MAX`.
+ * @throws When the name is not one line of at most `AGENT_NAME_MAX`, or the
+ *   store has no such conversation (`registerAgentSession` first).
  */
 export async function nameConversation(
   agent: TerminalAgent,
@@ -299,15 +438,8 @@ export async function nameConversation(
 ): Promise<void> {
   if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
-  const clean = cleanAgentName(name);
-  await updateAgentMark(
-    agentMarksFile(),
-    agentKey({ agent, id }),
-    (current) => ({
-      ...current,
-      name: clean || undefined,
-    }),
-  );
+  if (!nameSession(sessionStore(), sessionKey(agent, id), name))
+    throw new Error("That conversation is not one Lanework has.");
 }
 
 /**
@@ -316,17 +448,23 @@ export async function nameConversation(
  *
  * Started by the LISTING, not by a subscribe call: the rail lists a project
  * as soon as it shows it, which is when its rows need to be able to spin.
- * Capped at {@link WATCH_LIMIT}, because every project somebody has looked
- * at in this run would otherwise keep a watcher.
+ * Also by a conversation Lanework starts in a project (FE-112), whose row
+ * only the watcher fills in. Capped at {@link WATCH_LIMIT}, the project
+ * least recently listed let go first, because every project somebody has
+ * looked at in this run would otherwise keep a watcher.
  */
 const watching = new Map<string, { folder: string; stop: () => void }>();
 const WATCH_LIMIT = 8;
 
 function watchProject(project: string, folder: string): void {
   const current = watching.get(project);
-  if (current?.folder === folder) return;
-  current?.stop();
   watching.delete(project);
+  if (current?.folder === folder) {
+    // Listed again: the newest in the cap's order.
+    watching.set(project, current);
+    return;
+  }
+  current?.stop();
   if (watching.size >= WATCH_LIMIT) {
     const [oldest] = watching.keys();
     if (oldest !== undefined) {
@@ -351,7 +489,7 @@ function watchProject(project: string, folder: string): void {
     // first rollout can be caught before its `session_meta` is whole, and
     // the next writes of that turn are no news (FE-31/D5).
     (agent, id) => {
-      rebind(project, agentKey({ agent, id }));
+      rebind(project);
       // Also for a view showing its numbers, which move on every write of a
       // turn, most of which change no state.
       broadcast(terminalChannels.agentWritten, {
@@ -362,6 +500,10 @@ function watchProject(project: string, folder: string): void {
       } satisfies AgentWrite);
     },
     (agent, id) => {
+      // Only a conversation Lanework holds for this project notifies, as
+      // only those are on its rail (FE-112): one never pulled stays quiet.
+      const row = sessionStore().getSession(sessionKey(agent, id));
+      if (!row || row.project !== project || row.archivedAt !== null) return;
       void knownProject(project)
         .then(async ({ project: found }) => {
           const tabs = host
@@ -378,73 +520,113 @@ function watchProject(project: string, folder: string): void {
         })
         .catch(() => {});
     },
+    // FE-112: a settled write of a conversation the store has is read into
+    // it. One that only now has a title is new to the rail: a tab's first
+    // prompt, say, which the activity watcher may not count as news.
+    {
+      store: sessionStore,
+      project,
+      onIngested: (_key, appeared) => {
+        if (appeared) touchRail(project);
+      },
+    },
   );
   watching.set(project, { folder, stop });
 }
 
 /**
- * The conversations `project`'s folder has, with Lanework's names and pins
- * laid over them; none without a folder here.
+ * `project`'s rail as Lanework's session store lists it, ready to show.
+ *
+ * - A conversation nothing was typed in yet, registered when Lanework
+ *   started it, is left out: the rail shows its tab as new until then.
+ * - The newest {@link AGENT_SESSION_LIMIT} of the rest, every pinned and
+ *   conductor's one besides.
+ * - `working` is what the last read found, and nothing ages it: one not
+ *   written for `STALE_MS` is not working, whatever that read said, so a row
+ *   never spins for good. Its card goes with it; a sub-agent's the same, past
+ *   `SUBAGENT_STALE_MS`.
+ *
+ * @param listed `listRail`'s rows, newest first.
+ */
+function railOf(listed: AgentSession[], now = Date.now()): AgentSession[] {
+  const out: AgentSession[] = [];
+  let rest = 0;
+  for (const session of listed) {
+    if (!session.cliTitle) continue;
+    const kept = session.pinnedAt !== null || session.conductor !== null;
+    if (!kept && rest >= AGENT_SESSION_LIMIT) continue;
+    if (!kept) rest += 1;
+    const working =
+      session.working && now - Date.parse(session.updatedAt) <= STALE_MS;
+    out.push({
+      ...session,
+      working,
+      card: working ? session.card : null,
+      subagents: session.subagents.map((sub) =>
+        sub.working && now - Date.parse(sub.updatedAt) > SUBAGENT_STALE_MS
+          ? { ...sub, working: false }
+          : sub,
+      ),
+    });
+  }
+  return out;
+}
+
+/** `project`'s rows as the store has them, before {@link railOf}. */
+function storedRail(project: string): AgentSession[] {
+  // Twice the limit: rows nothing was typed in yet take no place on it.
+  return sessionStore().listRail(project, AGENT_SESSION_LIMIT * 2);
+}
+
+/**
+ * The conversations Lanework lists for `project` (FE-112), with its names
+ * and pins; none without a folder here, where nothing could resume them.
+ *
+ * NOTE: A SELECT, no CLI file read: a conversation started outside Lanework
+ * joins through a Pull. Listing starts the project's watcher, which keeps
+ * the rows it has up to date.
  */
 async function agentSessionsOf(project: string): Promise<AgentSession[]> {
   const folder = await terminalFolder(project);
   if (!folder) return [];
   watchProject(project, folder);
-  const marks = await readAgentMarks(agentMarksFile());
-  const listed = await listAgentSessions(agentHome(), folder, keptKeys(marks));
-  listedKeys.set(project, new Set(listed.map(agentKey)));
-  return applyAgentMarks(listed, marks);
+  return railOf(storedRail(project));
 }
 
-/** Per project with a re-check in flight: the keys written meanwhile. */
-const rebinding = new Map<string, Set<string>>();
+/** `project`'s listed conversations as `agent:id`; none when unreadable. */
+function railKeys(project: string): Set<string> {
+  try {
+    return new Set(railOf(storedRail(project)).map(agentKey));
+  } catch {
+    return new Set();
+  }
+}
+
+/** Projects with a re-check in flight: true when another was asked for. */
+const rebinding = new Map<string, boolean>();
 /**
  * Re-check which conversation `project`'s agent tabs are on (FE-31/D5).
  *
  * The host tells every window if one moved. One run at a time per
  * project, and at most one more queued behind it: a turn writes its
  * transcript many times a second.
- *
- * @param written the agent key of the transcript just written, if any.
  */
-function rebind(project: string, written?: string): void {
+function rebind(project: string): void {
   if (!host) return;
-  const queued = rebinding.get(project);
-  if (queued) {
-    // "" is a run asked for with no write behind it (a Claude move).
-    queued.add(written ?? "");
+  if (rebinding.has(project)) {
+    rebinding.set(project, true);
     return;
   }
-  const writes = new Set(written ? [written] : []);
-  // The next run's writes collect here while this one is in flight.
-  rebinding.set(project, new Set());
+  rebinding.set(project, false);
   void agentTerminals(project)
-    .then((terminals) => {
-      // NOTE: A tab on a conversation the rail has not been shown, whose
-      // transcript was just written: list again. A new Codex's first write
-      // is its `session_meta`, before the prompt that titles it, and the
-      // rest of that turn is no news to the activity watcher. Without this
-      // its row stays "New Codex session" until something else moves.
-      const shown = listedKeys.get(project);
-      const untitled = terminals.some((entry) => {
-        if (entry.kind === "shell" || entry.exit || entry.resume === null)
-          return false;
-        const key = agentKey({ agent: entry.kind, id: entry.resume });
-        return writes.has(key) && !shown?.has(key);
-      });
-      if (untitled) return request({ t: "touch", project });
-    })
     .catch(() => undefined)
     .finally(() => {
-      const next = rebinding.get(project);
+      const again = rebinding.get(project);
       rebinding.delete(project);
       // One run for all that queued: the first starts it, the rest join.
-      for (const key of next ?? []) rebind(project, key || undefined);
+      if (again) rebind(project);
     });
 }
-
-/** The conversations each project's listing last answered, as keys. */
-const listedKeys = new Map<string, Set<string>>();
 
 let movesWatch: FSWatcher | null = null;
 let movesTimer: NodeJS.Timeout | null = null;
@@ -485,7 +667,9 @@ async function liveTerminalPids(project: string): Promise<number[]> {
  * `project`'s tabs, each agent tab on the conversation it is on NOW.
  *
  * A tab that moved is moved in the host too, which tells every window, so
- * the rail regroups without polling (FE-31/D5). Best effort: a folder that
+ * the rail regroups without polling (FE-31/D5). The conversation it moved to
+ * is one Lanework runs, so the store gets its row (FE-112): a new Codex
+ * tab's, or the one a Claude `/clear` started. Best effort: a folder that
  * cannot be read keeps what the host had.
  */
 async function agentTerminals(project: string): Promise<TerminalSession[]> {
@@ -494,62 +678,94 @@ async function agentTerminals(project: string): Promise<TerminalSession[]> {
     return listed;
   const folder = await terminalFolder(project);
   if (!folder) return listed;
-  const bindings = await agentBindings(agentHome(), folder, listed).catch(
-    () => [],
-  );
+  const rollouts = new Map<string, string>();
+  const bindings = await agentBindings(
+    agentHome(),
+    folder,
+    listed,
+    rollouts,
+  ).catch(() => []);
   if (bindings.length === 0) return listed;
   await request({ t: "bind", project, bindings });
   const moved = new Map(bindings.map((entry) => [entry.id, entry.resume]));
+  for (const entry of listed) {
+    const to = moved.get(entry.id);
+    if (to && entry.kind !== "shell")
+      void registerAgentSession(
+        project,
+        entry.kind,
+        to,
+        folder,
+        rollouts.get(to),
+      ).catch(() => undefined);
+  }
   return listed.map((entry) => ({
     ...entry,
     resume: moved.get(entry.id) ?? entry.resume,
   }));
 }
 
+/** Whether a live tab of `project` is running conversation `id`. */
+async function runningInTab(
+  project: string,
+  agent: TerminalAgent,
+  id: string,
+): Promise<boolean> {
+  if (!host) return false;
+  const terminals = await request<TerminalSession[]>({ t: "list", project });
+  return terminals.some(
+    (entry) => entry.resume === id && entry.kind === agent && !entry.exit,
+  );
+}
+
 /**
- * The conversation a rename or pin names, checked against the listing.
+ * The conversation a rename, pin, archive, delete or forget names, checked
+ * against Lanework's session store (FE-112).
  *
- * NOTE: The same rule a resume follows: an id this project's own listing
- * does not have is refused, so nothing can be written about a conversation
- * the rail was never shown.
+ * NOTE: The same rule a resume follows: an id the store does not list for
+ * this project (none, another project's, or archived) is refused, so nothing
+ * can be done to a conversation the rail was never shown.
  *
  * @throws when the arguments are malformed or the id is not listed here.
  */
-async function markable(args: unknown[]): Promise<{
+function markable(args: unknown[]): {
   project: string;
+  agent: TerminalAgent;
+  id: string;
   key: string;
-}> {
+} {
   const project = key(args[0], "project");
   const agent = args[1];
   const id = args[2];
   if (!isTerminalAgent(agent)) throw new Error("A valid agent is required");
   if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
-  const known = await agentSessionsOf(project);
-  if (!known.some((entry) => entry.agent === agent && entry.id === id))
+  const mark = sessionKey(agent, id);
+  const row = sessionStore().getSession(mark);
+  if (!row || row.project !== project || row.archivedAt !== null)
     throw new Error("That conversation is not one of this project's");
-  return { project, key: agentKey({ agent, id }) };
+  return { project, agent, id, key: mark };
 }
 
 /** The project's archived conversations, with Lanework's names. */
 async function archivedOf(project: string): Promise<ArchivedAgentSession[]> {
   const folder = await terminalFolder(project);
   if (!folder) return [];
-  const [archived, marks] = await Promise.all([
-    listArchivedAgentSessions(agentHome(), folder),
-    readAgentMarks(agentMarksFile()),
-  ]);
+  const archived = await listArchivedAgentSessions(agentHome(), folder);
+  const sessions = sessionStore();
   return archived.map((entry) => ({
     ...entry,
-    title: marks[agentKey(entry)]?.name ?? entry.title,
+    title: sessions.getSession(agentKey(entry))?.name ?? entry.title,
   }));
 }
 
 /**
  * The archived conversation an unarchive or a delete names.
  *
- * Checked against the project's archived list: {@link markable}'s rule, for
- * the archive.
+ * Checked against Lanework's session store (FE-112): one it archived for
+ * this project. One archived some other way (before the store, or by the
+ * CLI itself) is checked against the project's archived list instead,
+ * {@link markable}'s rule for the archive; another project's never.
  *
  * @throws when the arguments are malformed or the id is not archived here.
  */
@@ -570,10 +786,106 @@ async function archivedOne(args: unknown[]): Promise<{
     throw new Error("A valid conversation is required");
   const folder = await terminalFolder(project);
   if (!folder) throw new Error("This project has no folder here.");
-  const archived = await listArchivedAgentSessions(agentHome(), folder);
-  if (!archived.some((entry) => entry.agent === agent && entry.id === id))
+  const row = sessionStore().getSession(sessionKey(agent, id));
+  const known =
+    row?.project === project && row.archivedAt !== null
+      ? true
+      : row?.project && row.project !== project
+        ? false
+        : (await listArchivedAgentSessions(agentHome(), folder)).some(
+            (entry) => entry.agent === agent && entry.id === id,
+          );
+  if (!known)
     throw new Error("That conversation is not in this project's archive");
   return { project, folder, agent, id };
+}
+
+/** Where Codex keeps conversation `id`'s rollout, if it has it at all. */
+async function codexRolloutOfId(id: string): Promise<string | null> {
+  const all = await allCodexRollouts(join(agentHome(), ".codex", "sessions"));
+  return all.find((file) => file.endsWith(`-${id}.jsonl`)) ?? null;
+}
+
+// ── Pull (FE-112) ───────────────────────────────────────────────────────────
+
+/** The Pull running now: one at a time. */
+let pullRun: AbortController | null = null;
+
+/** The CLIs a Pull reads, off the wire. */
+function pullAgents(value: unknown): TerminalAgent[] {
+  if (!isAgentPullList(value))
+    throw new Error("Pick at least one agent to pull from.");
+  return [...value];
+}
+
+/** What a failure says, for a person to read. */
+function said(error: unknown): string {
+  return error instanceof Error && error.message
+    ? error.message
+    : "It stopped for no reason it gave.";
+}
+
+/**
+ * Pull the conversations of each `{project, folder}` into the store, one
+ * project at a time.
+ *
+ * Every agent of every project ends on `done`, `failed` or `cancelled`, told
+ * to every window on `agentPullProgress`; one cancelled before its turn
+ * came ends `cancelled` at nought. One project failing does not stop the
+ * next.
+ *
+ * @param targets Resolved once this Pull holds the lock.
+ * @param alone One project's Pull: its failure is the Pull's.
+ * @throws Readably, when another Pull runs, the projects or the store
+ *   cannot be read, or nothing could be pulled.
+ */
+async function pullInto(
+  targets: () => Promise<{ project: string; folder: string }[]>,
+  agents: TerminalAgent[],
+  alone: boolean,
+): Promise<AgentPullResult> {
+  if (pullRun)
+    throw new Error(
+      "A Pull is already running. Wait for it to finish, or cancel it.",
+    );
+  const run = new AbortController();
+  pullRun = run;
+  const progress = (step: AgentPullProgress) =>
+    broadcast(terminalChannels.agentPullProgress, step);
+  try {
+    const sessions = sessionStore();
+    const list = await targets();
+    let pulled = 0;
+    let failure: unknown = null;
+    for (const [at, target] of list.entries()) {
+      if (run.signal.aborted) {
+        for (const { project } of list.slice(at))
+          for (const agent of agents)
+            progress({ project, agent, done: 0, total: 0, phase: "cancelled" });
+        break;
+      }
+      try {
+        const outcome = await pullIntoStore(sessions, {
+          project: target.project,
+          folder: target.folder,
+          agents,
+          home: agentHome(),
+          signal: run.signal,
+          onProgress: progress,
+        });
+        pulled += outcome.pulled;
+        // Another window showing it lists it again too.
+        if (outcome.pulled > 0) touchRail(target.project);
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure !== null && (alone || pulled === 0))
+      throw new Error(`Couldn't pull the sessions: ${said(failure)}`);
+    return { pulled };
+  } finally {
+    if (pullRun === run) pullRun = null;
+  }
 }
 
 /** Tell the focused window the View menu asked for something. */
@@ -585,140 +897,6 @@ export function sendTerminalCommand(command: TerminalCommand): void {
   if (window.webContents.isLoadingMainFrame())
     window.webContents.once("did-finish-load", send);
   else send();
-}
-
-interface RunningProject {
-  name: string;
-  project: string;
-  slug: string;
-  items: { label: string; href: string; shellId?: string }[];
-}
-
-/**
- * What runs in every project of the account, for the native menu.
- *
- * Reads the host only when it already runs: it never starts the pty host.
- *
- * @throws when the session changed while the projects were read.
- */
-export async function runningProjects(): Promise<RunningProject[]> {
-  const account = await authorizedRecord();
-  const projects = await menuBarProjects();
-  const terminals = host ? await request<TerminalSession[]>({ t: "list" }) : [];
-  const marks = await readAgentMarks(agentMarksFile());
-  const results: RunningProject[] = [];
-  // Sequential reads bound disk work, even with many linked projects.
-  for (const listed of projects) {
-    const project = listed.id ?? listed.slug;
-    const prefix = `/w/${encodeURIComponent(listed.slug)}`;
-    const live = terminals.filter(
-      (entry) => entry.project === project && !entry.exit,
-    );
-    const folder = await terminalFolder(project);
-    const conversations = folder
-      ? applyAgentMarks(
-          await listAgentSessions(
-            agentHome(),
-            folder,
-            keptKeys(marks),
-            Infinity,
-          ),
-          marks,
-        )
-      : [];
-    const items: RunningProject["items"] = live.map((entry) => {
-      const conversation = conversations.find(
-        (row) => row.agent === entry.kind && row.id === entry.resume,
-      );
-      const name =
-        entry.kind === "shell"
-          ? entry.shell
-          : (conversation?.title ?? entry.kind);
-      const status =
-        entry.kind === "shell"
-          ? "Running"
-          : conversation?.working
-            ? "Working"
-            : "Open";
-      return {
-        label: `${name} — ${status}, PID ${entry.pid}`,
-        href:
-          entry.kind === "shell"
-            ? `${prefix}/issues`
-            : `${prefix}/agents/${encodeURIComponent(entry.id)}`,
-        ...(entry.kind === "shell" ? { shellId: entry.id } : {}),
-      };
-    });
-    for (const conversation of conversations) {
-      // Include working conversations started outside the app, too.
-      if (
-        conversation.working &&
-        !live.some(
-          (entry) =>
-            entry.kind === conversation.agent &&
-            entry.resume === conversation.id,
-        )
-      ) {
-        items.push({
-          label: `${conversation.title} — Working (external)`,
-          href: `${prefix}/issues`,
-        });
-      }
-      for (const sub of conversation.subagents.filter(
-        (entry) => entry.working,
-      )) {
-        items.push({
-          label: `${sub.title || sub.id} — Working (sub-agent)`,
-          href: `${prefix}/agents/sub/${conversation.id}/${encodeURIComponent(sub.id)}?agent=${conversation.agent}`,
-        });
-      }
-      if (
-        folder &&
-        conversation.agent === "claude" &&
-        conversation.background.running > 0
-      ) {
-        const tasks = await readBackgroundTasks(
-          agentHome(),
-          folder,
-          conversation.id,
-        );
-        for (const task of tasks.filter(
-          (entry) => entry.status === "running",
-        )) {
-          if (
-            task.kind === "agent" &&
-            conversation.subagents.some(
-              (sub) => sub.id === task.subagentId && sub.working,
-            )
-          )
-            continue;
-          items.push({
-            label: `${task.description || task.kind} — Running (${task.kind})`,
-            href:
-              task.kind === "agent" && task.subagentId
-                ? `${prefix}/agents/sub/${conversation.id}/${encodeURIComponent(task.subagentId)}?agent=claude`
-                : `${prefix}/agents/task/${conversation.id}/${encodeURIComponent(task.id)}`,
-          });
-        }
-      }
-    }
-    if (items.length)
-      results.push({
-        name: listed.name,
-        project,
-        slug: listed.slug,
-        items,
-      });
-  }
-  const current = await authorizedRecord();
-  if (
-    current.machineId !== account.machineId ||
-    current.secret !== account.secret ||
-    current.apiUrl !== account.apiUrl ||
-    current.userId !== account.userId
-  )
-    throw new Error("Your session changed.");
-  return results;
 }
 
 /**
@@ -810,10 +988,8 @@ export function registerTerminal(devUrl?: string): void {
   // Claude's and Codex's limits: their IPC, and the poll that starts now so
   // Claude's are known before the footer first asks.
   registerUsage(devUrl, {
-    listed: () => listedKeys,
-    keysOf: async (project) =>
-      listedKeys.get(project) ??
-      new Set((await agentSessionsOf(project)).map(agentKey)),
+    projects: () => watching.keys(),
+    keysOf: railKeys,
   });
   // NOTE: Not `handle()`: the port goes back to THIS sender, so the handler
   // needs the event. The sender check is the same one `handle()` applies.
@@ -848,22 +1024,23 @@ export function registerTerminal(devUrl?: string): void {
       // decided by the host from the name, never sent (FE-19/D8).
       const kind = args[3] ?? "shell";
       if (!isTerminalKind(kind)) throw new Error("Unknown kind of terminal");
-      // NOTE: A resume id is one this folder's listing has, for that agent,
-      // not merely one shaped right (FE-23). The host checks the shape again.
-      // `null` is "none", sent only to put a card behind it.
+      // NOTE: A resume id is one Lanework's session store lists for this
+      // project, for that agent, not merely one shaped right (FE-23,
+      // FE-112). The host checks the shape again. `null` is "none", sent
+      // only to put a card behind it.
       const resume = args[4] ?? undefined;
       if (resume !== undefined) {
         if (kind === "shell" || !isAgentSessionIdOf(kind, resume))
           throw new Error("Unknown conversation");
-        const known = await agentSessionsOf(project);
-        if (!known.some((entry) => entry.id === resume && entry.agent === kind))
+        const row = sessionStore().getSession(sessionKey(kind, resume));
+        if (!row || row.project !== project || row.archivedAt !== null)
           throw new Error("That conversation is not in this project.");
       }
       const card = args.length === 6 ? await cardFor(project, args[5]) : null;
       if (card && (kind === "shell" || resume !== undefined))
         throw new Error("A card starts a new agent.");
       const cwd = await terminalFolder(project);
-      return request<TerminalSession>({
+      const session = await request<TerminalSession>({
         t: "spawn",
         project,
         cwd,
@@ -873,6 +1050,15 @@ export function registerTerminal(devUrl?: string): void {
         resume,
         card,
       });
+      // FE-112: a conversation Lanework starts is listed without a Pull.
+      // Claude's and OpenCode's are named at spawn; a new Codex's once a
+      // write binds its tab (`agentTerminals`).
+      const agent = session.kind;
+      if (agent !== "shell" && session.resume && cwd)
+        void registerAgentSession(project, agent, session.resume, cwd).catch(
+          () => undefined,
+        );
+      return session;
     },
   );
   // Asked from the panel's + menu, which only exists beside a running
@@ -885,8 +1071,9 @@ export function registerTerminal(devUrl?: string): void {
       return request<TerminalAgent[]>({ t: "agents" });
     },
   );
-  // Read in MAIN, not the pty host: listing files starts no process, and the
-  // rail asks for this on every project, most of which never open a terminal.
+  // Read in MAIN, not the pty host: a query of Lanework's session store
+  // (FE-112), and the rail asks for this on every project, most of which
+  // never open a terminal.
   handle(
     terminalChannels.agentSessions,
     devUrl,
@@ -901,13 +1088,9 @@ export function registerTerminal(devUrl?: string): void {
     async (args): Promise<AgentSession[]> => {
       if (args.length !== 4)
         throw new Error("A project, a conversation and a name are required");
-      const { project, key: mark } = await markable(args);
-      const name = cleanAgentName(args[3]);
-      await updateAgentMark(agentMarksFile(), mark, (current) => ({
-        ...current,
-        // Empty is "back to the CLI's own title".
-        name: name || undefined,
-      }));
+      const { project, key: mark } = markable(args);
+      // Empty is "back to the CLI's own title".
+      nameSession(sessionStore(), mark, args[3]);
       return agentSessionsOf(project);
     },
   );
@@ -917,12 +1100,8 @@ export function registerTerminal(devUrl?: string): void {
     async (args): Promise<AgentSession[]> => {
       if (args.length !== 4 || typeof args[3] !== "boolean")
         throw new Error("A project, a conversation and a pin are required");
-      const { project, key: mark } = await markable(args);
-      const pinned = args[3];
-      await updateAgentMark(agentMarksFile(), mark, (current) => ({
-        ...current,
-        pinnedAt: pinned ? (current.pinnedAt ?? Date.now()) : undefined,
-      }));
+      const { project, key: mark } = markable(args);
+      pinSession(sessionStore(), mark, args[3]);
       return agentSessionsOf(project);
     },
   );
@@ -932,70 +1111,136 @@ export function registerTerminal(devUrl?: string): void {
     async (args): Promise<AgentSession[]> => {
       if (args.length !== 3)
         throw new Error("A project and a conversation are required");
-      const { project, key: mark } = await markable(args);
-      await updateAgentMark(agentMarksFile(), mark, (current) => ({
-        ...current,
-        conductor: undefined,
-      }));
+      const { project, key: mark } = markable(args);
+      releaseConductor(sessionStore(), mark);
       return agentSessionsOf(project);
     },
   );
-  // NOTE: Deletes the CLI's own files for good (FE-57). The id must be one
-  // this project lists (`markable`), and a conversation a tab of ours is
-  // running is refused: the CLI would only write it again.
+  // NOTE: Deletes the CLI's own files for good (FE-57), and the store's row
+  // with them. The id must be one this project lists (`markable`), and a
+  // conversation a tab of ours is running is refused: the CLI would only
+  // write it again.
   handle(
     terminalChannels.agentSessionDelete,
     devUrl,
     async (args): Promise<AgentSession[]> => {
       if (args.length !== 3)
         throw new Error("A project and a conversation are required");
-      const { project, key: mark } = await markable(args);
-      const agent = args[1] as TerminalAgent;
-      const id = args[2] as string;
-      const terminals = host
-        ? await request<TerminalSession[]>({ t: "list", project })
-        : [];
-      if (
-        terminals.some(
-          (entry) => entry.resume === id && entry.kind === agent && !entry.exit,
-        )
-      )
+      const { project, agent, id } = markable(args);
+      if (await runningInTab(project, agent, id))
         throw new Error("Stop this conversation before deleting it.");
       const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
-      await deleteAgentTranscript(agentHome(), folder, agent, id, runOpencode);
-      await updateAgentMark(agentMarksFile(), mark, () => ({}));
+      await deleteAgentTranscript(
+        agentHome(),
+        folder,
+        agent,
+        id,
+        runOpencode,
+        sessionStore(),
+      );
       return agentSessionsOf(project);
     },
   );
+  // NOTE: Takes a conversation off Lanework only (FE-112): its row, name and
+  // pin go, and the CLI's files are not touched, so a later Pull finds it
+  // again. `markable` first, and refused while a tab of ours runs it, as
+  // Delete is: its writes would be read into nothing.
+  handle(
+    terminalChannels.agentSessionForget,
+    devUrl,
+    async (args): Promise<AgentSession[]> => {
+      if (args.length !== 3)
+        throw new Error("A project and a conversation are required");
+      const { project, agent, id, key: mark } = markable(args);
+      if (await runningInTab(project, agent, id))
+        throw new Error("Stop this conversation before removing it.");
+      sessionStore().removeSession(mark);
+      return agentSessionsOf(project);
+    },
+  );
+  // NOTE: Reads the CLIs' own files into Lanework's session store (FE-112),
+  // in a worker thread, one Pull at a time. Only agents by name and a
+  // project come off the wire: the folder is the one main wrote down for it,
+  // so a page names no file to read.
+  handle(
+    terminalChannels.agentSessionsPull,
+    devUrl,
+    async (args): Promise<AgentPullResult> => {
+      if (args.length !== 2)
+        throw new Error("A project and the agents to pull from are required");
+      const project = key(args[0], "project");
+      const agents = pullAgents(args[1]);
+      return pullInto(
+        async () => {
+          const folder = await terminalFolder(project);
+          if (!folder)
+            throw new Error("This project has no folder here to pull from.");
+          return [{ project, folder }];
+        },
+        agents,
+        true,
+      );
+    },
+  );
+  // Every project with a folder here, one after the other.
+  handle(
+    terminalChannels.agentSessionsPullAll,
+    devUrl,
+    async (args): Promise<AgentPullResult> => {
+      if (args.length !== 1)
+        throw new Error("The agents to pull from are required");
+      const agents = pullAgents(args[0]);
+      return pullInto(
+        async () => {
+          const targets: { project: string; folder: string }[] = [];
+          for (const entry of await menuBarProjects()) {
+            // The key the rail lists it by (`useProjectKey`).
+            const project = entry.id ?? entry.slug;
+            const folder = await terminalFolder(project).catch(() => null);
+            if (folder) targets.push({ project, folder });
+          }
+          if (targets.length === 0)
+            throw new Error("No project has a folder here to pull from.");
+          return targets;
+        },
+        agents,
+        false,
+      );
+    },
+  );
+  // What it read so far stays; the Pull's own answer says it was cancelled.
+  handle(
+    terminalChannels.agentSessionsPullCancel,
+    devUrl,
+    async (args): Promise<void> => {
+      if (args.length !== 0) throw new Error("No arguments are taken");
+      pullRun?.abort();
+    },
+  );
   // NOTE: Into the CLI's own archive. `markable` first, and refused while a
-  // tab of ours runs it (FE-72/D5), as Delete is. The pin goes (FE-72/D3);
-  // the name stays, for the archived list and for when it comes back.
+  // tab of ours runs it (FE-72/D5), as Delete is. The store marks it
+  // archived, which drops the pin (FE-72/D3); the name stays, for the
+  // archived list and for when it comes back.
   handle(
     terminalChannels.agentSessionArchive,
     devUrl,
     async (args): Promise<AgentSession[]> => {
       if (args.length !== 3)
         throw new Error("A project and a conversation are required");
-      const { project, key: mark } = await markable(args);
-      const agent = args[1] as TerminalAgent;
-      const id = args[2] as string;
-      const terminals = host
-        ? await request<TerminalSession[]>({ t: "list", project })
-        : [];
-      if (
-        terminals.some(
-          (entry) => entry.resume === id && entry.kind === agent && !entry.exit,
-        )
-      )
+      const { project, agent, id } = markable(args);
+      if (await runningInTab(project, agent, id))
         throw new Error("Stop this conversation before archiving it.");
       const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
-      await archiveAgentTranscript(agentHome(), folder, agent, id, runCodex);
-      await updateAgentMark(agentMarksFile(), mark, (current) => ({
-        ...current,
-        pinnedAt: undefined,
-      }));
+      await archiveAgentTranscript(
+        agentHome(),
+        folder,
+        agent,
+        id,
+        runCodex,
+        sessionStore(),
+      );
       return agentSessionsOf(project);
     },
   );
@@ -1012,7 +1257,31 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<ArchivedAgentSession[]> => {
       const { project, folder, agent, id } = await archivedOne(args);
-      await unarchiveAgentTranscript(agentHome(), folder, agent, id, runCodex);
+      const had = await unarchiveAgentTranscript(
+        agentHome(),
+        folder,
+        agent,
+        id,
+        runCodex,
+        sessionStore(),
+      );
+      // Archived before the store kept it (FE-112): read in now, so the rail
+      // lists it again without a Pull.
+      if (!had) {
+        const file =
+          agent === "claude"
+            ? claudeTranscriptOf(agentHome(), folder, id)
+            : await codexRolloutOfId(id);
+        const read = sourceOf(agent, id, file);
+        if (read)
+          await readInto(
+            project,
+            folder,
+            sessionKey(agent, id),
+            read,
+            true,
+          ).catch(() => undefined);
+      }
       return archivedOf(project);
     },
   );
@@ -1021,11 +1290,12 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<ArchivedAgentSession[]> => {
       const { project, folder, agent, id } = await archivedOne(args);
-      await deleteArchivedTranscript(agentHome(), folder, agent, id);
-      await updateAgentMark(
-        agentMarksFile(),
-        agentKey({ agent, id }),
-        () => ({}),
+      await deleteArchivedTranscript(
+        agentHome(),
+        folder,
+        agent,
+        id,
+        sessionStore(),
       );
       return archivedOf(project);
     },
@@ -1145,7 +1415,8 @@ export function registerTerminal(devUrl?: string): void {
       return readAgentFiles(agentHome(), folder, which);
     },
   );
-  // Only the conversations this project's own listing has (FE-39/D2).
+  // Only the conversations Lanework lists for this project (FE-39/D2,
+  // FE-112).
   handle(
     terminalChannels.agentFilesForWorktree,
     devUrl,
@@ -1193,6 +1464,10 @@ export function registerTerminal(devUrl?: string): void {
     });
   });
   app.on("will-quit", () => {
+    pullRun?.abort();
+    for (const entry of watching.values()) entry.stop();
+    watching.clear();
+    closeSessionStore();
     host?.kill();
   });
   // NOTE: The dev launcher restarts the app with SIGTERM on every

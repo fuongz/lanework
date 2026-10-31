@@ -30,6 +30,13 @@ import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { useAgentTerminals } from "#/stores/agent-terminals";
 import { AgentSessionSearch } from "./agent-session-search";
 import { AgentSessionsMini } from "./agent-sessions-nav.mini";
+import {
+  PullMenu,
+  PullProblemDialog,
+  PullProgress,
+  SessionsEmpty,
+  useSessionsPull,
+} from "./agent-sessions-nav.pull";
 import { SessionRow, StopItem } from "./agent-sessions-nav.row";
 import { useAgentRail } from "./agent-sessions-nav.sessions";
 import { RenameAgentDialog } from "./rename-agent-dialog";
@@ -63,7 +70,11 @@ const FOLDED = 5;
  *   dot under its icon says where it stands; Stop is in its context menu.
  * - Hidden when there is nothing here to do: no agent CLI on this machine, or
  *   no folder and no conversation (FE-23/D9). A folder with no conversation
- *   yet keeps the group, for its + (FE-26/D3).
+ *   yet keeps the group, for its + (FE-26/D3), and says a Pull would bring
+ *   the ones its CLIs already had (FE-112).
+ * - Lists Lanework's own record (`lw.db`). Its … menu pulls a CLI's
+ *   conversations in; a row's Remove from Lanework takes one out and leaves
+ *   the transcript, Delete transcript deletes that too (FE-112).
  */
 export function AgentSessionsNav({
   project,
@@ -152,6 +163,7 @@ function AgentSessionsList({
   rail: ReturnType<typeof useAgentRail>;
 }) {
   const {
+    agents,
     sessions,
     pending,
     fresh,
@@ -167,6 +179,7 @@ function AgentSessionsList({
   const navigate = useNavigate();
   const stop = useAgentTerminals((state) => state.stop);
   const remove = useAgentSessions((state) => state.remove);
+  const pull = useSessionsPull(project);
   const [expanded, setExpanded] = useState(false);
   const [searching, setSearching] = useState(false);
   /** Conversations whose sub-agents are all shown, past the fold (FE-33/D4). */
@@ -174,8 +187,14 @@ function AgentSessionsList({
     new Set(),
   );
   const [renaming, setRenaming] = useState<AgentSession | null>(null);
-  /** Why an Archive was refused; it has no dialog of its own to show it in. */
-  const [archiveError, setArchiveError] = useState<string | null>(null);
+  /**
+   * Why a row's Archive, Remove from Lanework or Open in terminal was
+   * refused: they have no dialog of their own to show it in.
+   */
+  const [rowError, setRowError] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
   /** The conversation whose transcript is about to go for good. */
   const [deleting, setDeleting] = useState<{
     session: AgentSession;
@@ -197,6 +216,12 @@ function AgentSessionsList({
   const runningUnpinned = inRunning.filter(
     (session) => session.pinnedAt === null,
   );
+  // A folder with nothing in Lanework yet: what a Pull would bring (FE-112).
+  const empty =
+    hasFolder &&
+    sessions.length === 0 &&
+    pending.length === 0 &&
+    fresh.length === 0;
 
   const sessionRow = (session: AgentSession) => {
     const key = agentKey(session);
@@ -227,7 +252,7 @@ function AgentSessionsList({
         }
         onResume={() => openSession(session)}
         onRename={() => setRenaming(session)}
-        onArchiveError={setArchiveError}
+        onError={(title, message) => setRowError({ title, message })}
         onDelete={() => setDeleting({ session, busy: false, error: null })}
         onConfirmStop={setConfirming}
       />
@@ -245,26 +270,32 @@ function AgentSessionsList({
         hasFolder) && (
         <nav aria-label="Sessions" className="flex flex-col gap-0.5">
           <div className="flex min-w-0 items-center justify-between gap-2 pt-4 pb-1 pr-1">
-            <span className="text-muted-foreground px-2 text-[11px] font-medium tracking-wide uppercase">
+            <span className="text-muted-foreground shrink-0 px-2 text-[11px] font-medium tracking-wide uppercase">
               Sessions
             </span>
-            <span className="flex items-center gap-0.5">
-              {/* Every conversation by title, past the fold: Claude Code's
-                and Codex's in one list. */}
-              <button
-                type="button"
-                aria-label="Search conversations"
-                title="Search conversations"
-                disabled={sessions.length === 0}
-                onClick={() => setSearching(true)}
-                className="hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
-              >
-                <HugeiconsIcon
-                  icon={Search01Icon}
-                  className="size-3.5"
-                  strokeWidth={2}
-                />
-              </button>
+            <span className="flex min-w-0 items-center gap-0.5">
+              {/* A Pull reading this project takes Search's and the menu's
+                place: how far it has got, and Cancel (FE-112). */}
+              {pull.here ? (
+                <PullProgress pull={pull} />
+              ) : (
+                // Every conversation by title, past the fold: Claude Code's
+                // and Codex's in one list.
+                <button
+                  type="button"
+                  aria-label="Search conversations"
+                  title="Search conversations"
+                  disabled={sessions.length === 0}
+                  onClick={() => setSearching(true)}
+                  className="hover:bg-foreground/[0.06] text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-md transition-colors disabled:opacity-50"
+                >
+                  <HugeiconsIcon
+                    icon={Search01Icon}
+                    className="size-3.5"
+                    strokeWidth={2}
+                  />
+                </button>
+              )}
               {/* A new conversation opens as a chat: its model picks the CLI,
                 Claude Code or Codex, and its composer starts it. */}
               <button
@@ -286,8 +317,12 @@ function AgentSessionsList({
                   strokeWidth={2}
                 />
               </button>
+              {!pull.here && (
+                <PullMenu pull={pull} agents={agents} hasFolder={hasFolder} />
+              )}
             </span>
           </div>
+          {empty && <SessionsEmpty pull={pull} agents={agents} />}
           {pinned.map((session) => sessionRow(session))}
           {pending.map((entry) => (
             <button
@@ -404,12 +439,13 @@ function AgentSessionsList({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete “{deleting?.session.title}”?
+              Delete the transcript of “{deleting?.session.title}”?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Its transcript is deleted from this machine for good. There is no
-              undo, and {RESUME_COMMAND[deleting?.session.agent ?? "claude"]}{" "}
-              will no longer find it.
+              It is deleted from this machine for good. There is no undo, and{" "}
+              {RESUME_COMMAND[deleting?.session.agent ?? "claude"]} will no
+              longer find it. To only take it off this list, use Remove from
+              Lanework.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleting?.error && (
@@ -449,25 +485,26 @@ function AgentSessionsList({
                 );
               }}
             >
-              {deleting?.busy ? "Deleting…" : "Delete"}
+              {deleting?.busy ? "Deleting…" : "Delete transcript"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
       <AlertDialog
-        open={archiveError !== null}
-        onOpenChange={(open) => !open && setArchiveError(null)}
+        open={rowError !== null}
+        onOpenChange={(open) => !open && setRowError(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Could not archive it</AlertDialogTitle>
-            <AlertDialogDescription>{archiveError}</AlertDialogDescription>
+            <AlertDialogTitle>{rowError?.title}</AlertDialogTitle>
+            <AlertDialogDescription>{rowError?.message}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>OK</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <PullProblemDialog pull={pull} />
       <RenameAgentDialog
         project={project}
         session={renaming}

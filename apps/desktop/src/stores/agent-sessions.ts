@@ -1,23 +1,67 @@
 import { create } from "zustand";
 import { forgetDraft } from "#/lib/conversation-draft";
+import { ipcMessage } from "#/lib/ipc-error";
+import { useAgentTerminals } from "#/stores/agent-terminals";
+import { useChatEngines } from "#/stores/chat-engines";
+import { useNewChats } from "#/stores/new-chats";
 import {
   type AgentActivity,
   type AgentCard,
+  type AgentPullProgress,
+  type AgentPullResult,
   type AgentSession,
   type AgentSubagent,
   type ClaudeUsage,
   type CodexGoal,
   type CodexQuota,
   type CodexResetOutcome,
+  type DesktopTerminalApi,
   isWorkflowAgentKey,
   type OpenCodeUsage,
   type TerminalAgent,
 } from "../../shared/terminal";
 
 /**
- * The agent conversations each project's folder has on disk.
+ * The Pull in progress (FE-112): main runs one at a time.
+ */
+export interface AgentPull {
+  /** The project it reads, or null for every project with a folder here. */
+  project: string | null;
+  agents: TerminalAgent[];
+  /** Main's latest word for each project and agent, by `project\nagent`. */
+  progress: Record<string, AgentPullProgress>;
+  /** The project main last reported on: the one it reads now. */
+  reading: string | null;
+  /** Cancel was pressed: main stops after the conversation it is reading. */
+  cancelling: boolean;
+}
+
+/** How the last Pull ended (FE-112). */
+export interface AgentPullEnd {
+  project: string | null;
+  agents: TerminalAgent[];
+  /** Conversations added to Lanework or brought up to date. */
+  pulled: number;
+  cancelled: boolean;
+  /** The CLIs whose part failed; what they read before stays. */
+  failed: TerminalAgent[];
+  /** Why main refused the whole Pull, when it did. */
+  error: string | null;
+}
+
+/** How far a Pull has got, summed over its agents (and projects). */
+export interface AgentPullCount {
+  done: number;
+  total: number;
+  /** Some part still looks for its conversations: `total` is not final. */
+  scanning: boolean;
+}
+
+/**
+ * The conversations Lanework keeps for each project (FE-112: `lw.db`).
  *
- * As the rail's Agents group last read them.
+ * As the rail's Sessions group last read them. One started outside Lanework
+ * joins only through a Pull.
  */
 interface AgentSessionsState {
   byProject: Record<string, AgentSession[]>;
@@ -69,6 +113,33 @@ interface AgentSessionsState {
    */
   remove: (project: string, session: AgentSession) => Promise<void>;
   /**
+   * Drop a conversation from Lanework only, its name and pin with it
+   * (FE-112). The CLI keeps its transcript, so a later Pull finds it again.
+   *
+   * Off the list at once; the row comes back when main refuses.
+   *
+   * @throws What main refused, when it did.
+   */
+  forget: (project: string, session: AgentSession) => Promise<void>;
+  /** The Pull in progress, if one is. */
+  pulling: AgentPull | null;
+  /** How the last Pull ended, until the next one starts. */
+  lastPull: AgentPullEnd | null;
+  /**
+   * Read `project`'s conversations in from `agents`' own files, then list it
+   * again (FE-112). Never throws: a refusal is the answer's `error`.
+   *
+   * Answers null when a Pull is already running.
+   */
+  pull: (
+    project: string,
+    agents: TerminalAgent[],
+  ) => Promise<AgentPullEnd | null>;
+  /** {@link pull} for every project with a folder here. */
+  pullAll: (agents: TerminalAgent[]) => Promise<AgentPullEnd | null>;
+  /** Stop the Pull in progress. What it already read stays. */
+  cancelPull: () => Promise<void>;
+  /**
    * Archive it in its CLI's own archive; it leaves the rail.
    *
    * @throws what main refused, e.g. a conversation a tab is running.
@@ -77,9 +148,12 @@ interface AgentSessionsState {
   /**
    * Start listening for transcript writes.
    *
+   * Every project's writes mark its rows, but only `project`, the one on
+   * screen, is listed again (FE-111/D3): another is listed when it is opened.
+   *
    * @returns The stop.
    */
-  watchActivity: () => () => void;
+  watchActivity: (project: string) => () => void;
   /**
    * The Codex account's usage, as its newest turn on this machine reported it.
    *
@@ -214,7 +288,8 @@ export function workingOn(
 const latest = new Map<string, number>();
 
 /**
- * How often unknown ids re-list at most: a new conversation, just begun.
+ * How often unknown ids re-list at most: a new conversation Lanework just
+ * began.
  *
  * NOTE: One inside the window is put off to its end, never dropped (FE-31).
  * Otherwise a second agent started within it, or a first whose transcript had
@@ -283,6 +358,65 @@ function subagentWorking(
  */
 const sameJson = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Whether Lanework started `agent:id` in `project`, so main lists it without
+ * a Pull (FE-112).
+ *
+ * One the new-conversation page started or is starting, one the chat's engine
+ * runs, or one a live tab of the project runs: a new Codex tab has no id
+ * until its first turn, so any tab of that CLI counts.
+ */
+function startedHere(
+  project: string,
+  agent: TerminalAgent,
+  id: string,
+): boolean {
+  const chats = useNewChats.getState();
+  if (chats.started[id]?.project === project) return true;
+  if (chats.starting[project]?.agent === agent) return true;
+  if (useChatEngines.getState().alive[project]?.includes(id)) return true;
+  return (useAgentTerminals.getState().sessions[project] ?? []).some(
+    (tab) =>
+      tab.kind === agent &&
+      !tab.exit &&
+      (tab.resume === id || tab.resume === null),
+  );
+}
+
+/**
+ * How far `pull` has got: for `project` (and `agent`), or for all of it.
+ *
+ * Zero of zero for none, or for a Pull of another project.
+ */
+export function pullCount(
+  pull: AgentPull | null,
+  project?: string,
+  agent?: TerminalAgent,
+): AgentPullCount {
+  const count: AgentPullCount = { done: 0, total: 0, scanning: false };
+  if (!pull) return count;
+  for (const entry of Object.values(pull.progress)) {
+    if (project !== undefined && entry.project !== project) continue;
+    if (agent !== undefined && entry.agent !== agent) continue;
+    count.done += entry.done;
+    count.total += entry.total;
+    if (entry.phase === "scan") count.scanning = true;
+  }
+  return count;
+}
+
+/**
+ * Whether `pull` reads `project`: a Pull of it, or one of every project that
+ * has reached it.
+ */
+export function pullReads(pull: AgentPull | null, project: string): boolean {
+  if (!pull) return false;
+  if (pull.project !== null) return pull.project === project;
+  return Object.values(pull.progress).some(
+    (entry) => entry.project === project,
+  );
+}
 
 export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
   byProject: {},
@@ -421,11 +555,75 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     }));
   },
 
-  watchActivity: () => {
+  forget: async (project, session) => {
+    const surface = window.desktop?.terminal;
+    if (!surface) return;
+    // NOTE: Off the list at once, as a pin is: nothing is lost, so there is
+    // nothing to ask. Bumping `latest` drops a read already in flight, which
+    // would put the row back.
+    const mine = (latest.get(project) ?? 0) + 1;
+    latest.set(project, mine);
+    set((state) => {
+      const listed = state.byProject[project];
+      if (!listed) return {};
+      return {
+        byProject: {
+          ...state.byProject,
+          [project]: listed.filter(
+            (entry) => agentKey(entry) !== agentKey(session),
+          ),
+        },
+      };
+    });
+    try {
+      const listed = await surface.forgetAgentSession(
+        project,
+        session.agent,
+        session.id,
+      );
+      forgetDraft(session.id);
+      if (latest.get(project) !== mine) return;
+      latest.set(project, mine + 1);
+      set((state) => ({
+        byProject: { ...state.byProject, [project]: listed },
+      }));
+    } catch (error) {
+      // Not forgotten: the list as main has it puts the row back.
+      void get().load(project);
+      throw error;
+    }
+  },
+
+  pulling: null,
+  lastPull: null,
+
+  pull: (project, agents) =>
+    runPull(project, agents, (surface) =>
+      surface.pullAgentSessions(project, agents),
+    ),
+
+  pullAll: (agents) =>
+    runPull(null, agents, (surface) => surface.pullAllAgentSessions(agents)),
+
+  cancelPull: async () => {
+    const surface = window.desktop?.terminal;
+    if (!surface || !get().pulling) return;
+    set((state) =>
+      state.pulling ? { pulling: { ...state.pulling, cancelling: true } } : {},
+    );
+    try {
+      await surface.cancelAgentSessionsPull();
+    } catch {
+      // Nothing to stop any more: the Pull's own answer ends it.
+    }
+  },
+
+  watchActivity: (shown) => {
     const surface = window.desktop?.terminal;
     if (!surface) return () => {};
     /** List `project` again, but not on every write that asks. */
     const relistSoon = (project: string) => {
+      if (project !== shown) return;
       const relist = () => {
         relistLater.delete(project);
         relisted.set(project, Date.now());
@@ -469,8 +667,12 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
             : { live: { ...state.live, [key]: activity.working } },
         );
         // A sub-agent the rail has not listed was just spawned: list again,
-        // as for a new conversation.
-        if (!parent?.subagents.some((entry) => entry.id === activity.subagent))
+        // as for a new conversation Lanework started.
+        if (
+          parent
+            ? !parent.subagents.some((entry) => entry.id === activity.subagent)
+            : startedHere(activity.project, activity.agent, activity.id)
+        )
           relistSoon(activity.project);
         return;
       }
@@ -484,15 +686,20 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
               cards: { ...state.cards, [key]: activity.card },
             },
       );
-      // A conversation the rail has not listed yet just started: list again,
-      // but not on every write of it.
-      if (!parent) relistSoon(activity.project);
+      // A conversation Lanework started is not listed yet: main has it now,
+      // so list again, but not on every write of it.
+      // NOTE: Only one Lanework started (FE-112). Main lists one started
+      // outside only after a Pull, so listing again on its writes would read
+      // the same list over and over.
+      if (!parent && startedHere(activity.project, activity.agent, activity.id))
+        relistSoon(activity.project);
     });
-    // Listed again every SUBAGENT_POLL_MS while a sub-agent shows working.
+    // The shown project listed again every SUBAGENT_POLL_MS while a sub-agent
+    // shows working.
     const polls = new Map<string, ReturnType<typeof setInterval>>();
     const poll = (state: AgentSessionsState) => {
       for (const [project, sessions] of Object.entries(state.byProject)) {
-        const busy = subagentWorking(sessions, state.live);
+        const busy = project === shown && subagentWorking(sessions, state.live);
         const timer = polls.get(project);
         if (busy && !timer)
           polls.set(
@@ -655,3 +862,84 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
     }
   },
 }));
+
+/**
+ * Run a Pull to its end, with its progress in the store, then list again what
+ * it read (FE-112).
+ *
+ * NOTE: Subscribed before main is asked, so no progress is missed, and
+ * unsubscribed once it answers: a late word belongs to no Pull here.
+ */
+async function runPull(
+  project: string | null,
+  agents: TerminalAgent[],
+  start: (surface: DesktopTerminalApi) => Promise<AgentPullResult>,
+): Promise<AgentPullEnd | null> {
+  const { getState, setState } = useAgentSessions;
+  const surface = window.desktop?.terminal;
+  if (!surface || getState().pulling || agents.length === 0) return null;
+  setState({
+    pulling: {
+      project,
+      agents,
+      progress: {},
+      reading: project,
+      cancelling: false,
+    },
+    lastPull: null,
+  });
+  const stop = surface.onAgentPullProgress((progress) =>
+    setState((state) =>
+      state.pulling
+        ? {
+            pulling: {
+              ...state.pulling,
+              progress: {
+                ...state.pulling.progress,
+                [`${progress.project}\n${progress.agent}`]: progress,
+              },
+              reading: progress.project,
+            },
+          }
+        : {},
+    ),
+  );
+  let pulled = 0;
+  let error: string | null = null;
+  try {
+    pulled = (await start(surface)).pulled;
+  } catch (failure) {
+    error = ipcMessage(failure, "Could not pull the sessions.");
+  } finally {
+    stop();
+  }
+  const ended = getState().pulling;
+  const finals = Object.values(ended?.progress ?? {});
+  const end: AgentPullEnd = {
+    project,
+    agents,
+    pulled,
+    cancelled:
+      Boolean(ended?.cancelling) ||
+      finals.some((entry) => entry.phase === "cancelled"),
+    failed: [
+      ...new Set(
+        finals
+          .filter((entry) => entry.phase === "failed")
+          .map((entry) => entry.agent),
+      ),
+    ],
+    error,
+  };
+  setState({ pulling: null, lastPull: end });
+  // What it read, listed again: the project, or every one it reached that
+  // the rail has listed. Another is listed when it is opened.
+  const listed = getState().byProject;
+  const read = project
+    ? [project]
+    : [...new Set(finals.map((entry) => entry.project))].filter(
+        (key) => key in listed,
+      );
+  for (const key of read) void getState().load(key);
+  return end;
+}

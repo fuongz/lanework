@@ -23,6 +23,17 @@ export function appHomeDir(): string {
 }
 
 /**
+ * Lanework's own record of agent conversations (FE-112): `<home>/lw.db`.
+ *
+ * What the rail lists, the names, pins and conductors given in Lanework, and
+ * how far each CLI transcript has been read (`session-store/`). It follows
+ * `LANEWORK_HOME` like every other app path.
+ */
+export function sessionStorePath(home = appHomeDir()): string {
+  return join(home, "lw.db");
+}
+
+/**
  * The per-account project state under the app home (`<home>/projects`): the
  * selection, the linked folders, the board caches and the migration receipts
  * (`projects/store.ts`).

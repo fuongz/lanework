@@ -55,6 +55,7 @@ import type {
 } from "../../../../shared/handoff";
 import type { HarnessAgent } from "../../../../shared/harness";
 import { HarnessCard } from "./harness-section.card";
+import { usePullAllSection } from "./harness-section.pull";
 
 const NAMES: Record<HookAgent, string> = {
   "claude-code": "Claude Code",
@@ -106,6 +107,9 @@ const rowWords = (rows: SettingsRowSpec[]) =>
  *
  * The cards are `content` sections, so search cannot narrow them row by row:
  * a card matches on every word of its rows ({@link rowWords}) and shows whole.
+ *
+ * Sessions, under the cards, pulls every project's conversations in from the
+ * CLIs ticked (FE-112).
  */
 export function HarnessSection() {
   const accounts = useHarnessAccounts();
@@ -114,6 +118,7 @@ export function HarnessSection() {
   const [error, setError] = useState<string | null>(null);
   const now = useClock();
   const [copied, copy] = useCopy();
+  const pullSection = usePullAllSection();
   // "Approve in Codex" opens Codex in the app's own terminal, in the project
   // last open, so its hook review is one keypress away rather than a trip to
   // another window. The approval itself is still Codex's (FE-29/D7).
@@ -579,7 +584,7 @@ export function HarnessSection() {
     },
   );
 
-  const sections: SettingsSectionSpec[] = [...cardSections];
+  const sections: SettingsSectionSpec[] = [...cardSections, pullSection];
 
   if (handoff)
     sections.push({
@@ -777,8 +782,8 @@ export function HarnessSection() {
       title="Harness"
       description={
         handoff
-          ? "Coding agents, their versions, usage and handoff."
-          : "Coding agents, their versions and usage."
+          ? "Coding agents, their versions, usage, sessions and handoff."
+          : "Coding agents, their versions, usage and sessions."
       }
       sections={sections}
     />

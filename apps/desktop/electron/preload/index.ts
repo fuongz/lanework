@@ -482,13 +482,8 @@ const git: DesktopGitApi = {
  */
 function createTerminal(): DesktopTerminalApi {
   const commandListeners = new Set<(command: TerminalCommand) => void>();
-  let pendingFocus: Extract<TerminalCommand, { type: "focus" }> | null = null;
-  // A reopened window can receive native navigation before React mounts, so
-  // a focus command with no listener yet is held for the first one.
   subscribe<TerminalCommand>(terminalChannels.command, (command) => {
-    if (!commandListeners.size && typeof command === "object")
-      pendingFocus = command;
-    else for (const listener of commandListeners) listener(command);
+    for (const listener of commandListeners) listener(command);
   });
   let port: MessagePort | null = null;
   let connecting: Promise<MessagePort> | null = null;
@@ -592,6 +587,21 @@ function createTerminal(): DesktopTerminalApi {
         agent,
         id,
       ),
+    forgetAgentSession: (project, agent, id) =>
+      ipcRenderer.invoke(
+        terminalChannels.agentSessionForget,
+        project,
+        agent,
+        id,
+      ),
+    pullAgentSessions: (project, agents) =>
+      ipcRenderer.invoke(terminalChannels.agentSessionsPull, project, agents),
+    pullAllAgentSessions: (agents) =>
+      ipcRenderer.invoke(terminalChannels.agentSessionsPullAll, agents),
+    cancelAgentSessionsPull: () =>
+      ipcRenderer.invoke(terminalChannels.agentSessionsPullCancel),
+    onAgentPullProgress: (listener) =>
+      subscribe(terminalChannels.agentPullProgress, listener),
     archiveAgentSession: (project, agent, id) =>
       ipcRenderer.invoke(
         terminalChannels.agentSessionArchive,
@@ -691,14 +701,6 @@ function createTerminal(): DesktopTerminalApi {
     },
     onCommand: (listener) => {
       commandListeners.add(listener);
-      if (pendingFocus) {
-        const command = pendingFocus;
-        pendingFocus = null;
-        queueMicrotask(() => {
-          if (commandListeners.has(listener)) listener(command);
-          else pendingFocus = command;
-        });
-      }
       return () => {
         commandListeners.delete(listener);
       };

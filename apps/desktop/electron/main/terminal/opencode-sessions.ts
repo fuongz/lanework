@@ -11,7 +11,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
-  type AgentSession,
   type AgentSubagent,
   isAgentSessionIdOf,
 } from "../../../shared/terminal";
@@ -147,13 +146,6 @@ export function opencodePromptText(data: unknown): string | null {
 }
 
 /** What the rail calls a session: its title, else its first prompt. */
-function titleOf(row: { title: unknown; prompt: unknown }): string | null {
-  const title = opencodeTitle(row.title);
-  if (title) return title;
-  const prompt = opencodePromptText(row.prompt);
-  return prompt ? tidy(prompt) : null;
-}
-
 /** The newest message that says where a turn stands, as SQL picks it apart. */
 interface TurnRow {
   type: unknown;
@@ -292,118 +284,7 @@ export function opencodeChildren(
   return out;
 }
 
-interface Row {
-  id: unknown;
-  title: unknown;
-  updated: unknown;
-  compacting: unknown;
-  prompt: unknown;
-}
-
 /** The first prompt of each session, in the schema `db` has. */
-function query(schema: OpencodeSchema, where: string): string {
-  const archived = schema.columns.has("time_archived")
-    ? "AND s.time_archived IS NULL"
-    : "";
-  const compacting = schema.columns.has("time_compacting")
-    ? "s.time_compacting"
-    : "NULL";
-  return schema.v2
-    ? `SELECT s.id AS id, s.title AS title, s.time_updated AS updated,
-              ${compacting} AS compacting,
-              (SELECT m.data FROM session_message m
-                WHERE m.session_id = s.id AND m.type = 'user'
-                ORDER BY m.seq LIMIT 1) AS prompt
-         FROM session_v2 s
-        WHERE s.directory = ? AND s.parent_id IS NULL ${archived} ${where}
-        ORDER BY s.time_updated DESC`
-    : `SELECT s.id AS id, s.title AS title, s.time_updated AS updated,
-              ${compacting} AS compacting, NULL AS prompt
-         FROM session s
-        WHERE s.directory = ? AND s.parent_id IS NULL ${archived} ${where}
-        ORDER BY s.time_updated DESC`;
-}
-
-/**
- * `folder`'s newest OpenCode conversations, top-level only, each with the
- * sessions it spawned as its sub-agents (FE-104).
- *
- * At most `limit`, plus every one in `keep` (`opencode:<id>`): the pinned
- * ones stay however old they are (FE-25/D1). One archived in OpenCode
- * (`time_archived`) is not listed, as OpenCode's own list leaves it out.
- *
- * The answer is empty, never thrown, for a database that is missing, locked
- * or of a schema this does not know.
- *
- * NOTE: No `card`: OpenCode's MCP calls are rows of its database, not lines
- * of a transcript `transcriptCard` can read.
- */
-export function opencodeSessions(
-  dataDir: string,
-  folder: string,
-  keep: ReadonlySet<string>,
-  limit: number,
-): Promise<AgentSession[]> {
-  return withOpencodeDb(dataDir, [] as AgentSession[], (db, schema) => {
-    // A few spare, for the ones that turn out untitled and empty.
-    const newest = db
-      .prepare(`${query(schema, "")} LIMIT ?`)
-      .all(folder, limit * 2) as unknown as Row[];
-    const pinned = [...keep]
-      .filter((key) => key.startsWith("opencode:"))
-      .map((key) => key.slice("opencode:".length))
-      .filter((id) => isAgentSessionIdOf("opencode", id))
-      .filter((id) => !newest.some((row) => row.id === id));
-    const kept =
-      pinned.length > 0
-        ? (db
-            .prepare(
-              query(
-                schema,
-                `AND s.id IN (${pinned.map(() => "?").join(", ")})`,
-              ),
-            )
-            .all(folder, ...pinned) as unknown as Row[])
-        : [];
-    const picked: { row: Row & { id: string }; title: string }[] = [];
-    for (const row of [...newest, ...kept]) {
-      if (!isAgentSessionIdOf("opencode", row.id)) continue;
-      if (picked.length >= limit && !keep.has(`opencode:${row.id}`)) continue;
-      const title = titleOf(row);
-      // Never typed into: nothing to go back to, as Codex's unwritten ones.
-      if (!title) continue;
-      picked.push({ row: row as Row & { id: string }, title });
-    }
-    let children = new Map<string, AgentSubagent[]>();
-    try {
-      children = opencodeChildren(
-        db,
-        schema,
-        picked.map(({ row }) => row.id),
-      );
-    } catch {
-      // A schema without `parent_id` or `agent`: rows without sub-agents.
-    }
-    return picked.map(({ row, title }): AgentSession => {
-      const updated = num(row.updated) ?? 0;
-      return {
-        id: row.id,
-        agent: "opencode",
-        title,
-        cliTitle: title,
-        updatedAt: new Date(updated).toISOString(),
-        pinnedAt: null,
-        conductor: null,
-        working: opencodeWorking(db, schema, row.id, updated, row.compacting),
-        card: null,
-        subagents: children.get(row.id) ?? [],
-        // OpenCode keeps no background tasks of the kind Claude does.
-        background: { running: 0, total: 0 },
-      };
-    });
-  });
-}
-
 /** A session of {@link opencodeSessionIn}. */
 export interface OpencodeSessionRow {
   id: string;

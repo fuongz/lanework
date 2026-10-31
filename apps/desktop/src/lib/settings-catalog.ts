@@ -98,7 +98,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         label: "Harness",
         icon: CommandLineIcon,
         keywords:
-          "harness cli agent agents claude code codex version update install usage limit quota handoff checkpoint resume hook push wip lanework mcp sign in",
+          "harness cli agent agents claude code codex version update install usage limit quota handoff checkpoint resume hook push wip lanework mcp sign in pull sessions import conversations transcripts",
       },
       {
         to: "/settings/models",

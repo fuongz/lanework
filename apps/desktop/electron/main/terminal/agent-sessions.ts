@@ -1,14 +1,17 @@
-// The Claude and Codex conversations a project's folder has on disk (FE-23):
-// what the rail's Agents group lists, and the only ids a tab may resume.
+// How the CLIs' own files are read for a conversation (FE-23): its title,
+// first prompt, card, sub-agents and Codex role, which a Pull and the
+// transcript watcher write into Lanework's session store (`sessions/`,
+// FE-112), and the archive, the delete and the tab bindings use as they are.
+//
+// NOTE: Since FE-112 the rail lists the store, not the folder, and a resume
+// is checked against the store.
 //
 // Read-only, and nothing here imports Electron: main calls it, and a spec can
 // drive it under plain Node against a fake home folder.
 import { open, readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { mentionsAsNames } from "../../../shared/conversation";
 import {
-  AGENT_SESSION_LIMIT,
   type AgentCard,
   type AgentSession,
   type AgentSubagent,
@@ -17,7 +20,6 @@ import {
 import {
   claudeSubagentGoing,
   claudeWorking,
-  codexWorking,
   lastActivity,
   STALE_MS,
   SUBAGENT_STALE_MS,
@@ -25,15 +27,13 @@ import {
 import {
   CHUNK,
   CLAUDE_SUBAGENT_FILE,
-  claudeProjectDir,
   type Line,
   lines,
   META_CHUNK,
   readRange,
   tidy,
 } from "../transcripts/jsonl";
-import { backgroundCount, readTranscriptTasks } from "./background-tasks";
-import { opencodeDataDir, opencodeSessions } from "./opencode-sessions";
+import { backgroundCount, listedTranscriptTasks } from "./background-tasks";
 
 // Transitional re-exports (FE-80): import these from `../transcripts/`.
 export {
@@ -68,7 +68,7 @@ const PROMPT_SCAN = 16 * 1024 * 1024;
 /** Codex keeps every folder's rollouts in one tree; stop looking after this. */
 const CODEX_SCAN = 400;
 /** A conversation's newest sub-agents read, at most (FE-33/D4). */
-const SUBAGENT_LIMIT = 20;
+export const SUBAGENT_LIMIT = 20;
 /**
  * A prompt somebody typed, tidied for a title.
  *
@@ -77,7 +77,7 @@ const SUBAGENT_LIMIT = 20;
  *
  * @returns null for anything but a typed prompt.
  */
-function typed(text: unknown): string | null {
+export function typed(text: unknown): string | null {
   if (typeof text !== "string") return null;
   const clean = text.trim();
   if (!clean) return null;
@@ -100,7 +100,7 @@ export function agentKey(session: Pick<AgentSession, "agent" | "id">): string {
 }
 
 /** The prompt a Claude line holds, if it is one somebody typed. */
-function claudePrompt(line: Line): string | null {
+export function claudePrompt(line: Line): string | null {
   if (line.type !== "user" || line.isMeta || line.isSidechain) return null;
   const content = (line.message as { content?: unknown } | undefined)?.content;
   if (typeof content === "string") return typed(content);
@@ -258,10 +258,12 @@ async function transcriptCard(
  * are written to the same folder, so they come out flat (FE-33/D6).
  *
  * @param dir Claude's folder for the project.
+ * @param now Epoch ms, for what is recent.
  */
-async function claudeSubagents(
+export async function claudeSubagents(
   dir: string,
   id: string,
+  now = Date.now(),
 ): Promise<AgentSubagent[]> {
   const folder = join(dir, id, "subagents");
   const names = await readdir(folder).catch(() => [] as string[]);
@@ -304,7 +306,7 @@ async function claudeSubagents(
           .find(Boolean) ??
         "Sub-agent";
       // A background one may go on long after its conversation went quiet.
-      const recent = Date.now() - info.mtimeMs <= SUBAGENT_STALE_MS;
+      const recent = now - info.mtimeMs <= SUBAGENT_STALE_MS;
       const tail = recent
         ? lines(await readRange(file, Math.max(0, info.size - CHUNK), CHUNK), {
             head: info.size <= CHUNK,
@@ -424,57 +426,11 @@ export async function claudeSession(
     card: working ? await transcriptCard(file, info.size) : null,
     subagents: await claudeSubagents(dirname(file), id),
     // Read on from where the last listing stopped: cheap after the first.
+    // A quiet one never opened is not read at all (FE-111/D2).
     background: backgroundCount(
-      await readTranscriptTasks(file).catch(() => []),
+      await listedTranscriptTasks(file, info.mtimeMs).catch(() => []),
     ),
   };
-}
-
-/**
- * `folder`'s newest Claude conversations, and every kept one.
- *
- * @param keep The `agent:id`s listed however old they are.
- */
-async function claudeSessions(
-  home: string,
-  folder: string,
-  keep: ReadonlySet<string>,
-  limit: number,
-): Promise<AgentSession[]> {
-  const dir = join(home, ".claude", "projects", claudeProjectDir(folder));
-  const names = await readdir(dir).catch(() => [] as string[]);
-  const files = await Promise.all(
-    names
-      .filter((name) => name.endsWith(".jsonl"))
-      .map(async (name) => {
-        const file = join(dir, name);
-        const info = await stat(file).catch(() => null);
-        return info?.isFile()
-          ? { file, id: name.slice(0, -6), at: info.mtimeMs }
-          : null;
-      }),
-  );
-  const valid = files
-    .filter((entry) => entry !== null && isAgentSessionId(entry.id))
-    .sort((a, b) => (b?.at ?? 0) - (a?.at ?? 0));
-  // A few spare, for the ones that turn out empty or another folder's, and
-  // every KEPT one wherever it falls: a pinned conversation stays on the rail
-  // however old it gets (FE-25/D1).
-  const head = valid.slice(0, limit * 2);
-  const newest = [
-    ...head,
-    ...valid
-      .slice(limit * 2)
-      .filter((entry) => entry && keep.has(`claude:${entry.id}`)),
-  ];
-  const read = await Promise.all(
-    newest.map((entry) =>
-      entry
-        ? claudeSession(entry.file, entry.id, folder).catch(() => null)
-        : null,
-    ),
-  );
-  return read.filter((entry): entry is AgentSession => entry !== null);
 }
 
 /** `thread_name` by id from Codex's index; the last entry for an id wins. */
@@ -599,139 +555,8 @@ export function codexRole(meta: Record<string, unknown>): CodexRole {
 }
 
 /**
- * `folder`'s newest Codex conversations, and every kept one, each with the
- * threads it spawned.
- *
- * @param keep The `agent:id`s listed however old they are.
- */
-async function codexSessions(
-  home: string,
-  folder: string,
-  keep: ReadonlySet<string>,
-  limit: number,
-): Promise<AgentSession[]> {
-  const files = await codexRollouts(join(home, ".codex", "sessions"));
-  const names = await codexNames(home);
-  const out: AgentSession[] = [];
-  // The threads each conversation spawned, by its id. A spawned thread
-  // starts after its conversation, so newest-first meets it first.
-  const spawned = new Map<string, AgentSubagent[]>();
-  // NOTE: Only Codex's own kept ids: waiting on a Claude one here would read
-  // every rollout on the machine looking for it.
-  const wanted = [...keep].filter((key) => key.startsWith("codex:"));
-  const found = new Set<string>();
-  for (const file of files) {
-    // Enough of the newest, and every kept one found: stop reading.
-    if (out.length >= limit && wanted.every((key) => found.has(key))) break;
-    try {
-      const head = lines(await readRange(file, 0, META_CHUNK), { head: true });
-      const meta = head.find((line) => line.type === "session_meta")?.payload as
-        | { id?: unknown; cwd?: unknown }
-        | undefined;
-      if (meta?.cwd !== folder || !isAgentSessionId(meta.id)) continue;
-      const role = codexRole(meta);
-      if (role.kind === "helper") continue;
-      if (role.kind === "spawned") {
-        const siblings = spawned.get(role.root) ?? [];
-        if (siblings.length >= SUBAGENT_LIMIT) continue;
-        spawned.set(role.root, siblings);
-        const info = await stat(file);
-        const recent = Date.now() - info.mtimeMs <= STALE_MS;
-        const start = Math.max(0, info.size - CHUNK);
-        const tail = !recent
-          ? []
-          : start === 0
-            ? head
-            : lines(await readRange(file, start, CHUNK), { head: false });
-        // What it was told is sealed in its spawner's call; the task name it
-        // was spawned under is what is left to call it by.
-        const task = role.task ?? head.map(codexPrompt).find(Boolean) ?? null;
-        siblings.push({
-          id: meta.id,
-          title:
-            [role.nickname, task].filter(Boolean).join(": ") || "Sub-agent",
-          type: role.role,
-          updatedAt: lastActivity(tail, "codex") ?? info.mtime.toISOString(),
-          working: recent && codexWorking(tail),
-        });
-        continue;
-      }
-      if (out.length >= limit && !keep.has(`codex:${meta.id}`)) continue;
-      const named = names.get(meta.id);
-      const title = named ? tidy(named) : head.map(codexPrompt).find(Boolean);
-      if (!title) continue;
-      const info = await stat(file);
-      found.add(`codex:${meta.id}`);
-      const start = Math.max(0, info.size - CHUNK);
-      const tail =
-        start === 0
-          ? head
-          : lines(await readRange(file, start, CHUNK), { head: false });
-      const working =
-        Date.now() - info.mtimeMs <= STALE_MS && codexWorking(tail);
-      out.push({
-        id: meta.id,
-        agent: "codex",
-        title,
-        cliTitle: title,
-        updatedAt:
-          lastActivity(tail, "codex") ??
-          lastActivity(head, "codex") ??
-          info.mtime.toISOString(),
-        pinnedAt: null,
-        conductor: null,
-        working,
-        card: working ? await transcriptCard(file, info.size) : null,
-        subagents: spawned.get(meta.id) ?? [],
-        // Codex keeps no background tasks in its rollout (FE-42/D4).
-        background: { running: 0, total: 0 },
-      });
-    } catch {
-      // A rollout being written, or gone: the next one.
-    }
-  }
-  return out;
-}
-
-/**
- * Every CLI's conversations for `folder`, newest first.
- *
- * At most `limit`, plus every `agent:id` in `keep` that still exists: the
- * pinned ones, which stay however old they are (FE-25/D1).
- *
- * NOTE: Nothing read here reaches a command line but an id that passed
- * {@link isAgentSessionId}; titles are text for the rail and nothing else.
- */
-export async function listAgentSessions(
-  home: string,
-  folder: string,
-  keep: ReadonlySet<string> = new Set(),
-  limit = AGENT_SESSION_LIMIT,
-): Promise<AgentSession[]> {
-  const [claude, codex, opencode] = await Promise.all([
-    claudeSessions(home, folder, keep, limit).catch(() => []),
-    codexSessions(home, folder, keep, limit).catch(() => []),
-    opencodeSessions(
-      opencodeDataDir(home, process.env, home === homedir()),
-      folder,
-      keep,
-      limit,
-    ).catch(() => []),
-  ]);
-  const all = [...claude, ...codex, ...opencode].sort((a, b) =>
-    b.updatedAt.localeCompare(a.updatedAt),
-  );
-  const kept = all.filter((entry) => keep.has(agentKey(entry)));
-  const rest = all
-    .filter((entry) => !keep.has(agentKey(entry)))
-    .slice(0, limit);
-  return [...kept, ...rest].sort((a, b) =>
-    b.updatedAt.localeCompare(a.updatedAt),
-  );
-}
-
-/**
- * `folder`'s newest Codex conversations, and when each one's CLI STARTED.
+ * `folder`'s newest Codex conversations, when each one's CLI STARTED, and
+ * its rollout.
  *
  * Only the newest `scan` rollouts on the machine written since `since` are
  * read.
@@ -747,12 +572,12 @@ export async function codexStarts(
   folder: string,
   since = 0,
   scan = 40,
-): Promise<{ id: string; startedAt: number }[]> {
+): Promise<{ id: string; startedAt: number; file: string }[]> {
   const files = (await codexRollouts(join(home, ".codex", "sessions"))).slice(
     0,
     scan,
   );
-  const out: { id: string; startedAt: number }[] = [];
+  const out: { id: string; startedAt: number; file: string }[] = [];
   for (const file of files) {
     try {
       // Not written since `since`: no tab asking could be its, and not worth
@@ -768,7 +593,8 @@ export async function codexStarts(
       if (codexRole(meta).kind !== "conversation") continue;
       const startedAt =
         typeof meta.timestamp === "string" ? Date.parse(meta.timestamp) : NaN;
-      if (Number.isFinite(startedAt)) out.push({ id: meta.id, startedAt });
+      if (Number.isFinite(startedAt))
+        out.push({ id: meta.id, startedAt, file });
     } catch {
       // A rollout being written, or gone.
     }

@@ -480,14 +480,17 @@ export function BackgroundTasksButton({
    */
   const [finishedChoice, setFinishedChoice] = useState<boolean | null>(null);
   const stopping = useStopBackgroundTask(project, session.id);
-  const any = session.agent === "claude" && session.background.total > 0;
+  // Read for every Claude conversation on screen, not only one its listing
+  // counts tasks for: the listing skips a quiet one it never read (FE-111/D2).
+  const claude = session.agent === "claude";
   const { tasks, error } = useBackgroundTasks(
     project,
     session.id,
     `${backgroundCue(session)}:${stopping.revision}`,
-    any,
+    claude,
   );
-  if (!any) return null;
+  if (!claude || Math.max(tasks?.length ?? 0, session.background.total) === 0)
+    return null;
 
   const list = tasks ?? [];
   const running = list.filter((task) => task.status === "running");

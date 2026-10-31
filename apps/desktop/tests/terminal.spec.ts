@@ -208,6 +208,27 @@ async function newAgent(
 const sessions = (page: Page) =>
   page.getByRole("navigation", { name: "Sessions" });
 
+/**
+ * Pull the fake agent home's conversations into the rail (FE-112), through
+ * the Sessions group's … menu, as a person does.
+ *
+ * Sessions lists only Lanework's own record (`lw.db`): a transcript seeded
+ * before launch shows once a Pull reads it in, never by itself. Resolves once
+ * the menu is back, which is when the Pull ended; the caller waits for the
+ * rows it expects.
+ */
+async function pullSessions(page: Page, item = "Pull all") {
+  // ⚠️ An empty group's own button is named "Pull sessions" too: the menu's
+  // trigger is the one with a popup.
+  const trigger = sessions(page)
+    .getByRole("button", { name: "Pull sessions", exact: true })
+    .and(page.locator('[aria-haspopup="menu"]'));
+  await trigger.click();
+  await page.getByRole("menuitem", { name: item, exact: true }).click();
+  // Its place is the Pull's progress and Cancel until it ends.
+  await expect(trigger).toBeVisible({ timeout: 15_000 });
+}
+
 /** Click a View-menu item the way the ⌘` accelerator does. */
 async function menu(app: ElectronApplication, id: string) {
   await app.evaluate(({ Menu }, itemId) => {
@@ -872,6 +893,8 @@ test("an Agents row resumes its conversation in the main view, which outlives le
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    // The seeded conversations are on the rail once pulled (FE-112).
+    await pullSessions(page);
     // One Sessions group (FE-98): a row whose conversation a pty runs says
     // "running" (or "working") in its tooltip, where it used to move to a
     // Running group. Both CLIs' rows open the chat; a terminal is the row's
@@ -935,9 +958,13 @@ test("an Agents row resumes its conversation in the main view, which outlives le
     await codexRow.click({ button: "right" });
     await expect(page.getByRole("menuitem", { name: "Stop" })).toBeVisible();
     // FE-57/D4: a running conversation cannot be deleted — off in the menu,
-    // and refused by main whatever the page sends.
+    // and refused by main whatever the page sends. Nor removed from Lanework
+    // (FE-112): the writes of the tab running it would be read into nothing.
     await expect(
-      page.getByRole("menuitem", { name: "Delete…" }),
+      page.getByRole("menuitem", { name: "Delete transcript…" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    await expect(
+      page.getByRole("menuitem", { name: "Remove from Lanework" }),
     ).toHaveAttribute("aria-disabled", "true");
     await page.keyboard.press("Escape");
     expect(
@@ -954,6 +981,20 @@ test("an Agents row resumes its conversation in the main view, which outlives le
         CODEX_ID,
       ),
     ).toContain("Stop this conversation before deleting it.");
+    expect(
+      await page.evaluate(
+        (id) =>
+          (
+            window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+          ).desktop.terminal
+            .forgetAgentSession("ws-alpha", "codex", id)
+            .then(
+              () => "removed",
+              (error: Error) => error.message,
+            ),
+        CODEX_ID,
+      ),
+    ).toContain("Stop this conversation before removing it.");
     // An idle agent's Stop ends it without asking, and its row goes back to
     // a transcript — whose menu has no Stop.
     await codexRow.click({ button: "right" });
@@ -1054,6 +1095,7 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
   try {
     let page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
     // One Sessions group (FE-98): a pinned row leads it, with a pin mark,
     // rather than moving to a Pinned group. Claude's row is told from Codex's
     // by its tooltip.
@@ -1093,8 +1135,11 @@ test("an Agents row is renamed and pinned from its context menu, and spins while
     app = await boot(profile, home, plane.origin, env);
     page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    // No Pull this time: `lw.db` kept both rows, the name and the pin
+    // (FE-112).
     await expect(claude()).toHaveAccessibleName(claudeRowName("Login fix"));
     await expect(pinMark()).toHaveCount(1);
+    await expect(rows()).toHaveCount(2);
 
     // Bookkeeping — what opening a conversation writes — is not work.
     await appendFile(transcript, `${JSON.stringify({ type: "cost-state" })}\n`);
@@ -1161,6 +1206,7 @@ test("FE-57: an Agents row's transcript is deleted for good from its context men
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
     // Both CLIs' rows read "Open “…”" now (FE-98); the tooltip says which.
     const rows = sessions(page).getByRole("button", { name: CONVERSATION_ROW });
     const claude = rows.and(page.getByTitle(/\nClaude, /));
@@ -1195,18 +1241,23 @@ test("FE-57: an Agents row's transcript is deleted for good from its context men
     await page.getByRole("menuitem", { name: "Pin" }).click();
     await expect(claude.getByLabel("Pinned")).toBeVisible();
 
-    // Cancel keeps everything.
+    // Cancel keeps everything. The menu says what goes since FE-112, beside
+    // Remove from Lanework, which leaves the transcript.
     await claude.click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Delete…" }).click();
+    await page.getByRole("menuitem", { name: "Delete transcript…" }).click();
     const dialog = page.getByRole("alertdialog");
-    await expect(dialog).toContainText("Delete “Flaky login test”?");
+    await expect(dialog).toContainText(
+      "Delete the transcript of “Flaky login test”?",
+    );
     await expect(dialog).toContainText("claude --resume");
     await dialog.getByRole("button", { name: "Cancel" }).click();
     expect(await gone(join(claudeDir, `${CLAUDE_ID}.jsonl`))).toBe(false);
 
     await claude.click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Delete…" }).click();
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    await page.getByRole("menuitem", { name: "Delete transcript…" }).click();
+    await dialog
+      .getByRole("button", { name: "Delete transcript", exact: true })
+      .click();
     await expect(dialog).toBeHidden();
     await expect(claude).toHaveCount(0);
     await expect(sessions(page).getByLabel("Pinned")).toHaveCount(0);
@@ -1216,15 +1267,26 @@ test("FE-57: an Agents row's transcript is deleted for good from its context men
     expect(
       await gone(join(claudeDir, "33333333-2222-4333-8444-555555555555.jsonl")),
     ).toBe(false);
+    // Its row left Lanework's store, the pin with it (FE-112): main lists it
+    // no more, and no `agent-sessions.json` holds marks any longer.
     expect(
-      await readFile(join(home, "agent-sessions.json"), "utf8"),
+      (
+        await page.evaluate(() =>
+          (
+            window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+          ).desktop.terminal.agentSessions("ws-alpha"),
+        )
+      ).map((session) => session.id),
     ).not.toContain(CLAUDE_ID);
+    expect(await gone(join(home, "agent-sessions.json"))).toBe(true);
 
     // Codex: its rollout, and its lines in Codex's own index (FE-57/D3).
     await codex.click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Delete…" }).click();
+    await page.getByRole("menuitem", { name: "Delete transcript…" }).click();
     await expect(dialog).toContainText("codex resume");
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    await dialog
+      .getByRole("button", { name: "Delete transcript", exact: true })
+      .click();
     await expect(dialog).toBeHidden();
     await expect(codex).toHaveCount(0);
     const left = await readdir(codexDay);
@@ -1233,6 +1295,11 @@ test("FE-57: an Agents row's transcript is deleted for good from its context men
     expect(
       await readFile(join(agentHome, ".codex", "session_index.jsonl"), "utf8"),
     ).not.toContain(CODEX_ID);
+
+    // Gone for good: a Pull finds neither again (FE-112).
+    await pullSessions(page);
+    await expect(rows).toHaveCount(0);
+    await expect(sessions(page)).toContainText("No sessions yet");
   } finally {
     await app.close();
     await plane.close();
@@ -1274,6 +1341,7 @@ test("a conversation's sub-agents sit under its row — folded until one works (
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
     const group = sessions(page);
     const claudeRow = page.getByRole("button", {
       name: claudeRowName("Flaky login test"),
@@ -1394,6 +1462,7 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
     const subRows = page.getByRole("button", {
       name: "a sub-agent of “Flaky login test”",
     });
@@ -1582,6 +1651,7 @@ test("FE-38: an agent's view shows its conversation's numbers and Claude's recap
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
 
     // A row's tooltip has its cost and context once it is hovered — read
     // then, and not before (FE-38/D5).
@@ -1759,6 +1829,7 @@ test("FE-42: an agent's header counts its background tasks; a shell opens its co
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
 
     // The rail: its running shell and monitor under it, unasked — never the
     // failed shell, and never the agent, which is a sub-agent row (D1).
@@ -1855,6 +1926,7 @@ test("FE-43: shell Stop confirms all entry points, cancels safely, reports races
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
     const seeded = await page.evaluate(
       async (conversation) =>
         (
@@ -1973,6 +2045,7 @@ test("FE-56: running shells and monitors show their pid, and a found monitor can
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
     const seeded = await page.evaluate(
       async (conversation) =>
         (
@@ -2207,6 +2280,7 @@ test("a card an agent is working on carries its spinner, on the board and in the
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
     const working = issueRow(page, "Show who is working");
     await expect(working).toHaveCount(1);
     await expect(issueRow(page, "Nobody on this one")).toHaveCount(1);
@@ -2352,6 +2426,7 @@ test("an agent on another machine marks its card too, and this machine's own is 
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
     const decio = issueRow(page, "Decio is on this one");
     const mine = issueRow(page, "Show who is working");
 
@@ -2693,6 +2768,7 @@ test("folded, the window gets a title bar and the rail shows each agent as an ic
   try {
     const page = await app.firstWindow();
     await switchTo(page, "Alpha");
+    await pullSessions(page);
     await expect(
       page
         .locator("nav")

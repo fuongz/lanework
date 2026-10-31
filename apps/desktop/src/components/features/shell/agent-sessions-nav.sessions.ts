@@ -32,8 +32,11 @@ export interface PendingChat {
  * the agents running them, and which one is on screen.
  *
  * Owns the reads and their refresh policy: on entering the project, on focus,
- * when its terminals change, and as a started conversation's first turn
- * lands. Never on a timer, the Changes badge's rule.
+ * when its terminals change, as a started conversation's first turn lands,
+ * and once a Pull ends (FE-112). Never on a timer, the Changes badge's rule.
+ *
+ * The listing is Lanework's own (`lw.db`): one started outside Lanework joins
+ * only through a Pull.
  *
  * `visible` is false when there is nothing here to do: no agent CLI on this
  * machine, or no folder and no conversation (FE-23/D9).
@@ -90,7 +93,7 @@ export function useAgentRail(
   const started = useNewChats((state) => state.started);
   const forgetStarted = useNewChats((state) => state.forget);
 
-  useEffect(() => watchActivity(), [watchActivity]);
+  useEffect(() => watchActivity(project), [watchActivity, project]);
   useEffect(() => watchChats(), [watchChats]);
   useEffect(() => {
     void refreshChats(project);
@@ -307,6 +310,8 @@ export function useAgentRail(
   return {
     visible,
     loading,
+    /** The CLIs on this machine: the ones a Pull can read (FE-112). */
+    agents,
     sessions,
     pending,
     fresh,

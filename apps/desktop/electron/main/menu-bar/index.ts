@@ -1,110 +1,26 @@
-import { app, Menu, type MenuItemConstructorOptions, Tray } from "electron";
-import {
-  onRunningChanged,
-  runningProjects,
-  sendTerminalCommand,
-} from "../terminal";
+import { app, Menu, Tray } from "electron";
 import { menuBarIcon } from "./icon";
 
 /**
- * Install the macOS menu-bar tray that lists running processes.
+ * Install the macOS menu-bar tray: Open and Quit, nothing else (FE-111/D1).
  *
  * One tray, owned by main and kept alive when windows close. Nothing on other
  * platforms.
+ *
+ * NOTE: It used to list what ran in every project, polled every 5s. That
+ * read every Claude transcript of every project for its background tasks,
+ * which kept main at a full core.
  */
 export function installMenuBar(showWindow: () => void): void {
   if (process.platform !== "darwin") return;
   const tray = new Tray(menuBarIcon());
-  let stopped = false;
-  let refreshing = false;
-  let generation = 0;
-  let lastSnapshot = "";
-  const open: MenuItemConstructorOptions = {
-    label: "Open Lanework",
-    click: showWindow,
-  };
-  const quit: MenuItemConstructorOptions = {
-    label: "Quit Lanework",
-    role: "quit",
-  };
   tray.setToolTip("Lanework");
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      open,
-      { label: "Loading processes…", enabled: false },
+      { label: "Open Lanework", click: showWindow },
       { type: "separator" },
-      quit,
+      { label: "Quit Lanework", role: "quit" },
     ]),
   );
-
-  const refresh = async () => {
-    if (refreshing || stopped) return;
-    refreshing = true;
-    const current = ++generation;
-    try {
-      const projects = await runningProjects();
-      if (stopped || current !== generation) return;
-      const snapshot = JSON.stringify(projects);
-      if (snapshot === lastSnapshot) return;
-      const count = projects.reduce(
-        (sum, project) => sum + project.items.length,
-        0,
-      );
-      const items: MenuItemConstructorOptions[] = [open, { type: "separator" }];
-      for (const project of projects) {
-        items.push({
-          label: project.name,
-          submenu: project.items.map((item) => ({
-            label: item.label.replace(/[\r\n\t]+/g, " ").slice(0, 160),
-            click: () => {
-              showWindow();
-              sendTerminalCommand({
-                type: "focus",
-                project: project.project,
-                slug: project.slug,
-                href: item.href,
-                shellId: item.shellId,
-              });
-            },
-          })),
-        });
-      }
-      if (!count) items.push({ label: "No running processes", enabled: false });
-      items.push({ type: "separator" }, quit);
-      tray.setContextMenu(Menu.buildFromTemplate(items));
-      lastSnapshot = snapshot;
-      tray.setToolTip(
-        `Lanework — ${count} running process${count === 1 ? "" : "es"}`,
-      );
-    } catch {
-      if (!stopped) {
-        lastSnapshot = "";
-        tray.setContextMenu(
-          Menu.buildFromTemplate([
-            open,
-            { label: "Processes unavailable — open Lanework", enabled: false },
-            { type: "separator" },
-            quit,
-          ]),
-        );
-        tray.setToolTip("Lanework — processes unavailable");
-      }
-    } finally {
-      refreshing = false;
-    }
-  };
-  // The poll also catches transcript and background changes in projects that
-  // have no active watcher.
-  const timer = setInterval(() => void refresh(), 5_000);
-  const unsubscribe = onRunningChanged(() => void refresh());
-  timer.unref();
-  tray.on("click", () => void refresh());
-  void refresh();
-  app.once("will-quit", () => {
-    stopped = true;
-    generation++;
-    clearInterval(timer);
-    unsubscribe();
-    tray.destroy();
-  });
+  app.once("will-quit", () => tray.destroy());
 }

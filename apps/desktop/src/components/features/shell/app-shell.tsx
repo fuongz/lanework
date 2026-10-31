@@ -221,16 +221,10 @@ export function AppShell() {
     () =>
       window.desktop?.terminal.onCommand((command) => {
         const terminal = useTerminal.getState();
-        if (typeof command === "object" && command.type === "focus") {
-          if (command.shellId) {
-            terminal.select(command.project, command.shellId);
-            terminal.setOpen(command.project, true);
-          }
-          void navigate({ href: command.href });
-        } else if (command === "toggle") void terminal.toggle(keyRef.current);
+        if (command === "toggle") void terminal.toggle(keyRef.current);
         else void terminal.newTerminal(keyRef.current);
       }),
-    [navigate],
+    [],
   );
 
   // NOTE:

@@ -232,8 +232,8 @@ test("the rail remembers a project across relaunch, and never falls back silentl
     ).toBeVisible();
     expect(plane.calls).toContain("GET /v1/sync/state");
     // Every read carries the machine's credential. Not just one read: the
-    // menu bar and the new-PR watcher read the list at start too, and with
-    // the delay above none of them finds it cached yet.
+    // new-PR watcher reads the list at start too, and with the delay above
+    // neither finds it cached yet.
     expect(plane.projectAuth.length).toBeGreaterThan(0);
     expect(new Set(plane.projectAuth)).toEqual(
       new Set(["Bearer lw_mch_test-secret"]),

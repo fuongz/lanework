@@ -13,7 +13,7 @@
 //   a restart drops the reports still owed.
 //
 // Nothing here imports Electron: `index.ts` hands in the engines, the
-// transcripts and the marks.
+// transcripts, the marks and Lanework's session store (FE-112).
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -98,6 +98,16 @@ export interface ConductorSessionsDeps {
     agent: ConversationAgent,
     id: string,
   ) => Promise<string | null>;
+  /**
+   * Make a conversation just started known to Lanework's session store
+   * (FE-112), so the rail lists it without a Pull. Before {@link name}.
+   */
+  register: (
+    project: string,
+    agent: ConversationAgent,
+    id: string,
+    folder: string,
+  ) => Promise<void>;
   /** Give a new conversation its name in the rail. */
   name: (agent: ConversationAgent, id: string, title: string) => Promise<void>;
   /** An engine in this folder runs a worker of a run. */
@@ -389,6 +399,7 @@ export class ConductorSessions {
         throw error;
       }
     }
+    await this.deps.register(project, agent, session, folder).catch(() => {});
     await this.deps.name(agent, session, input.title).catch(() => {});
     await this.remember({ ...launch, session });
     return {

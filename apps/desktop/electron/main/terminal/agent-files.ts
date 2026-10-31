@@ -792,7 +792,8 @@ function lastMoved(session: AgentSession): number {
  * already in it. The commit time has one-second resolution, so an edit in
  * the same second counts as committed.
  *
- * @param sessions `folder`'s listing.
+ * @param sessions The project's conversations, as Lanework's session store
+ *   lists them (FE-112): only those can mark a file.
  */
 export async function agentFileMarks(
   home: string,

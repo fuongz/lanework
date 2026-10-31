@@ -28,6 +28,7 @@ import {
 } from "@playwright/test";
 import type { MachineRecord } from "../electron/main/auth/store";
 import { writeFolders } from "../electron/main/projects/store";
+import { pullIntoStore } from "../electron/main/sessions";
 import { watchAgentActivity } from "../electron/main/terminal/agent-activity";
 import { agentBindings } from "../electron/main/terminal/agent-binding";
 import {
@@ -44,11 +45,10 @@ import {
   scanTranscript,
 } from "../electron/main/terminal/agent-files";
 import {
-  applyAgentMarks,
   cleanAgentName,
-  keptKeys,
-  readAgentMarks,
-  updateAgentMark,
+  importLegacyMarksOnce,
+  nameSession,
+  pinSession,
 } from "../electron/main/terminal/agent-marks";
 import {
   claudeProjectDir,
@@ -59,7 +59,6 @@ import {
   laneworkCard,
   lastActivity,
   lastCardIn,
-  listAgentSessions,
 } from "../electron/main/terminal/agent-sessions";
 import {
   backgroundRequest,
@@ -79,13 +78,16 @@ import {
   readSubagentTranscript,
   subagentRequest,
 } from "../electron/main/terminal/subagent-transcript";
+import { openSessionStore } from "../electron/session-store";
 import {
   AGENT_FACTS_READ_MAX,
+  type AgentSession,
   BACKGROUND_OUTPUT_MAX,
   type ClaudeUsage,
   type DesktopTerminalApi,
   isAgentSessionId,
   isCardRef,
+  type TerminalAgent,
   type TerminalHostMessage,
   type TerminalSession,
 } from "../shared/terminal";
@@ -125,12 +127,40 @@ async function tempDir(prefix: string): Promise<string> {
   return realpath(await mkdtemp(join(tmpdir(), prefix)));
 }
 
-test("lists this folder's Claude and Codex conversations by their titles, and nothing else", async () => {
+/**
+ * What a Pull of `folder` puts on a project's rail (FE-112): its
+ * conversations read from the fake `home` into a throwaway store, on this
+ * thread, then listed the way the rail lists the store.
+ *
+ * NOTE: The rail lists Lanework's own store since FE-112, and a Pull is how
+ * a CLI's conversation gets there; this took `listAgentSessions`' place.
+ */
+async function pulledRail(
+  home: string,
+  folder: string,
+  agents: TerminalAgent[] = ["claude", "codex"],
+): Promise<AgentSession[]> {
+  const store = openSessionStore({ path: ":memory:" });
+  try {
+    await pullIntoStore(store, {
+      project: "ws",
+      folder,
+      agents,
+      home,
+      inline: true,
+    });
+    return store.listRail("ws");
+  } finally {
+    store.close();
+  }
+}
+
+test("a Pull lists this folder's Claude and Codex conversations by their titles, and nothing else", async () => {
   const home = await tempDir("lanew-agent-home-");
   const folder = join(await tempDir("lanew-agent-"), "my_repo");
   await seedAgentHome(home, folder);
 
-  const listed = await listAgentSessions(home, folder);
+  const listed = await pulledRail(home, folder);
   expect(
     listed
       .map(({ id, agent, title }) => ({ id, agent, title }))
@@ -140,9 +170,7 @@ test("lists this folder's Claude and Codex conversations by their titles, and no
     { id: CODEX_ID, agent: "codex", title: "Settings page cleanup" },
   ]);
   // No history at all is an empty list, not an error.
-  expect(
-    await listAgentSessions(await tempDir("lanew-empty-"), folder),
-  ).toEqual([]);
+  expect(await pulledRail(await tempDir("lanew-empty-"), folder)).toEqual([]);
 });
 
 test("an agent tab resumes a conversation by its id — and never types anything else as one", async () => {
@@ -354,44 +382,75 @@ test("a name and a pin are Lanework's own, and a pinned conversation outlives th
     const at = new Date(Date.UTC(2026, 0, 1, 0, index));
     await utimes(file, at, at);
   }
-  const marks = join(await tempDir("lanew-marks-"), "agent-sessions.json");
   const oldest = `claude:${ids[0]}`;
+  // The marks live in Lanework's store beside what a Pull read (FE-112),
+  // never in the CLI's files.
+  const store = openSessionStore({ path: ":memory:" });
+  const pull = () =>
+    pullIntoStore(store, {
+      project: "ws",
+      folder,
+      agents: ["claude"],
+      home,
+      inline: true,
+    });
+  try {
+    await pull();
+    expect(store.listRail("ws")).toHaveLength(20);
+    expect(store.listRail("ws").some((entry) => entry.id === ids[0])).toBe(
+      false,
+    );
 
-  expect(await listAgentSessions(home, folder)).toHaveLength(20);
-  expect(
-    (await listAgentSessions(home, folder)).some(
-      (entry) => entry.id === ids[0],
-    ),
-  ).toBe(false);
+    expect(nameSession(store, oldest, "  Login rewrite  ")).toBe(true);
+    expect(pinSession(store, oldest, true)).toBe(true);
+    const listed = store.listRail("ws");
+    // Pinned, so kept past the limit — and shown by its Lanework name.
+    expect(listed).toHaveLength(21);
+    expect(listed.find((entry) => entry.id === ids[0])).toMatchObject({
+      title: "Login rewrite",
+      cliTitle: "Task 0",
+      pinnedAt: expect.any(Number),
+    });
 
-  await updateAgentMark(marks, oldest, (mark) => ({
-    ...mark,
-    name: "Login rewrite",
-    pinnedAt: 1_000,
-  }));
-  const saved = await readAgentMarks(marks);
-  const listed = applyAgentMarks(
-    await listAgentSessions(home, folder, keptKeys(saved)),
-    saved,
-  );
-  // Pinned, so kept past the limit — and shown by its Lanework name.
-  expect(listed).toHaveLength(21);
-  expect(listed.find((entry) => entry.id === ids[0])).toMatchObject({
-    title: "Login rewrite",
-    cliTitle: "Task 0",
-    pinnedAt: 1_000,
-  });
+    // What the CLI writes next is read in on the next Pull, and leaves the
+    // marks as they are.
+    await appendFile(
+      join(dir, `${ids[0]}.jsonl`),
+      `${JSON.stringify({ type: "ai-title", aiTitle: "Rewrite the login" })}\n`,
+    );
+    await pull();
+    expect(
+      store.listRail("ws").find((entry) => entry.id === ids[0]),
+    ).toMatchObject({
+      title: "Login rewrite",
+      cliTitle: "Rewrite the login",
+      pinnedAt: expect.any(Number),
+    });
 
-  // Emptied, a mark goes away entirely; nothing blank is kept.
-  await updateAgentMark(marks, oldest, () => ({}));
-  expect(await readAgentMarks(marks)).toEqual({});
+    // Emptied, the name goes back to the CLI's; unpinned, the limit holds
+    // again.
+    nameSession(store, oldest, "");
+    pinSession(store, oldest, false);
+    expect(store.getSession(oldest)).toMatchObject({
+      name: null,
+      pinnedAt: null,
+    });
+    expect(store.listRail("ws")).toHaveLength(20);
+    // A conversation the store does not have takes no mark.
+    expect(
+      nameSession(store, "claude:99999999-2222-4333-8444-555555555555", "x"),
+    ).toBe(false);
+
+    // A legacy marks file that is not there carries nothing over.
+    expect(importLegacyMarksOnce(store, join(home, "nope.json"))).toBeNull();
+  } finally {
+    store.close();
+  }
 
   // A name is one line, and short.
   expect(cleanAgentName("  Login rewrite  ")).toBe("Login rewrite");
   expect(() => cleanAgentName("two\nlines")).toThrow("one line");
   expect(() => cleanAgentName("x".repeat(121))).toThrow("at most 120");
-  // A missing or foreign file reads as no marks.
-  expect(await readAgentMarks(join(home, "nope.json"))).toEqual({});
 });
 
 test("working is a turn left open — not a transcript being written", async () => {
@@ -568,7 +627,7 @@ test("a conversation lists the agents it spawned under it — and Codex's own he
   await seedAgentHome(home, folder);
   await seedSubagents(home, folder);
 
-  const listed = await listAgentSessions(home, folder);
+  const listed = await pulledRail(home, folder);
   // The guardian is no conversation, and no spawned one is a row of its own.
   expect(listed.map(({ agent, id }) => `${agent}:${id}`).sort()).toEqual([
     `claude:${CLAUDE_ID}`,
@@ -1413,7 +1472,7 @@ test("a listing and the watcher both say which card a working agent is on — an
         .poll(() => seen.at(-1), { timeout: 1_500 })
         .toBe("claude:true:FE-1");
     }).toPass({ timeout: 15_000 });
-    const listed = await listAgentSessions(home, folder);
+    const listed = await pulledRail(home, folder);
     expect(listed.find((entry) => entry.agent === "claude")?.card).toEqual({
       boardId: "b1",
       card: "FE-1",
@@ -1434,9 +1493,8 @@ test("a listing and the watcher both say which card a working agent is on — an
     );
     await expect.poll(() => seen.at(-1)).toBe("claude:false:-");
     expect(
-      (await listAgentSessions(home, folder)).find(
-        (entry) => entry.agent === "claude",
-      )?.card,
+      (await pulledRail(home, folder)).find((entry) => entry.agent === "claude")
+        ?.card,
     ).toBeNull();
   } finally {
     stop();
@@ -1893,11 +1951,28 @@ process.stdin.resume();
   return { app, profile };
 }
 
-/** A new `agent` conversation, on screen in the main view (FE-26). */
+/**
+ * A new `agent` conversation, on screen in the main view (FE-26).
+ *
+ * ⚠️ The rail's New agent menu is gone (FE-98): a blank agent in a pty is
+ * what a card or Settings › Agents starts, through the terminal surface, so
+ * it is started that way here. Its own row in Sessions opens it, in the app
+ * and with no page load, so the terminal panel stays as it was.
+ */
 async function startAgent(page: Page, agent: "Claude" | "Codex") {
-  await page.getByRole("button", { name: "New agent", exact: true }).click();
+  const kind: TerminalAgent = agent === "Claude" ? "claude" : "codex";
+  await page.evaluate(
+    (kind) =>
+      (
+        window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+      ).desktop.terminal
+        .spawn("ws-alpha", 120, 36, kind)
+        .then(() => undefined),
+    kind,
+  );
   await page
-    .getByRole("menuitem", { name: `New ${agent}`, exact: true })
+    .getByRole("navigation", { name: "Sessions" })
+    .getByRole("button", { name: `Open new ${agent} session` })
     .click();
   await expect(
     page.getByRole("region", { name: `${agent} — New ${agent} session` }),
@@ -1910,6 +1985,27 @@ async function openProject(page: Page, name: string) {
   await expect(
     page.getByRole("button", { name: `Switch project — currently ${name}` }),
   ).toBeVisible();
+}
+
+/**
+ * Read Alpha's conversations in from the fake agent home (FE-112), through
+ * main's IPC: for a case about something other than the Pull. The answer
+ * comes once the Pull ended; the focus event lists the rail again.
+ *
+ * NOTE: The rail lists only Lanework's own record (`lw.db`), so a transcript
+ * seeded before launch is not on it until a Pull reads it in.
+ */
+async function pullThroughMain(
+  page: Page,
+  agents: TerminalAgent[] = ["claude", "codex"],
+) {
+  await page.evaluate(async (agents) => {
+    const { terminal } = (
+      window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+    ).desktop;
+    await terminal.pullAgentSessions("ws-alpha", agents);
+    window.dispatchEvent(new Event("focus"));
+  }, agents);
 }
 
 test("FE-49: completed main-agent turns notify once with sound and restore the window", async () => {
@@ -1968,6 +2064,8 @@ test("FE-49: completed main-agent turns notify once with sound and restore the w
     });
     const page = await app.firstWindow();
     await openProject(page, "Alpha");
+    // Only a conversation Lanework holds notifies (FE-112): pull them in.
+    await pullThroughMain(page);
     await page.evaluate(() =>
       (
         window as unknown as { desktop: { terminal: DesktopTerminalApi } }
@@ -2148,6 +2246,9 @@ test("FE-41: the terminal bar shows Codex's usage until each window resets, and 
   try {
     const page = await app.firstWindow();
     await openProject(page, "Alpha");
+    // The goals are those of the Codex conversations Lanework lists, which
+    // a Pull brings in (FE-112).
+    await pullThroughMain(page);
     const quota = page.getByTestId("codex-quota");
     // No Codex on screen yet: no strip, and none in the rail any more (FE-54).
     await expect(quota).toHaveCount(0);
@@ -2177,8 +2278,9 @@ test("FE-41: the terminal bar shows Codex's usage until each window resets, and 
     await page.keyboard.press("Escape");
     await expect(details).not.toBeVisible();
     // The goal that ran out of usage says so on its own row, and only there.
+    // Codex's row reads "Open “…”" too now (FE-98).
     const codexRow = page.getByRole("button", {
-      name: "Resume “Settings page cleanup” in Codex",
+      name: claudeRowName("Settings page cleanup"),
     });
     await expect(codexRow.getByTestId("codex-goal-badge")).toHaveAttribute(
       "aria-label",
@@ -2594,7 +2696,7 @@ test("FE-39: Changes marks only what a conversation edited since HEAD's commit �
   gitRepo(folder, tick(4));
   await seedClaudeEdits(home, folder);
   expect(
-    await agentFileMarks(home, folder, await listAgentSessions(home, folder)),
+    await agentFileMarks(home, folder, await pulledRail(home, folder)),
   ).toEqual({
     partial: false,
     files: {
@@ -2719,8 +2821,8 @@ test("FE-42: a conversation's background tasks are read from its transcript — 
     { id: "bglost1", status: "lost", endedAt: null },
   ]);
 
-  // The rail's counts ride on the listing.
-  const listed = await listAgentSessions(home, folder);
+  // The rail's counts ride on the row a Pull wrote (FE-112).
+  const listed = await pulledRail(home, folder);
   expect(
     Object.fromEntries(
       listed.map((session) => [session.id, session.background]),
@@ -3283,10 +3385,9 @@ test("FE-46: new and resumed Claude launches install the default statusLine brid
   try {
     const page = await app.firstWindow();
     await openProject(page, "Alpha");
-    await page.getByRole("button", { name: "New agent", exact: true }).click();
-    await page
-      .getByRole("menuitem", { name: "New Claude", exact: true })
-      .click();
+    // The conversation resumed below is on the rail once pulled (FE-112).
+    await pullThroughMain(page, ["claude"]);
+    await startAgent(page, "Claude");
     // The agent runs full size in the main view; the strip stays in the bar.
     const strip = page.getByTestId("claude-quota");
     await expect(strip).toHaveAccessibleName(
@@ -3588,4 +3689,414 @@ test("FE-56: a monitor's group is found under its CLI, shown as its pid, and sto
       }
     for (const cli of clis) cli.kill("SIGKILL");
   }
+});
+
+// ── FE-112: Lanework's own session store, and the Pull ─────────────────────
+
+/**
+ * A profile whose Alpha project is linked to a folder, and a fake agent home
+ * holding `seedAgentHome`'s Claude and Codex conversations for it: on disk,
+ * and not in Lanework until a Pull reads them in.
+ */
+async function sessionsProfile(origin: string) {
+  const profile = await mkdtemp(join(tmpdir(), "lanew-fe112-"));
+  const home = join(profile, "home");
+  const repo = await realpath(await mkdtemp(join(tmpdir(), "lanew-repo-")));
+  await mkdir(home, { recursive: true });
+  await seedCredential(home, origin);
+  const previous = process.env.LANEWORK_HOME;
+  process.env.LANEWORK_HOME = home;
+  await writeFolders(
+    {
+      machineId: "test-machine",
+      userId: "test-user",
+      apiUrl: origin,
+      name: "test-machine",
+      secret: "lw_mch_test-secret",
+      owner: null,
+    } satisfies MachineRecord,
+    "alpha",
+    [repo],
+  );
+  if (previous === undefined) delete process.env.LANEWORK_HOME;
+  else process.env.LANEWORK_HOME = previous;
+  const agentHome = join(profile, "agent-home");
+  await seedAgentHome(agentHome, repo);
+  return {
+    profile,
+    home,
+    repo,
+    agentHome,
+    transcript: join(
+      agentHome,
+      ".claude",
+      "projects",
+      claudeProjectDir(repo),
+      `${CLAUDE_ID}.jsonl`,
+    ),
+  };
+}
+
+/** The app on `seeded`'s profile, both CLIs "installed"; again for a relaunch. */
+function bootSessions(
+  seeded: { profile: string; home: string; agentHome: string },
+  origin: string,
+  extra: Record<string, string> = {},
+) {
+  return electron.launch({
+    args: [process.cwd()],
+    env: {
+      ...launchEnv({
+        profile: seeded.profile,
+        home: seeded.home,
+        apiUrl: origin,
+      }),
+      LANEWORK_TERMINAL_SHELL: "/bin/sh",
+      LANEWORK_TEST_AGENT_HOME: seeded.agentHome,
+      LANEWORK_TERMINAL_AGENTS: "claude,codex",
+      ...extra,
+    },
+  });
+}
+
+/** The rail's Sessions group. */
+const sessionsGroup = (page: Page) =>
+  page.getByRole("navigation", { name: "Sessions" });
+
+/** Its conversation rows, either CLI's: both read "Open “…”" (FE-98). */
+const conversationRows = (page: Page) =>
+  sessionsGroup(page).getByRole("button", { name: /^Open “/ });
+
+/**
+ * Pull through the Sessions group's … menu, `item` one of its entries.
+ *
+ * Resolves once the menu is back in the header, which is when the Pull
+ * ended; the caller waits for the rows it expects.
+ */
+async function pullFrom(page: Page, item: string) {
+  // ⚠️ An empty group's own button is named "Pull sessions" too: the menu's
+  // trigger is the one with a popup.
+  const trigger = sessionsGroup(page)
+    .getByRole("button", { name: "Pull sessions", exact: true })
+    .and(page.locator('[aria-haspopup="menu"]'));
+  await trigger.click();
+  await page.getByRole("menuitem", { name: item, exact: true }).click();
+  // Its place is the Pull's progress and Cancel until it ends.
+  await expect(trigger).toBeVisible({ timeout: 15_000 });
+}
+
+/** What main lists for Alpha: Lanework's store, as the rail reads it. */
+const mainLists = (page: Page) =>
+  page.evaluate(() =>
+    (
+      window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+    ).desktop.terminal.agentSessions("ws-alpha"),
+  );
+
+const exists = (path: string) =>
+  stat(path).then(
+    () => true,
+    () => false,
+  );
+
+test.describe("FE-112: the rail lists Lanework's own sessions; a Pull reads a CLI's in", () => {
+  test.skip(process.platform === "win32", "These drive a POSIX shell.");
+
+  const board = {
+    columns: [{ key: "todo", name: "To-Do", role: "start" }],
+    cards: [],
+  };
+
+  test("an empty rail offers a Pull; Pull from Claude Code brings Claude's conversations in, and only those", async () => {
+    const plane = await startStubPlane({ projects: FE41_PROJECTS });
+    plane.setBoard("ws-alpha", board);
+    const seeded = await sessionsProfile(plane.origin);
+    const app = await bootSessions(seeded, plane.origin);
+    try {
+      const page = await app.firstWindow();
+      await openProject(page, "Alpha");
+      const group = sessionsGroup(page);
+      // On disk, not in Lanework: main lists nothing, and the group says a
+      // Pull would bring them, with a button that starts one.
+      expect(await mainLists(page)).toEqual([]);
+      await expect(group).toContainText("No sessions yet");
+      await expect(
+        group
+          .getByRole("button", { name: "Pull sessions" })
+          .filter({ hasText: "Pull sessions" }),
+      ).toBeVisible();
+      await expect(conversationRows(page)).toHaveCount(0);
+
+      // The … menu: one entry per CLI on this machine, then all of them.
+      await group
+        .getByRole("button", { name: "Pull sessions", exact: true })
+        .and(page.locator('[aria-haspopup="menu"]'))
+        .click();
+      await expect(page.getByRole("menuitem")).toHaveText([
+        "Pull from Claude Code",
+        "Pull from Codex",
+        "Pull all",
+      ]);
+      await page.keyboard.press("Escape");
+
+      await pullFrom(page, "Pull from Claude Code");
+      await expect(
+        group.getByRole("button", { name: claudeRowName("Flaky login test") }),
+      ).toBeVisible();
+      await expect(group).not.toContainText("No sessions yet");
+      // Codex's was not asked for.
+      await expect(conversationRows(page)).toHaveCount(1);
+      expect(
+        (await mainLists(page)).map(({ agent, id }) => ({ agent, id })),
+      ).toEqual([{ agent: "claude", id: CLAUDE_ID }]);
+      // Kept in `<LANEWORK_HOME>/lw.db`.
+      expect(await exists(join(seeded.home, "lw.db"))).toBe(true);
+
+      await pullFrom(page, "Pull from Codex");
+      await expect(
+        group.getByRole("button", {
+          name: claudeRowName("Settings page cleanup"),
+        }),
+      ).toBeVisible();
+      await expect(conversationRows(page)).toHaveCount(2);
+      // Pulled again, nothing doubles.
+      await pullFrom(page, "Pull all");
+      await expect(conversationRows(page)).toHaveCount(2);
+    } finally {
+      await app.close();
+      await plane.close();
+      await removeProfile(seeded.profile);
+    }
+  });
+
+  test("a conversation Lanework starts is on the rail without a Pull; the CLI's own are not", async () => {
+    const plane = await startStubPlane({ projects: FE41_PROJECTS });
+    plane.setBoard("ws-alpha", board);
+    const seeded = await sessionsProfile(plane.origin);
+    // A stand-in Claude that writes the conversation main named
+    // (`--session-id`) as the real one does: each line typed is a prompt and
+    // its closed turn.
+    const claudeBin = join(seeded.profile, "claude-writes.sh");
+    await writeFile(
+      claudeBin,
+      `#!/bin/sh
+id=""
+while [ $# -gt 0 ]; do
+  [ "$1" = "--session-id" ] && id="$2"
+  shift
+done
+file='${join(seeded.agentHome, ".claude", "projects", claudeProjectDir(seeded.repo))}/'"$id.jsonl"
+echo claude-started
+while IFS= read -r line; do
+  [ "$line" = "/exit" ] && exit 0
+  printf '{"type":"user","cwd":"%s","message":{"role":"user","content":"%s"}}\\n{"type":"system","subtype":"turn_duration"}\\n' "$PWD" "$line" >> "$file"
+  echo "claude-heard-$line"
+done
+`,
+      { mode: 0o755 },
+    );
+    const app = await bootSessions(seeded, plane.origin, {
+      LANEWORK_CLAUDE_BIN: claudeBin,
+    });
+    try {
+      const page = await app.firstWindow();
+      await openProject(page, "Alpha");
+      await startAgent(page, "Claude");
+      const view = page.getByRole("region", { name: /^Claude — / });
+      await expect(view.locator(".xterm-rows")).toContainText("claude-started");
+      await view.locator(".xterm").click();
+      await page.keyboard.type("Read the readme");
+      await page.keyboard.press("Enter");
+      await expect(view.locator(".xterm-rows")).toContainText(
+        "claude-heard-Read the readme",
+      );
+
+      // Listed once its first prompt is in — no Pull.
+      const group = sessionsGroup(page);
+      await expect(
+        group.getByRole("button", { name: claudeRowName("Read the readme") }),
+      ).toBeVisible();
+      // Only it: the seeded ones are the CLI's until a Pull reads them in.
+      await expect(conversationRows(page)).toHaveCount(1);
+      await expect(
+        group.getByRole("button", { name: claudeRowName("Flaky login test") }),
+      ).toHaveCount(0);
+      await expect(group).not.toContainText("No sessions yet");
+    } finally {
+      await app.close();
+      await plane.close();
+      await removeProfile(seeded.profile);
+    }
+  });
+
+  test("a name and a pin given in Lanework, and what a Pull read, outlive a relaunch", async () => {
+    const plane = await startStubPlane({ projects: FE41_PROJECTS });
+    plane.setBoard("ws-alpha", board);
+    const seeded = await sessionsProfile(plane.origin);
+    let app = await bootSessions(seeded, plane.origin);
+    try {
+      let page = await app.firstWindow();
+      await openProject(page, "Alpha");
+      await pullFrom(page, "Pull all");
+      const claude = () =>
+        sessionsGroup(page).getByRole("button", {
+          name: claudeRowName("Login fix"),
+        });
+      await sessionsGroup(page)
+        .getByRole("button", { name: claudeRowName("Flaky login test") })
+        .click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Rename" }).click();
+      await page
+        .getByRole("textbox", { name: "Session name" })
+        .fill("Login fix");
+      await page.getByRole("button", { name: "Save" }).click();
+      await expect(claude()).toBeVisible();
+      await claude().click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Pin" }).click();
+      await expect(claude().getByLabel("Pinned")).toBeVisible();
+      await expect(conversationRows(page)).toHaveCount(2);
+
+      await app.close();
+      app = await bootSessions(seeded, plane.origin);
+      page = await app.firstWindow();
+      await openProject(page, "Alpha");
+      // No Pull this time: `lw.db` has both rows, the name and the pin.
+      await expect(claude()).toBeVisible();
+      await expect(claude().getByLabel("Pinned")).toBeVisible();
+      await expect(conversationRows(page).first()).toHaveAccessibleName(
+        claudeRowName("Login fix"),
+      );
+      await expect(
+        sessionsGroup(page).getByRole("button", {
+          name: claudeRowName("Settings page cleanup"),
+        }),
+      ).toBeVisible();
+      await expect(conversationRows(page)).toHaveCount(2);
+      await expect(sessionsGroup(page)).not.toContainText("No sessions yet");
+    } finally {
+      await app.close();
+      await plane.close();
+      await removeProfile(seeded.profile);
+    }
+  });
+
+  test("agent-sessions.json is carried into lw.db on the first launch, then deleted; a Pull shows its names and pins", async () => {
+    const plane = await startStubPlane({ projects: FE41_PROJECTS });
+    plane.setBoard("ws-alpha", board);
+    const seeded = await sessionsProfile(plane.origin);
+    // As FE-24 … FE-111 left it: a name and a pin, by `agent:id`.
+    const legacy = join(seeded.home, "agent-sessions.json");
+    await writeFile(
+      legacy,
+      JSON.stringify({
+        v: 1,
+        marks: {
+          [`claude:${CLAUDE_ID}`]: {
+            name: "Kept from before",
+            pinnedAt: 1_000,
+          },
+        },
+      }),
+    );
+    const app = await bootSessions(seeded, plane.origin);
+    try {
+      const page = await app.firstWindow();
+      await openProject(page, "Alpha");
+      // A mark alone lists nothing: the conversation is the CLI's until a
+      // Pull reads it in.
+      expect(await mainLists(page)).toEqual([]);
+      await expect(conversationRows(page)).toHaveCount(0);
+      // Carried over on the store's first open, which that listing was at
+      // the latest, then deleted.
+      expect(await exists(legacy)).toBe(false);
+
+      await pullFrom(page, "Pull all");
+      const claude = sessionsGroup(page).getByRole("button", {
+        name: claudeRowName("Kept from before"),
+      });
+      await expect(claude).toBeVisible();
+      await expect(claude.getByLabel("Pinned")).toBeVisible();
+      await expect(conversationRows(page).first()).toHaveAccessibleName(
+        claudeRowName("Kept from before"),
+      );
+      await expect(
+        sessionsGroup(page).getByRole("button", {
+          name: claudeRowName("Settings page cleanup"),
+        }),
+      ).toBeVisible();
+      // Never written back.
+      expect(await exists(legacy)).toBe(false);
+    } finally {
+      await app.close();
+      await plane.close();
+      await removeProfile(seeded.profile);
+    }
+  });
+
+  test("Remove from Lanework leaves the transcript, and a Pull brings it back; Delete transcript deletes it for good", async () => {
+    const plane = await startStubPlane({ projects: FE41_PROJECTS });
+    plane.setBoard("ws-alpha", board);
+    const seeded = await sessionsProfile(plane.origin);
+    const app = await bootSessions(seeded, plane.origin);
+    try {
+      const page = await app.firstWindow();
+      await openProject(page, "Alpha");
+      const group = sessionsGroup(page);
+      const claude = group.getByRole("button", {
+        name: claudeRowName("Flaky login test"),
+      });
+      await pullFrom(page, "Pull from Claude Code");
+      await expect(claude).toBeVisible();
+      // Pinned first: the pin goes with the row.
+      await claude.click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Pin" }).click();
+      await expect(claude.getByLabel("Pinned")).toBeVisible();
+
+      // Remove: nothing is lost, so nothing is asked. Off the rail at once;
+      // the CLI keeps its transcript.
+      await claude.click({ button: "right" });
+      await page
+        .getByRole("menuitem", { name: "Remove from Lanework" })
+        .click();
+      await expect(page.getByRole("alertdialog")).toHaveCount(0);
+      await expect(claude).toHaveCount(0);
+      await expect(group).toContainText("No sessions yet");
+      expect(await mainLists(page)).toEqual([]);
+      expect(await exists(seeded.transcript)).toBe(true);
+
+      // A Pull finds it again, as the CLI has it: no pin.
+      await pullFrom(page, "Pull from Claude Code");
+      await expect(claude).toBeVisible();
+      await expect(claude.getByLabel("Pinned")).toHaveCount(0);
+
+      // Delete transcript asks first, and says Remove is the gentler one.
+      await claude.click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Delete transcript…" }).click();
+      const dialog = page.getByRole("alertdialog");
+      await expect(dialog).toContainText(
+        "Delete the transcript of “Flaky login test”?",
+      );
+      await expect(dialog).toContainText("Remove from Lanework");
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(claude).toBeVisible();
+      expect(await exists(seeded.transcript)).toBe(true);
+
+      await claude.click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Delete transcript…" }).click();
+      await dialog
+        .getByRole("button", { name: "Delete transcript", exact: true })
+        .click();
+      await expect(dialog).toBeHidden();
+      await expect(claude).toHaveCount(0);
+      expect(await exists(seeded.transcript)).toBe(false);
+      // Gone for good: a Pull has nothing to find.
+      await pullFrom(page, "Pull from Claude Code");
+      await expect(conversationRows(page)).toHaveCount(0);
+      await expect(group).toContainText("No sessions yet");
+    } finally {
+      await app.close();
+      await plane.close();
+      await removeProfile(seeded.profile);
+    }
+  });
 });

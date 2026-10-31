@@ -8,9 +8,15 @@
 // `claude --resume` never looks, and back.
 //
 // NOTE: Every path is built here from ids main has already checked against
-// this folder's listing (or its archived one); a page never names a file.
+// Lanework's session store (or this folder's archive); a page never names a
+// file.
 //
-// Nothing here imports Electron: main passes the home and the Codex runner.
+// Lanework's own record follows the files (FE-112): an archived conversation
+// is marked archived in the session store, which takes it off the rail and
+// drops its pin, and one deleted from the archive is dropped from it.
+//
+// Nothing here imports Electron: main passes the home, the Codex runner and
+// the store.
 import { createReadStream } from "node:fs";
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -20,6 +26,7 @@ import {
   isAgentSessionId,
   type TerminalAgent,
 } from "../../../shared/terminal";
+import { type SessionStore, sessionKey } from "../../session-store";
 import { dropCodexIndex } from "./agent-delete";
 import {
   claudeProjectDir,
@@ -78,6 +85,9 @@ async function moveClaude(from: string, to: string, id: string) {
 /**
  * Archive a conversation main has checked is one of `folder`'s.
  *
+ * Once the CLI's files moved, `store` marks it archived (FE-112), which
+ * also drops its pin (FE-72/D3); its name stays.
+ *
  * @throws when `id` is not a session id, or the move or `codex archive`
  *   fails.
  */
@@ -87,23 +97,25 @@ export async function archiveAgentTranscript(
   agent: TerminalAgent,
   id: string,
   codex: CodexRunner,
+  store?: SessionStore,
 ): Promise<void> {
   if (!isAgentSessionId(id))
     throw new Error("A valid conversation is required");
   if (agent === "claude")
-    return moveClaude(
-      claudeLive(home, folder),
-      claudeArchive(home, folder),
-      id,
-    );
+    await moveClaude(claudeLive(home, folder), claudeArchive(home, folder), id);
   // NOTE: Named, never "the other one": OpenCode keeps no archive (FE-104/D11).
-  if (agent !== "codex") throw new Error("This agent has no archive.");
-  await codex(["archive", id]);
+  else if (agent !== "codex") throw new Error("This agent has no archive.");
+  else await codex(["archive", id]);
+  store?.setArchived(sessionKey(agent, id), true);
 }
 
 /**
  * Bring back a conversation main has checked is in `folder`'s archive.
  *
+ * Once the CLI's files moved back, `store` lists it again (FE-112).
+ *
+ * @returns Whether `store` had it: one archived before Lanework kept a store
+ *   has no row yet, and main reads it in.
  * @throws when `id` is not a session id, or the move or `codex unarchive`
  *   fails.
  */
@@ -113,18 +125,16 @@ export async function unarchiveAgentTranscript(
   agent: TerminalAgent,
   id: string,
   codex: CodexRunner,
-): Promise<void> {
+  store?: SessionStore,
+): Promise<boolean> {
   if (!isAgentSessionId(id))
     throw new Error("A valid conversation is required");
   if (agent === "claude")
-    return moveClaude(
-      claudeArchive(home, folder),
-      claudeLive(home, folder),
-      id,
-    );
+    await moveClaude(claudeArchive(home, folder), claudeLive(home, folder), id);
   // NOTE: Named, never "the other one": OpenCode keeps no archive (FE-104/D11).
-  if (agent !== "codex") throw new Error("This agent has no archive.");
-  await codex(["unarchive", id]);
+  else if (agent !== "codex") throw new Error("This agent has no archive.");
+  else await codex(["unarchive", id]);
+  return store?.setArchived(sessionKey(agent, id), false) ?? false;
 }
 
 /**
@@ -265,6 +275,7 @@ export async function listArchivedAgentSessions(
  *
  * It removes the same files as deleting a live conversation, from the
  * archive instead. A Codex conversation takes its spawned threads with it.
+ * Then `store` drops it, its name with it (FE-112).
  *
  * @throws when `id` is not a session id, or the archive has no file for it.
  */
@@ -273,6 +284,7 @@ export async function deleteArchivedTranscript(
   folder: string,
   agent: TerminalAgent,
   id: string,
+  store?: SessionStore,
 ): Promise<void> {
   if (!isAgentSessionId(id))
     throw new Error("A valid conversation is required");
@@ -280,13 +292,14 @@ export async function deleteArchivedTranscript(
     const dir = claudeArchive(home, folder);
     await rm(join(dir, `${id}.jsonl`));
     await rm(join(dir, id), { recursive: true, force: true });
-    return;
+  } else {
+    const doomed = (await codexArchived(home, folder)).filter(
+      (entry) => entry.id === id || entry.parent === id,
+    );
+    if (doomed.length === 0)
+      throw new Error("That conversation has no file here.");
+    for (const entry of doomed) await rm(entry.file, { force: true });
+    await dropCodexIndex(join(home, ".codex"), id);
   }
-  const doomed = (await codexArchived(home, folder)).filter(
-    (entry) => entry.id === id || entry.parent === id,
-  );
-  if (doomed.length === 0)
-    throw new Error("That conversation has no file here.");
-  for (const entry of doomed) await rm(entry.file, { force: true });
-  await dropCodexIndex(join(home, ".codex"), id);
+  store?.removeSession(sessionKey(agent, id));
 }

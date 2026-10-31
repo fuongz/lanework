@@ -76,11 +76,16 @@ async function claudeConversation(
  *   whose start is closest after the tab's, among those no other tab is on
  *   (FE-31/D3). One Codex can only start after its tab, so nearest-first
  *   pairs two new tabs with their own two rollouts.
+ *
+ * @param rollouts Filled with the rollout of each Codex conversation a tab
+ *   is bound to, by its id: main registers that conversation in Lanework's
+ *   session store with its transcript (FE-112).
  */
 export async function agentBindings(
   home: string,
   folder: string,
   terminals: readonly TerminalSession[],
+  rollouts?: Map<string, string>,
 ): Promise<AgentBinding[]> {
   const live = terminals.filter(
     (entry) => entry.kind !== "shell" && !entry.exit,
@@ -122,6 +127,7 @@ export async function agentBindings(
     if (paired.has(entry.id) || taken.has(start.id)) continue;
     paired.add(entry.id);
     taken.add(start.id);
+    rollouts?.set(start.id, start.file);
     out.push({ id: entry.id, resume: start.id });
   }
   return out;

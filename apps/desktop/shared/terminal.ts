@@ -890,6 +890,56 @@ export interface CodexUsage {
   opencode?: OpenCodeUsage | null;
 }
 
+/**
+ * Where a Pull is (FE-112).
+ *
+ * `scan`: finding the CLI's conversations; `total` is not known yet. `read`:
+ * reading them, `done` of `total`. `done`, `cancelled` and `failed` end that
+ * agent's part of the Pull.
+ */
+export const AGENT_PULL_PHASES = [
+  "scan",
+  "read",
+  "done",
+  "cancelled",
+  "failed",
+] as const;
+export type AgentPullPhase = (typeof AGENT_PULL_PHASES)[number];
+
+/**
+ * How far a Pull has got through one agent's conversations for one project.
+ *
+ * Pushed by main while it reads; a Pull of every project pushes one set per
+ * project.
+ */
+export interface AgentPullProgress {
+  project: string;
+  agent: TerminalAgent;
+  done: number;
+  total: number;
+  phase: AgentPullPhase;
+}
+
+/** What a Pull answers once it ends. */
+export interface AgentPullResult {
+  /** Conversations added to Lanework or brought up to date. */
+  pulled: number;
+}
+
+/**
+ * Whether `value` can name the CLIs a Pull reads: one or more agents, each
+ * once.
+ */
+export function isAgentPullList(value: unknown): value is TerminalAgent[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= TERMINAL_AGENTS.length &&
+    value.every(isTerminalAgent) &&
+    new Set(value).size === value.length
+  );
+}
+
 /** The longest name a session may be given in Lanework. */
 export const AGENT_NAME_MAX = 120;
 
@@ -959,8 +1009,22 @@ export const terminalChannels = {
   agentSessionPin: "terminal:agent-sessions:pin",
   /** Let a conversation go from its conductor (FE-95): Reset. */
   agentSessionConductor: "terminal:agent-sessions:conductor",
-  /** Delete a conversation's transcript for good. */
+  /**
+   * Delete a conversation's transcript for good, from the CLI's own folder.
+   *
+   * Forget is the one that leaves the transcript alone.
+   */
   agentSessionDelete: "terminal:agent-sessions:delete",
+  /** Drop a conversation from Lanework only (FE-112); the CLI keeps it. */
+  agentSessionForget: "terminal:agent-sessions:forget",
+  /** Read one project's conversations in from the CLIs' files (FE-112). */
+  agentSessionsPull: "terminal:agent-sessions:pull",
+  /** The same, for every project with a folder here. */
+  agentSessionsPullAll: "terminal:agent-sessions:pull-all",
+  /** Stop the Pull in progress. */
+  agentSessionsPullCancel: "terminal:agent-sessions:pull-cancel",
+  /** Main → renderer: how far a Pull has got. */
+  agentPullProgress: "terminal:agent-pull-progress",
   /** Archive a conversation in its CLI's own archive. */
   agentSessionArchive: "terminal:agent-sessions:archive",
   /** The conversations archived for a project's folder. */
@@ -1006,16 +1070,7 @@ export const terminalChannels = {
 } as const;
 
 /** What the View menu can ask the panel to do. */
-export type TerminalCommand =
-  | "toggle"
-  | "new"
-  | {
-      type: "focus";
-      project: string;
-      slug: string;
-      href: string;
-      shellId?: string;
-    };
+export type TerminalCommand = "toggle" | "new";
 
 /** Renderer → host, over the port. */
 export type TerminalClientMessage =
@@ -1106,6 +1161,43 @@ export interface DesktopTerminalApi {
     agent: TerminalAgent,
     id: string,
   ) => Promise<AgentSession[]>;
+  /**
+   * Drops a conversation from Lanework only, its name and pin with it
+   * (FE-112).
+   *
+   * The CLI's transcript is never touched, so a later Pull finds it again.
+   * Answers the new listing.
+   */
+  forgetAgentSession: (
+    project: string,
+    agent: TerminalAgent,
+    id: string,
+  ) => Promise<AgentSession[]>;
+  /**
+   * Reads `project`'s conversations in from the CLIs' own files (FE-112).
+   *
+   * Only the `agents` named. Progress comes on
+   * {@link DesktopTerminalApi.onAgentPullProgress};
+   * resolves once the Pull ends, cancelled or not.
+   */
+  pullAgentSessions: (
+    project: string,
+    agents: TerminalAgent[],
+  ) => Promise<AgentPullResult>;
+  /**
+   * {@link DesktopTerminalApi.pullAgentSessions} for every project with a
+   * folder here.
+   */
+  pullAllAgentSessions: (agents: TerminalAgent[]) => Promise<AgentPullResult>;
+  /**
+   * Stops the Pull in progress, if any.
+   *
+   * What it already read stays.
+   */
+  cancelAgentSessionsPull: () => Promise<void>;
+  onAgentPullProgress: (
+    listener: (progress: AgentPullProgress) => void,
+  ) => () => void;
   /**
    * Archives a conversation the CLI's own way.
    *

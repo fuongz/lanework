@@ -54,10 +54,14 @@ const META_MAX = 64 * 1024;
 /** How much of a transcript one read step takes. */
 const STEP = 1024 * 1024;
 /**
- * Transcripts whose parse is kept between listings: more than one listing
- * reads (40).
+ * Transcripts whose parse is kept between listings.
+ *
+ * NOTE: Above what one run reads: a listing that cycles through more than
+ * this evicts each file before its next turn, and every listing then reads
+ * every transcript from its first byte again (FE-111). A parse is small, its
+ * offset and the few lines that name a task.
  */
-const CACHE_MAX = 128;
+const CACHE_MAX = 1024;
 /**
  * What a line must hold to start, name or end a background task.
  *
@@ -96,7 +100,7 @@ const ANSI =
   /\u001b(?:\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])/g;
 
 /** A task as the transcript built it, with where its output goes. */
-interface Started {
+export interface Started {
   task: Omit<
     BackgroundTask,
     "status" | "exitCode" | "summary" | "endedAt" | "pid" | "workflow"
@@ -110,7 +114,7 @@ interface Started {
 }
 
 /** The newest a task's notifications said of it. */
-interface Notice {
+export interface Notice {
   /** How it ended; null while it has not. */
   status: BackgroundTaskStatus | null;
   exitCode: number | null;
@@ -118,21 +122,49 @@ interface Notice {
   at: string | null;
 }
 
+/** A tool call that may start a task, not answered yet. */
+export interface PendingCall {
+  name: string;
+  input: Record<string, unknown>;
+  at: string | null;
+}
+
 /** What one transcript says so far, and how far it was read. */
-interface Parsed {
+export interface Parsed {
   size: number;
   mtimeMs: number;
   /** Bytes read up to the end of the last whole line. */
   offset: number;
   /** Tool calls that may start a task, by id, until they are answered. */
-  calls: Map<
-    string,
-    { name: string; input: Record<string, unknown>; at: string | null }
-  >;
+  calls: Map<string, PendingCall>;
   /** The tasks started so far, by task id. */
   started: Map<string, Started>;
   /** What each task's notifications said, by task id. */
   notices: Map<string, Notice>;
+}
+
+/** The shape {@link TranscriptParseState} is at; bump it when it changes. */
+const PARSE_STATE_VERSION = 1;
+
+/**
+ * A {@link Parsed} as JSON holds it (FE-112).
+ *
+ * Lanework's session store keeps one per Claude conversation, so a read
+ * after a restart goes on from `offset` instead of the transcript's first
+ * byte.
+ *
+ * NOTE: `v` is the shape's version. One of another version (an older
+ * build's) reads as none, and that transcript is parsed again from its
+ * start.
+ */
+export interface TranscriptParseState {
+  v: typeof PARSE_STATE_VERSION;
+  size: number;
+  mtimeMs: number;
+  offset: number;
+  calls: [string, PendingCall][];
+  started: [string, Started][];
+  notices: [string, Notice][];
 }
 
 /** `execFile`, awaited. */
@@ -486,6 +518,64 @@ function fresh(size: number, mtimeMs: number): Parsed {
 }
 
 /**
+ * Read `file` on from `parsed.offset` up to byte `size`, folding each whole
+ * line into `parsed`.
+ *
+ * A line still being written (no newline after it yet) is left for the next
+ * read, which starts where this one's whole lines ended.
+ *
+ * @param onLine Handed every whole line read, in order, before it is
+ *   folded in: a reader of the same transcript for something else reads it
+ *   in the same pass (FE-112).
+ */
+async function readOn(
+  file: string,
+  parsed: Parsed,
+  size: number,
+  onLine?: (line: string) => void,
+): Promise<void> {
+  const handle = await open(file, "r");
+  try {
+    const buffer = Buffer.alloc(STEP);
+    let carry = "";
+    let position = parsed.offset;
+    while (position < size) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        Math.min(STEP, size - position),
+        position,
+      );
+      if (!bytesRead) break;
+      position += bytesRead;
+      // Cut on the last newline in bytes: a character is never split.
+      const chunk = buffer.subarray(0, bytesRead);
+      const last = chunk.lastIndexOf(0x0a);
+      if (last < 0) {
+        carry += chunk.toString("utf8");
+        continue;
+      }
+      const text = carry + chunk.subarray(0, last).toString("utf8");
+      carry = chunk.subarray(last + 1).toString("utf8");
+      parsed.offset = position - (bytesRead - last - 1);
+      for (const part of text.split("\n")) {
+        onLine?.(part);
+        if (!MARKERS.some((marker) => part.includes(marker))) continue;
+        try {
+          const value: unknown = JSON.parse(part);
+          const line = record(value);
+          if (line) visit(parsed, line);
+        } catch {
+          // Not ours, or cut.
+        }
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * `file` parsed up to its end.
  *
  * A transcript only grows, so a cached parse reads on from where it stopped;
@@ -506,44 +596,7 @@ async function parse(file: string): Promise<Parsed> {
     cached && cached.offset <= info.size
       ? cached
       : fresh(info.size, info.mtimeMs);
-  const handle = await open(file, "r");
-  try {
-    const buffer = Buffer.alloc(STEP);
-    let carry = "";
-    let position = parsed.offset;
-    while (position < info.size) {
-      const { bytesRead } = await handle.read(
-        buffer,
-        0,
-        Math.min(STEP, info.size - position),
-        position,
-      );
-      if (!bytesRead) break;
-      position += bytesRead;
-      // Cut on the last newline in bytes: a character is never split.
-      const chunk = buffer.subarray(0, bytesRead);
-      const last = chunk.lastIndexOf(0x0a);
-      if (last < 0) {
-        carry += chunk.toString("utf8");
-        continue;
-      }
-      const text = carry + chunk.subarray(0, last).toString("utf8");
-      carry = chunk.subarray(last + 1).toString("utf8");
-      parsed.offset = position - (bytesRead - last - 1);
-      for (const part of text.split("\n")) {
-        if (!MARKERS.some((marker) => part.includes(marker))) continue;
-        try {
-          const value: unknown = JSON.parse(part);
-          const line = record(value);
-          if (line) visit(parsed, line);
-        } catch {
-          // Not ours, or cut.
-        }
-      }
-    }
-  } finally {
-    await handle.close();
-  }
+  await readOn(file, parsed, info.size);
   parsed.size = info.size;
   parsed.mtimeMs = info.mtimeMs;
   cache.delete(file);
@@ -855,6 +908,160 @@ export async function workflowRunEnded(
     )
       newest = started;
   return newest !== null && Boolean(parsed.notices.get(newest.task.id)?.status);
+}
+
+/**
+ * {@link readTranscriptTasks} for a listing (FE-111/D2): a transcript quiet
+ * for {@link SUBAGENT_STALE_MS} that this run never parsed is not read, and
+ * lists none.
+ *
+ * NOTE: Nothing of it can still run but a background agent writing its own
+ * file. Opening the conversation reads it, which keeps its parse, and its
+ * listings count it from then on.
+ */
+export async function listedTranscriptTasks(
+  file: string,
+  mtimeMs: number,
+): Promise<BackgroundTask[]> {
+  if (Date.now() - mtimeMs > SUBAGENT_STALE_MS && !cache.has(file)) return [];
+  return readTranscriptTasks(file);
+}
+
+/** A finite number of zero or more, or null. */
+function count(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+/**
+ * `value`'s `[id, entry]` pairs as a map, each entry checked by `valid`.
+ *
+ * @returns null when it is not a list of such pairs.
+ */
+function pairs<T>(
+  value: unknown,
+  valid: (entry: Record<string, unknown>) => boolean,
+): Map<string, T> | null {
+  if (!Array.isArray(value)) return null;
+  const out = new Map<string, T>();
+  for (const pair of value) {
+    if (!Array.isArray(pair) || typeof pair[0] !== "string") return null;
+    const entry = record(pair[1]);
+    if (!entry || !valid(entry)) return null;
+    out.set(pair[0], entry as T);
+  }
+  return out;
+}
+
+/** A string or null: what a notice's text fields hold. */
+const textOrNull = (value: unknown) =>
+  value === null || typeof value === "string";
+
+/** `parsed` as JSON holds it (FE-112). */
+export function parsedToJSON(parsed: Parsed): TranscriptParseState {
+  return {
+    v: PARSE_STATE_VERSION,
+    size: parsed.size,
+    mtimeMs: parsed.mtimeMs,
+    offset: parsed.offset,
+    calls: [...parsed.calls],
+    started: [...parsed.started],
+    notices: [...parsed.notices],
+  };
+}
+
+/**
+ * The {@link Parsed} a {@link TranscriptParseState} holds (FE-112).
+ *
+ * @returns null for anything else: another version's state, or one that is
+ *   cut or edited. Its transcript is then read from the first byte.
+ */
+export function parsedFromJSON(value: unknown): Parsed | null {
+  const state = record(value);
+  if (!state || state.v !== PARSE_STATE_VERSION) return null;
+  const size = count(state.size);
+  const mtimeMs = count(state.mtimeMs);
+  const offset = count(state.offset);
+  const calls = pairs<PendingCall>(
+    state.calls,
+    (call) => typeof call.name === "string" && record(call.input) !== null,
+  );
+  const started = pairs<Started>(state.started, (entry) => {
+    const task = record(entry.task);
+    return (
+      task !== null &&
+      typeof task.id === "string" &&
+      typeof task.kind === "string" &&
+      typeof task.description === "string" &&
+      typeof task.startedAt === "string"
+    );
+  });
+  const notices = pairs<Notice>(
+    state.notices,
+    (notice) =>
+      textOrNull(notice.status) &&
+      textOrNull(notice.summary) &&
+      textOrNull(notice.at),
+  );
+  if (
+    size === null ||
+    mtimeMs === null ||
+    offset === null ||
+    offset > size ||
+    !calls ||
+    !started ||
+    !notices
+  )
+    return null;
+  return { size, mtimeMs, offset, calls, started, notices };
+}
+
+/**
+ * {@link readTranscriptTasks} for a reader that keeps the parse itself
+ * (FE-112): read on from the state `from` it saved, never through this
+ * module's cache, and answered with the state to save next.
+ *
+ * A transcript that shrank since `from`, or a `from` that is not a
+ * {@link TranscriptParseState}, is read from its first byte.
+ *
+ * @param from What the last read answered as `state`; null to read from the
+ *   first byte.
+ * @param onLine Handed every whole line read, in order: a reader of the
+ *   transcript for something else reads it in the same pass.
+ * @returns `restarted` when a `from` was given and the read went back to the
+ *   first byte all the same: what `onLine` was handed starts there too.
+ * @throws when `file` is missing or not a file.
+ */
+export async function readTranscriptTasksFrom(
+  file: string,
+  from: unknown,
+  onLine?: (line: string) => void,
+): Promise<{
+  tasks: BackgroundTask[];
+  state: TranscriptParseState;
+  restarted: boolean;
+}> {
+  const info = await stat(file);
+  if (!info.isFile()) throw new Error("That conversation has no transcript.");
+  const prior = from == null ? null : parsedFromJSON(from);
+  const parsed =
+    prior && prior.size <= info.size && prior.offset <= info.size
+      ? prior
+      : fresh(info.size, info.mtimeMs);
+  await readOn(file, parsed, info.size, onLine);
+  parsed.size = info.size;
+  parsed.mtimeMs = info.mtimeMs;
+  const tasks = await withWorkflows(
+    parsed,
+    file,
+    await withAgents(parsed, file, tasksOf(parsed, file)),
+  );
+  return {
+    tasks,
+    state: parsedToJSON(parsed),
+    restarted: from != null && parsed !== prior,
+  };
 }
 
 /** Conversation `conversation`'s background tasks, without pids. */

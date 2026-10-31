@@ -10,6 +10,9 @@ export const electronBuildOptions = {
     "main/index": "electron/main/index.ts",
     // The utility process every terminal lives in.
     "main/pty-host": "electron/main/terminal/host.ts",
+    // FE-112: the Pull's worker thread, which reads the CLIs' transcripts off
+    // main's thread. `sessions/pull.ts` finds it beside main's own bundle.
+    "main/session-pull": "electron/main/sessions/pull-worker.ts",
     "preload/index": "electron/preload/index.ts",
     // The agents' Stop hook, run by Electron's own Node
     // (`ELECTRON_RUN_AS_NODE=1`) from the command Settings → Agents installs.

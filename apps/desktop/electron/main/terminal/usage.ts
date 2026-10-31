@@ -3,9 +3,9 @@
 // the polling, its timers, and the IPC that reads and refreshes them.
 //
 // NOTE: Split out of `terminal/index.ts` (FE-82/D2). It needs to know which
-// conversations each project's listing last answered, which is the
-// listing's state, so `registerUsage` is handed that rather than importing
-// the module that owns it.
+// projects the rail follows and which conversations Lanework's session store
+// lists for each (FE-112), which are that module's to answer, so
+// `registerUsage` is handed them rather than importing it.
 import { type FSWatcher, watch } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -59,10 +59,13 @@ export function opencodeUsageNow(): Promise<OpenCodeUsage | null> {
 
 /** What the usage reads need from the terminal's conversation listing. */
 export interface UsageListing {
-  /** Each listed project's conversation keys, as its listing last answered. */
-  listed: () => Iterable<[string, Set<string>]>;
-  /** One project's conversation keys, listing it if it has not been yet. */
-  keysOf: (project: string) => Promise<Set<string>>;
+  /** The projects whose rail is followed now: those a window listed. */
+  projects: () => Iterable<string>;
+  /**
+   * One project's conversation keys, `agent:id`, as Lanework's session
+   * store lists them (FE-112); none when it cannot be read.
+   */
+  keysOf: (project: string) => Set<string>;
 }
 
 /** Set by {@link registerUsage}; nothing is listed before it. */
@@ -183,13 +186,15 @@ let lastClaudeMode: string | undefined;
 let claudeAccountChangedAt = 0;
 let quotaWatch: FSWatcher | null = null;
 /**
- * Tell every listed project to ask `codexUsage` again.
+ * Tell every followed project to ask `codexUsage` again.
  *
  * Sent as an `agentWritten` on one of its Claude conversations, or on a
  * placeholder id when it has none.
  */
 function notifyClaudeUsage(): void {
-  for (const [project, keys] of deps?.listed() ?? []) {
+  if (!deps) return;
+  for (const project of deps.projects()) {
+    const keys = deps.keysOf(project);
     const id = [...keys].find((key) => key.startsWith("claude:"))?.slice(7);
     broadcast(terminalChannels.agentWritten, {
       project,
@@ -362,14 +367,14 @@ export function registerUsage(
   deps = listing;
   startClaudeUsagePoll();
   // NOTE: By project alone (FE-41): the goals are those of the Codex
-  // conversations its own listing last answered, and the quota is the
+  // conversations Lanework lists for it (FE-112), and the quota is the
   // account's. A page names no file and no thread.
   handle(
     terminalChannels.codexUsage,
     devUrl,
     async (args): Promise<CodexUsage> => {
       const [project] = arity(args, 1, "A project is required");
-      const listed = await listing.keysOf(
+      const listed = listing.keysOf(
         slug(project, "A valid project is required"),
       );
       const ids = [...listed]

@@ -22,6 +22,7 @@ import type { MachineRecord } from "../electron/main/auth/store";
 import * as worktree from "../electron/main/git/worktree";
 import { writeFolders } from "../electron/main/projects/store";
 import type { Project } from "../shared/projects";
+import type { DesktopTerminalApi } from "../shared/terminal";
 import {
   agentStandIn,
   CLAUDE_EDITS_ID,
@@ -737,6 +738,14 @@ test("FE-39: Changes marks the one file a conversation edited since HEAD, and it
     LANEWORK_CLAUDE_BIN: await agentStandIn(scratch, "claude"),
   });
   try {
+    // Lanework lists only the conversations it holds (FE-112): pull the
+    // seeded one in before Changes looks for its edits.
+    await page.evaluate(async () => {
+      const { terminal } = (
+        window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+      ).desktop;
+      await terminal.pullAgentSessions("ws-alpha", ["claude"]);
+    });
     await page.goto("app://lanework/w/alpha/changes");
     const list = page.getByRole("complementary", { name: "Changed files" });
     await expect(list.getByText("notes.md")).toBeVisible({ timeout: 15_000 });

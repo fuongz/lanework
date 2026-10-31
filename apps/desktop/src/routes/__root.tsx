@@ -13,6 +13,7 @@ import { useFonts } from "#/hooks/use-fonts";
 import { useNotificationRouting } from "#/hooks/use-notification-routing";
 import { useTheme } from "#/hooks/use-theme";
 import { useVibrancy } from "#/hooks/use-vibrancy";
+import { useWindowActive } from "#/hooks/use-window-active";
 import { usePreferences } from "#/stores/preferences";
 import css from "#/styles/app.css?url";
 export const Route = createRootRoute({
@@ -29,6 +30,7 @@ export const Route = createRootRoute({
 });
 function RootShell() {
   useVibrancy();
+  useWindowActive();
   useTheme();
   useFonts();
   useNotificationRouting();

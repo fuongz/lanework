@@ -32,6 +32,7 @@ const NODE_OUTPUTS = [
   "dist/electron/statusline/claude-usage.cjs",
   "dist/electron/mcp-local/server.cjs",
   "dist/electron/control/lanework-control.cjs",
+  "dist/electron/main/session-pull.cjs",
 ];
 /** Source folders (APP-relative) that never import Electron. */
 const ELECTRON_FREE = [
@@ -40,6 +41,8 @@ const ELECTRON_FREE = [
   "electron/local-store/",
   "electron/statusline/",
   "electron/control/",
+  "electron/main/sessions/",
+  "electron/session-store/",
   "shared/",
 ];
 /** The one file the main bundle may take from the hook's folder. */

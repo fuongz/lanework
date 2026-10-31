@@ -185,12 +185,13 @@ export function JobCapsules({
 }) {
   const navigate = useNavigate();
   const live = useAgentSessions((state) => state.live);
-  const any = (session?.background.total ?? 0) > 0;
+  // Read for a Claude conversation on screen whatever its listing counted:
+  // the listing skips a quiet transcript it never read (FE-111/D2).
   const { tasks } = useBackgroundTasks(
     project,
     session?.id ?? null,
     backgroundCue(session),
-    any,
+    session?.agent === "claude",
   );
   if (!session) return null;
   const recent = (at: string) => since !== null && at >= since;

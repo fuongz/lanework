@@ -132,6 +132,21 @@
   }
 }
 
+/* The window is behind another (use-window-active.ts): the endless motion
+   holds still, as nobody watches it and each loop repaints every frame.
+   Only these loops: pausing everything would freeze a toast's entrance on
+   its first, invisible frame until the window comes back. */
+html[data-window-inactive]
+:is(
+  .text-shimmer,
+  .orbit-spinner [data-orbit],
+  .animate-ping,
+  .animate-spin,
+  .animate-pulse
+) {
+  animation-play-state: paused;
+}
+
 /* Semantic tokens only. Components use `bg-card` / `text-muted-foreground` /
    `ring-border`, never a literal hex or oklch.
 

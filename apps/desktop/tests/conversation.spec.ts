@@ -24,6 +24,7 @@ import { writeFolders } from "../electron/main/projects/store";
 import { claudeProjectDir } from "../electron/main/terminal/agent-sessions";
 import { conversationChannels } from "../shared/conversation";
 import type { Project } from "../shared/projects";
+import type { DesktopTerminalApi } from "../shared/terminal";
 import { claudeRowName } from "./agent-fixtures";
 import {
   launchEnv,
@@ -493,6 +494,24 @@ async function switchTo(page: Page, name: string) {
 }
 
 /**
+ * Pull Alpha's Claude conversations into Lanework (FE-112): the rail lists
+ * only its own record (`lw.db`), so the transcript seeded before launch shows
+ * once a Pull reads it in.
+ *
+ * Through main's IPC, not the rail's … menu: this spec is about the chat. The
+ * answer comes once the Pull ended; the focus event lists the rail again.
+ */
+async function pullClaude(page: Page) {
+  await page.evaluate(async () => {
+    const { terminal } = (
+      window as unknown as { desktop: { terminal: DesktopTerminalApi } }
+    ).desktop;
+    await terminal.pullAgentSessions("ws-alpha", ["claude"]);
+    window.dispatchEvent(new Event("focus"));
+  });
+}
+
+/**
  * Answer every link preview in main with a fixed title and a drawn icon —
  * no network in a test. Installed before any chat draws a link: the
  * renderer keeps what it was told for the session.
@@ -548,6 +567,7 @@ test("V5: a Claude conversation opens as a chat, sends a prompt and switches to 
     });
     await stubLinkPreviews(app);
     await switchTo(page, "Alpha");
+    await pullClaude(page);
 
     // ─── The chat, read from the transcript ─────────────────────────────────
     await page
@@ -761,6 +781,7 @@ async function openLong(prompts: number) {
   });
   const page = await app.firstWindow();
   await switchTo(page, "Alpha");
+  await pullClaude(page);
   const row = page.getByRole("button", {
     name: claudeRowName(LONG_TITLE),
     exact: true,

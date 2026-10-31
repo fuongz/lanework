@@ -2,10 +2,11 @@
 //
 // NOTE: Apart from the archive, the one place Lanework writes into the CLIs'
 // own folders. Every path is built here from ids main has already checked
-// against this folder's listing; a page never names a file.
+// against Lanework's session store; a page never names a file. The store's
+// row goes with the files (FE-112); Forget is the one that leaves them.
 //
-// Nothing here imports Electron: main passes the home, and a spec drives it
-// against a fake one.
+// Nothing here imports Electron: main passes the home and the store, and a
+// spec drives it against fake ones.
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -13,6 +14,7 @@ import {
   isAgentSessionIdOf,
   type TerminalAgent,
 } from "../../../shared/terminal";
+import { type SessionStore, sessionKey } from "../../session-store";
 import {
   claudeProjectDir,
   codexRolloutOf,
@@ -30,10 +32,26 @@ import { opencodeDataDirOf, opencodeOwns } from "./opencode-sessions";
  * - OpenCode: `opencode session delete <id>`, which takes its child sessions
  *   with it (FE-104). Its database is OpenCode's: only its CLI writes it.
  *
+ * Once the files are gone, `store` drops the conversation, its name and pin
+ * with it (FE-112).
+ *
  * @param runOpencode Runs `opencode <args>`: main's, or a spec's stand-in.
  * @throws when `id` is not a session id, or there is no file for it.
  */
 export async function deleteAgentTranscript(
+  home: string,
+  folder: string,
+  agent: TerminalAgent,
+  id: string,
+  runOpencode?: (args: string[]) => Promise<void>,
+  store?: SessionStore,
+): Promise<void> {
+  await deleteFiles(home, folder, agent, id, runOpencode);
+  store?.removeSession(sessionKey(agent, id));
+}
+
+/** {@link deleteAgentTranscript}'s part in the CLI's own files. */
+async function deleteFiles(
   home: string,
   folder: string,
   agent: TerminalAgent,
@@ -56,7 +74,7 @@ export async function deleteAgentTranscript(
     throw new Error("A valid conversation is required");
   if (agent === "claude") {
     const dir = join(home, ".claude", "projects", claudeProjectDir(folder));
-    // The transcript first: once it is gone the rail no longer lists it,
+    // The transcript first: once it is gone the CLI no longer offers it,
     // whatever happens to the folder after.
     await rm(join(dir, `${id}.jsonl`));
     await rm(join(dir, id), { recursive: true, force: true });

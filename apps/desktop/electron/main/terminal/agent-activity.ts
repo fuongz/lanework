@@ -1,11 +1,15 @@
 // Which agent conversations are being written right now (FE-25/D3): the
 // transcripts a project's folder has, watched rather than polled.
 //
+// Since FE-112 a settled write is also read into Lanework's session store,
+// for a conversation the store has: what the rail lists stays up to date
+// without a Pull, and a conversation it does not have is left alone.
+//
 // Nothing here imports Electron, so a spec can drive it under plain Node
 // against a fake home folder.
-import { type FSWatcher, watch } from "node:fs";
+import { existsSync, type FSWatcher, watch } from "node:fs";
 import { stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   type AgentCard,
   isAgentSessionId,
@@ -13,6 +17,8 @@ import {
   type TerminalAgent,
   workflowAgentKey,
 } from "../../../shared/terminal";
+import type { SessionStore } from "../../session-store";
+import { type IngestSource, ingestOne } from "../sessions";
 import {
   CLAUDE_SUBAGENT_FILE,
   claudeProjectDir,
@@ -50,6 +56,60 @@ const CLAUDE_SUBAGENT_PATH = /^([^/\\]+)[/\\]subagents[/\\]([^/\\]+)$/;
 const CLAUDE_WORKFLOW_AGENT_PATH =
   /^([^/\\]+)[/\\]subagents[/\\]workflows[/\\]([^/\\]+)[/\\]([^/\\]+)$/;
 
+/** Where the watcher reads settled writes into (FE-112). */
+export interface WatchSessions {
+  /** Lanework's session store; one that throws (closed) ends the reads. */
+  store: () => SessionStore;
+  /** The project whose rail the folder's conversations are listed on. */
+  project: string;
+  /**
+   * After a read changed conversation `key`'s row: `appeared` when it now
+   * has a title it had not, so the rail lists it for the first time.
+   */
+  onIngested?: (key: string, appeared: boolean) => void;
+}
+
+/** What {@link ingestSession} came to. */
+export interface SessionIngest {
+  /** The store changed. */
+  written: boolean;
+  /** The row has a title it had not before: the rail lists it now. */
+  appeared: boolean;
+}
+
+const UNREAD: SessionIngest = { written: false, appeared: false };
+
+/**
+ * Read conversation `key`'s new bytes into the store (FE-112).
+ *
+ * Only one the store already has, for `project` or for none yet (a stub a
+ * legacy mark made): a conversation started outside Lanework joins through
+ * a Pull, never through a write, and one listed on another project stays
+ * there.
+ *
+ * @param key `agent:id`; for a Codex thread, the conversation that spawned
+ *   it.
+ * @param create Read it in though the store has no row: one main is sure
+ *   about, such as one just brought back from the archive.
+ */
+export async function ingestSession(
+  store: SessionStore,
+  key: string,
+  source: IngestSource,
+  options: { project: string; folder: string; home: string; create?: boolean },
+): Promise<SessionIngest> {
+  const { project, folder, home } = options;
+  const before = store.getSession(key);
+  if (!before && !options.create) return UNREAD;
+  if (before?.project && before.project !== project) return UNREAD;
+  const { written } = await ingestOne(store, source, { project, folder, home });
+  if (!written) return UNREAD;
+  return {
+    written,
+    appeared: !before?.cliTitle && Boolean(store.getSession(key)?.cliTitle),
+  };
+}
+
 /**
  * Watch `folder`'s Claude and Codex transcripts under `home`, and call
  * `onActivity` when one is written.
@@ -59,10 +119,13 @@ const CLAUDE_WORKFLOW_AGENT_PATH =
  * every folder's rollouts in one tree, so a rollout seen for the first time
  * is opened once to learn whose it is, and the answer is kept.
  *
- * A folder that does not exist yet is not watched. The rail lists again on
- * focus, which starts the watch once the CLI has made it.
+ * Claude's folder for `folder`, when Claude has not made it yet, is watched
+ * for once it does. Codex's and OpenCode's are one per machine: missing,
+ * they are not watched.
  *
  * @param onCompleted Called when a turn that was running ends complete.
+ * @param sessions Where a settled write of a conversation the store has is
+ *   read into, before anything is told of it (FE-112).
  * @returns The function that stops every watch.
  */
 export function watchAgentActivity(
@@ -85,6 +148,7 @@ export function watchAgentActivity(
    */
   onWrite?: (agent: TerminalAgent, id: string) => void,
   onCompleted?: (agent: TerminalAgent, id: string) => void,
+  sessions?: WatchSessions,
 ): () => void {
   const watchers: FSWatcher[] = [];
   const pending = new Map<string, NodeJS.Timeout>();
@@ -111,6 +175,46 @@ export function watchAgentActivity(
     return next.card;
   };
   let stopped = false;
+
+  // One read into the store per source at a time, and at most one more
+  // queued behind it: every write a read in flight missed is read by that
+  // one. A busy conversation's sub-agents each settle on their own, and
+  // each is news of the same transcript.
+  const reading = new Map<string, Promise<void>>();
+  const queued = new Map<string, Promise<void>>();
+  const readIn = async (key: string, source: IngestSource) => {
+    if (!sessions || stopped) return;
+    try {
+      const read = await ingestSession(sessions.store(), key, source, {
+        project: sessions.project,
+        folder,
+        home,
+      });
+      if (read.written && !stopped) sessions.onIngested?.(key, read.appeared);
+    } catch {
+      // The store closed, or the file went: the next write reads it again.
+    }
+  };
+  const ingest = (key: string, source: IngestSource): Promise<void> => {
+    if (!sessions) return Promise.resolve();
+    const lock =
+      source.agent === "opencode" ? `opencode:${source.id}` : source.file;
+    const waiting = queued.get(lock);
+    if (waiting) return waiting;
+    const running = reading.get(lock);
+    if (running) {
+      const next = running.then(() => {
+        queued.delete(lock);
+        return ingest(key, source);
+      });
+      queued.set(lock, next);
+      return next;
+    }
+    const run = readIn(key, source).finally(() => reading.delete(lock));
+    reading.set(lock, run);
+    return run;
+  };
+
   // With `subagent` set, it is that sub-agent of `id` that was written: its
   // own state, no card, and no `onWrite`, since a sub-agent is never the
   // conversation a tab is on.
@@ -127,8 +231,17 @@ export function watchAgentActivity(
       key,
       setTimeout(() => {
         pending.delete(key);
-        if (!stopped && !subagent) onWrite?.(agent, id);
         void (async () => {
+          // NOTE: Into the store FIRST (FE-112): the rail that lists again on
+          // this news finds the conversation as it is now. A sub-agent's write
+          // reads its conversation's transcript, whose read lists them.
+          await ingest(
+            `${agent}:${id}`,
+            agent === "claude"
+              ? { agent, file: join(claudeDir, `${id}.jsonl`) }
+              : { agent, file },
+          );
+          if (!stopped && !subagent) onWrite?.(agent, id);
           const working = await transcriptWorking(
             file,
             agent,
@@ -184,52 +297,84 @@ export function watchAgentActivity(
   };
 
   const claudeDir = join(home, ".claude", "projects", claudeProjectDir(folder));
-  try {
-    watchers.push(
-      watch(claudeDir, (_event, name) => {
+  const watchClaude = (): boolean => {
+    let conversations: FSWatcher;
+    try {
+      conversations = watch(claudeDir, (_event, name) => {
         const id = name ? basename(String(name)).replace(/\.jsonl$/, "") : "";
         if (name && String(name).endsWith(".jsonl") && isAgentSessionId(id))
           report("claude", id, join(claudeDir, `${id}.jsonl`));
-      }),
-    );
-  } catch {
-    // No Claude conversations for this folder yet.
-  }
+      });
+    } catch {
+      // No Claude conversations for this folder yet.
+      return false;
+    }
+    conversations.on("error", () => conversations.close());
+    watchers.push(conversations);
+    watchSubagents();
+    return true;
+  };
   // NOTE: A sub-agent writes its OWN transcript, one folder down, while its
   // conversation's may sit still, as a background agent's does. It gets its
   // own recursive watch, so the conversations' watch above stays as it is.
-  try {
-    watchers.push(
-      watch(claudeDir, { recursive: true }, (_event, name) => {
-        const match = name ? CLAUDE_SUBAGENT_PATH.exec(String(name)) : null;
-        const sub = match?.[2]
-          ? CLAUDE_SUBAGENT_FILE.exec(match[2])?.[1]
-          : null;
-        if (match?.[1] && sub && isAgentSessionId(match[1])) {
-          report("claude", match[1], join(claudeDir, String(name)), sub);
-          return;
-        }
-        // A workflow's agent: news of its run's row, keyed `<run>/<id>`.
-        const agent = name
-          ? CLAUDE_WORKFLOW_AGENT_PATH.exec(String(name))
-          : null;
-        const id = agent?.[3] ? CLAUDE_SUBAGENT_FILE.exec(agent[3])?.[1] : null;
-        if (
-          agent?.[1] &&
-          id &&
-          isAgentSessionId(agent[1]) &&
-          isWorkflowRunId(agent[2])
-        )
-          report(
-            "claude",
-            agent[1],
-            join(claudeDir, String(name)),
-            workflowAgentKey(agent[2], id),
-          );
-      }),
-    );
-  } catch {
-    // No Claude conversations for this folder yet.
+  const watchSubagents = () => {
+    try {
+      const subagents = watch(
+        claudeDir,
+        { recursive: true },
+        (_event, name) => {
+          const match = name ? CLAUDE_SUBAGENT_PATH.exec(String(name)) : null;
+          const sub = match?.[2]
+            ? CLAUDE_SUBAGENT_FILE.exec(match[2])?.[1]
+            : null;
+          if (match?.[1] && sub && isAgentSessionId(match[1])) {
+            report("claude", match[1], join(claudeDir, String(name)), sub);
+            return;
+          }
+          // A workflow's agent: news of its run's row, keyed `<run>/<id>`.
+          const agent = name
+            ? CLAUDE_WORKFLOW_AGENT_PATH.exec(String(name))
+            : null;
+          const id = agent?.[3]
+            ? CLAUDE_SUBAGENT_FILE.exec(agent[3])?.[1]
+            : null;
+          if (
+            agent?.[1] &&
+            id &&
+            isAgentSessionId(agent[1]) &&
+            isWorkflowRunId(agent[2])
+          )
+            report(
+              "claude",
+              agent[1],
+              join(claudeDir, String(name)),
+              workflowAgentKey(agent[2], id),
+            );
+        },
+      );
+      subagents.on("error", () => subagents.close());
+      watchers.push(subagents);
+    } catch {
+      // Gone again since.
+    }
+  };
+  // NOTE: A folder no Claude has run in yet has no folder of Claude's. Once
+  // the rail no longer reads the folder on each listing (FE-112), only this
+  // watch reads a first conversation there into the store, so it waits for
+  // Claude to make the folder rather than give up on it.
+  if (!watchClaude()) {
+    try {
+      const projects = dirname(claudeDir);
+      const waiter = watch(projects, (_event, name) => {
+        if (stopped || String(name) !== basename(claudeDir)) return;
+        if (!existsSync(claudeDir) || !watchClaude()) return;
+        waiter.close();
+      });
+      waiter.on("error", () => waiter.close());
+      watchers.push(waiter);
+    } catch {
+      // Claude has never run here: nothing to wait for.
+    }
   }
 
   const codexRoot = join(home, ".codex", "sessions");
@@ -317,6 +462,11 @@ export function watchAgentActivity(
     for (const seen of opencodeSeen.values())
       if (seen.working) since = Math.min(since, seen.updated);
     const changes = await opencodeChanges(opencodeDir, folder, since);
+    if (stopped) return;
+    // Into the store first (FE-112), as a transcript's write is: a
+    // sub-agent's change is its conversation's, whose read lists them.
+    for (const id of new Set(changes.map((change) => change.root ?? change.id)))
+      await ingest(`opencode:${id}`, { agent: "opencode", id });
     if (stopped) return;
     for (const change of changes) {
       opencodeSince = Math.max(opencodeSince, change.updated);

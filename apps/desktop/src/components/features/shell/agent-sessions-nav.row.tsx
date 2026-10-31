@@ -212,7 +212,7 @@ export function SessionRow({
   onToggleAll,
   onResume,
   onRename,
-  onArchiveError,
+  onError,
   onDelete,
   onConfirmStop,
 }: {
@@ -241,8 +241,9 @@ export function SessionRow({
   onToggleAll: () => void;
   onResume: () => void;
   onRename: () => void;
-  /** Why an Archive was refused. */
-  onArchiveError: (message: string) => void;
+  /** Why an Archive, Remove from Lanework or Open in terminal was refused. */
+  onError: (title: string, message: string) => void;
+  /** Delete its transcript, once its dialog is confirmed. */
   onDelete: () => void;
   /** A working agent's Stop asks first (FE-26/D5). */
   onConfirmStop: (confirm: { stop: () => void; label: string }) => void;
@@ -265,6 +266,7 @@ export function SessionRow({
   const setOpenSubagents = useAgentSessions((state) => state.setOpen);
   const pin = useAgentSessions((state) => state.pin);
   const archive = useAgentSessions((state) => state.archive);
+  const forget = useAgentSessions((state) => state.forget);
   const stop = useAgentTerminals((state) => state.stop);
   const refreshChats = useChatEngines((state) => state.refresh);
   const openInTerminal = useOpenInTerminal(slug, project);
@@ -439,7 +441,8 @@ export function SessionRow({
                         });
                     },
                     (error: unknown) =>
-                      onArchiveError(
+                      onError(
+                        "Could not archive it",
                         ipcMessage(error, "Could not archive it."),
                       ),
                   )
@@ -455,7 +458,8 @@ export function SessionRow({
               disabled={working && !tab}
               onClick={() =>
                 void openInTerminal(session).then(
-                  (error) => error && onArchiveError(error),
+                  (error) =>
+                    error && onError("Could not open it in a terminal", error),
                 )
               }
             >
@@ -463,6 +467,31 @@ export function SessionRow({
             </ContextMenuItem>
             <ContextMenuSeparator />
             {onStop && <StopItem onStop={onStop} />}
+            {/* Out of Lanework only, its name and pin with it; the CLI keeps
+                the transcript, so a Pull brings it back (FE-112). Nothing is
+                lost, so it does not ask. Off while a tab runs it, as Delete
+                is: Lanework lists what it runs. */}
+            <ContextMenuItem
+              disabled={Boolean(onStop)}
+              onClick={() =>
+                forget(project, session).then(
+                  () => {
+                    if (viewing === session.id)
+                      void navigate({
+                        to: "/w/$slug/issues",
+                        params: { slug },
+                      });
+                  },
+                  (error: unknown) =>
+                    onError(
+                      "Could not remove it",
+                      ipcMessage(error, "Could not remove it from Lanework."),
+                    ),
+                )
+              }
+            >
+              Remove from Lanework
+            </ContextMenuItem>
             {/* NOTE: Off while a tab runs it (FE-57/D4): the CLI would only
                 write the transcript again. Stop first. Main deletes
                 OpenCode's through its own CLI (FE-104). */}
@@ -471,7 +500,7 @@ export function SessionRow({
               disabled={Boolean(onStop)}
               onClick={onDelete}
             >
-              Delete…
+              Delete transcript…
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>

@@ -61,6 +61,7 @@ import {
   bindConductorConversation,
   conductorOfConversation,
   nameConversation,
+  registerAgentSession,
 } from "../terminal";
 import { opencodeDataDir } from "../terminal/opencode-sessions";
 import {
@@ -597,6 +598,7 @@ export function registerConversation(
     storedSettings: (conversation) => store.of(conversation),
     conductorOf: conductorOfConversation,
     name: nameConversation,
+    register: registerAgentSession,
     isWorkerFolder,
     endpoint: controlEndpoint,
     cliPath: controlCliPath(),
@@ -713,6 +715,13 @@ export function registerConversation(
                 out,
               ),
             };
+      // FE-112: listed without a Pull, once its first prompt is read in.
+      await registerAgentSession(
+        request.project,
+        agent,
+        started.conversation,
+        folder,
+      ).catch(() => undefined);
       if (conductor)
         await bindConductorConversation(
           request.project,
@@ -752,6 +761,14 @@ export function registerConversation(
         throw new Error(
           `Pick ${agent === "opencode" ? "an" : "a"} ${AGENT_LABELS[agent]} model for this conversation.`,
         );
+      // FE-112: one Lanework resumes is one it lists. A row the store has is
+      // left as it is.
+      void registerAgentSession(
+        request.project,
+        agent,
+        request.conversation,
+        folder,
+      ).catch(() => undefined);
       return noted(
         request.project,
         request.conversation,
@@ -843,6 +860,11 @@ export function registerConversation(
     const fork = await forkConversation(agentHome(), folder, conversation);
     const settings = await store.of(conversation);
     if (settings) await store.remember(fork, settings);
+    // FE-112: the fork is Lanework's own, titled from the start, so it is
+    // listed as soon as this answers.
+    await registerAgentSession(project, "claude", fork, folder).catch(
+      () => undefined,
+    );
     return fork;
   });
 
