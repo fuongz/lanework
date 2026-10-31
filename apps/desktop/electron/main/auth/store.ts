@@ -1,4 +1,12 @@
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { safeStorage } from "electron";
 import type { AccountOwner } from "../../../shared/auth";
@@ -157,6 +165,11 @@ async function reencrypt(raw: string, record: MachineRecord): Promise<boolean> {
  * applies on CREATE, so a file that already exists with looser permissions
  * would silently keep them.
  *
+ * NOTE: Written to a temporary file and renamed into place. `writeFile`
+ * truncates first, so a read landing mid-write saw an empty or half-written
+ * `auth.json`, read it as "never signed in", and put the sign-in screen in
+ * front of a signed-in app until the next heartbeat.
+ *
  * @returns The path of the credential file.
  */
 export async function writeRecord(record: MachineRecord): Promise<string> {
@@ -180,11 +193,18 @@ export async function writeRecord(record: MachineRecord): Promise<string> {
     : { ...base, enc: false, secret: record.secret };
 
   const file = credentialFile();
-  await writeFile(file, `${JSON.stringify(stored, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  await chmod(file, 0o600).catch(() => {});
+  const temp = `${file}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temp, `${JSON.stringify(stored, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await chmod(temp, 0o600).catch(() => {});
+    await rename(temp, file);
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => {});
+    throw error;
+  }
   return file;
 }
 

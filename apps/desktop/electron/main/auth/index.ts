@@ -1,6 +1,7 @@
 import type { MachineCredential } from "@lanework/protocol";
 import { shell } from "electron";
 import {
+  type AccountOwner,
   anonymousSession,
   authChannels,
   localSession,
@@ -100,6 +101,16 @@ function principalOf(
 }
 
 /**
+ * Whether two owner blocks say the same thing.
+ *
+ * NOTE: By value. Every probe parses a fresh object, so comparing references
+ * rewrote `auth.json` on every probe that went to the network.
+ */
+function sameOwner(a: AccountOwner | null, b: AccountOwner | null): boolean {
+  return a?.name === b?.name && a?.email === b?.email && a?.image === b?.image;
+}
+
+/**
  * The session as it stands, asking the control plane when the answer is stale.
  *
  * A `userId` or owner learned here is written back: identity lives on the
@@ -119,7 +130,7 @@ export async function currentSession(): Promise<RedactedSession> {
       : anonymousSession(apiUrl);
 
   const { verdict, userId, owner } = await api.probeIfStale(record);
-  if (userId !== record.userId || owner !== record.owner)
+  if (userId !== record.userId || !sameOwner(owner, record.owner))
     await writeRecord({ ...record, userId, owner });
 
   const { checkedAt } = api.cachedVerdict();
