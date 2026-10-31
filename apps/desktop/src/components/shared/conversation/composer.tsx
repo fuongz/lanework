@@ -685,7 +685,11 @@ export const Composer = forwardRef<
     asked.current++;
   };
 
-  const addFiles = async (files: File[], pasted: boolean) => {
+  const addFiles = async (
+    files: File[],
+    pasted: boolean,
+    folders: ReadonlySet<File> = new Set(),
+  ) => {
     const surface = window.desktop?.conversation;
     if (!surface) return;
     const added: Pending[] = [];
@@ -702,6 +706,7 @@ export const Composer = forwardRef<
           key: `a${++keys}`,
           name: file.name,
           image,
+          folder: folders.has(file),
           out: { kind: "path", path },
         });
         continue;
@@ -936,7 +941,16 @@ export const Composer = forwardRef<
         if (!event.dataTransfer.files.length) return;
         event.preventDefault();
         setDragging(false);
-        void addFiles([...event.dataTransfer.files], false);
+        // Only the drop's entries tell a folder from a file: a File does not.
+        const files: File[] = [];
+        const folders = new Set<File>();
+        for (const item of event.dataTransfer.items) {
+          const file = item.kind === "file" ? item.getAsFile() : null;
+          if (!file) continue;
+          files.push(file);
+          if (item.webkitGetAsEntry()?.isDirectory) folders.add(file);
+        }
+        void addFiles(files, false, folders);
       }}
       className={cn(
         "bg-card border-border relative flex flex-col gap-1 rounded-xl border px-3 pt-2.5 pb-2 shadow-xs transition-colors",
@@ -1060,7 +1074,13 @@ export const Composer = forwardRef<
                 className="bg-foreground/[0.06] text-foreground flex h-6 max-w-60 items-center gap-1.5 rounded-md ps-2 pe-1 text-xs"
               >
                 <HugeiconsIcon
-                  icon={file.image ? Image01Icon : File01Icon}
+                  icon={
+                    file.folder
+                      ? Folder01Icon
+                      : file.image
+                        ? Image01Icon
+                        : File01Icon
+                  }
                   className={cn(
                     "size-3.5 shrink-0",
                     file.image ? "text-tone-teal" : "text-muted-foreground",

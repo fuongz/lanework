@@ -31,6 +31,8 @@ export interface PendingAttachment {
   key: string;
   name: string;
   image: boolean;
+  /** A dropped folder: its path goes like a file's, its chip says folder. */
+  folder?: boolean;
   out: OutgoingAttachment;
 }
 
