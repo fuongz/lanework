@@ -46,6 +46,7 @@ import { jevMain } from "./jev";
 import { registerMemory } from "./memory";
 import { installMenu } from "./menu";
 import { installMenuBar } from "./menu-bar";
+import { registerMetrics } from "./metrics";
 import { registerNotifications } from "./notifications";
 import { startPullWatcher } from "./notifications/pull-watcher";
 import { orchestrationMain, setJev, startControlServer } from "./orchestration";
@@ -462,6 +463,7 @@ app
       return window;
     };
     registerNotifications(devUrl, showWindow);
+    registerMetrics(devUrl);
     startPullWatcher(readLinkedOpenPulls);
     installMenu();
     createWindow();

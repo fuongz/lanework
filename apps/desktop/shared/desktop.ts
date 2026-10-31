@@ -8,6 +8,7 @@ import type { DesktopHandoffApi } from "./handoff";
 import type { DesktopHarnessApi } from "./harness";
 import type { DesktopInstructionsApi } from "./instructions";
 import type { DesktopMemoryApi } from "./memory";
+import type { DesktopMetricsApi } from "./metrics";
 import type { DesktopNotificationsApi } from "./notifications";
 import type {
   DesktopJevApi,
@@ -86,6 +87,8 @@ export interface DesktopApi {
   dictation: DesktopDictationApi;
   /** Settings → Notifications, and where a clicked one leads. */
   notifications: DesktopNotificationsApi;
+  /** Settings → About: the resource log, off until switched on (FE-115). */
+  metrics: DesktopMetricsApi;
   /** Settings → Agents: the checkpoint hook for Claude Code. */
   handoff: DesktopHandoffApi;
   /** Whether a project's folder is ready for an agent to work its board. */

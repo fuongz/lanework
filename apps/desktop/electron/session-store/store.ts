@@ -456,6 +456,24 @@ export class SessionStore {
     );
   }
 
+  /**
+   * How many live conversations a turn runs in now, and how many have a
+   * background task running: what the resource log notes beside each sample
+   * (FE-115).
+   */
+  activityCounts(): { working: number; background: number } {
+    const row = this.#get<{
+      working: number | null;
+      background: number | null;
+    }>(
+      "SELECT SUM(working) AS working, SUM(bg_running > 0) AS background FROM agent_session WHERE archived_at IS NULL",
+    );
+    return {
+      working: Number(row?.working ?? 0),
+      background: Number(row?.background ?? 0),
+    };
+  }
+
   /** How far `key`'s transcript has been read; null when there is no row. */
   getIngestState<T = unknown>(key: string): IngestState<T> | null {
     const row = this.#row(key);

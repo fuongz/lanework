@@ -86,7 +86,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         to: "/settings/about",
         label: "About",
         icon: InformationCircleIcon,
-        keywords: "version platform control plane status build",
+        keywords:
+          "version platform control plane status build resource log diagnostics telemetry metrics cpu memory",
       },
     ],
   },

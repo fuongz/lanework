@@ -41,6 +41,7 @@ import {
   type MemoryChange,
   memoryChannels,
 } from "../../shared/memory";
+import { type DesktopMetricsApi, metricsChannels } from "../../shared/metrics";
 import {
   type DesktopNotificationsApi,
   type NotificationTarget,
@@ -184,6 +185,13 @@ const notifications: DesktopNotificationsApi = {
       notificationChannels.unseenPullsChanged,
       listener,
     ),
+};
+
+/** Settings → About: the resource log (FE-115). */
+const metrics: DesktopMetricsApi = {
+  get: () => ipcRenderer.invoke(metricsChannels.get),
+  set: (enabled) => ipcRenderer.invoke(metricsChannels.set, enabled),
+  reveal: () => ipcRenderer.invoke(metricsChannels.reveal),
 };
 
 /** Settings → Agents: the checkpoint hook, on and off. */
@@ -891,6 +899,7 @@ const desktop: DesktopApi = {
   conversation,
   dictation,
   notifications,
+  metrics,
   handoff,
   readiness,
   harness,

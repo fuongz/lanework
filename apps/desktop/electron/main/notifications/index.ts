@@ -58,6 +58,11 @@ export async function notificationsOn(
 /** The path the window last said it shows (FE-70/D2a). */
 let location: string | null = null;
 
+/** The path the window last said it shows; the resource log reads it. */
+export function windowLocation(): string | null {
+  return location;
+}
+
 /** The path a target opens, as the renderer's router spells it. */
 function targetPath(target: NotificationTarget): string {
   const slug = encodeURIComponent(target.slug);

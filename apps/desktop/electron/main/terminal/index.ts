@@ -811,6 +811,37 @@ async function codexRolloutOfId(id: string): Promise<string | null> {
 /** The Pull running now: one at a time. */
 let pullRun: AbortController | null = null;
 
+/**
+ * What the terminals and the agent sessions are doing now, noted beside each
+ * sample of the resource log (FE-115).
+ *
+ * Never starts the pty host or opens the session store to answer: a count
+ * is not worth either. Unread parts count as zero.
+ */
+export async function terminalActivity(): Promise<{
+  terminals: number;
+  working: number;
+  background: number;
+  pulling: boolean;
+  watched: number;
+}> {
+  const terminals = host
+    ? await request<number>({ t: "count" }, 2_000).catch(() => 0)
+    : 0;
+  let counts = { working: 0, background: 0 };
+  try {
+    if (store) counts = store.activityCounts();
+  } catch {
+    // A store closing under the sample: the counts stay zero.
+  }
+  return {
+    terminals,
+    ...counts,
+    pulling: pullRun !== null,
+    watched: watching.size,
+  };
+}
+
 /** The CLIs a Pull reads, off the wire. */
 function pullAgents(value: unknown): TerminalAgent[] {
   if (!isAgentPullList(value))

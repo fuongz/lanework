@@ -34,6 +34,14 @@ export function sessionStorePath(home = appHomeDir()): string {
 }
 
 /**
+ * The resource log (FE-115): `<home>/metrics`, one JSON-lines file per hour,
+ * the last 24 kept (`metrics/log.ts`).
+ */
+export function metricsDir(home = appHomeDir()): string {
+  return join(home, "metrics");
+}
+
+/**
  * The per-account project state under the app home (`<home>/projects`): the
  * selection, the linked folders, the board caches and the migration receipts
  * (`projects/store.ts`).
