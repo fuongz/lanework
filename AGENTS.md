@@ -6,7 +6,8 @@ the cloud and is reached ONLY through the remote Lanework MCP server
 (`https://mcp.lanework.dev/v1`) — there are no card files in this repo.
 
 Follow these conventions for code-related tasks, while always respecting the
-user's latest explicit instructions.
+user's latest explicit instructions. Desktop rules are indexed in
+[apps/desktop/AGENTS.md](apps/desktop/AGENTS.md) (DOC-01).
 
 ## Finding the board
 
@@ -24,52 +25,19 @@ the card by another route — in particular, never write a card as a local file.
 
 ## `.agents/reviews/` is gone (BE-09)
 
-Until 2026-09-24 cards were also markdown files under `.agents/reviews/`. Every
-one of them was imported to the cloud board and the folder was removed; it is
-still in git history before that commit. Do not recreate it.
-
-Some local cards carried a task id the cloud had already given to another card.
-Commits and notes written before BE-09 use the **local** id; this is where each
-one lives now:
-
-| Local id (old commits) | Card | Cloud id |
-| --- | --- | --- |
-| BE-05 | Checklist progress trên board list read | **BE-10** |
-| BE-06 | Issue detail theo design: activity, comment, assignee | **BE-11** |
-| BE-07 | Remote MCP server (packages/db, Hono, OAuth 2.1 + DCR) | **BE-06** |
-| FE-09 | Kết nối git repo và quản lý pull request | **FE-12** |
-| FE-10 | Pull requests: resizable panels, Summary/Code | FE-10 (unchanged) |
-| FE-11 | Summary tab: description, checks, activity | FE-11 (unchanged) |
-
-Every other local id (INF-01, BE-01…BE-04, FE-01…FE-08) is the same card on the
-cloud. The cloud's own BE-05, BE-07 and FE-09 are different cards from the
-local ones of that id.
+Cards used to be files under `.agents/reviews/`; all were imported to the
+cloud. Do not recreate the folder.
 
 ## Two boards since the repo split (2026-10-14)
-
-The open-source split (INF-04) left this repo — the desktop app — on the board
-it shared with the API and MCP. On 2026-10-14 it moved to a board of its own:
 
 | Repo | Board |
 | --- | --- |
 | `github.com/fuongz/lanework` (this repo: desktop, protocol, plugin) | **fuongz/lanework-public** |
 | `github.com/fuongz/lanework-cloud` (API, MCP, landing, db) | **fuongz/lanework** |
 
-Every desktop card (INF-01…INF-04, FE-01…FE-59 except FE-09) was re-created on
-the new board — its body starts with `ID cũ` — and archived on the old one. The
-new board minted its own ids, and FE-09 (landing) stayed behind, so:
-
-| Old id (fuongz/lanework) | New id (fuongz/lanework-public) |
-| --- | --- |
-| INF-01…INF-04, FE-01…FE-08 | the same |
-| FE-10…FE-59 | one lower: FE-10 → **FE-09**, FE-20 → **FE-19**, FE-58 → **FE-57**, FE-59 → **FE-58** |
-| BE-*, PD-*, FE-09 | not moved — still on fuongz/lanework |
-
-Commits and code comments written before the move use the **old** ids, and so
-does the rest of this file (BE-09, BE-17, BE-19, FE-28, FE-29 above and below).
-The shell's files (`app-shell.tsx`, `app-sidebar.tsx`, `app.css`,
-`tests/rail.spec.ts`) were renumbered to the new ids when FE-58 touched them.
-When an id's card does not match what the comment describes, look it up here.
+Commits and comments written before these two moves use **old** ids, and so
+does this file. When an id's card does not match, look it up in
+[docs/agents/id-history.md](docs/agents/id-history.md).
 
 ## Required card metadata
 
@@ -108,29 +76,13 @@ the cloud, never in a local file.
   paste transcripts, secrets, tokens or `.env` values. A card keeps its last 5
   checkpoints; moving it to done or archiving it clears them.
 - **Claude Code and Codex do this by themselves** after every turn, through
-  the Stop hook the desktop app installs: **Settings → Agents**, one switch
-  per CLI (FE-28, FE-29). It goes into `~/.claude/settings.json` and
-  `~/.codex/hooks.json`, so every repo gets it, and both run one script the
-  app rewrites on each launch, `~/.lanew/hooks/lanework-checkpoint`, under the
-  app's own Node — no bun needed. Codex runs a new hook only after you approve
-  it in Codex, once (`/hooks`); the app never approves it for you. Hooks are
-  on by default in current Codex — only `[features] hooks = false` in
-  `~/.codex/config.toml` turns them off. It costs no model
-  quota, redacts secrets on the machine, and uses the app's machine credential
-  from the Keychain (revoking the machine revokes the hook). A second switch,
-  off by default, also force-pushes the uncommitted working tree (tracked
-  changes plus untracked, non-ignored files) to `refs/lanework/wip/<task-id>`
-  — a ref on no branch; your branch, index and history are never touched.
-  Failures go to `~/.cache/lanework/checkpoint/hook.log`, never to the session.
-  The source is `apps/desktop/electron/hook/lanework-checkpoint.ts`. Without
-  the app, Claude Code users install the **plugin** (INF-03,
-  `plugins/lanework/`): `/plugin marketplace add fuongz/lanework`,
-  `/plugin install lanework@lanework`, then `! lanework login`. The plugin's
-  hook stays quiet when the app's hook is installed. Its bundle,
+  the Stop hook the desktop app installs (**Settings → Agents**, FE-28,
+  FE-29) or the **plugin** (INF-03, `plugins/lanework/`). Its bundle,
   `plugins/lanework/bin/lanework-checkpoint.cjs`, is committed — rebuild it
   with `bun run build:plugin` after changing the hook; `bun run gate` fails
   when it is stale. This repo no longer carries its own
-  copy of the hook — two installs would checkpoint every turn twice.
+  copy of the hook — two installs would checkpoint every turn twice. Details:
+  [docs/agents/checkpoint-hook.md](docs/agents/checkpoint-hook.md).
 - **Resume ("resume BE-17").** `get_review` the card and read `checkpoint`.
   If `checkpoint.git.wipRef` is set and you are NOT in the checkout it came
   from (`checkpoint.host` is another machine, a fresh clone, a cloud sandbox),
@@ -209,12 +161,6 @@ Shared files (types, schema, contracts) go in a **`W0`** stream the others
 depend on. **At most 4 streams per wave.** Keep the human **files touched**
 table; `owns` is its machine-readable per-stream form.
 
-| Stream | Role | Owns | Depends on |
-| --- | --- | --- | --- |
-| `W0` Contract | implement | `packages/db/src/schema.ts` | — |
-| `W1` MCP tools | implement | `apps/mcp/src/mcp/tools/` | `W0` |
-| `W2` Desktop panel | implement | `apps/desktop/src/components/features/board/` | `W0` |
-
 **Running a card with streams.** `get_review` returns `streams` and
 `dispatch: { waves, briefs }`; the agent that got the card is the **lead**:
 
@@ -245,11 +191,6 @@ job. Its `TOOL.md` frontmatter names the `runtime` and `entrypoint` to run,
 e.g. `python3 main.py <args>`. Prefer running one of these over writing new
 code from scratch; add a new one there yourself if the task is likely to
 recur.
-
-## Loading states use skeletons
-
-Moved to [apps/desktop/AGENTS.md](apps/desktop/AGENTS.md), the index of every
-desktop rule and the gate that enforces it (DOC-01).
 
 ## Verification before done
 
