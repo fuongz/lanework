@@ -404,7 +404,13 @@ export async function claudeSession(
     cwd ??= opening.cwd;
     if (cwd !== undefined && cwd !== folder) return null;
   }
-  const title = named ? tidy(named) : prompt;
+  // NOTE: A conversation whose only message is a local command (`/compact`
+  // as its first and only line) has no prompt. Left off the rail, a chat
+  // started that way stayed a "starting" row forever: no menu, so it could
+  // not be deleted. The command names it instead.
+  const title = named
+    ? tidy(named)
+    : (prompt ?? head.map(claudeCommand).find(Boolean) ?? null);
   // Nothing was ever asked in it: a CLI opened and closed, nothing to resume.
   if (!title) return null;
   const working =
@@ -632,4 +638,30 @@ export async function codexRolloutOf(
   } catch {
     return null;
   }
+}
+
+/**
+ * A user line that ran a slash command, as the command (`/compact`), or null.
+ */
+function claudeCommand(line: Line): string | null {
+  if (line.type !== "user" || line.isSidechain) return null;
+  const content = (line.message as { content?: unknown } | undefined)?.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? ((content as { type?: unknown; text?: unknown }[]).find(
+            (part) => part?.type === "text",
+          )?.text ?? "")
+        : "";
+  if (typeof text !== "string") return null;
+  const name = /<command-name>([\s\S]*?)<\/command-name>/
+    .exec(text)?.[1]
+    ?.trim();
+  if (!name) return null;
+  const args = /<command-args>([\s\S]*?)<\/command-args>/
+    .exec(text)?.[1]
+    ?.trim();
+  const command = name.startsWith("/") ? name : `/${name}`;
+  return args ? `${command} ${args}` : command;
 }

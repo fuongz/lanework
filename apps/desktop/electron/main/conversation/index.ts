@@ -380,15 +380,17 @@ async function imageScope(args: unknown[]): Promise<{
   const attachments = (read?.turns ?? []).flatMap((turn) =>
     turn.role === "user"
       ? turn.attachments.flatMap((entry) => (entry.path ? [entry.path] : []))
-      : turn.blocks.flatMap((block) =>
-          block.type === "tools"
-            ? block.calls.flatMap((call) =>
-                call.filePath && isAbsolute(call.filePath)
-                  ? [call.filePath]
-                  : [],
-              )
-            : [],
-        ),
+      : turn.role === "compaction"
+        ? []
+        : turn.blocks.flatMap((block) =>
+            block.type === "tools"
+              ? block.calls.flatMap((call) =>
+                  call.filePath && isAbsolute(call.filePath)
+                    ? [call.filePath]
+                    : [],
+                )
+              : [],
+          ),
   );
   return {
     path: path.trim(),

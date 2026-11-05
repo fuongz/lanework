@@ -344,6 +344,21 @@ export function SessionRow({
       .close(project, session.id)
       .catch(() => {})
       .finally(() => void refreshChats(project));
+  // NOTE: Only a tab running it, or a chat turn in progress, blocks
+  // Archive, Remove and Delete. A chat whose engine is merely alive between
+  // turns (after a Stop, a /compact, an error) is closed first instead:
+  // gating on the engine being alive left such a session impossible to
+  // delete, with nothing on screen saying why.
+  const blocked = Boolean(tab) || (chat && working);
+  const releaseChat = () =>
+    chat
+      ? (
+          window.desktop?.conversation.close(project, session.id) ??
+          Promise.resolve()
+        )
+          .catch(() => {})
+          .finally(() => void refreshChats(project))
+      : Promise.resolve();
   const onStop = tab
     ? () =>
         working
@@ -430,22 +445,24 @@ export function SessionRow({
                 keeps no archive (FE-104/D11). */}
             {session.agent !== "opencode" && (
               <ContextMenuItem
-                disabled={Boolean(onStop)}
+                disabled={blocked}
                 onClick={() =>
-                  archive(project, session).then(
-                    () => {
-                      if (viewing === session.id)
-                        void navigate({
-                          to: "/w/$slug/issues",
-                          params: { slug },
-                        });
-                    },
-                    (error: unknown) =>
-                      onError(
-                        "Could not archive it",
-                        ipcMessage(error, "Could not archive it."),
-                      ),
-                  )
+                  releaseChat()
+                    .then(() => archive(project, session))
+                    .then(
+                      () => {
+                        if (viewing === session.id)
+                          void navigate({
+                            to: "/w/$slug/issues",
+                            params: { slug },
+                          });
+                      },
+                      (error: unknown) =>
+                        onError(
+                          "Could not archive it",
+                          ipcMessage(error, "Could not archive it."),
+                        ),
+                    )
                 }
               >
                 Archive
@@ -472,22 +489,24 @@ export function SessionRow({
                 lost, so it does not ask. Off while a tab runs it, as Delete
                 is: Lanework lists what it runs. */}
             <ContextMenuItem
-              disabled={Boolean(onStop)}
+              disabled={blocked}
               onClick={() =>
-                forget(project, session).then(
-                  () => {
-                    if (viewing === session.id)
-                      void navigate({
-                        to: "/w/$slug/issues",
-                        params: { slug },
-                      });
-                  },
-                  (error: unknown) =>
-                    onError(
-                      "Could not remove it",
-                      ipcMessage(error, "Could not remove it from Lanework."),
-                    ),
-                )
+                releaseChat()
+                  .then(() => forget(project, session))
+                  .then(
+                    () => {
+                      if (viewing === session.id)
+                        void navigate({
+                          to: "/w/$slug/issues",
+                          params: { slug },
+                        });
+                    },
+                    (error: unknown) =>
+                      onError(
+                        "Could not remove it",
+                        ipcMessage(error, "Could not remove it from Lanework."),
+                      ),
+                  )
               }
             >
               Remove from Lanework
@@ -497,8 +516,8 @@ export function SessionRow({
                 OpenCode's through its own CLI (FE-104). */}
             <ContextMenuItem
               variant="destructive"
-              disabled={Boolean(onStop)}
-              onClick={onDelete}
+              disabled={blocked}
+              onClick={() => void releaseChat().then(onDelete)}
             >
               Delete transcript…
             </ContextMenuItem>

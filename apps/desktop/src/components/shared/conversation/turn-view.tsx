@@ -33,6 +33,7 @@ import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { useKnown } from "./composer.known";
 import { AssistantActions, UserActions } from "./turn-view.actions";
+import { CompactionDivider } from "./turn-view.compaction";
 import {
   LaunchedSessionCard,
   launchedSessions,
@@ -438,6 +439,7 @@ export const TurnView = memo(
     handlers,
     forking,
     anchor,
+    compacted = false,
   }: {
     turn: Turn;
     delta: string;
@@ -447,19 +449,33 @@ export const TurnView = memo(
     forking: boolean;
     /** Registers a user turn's element for the TOC. */
     anchor?: (id: string, node: HTMLElement | null) => void;
+    /**
+     * Before the latest compaction (FE-120): out of the model's context, so
+     * drawn dimmer. Hovered or focused, it reads at full strength.
+     */
+    compacted?: boolean;
   }) {
+    const dim = compacted
+      ? "opacity-60 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none"
+      : undefined;
+    if (turn.role === "compaction")
+      return (
+        <div data-turn={turn.id} className={dim}>
+          <CompactionDivider turn={turn} />
+        </div>
+      );
     if (turn.role === "user")
       return (
         <div
           ref={(node) => anchor?.(turn.id, node)}
           data-turn={turn.id}
-          className={cn("scroll-mt-6", OFFSCREEN)}
+          className={cn("scroll-mt-6", OFFSCREEN, dim)}
         >
           <UserTurnView turn={turn} />
         </div>
       );
     return (
-      <div data-turn={turn.id} className={turn.open ? undefined : OFFSCREEN}>
+      <div data-turn={turn.id} className={cn(!turn.open && OFFSCREEN, dim)}>
         <AssistantView
           turn={turn}
           delta={delta}
@@ -478,7 +494,8 @@ export const TurnView = memo(
       a.handlers !== b.handlers ||
       a.anchor !== b.anchor ||
       a.delta !== b.delta ||
-      a.forking !== b.forking
+      a.forking !== b.forking ||
+      a.compacted !== b.compacted
     )
       return false;
     if (a.turn === b.turn) return true;
@@ -497,6 +514,10 @@ export const TurnView = memo(
         a.turn.usage?.output === b.turn.usage?.output
       );
     }
+    if (a.turn.role === "compaction" && b.turn.role === "compaction")
+      return (
+        a.turn.summary === b.turn.summary && a.turn.taskId === b.turn.taskId
+      );
     return false;
   },
 );

@@ -19,6 +19,7 @@ import {
   AGENT_LABELS,
   type AssistantTurn,
   agentOfModel,
+  type CompactionTurn,
   type ComposerSettings,
   DEFAULT_SETTINGS,
   mentionsAsNames,
@@ -26,6 +27,7 @@ import {
   type PermissionAnswer,
   type QueuedMessage,
   settingsFor,
+  type UserTurn,
 } from "#/../shared/conversation";
 import { canLead } from "#/../shared/orchestration";
 import type { AgentSession } from "#/../shared/terminal";
@@ -266,8 +268,15 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   }, [loaded, own, settings, agent, ranOn]);
 
   const turns = conversation?.turns ?? [];
+  // What a send lands as: a user turn; `/compact` as the compaction it asked
+  // for (FE-120), as the CLI keeps no turn of the command itself.
   const userTurns = useMemo(
-    () => conversation?.turns.filter((turn) => turn.role === "user") ?? [],
+    () =>
+      conversation?.turns.filter(
+        (turn): turn is UserTurn | CompactionTurn =>
+          turn.role === "user" ||
+          (turn.role === "compaction" && turn.trigger === "manual"),
+      ) ?? [],
     [conversation],
   );
   const lastUser = userTurns.at(-1)?.id ?? null;
@@ -341,6 +350,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         if (
           turnsSince(userTurnsRef.current, entry.since).some(
             (turn) =>
+              turn.role === "user" &&
               turn.text === entry.text &&
               turn.attachments.length === entry.attachments.length,
           )
@@ -385,6 +395,13 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     send: (text, attachments, names) => send(text, attachments, names),
   });
   const shown = orchestration.turns;
+  // FE-120: what came before the latest compaction is out of the model's
+  // context; it stays in the chat, dimmer.
+  const compactedBefore = useMemo(() => {
+    for (let at = shown.length - 1; at >= 0; at--)
+      if (shown[at]?.role === "compaction") return at;
+    return -1;
+  }, [shown]);
   const awaiting = useAwaitingProposal(orchestration);
   // The conductor this conversation belongs to (FE-95), once both the
   // listing (or the start that is ahead of it) and the leads are read.
@@ -917,7 +934,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     project={project}
                     conversation={id}
                   >
-                    {shown.map((turn) => (
+                    {shown.map((turn, index) => (
                       <TurnView
                         key={turn.id}
                         turn={turn}
@@ -927,6 +944,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                         handlers={handlers}
                         forking={forking}
                         anchor={anchor}
+                        compacted={index < compactedBefore}
                       />
                     ))}
                     {stream && (

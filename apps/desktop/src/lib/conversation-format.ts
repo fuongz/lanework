@@ -41,6 +41,8 @@ export function textLines(text: string, max: number): string[] {
 /** The text of an assistant turn, its text blocks joined: what Copy copies. */
 export function turnText(turn: Turn): string {
   if (turn.role === "user") return turn.text;
+  // A compaction's divider is not something said.
+  if (turn.role === "compaction") return "";
   return turn.blocks
     .filter((block) => block.type === "text")
     .map((block) => block.text)

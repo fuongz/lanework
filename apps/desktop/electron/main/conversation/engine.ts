@@ -206,6 +206,17 @@ class Engine implements ConversationEngine {
   /** Set while `deliver` restarts the process: that exit is not news. */
   quiet = false;
   error: string | null = null;
+  /**
+   * Ends a turn the CLI will not end itself (see {@link settleSoon}).
+   *
+   * NOTE: A local command the CLI answers without the model (`/compact` on a
+   * conversation with nothing to compact: "Not enough messages to compact.")
+   * and an interrupt with nothing left to stop bring no `result`. Waiting for
+   * one left the page on "Working…" forever, with Stop unable to end it.
+   */
+  settleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the CLI last wrote a line that starts or carries a turn. */
+  lastLineAt = 0;
   /** What waits to be written. */
   held = new Held();
   /**
@@ -465,11 +476,37 @@ class Engine implements ConversationEngine {
 
   /** One line of the CLI's stream-json output. */
   handle(line: Record<string, unknown>): void {
+    // Only a line that starts or carries a turn counts as the CLI working:
+    // after a `result` it still writes housekeeping (`system`
+    // `commands_changed` seconds later), which is not a queued message
+    // running.
+    if (
+      line.type === "assistant" ||
+      line.type === "stream_event" ||
+      (line.type === "user" && line.isReplay === true) ||
+      (line.type === "system" && line.subtype === "init")
+    )
+      this.lastLineAt = Date.now();
     switch (line.type) {
       case "system": {
         if (line.subtype === "init") {
           this.starting = false;
           if (this.busy) this.emitState();
+        }
+        // FE-120: a compaction, and the hook reminder told just before it,
+        // are turns' lines too.
+        if (
+          line.subtype === "hook_response" &&
+          line.hook_event === "SessionStart"
+        )
+          this.push(line);
+        if (line.subtype === "compact_boundary") {
+          this.push(line);
+          this.emitLast();
+        }
+        if (line.subtype === "local_command") {
+          const said = localStdout(line.content);
+          if (said !== null) this.settleSoon(said);
         }
         const mode = permissionOf(line.permissionMode);
         if (mode && this.applied)
@@ -511,6 +548,12 @@ class Engine implements ConversationEngine {
       }
       case "user":
       case "assistant": {
+        if (line.type === "user" && !line.parent_tool_use_id) {
+          const content = (line.message as { content?: unknown } | undefined)
+            ?.content;
+          const said = localStdout(content);
+          if (said !== null) this.settleSoon(said);
+        }
         // FE-87: a write is told as soon as the CLI names it, a sub-agent's
         // too, so a worker's write guard sees it before the tool runs.
         if (line.type === "assistant") this.tellWrites(line);
@@ -520,20 +563,8 @@ class Engine implements ConversationEngine {
         this.starting = false;
         // The CLI wrote the conversation down: a restart resumes it now.
         this.fresh = false;
-        const row: Line = { ...line };
-        if (typeof row.timestamp !== "string")
-          row.timestamp = new Date().toISOString();
-        this.rows.push(row);
-        const turns: Turn[] = buildTurns(this.rows, this.folder);
-        const last = turns.at(-1);
-        if (!last) return;
-        if (last.role === "assistant") {
-          // A thinking-only line has nothing to draw yet.
-          if (last.blocks.length === 0) return;
-          last.open = true;
-          last.endedAt = null;
-        }
-        this.emit({ type: "turn", turn: last });
+        this.push(line);
+        this.emitLast();
         return;
       }
       case "result":
@@ -549,6 +580,28 @@ class Engine implements ConversationEngine {
         this.onResult();
         return;
     }
+  }
+
+  /** Keep a line of the running turn, stamped when the stream did not. */
+  push(line: Record<string, unknown>): void {
+    const row: Line = { ...line };
+    if (typeof row.timestamp !== "string")
+      row.timestamp = new Date().toISOString();
+    this.rows.push(row);
+  }
+
+  /** Tell the page the turn the kept lines end on. */
+  emitLast(): void {
+    const turns: Turn[] = buildTurns(this.rows, this.folder);
+    const last = turns.at(-1);
+    if (!last) return;
+    if (last.role === "assistant") {
+      // A thinking-only line has nothing to draw yet.
+      if (last.blocks.length === 0) return;
+      last.open = true;
+      last.endedAt = null;
+    }
+    this.emit({ type: "turn", turn: last });
   }
 
   /** Tell orchestration the files an assistant line's tool calls write. */
@@ -686,6 +739,8 @@ class Engine implements ConversationEngine {
    * The work goes on while messages written to the CLI are still to run.
    */
   onResult(): void {
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = null;
     this.rows = [];
     this.dropPermissions();
     if (this.reclaim && this.inflight.length) {
@@ -702,6 +757,18 @@ class Engine implements ConversationEngine {
     }
     if (this.inflight.length) {
       // Written while text streamed: the CLI runs it as the next turn.
+      // NOTE: A slash command the CLI runs itself (`/compact`, `/model`) is
+      // never replayed back, so it stays "not taken in" forever and the
+      // page sat on "Working…" after its `result`. Nothing more from the CLI
+      // within the grace means nothing is queued: drop it and end the work.
+      const resultAt = Date.now();
+      if (this.settleTimer) clearTimeout(this.settleTimer);
+      this.settleTimer = setTimeout(() => {
+        this.settleTimer = null;
+        if (!this.busy || this.lastLineAt > resultAt) return;
+        this.inflight = [];
+        this.onResult();
+      }, SETTLE_MS);
       this.emitState();
       return;
     }
@@ -885,7 +952,57 @@ class Engine implements ConversationEngine {
     } catch {
       this.child?.kill("SIGINT");
     }
+    this.settleSoon(null, STOP_SETTLE_MS);
   }
+
+  /**
+   * End the running turn unless a `result` ends it first.
+   *
+   * @param said The local command's answer. Shown when it reads as a
+   *   refusal, so a `/compact` that did nothing says why.
+   */
+  settleSoon(said: string | null, after = SETTLE_MS): void {
+    if (!this.busy) return;
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = null;
+      if (!this.busy) return;
+      if (said && REFUSAL.test(said)) this.error = said;
+      this.onResult();
+    }, after);
+  }
+}
+
+/** How long a turn may wait for its `result` after the CLI went quiet. */
+const SETTLE_MS = 2500;
+
+/** Longer after Stop: a tool being torn down may take a moment to answer. */
+const STOP_SETTLE_MS = 5000;
+
+/** A local command's answer that says it did nothing. */
+const REFUSAL = /\b(not enough|cannot|can't|unable|failed|error|no )/i;
+
+/**
+ * The text of a `<local-command-stdout>` block, from a line's content (a
+ * string, or text parts), or null when it carries none.
+ */
+function localStdout(content: unknown): string | null {
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((part) =>
+              part && typeof part === "object" && "text" in part
+                ? String((part as { text: unknown }).text)
+                : "",
+            )
+            .join("")
+        : "";
+  const match = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(
+    text,
+  );
+  return match ? (match[1] ?? "").trim() : null;
 }
 
 /** The engines {@link createEngines} made last: orchestration's (FE-87). */

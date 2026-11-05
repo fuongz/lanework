@@ -500,6 +500,7 @@ export function visibleTurns(turns: Turn[]): Turn[] {
       if (!text && !turn.attachments.length) return [];
       return [{ ...turn, text }];
     }
+    if (turn.role === "compaction") return [turn];
     if (
       !turn.blocks.some(
         (block) =>

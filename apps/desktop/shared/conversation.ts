@@ -431,7 +431,32 @@ export interface AssistantTurn {
   open: boolean;
 }
 
-export type Turn = UserTurn | AssistantTurn;
+/**
+ * Claude compacted the conversation here (FE-120): its `compact_boundary`
+ * line, with the summary it kept. What came before is no longer in the
+ * model's context, though the chat still shows it.
+ */
+export interface CompactionTurn {
+  role: "compaction";
+  /** The boundary line's uuid. */
+  id: string;
+  /** `/compact` typed, or the context ran full; null when not said. */
+  trigger: "manual" | "auto" | null;
+  /** The context's size before and after, in tokens; null when not said. */
+  preTokens: number | null;
+  postTokens: number | null;
+  /** The summary Claude kept in place of what came before. */
+  summary: string | null;
+  /**
+   * The card Lanework's hook asked the agent to checkpoint right after this
+   * compaction (FE-117), such as `FE-117`; null when it asked none.
+   */
+  taskId: string | null;
+  /** When it compacted, as an ISO timestamp. */
+  at: string;
+}
+
+export type Turn = UserTurn | AssistantTurn | CompactionTurn;
 
 export interface Conversation {
   id: string;

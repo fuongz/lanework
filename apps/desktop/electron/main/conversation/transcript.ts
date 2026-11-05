@@ -11,6 +11,7 @@ import {
   type AssistantTurn,
   type Attachment,
   CONVERSATION_READ_MAX,
+  type CompactionTurn,
   type Conversation,
   TOOL_TEXT_MAX,
   type ToolCall,
@@ -236,6 +237,8 @@ function promptOf(
 ): { text: string; attachments: Attachment[]; command: boolean } | null {
   if (line.type !== "user" || line.isMeta || line.isSidechain) return null;
   if (line.isCompactSummary || line.isVisibleInTranscriptOnly) return null;
+  // The stream's word for the same: a meta line, a compaction summary.
+  if (line.isSynthetic) return null;
   const content = (line.message as { content?: unknown } | undefined)?.content;
   const parts: Record<string, unknown>[] =
     typeof content === "string"
@@ -385,6 +388,106 @@ function finishUsage(building: Building): TurnUsage | null {
 const stamp = (line: Line): string | null =>
   typeof line.timestamp === "string" ? line.timestamp : null;
 
+/** `value` when it is a finite number, else null. */
+const count = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+
+/**
+ * A `compact_boundary` line read as the chat's divider (FE-120).
+ *
+ * The transcript names its numbers `compactMetadata.preTokens`; the
+ * stream-json output, `compact_metadata.pre_tokens`.
+ *
+ * @returns null for any other line.
+ */
+function compactionOf(line: Line, at: string | null): CompactionTurn | null {
+  if (line.type !== "system" || line.subtype !== "compact_boundary")
+    return null;
+  const file = record(line.compactMetadata);
+  const stream = record(line.compact_metadata);
+  const trigger = file.trigger ?? stream.trigger;
+  return {
+    role: "compaction",
+    id: typeof line.uuid === "string" ? line.uuid : `c-${at ?? ""}`,
+    trigger: trigger === "manual" || trigger === "auto" ? trigger : null,
+    preTokens: count(file.preTokens) ?? count(stream.pre_tokens),
+    postTokens: count(file.postTokens) ?? count(stream.post_tokens),
+    summary: null,
+    taskId: null,
+    at: at ?? "",
+  };
+}
+
+/**
+ * The text of the summary a compaction kept: the user line after its
+ * boundary, `isCompactSummary` in the transcript, `isSynthetic` in the
+ * stream.
+ *
+ * @returns null for any other line.
+ */
+function compactSummary(line: Line): string | null {
+  if (line.type !== "user" || line.isSidechain) return null;
+  if (!line.isCompactSummary && !line.isSynthetic) return null;
+  const content = (line.message as { content?: unknown } | undefined)?.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? (content as Record<string, unknown>[])
+            .map((part) =>
+              part?.type === "text" && typeof part.text === "string"
+                ? part.text
+                : "",
+            )
+            .join("\n\n")
+        : "";
+  return text.trim() ? cut(text.trim()) : null;
+}
+
+/**
+ * The reminder Lanework's hook gives right after a compaction (FE-117), and
+ * the task id in it.
+ *
+ * NOTE: Mirrors `compactReminder` in `electron/hook/compaction.ts`, whose
+ * text is a fixed template but for the id; main bundles no hook code, so it
+ * is matched here, not imported. The id pattern is the hook's own.
+ */
+const COMPACT_REMINDER =
+  /Lanework: the context was just compacted while you were working ([A-Z][A-Z0-9]{0,9}-\d{1,6})\. Before continuing, call the lanework `checkpoint` tool for card \1\b/;
+
+/**
+ * The task id a `SessionStart` hook's reminder names.
+ *
+ * - Transcript: an `attachment` line, `hook_additional_context` (its
+ *   `content`) or `hook_success` (its `stdout`).
+ * - Stream: a `system` `hook_response` line (its `stdout` / `output`).
+ *
+ * @returns null for any other line, or one without Lanework's reminder.
+ */
+function reminderTaskId(line: Line): string | null {
+  let said: unknown[] = [];
+  if (line.type === "attachment") {
+    const attachment = record(line.attachment);
+    if (attachment.hookEvent !== "SessionStart") return null;
+    said = [attachment.content, attachment.stdout];
+  } else if (line.type === "system" && line.subtype === "hook_response") {
+    if (line.hook_event !== "SessionStart") return null;
+    said = [line.stdout, line.output];
+  } else return null;
+  for (const value of said) {
+    const text =
+      typeof value === "string"
+        ? value
+        : Array.isArray(value)
+          ? value.filter((part) => typeof part === "string").join("\n")
+          : "";
+    // The hook's stdout is JSON: its backticks come through unescaped.
+    const found = COMPACT_REMINDER.exec(text)?.[1];
+    if (found) return found;
+  }
+  return null;
+}
+
 /**
  * The turns of a conversation's lines, in order.
  *
@@ -394,6 +497,10 @@ const stamp = (line: Line): string | null =>
  *   group — across lines, each call given the result a later line brings.
  * - Usage is summed once per API message (`message.id`): the CLI writes one
  *   line per content block, each repeating its message's usage.
+ * - A `compact_boundary` is a turn of its own (FE-120), with the summary
+ *   after it and the task id of Lanework's reminder. Every turn before it
+ *   stays: the lines are read in file order, never by `parentUuid`, which a
+ *   boundary does not have.
  */
 export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
   const turns: Turn[] = [];
@@ -433,9 +540,62 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
   // The turn of a slash command just read: a local one's output takes it
   // back out.
   let command: number | null = null;
+  // FE-120: the last compaction, until the model next answers; and a
+  // reminder told before its boundary, as the stream tells it.
+  let compacted: CompactionTurn | null = null;
+  let reminded: string | null = null;
   for (const line of rows) {
     if (line.isSidechain) continue;
     const at = stamp(line);
+    const compaction = compactionOf(line, at);
+    if (compaction) {
+      // An automatic one may fall mid-answer: the answer goes on below it.
+      close();
+      command = null;
+      compaction.taskId = reminded;
+      reminded = null;
+      compacted = compaction;
+      turns.push(compaction);
+      continue;
+    }
+    if (compacted && compacted.summary === null && turns.at(-1) === compacted) {
+      const summary = compactSummary(line);
+      if (summary) {
+        compacted.summary = summary;
+        continue;
+      }
+    }
+    const task = reminderTaskId(line);
+    if (task) {
+      // The transcript writes the hook's attachment after the boundary; the
+      // stream tells its `hook_response` before.
+      if (line.type !== "attachment") reminded = task;
+      else if (compacted && compacted.taskId === null) compacted.taskId = task;
+      continue;
+    }
+    // NOTE: A current CLI writes a local command's answer as a `system`
+    // `local_command` line ("Not enough messages to compact."), and the
+    // stream tells the same words as an assistant message. Read as nothing,
+    // the chat showed the command and then a blank page once the transcript
+    // replaced the live turn. It is the command's answer: shown as one.
+    if (line.type === "system" && line.subtype === "local_command") {
+      const said = localCommandText(line.content);
+      if (said) {
+        close();
+        command = null;
+        turns.push({
+          role: "assistant",
+          id: typeof line.uuid === "string" ? line.uuid : `a-${turns.length}`,
+          blocks: [{ type: "text", text: said }],
+          model: null,
+          usage: null,
+          at: at ?? "",
+          endedAt: at,
+          open: false,
+        });
+      }
+      continue;
+    }
     if (localOutput(line) && !line.isMeta) {
       // `/model` and the like ran in the CLI and never reached the model.
       if (command !== null && command === turns.length - 1 && !building)
@@ -460,6 +620,10 @@ export function buildTurns(rows: readonly Line[], folder: string): Turn[] {
     }
 
     if (line.type === "assistant") {
+      // The model answers: a hook's reminder after this is not the
+      // compaction's.
+      compacted = null;
+      reminded = null;
       const message = record(line.message);
       const content = Array.isArray(message.content)
         ? (message.content as Record<string, unknown>[])
@@ -651,3 +815,17 @@ export async function readConversation(
 
 /** Re-exported for the engine's live turns. */
 export type { Line };
+
+/**
+ * The words inside a `<local-command-stdout>` (or `-stderr`) block of a
+ * `system` `local_command` line, or null when it carries none.
+ */
+function localCommandText(content: unknown): string | null {
+  if (typeof content !== "string") return null;
+  const match =
+    /<local-command-(?:stdout|stderr)>([\s\S]*?)<\/local-command-(?:stdout|stderr)>/.exec(
+      content,
+    );
+  const text = match?.[1]?.trim();
+  return text ? text : null;
+}
