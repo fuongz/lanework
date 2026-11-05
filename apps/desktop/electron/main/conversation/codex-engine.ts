@@ -41,6 +41,7 @@ import { isAgentSessionId } from "../../../shared/terminal";
 import { agentEnv, engineTap, safely } from "../orchestration/engine-tap";
 import type { ClaudeCli } from "./claude-cli";
 import type { ConversationEngine } from "./conversation-engine";
+import { codexMcpArgs } from "./mcp-args";
 import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { cut, inputText } from "./transcript";
@@ -51,6 +52,10 @@ interface CodexEngineDeps {
   emit: (event: ConversationEvent) => void;
   remember: (conversation: string, settings: ComposerSettings) => void;
   spawn?: typeof spawnChild;
+  /** See `EngineDeps.localMcp` (FE-121/D9). */
+  localMcp?: (project: string) => Promise<string | null>;
+  /** Whether Codex's config has its own `lanework` table to switch off. */
+  codexLanework?: () => Promise<boolean>;
   /** How long a request to the app-server is waited on. */
   requestTimeoutMs?: number;
 }
@@ -391,7 +396,12 @@ export class CodexEngine implements ConversationEngine {
   async start(settings: ComposerSettings): Promise<void> {
     const cli = await this.deps.cli();
     const spawn = this.deps.spawn ?? spawnChild;
-    const child = spawn(cli.file, ["app-server"], {
+    // FE-121/D9: a local project's board, while Codex's config is the cloud.
+    const localMcp = (await this.deps.localMcp?.(this.project)) ?? null;
+    const overrides = localMcp
+      ? codexMcpArgs(localMcp, (await this.deps.codexLanework?.()) ?? false)
+      : [];
+    const child = spawn(cli.file, [...overrides, "app-server"], {
       cwd: this.folder,
       // FE-87: a lead's control endpoint, a worker's scratch; never the
       // control variables for anyone else.

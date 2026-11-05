@@ -123,6 +123,26 @@ export function opencodeHasLanework(jsonc: string | null): boolean {
   return hasLaneworkServer(mcp.servers) || hasLaneworkServer(mcp);
 }
 
+/** Which board a repo is linked to, from `GET /v1/boards?repo=`. */
+export type BoardLink =
+  | { kind: "this" }
+  | { kind: "other"; name: string }
+  | { kind: "none" }
+  /** The service could not be asked. Said nothing about, not guessed at. */
+  | { kind: "unknown" };
+
+export function boardLinkOf(
+  boards: { workspaceId: string; name: string }[],
+  workspaceId: string,
+): BoardLink {
+  if (boards.length === 1 && boards[0]?.workspaceId === workspaceId)
+    return { kind: "this" };
+  const others = boards.filter((board) => board.workspaceId !== workspaceId);
+  return others.length
+    ? { kind: "other", name: others.map((board) => board.name).join("”, “") }
+    : { kind: "none" };
+}
+
 /** Everything main gathers about one project before judging it. */
 export interface ReadinessFacts {
   slug: string;
@@ -132,6 +152,8 @@ export interface ReadinessFacts {
     | {
         kind: "linked";
         path: string;
+        /** Omitted for local boards, which never call the cloud. */
+        repo?: { remote: string | null; board: BoardLink };
         agentsMd: string | null;
         claudeMd: string | null;
         claudeMcp: boolean;
@@ -161,7 +183,7 @@ const OPENCODE_MCP: ReadinessId = "opencode-mcp";
 
 function check(
   base: Omit<ReadinessCheck, "detail" | "fix" | "action"> &
-    Partial<Pick<ReadinessCheck, "fix" | "action">>,
+    Partial<Pick<ReadinessCheck, "fix" | "action" | "linkedTo">>,
   detail: string,
 ): ReadinessCheck {
   return {
@@ -192,6 +214,41 @@ export function buildReport(facts: ReadinessFacts): ReadinessReport {
   );
 
   if (folder.kind === "linked") {
+    const repo = folder.repo;
+    if (repo) {
+      checks.push(
+        check(
+          {
+            id: "remote",
+            level: "blocker",
+            ok: repo.remote !== null,
+            title: "Git remote",
+          },
+          "This folder has no origin remote, so an agent cannot tell which board it belongs to. Add one with git remote add origin <url>.",
+        ),
+      );
+      // NOTE: Left out, not failed, when the service could not be asked: an
+      // offline laptop is not a misconfigured repo.
+      if (repo.remote !== null && repo.board.kind !== "unknown")
+        checks.push(
+          check(
+            {
+              id: "board",
+              level: "blocker",
+              ok: repo.board.kind === "this",
+              title: "Repo linked to this board",
+              // One click on the service (BE-20/D3), not an agent's errand.
+              action: "link-board",
+              ...(repo.board.kind === "other"
+                ? { linkedTo: repo.board.name }
+                : {}),
+            },
+            repo.board.kind === "other"
+              ? `Agents in this folder file their cards on “${repo.board.name}”, the board this repo is linked to. Link it here instead: new cards come to this board, and the ones on “${repo.board.name}” stay there.`
+              : "This repo is not linked to a board, so an agent here cannot tell where its cards go. Link it to this board.",
+          ),
+        );
+    }
     checks.push(
       check(
         {

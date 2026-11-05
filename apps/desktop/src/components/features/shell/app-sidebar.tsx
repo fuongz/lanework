@@ -33,6 +33,7 @@ import { useWorktree } from "#/stores/worktree";
 import { AgentSessionsNav } from "./agent-sessions-nav";
 import { MiniRail } from "./mini-rail";
 import { ProjectSwitcher } from "./project-switcher";
+import { SyncBanner } from "./sync-banner";
 import { useUnseenPulls } from "./use-unseen-pulls";
 
 /**
@@ -456,6 +457,9 @@ export function AppSidebar({
           />
         )}
       </RailHover>
+
+      {/* FE-122: a local project's invitation to sync, above Settings. */}
+      <SyncBanner slug={slug} />
 
       {/* Local mode's badge sits beside Settings, outside its link: a button
           inside an anchor is neither valid nor reachable by keyboard. */}

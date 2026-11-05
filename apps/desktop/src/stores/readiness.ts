@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import type {
   ReadinessFix,
+  ReadinessLinkResult,
   ReadinessPreview,
   ReadinessReport,
 } from "../../shared/readiness";
@@ -23,6 +24,7 @@ const FOCUS_MIN_AGE_MS = 60_000;
  * the project it was read for and never shown on the new one.
  */
 interface ReadinessState {
+  linkBoard: (slug: string, replace: boolean) => Promise<ReadinessLinkResult>;
   reports: Record<string, ReadinessReport>;
   errors: Record<string, string>;
   check: (slug: string, options?: { minAgeMs?: number }) => Promise<void>;
@@ -49,6 +51,20 @@ function bump(slug: string): number {
 }
 
 export const useReadiness = create<ReadinessState>((set) => ({
+  linkBoard: async (slug, replace) => {
+    const surface = window.desktop?.readiness;
+    if (!surface) throw new Error("Not available in this window.");
+    const mine = bump(slug);
+    const result = await surface.linkBoard(slug, replace);
+    if (result.done && generation[slug] === mine) {
+      askedAt[slug] = Date.now();
+      set((state) => {
+        const { [slug]: _, ...errors } = state.errors;
+        return { reports: { ...state.reports, [slug]: result.report }, errors };
+      });
+    }
+    return result;
+  },
   reports: {},
   errors: {},
   check: async (slug, options = {}) => {

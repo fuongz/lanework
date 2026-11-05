@@ -1,9 +1,9 @@
 // Is this project's folder ready for an agent to work its board? (FE-30)
 //
 // Gathered here, in main, because every answer is on the disk or behind the
-// machine: the folder link, AGENTS.md, CLAUDE.md, `.mcp.json`,
-// `~/.claude.json`, Codex's `config.toml` and the checkpoint hooks. Nothing
-// about git: the folder's remote and the repo's board are not checked here.
+// machine: the folder link, origin remote, AGENTS.md, CLAUDE.md, `.mcp.json`,
+// `~/.claude.json`, Codex's `config.toml` and the checkpoint hooks.
+// Cloud boards also look up which board the folder's origin belongs to.
 // Judging the facts is `checks.ts`, which is pure.
 //
 // NOTE: The renderer names a project by SLUG and a fix by NAME. Every path is
@@ -21,12 +21,14 @@ import { join } from "node:path";
 import {
   isReadinessFix,
   type ReadinessFix,
+  type ReadinessLinkResult,
   type ReadinessPreview,
   type ReadinessReport,
   readinessChannels,
 } from "../../../shared/readiness";
 import { claudeDir, claudeJsonPath, readText } from "../agent-home";
 import { opencodeConfigDir, opencodeConfigPath } from "../agent-setup/opencode";
+import { gitReadOut } from "../git/runner";
 import {
   claudeSettingsPath,
   findHook,
@@ -35,13 +37,20 @@ import {
 import { codexConfigPath, codexHome, codexHooksPath } from "../handoff/codex";
 import { opencodePluginPath, readOpencodePlugin } from "../handoff/opencode";
 import { handle } from "../ipc";
-import { knownProject } from "../projects";
+import { fetchBoardsForRepo, linkRepoToBoard } from "../projects/client";
 import { folderExists } from "../projects/local-folder";
+import {
+  assertSameSession,
+  knownProject,
+  LOCAL_RECORD,
+} from "../projects/session";
 import { readFolders } from "../projects/store";
 import { opencodeDataDir } from "../terminal/opencode-sessions";
 import { agentHomeDir } from "../test-seams";
 import {
   applyFix,
+  type BoardLink,
+  boardLinkOf,
   buildReport,
   claudeHasLanework,
   codexHasLanework,
@@ -79,7 +88,7 @@ async function hasLegacyReviews(folder: string): Promise<boolean> {
 async function resolve(slug: string) {
   const { record, project } = await knownProject(slug);
   const [path] = (await readFolders(record))[project.slug] ?? [];
-  return { project, path: path ?? null };
+  return { record, project, path: path ?? null };
 }
 
 /**
@@ -119,7 +128,7 @@ async function opencodeFacts(folder: string | null) {
 }
 
 async function gather(slug: string): Promise<ReadinessFacts> {
-  const { project, path } = await resolve(slug);
+  const { record, project, path } = await resolve(slug);
   const [claudeUsed, codexUsed] = await Promise.all([
     Promise.all([exists(claudeDir()), exists(claudeJsonPath())]).then((found) =>
       found.some(Boolean),
@@ -143,8 +152,19 @@ async function gather(slug: string): Promise<ReadinessFacts> {
       readText(join(path, ".mcp.json")),
       hasLegacyReviews(path),
     ]);
+    let repo: { remote: string | null; board: BoardLink } | undefined;
+    if (record !== LOCAL_RECORD && project.id) {
+      const remote = await originUrl(path);
+      const board = remote
+        ? await fetchBoardsForRepo(record, remote)
+            .then((boards) => boardLinkOf(boards, project.id as string))
+            .catch(() => ({ kind: "unknown" }) as const)
+        : ({ kind: "unknown" } as const);
+      repo = { remote, board };
+    }
     folder = {
       kind: "linked",
+      repo,
       path,
       agentsMd,
       claudeMd,
@@ -164,6 +184,46 @@ async function gather(slug: string): Promise<ReadinessFacts> {
     },
     opencode: await opencodeFacts(path),
     checkedAt: new Date().toISOString(),
+  };
+}
+
+/** Read only the linked folder's origin, through the safe git runner. */
+async function originUrl(folder: string): Promise<string | null> {
+  return gitReadOut(folder, ["remote", "get-url", "origin"], {
+    timeout: 5_000,
+    maxBuffer: 16_384,
+  }).then(
+    (value) => value.trim() || null,
+    () => null,
+  );
+}
+
+/**
+ * Make this project's board THE board for its folder's repo (BE-20): the
+ * remote is read here from the folder this process linked, never sent by the
+ * renderer — like every path in this file.
+ */
+async function linkBoard(
+  slug: string,
+  replace: boolean,
+): Promise<ReadinessLinkResult> {
+  const { record, project, path } = await resolve(slug);
+  if (record === LOCAL_RECORD)
+    throw new Error("Local boards do not have a cloud repo link.");
+  await assertSameSession(record);
+  if (!project.id)
+    throw new Error("This project has no board on the service to link to.");
+  if (!path || !(await folderExists(path)))
+    throw new Error("This project has no folder on this machine.");
+  const remote = await originUrl(path);
+  if (!remote)
+    throw new Error("This folder has no origin remote to link to the board.");
+  const moved = await linkRepoToBoard(record, project.id, remote, replace);
+  if (!moved.ok) return { done: false, linked: moved.linked };
+  return {
+    done: true,
+    report: await readinessOf(slug),
+    unlinked: moved.unlinked.map((board) => board.name),
   };
 }
 
@@ -251,6 +311,11 @@ export function registerReadiness(devUrl?: string): void {
   handle(readinessChannels.check, devUrl, (args) => {
     if (args.length !== 1) throw new Error("check takes one project");
     return readinessOf(slugArg(args[0]));
+  });
+  handle(readinessChannels.linkBoard, devUrl, (args) => {
+    if (args.length !== 2 || typeof args[1] !== "boolean")
+      throw new Error("linkBoard takes a project and whether to replace");
+    return linkBoard(slugArg(args[0]), args[1]);
   });
   handle(readinessChannels.preview, devUrl, (args) => {
     if (args.length !== 2) throw new Error("preview takes a project and a fix");

@@ -374,6 +374,8 @@ const dictation: DesktopDictationApi = {
 
 /** Whether a project's folder is ready for an agent. A slug, never a path. */
 const readiness: DesktopReadinessApi = {
+  linkBoard: (slug, replace) =>
+    ipcRenderer.invoke(readinessChannels.linkBoard, slug, replace),
   check: (slug) => ipcRenderer.invoke(readinessChannels.check, slug),
   preview: (slug, fix) =>
     ipcRenderer.invoke(readinessChannels.preview, slug, fix),
@@ -733,8 +735,13 @@ const projects: DesktopProjectsApi = {
   // The NAME a human typed; main derives the slug the service demands. The
   // folders are pick IDS, primary first. Main resolves them to paths it
   // handed out itself, so no path ever travels this way.
-  create: (name, folders) =>
-    ipcRenderer.invoke(projectChannels.createProject, name, folders ?? []),
+  create: (name, folders, destination) =>
+    ipcRenderer.invoke(
+      projectChannels.createProject,
+      name,
+      folders ?? [],
+      destination,
+    ),
   // NOTE: By cloud ID, never the slug. A uuid matches the service's slug
   // shape, so only the service, not anything here, would catch a mix-up.
   rename: (id, name) =>
@@ -872,6 +879,8 @@ const projects: DesktopProjectsApi = {
   folder: {
     state: (slug) => ipcRenderer.invoke(projectChannels.folderState, slug),
     choose: () => ipcRenderer.invoke(projectChannels.folderChoose),
+    // Pick ids, never paths: main reads only folders a person chose.
+    origins: (ids) => ipcRenderer.invoke(projectChannels.folderOrigins, ids),
     // FE-106: the path is read here, from a File the OS dropped. A script's
     // own `new File(...)` answers "", and is left out.
     drop: (files) =>

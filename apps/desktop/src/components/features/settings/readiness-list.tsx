@@ -56,10 +56,12 @@ const rank = (check: ReadinessCheck) => (check.ok ? 3 : ORDER[check.level]);
 export function ReadinessList({
   report,
   onFix,
+  onLink,
   className,
 }: {
   report: ReadinessReport;
   onFix: (fix: ReadinessFix) => void;
+  onLink: (check: ReadinessCheck) => void;
   className?: string;
 }) {
   const navigate = useNavigate();
@@ -103,9 +105,13 @@ export function ReadinessList({
               size="lg"
               className={SETTINGS_BUTTON}
               variant="outline"
-              onClick={() => check.action && go(check.action)}
+              onClick={() =>
+                check.action === "link-board"
+                  ? onLink(check)
+                  : check.action && go(check.action)
+              }
             >
-              Open settings
+              {check.action === "link-board" ? "Link here" : "Open settings"}
             </Button>
           )}
         </li>

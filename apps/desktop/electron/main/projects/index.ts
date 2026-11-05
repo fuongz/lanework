@@ -16,6 +16,7 @@ import {
   type ImportReport,
   type LocalFolderState,
   type LocalSyncResult,
+  type OriginScan,
   type PickedFolder,
   type Project,
   type ProjectAnswer,
@@ -36,6 +37,7 @@ import {
   editComment,
   fetchActivity,
   fetchBoardConfig,
+  fetchBoardsForRepo,
   fetchCard,
   fetchCards,
   fetchChanges,
@@ -47,6 +49,7 @@ import {
   type GroupSpec,
   groupSpecs,
   importRecords,
+  linkRepoToBoard,
   lookupCard,
   moveCard,
   purgeIssues,
@@ -79,11 +82,14 @@ import {
   writeLocal,
 } from "./local-backend";
 import { folderExists, readLocalFolder } from "./local-folder";
+import { remoteFor, scanOrigins } from "./origin-scan";
 import {
   commentBody,
   parseAttachmentDraft,
   parseChecklistDraft,
+  parseDestination,
   parseDraft,
+  parseFolderIdList,
   parseFolderIds,
   parsePatch,
   parsePlacement,
@@ -173,6 +179,86 @@ async function syncToCloud(localId: string): Promise<LocalSyncResult> {
   } finally {
     syncing.delete(localId);
   }
+}
+
+/**
+ * Create a project whose board is the one linked to `repo` (FE-121).
+ *
+ * - The repo's remote is read again here from the picked folders, never sent
+ *   by the renderer.
+ * - No board linked to it: a new cloud board, linked to the repo (BE-20).
+ * - One board: that board is opened and the folders are attached to it on
+ *   this machine (FE-121/D5). Nothing is created, nothing merged.
+ * - Several: refused. Picking one by name or by order would be a guess about
+ *   where every agent writes its cards.
+ *
+ * The clones of `repo` come first among the folders, so the folder Git and
+ * pull requests read is a checkout of the repo the board is linked to.
+ */
+async function createForRepo(
+  record: MachineRecord,
+  name: string,
+  repo: string,
+  folders: { id: string; path: string }[],
+): Promise<ProjectSnapshot> {
+  const found = await remoteFor(folders, repo);
+  if (!found)
+    throw new Error(
+      `None of these folders has ${repo} as its origin any more. Check the folders again.`,
+    );
+  const clones = new Set(found.folderIds);
+  const paths = [
+    ...folders.filter((folder) => clones.has(folder.id)),
+    ...folders.filter((folder) => !clones.has(folder.id)),
+  ].map((folder) => folder.path);
+  const boards = await fetchBoardsForRepo(record, found.remote);
+  await assertSameSession(record);
+  if (boards.length > 1)
+    throw new Error(
+      `${repo} is linked to ${boards.length} boards. Keep it on one board, then try again.`,
+    );
+  const [board] = boards;
+  if (board) {
+    // A fresh read: the board may have been made on another machine.
+    forgetList();
+    const listed = await fetchProjects(record);
+    const existing = listed.find((entry) => entry.id === board.workspaceId);
+    if (!existing?.id)
+      throw new Error(
+        `${repo} is linked to ${board.name}, which this account cannot open.`,
+      );
+    const linked = (await readFolders(record))[existing.slug] ?? [];
+    const added = paths.filter((path) => !linked.includes(path));
+    if (added.length)
+      await writeFolders(record, existing.slug, [...linked, ...added]);
+    return load(existing.id);
+  }
+  if (!name) throw new Error("A project name is required");
+  const created = await createProject(record, {
+    slug: slugify(name),
+    name,
+    ...(paths[0] ? { path: paths[0] } : {}),
+  });
+  if (paths.length) await writeFolders(record, created.slug, paths);
+  // NOTE: Created first, linked second: the service has no call that does
+  // both. A link that fails leaves a working, unlinked cloud project. That
+  // is said out loud, never passed off as linked; Setup links it later.
+  const moved = await linkRepoToBoard(
+    record,
+    created.id,
+    found.remote,
+    false,
+  ).catch((failure: unknown) => ({
+    ok: false as const,
+    linked: failure instanceof Error ? failure.message : String(failure),
+  }));
+  if (!moved.ok) {
+    forgetList();
+    throw new Error(
+      `${created.name} was created, but ${repo} could not be linked to it (${moved.linked}). Link it from the project's Setup.`,
+    );
+  }
+  return load(created.id);
 }
 
 /** Exports running now, by cloud id — one click is one copy. */
@@ -517,20 +603,28 @@ export function registerProjects(devUrl?: string): void {
     devUrl,
     async (args): Promise<ProjectSnapshot> => {
       if (
-        args.length > 2 ||
+        args.length > 3 ||
         typeof args[0] !== "string" ||
-        !args[0].trim() ||
         args[0].length > 200
       )
         throw new Error("A project name is required");
       const name = args[0].trim();
+      const destination = parseDestination(args[2]);
       // NOTE: Ids, resolved HERE against folders this app's own chooser
       // handed out. A create call cannot name a path, so it cannot link a
       // folder the user never picked — see `folder-chooser.ts`.
-      const paths = parseFolderIds(args[1], folderFor);
-      // In local mode a new project is a local board: created on this
-      // machine, linked to its folders, and opened, like the cloud one.
-      if (await inLocalMode()) {
+      const ids = parseFolderIdList(args[1]);
+      const paths = parseFolderIds(ids, folderFor);
+      // FE-121/D5: opening the board a repo already has takes no new name.
+      if (!name && destination?.kind !== "repo")
+        throw new Error("A project name is required");
+      // A local board: in local mode always, and signed in when the user
+      // chose Local (FE-121/D1). Created on this machine, linked to its
+      // folders, and opened, like the cloud one.
+      if (destination?.kind === "local" || (await inLocalMode())) {
+        if (destination?.kind === "repo")
+          throw new Error("Sign in to link a repo. Or choose Local for now.");
+        if (!name) throw new Error("A project name is required");
         const created = writeLocal((store) =>
           store.createProject({ name, slug: slugify(name) }),
         );
@@ -538,6 +632,13 @@ export function registerProjects(devUrl?: string): void {
         return load(created.id);
       }
       const record = await authorizedRecord();
+      if (destination?.kind === "repo")
+        return createForRepo(
+          record,
+          name,
+          destination.repo,
+          ids.map((id, index) => ({ id, path: paths[index] as string })),
+        );
       const created = await createProject(record, {
         slug: slugify(name),
         name,
@@ -559,6 +660,23 @@ export function registerProjects(devUrl?: string): void {
       // intention, and `load` is what writes the selection down — so this
       // also survives a relaunch, which is the whole promise of the picker.
       return load(created.id);
+    },
+  );
+  handle(
+    projectChannels.folderOrigins,
+    devUrl,
+    async (args): Promise<OriginScan> => {
+      if (args.length !== 1) throw new Error("Name the folders to read");
+      const ids = parseFolderIdList(args[0]);
+      const paths = parseFolderIds(ids, folderFor);
+      // Authorized as `folderChoose` is. Signed out, the repos are listed
+      // but their boards are not looked up: nothing leaves the machine.
+      await assertCanUse();
+      const record = (await inLocalMode()) ? null : await authorizedRecord();
+      return scanOrigins(
+        ids.map((id, index) => ({ id, path: paths[index] as string })),
+        record,
+      );
     },
   );
   handle(

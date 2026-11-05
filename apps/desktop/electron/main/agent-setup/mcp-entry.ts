@@ -243,6 +243,21 @@ async function writeMcpShim(
   return path;
 }
 
+/**
+ * The stdio shim's path, written now when this copy may write it (FE-121/D9).
+ *
+ * For one conversation that must reach this machine's local boards while the
+ * agents' own config points at the cloud. A copy that may not write shims
+ * (a dev build) still answers with one already on disk.
+ *
+ * @returns null when there is no shim to run.
+ */
+export async function ensureMcpShim(): Promise<string | null> {
+  if (!currentShimRefusal()) return writeMcpShim();
+  const path = mcpShimPath();
+  return existsSync(path) ? path : null;
+}
+
 // ── Claude Code: `~/.claude.json` `mcpServers.lanework` ──────────────────────
 
 /** Our `mcpServers` entry for `mode`. */

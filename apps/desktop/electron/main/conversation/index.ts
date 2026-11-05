@@ -80,6 +80,7 @@ import { forkConversation } from "./fork";
 import { type ImageScope, openableImage, previewImage } from "./image-preview";
 import { createLinkPreviews } from "./link-preview";
 import { claudePidsOn } from "./live-claude";
+import { codexHasLaneworkTable, localMcpFor } from "./mcp-binding";
 import { openCodeClient } from "./opencode-client";
 import { createOpenCodeModels } from "./opencode-models";
 import { createOpenCodeService } from "./opencode-service";
@@ -590,6 +591,9 @@ export function registerConversation(
     // FE-77/D3: Claude's trust record, under the test seam's home too.
     trusted: (folder, env) =>
       isClaudeTrusted(folder, claudeJsonFor(env, agentHome())),
+    // FE-121/D9: a local project's chat reaches its local board, signed in.
+    localMcp: localMcpFor,
+    codexLanework: codexHasLaneworkTable,
   });
 
   sessions = new ConductorSessions({

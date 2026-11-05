@@ -15,6 +15,7 @@ import {
   boardQueryKey,
   DEFAULT_BOARD_QUERY,
   type Project,
+  type ProjectDestination,
 } from "../../shared/projects";
 
 /**
@@ -167,6 +168,8 @@ interface BoardState {
      * Empty or missing when none were chosen.
      */
     folders?: string[],
+    /** Where its board lives (FE-121); absent keeps the older rule. */
+    destination?: ProjectDestination,
   ) => Promise<{ project: Project | null } | { error: string }>;
   /**
    * Rename a project on the account, by cloud project id.
@@ -861,12 +864,13 @@ export const useBoard = create<BoardState>()((set, get) => ({
     remember(next, get().cursor);
   },
 
-  createProject: async (name, folders) => {
+  createProject: async (name, folders, destination) => {
     set({ busy: "project", error: null });
     try {
       const snapshot = await desktopSurface("projects").create(
         name.trim(),
         folders,
+        destination,
       );
       set({
         projects: snapshot.projects,

@@ -15,6 +15,7 @@ import {
   CHECKLIST_SECTIONS,
   DEFAULT_BOARD_QUERY,
   MAX_CHANGES_REASON,
+  type ProjectDestination,
 } from "../../../shared/projects";
 import { arity, id } from "../ipc-args";
 
@@ -390,6 +391,40 @@ export function parseChecklistDraft(value: unknown): BoardChecklistDraft[] {
  *   path; passed in so this file stays free of Electron.
  * @throws When an id is malformed or was not handed out by this run.
  */
+/** Pick ids, as sent: an array of strings, bounded like `parseFolderIds`. */
+export function parseFolderIdList(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (
+    !Array.isArray(value) ||
+    value.length > 20 ||
+    value.some((id) => typeof id !== "string" || !id.trim())
+  )
+    throw new Error("Those source folders cannot be used");
+  return value as string[];
+}
+
+/** Where a new project's board lives (FE-121), or undefined for the old rule. */
+export function parseDestination(
+  value: unknown,
+): ProjectDestination | undefined {
+  if (value === undefined || value === null) return undefined;
+  const row = (typeof value === "object" ? value : {}) as Record<
+    string,
+    unknown
+  >;
+  if (row.kind === "local" && Object.keys(row).length === 1)
+    return { kind: "local" };
+  if (
+    row.kind === "repo" &&
+    Object.keys(row).length === 2 &&
+    typeof row.repo === "string" &&
+    row.repo.length > 0 &&
+    row.repo.length <= 300
+  )
+    return { kind: "repo", repo: row.repo };
+  throw new Error("That is not a place a project can live");
+}
+
 export function parseFolderIds(
   value: unknown,
   folderFor: (id: string) => string | null | undefined,

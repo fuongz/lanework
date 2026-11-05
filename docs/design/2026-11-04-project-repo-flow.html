@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lanework · Từ folder đến board</title>
+  <style>
+    :root{color-scheme:light;--ink:#202836;--muted:#596779;--line:#d5dde6;--paper:#f4f6f9;--blue:#275ac1;--blue-bg:#eaf0fc;--green:#20654c;--green-bg:#eaf5ef;--amber:#805117;--amber-bg:#fff4df;--surface:#fff}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1200px;margin:auto;padding:54px 32px 70px}h1,h2,h3,p{margin:0}h1{font-size:clamp(32px,5vw,58px);line-height:1.12;letter-spacing:-.045em;max-width:800px;font-weight:650}h2{font-size:25px;line-height:1.3;letter-spacing:-.025em}h3{font-size:16px;line-height:1.4}p+p{margin-top:10px}.eyebrow{font:12px/1.5 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:18px}.intro{font-size:18px;color:var(--muted);max-width:760px;margin-top:22px}.meta,.legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}.tag{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px;background:var(--surface)}.tag.green{color:var(--green);background:var(--green-bg);border-color:#bad8c9}.tag.blue{color:var(--blue);background:var(--blue-bg);border-color:#c4d4f5}.tag.amber{color:var(--amber);background:var(--amber-bg);border-color:#e9d2a9}nav{display:flex;gap:24px;flex-wrap:wrap;border-block:1px solid var(--line);padding:15px 0;margin:36px 0}a{color:var(--blue);text-underline-offset:4px}nav a{font-size:13px;text-decoration:none}section{scroll-margin-top:24px;margin-top:52px}.section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;margin-bottom:24px}.section-head p{max-width:540px;color:var(--muted);font-size:14px}.flow{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:28px}.spine{max-width:700px;margin:auto}.node{border:1px solid var(--line);border-radius:10px;padding:17px 20px;background:white;position:relative}.node p{color:var(--muted);font-size:13px;margin-top:5px}.node small{font:11px ui-monospace,monospace;color:var(--muted);display:block;margin-bottom:5px}.arrow{text-align:center;color:#8391a3;height:31px;font-size:23px;line-height:31px}.scan{background:#f5f7fa}.fork{display:grid;grid-template-columns:1fr 1fr;gap:38px;margin-top:4px;position:relative}.fork:before{content:"";position:absolute;left:25%;right:25%;height:14px;border:1px solid #aab8ca;border-bottom:0;top:-14px}.branch-label{text-align:center;font-size:12px;font-weight:600;color:var(--muted);margin:7px 0 12px}.local{border-color:#bbd8c9;background:var(--green-bg)}.remote{border-color:#c4d4f5;background:var(--blue-bg)}.proposed{border-left:3px solid #bd8a36}.pick{font-size:13px;border:1px solid #aab8ca;background:white;padding:10px 12px;border-radius:7px;margin-top:12px;display:flex;justify-content:space-between;gap:12px}.note{margin-top:20px;padding:13px 16px;border-radius:8px;background:var(--amber-bg);color:var(--amber);font-size:13px}.subflow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:18px}.subflow .node{padding:14px}.subflow h3{font-size:14px}.simulator{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(270px,.85fr);border:1px solid var(--line);border-radius:16px;overflow:hidden;background:white}.controls{padding:26px 30px}.field{margin-top:20px}label{font-size:13px;font-weight:600;display:block;margin-bottom:7px}select{font:inherit;font-size:14px;color:var(--ink);width:100%;min-height:44px;padding:9px 12px;border:1px solid #afbdcf;border-radius:7px;background:white}select:disabled{background:#f1f3f5;color:var(--muted)}:focus-visible{outline:3px solid #7597e5;outline-offset:3px}.hint{font-size:12px;color:var(--muted);margin-top:7px}.outcome{padding:28px;background:#f6f8fb;border-left:1px solid var(--line)}.outcome h3{font-size:22px;margin-top:16px}.outcome p{font-size:14px;margin-top:12px}.steps{padding-left:20px;font-size:13px;color:var(--muted)}.steps li+li{margin-top:9px}.preview-grid{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start}.sidebar{background:#e9edf3;border:1px solid #cbd4e0;border-radius:12px;padding:15px;box-shadow:0 10px 25px #25354e08}.side-title{font-size:15px;font-weight:650;margin:4px 8px 20px}.side-row{padding:8px 10px;font-size:13px;color:#48566a}.side-row.active{background:#dce4f0;border-radius:6px;color:var(--ink)}.side-group{font-size:10px;letter-spacing:.08em;color:var(--muted);padding:22px 10px 5px}.banner{border:1px solid #cbd6e9;background:#f8faff;border-radius:8px;padding:15px;margin-top:28px}.banner .tag{font-size:10px;padding:1px 6px}.banner h3{font-size:14px;margin-top:10px}.banner p{font-size:12px;color:var(--muted);margin-top:6px}.fake-button{display:block;text-align:center;padding:7px 10px;background:white;border:1px solid #b9c8e0;border-radius:5px;color:#244b8f;font-size:12px;font-weight:600;margin-top:13px}.banner .later{font-size:11px;text-align:center;margin-top:8px;color:var(--muted)}.caption{font-size:12px;color:var(--muted);margin-top:12px}.explain{padding-top:5px}.explain p{color:var(--muted);font-size:14px}.explain ul{padding-left:20px;font-size:14px}.explain li+li{margin-top:12px}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:white}table{border-collapse:collapse;width:100%;font-size:13px;text-align:left}th,td{padding:15px 18px;vertical-align:top;border-bottom:1px solid var(--line)}th{background:#eaf0f6;font-size:12px;color:#435269}tr:last-child td{border-bottom:0}td:first-child{font-weight:600;width:24%}td:nth-child(2){width:35%;color:var(--muted)}.decisions{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.decision{padding:22px;border:1px solid var(--line);border-radius:10px;background:white}.decision h3{margin-top:12px}.decision p{font-size:14px;color:var(--muted);margin-top:9px}.migration{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.migration .node{font-size:13px}.migration h3{font-size:14px}.foot{border-top:1px solid var(--line);margin-top:46px;padding-top:20px;color:var(--muted);font-size:12px}code{font:12px ui-monospace,monospace;background:#e8edf3;border-radius:3px;padding:2px 4px}button{font:inherit}.summary{margin-top:24px;border-left:3px solid var(--blue);padding-left:18px;font-size:16px;max-width:870px}.state-line{font:12px ui-monospace,monospace;color:var(--muted);margin-top:20px}
+    @media(max-width:760px){main{padding:30px 18px 44px}.section-head{display:block}.section-head p{margin-top:12px}.flow{padding:20px 14px}.fork{gap:16px}.node{padding:13px}.simulator,.preview-grid{grid-template-columns:1fr}.outcome{border-left:0;border-top:1px solid var(--line)}.subflow,.migration,.decisions{grid-template-columns:1fr}.sidebar{max-width:280px}.controls{padding:22px}.fork .node h3{font-size:14px}.meta{gap:6px}nav{gap:15px}.fork:before{display:none}}
+    @media print{body{background:white}main{padding:12px;max-width:none}nav,.simulator{display:none}section{margin-top:30px;break-inside:avoid}.flow,.decision,.table-wrap{box-shadow:none}a{color:inherit}h1{font-size:34px}}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Lanework / Product flow / 04.11.2026</p>
+    <h1>Chọn folder.<br>Chọn nơi board sống.</h1>
+    <p class="intro">Một project có thể làm việc hoàn toàn trên máy. Khi người dùng chọn link một repo, project chuyển sang board cloud và agent dùng đúng board đó.</p>
+    <div class="meta"><span class="tag">Bản đề xuất để duyệt</span><span class="tag green">Local = lưu trên máy</span><span class="tag blue">Cloud = link 1 repo</span><span class="tag amber">Chưa thay đổi logic app</span></div>
+    <p class="summary">Quy tắc xuyên suốt: <strong>nhiều folder → gom origin không trùng → chọn tối đa 1 repo hoặc chọn Local</strong>. Đăng nhập tài khoản không tự biến project Local thành Cloud.</p>
+  </header>
+  <nav aria-label="Mục lục"><a href="#flow">Sơ đồ tạo project</a><a href="#try">Thử các trường hợp</a><a href="#later">Link sau & banner</a><a href="#gaps">Các case còn thiếu</a><a href="#sync">Chuyển lên cloud</a><a href="#decisions">Đề xuất chốt</a></nav>
+
+  <section id="flow">
+    <div class="section-head"><h2>Luồng tạo project</h2><p>Phần Local/Cloud theo yêu cầu của anh. Nhánh đăng nhập, trùng board và chuyển dữ liệu là các bước em đề xuất bổ sung.</p></div>
+    <div class="flow">
+      <div class="spine">
+        <div class="node"><small>NGƯỜI DÙNG</small><h3>Tạo project Lanework → chọn folder</h3><p>Chọn một hoặc nhiều folder. Chưa tạo board cloud ở bước này.</p></div>
+        <div class="arrow" aria-hidden="true">↓</div>
+        <div class="node scan"><small>APP KIỂM TRA</small><h3>Đọc git origin của từng folder</h3><p>Chỉ đọc origin, không tự git init, thêm remote hay clone. Chuẩn hóa URL để gộp cùng một repo; giữ danh sách folder tương ứng.</p></div>
+        <div class="arrow" aria-hidden="true">↓</div>
+      </div>
+      <div class="fork">
+        <div><p class="branch-label">Không tìm thấy origin hợp lệ</p><div class="node local"><h3>Mặc định Local</h3><p>Tạo local board, lưu card trên máy. Sidebar có lời mời link repo sau này.</p></div></div>
+        <div><p class="branch-label">Có ít nhất 1 origin khác nhau</p><div class="node"><h3>Hiện Select “Nơi lưu project”</h3><p>Áp dụng cho cả 1 folder và nhiều folder. Không tự chọn repo thay người dùng.</p><div class="pick"><span>Local — chỉ lưu trên máy<br>Link github.com/acme/app<br>Link github.com/acme/api</span><span aria-hidden="true">⌄</span></div></div></div>
+      </div>
+      <div class="arrow" aria-hidden="true">↓</div>
+      <div class="fork">
+        <div><p class="branch-label">Chọn Local / không link</p><div class="node local"><h3>Tạo Local project</h3><p>Có origin vẫn được chọn Local. Folder, Git, chat và local board dùng bình thường; MCP trong chat trỏ local board của project.</p></div></div>
+        <div><p class="branch-label">Chọn link 1 repo</p><div class="node remote"><h3>Đăng nhập nếu cần → tra board của repo</h3><p>0 board: tạo board cloud + link repo.<br>1 board: đề nghị mở board đã có.<br>Nhiều board: yêu cầu xử lý liên kết trước.</p><p><strong>Khi thành công:</strong> project dùng cloud board; MCP trong chat dùng đúng cloud board ID.</p></div></div>
+      </div>
+      <div class="note"><strong>Không có origin ≠ không đọc được origin.</strong> Nếu thiếu Git, folder mất quyền truy cập hoặc bước đọc lỗi, hiển thị lỗi và cho thử lại hoặc chủ động chọn Local; không báo “không có repo”.</div>
+    </div>
+    <div class="subflow">
+      <div class="node"><small>1 FOLDER · 1 ORIGIN</small><h3>Hai lựa chọn</h3><p>Local hoặc link repo tìm thấy.</p></div>
+      <div class="node"><small>NHIỀU FOLDER · CÙNG ORIGIN</small><h3>Chỉ một dòng repo</h3><p>Hai clone của cùng repo vẫn là 1 lựa chọn; hiển thị các folder bên dưới.</p></div>
+      <div class="node"><small>NHIỀU FOLDER · NHIỀU ORIGIN</small><h3>Một repo đại diện cho board</h3><p>Các folder còn lại vẫn thuộc project; không tự link các origin khác.</p></div>
+    </div>
+  </section>
+
+  <section id="try">
+    <div class="section-head"><h2>Thử các trường hợp</h2><p>Mô phỏng để kiểm tra logic. Select trong app sẽ dùng component shadcn; file HTML này dùng select gốc để chạy độc lập, không tải thư viện.</p></div>
+    <div class="simulator">
+      <div class="controls"><h3>Tạo project</h3>
+        <div class="field"><label for="scenario">Các folder đã chọn</label><select id="scenario"><option value="one">1 folder · 1 origin</option><option value="none">1 folder · không có origin</option><option value="many">3 folder · 2 origin khác nhau</option><option value="same">2 folder · cùng một origin</option><option value="empty">3 folder · không có origin</option><option value="error">Không đọc được một folder</option></select><p class="hint" id="folderHint"></p></div>
+        <div class="field"><label for="destination">Nơi lưu project</label><select id="destination"></select><p class="hint" id="destinationHint"></p></div>
+        <div class="field" id="cloudOptions" hidden><label for="account">Tài khoản Lanework</label><select id="account"><option value="signed-in">Đã đăng nhập</option><option value="signed-out">Chưa đăng nhập</option></select><label for="existing" style="margin-top:16px">Liên kết của repo đã chọn</label><select id="existing"><option value="new">Chưa có board</option><option value="existing">Đã có 1 board truy cập được</option><option value="multiple">Có nhiều board truy cập được</option></select></div>
+      </div>
+      <div class="outcome" aria-live="polite" aria-atomic="true"><span class="tag green" id="resultTag">Local</span><h3 id="resultTitle">Tạo board trên máy này</h3><p id="resultText"></p><ol class="steps" id="resultSteps"></ol><p class="state-line" id="binding"></p></div>
+    </div>
+  </section>
+
+  <section id="later">
+    <div class="section-head"><h2>Link sau, từ sidebar</h2><p>Banner theo cách bố trí của ảnh tham khảo: một card nhỏ ở phần dưới sidebar. Mời người dùng đồng bộ, không tạo cảm giác Local bị giới hạn chức năng.</p></div>
+    <div class="preview-grid">
+      <div><aside class="sidebar" aria-label="Minh họa sidebar"><div class="side-title">◉ &nbsp; My project</div><div class="side-row active">Issues <span class="tag green" style="float:right">Local</span></div><div class="side-row">Files</div><div class="side-group">REPOSITORY</div><div class="side-row">Changes</div><div class="side-row">History</div><div class="banner"><span class="tag">Đang lưu trên máy này</span><h3>Tiếp tục ở bất kỳ đâu</h3><p>Link một repo để đưa board lên cloud và tiếp tục công việc trên máy khác.</p><span class="fake-button">Link repo & đồng bộ</span><div class="later">Để sau</div></div><div class="side-row" style="margin-top:14px">Settings</div></aside><p class="caption">Minh họa tĩnh, không phải nút thao tác thật.</p></div>
+      <div class="explain"><h3>Đề xuất hành vi của banner</h3><ul><li>Hiện cho mọi project Local, kể cả người dùng đã thấy repo nhưng chọn không link. Với lựa chọn “không link”, cho ẩn lời mời; vẫn tìm lại được trong Settings.</li><li>“Để sau” ẩn banner cho project đó trên máy này. Không hiện lại mỗi lần mở app. Settings → Project luôn có “Link repo & đồng bộ”.</li><li>Bấm CTA → đọc lại origin của tất cả folder → chọn 1 repo → đăng nhập nếu cần → kiểm tra board → xem tóm tắt số card sẽ chuyển → xác nhận.</li><li>Nếu vẫn chưa có origin: hướng dẫn thêm origin bằng Git hoặc chọn folder khác, kèm “Kiểm tra lại”. Không tự khởi tạo hay sửa repo.</li><li>Cloud project không hiện banner. Khi offline, hiện trạng thái “Chưa kết nối” riêng; không tự đổi project thành Local.</li></ul></div>
+    </div>
+  </section>
+
+  <section id="gaps">
+    <div class="section-head"><h2>Các case cần bổ sung</h2><p>Các hướng dưới đây là đề xuất, chưa phải quyết định đã duyệt hay hành vi đã có đủ trong app.</p></div>
+    <div class="table-wrap"><table><thead><tr><th>Trường hợp</th><th>Điểm còn thiếu</th><th>Hướng giải quyết đề xuất</th></tr></thead><tbody>
+      <tr><td>Chưa chọn folder / hủy chooser</td><td>Chưa có gì để kiểm tra hoặc tạo project.</td><td>Giữ nguyên form, không tạo project. Với luồng này cần ít nhất 1 folder; project không folder là luồng riêng nếu muốn hỗ trợ.</td></tr>
+      <tr><td>Local dù đã đăng nhập</td><td>Nếu mode theo tài khoản, lựa chọn “không link” sẽ không giữ được.</td><td>Lưu nơi chứa board theo từng project. Một tài khoản có thể mở cả Local và Cloud project.</td></tr>
+      <tr><td>Chọn repo nhưng chưa đăng nhập / mất mạng</td><td>Không thể hoàn tất tạo cloud board.</td><td>Giữ folder và repo đã chọn. Cho đăng nhập / thử lại hoặc chủ động đổi sang Local. Không âm thầm tạo một project Local với nhãn Cloud.</td></tr>
+      <tr><td>Cùng repo, URL khác nhau</td><td>SSH, HTTPS, đuôi .git hoặc nhiều clone có thể tạo lựa chọn trùng.</td><td>Dùng cùng quy tắc chuẩn hóa repo với API. Gộp theo repo chuẩn hóa, giữ các folder nguồn; không gửi URL chứa credential lên cloud.</td></tr>
+      <tr><td>Repo đã có board</td><td>Tạo board mới rồi chuyển link có thể khiến agent của project cũ đổi nơi ghi card.</td><td>Ưu tiên “Mở board đã có và gắn các folder trên máy”. Với project Local đã có dữ liệu: chưa tự merge; giải thích và giữ dữ liệu Local. Chuyển link / merge cần luồng duyệt riêng.</td></tr>
+      <tr><td>Nhiều board / không có quyền</td><td>Không thể quyết định nơi ghi card chỉ bằng tên repo.</td><td>Không chọn ngầm. Chọn đúng board ID nếu có nhiều kết quả; yêu cầu chủ sở hữu xử lý liên kết nếu API từ chối quyền. Không tiết lộ board mà API không cho thấy.</td></tr>
+      <tr><td>Nhiều folder, primary folder khác repo đã chọn</td><td>Board gắn repo A nhưng Git/PR có thể đang đọc folder B.</td><td>Tách “repo của board” và “folder đang thao tác Git”. Mặc định chọn clone của repo đã link làm folder Git ban đầu; các folder khác vẫn hiện trong project. Chat nhận toàn bộ folder và đúng board binding.</td></tr>
+      <tr><td>Thêm / bỏ folder, đổi origin sau đó</td><td>Không nên tự chuyển board theo cấu hình Git mới.</td><td>Giữ link board hiện tại. Hiện cảnh báo mismatch và action “Xem lại liên kết”; việc đổi repo là hành động có xác nhận.</td></tr>
+      <tr><td>Worktree, subfolder, folder không phải Git</td><td>Git có thể tìm repo ở thư mục cha; .git có thể là file.</td><td>Dùng Git để xác định repo root, không chỉ kiểm tra .git là thư mục. Hiện root đã nhận diện. Không tự quét toàn bộ các repo con trong folder.</td></tr>
+      <tr><td>Scan chậm / thiếu Git / origin không hỗ trợ</td><td>“Chưa kiểm tra xong” dễ bị hiểu thành “không có repo”.</td><td>Có trạng thái đang đọc, timeout và lỗi từng folder. Giữ kết quả đọc được; nêu rõ folder chưa đọc được trước khi tiếp tục. URL không hỗ trợ có thông báo riêng và vẫn cho chọn Local.</td></tr>
+      <tr><td>Chat đang chạy khi chuyển board</td><td>Agent có thể tiếp tục ghi vào board Local trong lúc dữ liệu chuyển.</td><td>Chờ các lượt agent đang ghi kết thúc; tạm chặn ghi board trong thời gian cutover. Chỉ lượt chat tiếp theo nhận binding cloud. Không sửa cấu hình MCP global hoặc prompt đang chạy giữa phiên.</td></tr>
+      <tr><td>Sync bị gián đoạn / mở app lại</td><td>Có thể tạo board trùng, copy thiếu card hoặc ghi cả hai nơi.</td><td>Lưu migration ID + cloud board ID + mapping card ID, retry vào cùng đích. Chỉ đổi nguồn dữ liệu sau khi kiểm tra hoàn tất; bản Local giữ được để khôi phục nếu chưa cutover.</td></tr>
+      <tr><td>Quyền cloud bị thu hồi / sign out</td><td>Dữ liệu cache không đồng nghĩa một local board độc lập.</td><td>Không tự fork thành Local. Hiện yêu cầu đăng nhập hoặc trạng thái chỉ đọc; xuất một bản Local là thao tác riêng có giải thích.</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section id="sync">
+    <div class="section-head"><h2>Local → Cloud cần một lần chuyển chủ</h2><p>Đề xuất chỉ có một nơi nhận ghi tại mỗi thời điểm. “Link repo” và “chuyển board” phải là một luồng có thể tiếp tục nếu bị dừng.</p></div>
+    <div class="migration">
+      <div class="node"><small>1 · CHUẨN BỊ</small><h3>Đọc lại & xác nhận</h3><p>Repo, tài khoản đích, board đích và tổng số card. Kiểm tra quyền, trùng board; chờ agent kết thúc ghi.</p></div>
+      <div class="node"><small>2 · CHUYỂN DỮ LIỆU</small><h3>Giữ Local làm nguồn</h3><p>Tạm khóa ghi board, lưu migration ID. Gửi config, card, checklist, quan hệ cha/con và checkpoint; retry không nhân đôi.</p></div>
+      <div class="node"><small>3 · XÁC MINH</small><h3>Đối chiếu trước khi đổi</h3><p>Kiểm đủ dữ liệu và mapping ID. Link repo vào đích sau khi dữ liệu sẵn sàng; lỗi thì giữ Local, cho tiếp tục.</p></div>
+      <div class="node remote"><small>4 · CUTOVER</small><h3>Cloud trở thành nguồn ghi</h3><p>Cập nhật project + board binding + lượt chat tiếp theo. Local thành bản lưu chỉ đọc; không có hai board cùng nhận ghi.</p></div>
+    </div>
+    <p class="note"><strong>Không thể coi cả luồng là một transaction duy nhất:</strong> có SQLite trên máy và API cloud. Cần trạng thái bền vững, điểm tiếp tục và thao tác idempotent. Nếu đã link trên cloud nhưng app dừng trước cutover, mở lại phải hoàn tất đúng migration đó. Không xóa dữ liệu Local khi có lỗi.</p>
+    <div class="table-wrap" style="margin-top:20px"><table><thead><tr><th>Trạng thái project</th><th>Nguồn ghi board</th><th>MCP trong chat</th></tr></thead><tbody><tr><td>Local</td><td>Local SQLite board</td><td>Local project/board ID, qua MCP local của project.</td></tr><tr><td>Đang chuyển</td><td>Tạm chặn ghi; Local là nguồn đối chiếu</td><td>Không mở lượt agent ghi mới; không thay binding giữa một lượt đang chạy.</td></tr><tr><td>Cloud</td><td>Cloud board, kể cả khi máy tạm offline</td><td>Cloud board ID theo project. Kết quả lookup repo là kiểm tra nhất quán, không đoán board theo tên.</td></tr></tbody></table></div>
+    <p class="caption">Các folder và đường dẫn vẫn là thông tin của máy. Chọn repo link không đồng nghĩa upload code hay đồng bộ folder lên cloud.</p>
+  </section>
+
+  <section id="decisions">
+    <div class="section-head"><h2>Bốn điểm em đề xuất chốt</h2><p>Đây là các phần cần rõ trước khi triển khai. Các trường hợp 1–4 anh mô tả được giữ nguyên trong sơ đồ phía trên.</p></div>
+    <div class="decisions">
+      <div class="decision"><span class="tag amber">Đề xuất</span><h3>Select mặc định là Local</h3><p>Kể cả tìm thấy 1 repo, mặc định “Local — chỉ lưu trên máy”. Người dùng chủ động chọn repo để chuyển sang Cloud. Không thêm một nút bật/tắt link song song với Select.</p></div>
+      <div class="decision"><span class="tag amber">Đề xuất</span><h3>Repo đã có board → dùng lại</h3><p>Project mới mở board đã có và gắn folder trên máy. Với Local có dữ liệu, chưa tự merge hay chuyển link: giữ Local, nêu rõ lựa chọn. Merge vào board có sẵn nên là một phạm vi riêng.</p></div>
+      <div class="decision"><span class="tag amber">Đề xuất</span><h3>Link sau = sync một chiều + cutover</h3><p>Giữ task ID, checklist và quan hệ card khi đích là board mới; map ID nội bộ nếu cần. Chỉ đổi sang Cloud khi hoàn tất. Không triển khai đồng bộ hai chiều ở bước này.</p></div>
+      <div class="decision"><span class="tag amber">Đề xuất</span><h3>MCP gắn theo từng project</h3><p>Local và Cloud cùng tồn tại trong một app đã đăng nhập. Chat nhận project ID, board ID, nguồn dữ liệu và repo đã chọn. Không sửa MCP toàn máy khi switch project.</p></div>
+    </div>
+    <p class="note"><strong>Khác với luồng BE-20 vừa nối:</strong> BE-20 sửa liên kết cho một cloud board đang tồn tại. Luồng mới bắt đầu từ Local hoặc tạo mới project, có thêm lựa chọn nơi lưu và chuyển dữ liệu. Nút Link hiện tại không đủ để thay thế toàn bộ luồng này.</p>
+  </section>
+
+  <footer class="foot"><p>Phạm vi tài liệu: thiết kế luồng, mô phỏng lựa chọn và đề xuất xử lý thiếu sót; chưa triển khai vào app.</p><p>Đối chiếu source hiện tại: <code>electron/main/projects/sync-to-cloud.ts</code> đã lưu cloudId để retry vào cùng board mới. Luồng “dùng lại board đã có”, ràng buộc origin và cutover MCP cần được rà soát/thiết kế thêm.</p><p>File tự chạy offline · Không có analytics, thư viện hay font ngoài · Có thể in / lưu PDF từ trình duyệt.</p></footer>
+</main>
+<script>
+  const scenario = document.getElementById('scenario');
+  const destination = document.getElementById('destination');
+  const account = document.getElementById('account');
+  const existing = document.getElementById('existing');
+  const cases = {
+    one: {hint:'~/code/app → git@github.com:acme/app.git', repos:['github.com/acme/app']},
+    none: {hint:'~/design → không có origin', repos:[]},
+    many: {hint:'~/app + ~/api + ~/notes → app, api và một folder không có origin', repos:['github.com/acme/app','github.com/acme/api']},
+    same: {hint:'~/app (SSH) + ~/app-copy (HTTPS) → cùng github.com/acme/app', repos:['github.com/acme/app']},
+    empty: {hint:'~/docs + ~/assets + ~/notes → không có origin', repos:[]},
+    error: {hint:'~/app → không đọc được origin. Chưa thể kết luận có repo hay không.', repos:[]}
+  };
+  function populate() {
+    const current = cases[scenario.value];
+    document.getElementById('folderHint').textContent = current.hint;
+    destination.replaceChildren(new Option('Local — chỉ lưu trên máy', 'local'));
+    for (const repo of current.repos) destination.add(new Option(`Link ${repo}`, repo));
+    destination.disabled = current.repos.length === 0;
+    document.getElementById('destinationHint').textContent = scenario.value === 'error'
+      ? 'Hiện lỗi + Thử lại. Chỉ tạo Local khi người dùng chủ động chọn tiếp tục Local.'
+      : current.repos.length ? 'Chọn tối đa 1 repo. Các folder khác vẫn thuộc project.' : 'Không có origin: mặc định Local; có thể link sau.';
+    render();
+  }
+  function render() {
+    const local = destination.value === 'local';
+    document.getElementById('cloudOptions').hidden = local;
+    let title, description, steps, binding, tag;
+    if (scenario.value === 'error') {
+      tag='Cần xử lý'; title='Chưa kết luận được repo';
+      description='Cho thử lại hoặc xác nhận tiếp tục Local. Không coi lỗi đọc là “không có repo”.';
+      steps=['Giữ nguyên các folder đã chọn.','Hiển thị nguyên nhân đọc thất bại.','Nếu chọn Local, không tạo cloud board.']; binding='Chưa tạo project / chưa bind board';
+    } else if (local) {
+      tag='Local'; title='Tạo board trên máy này';
+      description='Có Git origin hay không đều có thể làm việc Local. Chưa tạo board cloud.';
+      steps=['Lưu project và các folder trên máy.','Chat dùng local board ID của project.','Sidebar mời “Link repo & đồng bộ”; có thể để sau.']; binding='Project → Local board → Local MCP';
+    } else if (account.value === 'signed-out') {
+      tag='Cần đăng nhập';title='Giữ lựa chọn, mở đăng nhập';
+      description=`Repo đã chọn: ${destination.value}. Hủy đăng nhập thì trở về form, không tự đổi mode.`;
+      steps=['Đăng nhập bằng tài khoản muốn lưu board.','Tra liên kết repo sau khi có quyền truy cập.','Cho chọn Local nếu chưa muốn đăng nhập.'];binding='Chưa tạo cloud board / chưa cutover';
+    } else if (existing.value === 'existing') {
+      tag='Dùng board có sẵn';title='Mở board đã gắn repo';
+      description='Đề xuất xác nhận dùng lại board mà API trả về, rồi gắn các folder trên máy. Không tự chuyển link.';
+      steps=['Hiện tên board và repo để xác nhận.','Project mới dùng cloud board hiện có.','Nếu đang chuyển Local có card: giữ Local, không tự merge.'];binding='Project → Existing cloud board ID';
+    } else if (existing.value === 'multiple') {
+      tag='Cần chọn board';title='Chưa tự tạo hay chuyển link';
+      description='Có nhiều board truy cập được cùng liên kết repo. Người dùng phải chọn đúng board hoặc xử lý liên kết.';
+      steps=['Hiện các board được API cho phép truy cập.','Không đoán theo tên hay lấy kết quả đầu tiên.','Nếu không xử lý được, cho quay lại Local.'];binding='Chưa bind cloud board';
+    } else {
+      tag='Cloud';title='Tạo board cloud và link repo';
+      description=`Repo đại diện: ${destination.value}. Chỉ hoàn tất khi tạo board và link đều thành công.`;
+      steps=['Kiểm tra lại xung đột trước khi link.','Dùng cùng operation ID nếu retry để tránh tạo trùng.','Lưu cloud board ID cho project và MCP trong chat.'];binding='Project → New cloud board ID → Cloud MCP';
+    }
+    const badge=document.getElementById('resultTag'); badge.textContent=tag; badge.className=`tag ${local && scenario.value!=='error'?'green':tag==='Cloud'?'blue':'amber'}`;
+    document.getElementById('resultTitle').textContent=title;
+    document.getElementById('resultText').textContent=description;
+    document.getElementById('binding').textContent=binding;
+    const list=document.getElementById('resultSteps');list.replaceChildren(...steps.map(text=>{const li=document.createElement('li');li.textContent=text;return li;}));
+  }
+  scenario.addEventListener('change',populate);
+  for (const element of [destination,account,existing]) element.addEventListener('change',render);
+  populate();
+</script>
+</body>
+</html>

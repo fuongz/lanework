@@ -49,6 +49,7 @@ import type { ClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { CodexEngine } from "./codex-engine";
 import type { ConversationEngine } from "./conversation-engine";
+import { claudeMcpArgs } from "./mcp-args";
 import { OpenCodeEngine, type OpenCodeEngineDeps } from "./opencode-engine";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { buildTurns, inputText, type Line } from "./transcript";
@@ -80,6 +81,14 @@ interface EngineDeps {
    */
   trusted?: (folder: string, env: Record<string, string>) => Promise<boolean>;
   spawn?: typeof spawnChild;
+  /**
+   * The local board server's stdio shim when `project`'s conversation must
+   * use it instead of the agents' configured one (FE-121/D9), else null.
+   * Asked at every process start; absent, the configured server is used.
+   */
+  localMcp?: (project: string) => Promise<string | null>;
+  /** Whether Codex's config has its own `lanework` table (FE-121/D9). */
+  codexLanework?: () => Promise<boolean>;
   /** How long a control request is waited on. */
   controlTimeoutMs?: number;
 }
@@ -102,6 +111,7 @@ export function engineArgs(
   value: ComposerSettings,
   fresh = false,
   trusted = true,
+  localMcp: string | null = null,
 ): string[] {
   const settings = checkSettings(value);
   if (!settings || !isAgentSessionId(id)) throw new Error("Unknown settings");
@@ -130,6 +140,8 @@ export function engineArgs(
   if (settings.fast)
     args.push("--settings", JSON.stringify({ fastMode: true }));
   if (!trusted) args.push("--setting-sources", "user");
+  // FE-121/D9: this conversation's board is on this machine.
+  if (localMcp) args.push(...claudeMcpArgs(localMcp));
   return args;
 }
 
@@ -379,9 +391,10 @@ class Engine implements ConversationEngine {
     )(this.folder, cli.env).catch(() => false);
     this.untrusted = !trusted;
     this.stale = false;
+    const localMcp = (await this.deps.localMcp?.(this.project)) ?? null;
     const child = spawn(
       cli.file,
-      engineArgs(this.conversation, settings, this.fresh, trusted),
+      engineArgs(this.conversation, settings, this.fresh, trusted, localMcp),
       {
         cwd: this.folder,
         // FE-87: a lead's control endpoint, a worker's scratch; never the
@@ -1041,6 +1054,8 @@ export function createEngines(input: EngineDeps) {
     emit: deps.emit,
     remember: deps.remember,
     spawn: deps.spawn,
+    localMcp: deps.localMcp,
+    codexLanework: deps.codexLanework,
   });
   const opencodeDeps = (): OpenCodeEngineDeps => ({
     service:

@@ -990,6 +990,65 @@ export interface PickedFolder {
   name: string;
 }
 
+/**
+ * What one picked folder's git origin is (FE-121), as the create dialog reads
+ * it before the project exists.
+ *
+ * - `repo`: an origin `normalizeRepo` (local-store/ids.ts) can read, under that key.
+ * - `none`: not in a git repo, or a repo with no `origin` remote.
+ * - `unsupported`: an origin that is not `host/owner/name` (a local path).
+ * - `error`: the read failed (git missing, the folder gone, a timeout). NOT
+ *   "no repo": the dialog says so and offers Retry (FE-121/D7).
+ */
+export interface FolderOrigin {
+  /** The {@link PickedFolder} id. */
+  id: string;
+  name: string;
+  path: string;
+  status: "repo" | "none" | "unsupported" | "error";
+  /** `host/owner/name`, when `status` is `repo`. */
+  repo?: string;
+  /** The repo root git found, when it is not the folder itself. */
+  root?: string;
+  /** Why the read failed, when `status` is `error`. */
+  error?: string;
+}
+
+/**
+ * One distinct repo among the picked folders: a row of the "Where this
+ * project lives" select (FE-121).
+ */
+export interface RepoChoice {
+  /** `host/owner/name`, the value the create call names it by. */
+  repo: string;
+  /** The picked folders that are clones of it, in pick order. */
+  folderIds: string[];
+  /**
+   * The boards the signed-in account can see linked to it, or null when that
+   * was not looked up (signed out) or the lookup failed.
+   */
+  boards: { id: string; name: string }[] | null;
+}
+
+export interface OriginScan {
+  folders: FolderOrigin[];
+  repos: RepoChoice[];
+  /** Whether a repo can be linked from here: signed in to an account. */
+  canLink: boolean;
+}
+
+/**
+ * Where a new project's board lives (FE-121/D1, D5).
+ *
+ * - `local`: a board in this machine's store, signed in or not.
+ * - `repo`: the board linked to that repo — a new cloud board linked to it,
+ *   or the one board it already has. Main reads the repo's remote again from
+ *   the picked folders; the renderer never sends a URL.
+ */
+export type ProjectDestination =
+  | { kind: "local" }
+  | { kind: "repo"; repo: string };
+
 export const projectChannels = {
   load: "projects:load",
   select: "projects:select",
@@ -1033,6 +1092,8 @@ export const projectChannels = {
   folderLink: "projects:folder:link",
   folderForget: "projects:folder:forget",
   folderReveal: "projects:folder:reveal",
+  /** The git origins of picked folders, before a project exists (FE-121). */
+  folderOrigins: "projects:folder:origins",
   /** Move a local board to the cloud, in one click (FE-52/D7a). */
   syncToCloud: "projects:local:sync",
   /** Copy a cloud board to a new local one (FE-110). */
@@ -1306,6 +1367,13 @@ export interface DesktopFolderApi {
    */
   choose: () => Promise<PickedFolder[]>;
   /**
+   * The git origins of picked folders, grouped by repo (FE-121).
+   *
+   * Takes pick ids, like `create`, so it reads only folders a person chose.
+   * Read-only: no `git init`, no remote added, nothing written.
+   */
+  origins: (ids: string[]) => Promise<OriginScan>;
+  /**
    * Folders dragged in from the OS file manager, as `choose` answers them
    * (FE-106). Files and anything else that is not a folder are left out.
    *
@@ -1356,8 +1424,15 @@ export interface DesktopProjectsApi {
    * the primary: the folder every single-folder surface (the migration, "open
    * in file manager") means. Ids rather than paths, so this channel cannot be
    * asked to link a folder the user never chose.
+   *
+   * `destination` (FE-121) is where the board lives. Absent keeps the older
+   * rule: a cloud board when signed in, a local one in local mode.
    */
-  create: (name: string, folders?: string[]) => Promise<ProjectSnapshot>;
+  create: (
+    name: string,
+    folders?: string[],
+    destination?: ProjectDestination,
+  ) => Promise<ProjectSnapshot>;
   /**
    * Rename a project on the account, by CLOUD PROJECT ID.
    *

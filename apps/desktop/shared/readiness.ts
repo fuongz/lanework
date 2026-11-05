@@ -7,6 +7,8 @@ export type ReadinessLevel = "blocker" | "warning" | "info";
 /** One check of the report. */
 export type ReadinessId =
   | "folder"
+  | "remote"
+  | "board"
   | "agents-md"
   | "claude-md"
   | "claude-mcp"
@@ -30,7 +32,10 @@ export function isReadinessFix(value: unknown): value is ReadinessFix {
 }
 
 /** What a check that writes no file offers instead: a settings page. */
-export type ReadinessAction = "project-settings" | "agent-settings";
+export type ReadinessAction =
+  | "project-settings"
+  | "agent-settings"
+  | "link-board";
 
 export interface ReadinessCheck {
   id: ReadinessId;
@@ -41,6 +46,8 @@ export interface ReadinessCheck {
   detail: string;
   fix: ReadinessFix | null;
   action: ReadinessAction | null;
+  /** Names of the other boards linked to this remote. */
+  linkedTo?: string;
 }
 
 export interface ReadinessReport {
@@ -65,13 +72,20 @@ export interface ReadinessPreview {
   after: string;
 }
 
+export type ReadinessLinkResult =
+  | { done: true; report: ReadinessReport; unlinked: string[] }
+  | { done: false; linked: string };
+
 export const readinessChannels = {
   check: "readiness:check",
+  linkBoard: "readiness:link-board",
   preview: "readiness:preview",
   apply: "readiness:apply",
 } as const;
 
 export interface DesktopReadinessApi {
+  /** Main reads the origin; the renderer cannot supply a repo or path. */
+  linkBoard: (slug: string, replace: boolean) => Promise<ReadinessLinkResult>;
   check: (slug: string) => Promise<ReadinessReport>;
   preview: (slug: string, fix: ReadinessFix) => Promise<ReadinessPreview>;
   /**

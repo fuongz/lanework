@@ -13,7 +13,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState } from "react";
 import type { FolderTrust } from "#/../shared/agent-setup";
 import type { Project } from "#/../shared/projects";
-import type { ReadinessFix } from "#/../shared/readiness";
+import type { ReadinessCheck, ReadinessFix } from "#/../shared/readiness";
 import type { RepoTrust } from "#/../shared/worktree";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { ProjectTile } from "#/components/shared/projects/project-tile";
@@ -55,6 +55,7 @@ import { Input } from "#/components/ui/input";
 import { useBoard } from "#/stores/board";
 import { useReadiness, useReadinessWatch } from "#/stores/readiness";
 import { ReadinessFixDialog } from "./readiness-fix-dialog";
+import { ReadinessLinkDialog } from "./readiness-link-dialog";
 import { ReadinessList } from "./readiness-list";
 
 /** One row of the section's card: what it is on the left, the action right. */
@@ -101,6 +102,7 @@ function ReadinessSection({
 }) {
   const report = useReadiness((state) => state.reports[slug]);
   const error = useReadiness((state) => state.errors[slug]);
+  const [link, setLink] = useState<ReadinessCheck | null>(null);
   const [fix, setFix] = useState<ReadinessFix | null>(null);
   // Asked again when the folders change: linking one is the fix for the
   // first check, and its result should not wait for the next focus.
@@ -114,6 +116,7 @@ function ReadinessSection({
           <ReadinessList
             report={report}
             onFix={setFix}
+            onLink={setLink}
             className="divide-border divide-y"
           />
         ) : error ? (
@@ -126,6 +129,12 @@ function ReadinessSection({
           />
         )}
       </SettingsCard>
+      <ReadinessLinkDialog
+        key={slug}
+        slug={slug}
+        check={link}
+        onOpenChange={(open) => !open && setLink(null)}
+      />
       <ReadinessFixDialog
         slug={slug}
         fix={fix}
@@ -490,7 +499,11 @@ export function SelectedProjectSection({
         {extraRows}
       </SettingsCard>
 
-      <ReadinessSection slug={project.slug} folders={folders} />
+      <ReadinessSection
+        key={project.slug}
+        slug={project.slug}
+        folders={folders}
+      />
 
       <TrustSection slug={project.slug} />
 
