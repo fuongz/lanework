@@ -1,6 +1,7 @@
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
+  Loading03Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -14,6 +15,7 @@ import {
 } from "#/components/shared/settings/settings-page";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { UsageBar } from "#/components/shared/terminal/usage-bar";
+import { Button } from "#/components/ui/button";
 import { type UsageView, updatedText } from "#/lib/agent-usage";
 import { cn } from "#/lib/utils";
 import {
@@ -52,6 +54,7 @@ export function HarnessCard({
   account,
   now,
   rows,
+  onUpdate,
 }: {
   kind: HarnessAgent;
   /** `undefined` while the first check runs; null when it said nothing. */
@@ -61,6 +64,7 @@ export function HarnessCard({
   account: HarnessAccount | undefined;
   now: number;
   rows: SettingsRowSpec[];
+  onUpdate: () => void;
 }) {
   const name = HARNESS_NAMES[kind];
   const installed = !!info && (info.version !== null || info.path !== null);
@@ -94,39 +98,65 @@ export function HarnessCard({
           </span>
         </div>
         {info && installed && (
-          <div
-            className="text-muted-foreground flex shrink-0 items-center gap-2 text-[13px]"
-            title={INSTALLED_WITH[info.installMethod]}
-          >
-            {info.version && info.latest && !newer && (
-              <span className="flex items-center gap-1">
-                <HugeiconsIcon
-                  icon={Tick02Icon}
-                  className="text-tone-emerald size-3.5"
-                  strokeWidth={2}
-                  aria-hidden="true"
-                />
-                Up to date
-              </span>
-            )}
-            <span
-              data-testid={`harness-version-${kind}`}
-              className="bg-foreground/[0.05] text-foreground/80 rounded-md px-1.5 font-mono text-[12px] tabular-nums"
+          <div className="flex shrink-0 items-center gap-2">
+            <div
+              className="text-muted-foreground flex items-center gap-2 text-[13px]"
+              title={INSTALLED_WITH[info.installMethod]}
             >
-              {!info.version ? (
-                "Version unknown"
-              ) : newer ? (
-                <>
-                  {info.version} →{" "}
-                  <span className="text-foreground">{info.latest}</span>
-                </>
-              ) : (
-                info.version
+              {info.version && info.latest && !newer && (
+                <span className="flex items-center gap-1">
+                  <HugeiconsIcon
+                    icon={Tick02Icon}
+                    className="text-tone-emerald size-3.5"
+                    strokeWidth={2}
+                    aria-hidden="true"
+                  />
+                  Up to date
+                </span>
               )}
-            </span>
+              <span
+                data-testid={`harness-version-${kind}`}
+                className="bg-foreground/[0.05] text-foreground/80 rounded-md px-1.5 font-mono text-[12px] tabular-nums"
+              >
+                {!info.version ? (
+                  "Version unknown"
+                ) : newer ? (
+                  <>
+                    {info.version} →{" "}
+                    <span className="text-foreground">{info.latest}</span>
+                  </>
+                ) : (
+                  info.version
+                )}
+              </span>
+            </div>
+            {newer && info.updateCommand && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={info.update.state === "updating"}
+                aria-busy={info.update.state === "updating"}
+                onClick={onUpdate}
+              >
+                {info.update.state === "updating" && (
+                  <HugeiconsIcon
+                    icon={Loading03Icon}
+                    className="size-3.5 animate-spin motion-reduce:animate-none"
+                    strokeWidth={1.5}
+                    aria-hidden="true"
+                  />
+                )}
+                {info.update.state === "updating" ? "Updating…" : "Update"}
+              </Button>
+            )}
           </div>
         )}
       </div>
+      {info?.update.state === "failed" && (
+        <p role="alert" className="text-destructive px-4 py-2 text-[13px]">
+          Update failed: {info.update.message}
+        </p>
+      )}
       {info && !installed && (
         <p className="text-muted-foreground px-4 py-3 text-[13px] leading-relaxed">
           {name} is not installed, or its version could not be read.

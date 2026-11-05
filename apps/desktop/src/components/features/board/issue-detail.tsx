@@ -3,7 +3,6 @@ import {
   ArrowExpand01Icon,
   ArrowRight01Icon,
   Attachment01Icon,
-  File01Icon,
   GitBranchIcon,
   Link01Icon,
   MoreHorizontalIcon,
@@ -26,6 +25,7 @@ import {
 } from "#/components/shared/board/skeletons";
 import { ErrorState } from "#/components/shared/common/error-state";
 import { MarkdownBody } from "#/components/shared/common/markdown-body";
+import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -570,11 +570,7 @@ function AttachmentRow({
         title={file.reference}
         className="border-border hover:bg-foreground/[0.03] flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors"
       >
-        <HugeiconsIcon
-          icon={File01Icon}
-          className="text-muted-foreground size-5 shrink-0"
-          strokeWidth={1.5}
-        />
+        <FileTypeIcon path={file.name} className="size-5 shrink-0" />
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-[13px]">{file.name}</span>
           <span className="text-muted-foreground truncate text-xs">

@@ -3,9 +3,7 @@ import {
   Cancel01Icon,
   CommandLineIcon,
   CubeIcon,
-  File01Icon,
   Folder01Icon,
-  Image01Icon,
   Loading03Icon,
   SlashIcon,
   StopIcon,
@@ -59,6 +57,7 @@ import {
   type ChipEditorHandle,
   type ChipSpec,
 } from "./composer.editor";
+import { known, looked, remember } from "./composer.known";
 import { AttachMenu, ModelMenu, PermissionMenu } from "./composer.menus";
 
 export interface ComposerHandle {
@@ -132,20 +131,6 @@ const SOURCE_LABELS: Record<CommandSource, string> = {
   personal: "Personal",
   builtin: "Built-in",
 };
-
-/**
- * The `/` commands and `@` paths seen in a list, by value: what the message
- * shows as chips (FE-92, FE-93). Filled as lists arrive; a draft's token
- * nobody has listed yet is asked for once.
- */
-const known = new Map<string, Suggestion>();
-
-/** The draft tokens already asked for, found or not. */
-const looked = new Set<string>();
-
-function remember(items: Suggestion[]) {
-  for (const item of items) if (item.kind) known.set(item.value, item);
-}
 
 /** A `/` suggestion's icon: the team-lead one for `/orchestrate`. */
 function commandIcon(item: Suggestion) {
@@ -1073,21 +1058,19 @@ export const Composer = forwardRef<
                 key={file.key}
                 className="bg-foreground/[0.06] text-foreground flex h-6 max-w-60 items-center gap-1.5 rounded-md ps-2 pe-1 text-xs"
               >
-                <HugeiconsIcon
-                  icon={
-                    file.folder
-                      ? Folder01Icon
-                      : file.image
-                        ? Image01Icon
-                        : File01Icon
-                  }
-                  className={cn(
-                    "size-3.5 shrink-0",
-                    file.image ? "text-tone-teal" : "text-muted-foreground",
-                  )}
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                />
+                {file.folder ? (
+                  <HugeiconsIcon
+                    icon={Folder01Icon}
+                    className="text-muted-foreground size-3.5 shrink-0"
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <FileTypeIcon
+                    path={file.name}
+                    className="size-3.5 shrink-0"
+                  />
+                )}
                 <span className="truncate">{file.name}</span>
                 <button
                   type="button"

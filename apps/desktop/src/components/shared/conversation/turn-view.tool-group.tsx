@@ -23,6 +23,7 @@ import {
   ImageThumb,
   ImageViewerContext,
 } from "#/components/shared/common/markdown-body";
+import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import {
   ContextMenu,
@@ -84,15 +85,7 @@ function FileChip({ path }: { path: string }) {
       title={path}
       className="bg-foreground/[0.05] inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 font-mono text-[12px]"
     >
-      <HugeiconsIcon
-        icon={image ? Image01Icon : File01Icon}
-        className={cn(
-          "size-3.5 shrink-0",
-          image ? "text-tone-teal" : "text-muted-foreground",
-        )}
-        strokeWidth={1.8}
-        aria-hidden="true"
-      />
+      <FileTypeIcon path={path} className="size-3.5 shrink-0" />
       <span className="truncate">{path}</span>
     </span>
   );

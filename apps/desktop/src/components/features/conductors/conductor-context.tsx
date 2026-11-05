@@ -6,7 +6,6 @@ import {
   Add01Icon,
   AlertCircleIcon,
   Cancel01Icon,
-  File01Icon,
   Folder01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -15,13 +14,13 @@ import {
   type ContextEntry,
   LEAD_CONTEXT_FILES_MAX,
 } from "#/../shared/orchestration";
+import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { TextSkeleton } from "#/components/shared/loading/skeletons";
 import { Button } from "#/components/ui/button";
 import { ipcMessage } from "#/lib/ipc-error";
 import { cn } from "#/lib/utils";
 
 const KIND_ICONS = {
-  file: File01Icon,
   folder: Folder01Icon,
   missing: AlertCircleIcon,
 } as const;
@@ -120,17 +119,21 @@ export function ConductorContext({
                   className="hover:bg-foreground/[0.03] group flex h-8 items-center gap-2.5 rounded-md px-2"
                 >
                   {kind ? (
-                    <HugeiconsIcon
-                      icon={KIND_ICONS[kind]}
-                      className={cn(
-                        "size-3.5 shrink-0",
-                        kind === "missing"
-                          ? "text-destructive"
-                          : "text-muted-foreground",
-                      )}
-                      strokeWidth={1.5}
-                      aria-hidden="true"
-                    />
+                    kind === "file" ? (
+                      <FileTypeIcon path={path} className="size-3.5 shrink-0" />
+                    ) : (
+                      <HugeiconsIcon
+                        icon={KIND_ICONS[kind]}
+                        className={cn(
+                          "size-3.5 shrink-0",
+                          kind === "missing"
+                            ? "text-destructive"
+                            : "text-muted-foreground",
+                        )}
+                        strokeWidth={1.5}
+                        aria-hidden="true"
+                      />
+                    )
                   ) : (
                     <TextSkeleton
                       label={`Checking ${path}`}

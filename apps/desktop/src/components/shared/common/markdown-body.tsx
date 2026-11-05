@@ -1,3 +1,5 @@
+import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
   createContext,
   Fragment,
@@ -592,13 +594,7 @@ function BlockView({ block }: { block: Block }) {
       </p>
     );
   }
-  if (block.kind === "code")
-    return (
-      // Wide code scrolls inside its own box; the page never scrolls sideways.
-      <pre className="bg-foreground/[0.04] overflow-x-auto rounded-lg p-3 font-mono text-xs">
-        <code>{block.text}</code>
-      </pre>
-    );
+  if (block.kind === "code") return <CodeBlock text={block.text} />;
   if (block.kind === "list") {
     const Tag = block.ordered ? "ol" : "ul";
     return (
@@ -659,6 +655,47 @@ function BlockView({ block }: { block: Block }) {
     <p>
       <Spans spans={block.spans} />
     </p>
+  );
+}
+
+/** A fenced code block with a copy action that stays visible while it scrolls. */
+function CodeBlock({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1200);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <div className="group/code relative min-w-0">
+      {/* Wide code scrolls inside its own box; the page never scrolls sideways. */}
+      <pre className="bg-foreground/[0.04] overflow-x-auto rounded-lg p-3 pr-10 font-mono text-xs">
+        <code>{text}</code>
+      </pre>
+      <button
+        type="button"
+        aria-label={copied ? "Copied code" : "Copy code"}
+        title={copied ? "Copied" : "Copy code"}
+        onClick={() => {
+          void navigator.clipboard
+            .writeText(text)
+            .then(() => setCopied(true))
+            .catch(() => {
+              // A refused clipboard write should not claim the code was copied.
+            });
+        }}
+        className="bg-background/90 hover:bg-background text-muted-foreground hover:text-foreground focus-visible:ring-accent-brand absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-md opacity-0 shadow-sm transition-opacity group-hover/code:opacity-100 group-focus-within/code:opacity-100 focus-visible:ring-2 focus-visible:outline-none"
+      >
+        <HugeiconsIcon
+          icon={copied ? Tick02Icon : Copy01Icon}
+          className="size-4"
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      </button>
+    </div>
   );
 }
 

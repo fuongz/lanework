@@ -140,6 +140,7 @@ export function HarnessSection() {
   const checking = useHarness((state) => state.checking);
   const harnessError = useHarness((state) => state.error);
   const check = useHarness((state) => state.check);
+  const updateHarness = useHarness((state) => state.update);
   const checkedAt = harness
     .map((info) => info.checkedAt)
     .filter((at): at is string => at !== null)
@@ -578,6 +579,7 @@ export function HarnessSection() {
             account={accounts[kind]}
             now={now}
             rows={rows}
+            onUpdate={() => void updateHarness(kind)}
           />
         ),
       };

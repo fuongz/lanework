@@ -1,7 +1,7 @@
 import {
-  File01Icon,
+  CommandLineIcon,
+  CubeIcon,
   Folder01Icon,
-  Image01Icon,
   SlashIcon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
@@ -20,6 +20,7 @@ import {
   LinkedText,
   MarkdownBody,
 } from "#/components/shared/common/markdown-body";
+import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import {
   clock,
   downloadMarkdown,
@@ -30,6 +31,7 @@ import {
 } from "#/lib/conversation-format";
 import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
+import { useKnown } from "./composer.known";
 import { AssistantActions, UserActions } from "./turn-view.actions";
 import {
   LaunchedSessionCard,
@@ -99,20 +101,14 @@ function deltaAfterOpen(delta: string, before: string): string {
 }
 
 function AttachmentChip({ attachment }: { attachment: Attachment }) {
-  const image = attachment.mediaType.startsWith("image/");
   return (
     <span
       title={attachment.path ?? attachment.name}
       className="bg-foreground/[0.06] inline-flex max-w-60 items-center gap-1.5 rounded-md px-2 py-1 text-xs"
     >
-      <HugeiconsIcon
-        icon={image ? Image01Icon : File01Icon}
-        className={cn(
-          "size-3.5 shrink-0",
-          image ? "text-tone-teal" : "text-muted-foreground",
-        )}
-        strokeWidth={1.8}
-        aria-hidden="true"
+      <FileTypeIcon
+        path={attachment.path ?? attachment.name}
+        className="size-3.5 shrink-0"
       />
       <span className="truncate">{attachment.name}</span>
     </span>
@@ -155,8 +151,79 @@ const COMMAND_LABELS: Record<string, string> = {
   "/orchestrate": "Orchestrate",
 };
 
-function PromptText({ text }: { text: string }) {
+/**
+ * One `/command` or `@mention` of a prompt. A command a list has named shows
+ * as the composer's chip did: a skill its cube and name, in the accent.
+ */
+function PromptToken({ token }: { token: string }) {
   const conductors = useContext(ConductorNames);
+  const command = token.startsWith("/");
+  const listed = useKnown(command ? token : "");
+  const named = command ? "" : mentionOf(token);
+  const conductor = command ? undefined : conductors.get(named);
+  const path = !command && !conductor && /[./]/.test(named);
+  const skill = listed?.kind === "skill";
+  return (
+    <span
+      title={
+        command
+          ? listed?.detail
+            ? `${token}\n${listed.detail}`
+            : token
+          : `@${named}`
+      }
+      className={cn(
+        "mx-px inline-flex items-start gap-1 align-baseline font-medium",
+        token === "/orchestrate"
+          ? "text-tone-violet"
+          : conductor
+            ? "text-tone-teal"
+            : command && !skill
+              ? "text-muted-foreground"
+              : "text-primary",
+      )}
+    >
+      {(command || path || conductor) &&
+        (path && !/\/$/.test(named) ? (
+          <FileTypeIcon
+            path={named}
+            inherit
+            // The first line's middle, not the badge's: a long name wraps.
+            className="mt-[0.3em] size-3.5 shrink-0"
+          />
+        ) : (
+          <HugeiconsIcon
+            icon={
+              conductor
+                ? leadIcon(conductor.icon)
+                : token === "/orchestrate"
+                  ? UserGroupIcon
+                  : skill
+                    ? CubeIcon
+                    : listed?.kind === "builtin"
+                      ? CommandLineIcon
+                      : command
+                        ? SlashIcon
+                        : Folder01Icon
+            }
+            // The first line's middle, not the badge's: a long name wraps.
+            className="mt-[0.3em] size-3.5 shrink-0"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        ))}
+      {conductor
+        ? conductor.name
+        : command
+          ? (COMMAND_LABELS[token] ?? listed?.label ?? token)
+          : path
+            ? fileName(named)
+            : token}
+    </span>
+  );
+}
+
+function PromptText({ text }: { text: string }) {
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const match of text.matchAll(PROMPT_TOKEN)) {
@@ -170,53 +237,7 @@ function PromptText({ text }: { text: string }) {
           link={chatLink}
         />,
       );
-    const command = token.startsWith("/");
-    const named = command ? "" : mentionOf(token);
-    const conductor = command ? undefined : conductors.get(named);
-    const path = !command && !conductor && /[./]/.test(named);
-    parts.push(
-      <span
-        key={`c${at}`}
-        title={command ? token : `@${named}`}
-        className={cn(
-          "mx-px inline-flex items-start gap-1 align-baseline font-medium",
-          token === "/orchestrate"
-            ? "text-tone-violet"
-            : conductor
-              ? "text-tone-teal"
-              : command
-                ? "text-muted-foreground"
-                : "text-primary",
-        )}
-      >
-        {(command || path || conductor) && (
-          <HugeiconsIcon
-            icon={
-              conductor
-                ? leadIcon(conductor.icon)
-                : token === "/orchestrate"
-                  ? UserGroupIcon
-                  : command
-                    ? SlashIcon
-                    : /\/$/.test(named)
-                      ? Folder01Icon
-                      : File01Icon
-            }
-            // The first line's middle, not the badge's: a long name wraps.
-            className="mt-[0.3em] size-3.5 shrink-0"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        )}
-        {conductor
-          ? conductor.name
-          : command
-            ? (COMMAND_LABELS[token] ?? token)
-            : path
-              ? fileName(named)
-              : token}
-      </span>,
-    );
+    parts.push(<PromptToken key={`c${at}`} token={token} />);
     last = at + token.length;
   }
   if (last === 0) return <LinkedText source={text} link={chatLink} />;
