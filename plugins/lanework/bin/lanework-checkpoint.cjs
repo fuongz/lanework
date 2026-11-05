@@ -52,10 +52,10 @@ __export(exports_lanework_checkpoint, {
 });
 module.exports = __toCommonJS(exports_lanework_checkpoint);
 var import_node_child_process3 = require("node:child_process");
-var import_node_crypto4 = require("node:crypto");
-var import_node_fs5 = require("node:fs");
+var import_node_crypto5 = require("node:crypto");
+var import_node_fs6 = require("node:fs");
 var import_node_os6 = require("node:os");
-var import_node_path6 = require("node:path");
+var import_node_path7 = require("node:path");
 // packages/protocol/src/auth.ts
 var LOOPBACK_CALLBACK_PATH = "/oauth/callback";
 // packages/protocol/src/boards.ts
@@ -2965,10 +2965,73 @@ function mcp() {
   return runLocalMcpServer();
 }
 
-// apps/desktop/electron/hook/local-board.ts
+// apps/desktop/electron/hook/compaction.ts
+var import_node_crypto4 = require("node:crypto");
 var import_node_fs4 = require("node:fs");
+var import_node_path6 = require("node:path");
+var COMPACT_WINDOW_MS = 15 * 60 * 1000;
+var REMINDABLE_ID = /^[A-Z][A-Z0-9]{0,9}-\d{1,6}$/;
+function isRemindableTaskId(taskId) {
+  return REMINDABLE_ID.test(taskId);
+}
+function compactReminder(taskId) {
+  return `Lanework: the context was just compacted while you were working ${taskId}. Before continuing, call the lanework \`checkpoint\` tool for card ${taskId} with \`next_step\` (and a \`summary\` of where the work stands).`;
+}
+function sessionStartOutput(context) {
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      additionalContext: context
+    }
+  });
+}
+function markerFile(stateDir, sessionId) {
+  const id = import_node_crypto4.createHash("sha256").update(sessionId).digest("hex");
+  return import_node_path6.join(stateDir, `compact-${id}.json`);
+}
+function writeMarker(file, marker) {
+  import_node_fs4.writeFileSync(file, JSON.stringify(marker), { mode: 384 });
+}
+function markCompaction(stateDir, sessionId) {
+  import_node_fs4.mkdirSync(stateDir, { recursive: true, mode: 448 });
+  writeMarker(markerFile(stateDir, sessionId), { at: Date.now() });
+}
+function noteCompactionCard(stateDir, sessionId, taskId) {
+  const file = markerFile(stateDir, sessionId);
+  let marker;
+  try {
+    marker = JSON.parse(import_node_fs4.readFileSync(file, "utf8"));
+  } catch {
+    return;
+  }
+  writeMarker(file, { ...marker, taskId });
+}
+function takeCompactionMarker(stateDir, sessionId) {
+  const file = markerFile(stateDir, sessionId);
+  const taken = `${file}.${process.pid}.taken`;
+  try {
+    import_node_fs4.renameSync(file, taken);
+  } catch {
+    return null;
+  }
+  try {
+    const marker = JSON.parse(import_node_fs4.readFileSync(taken, "utf8"));
+    if (typeof marker.at !== "number")
+      return null;
+    if (Date.now() - marker.at > COMPACT_WINDOW_MS)
+      return null;
+    return marker;
+  } catch {
+    return null;
+  } finally {
+    import_node_fs4.rmSync(taken, { force: true });
+  }
+}
+
+// apps/desktop/electron/hook/local-board.ts
+var import_node_fs5 = require("node:fs");
 function localBoardFor(remote, path = localStorePath()) {
-  if (!import_node_fs4.existsSync(path))
+  if (!import_node_fs5.existsSync(path))
     return null;
   const store = openLocalStore({ path });
   try {
@@ -3090,7 +3153,7 @@ function hookConfig() {
   if (!file)
     return {};
   try {
-    return JSON.parse(import_node_fs5.readFileSync(file, "utf8"));
+    return JSON.parse(import_node_fs6.readFileSync(file, "utf8"));
   } catch {
     return {};
   }
@@ -3100,22 +3163,22 @@ var PUSH_WIP = ARGS.flags.has("push-wip") || HOOK_CONFIG.pushWip === true;
 var PUSH_WIP_UNTRACKED = ARGS.flags.has("push-wip-untracked") || HOOK_CONFIG.pushWipUntracked === true;
 var AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : ARGS.flags.get("agent") === "opencode" ? "opencode" : "claude-code";
 var AGENT_NAME = AGENT === "codex" ? "Codex" : AGENT === "opencode" ? "OpenCode" : "Claude Code";
-var STATE_DIR = import_node_path6.join(import_node_os6.homedir(), ".cache", "lanework", "checkpoint");
-var LOG = import_node_path6.join(STATE_DIR, "hook.log");
+var STATE_DIR = import_node_path7.join(import_node_os6.homedir(), ".cache", "lanework", "checkpoint");
+var LOG = import_node_path7.join(STATE_DIR, "hook.log");
 var THIN_MS = 60000;
 var PUSH_TIMEOUT_MS = 30000;
 var HTTP_TIMEOUT_MS = 1e4;
 function log(message) {
   try {
-    import_node_fs5.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-    if (import_node_fs5.existsSync(LOG)) {
-      const { size, mode } = import_node_fs5.statSync(LOG);
+    import_node_fs6.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
+    if (import_node_fs6.existsSync(LOG)) {
+      const { size, mode } = import_node_fs6.statSync(LOG);
       if (size > 512 * 1024)
-        import_node_fs5.rmSync(LOG);
+        import_node_fs6.rmSync(LOG);
       else if (mode & 63)
-        import_node_fs5.chmodSync(LOG, 384);
+        import_node_fs6.chmodSync(LOG, 384);
     }
-    import_node_fs5.appendFileSync(LOG, `${new Date().toISOString()} ${redact(message)}
+    import_node_fs6.appendFileSync(LOG, `${new Date().toISOString()} ${redact(message)}
 `, {
       mode: 384
     });
@@ -3137,27 +3200,27 @@ function tryGit(cwd, args) {
     return null;
   }
 }
-var sha256 = (s) => import_node_crypto4.createHash("sha256").update(s).digest("hex");
+var sha256 = (s) => import_node_crypto5.createHash("sha256").update(s).digest("hex");
 function clip2(s, max) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 function readJson(file, fallback) {
   try {
-    return JSON.parse(import_node_fs5.readFileSync(file, "utf8"));
+    return JSON.parse(import_node_fs6.readFileSync(file, "utf8"));
   } catch {
     return fallback;
   }
 }
 function writeJson(file, value) {
-  import_node_fs5.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-  import_node_fs5.writeFileSync(file, JSON.stringify(value), { mode: 384 });
+  import_node_fs6.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
+  import_node_fs6.writeFileSync(file, JSON.stringify(value), { mode: 384 });
 }
 function repoPath(path, root) {
   const trimmed = path.trim();
   if (!trimmed)
     return null;
-  const rel = import_node_path6.isAbsolute(trimmed) ? import_node_path6.relative(root, trimmed) : trimmed;
-  if (!rel || import_node_path6.isAbsolute(rel) || rel.startsWith("..") || rel.startsWith("~"))
+  const rel = import_node_path7.isAbsolute(trimmed) ? import_node_path7.relative(root, trimmed) : trimmed;
+  if (!rel || import_node_path7.isAbsolute(rel) || rel.startsWith("..") || rel.startsWith("~"))
     return null;
   return rel;
 }
@@ -3292,24 +3355,24 @@ function unquote(literal) {
 function findCodexRollout(sessionId) {
   if (!sessionId)
     return null;
-  const base = import_node_path6.join(process.env.CODEX_HOME || import_node_path6.join(import_node_os6.homedir(), ".codex"), "sessions");
+  const base = import_node_path7.join(process.env.CODEX_HOME || import_node_path7.join(import_node_os6.homedir(), ".codex"), "sessions");
   const ls = (dir) => {
     try {
-      return import_node_fs5.readdirSync(dir).sort().reverse();
+      return import_node_fs6.readdirSync(dir).sort().reverse();
     } catch {
       return [];
     }
   };
   let days = 0;
   for (const year of ls(base))
-    for (const month of ls(import_node_path6.join(base, year)))
-      for (const day of ls(import_node_path6.join(base, year, month))) {
+    for (const month of ls(import_node_path7.join(base, year)))
+      for (const day of ls(import_node_path7.join(base, year, month))) {
         if (++days > 3)
           return null;
-        const dir = import_node_path6.join(base, year, month, day);
+        const dir = import_node_path7.join(base, year, month, day);
         const hit = ls(dir).find((name) => name.endsWith(`${sessionId}.jsonl`));
         if (hit)
-          return import_node_path6.join(dir, hit);
+          return import_node_path7.join(dir, hit);
       }
   return null;
 }
@@ -3440,8 +3503,8 @@ function opencodeDataDir() {
   if (process.env.OPENCODE_DATA_DIR)
     return process.env.OPENCODE_DATA_DIR;
   if (process.env.XDG_DATA_HOME)
-    return import_node_path6.join(process.env.XDG_DATA_HOME, "opencode");
-  return import_node_path6.join(import_node_os6.homedir(), ".local", "share", "opencode");
+    return import_node_path7.join(process.env.XDG_DATA_HOME, "opencode");
+  return import_node_path7.join(import_node_os6.homedir(), ".local", "share", "opencode");
 }
 var asObject = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 function parseData(raw) {
@@ -3531,8 +3594,8 @@ function opencodeV1Messages(db, sessionId) {
   }
   return messages;
 }
-function readOpencodeSession(sessionId, file = import_node_path6.join(opencodeDataDir(), "opencode.db")) {
-  if (!import_node_fs5.existsSync(file))
+function readOpencodeSession(sessionId, file = import_node_path7.join(opencodeDataDir(), "opencode.db")) {
+  if (!import_node_fs6.existsSync(file))
     return null;
   const sqlite = process.getBuiltinModule?.("node:sqlite");
   if (!sqlite) {
@@ -3666,7 +3729,7 @@ function stripUserinfo(remote) {
   return value;
 }
 var BOARD_TTL_MS = 60 * 60 * 1000;
-var BOARDS_FILE = import_node_path6.join(STATE_DIR, "boards.json");
+var BOARDS_FILE = import_node_path7.join(STATE_DIR, "boards.json");
 function boardKey(remote, secret) {
   return [API, sha256(secret).slice(0, 12), remote].join(" ");
 }
@@ -3722,7 +3785,7 @@ var SECRET_FILES = [
   /^(?:\.envrc|\.npmrc|\.pypirc|\.netrc|_netrc|\.git-credentials|\.htpasswd|\.pgpass|\.dockercfg|\.s3cfg|\.boto)$/
 ];
 function isSecretFile(path) {
-  const name = import_node_path6.basename(path).toLowerCase();
+  const name = import_node_path7.basename(path).toLowerCase();
   return SECRET_FILES.some((pattern) => pattern.test(name));
 }
 function refusal(root, env) {
@@ -3758,7 +3821,7 @@ function refusal(root, env) {
   return null;
 }
 function snapshot(root, taskId, untracked = PUSH_WIP_UNTRACKED) {
-  const index = import_node_path6.resolve(root, git(root, ["rev-parse", "--git-path", `lanework-wip-${process.pid}.index`]));
+  const index = import_node_path7.resolve(root, git(root, ["rev-parse", "--git-path", `lanework-wip-${process.pid}.index`]));
   try {
     const env = { GIT_INDEX_FILE: index };
     git(root, ["read-tree", "HEAD"], env);
@@ -3799,14 +3862,18 @@ function snapshot(root, taskId, untracked = PUSH_WIP_UNTRACKED) {
       return { wipRef: null, wipSha: sha };
     }
   } finally {
-    import_node_fs5.rmSync(index, { force: true });
+    import_node_fs6.rmSync(index, { force: true });
   }
 }
+var compactionOf = (input) => input.hook_event_name !== "PreCompact" ? null : input.trigger === "manual" || input.trigger === "auto" ? input.trigger : "unknown";
 function buildBody(d, extra) {
   const heading = d.replyIsPrevious ? `${AGENT_NAME}'s last message, from the turn BEFORE the request below (it stopped before replying to that one):` : `${AGENT_NAME}'s last message before it stopped:`;
-  const summary = d.lastReply ? `${heading}
+  const body = d.lastReply ? `${heading}
 
 ${clip2(redact(d.lastReply), 5000)}` : `${AGENT_NAME} stopped before writing any reply in this session.`;
+  const summary = extra.compaction ? `[pre-compact, ${extra.compaction}] ${AGENT_NAME} was about to compact its context: this is where the work stood just before. Its next step is not known here; the agent is reminded to record one after the compaction.
+
+${body}` : body;
   return {
     summary,
     request: d.request ? clip2(redact(d.request), 2000) : null,
@@ -3820,7 +3887,7 @@ ${clip2(redact(d.lastReply), 5000)}` : `${AGENT_NAME} stopped before writing any
 }
 async function work(inputFile) {
   const input = readJson(inputFile, {});
-  import_node_fs5.rmSync(inputFile, { force: true });
+  import_node_fs6.rmSync(inputFile, { force: true });
   if (AGENT === "opencode")
     return workOpencode(input);
   if (!input.cwd)
@@ -3833,8 +3900,11 @@ async function work(inputFile) {
   if (!root || !origin)
     return;
   const remote = stripUserinfo(origin);
-  const transcript = import_node_fs5.readFileSync(transcriptPath, "utf8");
+  const transcript = import_node_fs6.readFileSync(transcriptPath, "utf8");
   const d = AGENT === "codex" ? digestCodex(transcript, root, input.last_assistant_message ?? null) : digest(transcript, root);
+  const compaction = compactionOf(input);
+  if (compaction && input.session_id)
+    noteCompactionCard(STATE_DIR, input.session_id, d.taskId);
   if (!d.taskId) {
     log(`session ${input.session_id}: no card in the transcript; nothing sent`);
     return;
@@ -3846,7 +3916,9 @@ async function work(inputFile) {
     log(`local board unavailable: ${String(error)}`);
   }
   try {
-    await checkpointTo(local, { ...d, taskId: d.taskId }, input, root, remote);
+    await checkpointTo(local, { ...d, taskId: d.taskId }, input, root, remote, {
+      compaction
+    });
   } finally {
     local?.store.close();
   }
@@ -3884,7 +3956,7 @@ async function workOpencode(input) {
     local?.store.close();
   }
 }
-async function checkpointTo(local, d, input, root, remote) {
+async function checkpointTo(local, d, input, root, remote, options = {}) {
   const secret = local ? null : readSecret2();
   if (!local && !secret) {
     log("no credential; turn the hook on in the Lanework app (Settings → Harness)");
@@ -3894,9 +3966,9 @@ async function checkpointTo(local, d, input, root, remote) {
   const status = tryGit(root, ["status", "--porcelain"]) ?? "";
   const diff = tryGit(root, ["diff", "HEAD"]) ?? "";
   const code = sha256([d.taskId, head, status, sha256(diff)].join("\x00"));
-  const stateFile = import_node_path6.join(STATE_DIR, `session-${sha256(input.session_id ?? "")}.json`);
+  const stateFile = import_node_path7.join(STATE_DIR, `session-${sha256(input.session_id ?? "")}.json`);
   const last = readJson(stateFile, null);
-  if (last && last.code === code && Date.now() - last.at < THIN_MS)
+  if (!options.compaction && last && last.code === code && Date.now() - last.at < THIN_MS)
     return;
   const boardId = local ? null : await boardFor(remote, secret);
   if (!local && !boardId)
@@ -3912,7 +3984,8 @@ async function checkpointTo(local, d, input, root, remote) {
       wipRef: wip.wipRef,
       wipSha: wip.wipSha,
       diffStat: clip2(tryGit(root, ["diff", "HEAD", "--stat"]) ?? "", 3000) || null
-    }
+    },
+    compaction: options.compaction ?? null
   });
   if (local) {
     try {
@@ -3942,6 +4015,36 @@ async function checkpointTo(local, d, input, root, remote) {
     taskId: d.taskId
   };
   writeJson(stateFile, state);
+  if (options.compaction)
+    log(`pre-compact checkpoint for ${d.taskId} (${options.compaction})`);
+}
+function boundTaskId(input) {
+  if (!input.cwd || AGENT === "opencode")
+    return null;
+  const transcriptPath = input.transcript_path || (AGENT === "codex" ? findCodexRollout(input.session_id) : null);
+  if (!transcriptPath)
+    return null;
+  const root = tryGit(input.cwd, ["rev-parse", "--show-toplevel"]);
+  if (!root || !tryGit(root, ["remote", "get-url", "origin"]))
+    return null;
+  const transcript = import_node_fs6.readFileSync(transcriptPath, "utf8");
+  return (AGENT === "codex" ? digestCodex(transcript, root, null) : digest(transcript, root)).taskId;
+}
+function remindAfterCompaction(input) {
+  if (input.source !== "compact" || !input.session_id)
+    return;
+  const marker = takeCompactionMarker(STATE_DIR, input.session_id);
+  if (!marker)
+    return;
+  const taskId = marker.taskId === undefined ? boundTaskId(input) : marker.taskId;
+  if (!taskId)
+    return;
+  if (!isRemindableTaskId(taskId)) {
+    log(`after compaction: ${clip2(taskId, 40)} is not a task id; no reminder`);
+    return;
+  }
+  process.stdout.write(sessionStartOutput(compactReminder(taskId)));
+  log(`after compaction: reminded the agent to checkpoint ${taskId}`);
 }
 async function setup(token) {
   if (!token?.startsWith(TOKEN_PREFIXES.registration)) {
@@ -4023,10 +4126,20 @@ async function main() {
   if (ARGS.flags.has("plugin") && desktopHookInstalled())
     return;
   try {
-    const stdin = import_node_fs5.readFileSync(0, "utf8");
-    import_node_fs5.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-    const file = import_node_path6.join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
-    import_node_fs5.writeFileSync(file, stdin, { mode: 384 });
+    const stdin = import_node_fs6.readFileSync(0, "utf8");
+    let input = {};
+    try {
+      input = JSON.parse(stdin);
+    } catch {}
+    if (input.hook_event_name === "SessionStart") {
+      remindAfterCompaction(input);
+      return;
+    }
+    if (input.hook_event_name === "PreCompact" && input.session_id)
+      markCompaction(STATE_DIR, input.session_id);
+    import_node_fs6.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
+    const file = import_node_path7.join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
+    import_node_fs6.writeFileSync(file, stdin, { mode: 384 });
     const flags = process.argv.slice(2).filter((a) => !ARGS.positional.includes(a));
     import_node_child_process3.spawn(process.execPath, [SELF, ...flags, "worker", file], {
       detached: true,
@@ -4036,5 +4149,5 @@ async function main() {
     log(`hook failed: ${String(error)}`);
   }
 }
-if (import_node_path6.basename(SELF).startsWith("lanework-checkpoint"))
+if (import_node_path7.basename(SELF).startsWith("lanework-checkpoint"))
   main();

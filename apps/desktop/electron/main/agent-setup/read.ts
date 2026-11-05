@@ -434,6 +434,9 @@ function hookDetail(type: string, hook: Json): string | null {
   return value ? shownText(value, 400) : null;
 }
 
+/** The events the lanework plugin's `hooks.json` runs its hook on. */
+const PLUGIN_HOOK_EVENTS = new Set(["Stop", "PreCompact", "SessionStart"]);
+
 /**
  * The hooks of one `{ <Event>: [{ matcher?, hooks: [...] }] }` map.
  *
@@ -473,10 +476,12 @@ function hooksFrom(
           type,
           detail: hookDetail(type, hook),
           // FE-40/D5: the app's hook names its script; the plugin's (INF-03)
-          // is the Stop hook of the lanework plugin.
+          // is a hook of the lanework plugin: Stop, and since FE-117
+          // PreCompact and SessionStart (compact).
           lanework:
             (command?.includes(HOOK_MARKER) ?? false) ||
-            (base.plugin?.startsWith("lanework@") === true && event === "Stop"),
+            (base.plugin?.startsWith("lanework@") === true &&
+              PLUGIN_HOOK_EVENTS.has(event)),
         });
       });
     });

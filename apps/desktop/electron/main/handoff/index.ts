@@ -53,9 +53,12 @@ import { agentHomeDir } from "../test-seams";
 import {
   buildHookCommand,
   buildShim,
+  CLAUDE_HOOK_EVENTS,
+  CODEX_HOOK_EVENTS,
   claudeSettingsPath,
   findHook,
   findHookPosition,
+  hasHookEvents,
   readSettings,
   updateSettings,
   withHook,
@@ -114,6 +117,14 @@ type HookConfig = {
   pushWip: boolean;
   pushWipUntracked: boolean;
   installed: Partial<Record<HookAgent, boolean>>;
+  /**
+   * Claude Code's entry was brought up to `CLAUDE_HOOK_EVENTS` (FE-117) once.
+   *
+   * A launch adds the compaction events to an older Stop-only install, but
+   * only the first time: one the user removes afterwards stays removed
+   * (FE-29/D8).
+   */
+  compactEvents: boolean;
 };
 
 async function readConfig(): Promise<HookConfig> {
@@ -125,6 +136,7 @@ async function readConfig(): Promise<HookConfig> {
     pushWipUntracked: raw.pushWipUntracked === true,
     installed:
       raw.installed && typeof raw.installed === "object" ? raw.installed : {},
+    compactEvents: raw.compactEvents === true,
   };
 }
 
@@ -184,6 +196,18 @@ async function writeShim(record: MachineRecord | null): Promise<void> {
 
 const commandFor = (agent: Exclude<HookAgent, "opencode">) =>
   buildHookCommand({ shimPath: shimPath(), agent });
+
+/** The events our command runs on in this CLI's settings (FE-117). */
+const eventsFor = (agent: Exclude<HookAgent, "opencode">) =>
+  agent === "codex" ? CODEX_HOOK_EVENTS : CLAUDE_HOOK_EVENTS;
+
+/** Whether this CLI's settings already hold every entry we would write. */
+const complete = (
+  agent: Exclude<HookAgent, "opencode">,
+  settings: Parameters<typeof findHook>[0],
+) =>
+  findHook(settings) === commandFor(agent) &&
+  hasHookEvents(settings, commandFor(agent), eventsFor(agent));
 
 /** The newest session the hook recorded, from its own state files. */
 async function lastCheckpoint(): Promise<HandoffStatus["last"]> {
@@ -290,20 +314,21 @@ async function enable(agent: HookAgent): Promise<HandoffStatus> {
     );
   if (record) await writeHookSecret(resolveApi(record.apiUrl), record.secret);
   await writeShim(record);
-  // NOTE: Rewritten only when the command differs. For Codex a new command
-  // needs a new approval, so re-enabling an entry that is already right must
-  // leave the file, and the approval, as they are.
+  // NOTE: Rewritten only when an entry is missing or its command differs.
+  // For Codex a new command needs a new approval, so re-enabling an entry
+  // that is already right must leave the file, and the approval, as they are.
   await updateSettings(
     (settings) =>
-      findHook(settings) === commandFor(agent)
+      complete(agent, settings)
         ? null
-        : withHook(settings, commandFor(agent)),
+        : withHook(settings, commandFor(agent), eventsFor(agent)),
     path,
   );
   const config = await readConfig();
   await writeConfig({
     ...config,
     installed: { ...config.installed, [agent]: true },
+    ...(agent === "claude-code" ? { compactEvents: true } : {}),
   });
   return handoffStatus();
 }
@@ -484,6 +509,7 @@ export async function syncHandoff(): Promise<void> {
   if (currentShimRefusal()) return;
   const config = await readConfig();
   const present: HookAgent[] = [];
+  let compactEvents = config.compactEvents;
   for (const agent of ["claude-code", "codex"] as const) {
     const path = settingsPathFor(agent);
     const read = await readSettings(path);
@@ -504,10 +530,23 @@ export async function syncHandoff(): Promise<void> {
       await updateSettings(
         (settings) =>
           findHook(settings)?.includes("ELECTRON_RUN_AS_NODE=1")
-            ? withHook(settings, commandFor(agent))
+            ? withHook(settings, commandFor(agent), eventsFor(agent))
             : null,
         path,
       );
+    // FE-117: an install from before the compaction events gets them, once.
+    // NOTE: Only on our own Stop entry, and never again after: an entry the
+    // user removes later stays removed (FE-29/D8).
+    else if (agent === "claude-code" && !compactEvents) {
+      await updateSettings(
+        (settings) =>
+          findHook(settings) !== commandFor(agent) || complete(agent, settings)
+            ? null
+            : withHook(settings, commandFor(agent), eventsFor(agent)),
+        path,
+      );
+    }
+    if (agent === "claude-code") compactEvents = true;
   }
   // OpenCode's plugin (FE-104): ours only when it runs this app home's shim;
   // one that runs another home's belongs to that install. Rewritten when an
@@ -526,7 +565,7 @@ export async function syncHandoff(): Promise<void> {
   await writeShim(record);
   const installed = { ...config.installed };
   for (const agent of present) installed[agent] = true;
-  await writeConfig({ ...config, installed });
+  await writeConfig({ ...config, installed, compactEvents });
   if (!record) return;
   const account = resolveApi(record.apiUrl);
   if ((await readHookSecret(account)) !== record.secret)

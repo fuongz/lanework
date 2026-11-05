@@ -23,6 +23,10 @@
 // checkpoint written there, with no credential and no network (FE-52/D9).
 // See `local-board.ts`.
 //
+// On Claude Code it also runs on `PreCompact` (a checkpoint marked
+// pre-compact) and on `SessionStart` with source `compact` (one reminder to
+// the model to state its next step), FE-117: see `compaction.ts`.
+//
 // OpenCode has no Stop hook: the app writes a plugin into its config folder
 // that runs this hook with `--agent opencode` on `session.idle`, handing it
 // `{ session_id, cwd }` on stdin. Its transcript is read, read-only, from
@@ -76,6 +80,14 @@ import {
   status,
   waitForDeviceLogin,
 } from "./cli";
+import {
+  compactReminder,
+  isRemindableTaskId,
+  markCompaction,
+  noteCompactionCard,
+  sessionStartOutput,
+  takeCompactionMarker,
+} from "./compaction";
 import {
   credentialLocation,
   readSecret as readCredential,
@@ -1234,7 +1246,23 @@ type HookInput = {
   cwd?: string;
   /** Codex only: the turn's final answer, no transcript needed. */
   last_assistant_message?: string | null;
+  /** `Stop`, `PreCompact` or `SessionStart`; OpenCode's plugin sends none. */
+  hook_event_name?: string;
+  /** PreCompact: `manual` (`/compact`) or `auto`. */
+  trigger?: string;
+  /** SessionStart: `startup`, `resume`, `clear`, `compact` or `fork`. */
+  source?: string;
 };
+
+/** How a PreCompact checkpoint names its trigger in the summary. */
+type Compaction = "manual" | "auto" | "unknown";
+
+const compactionOf = (input: HookInput): Compaction | null =>
+  input.hook_event_name !== "PreCompact"
+    ? null
+    : input.trigger === "manual" || input.trigger === "auto"
+      ? input.trigger
+      : "unknown";
 
 type Wip = { wipRef: string | null; wipSha: string | null };
 type SessionState = {
@@ -1258,14 +1286,21 @@ export function buildBody(
     host: string;
     session: string | null;
     git: Partial<CheckpointGit>;
+    /** Set for a PreCompact checkpoint (FE-117). */
+    compaction?: Compaction | null;
   },
 ): CheckpointRequest {
   const heading = d.replyIsPrevious
     ? `${AGENT_NAME}'s last message, from the turn BEFORE the request below (it stopped before replying to that one):`
     : `${AGENT_NAME}'s last message before it stopped:`;
-  const summary = d.lastReply
+  const body = d.lastReply
     ? `${heading}\n\n${clip(redact(d.lastReply), 5000)}`
     : `${AGENT_NAME} stopped before writing any reply in this session.`;
+  // NOTE: The marker goes in the summary, not a new field: the server's
+  // checkpoint format stays as it is (FE-117/D1).
+  const summary = extra.compaction
+    ? `[pre-compact, ${extra.compaction}] ${AGENT_NAME} was about to compact its context: this is where the work stood just before. Its next step is not known here; the agent is reminded to record one after the compaction.\n\n${body}`
+    : body;
   return {
     summary,
     request: d.request ? clip(redact(d.request), 2000) : null,
@@ -1299,6 +1334,10 @@ async function work(inputFile: string): Promise<void> {
     AGENT === "codex"
       ? digestCodex(transcript, root, input.last_assistant_message ?? null)
       : digest(transcript, root);
+  const compaction = compactionOf(input);
+  // The SessionStart after this compaction reminds only for a card (FE-117/D4).
+  if (compaction && input.session_id)
+    noteCompactionCard(STATE_DIR, input.session_id, d.taskId);
   if (!d.taskId) {
     log(`session ${input.session_id}: no card in the transcript; nothing sent`);
     return;
@@ -1314,7 +1353,9 @@ async function work(inputFile: string): Promise<void> {
     log(`local board unavailable: ${String(error)}`);
   }
   try {
-    await checkpointTo(local, { ...d, taskId: d.taskId }, input, root, remote);
+    await checkpointTo(local, { ...d, taskId: d.taskId }, input, root, remote, {
+      compaction,
+    });
   } finally {
     local?.store.close();
   }
@@ -1359,6 +1400,7 @@ async function checkpointTo(
   input: HookInput,
   root: string,
   remote: string,
+  options: { compaction?: Compaction | null } = {},
 ): Promise<void> {
   const secret = local ? null : readSecret();
   if (!local && !secret) {
@@ -1379,7 +1421,16 @@ async function checkpointTo(
     `session-${sha256(input.session_id ?? "")}.json`,
   );
   const last = readJson<SessionState | null>(stateFile, null);
-  if (last && last.code === code && Date.now() - last.at < THIN_MS) return;
+  // NOTE: Never thinned before a compaction (FE-117/D1). A Stop a few seconds
+  // earlier usually left the same code, and the point is a baton on the card
+  // from right before the agent loses its details.
+  if (
+    !options.compaction &&
+    last &&
+    last.code === code &&
+    Date.now() - last.at < THIN_MS
+  )
+    return;
 
   const boardId = local ? null : await boardFor(remote, secret as string);
   if (!local && !boardId) return;
@@ -1401,6 +1452,7 @@ async function checkpointTo(
       diffStat:
         clip(tryGit(root, ["diff", "HEAD", "--stat"]) ?? "", 3000) || null,
     },
+    compaction: options.compaction ?? null,
   });
 
   if (local) {
@@ -1435,6 +1487,54 @@ async function checkpointTo(
     taskId: d.taskId,
   };
   writeJson(stateFile, state);
+  // What the lead looks for in hook.log after a `/compact` (FE-117).
+  if (options.compaction)
+    log(`pre-compact checkpoint for ${d.taskId} (${options.compaction})`);
+}
+
+// ── Compaction (FE-117) ─────────────────────────────────────────────────────
+
+/**
+ * The card this session is bound to, read now: the Stop hook's resolution.
+ *
+ * For a SessionStart that came before PreCompact's worker said. Null for a
+ * folder that is not a git repo with an origin, as on Stop.
+ */
+function boundTaskId(input: HookInput): string | null {
+  if (!input.cwd || AGENT === "opencode") return null;
+  const transcriptPath =
+    input.transcript_path ||
+    (AGENT === "codex" ? findCodexRollout(input.session_id) : null);
+  if (!transcriptPath) return null;
+  const root = tryGit(input.cwd, ["rev-parse", "--show-toplevel"]);
+  if (!root || !tryGit(root, ["remote", "get-url", "origin"])) return null;
+  const transcript = readFileSync(transcriptPath, "utf8");
+  return (
+    AGENT === "codex"
+      ? digestCodex(transcript, root, null)
+      : digest(transcript, root)
+  ).taskId;
+}
+
+/**
+ * SessionStart after a compaction: the one reminder, or nothing.
+ *
+ * ⚠️ The only path in this hook that prints to the session, on purpose
+ * (FE-117/D1). Every failure stays in hook.log and prints nothing.
+ */
+function remindAfterCompaction(input: HookInput): void {
+  if (input.source !== "compact" || !input.session_id) return;
+  const marker = takeCompactionMarker(STATE_DIR, input.session_id);
+  if (!marker) return;
+  const taskId =
+    marker.taskId === undefined ? boundTaskId(input) : marker.taskId;
+  if (!taskId) return;
+  if (!isRemindableTaskId(taskId)) {
+    log(`after compaction: ${clip(taskId, 40)} is not a task id; no reminder`);
+    return;
+  }
+  process.stdout.write(sessionStartOutput(compactReminder(taskId)));
+  log(`after compaction: reminded the agent to checkpoint ${taskId}`);
 }
 
 // ── Setup ───────────────────────────────────────────────────────────────────
@@ -1547,6 +1647,22 @@ async function main(): Promise<void> {
   if (ARGS.flags.has("plugin") && desktopHookInstalled()) return;
   try {
     const stdin = readFileSync(0, "utf8");
+    let input: HookInput = {};
+    try {
+      input = JSON.parse(stdin) as HookInput;
+    } catch {
+      // Not ours to judge: the worker reads the same text and logs.
+    }
+    // FE-117: SessionStart runs here, not in a worker. Its stdout is the
+    // reminder, and it has nothing to send anywhere.
+    if (input.hook_event_name === "SessionStart") {
+      remindAfterCompaction(input);
+      return;
+    }
+    // NOTE: Before the worker, so the marker is there whatever the worker's
+    // pace; the worker adds the card to it.
+    if (input.hook_event_name === "PreCompact" && input.session_id)
+      markCompaction(STATE_DIR, input.session_id);
     mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
     const file = join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
     writeFileSync(file, stdin, { mode: 0o600 });

@@ -1,5 +1,7 @@
-// Reads and rewrites Claude Code's user settings to add or remove our Stop
-// hook, and nothing else. Codex's `hooks.json` has the same shape,
+// Reads and rewrites Claude Code's user settings to add or remove our
+// checkpoint hook, and nothing else. For Claude Code that is three entries
+// running one command: `Stop`, `PreCompact` and `SessionStart` matching
+// `compact` (FE-117, `CLAUDE_HOOK_EVENTS`); for Codex, `Stop` only. Codex's `hooks.json` has the same shape,
 // `{ hooks: { Stop: [{ hooks: [{ type, command }] }] } }`, so every rule here
 // serves it too (`codex.ts`).
 //
@@ -8,7 +10,7 @@
 // file as it was, apart from our one entry:
 //
 // - Our entry is recognised by the hook's filename in its command. Only that
-//   entry is replaced or removed. Other Stop hooks, other events and every
+//   entry (in any event) is replaced or removed. Other Stop hooks, other events and every
 //   other key pass through untouched.
 // - A file that exists but is not a JSON object is refused, not "repaired".
 //   The user may be halfway through editing it, and overwriting it would
@@ -28,6 +30,34 @@ import { updateConfigFile } from "../config-file";
 
 /** The text in our hook's command, and in no one else's. */
 export const HOOK_MARKER = "lanework-checkpoint";
+
+/** One event our command runs on, and the matcher its group carries. */
+export type HookEventSpec = { event: string; matcher?: string };
+
+/**
+ * Where the app installs the hook for Claude Code (FE-117/D1).
+ *
+ * - `PreCompact`, no matcher: both `/compact` and auto-compaction. The hook
+ *   writes a pre-compact checkpoint and prints nothing (its stdout would be
+ *   appended to the compaction instructions).
+ * - `SessionStart`, matcher `compact`: only the session that a compaction
+ *   restarts. The hook prints its one reminder there, nowhere else.
+ */
+export const CLAUDE_HOOK_EVENTS: readonly HookEventSpec[] = [
+  { event: "Stop" },
+  { event: "PreCompact" },
+  { event: "SessionStart", matcher: "compact" },
+];
+
+/**
+ * Where the app installs the hook for Codex: `Stop` only.
+ *
+ * ⚠️ Codex 0.165 lists PreCompact and SessionStart (source `compact`) too, but
+ * each new entry needs its own approval in Codex, which Settings does not
+ * track, and nothing documents that Codex starts a `compact` session after
+ * compacting (FE-117/D5). Not guessed.
+ */
+export const CODEX_HOOK_EVENTS: readonly HookEventSpec[] = [{ event: "Stop" }];
 
 /**
  * The path of Claude Code's user settings.
@@ -142,37 +172,99 @@ export function findHook(settings: Json): string | null {
   return null;
 }
 
-/** `settings` with every copy of our hook removed, and empty shells dropped. */
+const holdsOurs = (groups: unknown): boolean =>
+  Array.isArray(groups) &&
+  groups.some(
+    (group) =>
+      isObject(group) &&
+      Array.isArray((group as HookGroup).hooks) &&
+      ((group as HookGroup).hooks as unknown[]).some(isOurs),
+  );
+
+/**
+ * `settings` with every copy of our hook removed, in every event, and empty
+ * shells dropped.
+ *
+ * An event array that holds none of ours is passed through as it is.
+ */
 export function withoutHook(settings: Json): Json {
-  if (!isObject(settings.hooks) || !Array.isArray(settings.hooks.Stop))
-    return settings;
-  const stop = settings.hooks.Stop.flatMap((group: unknown) => {
-    if (!isObject(group) || !Array.isArray((group as HookGroup).hooks))
-      return [group];
-    const hooks = ((group as HookGroup).hooks as unknown[]).filter(
-      (entry) => !isOurs(entry),
-    );
-    // A group that held only ours goes; one that still holds others stays.
-    return hooks.length ? [{ ...group, hooks }] : [];
-  });
-  const { Stop: _, ...otherEvents } = settings.hooks;
-  const hooks = stop.length ? { ...otherEvents, Stop: stop } : otherEvents;
-  const { hooks: __, ...rest } = settings;
+  if (!isObject(settings.hooks)) return settings;
+  const hooks: Json = {};
+  for (const [event, groups] of Object.entries(settings.hooks)) {
+    if (!holdsOurs(groups)) {
+      hooks[event] = groups;
+      continue;
+    }
+    const kept = (groups as unknown[]).flatMap((group: unknown) => {
+      if (!isObject(group) || !Array.isArray((group as HookGroup).hooks))
+        return [group];
+      const entries = ((group as HookGroup).hooks as unknown[]).filter(
+        (entry) => !isOurs(entry),
+      );
+      // A group that held only ours goes; one that still holds others stays.
+      return entries.length ? [{ ...group, hooks: entries }] : [];
+    });
+    if (kept.length) hooks[event] = kept;
+  }
+  const { hooks: _, ...rest } = settings;
   return Object.keys(hooks).length ? { ...rest, hooks } : rest;
 }
 
-/** `settings` with exactly one copy of our hook, running `command`. */
-export function withHook(settings: Json, command: string): Json {
+/**
+ * `settings` with exactly one copy of our hook per event in `events`, each
+ * running `command`, appended last in its event.
+ *
+ * Stop only by default: Codex's file, whose approvals are keyed by position.
+ */
+export function withHook(
+  settings: Json,
+  command: string,
+  events: readonly HookEventSpec[] = CODEX_HOOK_EVENTS,
+): Json {
   const clean = withoutHook(settings);
-  const hooks = isObject(clean.hooks) ? clean.hooks : {};
-  const stop = Array.isArray(hooks.Stop) ? hooks.Stop : [];
-  return {
-    ...clean,
-    hooks: {
-      ...hooks,
-      Stop: [...stop, { hooks: [{ type: "command", command, timeout: 10 }] }],
-    },
-  };
+  const hooks: Json = isObject(clean.hooks) ? { ...clean.hooks } : {};
+  for (const { event, matcher } of events) {
+    const groups = Array.isArray(hooks[event])
+      ? (hooks[event] as unknown[])
+      : [];
+    hooks[event] = [
+      ...groups,
+      {
+        ...(matcher ? { matcher } : {}),
+        hooks: [{ type: "command", command, timeout: 10 }],
+      },
+    ];
+  }
+  return { ...clean, hooks };
+}
+
+/**
+ * Whether every event in `events` runs `command`, under its matcher.
+ *
+ * `enable` and the launch sync leave a file that already says so untouched.
+ */
+export function hasHookEvents(
+  settings: Json,
+  command: string,
+  events: readonly HookEventSpec[],
+): boolean {
+  const hooks = isObject(settings.hooks) ? settings.hooks : {};
+  return events.every(({ event, matcher }) => {
+    const groups = hooks[event];
+    return (
+      Array.isArray(groups) &&
+      groups.some(
+        (group) =>
+          isObject(group) &&
+          ((group as HookGroup).matcher ?? undefined) === matcher &&
+          Array.isArray((group as HookGroup).hooks) &&
+          ((group as HookGroup).hooks as unknown[]).some(
+            (entry) =>
+              isOurs(entry) && (entry as HookEntry).command === command,
+          ),
+      )
+    );
+  });
 }
 
 type SettingsRead =
