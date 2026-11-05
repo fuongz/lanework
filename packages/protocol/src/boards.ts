@@ -18,10 +18,18 @@ export type Priority = (typeof PRIORITIES)[number];
 export const CHECKLIST_SECTIONS = ["decisions", "verify"] as const;
 export type ChecklistSection = (typeof CHECKLIST_SECTIONS)[number];
 
+/**
+ * What a lane DOES, in board order.
+ *
+ * `review` (BE-23) holds a card whose code is written and waits for a human:
+ * no presence, no lifecycle stamp, never stale. Moving a card from a `review`
+ * lane back to an `active` one requests changes and carries a reason.
+ */
 export const COLUMN_ROLES = [
   "intake",
   "start",
   "active",
+  "review",
   "done",
   "archive",
 ] as const;
@@ -48,6 +56,9 @@ export type StreamIsolation = (typeof STREAM_ISOLATIONS)[number];
 
 /** Who did something: a signed-in human, a machine credential, or an agent. */
 export type ActorKind = "user" | "machine" | "agent";
+
+/** The longest request-changes reason a move accepts (BE-23). */
+export const MAX_CHANGES_REASON = 2000;
 
 /** The page size the list routes serve by default, and their ceiling. */
 export const DEFAULT_LIMIT = 50;
@@ -226,6 +237,39 @@ export interface ChecklistItem {
   group: string | null;
   /** The stream key this verify item proves, or null for the lead's. */
   stream: string | null;
+  /**
+   * Who ticked it (BE-22), or null when it is unticked or was ticked before
+   * BE-22 recorded it (read that as a person's tick).
+   *
+   * NOTE: Optional because a service older than BE-22, and the desktop's
+   * local board, never send it; absent and null read the same.
+   */
+  checkedBy?: ChecklistTickBy | null;
+  /** What proved this verify item (BE-22), or null. Optional as above. */
+  evidence?: ChecklistEvidence | null;
+}
+
+/**
+ * Who ticked a box (BE-22).
+ *
+ * `agent` is the agent's slug for `kind: "agent"`; null for a person. The
+ * desktop app ticks as a person.
+ */
+export interface ChecklistTickBy {
+  kind: "agent" | "user";
+  agent: string | null;
+}
+
+/**
+ * What an agent ran to prove a verify item (BE-22).
+ *
+ * `ok` is the agent's own report; the server does not re-run the command.
+ */
+export interface ChecklistEvidence {
+  command: string;
+  ok: boolean;
+  /** A CI run or log, when there is one. */
+  url?: string;
 }
 
 /** A stream as stored and served. */
@@ -304,6 +348,30 @@ export interface Card {
   completedAt: IsoDate | null;
   dueAt: IsoDate | null;
   archivedAt: IsoDate | null;
+  /**
+   * Set while the card sits in an `active` lane with no agent heard from for
+   * a while (BE-21); null when it is not stale.
+   *
+   * Optional: a service older than BE-21 never sends it. Read absent as null.
+   */
+  stale?: CardStale | null;
+  /**
+   * The outstanding request for changes (BE-23): the newest lane change, when
+   * it sent the card back from Review with a reason. Null once the card moves
+   * again. On list reads too, so a list can mark the card.
+   *
+   * Optional: a service older than BE-23 never sends it, and one older than
+   * the list extension sends it on single-card reads only. Read absent as
+   * null.
+   */
+  changesRequested?: ChangesRequested | null;
+}
+
+/** Why a card counts as stale: since when, and the last agent seen on it. */
+export interface CardStale {
+  since: IsoDate;
+  /** The agent slug last heard from, or null when none ever was. */
+  lastAgent: string | null;
 }
 
 /**
@@ -325,6 +393,18 @@ export interface CardDetail extends Card {
   /** Whether the caller starred it. */
   favorite: boolean;
   commentCount: number;
+}
+
+/** A reviewer's send-back from a `review` lane to an `active` one. */
+export interface ChangesRequested {
+  reason: string;
+  /** The lane key the card left, and the one it went to. */
+  from: string;
+  to: string;
+  at: IsoDate;
+  seq: number;
+  /** `kind` is an {@link ActorKind}, sent as free text. */
+  by: { kind: string; userId: string | null; agent: string | null };
 }
 
 /** `{ item }` with an `ETag: "<revision>"` header. */
@@ -549,6 +629,24 @@ export interface CardMoveRequest {
   /** Null reorders inside the current lane. */
   columnKey?: string | null;
   placement?: Placement | null;
+  /**
+   * Why a reviewer sends the card back (BE-23), up to
+   * {@link MAX_CHANGES_REASON} characters. Kept only on a move from a `review`
+   * lane to an `active` one; ignored on any other move.
+   */
+  reason?: string;
+}
+
+/**
+ * 400 from a move into a `review`- or `done`-role lane while a verify item an
+ * agent ticked has no evidence, or evidence with `ok: false` (BE-22).
+ *
+ * `keys` are those items' keys; `error` already names them. A person ticking
+ * the item themselves clears it.
+ */
+export interface CardMoveEvidenceError {
+  error: string;
+  keys: string[];
 }
 
 /**

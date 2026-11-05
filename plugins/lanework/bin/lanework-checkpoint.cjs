@@ -686,6 +686,13 @@ var DEFAULT_COLUMNS = [
     icon: "progress",
     tone: "blue"
   },
+  {
+    key: "review",
+    name: "Review",
+    role: "review",
+    icon: "progress",
+    tone: "teal"
+  },
   { key: "done", name: "Done", role: "done", icon: "check", tone: "emerald" },
   {
     key: "dropped",
@@ -2325,14 +2332,18 @@ var TOOLS = [
   },
   {
     name: "set_status",
-    description: "Move a card to another lane, the board's status columns. Moving it to a done or archive lane clears its checkpoints.",
+    description: "Move a card to another lane, the board's status columns. Finished, verified work goes to the review lane, not done. Moving it to a done or archive lane clears its checkpoints.",
     readOnly: false,
     properties: {
       board_id: BOARD_ID,
       card: CARD,
       status: {
         type: "string",
-        description: "Lane key, e.g. todo | processing | done | dropped"
+        description: "Lane key, e.g. todo | processing | review | done"
+      },
+      reason: {
+        type: "string",
+        description: "What to change when sending a card back from review. Accepted and not stored on a local board, which keeps no history."
       }
     },
     required: ["board_id", "card", "status"],
@@ -2414,7 +2425,7 @@ var TOOLS = [
   },
   {
     name: "lifecycle_status",
-    description: "What the board is waiting on: cards whose decisions are not all ticked (waiting), cards cleared to start (ready), and cards being worked (in flight).",
+    description: "What the board is waiting on: cards whose decisions are not all ticked (waiting), cards cleared to start (ready), cards being worked (in flight), and cards waiting for a human to review (review).",
     readOnly: true,
     properties: { board_id: BOARD_ID },
     required: ["board_id"],
@@ -2424,10 +2435,15 @@ var TOOLS = [
       const waiting = [];
       const ready = [];
       const inFlight = [];
+      const review = [];
       for (const card of store.listWorkItems(board.id)) {
         const role = order.get(card.columnKey)?.role ?? null;
         if (role === "done" || role === "archive")
           continue;
+        if (role === "review") {
+          review.push(brief(card));
+          continue;
+        }
         const detail = store.getWorkItem(card.id);
         const state = decisionState(detail.checklist);
         if (role === "active") {
@@ -2441,7 +2457,7 @@ var TOOLS = [
         else
           waiting.push({ ...brief(detail), pending: state.pending });
       }
-      return { waiting, ready, inFlight };
+      return { waiting, ready, inFlight, review };
     }
   }
 ];

@@ -1,4 +1,9 @@
-import { Outlet, useParams } from "@tanstack/react-router";
+import {
+  Outlet,
+  useNavigate,
+  useParams,
+  useSearch,
+} from "@tanstack/react-router";
 import { useEffect } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import {
@@ -7,12 +12,14 @@ import {
   ResizablePanelGroup,
 } from "#/components/ui/resizable";
 import { usePersistedLayout } from "#/hooks/use-persisted-layout";
+import { parseIssueSearch } from "#/lib/issue-search";
 import { useBoard } from "#/stores/board";
 import { usePresencePoll } from "#/stores/board-presence";
 import { useGitHubIssues } from "#/stores/github-issues";
 import { useLayout } from "#/stores/layout";
 import { useCloudFeatures } from "#/stores/session";
 import { IssuesList } from "./issues-list";
+import { RequestChangesDialog } from "./request-changes-dialog";
 
 /**
  * The issues screen: a list that stays, and one issue beside it.
@@ -48,6 +55,24 @@ export function IssuesLayout() {
     void openGitHub(slug);
   }, [openGitHub, slug]);
 
+  // A move into Review or Done refused for evidence (FE-119/D3), whichever
+  // control made it: open that card, where the checklist scrolls to the
+  // first box named and spends the focus. A card with no task id opens by its
+  // card id, which the detail route resolves too.
+  const navigate = useNavigate();
+  const rawSearch = useSearch({ from: "/_app/w/$slug/issues" });
+  const evidenceFocus = useBoard((state) => state.evidenceFocus);
+  const clearEvidenceFocus = useBoard((state) => state.clearEvidenceFocus);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per refusal, with the filters as they are then
+  useEffect(() => {
+    if (!evidenceFocus) return;
+    void navigate({
+      to: "/w/$slug/issues/$taskId",
+      params: { slug, taskId: evidenceFocus.taskId ?? evidenceFocus.cardId },
+      search: parseIssueSearch(rawSearch),
+    });
+  }, [evidenceFocus, clearEvidenceFocus, navigate, slug]);
+
   useEffect(() => {
     const onFocus = () => void refreshGitHub(slug);
     window.addEventListener("focus", onFocus);
@@ -67,31 +92,35 @@ export function IssuesLayout() {
   }, [focusMode, listRef]);
 
   return (
-    <ResizablePanelGroup
-      id="lanework:issues"
-      defaultLayout={defaultLayout}
-      onLayoutChanged={onLayoutChanged}
-    >
-      <ResizablePanel
-        id="list"
-        panelRef={listRef}
-        defaultSize="340px"
-        minSize="18%"
-        maxSize="45%"
-        collapsible
-        collapsedSize="0px"
-        groupResizeBehavior="preserve-pixel-size"
+    <>
+      <ResizablePanelGroup
+        id="lanework:issues"
+        defaultLayout={defaultLayout}
+        onLayoutChanged={onLayoutChanged}
       >
-        {/* The list column's ground is the Pull requests list's, so the
-            two tabs read as one column. */}
-        <aside aria-label="Issues" className="flex h-full min-h-0 flex-col">
-          <IssuesList />
-        </aside>
-      </ResizablePanel>
-      <ResizableHandle aria-label="Resize issue list" />
-      <ResizablePanel id="detail" minSize="40%">
-        <Outlet />
-      </ResizablePanel>
-    </ResizablePanelGroup>
+        <ResizablePanel
+          id="list"
+          panelRef={listRef}
+          defaultSize="340px"
+          minSize="18%"
+          maxSize="45%"
+          collapsible
+          collapsedSize="0px"
+          groupResizeBehavior="preserve-pixel-size"
+        >
+          {/* The list column's ground is the Pull requests list's, so the
+              two tabs read as one column. */}
+          <aside aria-label="Issues" className="flex h-full min-h-0 flex-col">
+            <IssuesList />
+          </aside>
+        </ResizablePanel>
+        <ResizableHandle aria-label="Resize issue list" />
+        <ResizablePanel id="detail" minSize="40%">
+          <Outlet />
+        </ResizablePanel>
+      </ResizablePanelGroup>
+      {/* Every move off a Review lane asks here, whichever control made it. */}
+      <RequestChangesDialog />
+    </>
   );
 }

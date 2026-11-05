@@ -1,7 +1,11 @@
 import {
   type BoardLabel,
   type BoardMember,
+  type CardStale,
+  type ChangesRequested,
+  type ChecklistEvidence,
   type ChecklistSection,
+  type ChecklistTickBy,
   type ColumnRole,
   type Priority,
   STREAM_ROLES,
@@ -14,9 +18,14 @@ import {
 export {
   type BoardLabel,
   type BoardMember,
+  type CardStale,
   CHECKLIST_SECTIONS,
+  type ChangesRequested,
+  type ChecklistEvidence,
   type ChecklistSection,
+  type ChecklistTickBy,
   type ColumnRole,
+  MAX_CHANGES_REASON,
   type Priority,
   STREAM_ROLES,
   type StreamRole,
@@ -254,6 +263,13 @@ export interface BoardChecklistItem {
    * loses its stream.
    */
   stream?: string | null;
+  /**
+   * Who ticked it (BE-22): an agent by slug, or a person (the desktop ticks
+   * as one). Null when unticked, ticked before BE-22, or on a local board.
+   */
+  checkedBy?: ChecklistTickBy | null;
+  /** What an agent ran to prove this verify item (BE-22), or null. */
+  evidence?: ChecklistEvidence | null;
 }
 
 /**
@@ -347,6 +363,20 @@ export interface BoardCard {
    * states this one. Null only for a service too old to send it.
    */
   checklistProgress: BoardChecklistProgress | null;
+  /**
+   * Set when the card sits In Progress with no agent activity for two hours
+   * (BE-21). Null when it is not stale, and on a service older than BE-21.
+   */
+  stale: CardStale | null;
+  /**
+   * The reviewer's outstanding request for changes (BE-23): set while the
+   * card's newest lane change sent it back from Review with a reason.
+   *
+   * On single-card and list reads alike; null on a local board, on a service
+   * older than BE-23, and on a list read from a service that predates the
+   * list carrying it.
+   */
+  changesRequested: ChangesRequested | null;
   /** Null for the same reason as `checklist`: absent from a list read. */
   assignees: BoardAssignees | null;
   /**
@@ -777,6 +807,22 @@ export type BoardWrite =
   | { kind: "error"; message: string };
 
 /**
+ * A move into a `review`- or `done`-role lane the board refused (BE-22): a
+ * verify item an agent ticked has no evidence, or evidence that failed.
+ *
+ * Its own result, not an error string, so the issue can open on the boxes
+ * that need it. `keys` are those items' keys; `message` is the server's.
+ */
+export interface BoardEvidenceRefusal {
+  kind: "needs-evidence";
+  message: string;
+  keys: string[];
+}
+
+/** What a move answers: any write's result, or the evidence gate's no. */
+export type BoardMoveWrite = BoardWrite | BoardEvidenceRefusal;
+
+/**
  * What changed on a board since a cursor.
  *
  * NOTE: `nextSince` is the cursor to send back, NOT `since + 1` and not the
@@ -1081,7 +1127,12 @@ export interface DesktopBoardApi {
     cardId: string,
     columnKey: string | null,
     placement?: BoardPlacement,
-  ) => Promise<BoardWrite>;
+    /**
+     * Why a reviewer sends the card back from a `review` lane to an `active`
+     * one (BE-23). The board keeps it on that move only.
+     */
+    reason?: string,
+  ) => Promise<BoardMoveWrite>;
   /** What changed since `since`; pass 0 for a first read. */
   changes: (projectId: string, since: number) => Promise<BoardChanges>;
   toggle: (

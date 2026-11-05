@@ -34,6 +34,15 @@ export const DEFAULT_COLUMNS = [
     icon: "progress",
     tone: "blue",
   },
+  // BE-23. The cloud seeds this lane with the `progress` icon too; the app
+  // draws a `review` lane on that icon as an eye (`laneIcon`).
+  {
+    key: "review",
+    name: "Review",
+    role: "review",
+    icon: "progress",
+    tone: "teal",
+  },
   { key: "done", name: "Done", role: "done", icon: "check", tone: "emerald" },
   {
     key: "dropped",

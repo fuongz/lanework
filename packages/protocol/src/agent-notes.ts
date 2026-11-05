@@ -6,6 +6,18 @@
 
 export const MCP_URL = "https://mcp.lanework.dev/v1";
 
+/**
+ * The same server with only the tools for working a card (BE-24):
+ * list_boards, get_review, set_status, toggle_item, checkpoint.
+ *
+ * NOTE: Same resource, same token. The server reads `toolset` past its auth
+ * gate; the protected-resource metadata and every token's audience stay the
+ * bare {@link MCP_URL}. A client must take the OAuth `resource` from that
+ * metadata, not from this URL (OpenCode 2.2 sends the URL itself, query and
+ * all, and the authorization server refuses it with `invalid_target`).
+ */
+export const MCP_WORKER_URL = "https://mcp.lanework.dev/v1?toolset=worker";
+
 /** The MCP host alone, which any lanework config or note contains. */
 export const MCP_HOST = "mcp.lanework.dev";
 

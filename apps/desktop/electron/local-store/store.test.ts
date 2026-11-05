@@ -100,7 +100,7 @@ describe("projects", () => {
     assert.equal(a.repo, "github.com/fuongz/lanework");
     assert.deepEqual(
       a.config.columns.map((column) => column.key),
-      ["backlog", "todo", "processing", "done", "dropped"],
+      ["backlog", "todo", "processing", "review", "done", "dropped"],
     );
     assert.deepEqual(a.taskHeads, {});
 

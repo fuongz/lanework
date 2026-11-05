@@ -107,9 +107,21 @@ function sentence(
     case "commented":
       return null;
     case "moved": {
-      const from = laneName(diff.from);
-      const to = laneName(diff.to);
-      if (!to) return <>moved the issue.</>;
+      // The service writes `columnKey: [from, to]`; `from`/`to` is an older
+      // spelling, still read.
+      const lanes = pair(diff.columnKey);
+      const from = laneName(lanes ? lanes[0] : diff.from);
+      const to = laneName(lanes ? lanes[1] : diff.to);
+      if (!to || from === to) return <>moved the issue.</>;
+      // BE-23: a send-back from Review carries why. The reason itself is
+      // drawn under the sentence (`AuditEntry`).
+      if (from && movedReason(event))
+        return (
+          <>
+            requested changes, moving it from <Strong>{from}</Strong> to{" "}
+            <Strong>{to}</Strong>.
+          </>
+        );
       return from ? (
         <>
           changed status from <Strong>{from}</Strong> to <Strong>{to}</Strong>.
@@ -125,6 +137,15 @@ function sentence(
     default:
       return null;
   }
+}
+
+/** The reason a `moved` row carries (BE-23), or null for a plain move. */
+function movedReason(
+  event: Extract<BoardActivity, { kind: "audit" }>,
+): string | null {
+  if (event.verb !== "moved") return null;
+  const reason = event.diff?.reason;
+  return typeof reason === "string" && reason.trim() ? reason.trim() : null;
 }
 
 /**
@@ -276,6 +297,7 @@ function AuditEntry({
 }) {
   const said = sentence(event, columns, labels, members);
   if (!said) return null;
+  const reason = movedReason(event);
   const member = memberOf(members, event.actorUserId);
   // An agent or a machine has no directory row; the ref it acted under is the
   // honest name for it.
@@ -289,9 +311,16 @@ function AuditEntry({
       <span className="flex w-5 shrink-0 justify-center self-start pt-0.5">
         <Avatar member={member} name={who} size="sm" />
       </span>
-      <p className="text-muted-foreground min-w-0 flex-1 text-[13px] leading-relaxed">
-        <Strong>{who}</Strong> {said} <When at={event.at} />
-      </p>
+      <div className="min-w-0 flex-1">
+        <p className="text-muted-foreground text-[13px] leading-relaxed">
+          <Strong>{who}</Strong> {said} <When at={event.at} />
+        </p>
+        {reason && (
+          <blockquote className="border-tone-teal/50 text-foreground mt-1 border-l-2 pl-3 text-[13px] leading-relaxed whitespace-pre-wrap">
+            {reason}
+          </blockquote>
+        )}
+      </div>
     </li>
   );
 }
@@ -504,17 +533,22 @@ export function IssueActivity({ card }: { card: BoardCard }) {
   const cursor = useBoard((state) => state.activityCursor);
   const loading = useBoard((state) => state.activityLoading);
   const loadActivity = useBoard((state) => state.loadActivity);
+  const syncActivity = useBoard((state) => state.syncActivity);
   const setSubscribed = useBoard((state) => state.setSubscribed);
   // A local board has no comments and no subscribers (FE-52/D10).
   const active = useBoard((state) => state.active);
   const { comments, subscribers: canSubscribe } = useCloudFeatures(active);
 
-  // NOTE: Read again when the card id changes, not only when the page mounts.
-  // Following a sub-issue link swaps the card under a page that never
-  // unmounts.
+  // NOTE: Keyed on the card's revision as well as its id. Every write this
+  // app makes to the card hands back (or re-reads) the card, and a poll or a
+  // local-board change that reports a newer revision re-reads it too
+  // (`followDetail` in the store), so a moved revision is the one signal for
+  // "something new happened here". The store dedupes by revision and reads
+  // only the feed's last page again. The id matters on its own: following a
+  // sub-issue link swaps the card under a page that never unmounts.
   useEffect(() => {
-    void loadActivity(card.id);
-  }, [card.id, loadActivity]);
+    void syncActivity(card.id, card.revision);
+  }, [card.id, card.revision, syncActivity]);
 
   const members = view?.members ?? [];
   const labels = view?.labels ?? [];

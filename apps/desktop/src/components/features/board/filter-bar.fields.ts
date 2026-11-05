@@ -1,4 +1,5 @@
 import {
+  Alert02Icon,
   Flag02Icon,
   Loading03Icon,
   Tag01Icon,
@@ -7,14 +8,28 @@ import {
 import type { BoardView } from "#/../shared/projects";
 import {
   byStatusOrder,
+  laneIcon,
   PRIORITY_GROUPS,
   statusKeys,
   tagVocabulary,
 } from "#/lib/board-view";
 import type { IssueSearch } from "#/lib/issue-search";
+import {
+  DIAGNOSIS_KINDS,
+  DIAGNOSIS_LABEL,
+  type DiagnosisKind,
+} from "./issues-list.diagnostics";
 
-/** The four axes a board can be filtered on. */
-export type FilterKey = "status" | "category" | "priority" | "tag";
+/**
+ * The axes a board can be filtered on: the four the URL keeps, and "Needs
+ * attention" (FE-116), which is the list's own state.
+ */
+export type FilterKey =
+  | "status"
+  | "category"
+  | "priority"
+  | "tag"
+  | "attention";
 
 export interface FilterOption {
   value: string;
@@ -57,7 +72,7 @@ export function filterFields(
         value: column.key,
         label: column.name,
         tone: column.tone,
-        lane: column.icon,
+        lane: laneIcon(column),
       })),
     },
     {
@@ -93,13 +108,46 @@ export function filterFields(
   return fields;
 }
 
-/** The options actually in play, in the order the user added them. */
+/**
+ * The "Needs attention" axis (FE-116/D1), or null while no card needs any.
+ *
+ * Offers "Any reason" and each kind that flags at least one card: a kind that
+ * flags none would filter the list down to nothing.
+ *
+ * NOTE: The kind in play is offered even once it flags nothing. A filter
+ * that cuts the list while its chip is gone is a list nobody can explain.
+ */
+export function attentionField(
+  counts: Record<DiagnosisKind, number>,
+  selected?: string,
+): FilterField | null {
+  const kinds = DIAGNOSIS_KINDS.filter(
+    (kind) => counts[kind] > 0 || kind === selected,
+  );
+  if (!kinds.length && !selected) return null;
+  return {
+    key: "attention",
+    label: "Needs attention",
+    icon: Alert02Icon,
+    options: [
+      { value: "any", label: "Any reason" },
+      ...kinds.map((kind) => ({ value: kind, label: DIAGNOSIS_LABEL[kind] })),
+    ],
+  };
+}
+
+/**
+ * The options actually in play, in the order the user added them.
+ *
+ * `attention` is passed apart: it is the list's state, not the URL's.
+ */
 export function activeFilters(
   fields: FilterField[],
   search: IssueSearch,
+  attention?: string,
 ): { field: FilterField; option: FilterOption }[] {
   return fields.flatMap((field) => {
-    const value = search[field.key];
+    const value = field.key === "attention" ? attention : search[field.key];
     if (!value) return [];
     // The status set is one chip naming every lane in it. No `status` in the
     // URL is the default set, which is no filter to show.

@@ -437,6 +437,8 @@ const laneworkMcp: DesktopLaneworkMcpApi = {
   login: (agent) => ipcRenderer.invoke(laneworkMcpChannels.login, agent),
   cancelLogin: (agent) =>
     ipcRenderer.invoke(laneworkMcpChannels.cancelLogin, agent),
+  setToolset: (agent, toolset) =>
+    ipcRenderer.invoke(laneworkMcpChannels.setToolset, agent, toolset),
 };
 
 /**
@@ -777,14 +779,15 @@ const projects: DesktopProjectsApi = {
     // NOTE: `placement` is sent as `null` when absent, never omitted. The
     // handler validates on argument COUNT, and the sender check cannot
     // state a rule for a call that sends four arguments one time and five
-    // the next.
-    move: (projectId, cardId, columnKey, placement) =>
+    // the next. `reason` (BE-23) follows the same rule, so it is always five.
+    move: (projectId, cardId, columnKey, placement, reason) =>
       ipcRenderer.invoke(
         projectChannels.move,
         projectId,
         cardId,
         columnKey,
         placement ?? null,
+        reason ?? null,
       ),
     changes: (projectId, since) =>
       ipcRenderer.invoke(projectChannels.changes, projectId, since),

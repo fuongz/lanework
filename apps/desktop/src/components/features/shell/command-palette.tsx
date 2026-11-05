@@ -181,10 +181,9 @@ export function CommandPalette() {
         hint: card.taskId ?? undefined,
         lane: card.columnKey,
         run: () => {
-          if (!card.taskId) return;
           void navigate({
             to: "/w/$slug/issues/$taskId",
-            params: { slug, taskId: card.taskId },
+            params: { slug, taskId: card.taskId ?? card.id },
           });
         },
       }));

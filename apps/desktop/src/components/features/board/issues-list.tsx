@@ -46,11 +46,34 @@ import {
   GitHubIssuesProblemState,
   GitHubIssuesSkeleton,
 } from "../github-issues/github-issue-row";
+import { attentionField } from "./filter-bar.fields";
+import {
+  ChangesRequestedMark,
+  DiagnosisMark,
+  DiagnosticsBanner,
+} from "./issues-list.diagnosis";
+import {
+  type AttentionFilter,
+  type Diagnosis,
+  diagnoseBoard,
+  diagnosisCounts,
+  needsAttention,
+} from "./issues-list.diagnostics";
 import { LoadMore } from "./load-more";
 import { ViewToolbar } from "./view-toolbar";
 
-/** One row j/k can land on: a card by its task id, or a GitHub issue. */
-type Entry = { kind: "card"; taskId: string } | { kind: "gh"; number: number };
+/**
+ * One row j/k can land on: a card by the ref its URL carries, or a GitHub
+ * issue.
+ */
+type Entry = { kind: "card"; ref: string } | { kind: "gh"; number: number };
+
+/**
+ * What a card's URL is addressed by: its task id, or its card id when it has
+ * none (a card filed under no category is minted none). The detail route
+ * resolves either.
+ */
+const cardRef = (card: BoardCard) => card.taskId ?? card.id;
 
 /**
  * What the board is read grouped by.
@@ -67,7 +90,7 @@ const stamp = (iso: string | null | undefined) => {
 };
 
 const entryKey = (entry: Entry) =>
-  entry.kind === "card" ? `card:${entry.taskId}` : `gh:${entry.number}`;
+  entry.kind === "card" ? `card:${entry.ref}` : `gh:${entry.number}`;
 
 /**
  * Whether a key press belongs to something else on screen.
@@ -86,9 +109,17 @@ function ownedElsewhere(target: EventTarget | null): boolean {
 
 /**
  * The lanes in the order the list draws them: the work under way first,
- * then what is next, then what is over.
+ * then what waits on a reviewer, then what is next, then what is over.
  */
-const ROLE_ORDER = ["active", "start", "intake", null, "done", "archive"];
+const ROLE_ORDER = [
+  "active",
+  "review",
+  "start",
+  "intake",
+  null,
+  "done",
+  "archive",
+];
 const roleRank = (role: string | null) => {
   const at = ROLE_ORDER.indexOf(role);
   return at === -1 ? ROLE_ORDER.indexOf(null) : at;
@@ -108,12 +139,15 @@ function CardRow({
   slug,
   search,
   now,
+  diagnoses,
 }: {
   card: BoardCard;
   view: BoardView;
   slug: string;
   search: IssueSearch;
   now: number;
+  /** What the board diagnostics found on this card (FE-116), if anything. */
+  diagnoses: readonly Diagnosis[] | undefined;
 }) {
   const column = columnOf(view.columns, card.columnKey);
   const progress = checklistProgress(card);
@@ -131,13 +165,12 @@ function CardRow({
     <IssueMenu card={card} render={<li />}>
       <Link
         to="/w/$slug/issues/$taskId"
-        params={{ slug, taskId: card.taskId ?? card.id }}
+        params={{ slug, taskId: cardRef(card) }}
         // The list's filters ride along, so opening a card keeps the list.
         search={search}
-        disabled={!card.taskId}
         activeOptions={{ includeSearch: false }}
         activeProps={{ className: "bg-foreground/[0.06]" }}
-        className={`${RAIL_ROW} group focus-visible:ring-accent-brand relative flex flex-col gap-0.5 rounded-lg px-3 py-2 outline-none focus-visible:ring-2 aria-disabled:cursor-default`}
+        className={`${RAIL_ROW} group focus-visible:ring-accent-brand relative flex flex-col gap-0.5 rounded-lg px-3 py-2 outline-none focus-visible:ring-2`}
       >
         <span className="flex min-w-0 items-center gap-2">
           {/* While an agent works on the card, its presence takes the
@@ -146,6 +179,8 @@ function CardRow({
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
             {card.title}
           </span>
+          <ChangesRequestedMark request={card.changesRequested} />
+          {diagnoses && <DiagnosisMark diagnoses={diagnoses} />}
         </span>
         {/* Under the title, set apart by space rather than pills or "·". */}
         <span className="text-muted-foreground flex min-w-0 items-center gap-3 ps-[22px] text-xs">
@@ -241,7 +276,24 @@ export function IssuesList() {
     ? new Date(github.view.fetchedAt).getTime()
     : Date.now();
 
+  // The board diagnostics (FE-116): read-only, over every card loaded, not
+  // just the ones a filter leaves on screen. A parent filtered out of sight
+  // is still the parent.
+  const diagnoses = useMemo(
+    () => (view ? diagnoseBoard(view.cards, view.columns, now) : new Map()),
+    [view, now],
+  );
+  const diagnosed = useMemo(() => diagnosisCounts(diagnoses), [diagnoses]);
+  const [attention, setAttention] = useState<AttentionFilter | undefined>();
+  const attentionControl = {
+    field: attentionField(diagnosed, attention),
+    value: attention,
+    onChange: setAttention,
+  };
+
   const needle = query.trim();
+  // A search or the attention filter only sees the cards already read.
+  const narrowed = Boolean(needle) || attention !== undefined;
   const groups = useMemo(() => {
     if (!view) return [];
     const lanes = statusKeys(view.columns, search.status);
@@ -250,12 +302,16 @@ export function IssuesList() {
       status: lanes.length ? lanes.join(",") : "none",
     }).map((group) => ({
       ...group,
-      cards: needle
-        ? group.cards.filter((card) => matchesSearch(card, needle))
-        : group.cards,
+      cards: group.cards.filter(
+        (card) =>
+          (!needle || matchesSearch(card, needle)) &&
+          (!attention || needsAttention(diagnoses, card, attention)),
+      ),
     }));
-  }, [view, search, needle]);
+  }, [view, search, needle, attention, diagnoses]);
   const issues = useMemo(() => {
+    // A GitHub issue is not a card, so no diagnostic ever flags one.
+    if (attention) return [];
     const all = github.view?.issues ?? [];
     return needle
       ? all.filter((issue) =>
@@ -265,12 +321,13 @@ export function IssuesList() {
           ),
         )
       : all;
-  }, [github.view, needle]);
+  }, [github.view, needle, attention]);
 
   // NOTE: The service's counts when it sent them. A group holds one page of
   // its cards, and counting those would say "20" for 226. A search is the
-  // exception: it only sees the cards that are here.
-  const counts = needle ? undefined : view?.stats?.byColumn;
+  // exception: it only sees the cards that are here. So does the attention
+  // filter.
+  const counts = narrowed ? undefined : view?.stats?.byColumn;
   // "No cards yet" is about the board, not the page of it on screen.
   const emptyBoard = view ? (view.total ?? view.cards.length) === 0 : false;
 
@@ -311,7 +368,7 @@ export function IssuesList() {
   for (const lane of lanes)
     if (isOpen(lane.key, lane.role))
       for (const card of lane.cards)
-        if (card.taskId) entries.push({ kind: "card", taskId: card.taskId });
+        entries.push({ kind: "card", ref: cardRef(card) });
   if (ghOpen)
     for (const issue of ghIssues)
       entries.push({ kind: "gh", number: issue.number });
@@ -333,7 +390,7 @@ export function IssuesList() {
       entry.kind === "card"
         ? {
             to: "/w/$slug/issues/$taskId",
-            params: { slug, taskId: entry.taskId },
+            params: { slug, taskId: entry.ref },
             search,
           }
         : {
@@ -396,6 +453,14 @@ export function IssuesList() {
         onSearch={onSearch}
         query={query}
         onQuery={setText}
+        attention={attentionControl}
+      />
+      {/* Above the scroller, so it stays in sight while the rows scroll. */}
+      <DiagnosticsBanner
+        total={diagnoses.size}
+        counts={diagnosed}
+        filter={attention}
+        onFilter={setAttention}
       />
       {/* The scroller is this area, not the list: the list stays mounted
           while issues open beside it, so its scroll survives every switch.
@@ -431,7 +496,9 @@ export function IssuesList() {
           <div className="flex flex-col gap-3 px-2 pb-2">
             {lanes.map((lane) => {
               const open = isOpen(lane.key, lane.role);
-              const left = needle ? null : leftIn(lane.key, lane.cards.length);
+              const left = narrowed
+                ? null
+                : leftIn(lane.key, lane.cards.length);
               return (
                 <section key={lane.key} aria-label={lane.name}>
                   <ListGroupHeader
@@ -456,6 +523,7 @@ export function IssuesList() {
                           slug={slug}
                           search={search}
                           now={now}
+                          diagnoses={diagnoses.get(card.id)}
                         />
                       ))}
                     </ul>

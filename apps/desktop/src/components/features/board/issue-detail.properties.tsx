@@ -38,7 +38,7 @@ import { presenceKind } from "#/stores/board-presence";
 import {
   SECTION_NAME,
   sections,
-  useChecklistDraft,
+  useChecklistTicks,
 } from "./issue-detail.checklist";
 
 /**
@@ -173,7 +173,7 @@ function AssigneeRow({
  *   card's task id.
  */
 export function Fields({ card }: { card: BoardCard }) {
-  const checklist = useChecklistDraft(card).items;
+  const checklist = useChecklistTicks(card).items;
   const view = useBoard((state) => state.view);
   const update = useBoard((state) => state.update);
   const busy = useBoard((state) => state.busy);

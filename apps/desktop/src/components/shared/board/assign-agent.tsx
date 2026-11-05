@@ -376,7 +376,7 @@ export function AssignAgentButton({
           // says why hangs off a wrapper around it.
           <Tooltip>
             <TooltipTrigger render={<span />}>{trigger}</TooltipTrigger>
-            <TooltipContent>Save your ticks first</TooltipContent>
+            <TooltipContent>Saving your ticks…</TooltipContent>
           </Tooltip>
         ) : (
           trigger

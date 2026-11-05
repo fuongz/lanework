@@ -125,6 +125,18 @@ export interface DesktopAuthApi {
 export type LaneworkMcpMode = "local" | "cloud";
 export type LaneworkMcpAgent = "claude-code" | "codex" | "opencode";
 
+/**
+ * Which of the cloud server's tools an agent's entry asks for (FE-119/D1).
+ *
+ * `full` is every tool, at `https://mcp.lanework.dev/v1`. `worker` is the five
+ * a card is worked with (BE-24), at `/v1?toolset=worker`: a tool list about a
+ * quarter the size, loaded into every session's context. Claude Code defers
+ * loading tools, so it stays on `full`; Codex starts on `worker`. OpenCode
+ * stays on `full`: it sends the URL itself, query and all, as the OAuth
+ * resource, and the server refuses that.
+ */
+export type LaneworkMcpToolset = "full" | "worker";
+
 export interface LaneworkMcpEntry {
   /** A `lanework` entry is in this agent's config. */
   installed: boolean;
@@ -133,6 +145,12 @@ export interface LaneworkMcpEntry {
   /** Where it points, when it is ours. */
   mode: LaneworkMcpMode | null;
   transport: "stdio" | "http" | null;
+  /**
+   * The toolset a cloud entry asks for, when its URL is one the app writes;
+   * null for a stdio entry or a URL somebody edited, which the app leaves
+   * alone.
+   */
+  toolset: LaneworkMcpToolset | null;
   configPath: string;
   /** The file exists but is not something the app will rewrite. */
   unreadable: boolean;
@@ -161,6 +179,10 @@ export interface LaneworkMcpStatus {
   claude: LaneworkMcpEntry;
   codex: LaneworkMcpEntry;
   opencode: LaneworkMcpEntry;
+  /** The toolset each agent's cloud entry is written with (FE-119/D1). */
+  toolsets: Record<LaneworkMcpAgent, LaneworkMcpToolset>;
+  /** The agents that may use `worker`; the rest are always `full`. */
+  workerAgents: LaneworkMcpAgent[];
 }
 
 export const laneworkMcpChannels = {
@@ -174,6 +196,8 @@ export const laneworkMcpChannels = {
   login: "lanework-mcp:login",
   /** Stop the login `login` is running; it then answers as usual. */
   cancelLogin: "lanework-mcp:cancel-login",
+  /** Choose one agent's toolset, and rewrite its entry when it is ours. */
+  setToolset: "lanework-mcp:set-toolset",
 } as const;
 
 export interface DesktopLaneworkMcpApi {
@@ -183,6 +207,10 @@ export interface DesktopLaneworkMcpApi {
   auth: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpAuth>;
   login: (agent: LaneworkMcpAgent) => Promise<LaneworkMcpAuth>;
   cancelLogin: (agent: LaneworkMcpAgent) => Promise<void>;
+  setToolset: (
+    agent: LaneworkMcpAgent,
+    toolset: LaneworkMcpToolset,
+  ) => Promise<LaneworkMcpStatus>;
 }
 
 const anonymous: Principal = { kind: "anonymous" };

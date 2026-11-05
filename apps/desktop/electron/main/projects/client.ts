@@ -1,4 +1,10 @@
-import { COLUMN_ROLES, PRIORITIES, paths } from "@lanework/protocol";
+import {
+  type CardStale,
+  type ChangesRequested,
+  COLUMN_ROLES,
+  PRIORITIES,
+  paths,
+} from "@lanework/protocol";
 import {
   type BoardActivity,
   type BoardActivityPage,
@@ -17,6 +23,7 @@ import {
   type BoardGroupPage,
   type BoardLabel,
   type BoardMember,
+  type BoardMoveWrite,
   type BoardPlacement,
   type BoardPresence,
   type BoardQuery,
@@ -24,7 +31,9 @@ import {
   type BoardWrite,
   type CardCheckpoint,
   CHECKLIST_SECTIONS,
+  type ChecklistEvidence,
   type ChecklistSection,
+  type ChecklistTickBy,
   type ColumnRole,
   matchesSearch,
   normalizeTag,
@@ -202,9 +211,35 @@ function parseChecklist(value: unknown): BoardChecklistItem[] {
         group: text(row.group) ? row.group : null,
         // The stream this verify item proves; null for the lead's.
         stream: parseItemStream(row.stream),
+        // BE-22. Absent from an older service: null, never a refusal.
+        checkedBy: parseTickBy(row.checkedBy),
+        evidence: parseEvidence(row.evidence),
       },
     ];
   });
+}
+
+/** Who ticked a box (BE-22), or null for none or a shape this app cannot read. */
+export function parseTickBy(value: unknown): ChecklistTickBy | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (row.kind !== "agent" && row.kind !== "user") return null;
+  return { kind: row.kind, agent: text(row.agent) ? row.agent : null };
+}
+
+/**
+ * What proved a verify item (BE-22), or null.
+ *
+ * NOTE: A `url` that is not http(s) is dropped, not the evidence: the pane
+ * renders it as a link, and a `javascript:` one is not a link anybody meant.
+ */
+export function parseEvidence(value: unknown): ChecklistEvidence | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (!text(row.command) || typeof row.ok !== "boolean") return null;
+  const url =
+    text(row.url) && /^https?:\/\/\S+$/.test(row.url) ? row.url : undefined;
+  return { command: row.command, ok: row.ok, ...(url ? { url } : {}) };
 }
 
 function parseAssignees(value: unknown): BoardAssignees {
@@ -268,6 +303,8 @@ export function parseCard(value: unknown): BoardCard | null {
     // Folding the count in under that name would make every card on a board
     // look like it has no decisions, the bug the comment above describes.
     checklistProgress: parseProgress(row.checklistProgress),
+    stale: parseStale(row.stale),
+    changesRequested: parseChangesRequested(row.changesRequested),
     assignees: "assignees" in row ? parseAssignees(row.assignees) : null,
     // NOTE: Every one of these five keys on the same rule as `checklist`
     // above: PRESENCE decides, not truthiness. A list read serializes without
@@ -329,6 +366,45 @@ function parseProgress(value: unknown): BoardChecklistProgress | null {
   // A `done` above `total` is the service disagreeing with itself; clamping
   // beats rendering `9/3`.
   return { done: Math.max(0, Math.min(done, total)), total };
+}
+
+/** BE-21's flag. Anything malformed reads as "not stale", never a crash. */
+function parseStale(value: unknown): CardStale | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (!text(row.since)) return null;
+  return {
+    since: row.since,
+    lastAgent: text(row.lastAgent) ? row.lastAgent : null,
+  };
+}
+
+/**
+ * BE-23's outstanding request for changes.
+ *
+ * A row without a reason or its two lanes is no request: null, never a crash.
+ */
+function parseChangesRequested(value: unknown): ChangesRequested | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (!text(row.reason) || !text(row.from) || !text(row.to) || !text(row.at))
+    return null;
+  const by =
+    row.by && typeof row.by === "object"
+      ? (row.by as Record<string, unknown>)
+      : {};
+  return {
+    reason: row.reason,
+    from: row.from,
+    to: row.to,
+    at: row.at,
+    seq: typeof row.seq === "number" && Number.isInteger(row.seq) ? row.seq : 0,
+    by: {
+      kind: text(by.kind) ? by.kind : "user",
+      userId: text(by.userId) ? by.userId : null,
+      agent: text(by.agent) ? by.agent : null,
+    },
+  };
 }
 
 /**
@@ -895,6 +971,8 @@ async function readWrite(
  * card in a place neither user put it.
  *
  * @param columnKey the lane to move to; null keeps the lane it is in.
+ * @param reason why a reviewer sends the card back from Review (BE-23); the
+ *   board keeps it only on a move from a `review` lane to an `active` one.
  */
 export async function moveCard(
   record: MachineRecord,
@@ -902,19 +980,44 @@ export async function moveCard(
   cardId: string,
   columnKey: string | null,
   placement?: BoardPlacement,
-): Promise<BoardWrite> {
-  return readWrite(
-    await call(record, paths.itemMove(projectId, cardId), {
-      method: "POST",
-      body: JSON.stringify({
-        // NOTE: The key is OMITTED rather than sent as null for a reorder.
-        // The API reads a missing `columnKey` as "keep the lane it is in"; a
-        // literal null is a value its parser has to reject.
-        ...(columnKey === null ? {} : { columnKey }),
-        ...(placement ? { placement } : {}),
-      }),
+  reason?: string | null,
+): Promise<BoardMoveWrite> {
+  const response = await call(record, paths.itemMove(projectId, cardId), {
+    method: "POST",
+    body: JSON.stringify({
+      // NOTE: The key is OMITTED rather than sent as null for a reorder.
+      // The API reads a missing `columnKey` as "keep the lane it is in"; a
+      // literal null is a value its parser has to reject.
+      ...(columnKey === null ? {} : { columnKey }),
+      ...(placement ? { placement } : {}),
+      // Omitted when there is none, so a service older than BE-23 never
+      // sees a key it does not read.
+      ...(reason ? { reason } : {}),
     }),
-  );
+  });
+  if (response.status === 400) return readMoveRefusal(await body(response));
+  return readWrite(response);
+}
+
+/**
+ * A move's 400, as a result the renderer can act on.
+ *
+ * With `keys` it is the evidence gate (BE-22): the issue opens on those boxes.
+ * Without, any other refusal (a send-back with no reason, a bad lane), worded
+ * as {@link readWrite} words one.
+ */
+export function readMoveRefusal(payload: unknown): BoardMoveWrite {
+  const row =
+    payload && typeof payload === "object"
+      ? (payload as { error?: unknown; keys?: unknown })
+      : {};
+  const message = text(row.error)
+    ? row.error
+    : "The board refused the change (HTTP 400).";
+  const keys = strings(row.keys);
+  return keys.length
+    ? { kind: "needs-evidence", message, keys }
+    : { kind: "error", message };
 }
 
 /**
@@ -958,8 +1061,17 @@ export async function fetchCard(
   return card;
 }
 
+/** The shape of a minted task id, `FE-06`, as the issue URL carries it. */
+const TASK_ID = /^[A-Za-z][A-Za-z0-9]*-\d+$/;
+
 /**
- * The card a human named by its task id, like `FE-06`.
+ * The card a URL names: by its task id, like `FE-06`, or by its card id when
+ * it has none.
+ *
+ * A card filed under no category is minted no task id, so the issue list
+ * links it by its card id instead. Anything not shaped like a task id is read
+ * as one, through the single-card read rather than `/lookup`, which only
+ * knows task ids.
  *
  * NOTE: A 404 becomes `null`, and every other failure still throws. "No card
  * carries that id" is an answer a deep link can legitimately get; folding it
@@ -971,7 +1083,12 @@ export async function lookupCard(
   projectId: string,
   taskId: string,
 ): Promise<BoardCard | null> {
-  const response = await call(record, paths.boardLookup(projectId, { taskId }));
+  const response = await call(
+    record,
+    TASK_ID.test(taskId)
+      ? paths.boardLookup(projectId, { taskId })
+      : paths.item(projectId, taskId),
+  );
   if (response.status === 404) return null;
   if (!response.ok)
     throw new Error(

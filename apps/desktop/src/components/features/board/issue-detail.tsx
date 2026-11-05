@@ -10,7 +10,7 @@ import {
   StarIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link, useBlocker, useParams, useSearch } from "@tanstack/react-router";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { BoardAttachment, BoardCard } from "#/../shared/projects";
 import { AssignAgentButton } from "#/components/shared/board/assign-agent";
@@ -30,16 +30,6 @@ import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
 import {
   DropdownMenu,
@@ -58,10 +48,11 @@ import { useIssueView } from "#/stores/issue-view";
 import { useLayout } from "#/stores/layout";
 import { useCloudFeatures } from "#/stores/session";
 import { IssueActivity } from "./issue-activity";
+import { IssueChangesRequested } from "./issue-changes-requested";
 import { IssueCheckpoint } from "./issue-checkpoint";
 import {
   Checklist,
-  useChecklistDraft,
+  useChecklistTicks,
   WorkBreakdown,
 } from "./issue-detail.checklist";
 import { Fields } from "./issue-detail.properties";
@@ -86,15 +77,8 @@ export function IssueDetail() {
     return () => closeIssue();
   }, [active?.id, closeIssue, openIssue, taskId]);
 
-  // Leaving with unsaved ticks asks first (FE-13/D7). The draft is only in
-  // this window's memory; a click on the breadcrumb or a ⌘K jump would drop
-  // decisions somebody had just made without a word.
-  const dirty = useChecklistDraft(card).dirty.size > 0;
-  const blocker = useBlocker({
-    shouldBlockFn: () => dirty,
-    enableBeforeUnload: () => dirty,
-    withResolver: true,
-  });
+  // No leave-without-saving prompt any more: a tick is saved the moment it
+  // is made, so there is nothing unsaved to lose by leaving.
 
   // Two panes side by side, each scrolling on its own, as on the New issue
   // page. A card's properties are a fixed, short list; scrolling them away
@@ -118,7 +102,7 @@ export function IssueDetail() {
           </Link>
           <span className="text-muted-foreground shrink-0 text-[13px]">›</span>
           <span className="text-muted-foreground shrink-0 px-1 font-mono text-xs">
-            {taskId}
+            {shownId(card, taskId)}
           </span>
           {card && <CardAgentsLine card={card} />}
           <div className="ml-auto flex items-center gap-1">
@@ -126,33 +110,6 @@ export function IssueDetail() {
             <PaneToggles />
           </div>
         </WindowTitlebar>
-        <AlertDialog
-          open={blocker.status === "blocked"}
-          onOpenChange={(open) => {
-            if (!open) blocker.reset?.();
-          }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Discard changes?</AlertDialogTitle>
-              <AlertDialogDescription>
-                The ticks you made on {taskId} have not been saved. Leaving now
-                drops them.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Keep editing</AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                className="border-0"
-                onClick={() => blocker.proceed?.()}
-              >
-                Discard
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
         {/* Keyed on the card: the pane stays mounted while j/k move through
             the list, and the next card must open at its top. */}
         <div key={taskId} className="min-h-0 flex-1 overflow-y-auto">
@@ -183,7 +140,7 @@ export function IssueDetail() {
             at the window's top edge. */}
           <header className="border-border flex h-11 shrink-0 items-center gap-1 border-b px-4">
             <span className="text-muted-foreground font-mono text-xs">
-              {card?.taskId ?? taskId}
+              {shownId(card, taskId)}
             </span>
             {card && <RailActions card={card} />}
           </header>
@@ -272,29 +229,14 @@ function branchName(card: BoardCard): string {
   return [prefix, words].filter(Boolean).join("-") || card.id;
 }
 
-/** The card's actions beside the breadcrumb: star, assign, save, and `…`. */
+/** The card's actions beside the breadcrumb: star, assign, and `…`. */
 function HeaderActions({ card }: { card: BoardCard }) {
   const setFavorite = useBoard((state) => state.setFavorite);
   const stale = useBoard((state) => state.view?.stale ?? false);
   const busy = useBoard((state) => state.busy);
-  const saveDraft = useBoard((state) => state.saveDraft);
-  const discardDraft = useBoard((state) => state.discardDraft);
   const [confirming, setConfirming] = useState(false);
-  const changes = useChecklistDraft(card).dirty.size;
-  const saving = busy === `${card.id}:checklist`;
-
-  // ⌘S saves, the way every editor this sits beside does.
-  useEffect(() => {
-    if (!changes) return;
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        if (!stale && !saving) void saveDraft();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [changes, saveDraft, saving, stale]);
+  // Ticks still on their way: the gate would judge the card without them.
+  const ticking = useChecklistTicks(card).pending.size > 0;
 
   return (
     <>
@@ -325,33 +267,8 @@ function HeaderActions({ card }: { card: BoardCard }) {
           />
         </Button>
       )}
-      {/* Save and Discard only while there is something to save (FE-13/D7).
-          A Save button that is always there, greyed out, reads as "this page
-          has unsaved state somewhere", the one thing it must never say when
-          it is false. */}
       <div className="flex items-center gap-1">
-        <AssignAgentButton card={card} unsaved={changes > 0} />
-        {changes > 0 && (
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={saving}
-              onClick={discardDraft}
-            >
-              Discard
-            </Button>
-            <Button
-              size="sm"
-              disabled={stale || saving}
-              onClick={() => void saveDraft()}
-            >
-              {saving
-                ? "Saving…"
-                : `Save ${changes === 1 ? "change" : `${changes} changes`}`}
-            </Button>
-          </>
-        )}
+        <AssignAgentButton card={card} unsaved={ticking} />
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -512,6 +429,7 @@ function Article({ card, slug }: { card: BoardCard; slug: string }) {
           }}
         />
       </div>
+      <IssueChangesRequested card={card} />
       <MarkdownBody source={card.body} />
       {attachments && <Attachments card={card} />}
       <Checklist card={card} />
@@ -675,4 +593,13 @@ function SubIssues({ card, slug }: { card: BoardCard; slug: string }) {
       )}
     </section>
   );
+}
+
+/**
+ * The key to print for the open card. The route param is a task id, or the
+ * raw card id for a card with no category; a uuid is noise in a header.
+ */
+function shownId(card: { taskId: string | null } | null, param: string) {
+  if (card) return card.taskId;
+  return /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(param) ? param : null;
 }

@@ -18,6 +18,7 @@
 // shows up in the app.
 import type {
   BoardColumn,
+  Card,
   CardDetail,
   ChecklistItem,
   ChecklistItemInput,
@@ -229,7 +230,7 @@ function decisionState(checklist: ChecklistItem[]): {
   return { ready: pending.length === 0, pending };
 }
 
-function brief(card: CardDetail) {
+function brief(card: Card) {
   return {
     id: card.id,
     taskId: card.taskId,
@@ -709,14 +710,22 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "set_status",
     description:
-      "Move a card to another lane, the board's status columns. Moving it to a done or archive lane clears its checkpoints.",
+      "Move a card to another lane, the board's status columns. Finished, verified work goes to the review lane, not done. Moving it to a done or archive lane clears its checkpoints.",
     readOnly: false,
     properties: {
       board_id: BOARD_ID,
       card: CARD,
       status: {
         type: "string",
-        description: "Lane key, e.g. todo | processing | done | dropped",
+        description: "Lane key, e.g. todo | processing | review | done",
+      },
+      // BE-23: the cloud's parameter, accepted so a call written for the
+      // cloud runs here. A local board keeps no history, so it is not stored
+      // and not required.
+      reason: {
+        type: "string",
+        description:
+          "What to change when sending a card back from review. Accepted and not stored on a local board, which keeps no history.",
       },
     },
     required: ["board_id", "card", "status"],
@@ -803,7 +812,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "lifecycle_status",
     description:
-      "What the board is waiting on: cards whose decisions are not all ticked (waiting), cards cleared to start (ready), and cards being worked (in flight).",
+      "What the board is waiting on: cards whose decisions are not all ticked (waiting), cards cleared to start (ready), cards being worked (in flight), and cards waiting for a human to review (review).",
     readOnly: true,
     properties: { board_id: BOARD_ID },
     required: ["board_id"],
@@ -813,9 +822,16 @@ export const TOOLS: ToolSpec[] = [
       const waiting: unknown[] = [];
       const ready: unknown[] = [];
       const inFlight: unknown[] = [];
+      // BE-23: written and verified, waiting on a person. Neither ready nor
+      // in flight, as on the cloud.
+      const review: unknown[] = [];
       for (const card of store.listWorkItems(board.id)) {
         const role = order.get(card.columnKey)?.role ?? null;
         if (role === "done" || role === "archive") continue;
+        if (role === "review") {
+          review.push(brief(card));
+          continue;
+        }
         const detail = store.getWorkItem(card.id) as CardDetail;
         const state = decisionState(detail.checklist);
         if (role === "active") {
@@ -829,7 +845,7 @@ export const TOOLS: ToolSpec[] = [
         } else if (state.ready) ready.push(brief(detail));
         else waiting.push({ ...brief(detail), pending: state.pending });
       }
-      return { waiting, ready, inFlight };
+      return { waiting, ready, inFlight, review };
     },
   },
 ];

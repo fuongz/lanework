@@ -4,6 +4,7 @@ import {
   type BoardAttachment,
   type BoardCard,
   type BoardChanges,
+  type BoardMoveWrite,
   type BoardQuery,
   type BoardStats,
   type BoardView,
@@ -86,6 +87,7 @@ import {
   parseFolderIds,
   parsePatch,
   parsePlacement,
+  parseReason,
   requireId,
   requireQuery,
 } from "./payloads";
@@ -760,30 +762,38 @@ export function registerProjects(devUrl?: string): void {
       args[3],
     );
   });
-  handle(projectChannels.move, devUrl, async (args): Promise<BoardWrite> => {
-    // NOTE: Four arguments always. `columnKey` is null for a reorder inside
-    // one lane and `placement` is null for an append, and a channel whose
-    // argument count varied would make "is this call well-formed?"
-    // unanswerable here.
-    if (args.length !== 4)
-      throw new Error("A card and a destination are required");
-    if (!(args[2] === null || typeof args[2] === "string"))
-      throw new Error("A card and a destination are required");
-    const [projectId, cardId] = requireId(args.slice(0, 2), 2);
-    const columnKey = args[2] === null ? null : requireId([args[2]], 1)[0];
-    const placement = parsePlacement(args[3]);
-    if (columnKey === null && !placement)
-      throw new Error("A move needs a column or a placement");
-    const local = await localTarget(projectId);
-    if (local) return local.move(cardId, columnKey, placement);
-    return moveCard(
-      await authorizedRecord(),
-      projectId,
-      cardId,
-      columnKey,
-      placement,
-    );
-  });
+  handle(
+    projectChannels.move,
+    devUrl,
+    async (args): Promise<BoardMoveWrite> => {
+      // NOTE: Five arguments always. `columnKey` is null for a reorder inside
+      // one lane, `placement` is null for an append and `reason` (BE-23) is
+      // null for any move that is not a send-back, and a channel whose
+      // argument count varied would make "is this call well-formed?"
+      // unanswerable here.
+      if (args.length !== 5)
+        throw new Error("A card and a destination are required");
+      if (!(args[2] === null || typeof args[2] === "string"))
+        throw new Error("A card and a destination are required");
+      const [projectId, cardId] = requireId(args.slice(0, 2), 2);
+      const columnKey = args[2] === null ? null : requireId([args[2]], 1)[0];
+      const placement = parsePlacement(args[3]);
+      const reason = parseReason(args[4]);
+      if (columnKey === null && !placement)
+        throw new Error("A move needs a column or a placement");
+      const local = await localTarget(projectId);
+      // A local board keeps no history, so it has nowhere to put a reason.
+      if (local) return local.move(cardId, columnKey, placement);
+      return moveCard(
+        await authorizedRecord(),
+        projectId,
+        cardId,
+        columnKey,
+        placement,
+        reason,
+      );
+    },
+  );
   handle(
     projectChannels.changes,
     devUrl,

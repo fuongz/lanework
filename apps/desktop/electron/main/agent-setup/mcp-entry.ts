@@ -21,12 +21,13 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { MCP_HOST, MCP_URL } from "../../../shared/agent-notes";
+import { MCP_HOST, MCP_URL, MCP_WORKER_URL } from "../../../shared/agent-notes";
 import type {
   LaneworkMcpAgent,
   LaneworkMcpEntry,
   LaneworkMcpMode,
   LaneworkMcpStatus,
+  LaneworkMcpToolset,
 } from "../../../shared/auth";
 import { type AgentHome, agentHome } from "../agent-home";
 import { updateConfigFile } from "../config-file";
@@ -42,6 +43,7 @@ import {
   withOpencodeMcp,
   withoutOpencodeMcp,
 } from "./opencode";
+import { setToolsetPref, toolsetFor, toolsets, WORKER_AGENTS } from "./prefs";
 
 /** The name of our entry in both agents' MCP server config. */
 export const MCP_NAME = "lanework";
@@ -50,6 +52,25 @@ type Json = Record<string, unknown>;
 
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+// ── Toolsets (FE-119/D1) ─────────────────────────────────────────────────────
+
+/** The cloud URL the app writes for `toolset`. */
+export const cloudUrl = (toolset: LaneworkMcpToolset = "full"): string =>
+  toolset === "worker" ? MCP_WORKER_URL : MCP_URL;
+
+/**
+ * The toolset `url` asks for, when it is exactly a URL the app writes.
+ *
+ * NOTE: Exact, on purpose. Any other URL on our host (a trailing slash, a
+ * query the user added, a staging server) is the user's edit: still ours to
+ * switch between stdio and HTTP, never ours to rewrite for a toolset.
+ */
+export function toolsetOfUrl(url: unknown): LaneworkMcpToolset | null {
+  if (url === MCP_URL) return "full";
+  if (url === MCP_WORKER_URL) return "worker";
+  return null;
+}
 
 /**
  * Where the agents' config is read from.
@@ -225,10 +246,14 @@ async function writeMcpShim(
 // ── Claude Code: `~/.claude.json` `mcpServers.lanework` ──────────────────────
 
 /** Our `mcpServers` entry for `mode`. */
-function claudeEntry(mode: LaneworkMcpMode, shim = mcpShimPath()) {
+function claudeEntry(
+  mode: LaneworkMcpMode,
+  shim = mcpShimPath(),
+  url = MCP_URL,
+) {
   return mode === "local"
     ? { type: "stdio", command: shim, args: [] as string[] }
-    : { type: "http", url: MCP_URL };
+    : { type: "http", url };
 }
 
 /** What one config entry points at, or null when it is not one we can read. */
@@ -265,6 +290,15 @@ export function isStaleShim(command: unknown, shim: string): boolean {
   );
 }
 
+/** What a config without our entry reads as. */
+export const NO_ENTRY = {
+  installed: false,
+  ours: false,
+  mode: null,
+  transport: null,
+  toolset: null,
+} as const;
+
 /** What `~/.claude.json` holds under our name. */
 function claudeState(
   json: Json,
@@ -272,14 +306,14 @@ function claudeState(
 ): Omit<LaneworkMcpEntry, "configPath" | "unreadable"> {
   const servers = isObject(json.mcpServers) ? json.mcpServers : {};
   const entry = servers[MCP_NAME];
-  if (!isObject(entry))
-    return { installed: false, ours: false, mode: null, transport: null };
+  if (!isObject(entry)) return NO_ENTRY;
   const mode = modeOf(entry, shim);
   return {
     installed: true,
     // A stale shim is ours with no mode, so `syncLaneworkMcp` rewrites it.
     ours: mode !== null || isStaleShim(entry.command, shim),
     mode,
+    toolset: mode === "cloud" ? toolsetOfUrl(entry.url) : null,
     transport:
       typeof entry.url === "string"
         ? "http"
@@ -294,11 +328,12 @@ export function withClaudeMcp(
   json: Json,
   mode: LaneworkMcpMode,
   shim = mcpShimPath(),
+  url = MCP_URL,
 ): Json {
   const servers = isObject(json.mcpServers) ? json.mcpServers : {};
   return {
     ...json,
-    mcpServers: { ...servers, [MCP_NAME]: claudeEntry(mode, shim) },
+    mcpServers: { ...servers, [MCP_NAME]: claudeEntry(mode, shim, url) },
   };
 }
 
@@ -361,8 +396,7 @@ export function codexState(
   shim = mcpShimPath(),
 ): Omit<LaneworkMcpEntry, "configPath" | "unreadable"> {
   const { ours } = splitCodex(text);
-  if (!ours.length)
-    return { installed: false, ours: false, mode: null, transport: null };
+  if (!ours.length) return NO_ENTRY;
   const url = codexValue(ours, "url");
   const command = codexValue(ours, "command");
   const mode = modeOf({ url, command }, shim);
@@ -370,6 +404,7 @@ export function codexState(
     installed: true,
     ours: mode !== null || isStaleShim(command, shim),
     mode,
+    toolset: mode === "cloud" ? toolsetOfUrl(url) : null,
     transport: url !== null ? "http" : command !== null ? "stdio" : null,
   };
 }
@@ -393,13 +428,14 @@ export function withCodexMcp(
   text: string,
   mode: LaneworkMcpMode,
   shim = mcpShimPath(),
+  url = MCP_URL,
 ): string {
   const rest = withoutCodexMcp(text).replace(/\n+$/, "");
   const table = [
     `[mcp_servers.${MCP_NAME}]`,
     mode === "local"
       ? `command = ${tomlQuote(shim)}`
-      : `url = ${tomlQuote(MCP_URL)}`,
+      : `url = ${tomlQuote(url)}`,
   ].join("\n");
   return `${rest ? `${rest}\n\n` : ""}${table}\n`;
 }
@@ -461,14 +497,7 @@ async function entryStatus(agent: LaneworkMcpAgent): Promise<LaneworkMcpEntry> {
     const config = parseJsonc(text);
     // A file in OpenCode 1's layout is one the app will not rewrite.
     if (!config || usesV1Layout(config))
-      return {
-        installed: false,
-        ours: false,
-        mode: null,
-        transport: null,
-        configPath,
-        unreadable: true,
-      };
+      return { ...NO_ENTRY, configPath, unreadable: true };
     const shim = mcpShimPath();
     return {
       ...opencodeMcpState(config, shim, (command) =>
@@ -479,15 +508,7 @@ async function entryStatus(agent: LaneworkMcpAgent): Promise<LaneworkMcpEntry> {
     };
   }
   const json = parseObject(text);
-  if (!json)
-    return {
-      installed: false,
-      ours: false,
-      mode: null,
-      transport: null,
-      configPath,
-      unreadable: true,
-    };
+  if (!json) return { ...NO_ENTRY, configPath, unreadable: true };
   return { ...claudeState(json), configPath, unreadable: false };
 }
 
@@ -495,18 +516,28 @@ async function entryStatus(agent: LaneworkMcpAgent): Promise<LaneworkMcpEntry> {
 export async function laneworkMcpStatus(
   want: LaneworkMcpMode | null,
 ): Promise<LaneworkMcpStatus> {
-  const [claude, codex, opencode] = await Promise.all([
+  const [claude, codex, opencode, chosen] = await Promise.all([
     entryStatus("claude-code"),
     entryStatus("codex"),
     entryStatus("opencode"),
+    toolsets(),
   ]);
-  return { want, shimPath: mcpShimPath(), claude, codex, opencode };
+  return {
+    want,
+    shimPath: mcpShimPath(),
+    claude,
+    codex,
+    opencode,
+    toolsets: chosen,
+    workerAgents: [...WORKER_AGENTS],
+  };
 }
 
 /**
  * Write our entry for `agent`, pointed at `mode`.
  *
- * Replaces any `lanework` entry.
+ * Replaces any `lanework` entry. A cloud entry asks for the toolset chosen
+ * for `agent` ({@link toolsetFor}).
  *
  * @throws When `~/.claude.json` or OpenCode's config is not valid JSON, or
  *   OpenCode's uses its 1.x layout; neither is ever overwritten.
@@ -526,10 +557,11 @@ export async function installLaneworkMcp(
     if (usesV1Layout(config)) throw v1Refusal(path);
   }
   if (mode === "local") await writeMcpShim();
+  const url = cloudUrl(await toolsetFor(agent));
   if (agent === "opencode") {
     await updateConfigFile(
       path,
-      (text) => withOpencodeMcp(text, mode, mcpShimPath(), path),
+      (text) => withOpencodeMcp(text, mode, mcpShimPath(), path, url),
       NEW_CONFIG_MODE,
     );
     return;
@@ -537,7 +569,7 @@ export async function installLaneworkMcp(
   if (agent === "codex") {
     await updateConfigFile(
       path,
-      (text) => withCodexMcp(text ?? "", mode),
+      (text) => withCodexMcp(text ?? "", mode, mcpShimPath(), url),
       NEW_CONFIG_MODE,
     );
     return;
@@ -547,7 +579,8 @@ export async function installLaneworkMcp(
     (text) => {
       const json = parseObject(text);
       if (!json) throw notJson(path);
-      return `${JSON.stringify(withClaudeMcp(json, mode), null, 2)}\n`;
+      const next = withClaudeMcp(json, mode, mcpShimPath(), url);
+      return `${JSON.stringify(next, null, 2)}\n`;
     },
     NEW_CONFIG_MODE,
   );
@@ -592,6 +625,22 @@ export function modeFor(
 }
 
 /**
+ * Whether an entry of ours must be rewritten for `mode`.
+ *
+ * Another mode, or a cloud URL the app wrote for the other toolset. A cloud
+ * URL the app did not write (`toolset: null`) stays: the user edited it.
+ */
+function needsRewrite(
+  status: LaneworkMcpEntry,
+  mode: LaneworkMcpMode,
+  want: LaneworkMcpToolset,
+): boolean {
+  if (!status.ours) return false;
+  if (status.mode !== mode) return true;
+  return mode === "cloud" && status.toolset !== null && status.toolset !== want;
+}
+
+/**
  * Bring entries that are already OURS in line with the session.
  *
  * Stdio while local, HTTP once signed in. Rewrites the shim when a stdio
@@ -599,8 +648,13 @@ export function modeFor(
  * mode, so it is rewritten to the one this app runs. Signed out (anonymous,
  * revoked) leaves everything as it is.
  *
+ * A cloud entry the app wrote follows its agent's toolset (FE-119/D1), so the
+ * first launch after FE-119 moves Codex's `/v1` to `/v1?toolset=worker`.
+ * Codex keys its OAuth token by URL, so Codex asks to log in once after it.
+ *
  * NOTE: Never ADDS an entry and never touches a `lanework` entry that points
  * somewhere else (a self-hosted server, a dev build): that one is the user's.
+ * Nor a cloud URL somebody edited: it stays as written.
  */
 export async function syncLaneworkMcp(
   kind: "anonymous" | "machine" | "revoked" | "local",
@@ -618,9 +672,29 @@ export async function syncLaneworkMcp(
   // this build's binary and bundle, not the last one's.
   if (statuses.some((status) => status?.ours && mode === "local"))
     await writeMcpShim();
+  const wanted = await toolsets();
   for (const [index, agent] of agents.entries()) {
     const status = statuses[index];
-    if (!status?.ours || status.mode === mode) continue;
+    if (!status || !needsRewrite(status, mode, wanted[agent])) continue;
     await installLaneworkMcp(agent, mode).catch(() => undefined);
   }
+}
+
+/**
+ * Choose `agent`'s toolset, and rewrite its entry when that is ours, cloud
+ * and a URL the app wrote.
+ *
+ * A stdio entry, or none, only remembers the choice: the next cloud entry
+ * is written with it.
+ *
+ * @throws For `worker` on an agent that cannot sign in to it.
+ */
+export async function setLaneworkMcpToolset(
+  agent: LaneworkMcpAgent,
+  toolset: LaneworkMcpToolset,
+): Promise<void> {
+  await setToolsetPref(agent, toolset);
+  const status = await entryStatus(agent);
+  if (status.mode === "cloud" && needsRewrite(status, "cloud", toolset))
+    await installLaneworkMcp(agent, "cloud");
 }

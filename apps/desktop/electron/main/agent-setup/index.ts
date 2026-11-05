@@ -27,6 +27,7 @@ import {
 import {
   type LaneworkMcpAgent,
   type LaneworkMcpStatus,
+  type LaneworkMcpToolset,
   laneworkMcpChannels,
 } from "../../../shared/auth";
 import { agentHome } from "../agent-home";
@@ -50,6 +51,7 @@ import {
   laneworkMcpStatus,
   modeFor,
   removeLaneworkMcp,
+  setLaneworkMcpToolset,
   setMcpHome,
   syncLaneworkMcp,
 } from "./mcp-entry";
@@ -254,6 +256,15 @@ async function mcpRemove(agent: LaneworkMcpAgent): Promise<LaneworkMcpStatus> {
 const isMcpAgent = (value: unknown): value is LaneworkMcpAgent =>
   value === "claude-code" || value === "codex" || value === "opencode";
 
+/** Choose one agent's toolset, then read every entry again (FE-119/D1). */
+async function mcpSetToolset(
+  agent: LaneworkMcpAgent,
+  toolset: LaneworkMcpToolset,
+): Promise<LaneworkMcpStatus> {
+  await setLaneworkMcpToolset(agent, toolset);
+  return mcpStatus();
+}
+
 export function registerAgentSetup(devUrl?: string): void {
   setMcpHome(where);
   handle(laneworkMcpChannels.status, devUrl, (args) => {
@@ -281,6 +292,17 @@ export function registerAgentSetup(devUrl?: string): void {
     return loginLaneworkMcp(args[0], (url) => {
       void shell.openExternal(url).catch(() => {});
     });
+  });
+  handle(laneworkMcpChannels.setToolset, devUrl, (args) => {
+    if (
+      args.length !== 2 ||
+      !isMcpAgent(args[0]) ||
+      (args[1] !== "full" && args[1] !== "worker")
+    )
+      throw new Error(
+        'setToolset takes "claude-code", "codex" or "opencode", and "full" or "worker"',
+      );
+    return mcpSetToolset(args[0], args[1]);
   });
   handle(laneworkMcpChannels.cancelLogin, devUrl, (args) => {
     if (args.length !== 1 || !isMcpAgent(args[0]))

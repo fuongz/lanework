@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { byRank } from "#/lib/board-view";
+import { byRank, evidenceMessage, isSendBack } from "#/lib/board-view";
 import { ipcMessage } from "#/lib/ipc-error";
 import { desktopSurface } from "#/server/desktop";
 import {
@@ -11,6 +11,7 @@ import {
   type BoardConflict,
   type BoardQuery,
   type BoardView,
+  type BoardWrite,
   boardQueryKey,
   DEFAULT_BOARD_QUERY,
   type Project,
@@ -110,6 +111,22 @@ interface BoardState {
   activity: { cardId: string; events: BoardActivity[] } | null;
   activityCursor: string | null;
   activityLoading: boolean;
+  /**
+   * Where the last page of the feed starts: the cursor it was read with
+   * (null for page one) and how many entries come before it.
+   *
+   * NOTE: The feed's cursor is a keyset on `(createdAt, id)`, so reading that
+   * page again returns it plus whatever was written after it. That is how a
+   * refresh picks up a new entry without paging through the whole history.
+   */
+  activityTail: { cardId: string; cursor: string | null; start: number } | null;
+  /**
+   * The card revision the feed on screen was read at, per card.
+   *
+   * What {@link BoardState.syncActivity} dedupes on: a card that has not
+   * moved past it has nothing new to narrate.
+   */
+  activityRevision: { cardId: string; revision: number } | null;
 
   /**
    * What the open board is read under: its grouping and filters.
@@ -216,16 +233,46 @@ interface BoardState {
    * @returns The failure, ready to show, when it did not delete.
    */
   archiveCard: (cardId: string) => Promise<{ error?: string }>;
-  move: (cardId: string, columnKey: string | null) => Promise<void>;
+  /**
+   * Move a card to a lane.
+   *
+   * A move from a `review` lane to an `active` one on a cloud board is a
+   * request for changes (BE-23): without a `reason` it is not sent. It is
+   * parked in `sendBack` instead, for the dialog that asks why, which calls
+   * this again with the reason or drops it with `cancelSendBack`.
+   */
+  move: (
+    cardId: string,
+    columnKey: string | null,
+    reason?: string,
+  ) => Promise<void>;
+  /**
+   * The send-back waiting on its reason (FE-118/D3), or null.
+   *
+   * In the store, not in the control that started the move, so every way of
+   * moving a card (the status menu today, anything added later) asks the
+   * same question through the one dialog `IssuesLayout` mounts.
+   */
+  sendBack: { cardId: string; columnKey: string } | null;
+  /** Drop the parked send-back: the card stays where it is. */
+  cancelSendBack: () => void;
+  /**
+   * The boxes a move into Review or Done was refused over (BE-22, FE-119/D3),
+   * or null.
+   *
+   * In the store, like `sendBack`, so whichever control moved the card, the
+   * one watcher `IssuesLayout` mounts opens the issue, and the checklist
+   * scrolls to `keys[0]` and clears it.
+   */
+  evidenceFocus: {
+    cardId: string;
+    taskId: string | null;
+    keys: string[];
+  } | null;
+  clearEvidenceFocus: () => void;
   update: (
     cardId: string,
     patch: BoardCardPatch,
-    revision: number,
-  ) => Promise<void>;
-  toggle: (
-    cardId: string,
-    key: string,
-    checked: boolean,
     revision: number,
   ) => Promise<void>;
   setChecklist: (
@@ -256,26 +303,39 @@ interface BoardState {
    */
   readCard: (cardId: string) => Promise<BoardCard | null>;
   /**
-   * Checklist ticks made on the open card and not saved yet (FE-13/D7).
+   * Ticks on the open card that are on their way to the service.
    *
-   * NOTE: The desired state per key, compared against the card when it is
-   * read, never a list of clicks. A tick flipped back, or one a poll shows
-   * someone else already made, stops being a change by itself; nothing has to
-   * prune it. It lives beside `detail`, not inside it, so a poll that re-reads
-   * the card cannot overwrite what is being decided.
+   * A tick is saved the moment it is made (it used to wait for a Save
+   * button, FE-13/D7, which left "Ticked by an agent" on a box a person had
+   * just re-ticked until they pressed it). This is the optimistic layer:
+   * the desired state per key, laid over `detail` when it is read, and
+   * dropped key by key as each write answers. Beside `detail`, not inside it,
+   * so a re-read that lands mid-write cannot flicker a box back.
+   *
+   * `seq` tells two writes of one key apart: only the newest one's answer
+   * removes the entry.
    */
-  draft: { cardId: string; checked: Record<string, boolean> } | null;
-  /** Tick or untick one box in the draft. */
-  stageTick: (cardId: string, key: string, checked: boolean) => void;
+  pendingTicks: {
+    cardId: string;
+    checked: Record<string, { checked: boolean; seq: number }>;
+  } | null;
   /**
-   * Pick one option of a "pick ONE" group in the draft.
+   * Tick or untick one box, saved at once (`PATCH …/checklist/:key`).
+   *
+   * Writes to one card run one after another, each against the revision the
+   * last one left, so two quick ticks never race each other into a 409. A
+   * real conflict (somebody else changed the card) puts the boxes back,
+   * shows the conflict notice and re-reads the card, as every write here
+   * does.
+   */
+  tick: (cardId: string, key: string, checked: boolean) => Promise<void>;
+  /**
+   * Pick one option of a "pick ONE" group, saved at once as one checklist
+   * write (one activity line, never half a choice applied).
    *
    * @param group Every key of the group; all but `key` go off.
    */
-  stagePick: (cardId: string, group: string[], key: string) => void;
-  discardDraft: () => void;
-  /** Send the draft as one checklist write. */
-  saveDraft: () => Promise<void>;
+  pick: (cardId: string, group: string[], key: string) => Promise<void>;
   openIssue: (taskId: string) => Promise<void>;
   /** Re-read the open card by id, after a write that changed its parts. */
   refreshDetail: (cardId: string) => Promise<void>;
@@ -285,6 +345,15 @@ interface BoardState {
    * @param more Append the next page instead of reading the first again.
    */
   loadActivity: (cardId: string, more?: boolean) => Promise<void>;
+  /**
+   * Bring the open card's feed up to `revision`.
+   *
+   * Called whenever the card on screen changes: after any write this app
+   * makes to it (each one re-reads or returns the card), and when a poll or
+   * a local-board change reports a newer revision. Deduped by revision, and
+   * one read at a time; a revision that arrives mid-read is caught up after.
+   */
+  syncActivity: (cardId: string, revision: number) => Promise<void>;
   comment: (cardId: string, body: string) => Promise<{ error?: string }>;
   editComment: (
     cardId: string,
@@ -362,6 +431,151 @@ const sameOrder = (before: string[], after: string[]): boolean =>
  */
 let reorders = 0;
 
+/**
+ * Checklist writes to the open card, chained so each one runs against the
+ * revision the previous one left (see `tick`).
+ */
+let tickChain: Promise<void> = Promise.resolve();
+let tickJobs = 0;
+let tickSeq = 0;
+/** Bumped by a refused tick: writes queued behind it are dropped, not sent. */
+let tickEra = 0;
+
+function enqueueTick(job: () => Promise<void>): Promise<void> {
+  tickJobs += 1;
+  const run = tickChain.then(job).finally(() => {
+    tickJobs -= 1;
+    // The lane's progress count is a list read's; it moves with one poll
+    // once the burst of ticks is over, not one poll per box.
+    if (tickJobs === 0) void useBoard.getState().poll();
+  });
+  tickChain = run.catch(() => undefined);
+  return run;
+}
+
+/** Lay `changes` over the open card at once; answers the write's `seq`. */
+function stageTicks(cardId: string, changes: Record<string, boolean>): number {
+  const seq = ++tickSeq;
+  useBoard.setState((state) => {
+    const same = state.pendingTicks?.cardId === cardId;
+    const checked = { ...(same ? state.pendingTicks?.checked : {}) };
+    for (const [key, value] of Object.entries(changes))
+      checked[key] = { checked: value, seq };
+    return { pendingTicks: { cardId, checked } };
+  });
+  return seq;
+}
+
+/**
+ * Take one write's keys off the optimistic layer, with `extra` in the same
+ * update so the box never shows the old card in between.
+ */
+function unstageTicks(
+  cardId: string,
+  keys: string[],
+  seq: number,
+  extra: Partial<BoardState> = {},
+): void {
+  useBoard.setState((state) => {
+    const pending = state.pendingTicks;
+    if (pending?.cardId !== cardId) return extra;
+    const checked = { ...pending.checked };
+    for (const key of keys) if (checked[key]?.seq === seq) delete checked[key];
+    return {
+      ...extra,
+      pendingTicks: Object.keys(checked).length ? { cardId, checked } : null,
+    };
+  });
+}
+
+/**
+ * A refused tick: every box still in flight on this card goes back, and the
+ * writes queued behind it are dropped. They were made against a card that
+ * turned out not to be the one on the service.
+ */
+function failTicks(cardId: string, extra: Partial<BoardState>): void {
+  tickEra += 1;
+  useBoard.setState((state) => ({
+    ...extra,
+    pendingTicks:
+      state.pendingTicks?.cardId === cardId ? null : state.pendingTicks,
+  }));
+}
+
+/** Apply a tick's answer: the saved card, a conflict, or a refusal. */
+async function settleTicks(
+  projectId: string,
+  cardId: string,
+  keys: string[],
+  seq: number,
+  result: BoardWrite,
+): Promise<void> {
+  const store = useBoard.getState();
+  if (result.kind === "ok") {
+    // NOTE: A `PATCH` answer can come without parts. Then the card is read
+    // once more, so the box says who ticked it ("a person") instead of
+    // keeping the agent's attribution until the next re-read.
+    let card: BoardCard = result.card;
+    if (!card.checklist) {
+      const read = await desktopSurface("projects")
+        .board.card(projectId, cardId)
+        .catch(() => null);
+      card = read ?? {
+        ...result.card,
+        checklist: useBoard.getState().detail?.checklist ?? null,
+      };
+    }
+    const current = useBoard.getState().detail;
+    unstageTicks(
+      cardId,
+      keys,
+      seq,
+      current?.id === cardId && card.revision >= current.revision
+        ? { detail: card }
+        : {},
+    );
+    return;
+  }
+  // The way every other write here answers a lost race: the notice with both
+  // sides, and the card as it stands now.
+  failTicks(
+    cardId,
+    result.kind === "conflict"
+      ? { conflict: result }
+      : { error: result.message },
+  );
+  await store.refreshDetail(cardId);
+}
+
+/**
+ * The detail re-read a poll already started, by card and revision, so a
+ * burst of polls does not stack reads of one card.
+ */
+let following: { cardId: string; revision: number } | null = null;
+
+/**
+ * Re-read the open card when the board list says it moved past the copy on
+ * screen: an agent ticked a box, somebody moved it, a local hook wrote it.
+ * The new revision is what then refreshes its activity.
+ */
+function followDetail(): void {
+  const { detail, view, refreshDetail } = useBoard.getState();
+  if (!detail || !view) return;
+  const listed = view.cards.find((card) => card.id === detail.id);
+  if (!listed || listed.revision <= detail.revision) return;
+  if (following?.cardId === detail.id && following.revision >= listed.revision)
+    return;
+  const mine = { cardId: detail.id, revision: listed.revision };
+  following = mine;
+  void refreshDetail(detail.id).finally(() => {
+    if (following === mine) following = null;
+  });
+}
+
+/** The activity sync in flight, and the newest revision asked for since. */
+let syncing: { cardId: string; revision: number } | null = null;
+let syncWanted: { cardId: string; revision: number } | null = null;
+
 export const useBoard = create<BoardState>()((set, get) => ({
   ready: false,
   projects: [],
@@ -377,12 +591,19 @@ export const useBoard = create<BoardState>()((set, get) => ({
   query: DEFAULT_BOARD_QUERY,
   moreLoading: null,
   detail: null,
-  draft: null,
+  pendingTicks: null,
   detailLoading: false,
   detailError: null,
   activity: null,
   activityCursor: null,
   activityLoading: false,
+  activityTail: null,
+  activityRevision: null,
+  sendBack: null,
+  evidenceFocus: null,
+
+  cancelSendBack: () => set({ sendBack: null }),
+  clearEvidenceFocus: () => set({ evidenceFocus: null }),
 
   hydrate: async () => {
     // Everyone waiting on the list waits on the same read. Two screens can
@@ -497,6 +718,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
       );
       if (mine !== ticket.board) return;
       set({ view, loading: false, error: null });
+      followDetail();
       // The board read hands back a head; start the change cursor there so the
       // first poll reports what happened after this read, not the whole board.
       // A grouped read already carries it; asking the feed from zero would
@@ -561,6 +783,8 @@ export const useBoard = create<BoardState>()((set, get) => ({
       };
       set({ view: next, cursor: changes.nextSince });
       remember(next, changes.nextSince);
+      // The open card among them: re-read it, and its activity follows.
+      followDetail();
       // Cards moved, arrived or left: the counts are stale now.
       await get().refreshStats();
     } catch {
@@ -832,7 +1056,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
    * was and then jumps to where it was dropped reads as broken, not slow. A
    * refusal restores the exact list this started from.
    */
-  move: async (cardId, columnKey) => {
+  move: async (cardId, columnKey, reason) => {
     const project = get().active;
     const view = get().view;
     if (!project?.id || !view) return;
@@ -840,6 +1064,16 @@ export const useBoard = create<BoardState>()((set, get) => ({
     const card = before.find((entry) => entry.id === cardId);
     if (!card) return;
     const destination = columnKey ?? card.columnKey;
+    // NOTE: A local board keeps no history, so it has nowhere to keep a
+    // reason, and asking for one it would throw away is a form that lies.
+    if (
+      !reason?.trim() &&
+      project.origin !== "local" &&
+      isSendBack(view.columns, card.columnKey, destination)
+    ) {
+      set({ sendBack: { cardId, columnKey: destination } });
+      return;
+    }
     const cards = reorder(before, cardId, destination);
     // NOTE: A move that moves nothing must not be sent. Putting a card back
     // where it was (on the boundary it already sits against, or into its own
@@ -862,6 +1096,8 @@ export const useBoard = create<BoardState>()((set, get) => ({
         project.id,
         cardId,
         columnKey,
+        undefined,
+        reason?.trim() || undefined,
       );
       if (result.kind === "ok") {
         // The properties rail reads detail, independently of the board list.
@@ -877,7 +1113,16 @@ export const useBoard = create<BoardState>()((set, get) => ({
         view: current ? { ...current, cards: before } : current,
         ...(result.kind === "conflict"
           ? { conflict: result }
-          : { error: result.message }),
+          : result.kind === "needs-evidence"
+            ? {
+                error: evidenceMessage(result.keys),
+                evidenceFocus: {
+                  cardId,
+                  taskId: card.taskId,
+                  keys: result.keys,
+                },
+              }
+            : { error: result.message }),
       });
       if (result.kind === "conflict") await get().reload();
     } catch (error) {
@@ -927,30 +1172,6 @@ export const useBoard = create<BoardState>()((set, get) => ({
     }
   },
 
-  toggle: async (cardId, key, checked, revision) => {
-    const project = get().active;
-    if (!project?.id) return;
-    set({ busy: `${cardId}:${key}`, error: null, conflict: null });
-    try {
-      const result = await desktopSurface("projects").board.toggle(
-        project.id,
-        cardId,
-        key,
-        checked,
-        revision,
-      );
-      if (result.kind === "ok") await get().refreshDetail(cardId);
-      else if (result.kind === "conflict") {
-        set({ conflict: result });
-        await get().refreshDetail(cardId);
-      } else set({ error: result.message });
-    } catch (error) {
-      set({ error: ipcMessage(error, "That tick did not save. Try again.") });
-    } finally {
-      set({ busy: null });
-    }
-  },
-
   setChecklist: async (cardId, items, revision) => {
     const project = get().active;
     if (!project?.id) return;
@@ -980,7 +1201,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
   approve: async (card, keys, note) => {
     const project = get().active;
     if (!project?.id || !card.checklist) return null;
-    // NOTE: The same shape `saveDraft` sends: every row back, `checked` and
+    // NOTE: The same shape `pick` sends: every row back, `checked` and
     // `note` only on the boxes being approved. Every other box keeps its
     // tick, its timestamp and a note the MCP may have written a second ago.
     const wanted = new Set(keys);
@@ -1034,86 +1255,102 @@ export const useBoard = create<BoardState>()((set, get) => ({
     }
   },
 
-  stageTick: (cardId, key, checked) =>
-    set((state) => {
-      const same = state.draft?.cardId === cardId;
-      return {
-        draft: {
-          cardId,
-          checked: { ...(same ? state.draft?.checked : {}), [key]: checked },
-        },
-      };
-    }),
-
-  stagePick: (cardId, group, key) =>
-    set((state) => {
-      const same = state.draft?.cardId === cardId;
-      const checked = { ...(same ? state.draft?.checked : {}) };
-      for (const option of group) checked[option] = option === key;
-      return { draft: { cardId, checked } };
-    }),
-
-  discardDraft: () => set({ draft: null }),
-
-  saveDraft: async () => {
+  tick: async (cardId, key, checked) => {
     const project = get().active;
-    const { draft, detail } = get();
-    if (!project?.id || !draft || detail?.id !== draft.cardId) return;
-    const items = detail.checklist ?? [];
-    const changed = items.filter(
-      (item) =>
-        item.key in draft.checked && draft.checked[item.key] !== item.checked,
-    );
-    if (!changed.length) {
-      set({ draft: null });
-      return;
-    }
-
-    // One request for the whole set: `PUT …/checklist` with the revision on
-    // screen as `If-Match`. A PATCH per box writes one "updated the checklist"
-    // line per tick into the card's activity, and can leave half a decision
-    // applied when a later box fails.
-    //
-    // NOTE: Every row goes back, but `checked` only on the boxes this draft
-    // changed. The service reads an absent `checked` (and an absent `note`) as
-    // "keep what it says". A box nobody touched keeps the moment it was
-    // approved, and a note edited through the MCP a second ago is kept.
-    const wanted = new Set(changed.map((item) => item.key));
-    const payload: BoardChecklistDraft[] = items.map((item) => ({
-      key: item.key,
-      // The card only ever holds these two; anything else would be refused.
-      section: item.section === "verify" ? "verify" : "decisions",
-      text: item.text,
-      group: item.group,
-      // Sent as it is, so saving a tick never strips a stream tag (BE-19).
-      stream: item.stream ?? null,
-      ...(wanted.has(item.key) ? { checked: draft.checked[item.key] } : {}),
-    }));
-
-    set({ busy: `${detail.id}:checklist`, error: null, conflict: null });
-    try {
-      const result = await desktopSurface("projects").board.setChecklist(
-        project.id,
-        detail.id,
-        payload,
-        detail.revision,
-      );
-      if (result.kind === "ok") {
-        set({ detail: result.card, draft: null });
+    if (!project?.id || get().detail?.id !== cardId) return;
+    const projectId = project.id;
+    const seq = stageTicks(cardId, { [key]: checked });
+    const era = tickEra;
+    set({ error: null, conflict: null });
+    await enqueueTick(async () => {
+      const detail = get().detail;
+      if (
+        era !== tickEra ||
+        detail?.id !== cardId ||
+        get().active?.id !== projectId
+      ) {
+        unstageTicks(cardId, [key], seq);
         return;
       }
-      // Refused as a whole, so nothing landed: the draft stays as it was,
-      // still marked, to compare against the new card.
-      if (result.kind === "conflict") set({ conflict: result });
-      else set({ error: result.message });
-      await get().refreshDetail(detail.id);
-    } catch (error) {
-      set({
-        error: ipcMessage(error, "Those ticks did not save. Try again."),
-      });
-    } finally {
-      set({ busy: null });
-    }
+      try {
+        const result = await desktopSurface("projects").board.toggle(
+          projectId,
+          cardId,
+          key,
+          checked,
+          detail.revision,
+        );
+        await settleTicks(projectId, cardId, [key], seq, result);
+      } catch (error) {
+        failTicks(cardId, {
+          error: ipcMessage(error, "That tick did not save. Try again."),
+        });
+      }
+    });
+  },
+
+  pick: async (cardId, group, key) => {
+    const project = get().active;
+    if (!project?.id || get().detail?.id !== cardId) return;
+    const projectId = project.id;
+    const want = Object.fromEntries(
+      group.map((option) => [option, option === key]),
+    );
+    const seq = stageTicks(cardId, want);
+    const era = tickEra;
+    set({ error: null, conflict: null });
+    await enqueueTick(async () => {
+      const detail = get().detail;
+      if (
+        era !== tickEra ||
+        detail?.id !== cardId ||
+        get().active?.id !== projectId
+      ) {
+        unstageTicks(cardId, group, seq);
+        return;
+      }
+      const items = detail.checklist ?? [];
+      const changed = new Set(
+        items
+          .filter((item) => item.key in want && want[item.key] !== item.checked)
+          .map((item) => item.key),
+      );
+      if (!changed.size) {
+        unstageTicks(cardId, group, seq);
+        return;
+      }
+      // One request for the whole choice: `PUT …/checklist` against the
+      // revision on screen. A PATCH per option writes an activity line each
+      // and can leave two options ticked when the second write fails.
+      //
+      // NOTE: Every row goes back, but `checked` only on the options this
+      // pick changed. The service reads an absent `checked` (and an absent
+      // `note`) as "keep what it says", so every other box keeps the moment
+      // it was approved and any note an agent wrote a second ago.
+      const payload: BoardChecklistDraft[] = items.map((item) => ({
+        key: item.key,
+        // The card only ever holds these two; anything else would be refused.
+        section: item.section === "verify" ? "verify" : "decisions",
+        text: item.text,
+        group: item.group,
+        // Sent as it is, so saving a tick never strips a stream tag (BE-19).
+        stream: item.stream ?? null,
+        ...(changed.has(item.key) ? { checked: want[item.key] } : {}),
+      }));
+      try {
+        const result = await desktopSurface("projects").board.setChecklist(
+          projectId,
+          cardId,
+          payload,
+          detail.revision,
+        );
+        await settleTicks(projectId, cardId, group, seq, result);
+      } catch (error) {
+        failTicks(cardId, {
+          error: ipcMessage(error, "That choice did not save. Try again."),
+        });
+      }
+    });
   },
 
   refreshDetail: async (cardId) => {
@@ -1125,10 +1362,14 @@ export const useBoard = create<BoardState>()((set, get) => ({
         project.id,
         cardId,
       );
+      const current = get().detail;
       if (
         mine === ticket.detail &&
         get().active?.id === project.id &&
-        get().detail?.id === cardId
+        current?.id === cardId &&
+        // NOTE: Never older than what is on screen. A read started before a
+        // tick landed can answer after it, and would put the box back.
+        card.revision >= current.revision
       )
         set({ detail: card });
     } catch {
@@ -1155,21 +1396,28 @@ export const useBoard = create<BoardState>()((set, get) => ({
       if (mine !== ticket.detail) return;
       set({
         detail: card,
-        // A draft belongs to the card it was made on; the page only gets here
-        // for a different card once the leave-without-saving prompt let it.
-        draft: null,
+        // Ticks in flight belong to the card they were made on; their writes
+        // still land, but their marks must not lie over the next card.
+        pendingTicks: null,
         detailLoading: false,
-        detailError: card ? null : `No card called ${taskId}.`,
+        detailError: card
+          ? null
+          : /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(taskId)
+            ? `No card called ${taskId}.`
+            : "This card could not be found.",
         // NOTE: Cleared here, not only in `closeIssue`. Opening a card from
         // another one (a sub-issue link) never unmounts the page, so a stale
         // thread would sit under the new card until its own read landed.
         activity: null,
         activityCursor: null,
+        activityTail: null,
+        activityRevision: null,
+        activityLoading: false,
       });
-      // The thread is not read here (FE-15/D5). `IssueActivity` reads it when
-      // it mounts under this card and when the card id changes; reading it
-      // here too sends every open twice. As a second read, it lets the card
-      // draw without waiting for a history that can run for pages.
+      // The thread is not read here (FE-15/D5). `IssueActivity` syncs it when
+      // it mounts under this card and whenever the card's revision moves;
+      // reading it here too sends every open twice. As a second read, it lets
+      // the card draw without waiting for a history that can run for pages.
     } catch (error) {
       if (mine !== ticket.detail) return;
       set({
@@ -1201,23 +1449,108 @@ export const useBoard = create<BoardState>()((set, get) => ({
         cursor,
       );
       if (mine !== ticket.detail || get().detail?.id !== cardId) return;
-      set((state) => ({
-        activity: {
-          cardId,
-          events:
-            more && state.activity?.cardId === cardId
-              ? [...state.activity.events, ...page.events]
-              : page.events,
-        },
-        activityCursor: page.cursor,
-        activityLoading: false,
-      }));
+      set((state) => {
+        const append = more && state.activity?.cardId === cardId;
+        const before = append ? (state.activity?.events ?? []) : [];
+        return {
+          activity: { cardId, events: [...before, ...page.events] },
+          activityCursor: page.cursor,
+          // This page is now the last one read: a refresh starts from it.
+          activityTail: { cardId, cursor, start: before.length },
+          activityLoading: false,
+        };
+      });
     } catch {
       if (mine !== ticket.detail) return;
       // Silent, and the thread already on screen is kept. Activity is context
       // around a card; replacing a conversation with an error banner loses
       // more than it explains.
       set({ activityLoading: false });
+    } finally {
+      // A sync that arrived while this page was being read runs now.
+      const wanted = syncWanted;
+      if (wanted && !syncing && !get().activityLoading) {
+        syncWanted = null;
+        void get().syncActivity(wanted.cardId, wanted.revision);
+      }
+    }
+  },
+
+  syncActivity: async (cardId, revision) => {
+    const project = get().active;
+    if (!project?.id || get().detail?.id !== cardId) return;
+    const loaded = get().activity?.cardId === cardId;
+    const seen = get().activityRevision;
+    // Deduped by revision: the feed on screen was read at this revision or a
+    // newer one, so there is nothing new in it to narrate.
+    if (loaded && seen?.cardId === cardId && seen.revision >= revision) return;
+    // One read at a time. Two overlapping reads of the tail would append the
+    // same entries twice; the newest revision asked for runs after.
+    if (syncing || get().activityLoading) {
+      if (
+        !syncWanted ||
+        syncWanted.revision < revision ||
+        syncWanted.cardId !== cardId
+      )
+        syncWanted = { cardId, revision };
+      return;
+    }
+    const mine = { cardId, revision };
+    syncing = mine;
+    try {
+      if (!loaded) {
+        await get().loadActivity(cardId);
+      } else {
+        const tail = get().activityTail;
+        const from = tail?.cardId === cardId ? tail : null;
+        const ticketNow = ticket.detail;
+        set({ activityLoading: true });
+        try {
+          const page = await desktopSurface("projects").board.activity(
+            project.id,
+            cardId,
+            from?.cursor ?? null,
+          );
+          if (ticketNow !== ticket.detail || get().detail?.id !== cardId)
+            return;
+          // The last page read again: what was on it, plus anything written
+          // after it. Everything before it is history that does not change.
+          set((state) => {
+            const events =
+              state.activity?.cardId === cardId ? state.activity.events : [];
+            const start = from?.start ?? 0;
+            return {
+              activity: {
+                cardId,
+                events: [...events.slice(0, start), ...page.events],
+              },
+              activityCursor: page.cursor,
+              activityTail: { cardId, cursor: from?.cursor ?? null, start },
+              activityLoading: false,
+            };
+          });
+        } catch {
+          // Silent, as every activity read is: the thread on screen stays.
+          set({ activityLoading: false });
+          return;
+        }
+      }
+      if (get().detail?.id === cardId)
+        set((state) => ({
+          activityRevision:
+            state.activityRevision?.cardId === cardId &&
+            state.activityRevision.revision > revision
+              ? state.activityRevision
+              : { cardId, revision },
+        }));
+    } finally {
+      if (syncing === mine) syncing = null;
+      const wanted = syncWanted;
+      if (wanted && !get().activityLoading) {
+        syncWanted = null;
+        if (get().detail?.id === wanted.cardId)
+          void get().syncActivity(wanted.cardId, wanted.revision);
+      }
     }
   },
 
@@ -1230,8 +1563,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
       // Re-read rather than appended locally. The service stamps the time and
       // the author; a comment spliced in here would carry this machine's
       // clock, next to audit rows the server ordered by its own.
-      await get().loadActivity(cardId);
       await get().refreshDetail(cardId);
+      // Only the tail of the feed is read again: a new comment is its newest
+      // entry. Forced, since a comment need not move the card's revision.
+      set({ activityRevision: null });
+      await get().syncActivity(cardId, get().detail?.revision ?? 0);
       return {};
     } catch (error) {
       const message = ipcMessage(
@@ -1350,10 +1686,13 @@ export const useBoard = create<BoardState>()((set, get) => ({
   closeIssue: () =>
     set({
       detail: null,
-      draft: null,
+      pendingTicks: null,
       detailError: null,
       activity: null,
       activityCursor: null,
+      activityTail: null,
+      activityRevision: null,
+      activityLoading: false,
     }),
   dismiss: () => set({ error: null, conflict: null }),
 }));

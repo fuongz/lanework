@@ -43,9 +43,9 @@ interface IssueGroup {
 
 /**
  * The order the status filter lists lanes in: the work being done first, then
- * what is next, then the rest.
+ * what waits on a reviewer, then what is next, then the rest.
  */
-const ROLE_ORDER = ["active", "start", "intake", "done", "archive"];
+const ROLE_ORDER = ["active", "review", "start", "intake", "done", "archive"];
 
 const roleRank = (role: string | null) => {
   const at = ROLE_ORDER.indexOf(role ?? "");
@@ -69,7 +69,7 @@ export function byStatusOrder<T extends { role: string | null }>(
 /**
  * The lanes the list shows when the URL names none: everything not finished.
  *
- * Backlog, To-Do and In Progress on a default board.
+ * Backlog, To-Do, In Progress and Review on a default board.
  */
 export function defaultStatusKeys(
   columns: readonly { key: string; role: string | null }[],
@@ -261,4 +261,52 @@ export function checklistProgress(
     done: card.checklist.filter((item) => item.checked).length,
     total: card.checklist.length,
   };
+}
+
+/**
+ * The icon name a lane is drawn with.
+ *
+ * NOTE: The cloud seeds its Review lane (BE-23) with `progress`, the In
+ * Progress spinner. A `review` lane on that icon is drawn as an eye instead
+ * (FE-118/D1), so the two lanes never look alike. A lane given any other icon
+ * keeps it.
+ */
+export function laneIcon(
+  column: Pick<BoardColumn, "role" | "icon"> | undefined,
+): string {
+  if (!column) return "";
+  return column.role === "review" && column.icon === "progress"
+    ? "eye"
+    : column.icon;
+}
+
+/**
+ * Whether moving a card from lane `from` to lane `to` sends it back from
+ * review (BE-23): a `review` lane into an `active` one. That move asks the
+ * reviewer why.
+ */
+export function isSendBack(
+  columns: readonly Pick<BoardColumn, "key" | "role">[],
+  from: string,
+  to: string,
+): boolean {
+  const role = (key: string) =>
+    columns.find((column) => column.key === key)?.role ?? null;
+  return role(from) === "review" && role(to) === "active";
+}
+
+/**
+ * What the board notice says when the evidence gate refuses a move into
+ * Review or Done (BE-22, FE-119/D3): the boxes by key, joined in words.
+ *
+ * "Needs evidence: V2." / "Needs evidence: V2 and V3." /
+ * "Needs evidence: V2, V3 and V5."
+ */
+export function evidenceMessage(keys: readonly string[]): string {
+  const named =
+    keys.length <= 1
+      ? (keys[0] ?? "")
+      : `${keys.slice(0, -1).join(", ")} and ${keys.at(-1)}`;
+  const them = keys.length === 1 ? "it" : "them";
+  return `Needs evidence: ${named}. An agent ticked ${them} without a passing check. Re-run the check, or tick ${them} yourself.`;
 }

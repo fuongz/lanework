@@ -26,7 +26,7 @@ import {
   type ParseError,
   parse,
 } from "jsonc-parser/lib/esm/main.js";
-import { MCP_HOST, MCP_URL } from "../../../shared/agent-notes";
+import { MCP_HOST, MCP_URL, MCP_WORKER_URL } from "../../../shared/agent-notes";
 import type { LaneworkMcpEntry, LaneworkMcpMode } from "../../../shared/auth";
 
 /** The name of our entry, as in Claude's and Codex's config. */
@@ -132,10 +132,10 @@ export const notJsonc = (path: string) =>
   );
 
 /** Our `mcp.servers` entry for `mode`. */
-function entryFor(mode: LaneworkMcpMode, shim: string): Json {
+function entryFor(mode: LaneworkMcpMode, shim: string, url: string): Json {
   return mode === "local"
     ? { type: "local", command: [shim] }
-    : { type: "remote", url: MCP_URL };
+    : { type: "remote", url };
 }
 
 /** What `config` holds under our name. */
@@ -148,7 +148,13 @@ export function opencodeMcpState(
   const servers = isObject(mcp.servers) ? mcp.servers : {};
   const entry = servers[NAME];
   if (!isObject(entry))
-    return { installed: false, ours: false, mode: null, transport: null };
+    return {
+      installed: false,
+      ours: false,
+      mode: null,
+      transport: null,
+      toolset: null,
+    };
   const command = Array.isArray(entry.command) ? entry.command[0] : undefined;
   const url = typeof entry.url === "string" ? entry.url : null;
   const mode: LaneworkMcpMode | null =
@@ -161,6 +167,15 @@ export function opencodeMcpState(
     installed: true,
     ours: mode !== null || isStale(command),
     mode,
+    // Exactly a URL the app writes, as `toolsetOfUrl` in mcp-entry.ts.
+    toolset:
+      mode !== "cloud"
+        ? null
+        : url === MCP_URL
+          ? "full"
+          : url === MCP_WORKER_URL
+            ? "worker"
+            : null,
     transport: url !== null ? "http" : command !== undefined ? "stdio" : null,
   };
 }
@@ -186,14 +201,20 @@ export function withOpencodeMcp(
   mode: LaneworkMcpMode,
   shim: string,
   path: string,
+  url: string = MCP_URL,
 ): string {
   const config = parseJsonc(text);
   if (!config) throw notJsonc(path);
   if (usesV1Layout(config)) throw v1Refusal(path);
   const base = text?.trim() ? (text as string) : "{}\n";
-  const edits = modify(base, ["mcp", "servers", NAME], entryFor(mode, shim), {
-    formattingOptions: formatting(base),
-  });
+  const edits = modify(
+    base,
+    ["mcp", "servers", NAME],
+    entryFor(mode, shim, url),
+    {
+      formattingOptions: formatting(base),
+    },
+  );
   const next = applyEdits(base, edits);
   return next.endsWith("\n") ? next : `${next}\n`;
 }

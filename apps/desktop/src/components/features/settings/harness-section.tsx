@@ -17,6 +17,13 @@ import {
   SettingsValue,
 } from "#/components/shared/settings/settings-page";
 import { Button } from "#/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#/components/ui/select";
 import { Switch } from "#/components/ui/switch";
 import { useClock } from "#/hooks/use-clock";
 import { useCopy } from "#/hooks/use-copy";
@@ -47,6 +54,7 @@ import { useCloudFeatures, useIsLocalMode } from "#/stores/session";
 import type {
   LaneworkMcpAgent,
   LaneworkMcpStatus,
+  LaneworkMcpToolset,
 } from "../../../../shared/auth";
 import type {
   AgentHookStatus,
@@ -56,6 +64,12 @@ import type {
 import type { HarnessAgent } from "../../../../shared/harness";
 import { HarnessCard } from "./harness-section.card";
 import { usePullAllSection } from "./harness-section.pull";
+
+/** What each toolset is called in its select (FE-119/D1). */
+const TOOLSET_LABELS: Record<LaneworkMcpToolset, string> = {
+  full: "Full",
+  worker: "Worker",
+};
 
 const NAMES: Record<HookAgent, string> = {
   "claude-code": "Claude Code",
@@ -451,9 +465,64 @@ export function HarnessSection() {
         />
       ),
     };
+    const rows = [board, toolsetRow(agent)];
     return cloud.includes(agent)
-      ? [board, authRow(agent, mcpAuth[agent])]
-      : [board];
+      ? [...rows, authRow(agent, mcpAuth[agent])]
+      : rows;
+  };
+
+  // Which of the cloud server's tools the entry asks for (FE-119/D1).
+  const toolsetRow = (agent: LaneworkMcpAgent): SettingsRowSpec => {
+    const entry = mcpEntry(mcpStatus, agent);
+    const name = NAMES[agent];
+    const chosen = mcpStatus?.toolsets[agent] ?? null;
+    const canWork = mcpStatus?.workerAgents.includes(agent) ?? false;
+    // Ours and in the cloud, at a URL the app did not write: the user's edit.
+    const edited =
+      !!entry?.ours && entry.mode === "cloud" && entry.toolset === null;
+    return {
+      label: "Lanework MCP tools",
+      description: !mcpStatus
+        ? "Checking…"
+        : !canWork
+          ? `${name} keeps every tool. It cannot sign in to the worker set yet.`
+          : edited
+            ? `${entry?.configPath} has a lanework URL Lanework did not write, so it stays as it is.`
+            : chosen === "worker"
+              ? `Only the five tools for working a card, so ${name} loads a smaller tool list. Changing it asks ${name} to log in again.`
+              : `Every board tool. Changing it asks ${name} to log in again.`,
+      keywords:
+        "mcp tools toolset worker full tool list context size codex claude opencode",
+      control: (
+        <Select
+          value={chosen}
+          disabled={!mcpSurface || busy || !chosen || !canWork || edited}
+          onValueChange={(next) =>
+            mcpSurface &&
+            (next === "full" || next === "worker") &&
+            void runMcp(
+              () => mcpSurface.setToolset(agent, next),
+              "Could not change the tools.",
+            )
+          }
+        >
+          <SelectTrigger aria-label={`Lanework MCP tools — ${name}`}>
+            <SelectValue>
+              {(current: LaneworkMcpToolset | null) =>
+                current ? TOOLSET_LABELS[current] : ""
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {(["full", "worker"] as const).map((toolset) => (
+              <SelectItem key={toolset} value={toolset}>
+                {TOOLSET_LABELS[toolset]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ),
+    };
   };
 
   const claudeRows: SettingsRowSpec[] = [

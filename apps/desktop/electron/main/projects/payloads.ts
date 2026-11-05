@@ -14,6 +14,7 @@ import {
   CHECKLIST_LIMITS,
   CHECKLIST_SECTIONS,
   DEFAULT_BOARD_QUERY,
+  MAX_CHANGES_REASON,
 } from "../../../shared/projects";
 import { arity, id } from "../ipc-args";
 
@@ -421,6 +422,23 @@ export function parsePlacement(value: unknown): BoardPlacement | undefined {
   if (typeof id !== "string" || !id.trim() || id.length > 200)
     throw new Error("A placement must name one neighbouring card");
   return keys[0] === "after" ? { after: id } : { before: id };
+}
+
+/**
+ * A request-changes reason off the wire (BE-23): null, or 1 to
+ * `MAX_CHANGES_REASON` characters once trimmed.
+ *
+ * NOTE: Null means "no reason". Blank is refused rather than read as null: a
+ * caller that meant to send one sent nothing, and the board would take the
+ * move without the reason the dialog promised.
+ */
+export function parseReason(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") throw new Error("A reason must be text");
+  const reason = value.trim();
+  if (!reason || reason.length > MAX_CHANGES_REASON)
+    throw new Error(`A reason must be 1-${MAX_CHANGES_REASON} characters`);
+  return reason;
 }
 
 /**

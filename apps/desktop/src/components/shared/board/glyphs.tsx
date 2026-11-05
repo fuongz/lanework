@@ -6,6 +6,7 @@ import {
   Idea01Icon,
   Loading03Icon,
   MinusIcon,
+  ViewIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type {
@@ -13,7 +14,7 @@ import type {
   BoardCategory,
   BoardColumn,
 } from "#/../shared/projects";
-import { checklistProgress } from "#/lib/board-view";
+import { checklistProgress, laneIcon } from "#/lib/board-view";
 import { cn } from "#/lib/utils";
 
 /**
@@ -43,6 +44,8 @@ const LANE_ICON: Record<string, typeof CircleIcon> = {
   idea: Idea01Icon,
   "circle-dashed": DashedLineCircleIcon,
   progress: Loading03Icon,
+  // A Review lane (BE-23): somebody has to look at it.
+  eye: ViewIcon,
   check: CheckmarkCircle02Icon,
   archive: Archive02Icon,
 };
@@ -56,7 +59,7 @@ export function StatusIcon({
 }) {
   return (
     <HugeiconsIcon
-      icon={LANE_ICON[column?.icon ?? ""] ?? CircleIcon}
+      icon={LANE_ICON[laneIcon(column)] ?? CircleIcon}
       // Decorative: the lane's name is always beside it, in the group header or
       // the properties rail. An `aria-label` here would make a screen reader
       // announce the status twice.

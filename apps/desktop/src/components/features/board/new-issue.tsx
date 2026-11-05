@@ -41,8 +41,8 @@ import { useBoard } from "#/stores/board";
  *   else. It is also the only surface with room for a description.
  * - Category is the field this page exists for. The board mints a card's
  *   issue key from it (`taskId` stays null without one), and an unkeyed card
- *   is invisible to ⌘K, impossible to deep-link, and blank in the column
- *   every list reserves for `FE-06`.
+ *   is addressed by its raw id and blank in the column every list reserves
+ *   for `FE-06`.
  */
 export function NewIssue() {
   const { slug } = useParams({ from: "/_app/w/$slug/issues/new" });
@@ -96,19 +96,13 @@ export function NewIssue() {
     // and navigating away would take a person's unsaved paragraph with it.
     if (result.error || !result.card) return;
 
-    // NOTE: The detail route is addressed by task id and resolves it through
-    // `lookup`, which only knows minted keys. A card created with no category
-    // has none, so following it there would land on "No card called …". The
-    // list is where an unkeyed card is reachable.
-    void navigate(
-      result.card.taskId
-        ? {
-            to: "/w/$slug/issues/$taskId",
-            params: { slug, taskId: result.card.taskId },
-            search: filters,
-          }
-        : { to: "/w/$slug/issues", params: { slug }, search: filters },
-    );
+    // The detail route takes a task id, or the card id when the card has no
+    // category and so no minted key; `lookup` resolves either.
+    void navigate({
+      to: "/w/$slug/issues/$taskId",
+      params: { slug, taskId: result.card.taskId ?? result.card.id },
+      search: filters,
+    });
   };
 
   return (

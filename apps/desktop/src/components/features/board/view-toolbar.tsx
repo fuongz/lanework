@@ -14,7 +14,7 @@ import type { GroupBy } from "#/lib/board-view";
 import type { IssueSearch } from "#/lib/issue-search";
 import { useBoard } from "#/stores/board";
 import { useGitHubIssues } from "#/stores/github-issues";
-import { FilterButton, FilterChips } from "./filter-bar";
+import { type AttentionControl, FilterButton, FilterChips } from "./filter-bar";
 
 const when = (iso: string): string => {
   const at = new Date(iso);
@@ -75,6 +75,7 @@ export function ViewToolbar({
   onSearch,
   query,
   onQuery,
+  attention,
 }: {
   slug: string;
   search: IssueSearch;
@@ -82,6 +83,8 @@ export function ViewToolbar({
   /** The search box's text. Not in the URL: it is a glance, not a view. */
   query: string;
   onQuery: (next: string) => void;
+  /** The "Needs attention" filter (FE-116), owned by the list. */
+  attention?: AttentionControl;
 }) {
   const view = useBoard((state) => state.view);
   const loading = useBoard((state) => state.loading);
@@ -95,7 +98,11 @@ export function ViewToolbar({
       search={{ query, onQuery, label: "Search issues" }}
       actions={
         <>
-          <FilterButton search={search} onSearch={onSearch} />
+          <FilterButton
+            search={search}
+            onSearch={onSearch}
+            attention={attention}
+          />
 
           {/* The freshness lives in the tooltip, and in the button's name for
             anybody who cannot hover. A saved copy still marks the button
@@ -143,7 +150,7 @@ export function ViewToolbar({
         </>
       }
     >
-      <FilterChips search={search} onSearch={onSearch} />
+      <FilterChips search={search} onSearch={onSearch} attention={attention} />
     </SourceHeader>
   );
 }

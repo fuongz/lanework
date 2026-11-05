@@ -80,8 +80,8 @@ the cloud, never in a local file.
   FE-29) or the **plugin** (INF-03, `plugins/lanework/`). Its bundle,
   `plugins/lanework/bin/lanework-checkpoint.cjs`, is committed — rebuild it
   with `bun run build:plugin` after changing the hook; `bun run gate` fails
-  when it is stale. This repo no longer carries its own
-  copy of the hook — two installs would checkpoint every turn twice. Details:
+  when it is stale. This repo carries no copy of the hook (two installs
+  would checkpoint twice). Details:
   [docs/agents/checkpoint-hook.md](docs/agents/checkpoint-hook.md).
 - **Resume ("resume BE-17").** `get_review` the card and read `checkpoint`.
   If `checkpoint.git.wipRef` is set and you are NOT in the checkout it came
@@ -122,12 +122,13 @@ Each card has a **status** — its board lane:
 
 | `status` | Meaning |
 | --- | --- |
-| `todo` | Plan written, boxes not all ticked — awaiting review. **New cards start here.** |
-| `processing` | Approved (all gating boxes ticked) and being implemented. |
+| `todo` | Plan written, boxes not all ticked. **New cards start here.** |
+| `processing` | All gating boxes ticked; being built. |
+| `review` | Built, verified; a human reviews. |
 | `done` | Shipped and verified. |
 | `dropped` | Superseded or abandoned. |
 
-Advance a card with `set_status`.
+Advance it with `set_status` ([lanes](docs/agents/lanes.md)).
 
 The card is a `body` (markdown) plus a `checklist`. Put Context, an explicit
 **out of scope** section and a **files touched** table in the body. Checklist

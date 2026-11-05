@@ -1,4 +1,8 @@
-import { Cancel01Icon, Tag01Icon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  Cancel01Icon,
+  Tag01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { BoardCard } from "#/../shared/projects";
@@ -27,6 +31,31 @@ import {
   type FilterOption,
   filterFields,
 } from "./filter-bar.fields";
+import {
+  type AttentionFilter,
+  isAttentionFilter,
+} from "./issues-list.diagnostics";
+
+/**
+ * The "Needs attention" filter (FE-116/D1), handed in by the list that owns
+ * it. Not in the URL: `IssueSearch` is the URL's, and this is the list's.
+ */
+export interface AttentionControl {
+  /** The axis, or null while no card needs attention. */
+  field: FilterField | null;
+  value: AttentionFilter | undefined;
+  onChange: (next: AttentionFilter | undefined) => void;
+}
+
+/** The board's fields, then the attention axis when there is one. */
+const withAttention = (
+  fields: FilterField[],
+  attention: AttentionControl | undefined,
+) => (attention?.field ? [...fields, attention.field] : fields);
+
+/** A picked attention value, or undefined to clear it. */
+const attentionValue = (value: string | undefined) =>
+  isAttentionFilter(value) ? value : undefined;
 
 /**
  * A status selection as the URL keeps it: `undefined` for the default set (so
@@ -89,6 +118,15 @@ function OptionGlyph({
           prefix: "",
           tone: option.tone ?? "neutral",
         }}
+      />
+    );
+  if (field.key === "attention")
+    return (
+      <HugeiconsIcon
+        icon={Alert02Icon}
+        className="text-tone-amber size-3.5 shrink-0"
+        strokeWidth={1.8}
+        aria-hidden="true"
       />
     );
   return (
@@ -196,12 +234,14 @@ function FilterChip({
 export function FilterButton({
   search,
   onSearch,
+  attention,
 }: {
   search: IssueSearch;
   onSearch: (next: IssueSearch) => void;
+  attention?: AttentionControl;
 }) {
   const view = useBoard((state) => state.view);
-  const fields = filterFields(view);
+  const fields = withAttention(filterFields(view), attention);
   if (!fields.length) return null;
   return (
     // NOTE: Keyed on the applied filters, which remounts the menu whenever one
@@ -212,24 +252,34 @@ export function FilterButton({
     <FilterMenu
       // The status set is left out of the key: ticking a box navigates too,
       // and a menu that closed on every tick could not tick three.
-      key={JSON.stringify({ ...search, status: undefined })}
+      key={JSON.stringify({
+        ...search,
+        status: undefined,
+        attention: attention?.value,
+      })}
       fields={fields}
       selected={(key) =>
-        key === "status" && view
-          ? statusKeys(view.columns, search.status).join(",")
-          : search[key]
+        key === "attention"
+          ? attention?.value
+          : key === "status" && view
+            ? statusKeys(view.columns, search.status).join(",")
+            : search[key]
       }
       glyph={glyph}
-      active={activeFilters(fields, search).length}
-      onPick={(key, value) =>
+      active={activeFilters(fields, search, attention?.value).length}
+      onPick={(key, value) => {
+        if (key === "attention") {
+          attention?.onChange(attentionValue(value));
+          return;
+        }
         onSearch({
           ...search,
           [key]:
             key === "status" && view && value !== undefined
               ? statusParam(view.columns, value)
               : value,
-        })
-      }
+        });
+      }}
     />
   );
 }
@@ -243,23 +293,31 @@ export function FilterButton({
 export function FilterChips({
   search,
   onSearch,
+  attention,
   className,
 }: {
   search: IssueSearch;
   onSearch: (next: IssueSearch) => void;
+  attention?: AttentionControl;
   className?: string;
 }) {
   const view = useBoard((state) => state.view);
-  const active = activeFilters(filterFields(view), search);
+  const active = activeFilters(
+    withAttention(filterFields(view), attention),
+    search,
+    attention?.value,
+  );
   if (!active.length) return null;
   const set = (key: FilterField["key"], value: string | undefined) =>
-    onSearch({
-      ...search,
-      [key]:
-        key === "status" && view && value !== undefined
-          ? statusParam(view.columns, value)
-          : value,
-    });
+    key === "attention"
+      ? attention?.onChange(attentionValue(value))
+      : onSearch({
+          ...search,
+          [key]:
+            key === "status" && view && value !== undefined
+              ? statusParam(view.columns, value)
+              : value,
+        });
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
       {active.map(({ field, option }) => (
