@@ -39,3 +39,9 @@ export async function codexHasLaneworkTable(): Promise<boolean> {
   const text = await readText(codexConfigPath()).catch(() => null);
   return !!text && /^\s*\[mcp_servers\.lanework\]\s*$/m.test(text);
 }
+
+/** Whether Codex's config sets `developer_instructions` itself (BE-01). */
+export async function codexHasDeveloperInstructions(): Promise<boolean> {
+  const text = await readText(codexConfigPath()).catch(() => null);
+  return !!text && /^\s*developer_instructions\s*=/m.test(text);
+}

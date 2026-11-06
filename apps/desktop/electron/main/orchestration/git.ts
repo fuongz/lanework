@@ -79,6 +79,23 @@ function gitEnv(): NodeJS.ProcessEnv {
 }
 
 /**
+ * `args`, with a `diff` kept to git's own output (FE-127): no
+ * `diff.external` program and no textconv driver, both of which the repo's
+ * own config names and would run. The patch a move applies has to be the
+ * real bytes anyway.
+ */
+function noDiffDrivers(args: string[]): string[] {
+  const at = args.findIndex((arg) => !arg.startsWith("-"));
+  if (at < 0 || args[at] !== "diff") return args;
+  return [
+    ...args.slice(0, at + 1),
+    "--no-ext-diff",
+    "--no-textconv",
+    ...args.slice(at + 1),
+  ];
+}
+
+/**
  * Run `git` with the read flags, its output as bytes.
  *
  * @throws With git's last lines when it exits with a code not in `ok`.
@@ -92,7 +109,7 @@ function git(
   return new Promise((resolve, reject) => {
     execFile(
       "git",
-      [...READ_FLAGS, ...args],
+      [...READ_FLAGS, ...noDiffDrivers(args)],
       {
         cwd,
         timeout,

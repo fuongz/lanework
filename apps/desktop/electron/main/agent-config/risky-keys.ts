@@ -23,21 +23,42 @@ const WATCHED: Partial<Record<ConfigFileId, WatchedFormat>> = {
   "opencode-config": "jsonc",
 };
 
-/** The top-level keys that run a command, in Claude's and Codex's files. */
+/**
+ * The top-level keys that run a command, or send the agent's credentials
+ * somewhere else, in Claude's and Codex's files.
+ *
+ * - Claude: `env` (`NODE_OPTIONS`, `ANTHROPIC_BASE_URL`, a proxy) and the
+ *   credential helpers beside `apiKeyHelper` (FE-127).
+ * - Codex: `notify` runs a program after every turn; `model_providers`
+ *   names where the API key goes (FE-127).
+ *
+ * NOT `permissions` or Codex's approval and sandbox keys: Settings writes
+ * those itself, from a switch the user just moved.
+ */
 export const RISKY_KEYS = [
   "hooks",
   "statusLine",
   "apiKeyHelper",
   "mcpServers",
   "mcp_servers",
+  "env",
+  "otelHeadersHelper",
+  "awsAuthRefresh",
+  "awsCredentialExport",
+  "notify",
+  "model_providers",
 ] as const;
 
-/** The same in OpenCode's config (FE-105/D1). */
+/**
+ * The same in OpenCode's config (FE-105/D1), plus `provider`, whose
+ * `options.baseURL` is where the API key goes (FE-127).
+ */
 export const OPENCODE_RISKY_KEYS = [
   "mcp",
   "plugin",
   "formatter",
   "lsp",
+  "provider",
 ] as const;
 
 /** The leaf keys a person reads as "the command". */

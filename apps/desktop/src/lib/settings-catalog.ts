@@ -1,6 +1,7 @@
 import {
   AiChipIcon,
   Archive02Icon,
+  BatteryEcoChargingIcon,
   CommandLineIcon,
   DashboardSquare02Icon,
   InformationCircleIcon,
@@ -74,6 +75,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: Notification01Icon,
         keywords:
           "notifications notification notify push alert os agent session sessions finished done pull request pr new",
+      },
+      {
+        to: "/settings/power",
+        label: "Power saver",
+        icon: BatteryEcoChargingIcon,
+        keywords:
+          "power saver battery energy idle end stop chat agent engine keep running heat cpu memory",
       },
       {
         to: "/settings/keybindings",

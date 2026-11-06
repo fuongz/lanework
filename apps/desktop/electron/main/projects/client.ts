@@ -4,6 +4,7 @@ import {
   COLUMN_ROLES,
   PRIORITIES,
   paths,
+  stripUserinfo,
 } from "@lanework/protocol";
 import {
   type BoardActivity,
@@ -235,7 +236,11 @@ export async function linkRepoToBoard(
 ): Promise<BoardRepoMove> {
   const response = await call(record, paths.boardRepo(workspaceId), {
     method: "PUT",
-    body: JSON.stringify({ repo: remote, ...(replace ? { replace } : {}) }),
+    // Never a credential the remote was cloned with (FE-127).
+    body: JSON.stringify({
+      repo: stripUserinfo(remote),
+      ...(replace ? { replace } : {}),
+    }),
   });
   const payload = (await body(response)) as Record<string, unknown>;
   if (response.ok) {

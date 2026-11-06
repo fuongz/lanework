@@ -24,6 +24,10 @@
 import { type ChildProcess, spawn as spawnChild } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  CREATE_CONDUCTOR_HINT,
+  SESSIONS_ENV,
+} from "../../../shared/conductor-sessions";
+import {
   AGENT_LABELS,
   type AskQuestion,
   type ComposerSettings,
@@ -65,6 +69,11 @@ interface EngineDeps {
    */
   opencode?: OpenCodeEngineDeps["service"];
   emit: (event: ConversationEvent) => void;
+  /**
+   * How long an engine may sit idle before its process ends, or null for
+   * never: Settings → Power saver (FE-126). Absent, 30 minutes.
+   */
+  idleLimit?: () => number | null;
   /** The id of a live pty running Claude on this conversation, or null. */
   terminalOn: (
     project: string,
@@ -89,6 +98,8 @@ interface EngineDeps {
   localMcp?: (project: string) => Promise<string | null>;
   /** Whether Codex's config has its own `lanework` table (FE-121/D9). */
   codexLanework?: () => Promise<boolean>;
+  /** Whether Codex's config has `developer_instructions` of its own (BE-01). */
+  codexInstructions?: () => Promise<boolean>;
   /** How long a control request is waited on. */
   controlTimeoutMs?: number;
 }
@@ -112,6 +123,7 @@ export function engineArgs(
   fresh = false,
   trusted = true,
   localMcp: string | null = null,
+  hint: string | null = null,
 ): string[] {
   const settings = checkSettings(value);
   if (!settings || !isAgentSessionId(id)) throw new Error("Unknown settings");
@@ -142,6 +154,8 @@ export function engineArgs(
   if (!trusted) args.push("--setting-sources", "user");
   // FE-121/D9: this conversation's board is on this machine.
   if (localMcp) args.push(...claudeMcpArgs(localMcp));
+  // BE-01: what this process may ask of the app, fixed for its life.
+  if (hint) args.push("--append-system-prompt", hint);
   return args;
 }
 
@@ -392,20 +406,24 @@ class Engine implements ConversationEngine {
     this.untrusted = !trusted;
     this.stale = false;
     const localMcp = (await this.deps.localMcp?.(this.project)) ?? null;
+    // FE-87: a lead's control endpoint, a worker's scratch; never the
+    // control variables for anyone else.
+    const env = agentEnv(cli.env, {
+      project: this.project,
+      conversation: this.conversation,
+      folder: this.folder,
+    });
     const child = spawn(
       cli.file,
-      engineArgs(this.conversation, settings, this.fresh, trusted, localMcp),
-      {
-        cwd: this.folder,
-        // FE-87: a lead's control endpoint, a worker's scratch; never the
-        // control variables for anyone else.
-        env: agentEnv(cli.env, {
-          project: this.project,
-          conversation: this.conversation,
-          folder: this.folder,
-        }),
-        stdio: ["pipe", "pipe", "pipe"],
-      },
+      engineArgs(
+        this.conversation,
+        settings,
+        this.fresh,
+        trusted,
+        localMcp,
+        env[SESSIONS_ENV.token] ? CREATE_CONDUCTOR_HINT : null,
+      ),
+      { cwd: this.folder, env, stdio: ["pipe", "pipe", "pipe"] },
     );
     this.child = child;
     this.applied = settings;
@@ -992,6 +1010,40 @@ const SETTLE_MS = 2500;
 /** Longer after Stop: a tool being torn down may take a moment to answer. */
 const STOP_SETTLE_MS = 5000;
 
+/** The idle limit when no setting gives one (FE-125). */
+const IDLE_REAP_MS = 30 * 60_000;
+
+/**
+ * `LANEWORK_ENGINE_IDLE_MS`: an idle limit that beats the setting, to check
+ * the sweep by hand.
+ */
+const IDLE_OVERRIDE_MS = Number(process.env.LANEWORK_ENGINE_IDLE_MS) || null;
+
+/** How often idle engines are looked over: at most this late. */
+const IDLE_SWEEP_MS = Math.min(60_000, IDLE_OVERRIDE_MS ?? 60_000);
+
+/** How long an engine has to end on SIGTERM at app quit before SIGKILL. */
+const QUIT_KILL_MS = 2_000;
+
+/**
+ * SIGKILL `pids` after `ms`, from a detached shell that outlives the app.
+ *
+ * App quit cannot wait on its engines (FE-125/D3); this ends any that ignore
+ * SIGTERM without holding the quit up.
+ */
+function killLater(pids: number[], ms: number): void {
+  if (!pids.length || process.platform === "win32") return;
+  try {
+    spawnChild(
+      "/bin/sh",
+      ["-c", `sleep ${ms / 1000}; kill -9 ${pids.join(" ")} 2>/dev/null`],
+      { detached: true, stdio: "ignore" },
+    ).unref();
+  } catch {
+    // Quitting anyway: SIGTERM was sent.
+  }
+}
+
 /** A local command's answer that says it did nothing. */
 const REFUSAL = /\b(not enough|cannot|can't|unable|failed|error|no )/i;
 
@@ -1037,8 +1089,18 @@ export function createEngines(input: EngineDeps) {
   // The settings each conversation last ran with here, so orchestration can
   // send its lead a turn on them (FE-87).
   const lastSettings = new Map<string, ComposerSettings>();
+  // When each conversation's engine last said anything, by key (FE-125).
+  const lastActive = new Map<string, number>();
+  // Chats kept running past the idle limit, by key, until stopped (FE-126).
+  const kept = new Set<string>();
+  // Engines whose idle process is being ended, until it has.
+  const reaping = new Map<ConversationEngine, Promise<void>>();
   const deps: EngineDeps = {
     ...input,
+    emit: (event) => {
+      lastActive.set(keyOf(event.project, event.conversation), Date.now());
+      input.emit(event);
+    },
     remember: (conversation, settings) => {
       lastSettings.delete(conversation);
       lastSettings.set(conversation, settings);
@@ -1056,6 +1118,7 @@ export function createEngines(input: EngineDeps) {
     spawn: deps.spawn,
     localMcp: deps.localMcp,
     codexLanework: deps.codexLanework,
+    codexInstructions: deps.codexInstructions,
   });
   const opencodeDeps = (): OpenCodeEngineDeps => ({
     service:
@@ -1195,6 +1258,9 @@ export function createEngines(input: EngineDeps) {
       agent: ConversationAgent = "claude",
     ): Promise<EngineState> {
       const key = keyOf(project, conversation);
+      // An idle engine being ended (FE-125): let it go, then start afresh.
+      const ending = reaping.get(engines.get(key) as ConversationEngine);
+      if (ending) await ending;
       let engine = engines.get(key);
       if (engine && (engine.folder !== folder || engine.agent !== agent)) {
         if (engine.busy) throw new Error("A turn is still running.");
@@ -1449,15 +1515,91 @@ export function createEngines(input: EngineDeps) {
       engine.held.clear();
       await engine.halt();
       engines.delete(key);
+      kept.delete(key);
       engine.busy = false;
       engine.emitState();
     },
 
-    /** Signal every engine's process to end, without waiting: app quit. */
+    /**
+     * Exempt one chat from the idle limit, or let it go again (FE-126).
+     *
+     * Held until the chat is stopped or the app quits.
+     */
+    keep(project: string, conversation: string, on: boolean): void {
+      const key = keyOf(project, conversation);
+      if (on) kept.add(key);
+      else {
+        kept.delete(key);
+        // Its idle time counts from now, not from before it was kept.
+        lastActive.set(key, Date.now());
+      }
+    },
+
+    /** The conversations of `project` exempt from the idle limit. */
+    kept(project: string): string[] {
+      const prefix = keyOf(project, "");
+      return [...kept]
+        .filter((key) => key.startsWith(prefix))
+        .map((key) => key.slice(prefix.length));
+    },
+
+    /**
+     * Signal every engine's process to end, without waiting: app quit.
+     *
+     * Any still running {@link QUIT_KILL_MS} later is SIGKILLed (FE-125/D3).
+     */
     killAll(): void {
-      for (const engine of engines.values()) engine.kill();
+      clearInterval(sweeper);
+      const running: number[] = [];
+      for (const engine of engines.values()) {
+        const pid = engine.alive() ? engine.pid() : null;
+        if (pid) running.push(pid);
+        engine.kill();
+      }
+      killLater(running, QUIT_KILL_MS);
     },
   };
+
+  /** Nothing runs, waits, or asks: the process may end. */
+  const reapable = (engine: ConversationEngine) =>
+    engine.alive() &&
+    !engine.busy &&
+    engine.held.length === 0 &&
+    engine.permissions.size === 0;
+
+  /** End the process of every engine idle past the limit (FE-125, FE-126). */
+  function sweep(): void {
+    const now = Date.now();
+    const limit =
+      IDLE_OVERRIDE_MS ?? (deps.idleLimit ? deps.idleLimit() : IDLE_REAP_MS);
+    for (const [key, engine] of engines) {
+      if (reaping.has(engine)) continue;
+      if (!reapable(engine) || limit === null || kept.has(key)) {
+        lastActive.set(key, now);
+        continue;
+      }
+      if (now - (lastActive.get(key) ?? now) < limit) {
+        if (!lastActive.has(key)) lastActive.set(key, now);
+        continue;
+      }
+      // As `release`: the next send makes a fresh engine that resumes it.
+      const done = engine
+        .halt()
+        .catch(() => {})
+        .then(() => {
+          reaping.delete(engine);
+          lastActive.delete(key);
+          if (engines.get(key) === engine) engines.delete(key);
+          engine.emitState();
+        });
+      reaping.set(engine, done);
+    }
+    for (const key of lastActive.keys())
+      if (!engines.has(key)) lastActive.delete(key);
+  }
+  const sweeper = setInterval(sweep, IDLE_SWEEP_MS);
+  sweeper.unref?.();
+
   shared = api;
   return api;
 }

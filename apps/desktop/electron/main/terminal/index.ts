@@ -1025,7 +1025,7 @@ export function registerTerminal(devUrl?: string): void {
   // NOTE: Not `handle()`: the port goes back to THIS sender, so the handler
   // needs the event. The sender check is the same one `handle()` applies.
   ipcMain.handle(terminalChannels.connect, (event) => {
-    assertTrustedSender(event, devUrl);
+    if (!assertTrustedSender(event, devUrl)) return false;
     const { port1, port2 } = new MessageChannelMain();
     ensureHost().postMessage({ t: "connect" }, [port1]);
     event.sender.postMessage(terminalChannels.port, null, [port2]);

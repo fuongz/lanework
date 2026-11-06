@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { open, readdir, realpath, rm, stat } from "node:fs/promises";
-import { extname, isAbsolute, join, relative, sep } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import {
   type BranchList,
   type BranchState,
@@ -128,6 +128,63 @@ export async function locate(
   } catch (error) {
     if (error instanceof GitMissingError) return { kind: "no-git" };
     return { kind: "not-repo", path: folder };
+  }
+}
+
+/** Folders a `git init` is running in now, so a second click waits its turn. */
+const initializing = new Set<string>();
+
+/**
+ * Make the linked folder a new, empty git repository: Files' Init Git.
+ *
+ * NOTE: Only `git init`, as a terminal would run it. No `-b` (git's or the
+ * user's `init.defaultBranch` names the branch), nothing staged or committed,
+ * no remote, no `.gitignore`, no config written. Everything the folder looked
+ * like is checked again right here, not trusted from the screen that offered
+ * the button:
+ *
+ * - the project is linked to a folder, and the folder is a directory;
+ * - no `.git` is in it, and git does not find it inside another repository
+ *   or worktree (`rev-parse --show-toplevel` succeeds): a repository nested
+ *   in another one is never what somebody meant.
+ *
+ * @throws With a sentence for each refusal, and {@link GitMissingError} when
+ *   git is not installed.
+ */
+export async function initRepo(folder: string | null): Promise<void> {
+  if (!folder)
+    throw new Error(
+      "This project is not linked to a folder. Link one in Settings.",
+    );
+  const found = await stat(folder).catch(() => null);
+  if (!found) throw new Error(`${folder} was moved or deleted.`);
+  if (!found.isDirectory()) throw new Error(`${folder} is not a folder.`);
+  const key = await realpath(folder).catch(() => folder);
+  if (initializing.has(key))
+    throw new Error("A git repository is already being created there.");
+  initializing.add(key);
+  try {
+    if (await stat(join(folder, ".git")).catch(() => null))
+      throw new Error(`${folder} already has a .git in it.`);
+    // A `.git` above it too: git may decline to say so itself (a parent it
+    // calls of dubious ownership answers like no repository at all).
+    for (let dir = dirname(key); dir !== dirname(dir); dir = dirname(dir))
+      if (await stat(join(dir, ".git")).catch(() => null))
+        throw new Error(
+          `${folder} is already inside the git repository at ${dir}.`,
+        );
+    const { stdout, code } = await read(
+      folder,
+      ["rev-parse", "--show-toplevel"],
+      { ok: [128] },
+    );
+    if (code === 0)
+      throw new Error(
+        `${folder} is already inside the git repository at ${stdout.trim()}.`,
+      );
+    await write(folder, ["init"], { timeout: 30_000 });
+  } finally {
+    initializing.delete(key);
   }
 }
 

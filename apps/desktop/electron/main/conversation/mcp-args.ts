@@ -29,3 +29,12 @@ export function codexMcpArgs(shim: string, configured: boolean): string[] {
     `mcp_servers.lanework_local={command=${JSON.stringify(shim)},args=[]}`,
   ];
 }
+
+/**
+ * Codex's `-c` override that tells it `hint` as developer instructions
+ * (BE-01). Only for a config without `developer_instructions` of its own:
+ * an override replaces the user's, it does not add to it.
+ */
+export function codexHintArgs(hint: string): string[] {
+  return ["-c", `developer_instructions=${JSON.stringify(hint)}`];
+}

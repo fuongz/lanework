@@ -9,9 +9,16 @@ export default defineConfig({
     // every run and rewrite artifacts nobody asked for.
     {
       name: "production",
-      testIgnore: ["dev.spec.ts", "packaged.spec.ts", "gallery.spec.ts"],
+      testIgnore: [
+        "dev.spec.ts",
+        "packaged.spec.ts",
+        "gallery.spec.ts",
+        "showcase.spec.ts",
+      ],
     },
     { name: "gallery", testMatch: "gallery.spec.ts", timeout: 180_000 },
+    // Marketing shots at 2x, raw and framed. Not a test either.
+    { name: "showcase", testMatch: "showcase.spec.ts", timeout: 240_000 },
     { name: "development", testMatch: "dev.spec.ts" },
     { name: "packaged", testMatch: "packaged.spec.ts" },
   ],

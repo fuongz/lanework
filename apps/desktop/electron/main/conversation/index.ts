@@ -38,6 +38,7 @@ import {
   type OutgoingAttachment,
   type PermissionAnswer,
   type PermissionRequest,
+  type PowerSettings,
   type SendRequest,
   type Suggestion,
   setCodexModels,
@@ -56,6 +57,7 @@ import {
   workerFolderOf,
 } from "../orchestration";
 import { setSessionsEnv } from "../orchestration/engine-tap";
+import { createConductor } from "../orchestration/leads";
 import { knownProject, terminalFolder } from "../projects";
 import {
   bindConductorConversation,
@@ -80,7 +82,11 @@ import { forkConversation } from "./fork";
 import { type ImageScope, openableImage, previewImage } from "./image-preview";
 import { createLinkPreviews } from "./link-preview";
 import { claudePidsOn } from "./live-claude";
-import { codexHasLaneworkTable, localMcpFor } from "./mcp-binding";
+import {
+  codexHasDeveloperInstructions,
+  codexHasLaneworkTable,
+  localMcpFor,
+} from "./mcp-binding";
 import { openCodeClient } from "./opencode-client";
 import { createOpenCodeModels } from "./opencode-models";
 import { createOpenCodeService } from "./opencode-service";
@@ -89,6 +95,7 @@ import {
   readOpenCodeConversation,
 } from "./opencode-transcript";
 import { contentOf, isMessageId, sendRequest } from "./outgoing";
+import { idleLimitMs, readPowerSettings, writePowerSettings } from "./power";
 import type { Outgoing } from "./queue";
 import { createSettingsStore } from "./settings-store";
 import {
@@ -580,6 +587,8 @@ export function registerConversation(
       testing ? process.env.LANEWORK_CODEX_BIN : undefined,
     ),
     emit: tell,
+    // FE-126: Settings → Power saver.
+    idleLimit: idleLimitMs,
     terminalOn: bridge.terminalOn,
     killTerminal: bridge.kill,
     remember: (id, settings) => void store.remember(id, settings),
@@ -594,6 +603,7 @@ export function registerConversation(
     // FE-121/D9: a local project's chat reaches its local board, signed in.
     localMcp: localMcpFor,
     codexLanework: codexHasLaneworkTable,
+    codexInstructions: codexHasDeveloperInstructions,
   });
 
   sessions = new ConductorSessions({
@@ -609,6 +619,7 @@ export function registerConversation(
     endpoint: controlEndpoint,
     cliPath: controlCliPath(),
     file: join(app.getPath("userData"), "conductor-sessions.json"),
+    createConductor,
   });
   const conductors = sessions;
   setSessionsEnv((target) => conductors.envFor(target));
@@ -904,6 +915,33 @@ export function registerConversation(
     async (args): Promise<string[]> => {
       if (args.length !== 1) throw new Error("A project is required");
       return engines.alive(key(args[0], "project"));
+    },
+  );
+
+  handle(conversationChannels.keep, devUrl, async (args): Promise<void> => {
+    if (args.length !== 3 || typeof args[2] !== "boolean")
+      throw new Error("A project, a conversation and on or off are required");
+    const { project, conversation } = conversationOf(args.slice(0, 2));
+    engines.keep(project, conversation, args[2]);
+  });
+
+  handle(conversationChannels.kept, devUrl, async (args): Promise<string[]> => {
+    if (args.length !== 1) throw new Error("A project is required");
+    return engines.kept(key(args[0], "project"));
+  });
+
+  handle(
+    conversationChannels.powerGet,
+    devUrl,
+    async (): Promise<PowerSettings> => readPowerSettings(),
+  );
+
+  handle(
+    conversationChannels.powerSet,
+    devUrl,
+    async (args): Promise<PowerSettings> => {
+      if (args.length !== 1) throw new Error("The settings are required");
+      return writePowerSettings(args[0]);
     },
   );
 

@@ -24,16 +24,25 @@ export function inScopes(scopes: readonly string[], path: string): boolean {
 }
 
 /**
- * Paths that configure an agent, an editor or a git hook (FE-89/D7): a file
- * here runs code the next time someone opens the project, so a worker may
- * write one only when its scope names it. They match at any depth.
+ * Paths that configure an agent, an editor, a shell or a git hook (FE-89/D7):
+ * a file here runs code the next time someone opens the project, so a worker
+ * may write one only when its scope names it. They match at any depth.
+ *
+ * Lower case: they are compared lower-cased (FE-127). A macOS volume ignores
+ * case, so `.CLAUDE/settings.json` is the same file as `.claude/…`.
  */
 export const AGENT_CONFIG_PATHS = [
   ".claude",
   ".codex",
   ".mcp.json",
+  ".opencode",
+  "opencode.json",
+  "opencode.jsonc",
+  ".cursor",
+  ".gemini",
   ".vscode",
   ".husky",
+  ".envrc",
   ".lanework",
 ] as const;
 
@@ -41,7 +50,9 @@ export const AGENT_CONFIG_PATHS = [
 export function isAgentConfig(path: string): boolean {
   return path
     .split("/")
-    .some((part) => (AGENT_CONFIG_PATHS as readonly string[]).includes(part));
+    .some((part) =>
+      (AGENT_CONFIG_PATHS as readonly string[]).includes(part.toLowerCase()),
+    );
 }
 
 /**

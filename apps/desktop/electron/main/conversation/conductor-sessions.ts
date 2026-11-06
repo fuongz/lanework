@@ -42,11 +42,19 @@ import {
   checkSettings,
   DEFAULT_SETTINGS,
   type EngineState,
+  PERMISSIONS,
   type PermissionRequest,
   settingsFor,
   type Turn,
 } from "../../../shared/conversation";
-import { CONTROL_ENV, ControlInputError } from "../../../shared/orchestration";
+import {
+  CONDUCTOR_DEFAULTS,
+  CONDUCTOR_INSTRUCTIONS,
+  CONTROL_ENV,
+  ControlInputError,
+  type TeamLead,
+  type TeamLeadInput,
+} from "../../../shared/orchestration";
 import type { EngineTarget } from "../orchestration/engine-tap";
 import { visibleText } from "../orchestration/prompts";
 import type { Outgoing } from "./queue";
@@ -118,6 +126,14 @@ export interface ConductorSessionsDeps {
   cliPath: string;
   /** Where the sessions each conductor started are kept. */
   file: string;
+  /**
+   * Save a new personal conductor of `project`, under an id none has yet
+   * (BE-01). Through the leads store, so it is checked and the rail hears.
+   */
+  createConductor: (
+    project: string,
+    input: Omit<TeamLeadInput, "id">,
+  ) => Promise<TeamLead>;
 }
 
 /** A session a conductor started. */
@@ -286,6 +302,10 @@ export class ConductorSessions {
     caller: Caller,
     call: SessionCall,
   ): Promise<SessionResults[SessionAction]> {
+    // Any conversation the app started may save a conductor: it is the
+    // user's own, and nothing runs until they open it (PD-04).
+    if (call.action === "conductors.create")
+      return this.createConductor(caller, call.input);
     const conductor = await this.conductorOf(caller);
     switch (call.action) {
       case "sessions.start":
@@ -297,6 +317,93 @@ export class ConductorSessions {
       case "sessions.send":
         return this.send(conductor, call.input);
     }
+  }
+
+  /**
+   * Save a conductor of the caller's project. Its project is the token's,
+   * never one the agent names; agent, model and effort default to the
+   * caller's own.
+   */
+  private async createConductor(
+    caller: Caller,
+    input: SessionInputs["conductors.create"],
+  ): Promise<SessionResults["conductors.create"]> {
+    const { project } = caller;
+    const conversation = caller.conversation();
+    const folder = await this.deps.folderOf(project).catch(() => null);
+    if (!folder)
+      refuse(
+        "This project has no folder on this machine any more. Link it again in Lanework, then retry.",
+      );
+    const callerAgent = conversation
+      ? (this.deps.engines().pending(project, conversation)?.agent ??
+        (await this.deps.agentOf(folder, conversation).catch(() => null)) ??
+        "claude")
+      : null;
+    const mine = conversation
+      ? await this.settingsOf(conversation, callerAgent ?? "claude")
+      : DEFAULT_SETTINGS;
+    // A conductor runs on Claude or Codex (FE-105): an OpenCode caller's
+    // conductor defaults to Claude.
+    const agent = input.agent ?? (callerAgent === "codex" ? "codex" : "claude");
+    const same = callerAgent === agent;
+    const base = settingsFor(agent, same ? mine : DEFAULT_SETTINGS);
+    const model = input.model ?? base.model;
+    const offered = allModels().filter(
+      (entry) => entry.agent === agent && !entry.legacy,
+    );
+    if (
+      !allModels().some((entry) => entry.id === model && entry.agent === agent)
+    )
+      refuse(
+        `model "${model}" is not a ${agent} model Lanework offers. Use one of: ${offered
+          .map((entry) => entry.id)
+          .join(", ")}`,
+      );
+    // NOTE: Never more than the caller may do without asking, as with
+    // sessions.start: a conversation cannot hand a looser mode to the
+    // conductor it saves.
+    const permission = input.permission ?? null;
+    if (
+      permission &&
+      PERMISSIONS.indexOf(permission) > PERMISSIONS.indexOf(mine.permission)
+    )
+      refuse(
+        `permission "${permission}" allows more than this conversation's own "${mine.permission}". Leave it out, or ask the user to set it in the conductor's settings.`,
+      );
+    let lead: TeamLead;
+    try {
+      lead = await this.deps.createConductor(project, {
+        name: input.name,
+        icon: input.icon ?? "Robot02Icon",
+        lead: {
+          agent,
+          model,
+          effort: input.effort ?? (same ? mine.effort : null),
+        },
+        instructions: input.instructions ?? CONDUCTOR_INSTRUCTIONS,
+        contextFiles: input.contextFiles ?? [],
+        workers: [...CONDUCTOR_DEFAULTS.workers],
+        maxWorkers: CONDUCTOR_DEFAULTS.maxWorkers,
+        checks: [...CONDUCTOR_DEFAULTS.checks],
+        jev: null,
+        permission,
+      });
+    } catch (error) {
+      // The store's refusals (a full project, a bad field) do not change
+      // on a retry of the same call.
+      refuse(error instanceof Error ? error.message : String(error));
+    }
+    return {
+      id: lead.id,
+      name: lead.name,
+      icon: lead.icon,
+      agent: lead.lead.agent as "claude" | "codex",
+      model: lead.lead.model,
+      effort: lead.lead.effort,
+      contextFiles: lead.contextFiles,
+      permission: lead.permission,
+    };
   }
 
   /** The caller as a conductor, or refused. */

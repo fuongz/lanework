@@ -68,8 +68,11 @@ import {
   type MachineRegisterRequest,
   type MachineRegisterResponse,
   paths,
+  stripUserinfo,
   TOKEN_PREFIXES,
 } from "@lanework/protocol";
+import { READ_FLAGS } from "../main/git/runner";
+import { readsAllowed } from "../main/git/trust-gate";
 import {
   config,
   desktopHookInstalled,
@@ -229,8 +232,20 @@ function log(message: string): void {
   }
 }
 
+/**
+ * Run git in a folder the hook did not choose: whatever the agent was in.
+ *
+ * With main's read flags (FE-127): the repo's fsmonitor and hooks never run,
+ * no signature check starts `gpg.program`, and a `diff` never hands a file to
+ * `diff.external` or a textconv driver. The folder's other risky settings
+ * (clean filters) are the trust gate's job, asked before the first `status`.
+ */
 function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv): string {
-  return execFileSync("git", args, {
+  const safe =
+    args[0] === "diff"
+      ? ["diff", "--no-ext-diff", "--no-textconv", ...args.slice(1)]
+      : args;
+  return execFileSync("git", [...READ_FLAGS, ...safe], {
     cwd,
     env: { ...process.env, ...env },
     encoding: "utf8",
@@ -995,32 +1010,6 @@ async function http(
   });
 }
 
-/**
- * `remote` without the userinfo a remote URL can carry (`https://<PAT>@…`).
- *
- * It is what the board lookup, hook.log and boards.json see, never the raw
- * URL (FE-78/D2). An scp-like remote (`git@host:owner/repo`) is left as it
- * is: its user is an ssh login, never a password or a token.
- */
-export function stripUserinfo(remote: string): string {
-  const value = remote.trim();
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
-    try {
-      const url = new URL(value);
-      // Untouched when there is nothing to strip: the same spelling as ever.
-      if (!url.username && !url.password) return value;
-      url.username = "";
-      url.password = "";
-      return url.toString();
-    } catch {
-      // Not a URL after all: cut what sits between `://` and the last `@`
-      // before the host.
-      return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
-    }
-  }
-  return value;
-}
-
 /** How long a board found for a repo is trusted without asking again. */
 const BOARD_TTL_MS = 60 * 60 * 1000;
 const BOARDS_FILE = join(STATE_DIR, "boards.json");
@@ -1406,6 +1395,16 @@ async function checkpointTo(
   if (!local && !secret) {
     log(
       "no credential; turn the hook on in the Lanework app (Settings → Harness)",
+    );
+    return;
+  }
+
+  // A folder whose git config or hooks would run a program is read only
+  // once the user trusted it in the app (FE-127, GAP-01): with nobody to ask
+  // here, the gate refuses it, and no checkpoint is sent.
+  if (!(await readsAllowed(root))) {
+    log(
+      `${root}: its git settings run programs and it is not trusted in Lanework; nothing sent`,
     );
     return;
   }

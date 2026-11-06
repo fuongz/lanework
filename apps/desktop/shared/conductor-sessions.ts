@@ -15,13 +15,26 @@
 // NOTE: Shapes, limits and validators only. Imported by the CLI bundle and
 // the renderer, so no Node or Electron.
 
-import { EFFORTS, type Effort } from "./conversation";
+import {
+  EFFORTS,
+  type Effort,
+  PERMISSIONS,
+  type Permission,
+} from "./conversation";
 import {
   ControlInputError,
+  contextPath,
   controlEffort,
   controlObject,
   controlRequestId,
   controlText,
+  LEAD_AGENTS,
+  LEAD_CONTEXT_FILES_MAX,
+  LEAD_ICONS,
+  LEAD_INSTRUCTIONS_MAX,
+  LEAD_NAME_MAX,
+  type LeadAgent,
+  type LeadIcon,
   PROMPT_MAX,
 } from "./orchestration";
 import {
@@ -30,12 +43,17 @@ import {
   type TerminalAgent,
 } from "./terminal";
 
-/** Every `sessions.*` action, in the order `--help` lists them. */
+/**
+ * Every action a conversation's sessions token carries, in the order
+ * `--help` lists them. `sessions.*` are a conductor's own; `conductors.create`
+ * (BE-01, PD-04) any conversation the app started may call.
+ */
 export const SESSION_ACTIONS = [
   "sessions.start",
   "sessions.list",
   "sessions.read",
   "sessions.send",
+  "conductors.create",
 ] as const;
 export type SessionAction = (typeof SESSION_ACTIONS)[number];
 
@@ -95,6 +113,23 @@ export interface SessionInputs {
     prompt: string;
     notifyOnComplete: boolean;
   };
+  /**
+   * A personal conductor of the caller's project. Every field left out takes
+   * the default the rail's dialog gives, or the caller's own agent and model.
+   */
+  "conductors.create": {
+    name: string;
+    /** Absent: the template the rail's dialog starts with. */
+    instructions?: string;
+    icon?: LeadIcon;
+    /** Absent: the caller's agent, or Claude for an OpenCode caller. */
+    agent?: LeadAgent;
+    /** Absent: the caller's model when it runs on `agent`. */
+    model?: string;
+    effort?: Effort;
+    contextFiles?: string[];
+    permission?: Permission;
+  };
 }
 
 export type SessionCall = {
@@ -153,6 +188,17 @@ export interface SessionResults {
     submitted: true;
     notifyOnComplete: boolean;
   };
+  "conductors.create": {
+    /** Its id, picked by the app: never one already taken. */
+    id: string;
+    name: string;
+    icon: LeadIcon;
+    agent: LeadAgent;
+    model: string;
+    effort: Effort | null;
+    contextFiles: string[];
+    permission: Permission | null;
+  };
 }
 
 function fail(message: string): never {
@@ -187,6 +233,19 @@ function count(
   )
     fail(`${label} must be a whole number from ${min} to ${max}`);
   return value;
+}
+
+function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  label: string,
+): T {
+  if (
+    typeof value !== "string" ||
+    !(allowed as readonly string[]).includes(value)
+  )
+    fail(`${label} must be one of ${allowed.join(", ")}`);
+  return value as T;
 }
 
 type Parsers = {
@@ -254,6 +313,66 @@ const SCHEMAS: {
       prompt: controlText(input.prompt, "prompt", PROMPT_MAX),
       notifyOnComplete: flag(input.notifyOnComplete, "notifyOnComplete"),
     }),
+  },
+  "conductors.create": {
+    fields: [
+      "name",
+      "instructions",
+      "icon",
+      "agent",
+      "model",
+      "effort",
+      "contextFiles",
+      "permission",
+    ],
+    parse: (input) => {
+      const name = controlText(input.name, "name", LEAD_NAME_MAX);
+      if (/[\r\n]/.test(name)) fail("name must be one line");
+      const out: SessionInputs["conductors.create"] = { name };
+      if (input.instructions !== undefined) {
+        if (
+          typeof input.instructions !== "string" ||
+          input.instructions.length > LEAD_INSTRUCTIONS_MAX
+        )
+          fail(
+            `instructions must be a string of at most ${LEAD_INSTRUCTIONS_MAX} characters`,
+          );
+        out.instructions = input.instructions;
+      }
+      if (input.icon !== undefined)
+        out.icon = oneOf(input.icon, LEAD_ICONS, "icon");
+      if (input.agent !== undefined)
+        out.agent = oneOf(input.agent, LEAD_AGENTS, "agent");
+      if (input.model !== undefined) {
+        if (
+          typeof input.model !== "string" ||
+          !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(input.model)
+        )
+          fail("model must be a model id; leave it out for yours");
+        out.model = input.model;
+      }
+      if (input.effort !== undefined)
+        out.effort = controlEffort(input.effort, "effort");
+      if (input.contextFiles !== undefined) {
+        if (
+          !Array.isArray(input.contextFiles) ||
+          input.contextFiles.length > LEAD_CONTEXT_FILES_MAX
+        )
+          fail(
+            `contextFiles must list at most ${LEAD_CONTEXT_FILES_MAX} paths`,
+          );
+        out.contextFiles = [
+          ...new Set(
+            input.contextFiles.map((entry, index) =>
+              contextPath(entry, `Context file ${index + 1}`),
+            ),
+          ),
+        ];
+      }
+      if (input.permission !== undefined)
+        out.permission = oneOf(input.permission, PERMISSIONS, "permission");
+      return out;
+    },
   },
 };
 
@@ -334,4 +453,25 @@ export const SESSION_HELP: Record<SessionAction, string> = {
   "sessions.send": `  sessions.send {"sessionId":"...","prompt":"...","notifyOnComplete":true}
             A follow-up to one of your sessions. Refused while it works or
             waits on the user. notifyOnComplete works as in start.`,
+  "conductors.create": `  conductors.create {"name":"Release captain","instructions":"## Role\\n...",
+                  "icon":"Robot02Icon","agent":"${LEAD_AGENTS.join('"|"')}",
+                  "model":"<model id>","effort":"${EFFORTS.join("|")}",
+                  "contextFiles":["docs/release.md"],
+                  "permission":"${PERMISSIONS.join("|")}"}
+            Any conversation Lanework started. Save a conductor of your own
+            in this project, as the Conductors rail's dialog would, and
+            return its id. Only "name" is required: "agent", "model" and
+            "effort" default to yours, "instructions" to the dialog's
+            template, "contextFiles" (project-relative) to none,
+            "permission" to the composer's default. Never replaces one: a
+            taken id gets -2, -3... It does not start the conductor or make
+            it the default; the user opens it from the rail.
+            icon: ${LEAD_ICONS.join(", ")}.`,
 };
+
+/**
+ * What a conversation the app started is told about `conductors.create`,
+ * once, when its process starts (BE-01). Fixed text, so a conversation's
+ * prompt prefix never changes between its turns.
+ */
+export const CREATE_CONDUCTOR_HINT = `Lanework: when the user asks you to create a conductor (a saved team lead in the Lanework app's Conductors rail), run \`"$${SESSIONS_ENV.cli}" conductors.create --json '{"name":"..."}'\` in the shell; add "instructions", "agent", "model", "effort", "contextFiles", "icon" or "permission" only when the user asked for them. Run it with --help for the fields. It prints one JSON line with the new conductor's id. Never print the LANEWORK_* environment variables.`;

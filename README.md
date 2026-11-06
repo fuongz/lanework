@@ -182,10 +182,9 @@ ship until these are fixed:
 - **SX-02 (Windows):** `git` and `gh` are looked up by name with the
   repository as `cwd`, so a `git.exe` or `gh.exe` committed to a repo would
   run (`electron/main/git/runner.ts`, `git/gh.ts`).
-- **SW-02 (Windows):** "Open in Default App" refuses a denylist of launchable
-  extensions (`LAUNCHABLE` in `shared/worktree.ts`) that misses Windows
-  script-host, shortcut and HTML-application types, and the exec-bit check
-  does nothing there.
+- **SW-02 (Windows):** "Open in Default App" opens only an allowlist of
+  document and media types (`shared/worktree.ts`), but its exec-bit check
+  does nothing there, so the allowlist is the only gate.
 - **GAP-02 (Linux AppImage):** an AppImage runs from a temporary mount, so it
   refuses to install the agent hook and offline MCP shims
   (`shimRefusal` in `electron/main/agent-setup/mcp-entry.ts`); those features

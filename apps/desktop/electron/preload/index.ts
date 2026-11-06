@@ -158,6 +158,7 @@ const worktree: DesktopWorktreeApi = {
   show: (slug, sha) => read(worktreeChannels.show, slug, sha),
   branches: (slug) => read(worktreeChannels.branches, slug),
   switchBranch: (slug, name) => read(worktreeChannels.switchBranch, slug, name),
+  init: (slug, folder) => read(worktreeChannels.init, slug, folder),
   repoTrust: (slug, folder) =>
     ipcRenderer.invoke(worktreeChannels.repoTrust, slug, folder),
   askAgain: (slug, folder) =>
@@ -243,6 +244,12 @@ const conversation: DesktopConversationApi = {
   close: (project, id) =>
     ipcRenderer.invoke(conversationChannels.close, project, id),
   alive: (project) => ipcRenderer.invoke(conversationChannels.alive, project),
+  keep: (project, id, on) =>
+    ipcRenderer.invoke(conversationChannels.keep, project, id, on),
+  kept: (project) => ipcRenderer.invoke(conversationChannels.kept, project),
+  power: () => ipcRenderer.invoke(conversationChannels.powerGet),
+  setPower: (settings) =>
+    ipcRenderer.invoke(conversationChannels.powerSet, settings),
   engineState: (project, id) =>
     ipcRenderer.invoke(conversationChannels.engineState, project, id),
   permissions: (project, id) =>

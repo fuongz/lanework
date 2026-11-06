@@ -18,10 +18,10 @@ import { useSyncBanner } from "#/stores/sync-banner";
  * - A card at the foot of the rail, above Settings, on every local project
  *   that has not moved yet. It invites; being local loses nothing, so it
  *   never reads as a warning.
- * - Signed in, its button is the same move the board's bar makes
- *   (`useSyncToCloud`). Signed out, it signs in first.
+ * - Signed in, its button is the move Settings → Projects makes
+ *   (`useSyncToCloud`); the board itself has no bar for it any more. Signed out, it signs in first.
  * - The close button puts it off for THIS project on THIS machine
- *   (`useSyncBanner`). The board's bar and Settings still offer the move.
+ *   (`useSyncBanner`). Settings still offers the move.
  */
 export function SyncBanner({ slug }: { slug: string | undefined }) {
   const project = useBoard(

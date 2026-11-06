@@ -19,9 +19,16 @@ const NONE: string[] = [];
  */
 const tickets = new Map<string, number>();
 
+const same = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((id, index) => id === b[index]);
+
 interface ChatEnginesState {
   /** Each project's conversation ids with a live engine. */
   alive: Record<string, string[]>;
+  /** Each project's conversation ids kept past the idle limit (FE-126). */
+  kept: Record<string, string[]>;
+  /** Keep one chat running past the idle limit, or let it go (FE-126). */
+  keep: (project: string, conversation: string, on: boolean) => Promise<void>;
   refresh: (project: string) => Promise<void>;
   /**
    * Follow engine events.
@@ -33,6 +40,12 @@ interface ChatEnginesState {
 
 export const useChatEngines = create<ChatEnginesState>((set, get) => ({
   alive: {},
+  kept: {},
+
+  keep: async (project, conversation, on) => {
+    await window.desktop?.conversation.keep(project, conversation, on);
+    await get().refresh(project);
+  },
 
   refresh: async (project) => {
     const surface = window.desktop?.conversation;
@@ -40,15 +53,19 @@ export const useChatEngines = create<ChatEnginesState>((set, get) => ({
     const mine = (tickets.get(project) ?? 0) + 1;
     tickets.set(project, mine);
     try {
-      const ids = await surface.alive(project);
+      const [ids, keptIds] = await Promise.all([
+        surface.alive(project),
+        surface.kept(project),
+      ]);
       if (tickets.get(project) !== mine) return;
-      const before = get().alive[project] ?? NONE;
-      if (
-        before.length === ids.length &&
-        before.every((id, index) => id === ids[index])
-      )
-        return;
-      set((state) => ({ alive: { ...state.alive, [project]: ids } }));
+      const state = get();
+      const aliveSame = same(state.alive[project] ?? NONE, ids);
+      const keptSame = same(state.kept[project] ?? NONE, keptIds);
+      if (aliveSame && keptSame) return;
+      set((current) => ({
+        alive: aliveSame ? current.alive : { ...current.alive, [project]: ids },
+        kept: keptSame ? current.kept : { ...current.kept, [project]: keptIds },
+      }));
     } catch {
       // The rail keeps what it last knew.
     }

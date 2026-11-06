@@ -53,6 +53,32 @@ export function isMachineSecret(value: unknown): value is string {
   return typeof value === "string" && MACHINE_SECRET_PATTERN.test(value);
 }
 
+/**
+ * A git remote with any `user:token@` taken out of it.
+ *
+ * `git remote get-url origin` prints a credential when one was cloned in
+ * (`https://u:ghp_x@github.com/o/r`). The board lookup sends the remote in a
+ * query string, where proxies and servers log it, so every remote is passed
+ * through this before it leaves the machine (FE-127). scp-like `git@host:o/r`
+ * has no secret in it and is left as is.
+ */
+export function stripUserinfo(remote: string): string {
+  const value = remote.trim();
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value;
+  try {
+    const url = new URL(value);
+    // Untouched when there is nothing to strip: the same spelling as ever.
+    if (!url.username && !url.password) return value;
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    // Not a URL after all: cut what sits between `://` and the last `@`
+    // before the host.
+    return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
+  }
+}
+
 /** `GET /v1/health`. Unauthenticated. */
 export interface HealthResponse {
   ok: true;

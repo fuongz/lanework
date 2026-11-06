@@ -62,7 +62,7 @@ import type {
   CheckpointListResponse,
   CheckpointRequest,
 } from "./checkpoints";
-import type { HealthResponse } from "./common";
+import { type HealthResponse, stripUserinfo } from "./common";
 import type {
   SyncStatePushRequest,
   SyncStatePushResponse,
@@ -113,7 +113,9 @@ export const paths = {
   syncWorkspaceById: (id: string) => `/v1/sync/state/workspace/${seg(id)}`,
   syncWorkspaceOrder: () => "/v1/sync/state/workspace-order",
 
-  boardsForRepo: (remote: string) => `/v1/boards?repo=${seg(remote)}`,
+  // Never a credential in a query string: see `stripUserinfo`.
+  boardsForRepo: (remote: string) =>
+    `/v1/boards?repo=${seg(stripUserinfo(remote))}`,
   boardRepo: (workspaceId: string) => `/v1/boards/${seg(workspaceId)}/repo`,
   boardConfig: (workspaceId: string) => `/v1/boards/${seg(workspaceId)}/config`,
   boardIcon: (workspaceId: string) => `/v1/boards/${seg(workspaceId)}/icon`,

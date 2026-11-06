@@ -216,10 +216,20 @@ export const useFiles = create<FilesStore>((set, get) => {
         // A non-primary folder answers for itself whether it is a repository
         // at all; the primary's answer is the worktree store's.
         if (folder > 0) {
-          const folderStatus = await desktopSurface("worktree").status(
-            slug,
-            folder,
-          );
+          const folderStatus = await desktopSurface("worktree")
+            .status(slug, folder)
+            .catch((error: unknown) => {
+              // A folder that was not a repository and now cannot be read
+              // (Init Git, then the git gate held the read back, FE-124)
+              // shows the read error, not its stale empty state.
+              if (
+                mine === ticket &&
+                get().slug === slug &&
+                get().folderStatus?.kind !== "ready"
+              )
+                set({ folderStatus: null });
+              throw error;
+            });
           if (mine !== ticket || get().slug !== slug) return;
           set({ folderStatus });
           if (folderStatus.kind !== "ready") {

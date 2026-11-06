@@ -25,8 +25,10 @@ import {
 import {
   CONDUCTOR_DEFAULTS,
   CONDUCTOR_INSTRUCTIONS,
+  freeLeadId,
   type LeadIcon,
   type LeadSource,
+  leadSlug,
   parseTeamLead,
   type TeamLead,
   type TeamLeadInput,
@@ -71,17 +73,8 @@ export const SOURCE_LABELS: Record<LeadSource, string> = {
   repo: "This repo",
 };
 
-/** A lead's name as an id: lower case, accents off, dashes between words. */
-export const slugify = (name: string) =>
-  name
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/đ/gi, "d")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48)
-    .replace(/-+$/, "");
+/** A lead's name as an id (shared with main's `conductors.create`). */
+export const slugify = leadSlug;
 
 /** The page's working copy of a lead: checks as typed, one per line. */
 export interface Draft {
@@ -144,14 +137,7 @@ export const inputOf = (draft: Draft): TeamLeadInput => ({
 });
 
 /** The first free `base`, `base-2`, `base-3`… among `taken`. */
-export function freeId(base: string, taken: Set<string>) {
-  const root = base || "lead";
-  if (!taken.has(root)) return root;
-  for (let n = 2; ; n++) {
-    const id = `${root.slice(0, 44)}-${n}`;
-    if (!taken.has(id)) return id;
-  }
-}
+export const freeId = freeLeadId;
 
 /** One labelled line inside a `content` card, drawn like a settings row. */
 function _Field({

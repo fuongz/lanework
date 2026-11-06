@@ -39,15 +39,18 @@ import {
   type ContextEntry,
   type ContextPick,
   contextPath,
+  freeLeadId,
   LEAD_CONTEXT_FILES_MAX,
   type LeadsEvent,
   type LeadsList,
   type LeadsMainHandlers,
   leadId,
   leadRef,
+  leadSlug,
   parseTeamLead,
   REPO_LEAD_PREFIX,
   type TeamLead,
+  type TeamLeadInput,
 } from "../../../../shared/orchestration";
 import { splitFrontmatter } from "./frontmatter";
 
@@ -76,6 +79,19 @@ export interface LeadStore extends Omit<LeadsMainHandlers, "pickContext"> {
    * @throws {Error} When no source holds `id`, or its repo file is broken.
    */
   resolve: (project: string, id: string) => Promise<TeamLead>;
+  /**
+   * Save a new personal conductor under the first free id its name gives
+   * (BE-01): unlike `savePersonal`, never one that
+   * replaces a conductor already kept. The id is picked inside the write,
+   * so two creates at once never take the same one.
+   *
+   * @throws {ControlInputError} When the lead does not parse.
+   * @throws {Error} When the project keeps {@link PERSONAL_LEADS_MAX}.
+   */
+  createPersonal: (
+    project: string,
+    input: Omit<TeamLeadInput, "id">,
+  ) => Promise<TeamLead>;
 }
 
 /** One project's own conductors, and its default. */
@@ -422,6 +438,25 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
           else bucket.leads[at] = lead;
         }),
       ).then(() => list(project)),
+
+    createPersonal: async (project, input) => {
+      let created: TeamLead | null = null;
+      await serial(() =>
+        updateBucket(project, (bucket) => {
+          if (bucket.leads.length >= PERSONAL_LEADS_MAX)
+            throw new Error(
+              `A project keeps at most ${PERSONAL_LEADS_MAX} conductors of your own. Remove one first.`,
+            );
+          const taken = new Set(bucket.leads.map((entry) => entry.id));
+          const id = freeLeadId(leadSlug(input.name), taken);
+          const lead = parseTeamLead({ ...input, id }, "personal");
+          bucket.leads.push(lead);
+          created = lead;
+        }),
+      );
+      if (!created) throw new Error("The conductor was not saved.");
+      return created;
+    },
 
     removePersonal: (project, id) =>
       serial(() =>

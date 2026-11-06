@@ -46,6 +46,9 @@ export function FilesLayout() {
   const primaryState = useWorktree((state) => state.state);
   const worktreeError = useWorktree((state) => state.error);
   const askAgain = useWorktree((state) => state.askAgain);
+  const initRepo = useWorktree((state) => state.initRepo);
+  const initializing = useWorktree((state) => state.initializing);
+  const initError = useWorktree((state) => state.initError);
   const folderStatus = useFiles((state) => state.folderStatus);
   const open = useFiles((state) => state.open);
   const refresh = useFiles((state) => state.refresh);
@@ -218,7 +221,20 @@ export function FilesLayout() {
       <>
         {title}
         {lone}
-        <RepoEmpty state={state} />
+        <RepoEmpty
+          state={state}
+          init={{
+            busy: initializing !== null,
+            error: initError?.folder === folder ? initError.message : null,
+            onInit: () => {
+              void initRepo(slug, folder).then((made) => {
+                // The primary's tree opens by itself once its status is
+                // ready (the effect above); another folder is read here.
+                if (made && folder > 0) void refresh();
+              });
+            },
+          }}
+        />
       </>
     );
   if (!base)

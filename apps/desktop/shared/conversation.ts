@@ -782,6 +782,39 @@ export function isPreviewUrl(value: unknown): value is string {
 
 // ─── IPC ────────────────────────────────────────────────────────────────────
 
+/** The idle limits Settings → Power saver offers, in minutes (FE-126). */
+export const POWER_MINUTES = [15, 30, 60, 120] as const;
+export type PowerMinutes = (typeof POWER_MINUTES)[number];
+
+/**
+ * Settings → Power saver (FE-126): whether a chat's engine ends after it has
+ * been idle for `minutes`. The next message resumes the conversation.
+ */
+export interface PowerSettings {
+  enabled: boolean;
+  minutes: PowerMinutes;
+}
+
+/** On, after 30 minutes (FE-126/D3). */
+const DEFAULT_POWER_SETTINGS: PowerSettings = { enabled: true, minutes: 30 };
+
+/** Whatever was on disk or sent, with anything unknown at its default. */
+export function checkPowerSettings(value: unknown): PowerSettings {
+  const saved =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    enabled:
+      typeof saved.enabled === "boolean"
+        ? saved.enabled
+        : DEFAULT_POWER_SETTINGS.enabled,
+    minutes: POWER_MINUTES.includes(saved.minutes as PowerMinutes)
+      ? (saved.minutes as PowerMinutes)
+      : DEFAULT_POWER_SETTINGS.minutes,
+  };
+}
+
 export const conversationChannels = {
   read: "conversation:read",
   /** Start a NEW conversation with its first message; answers its id. */
@@ -808,6 +841,13 @@ export const conversationChannels = {
   close: "conversation:close",
   /** A project's conversations whose engine process is alive (Running). */
   alive: "conversation:alive",
+  /** Keep one chat's engine past the idle limit, or let it go (FE-126). */
+  keep: "conversation:keep",
+  /** A project's conversations kept running past the idle limit (FE-126). */
+  kept: "conversation:kept",
+  /** Settings → Power saver (FE-126). */
+  powerGet: "conversation:power-get",
+  powerSet: "conversation:power-set",
   engineState: "conversation:engine-state",
   /** What the engine is waiting on the person for: a tool, or questions. */
   permissions: "conversation:permissions",
@@ -870,6 +910,13 @@ export interface DesktopConversationApi {
   release: (project: string, conversation: string) => Promise<void>;
   close: (project: string, conversation: string) => Promise<void>;
   alive: (project: string) => Promise<string[]>;
+  /** Exempt one chat from the idle limit, until it is stopped (FE-126). */
+  keep: (project: string, conversation: string, on: boolean) => Promise<void>;
+  /** A project's conversations exempt from the idle limit (FE-126). */
+  kept: (project: string) => Promise<string[]>;
+  /** Settings → Power saver (FE-126). */
+  power: () => Promise<PowerSettings>;
+  setPower: (settings: PowerSettings) => Promise<PowerSettings>;
   engineState: (project: string, conversation: string) => Promise<EngineState>;
   /**
    * The requests the engine is still waiting on.

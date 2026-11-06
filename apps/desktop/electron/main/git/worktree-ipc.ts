@@ -32,6 +32,7 @@ import {
   branches,
   commit,
   fileText,
+  initRepo,
   listDir,
   listFiles,
   locate,
@@ -421,6 +422,20 @@ export function registerWorktree(devUrl?: string): void {
         throw new Error("Choose a remote.");
       await sync(await top(slug), action, remote);
       return current(slug);
+    },
+  );
+
+  // Files' Init Git (FE-124): `git init` in the linked folder, then its new
+  // status. The renderer names the project and the folder's index only; the
+  // folder is the one this machine wrote down, and `initRepo` re-checks it.
+  handle(
+    worktreeChannels.init,
+    devUrl,
+    async (args): Promise<WorktreeState> => {
+      const slug = slugOf(args[0]);
+      const folder = folderOf(args[1]);
+      await initRepo(await folderAt(slug, folder));
+      return current(slug, folder);
     },
   );
 

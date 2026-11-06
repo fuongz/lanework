@@ -1,4 +1,8 @@
-import { GitBranchIcon, RefreshIcon } from "@hugeicons/core-free-icons";
+import {
+  GitBranchIcon,
+  Loading03Icon,
+  RefreshIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
@@ -59,21 +63,75 @@ function copy(state: Exclude<WorktreeState, { kind: "ready" }>): {
   }
 }
 
+/**
+ * Init Git, offered beside Open Settings on a folder that is not a
+ * repository (FE-124). Opt-in: only the Files screen passes it.
+ */
+export interface RepoInitAction {
+  /** Runs `git init`; the button is disabled until it settles. */
+  onInit: () => void;
+  busy: boolean;
+  /** Why the last try failed, shown under the buttons; null when it did not. */
+  error: string | null;
+}
+
 export function RepoEmpty({
   state,
+  init,
 }: {
   state: Exclude<WorktreeState, { kind: "ready" }>;
+  init?: RepoInitAction;
 }) {
   const { title, description, settings } = copy(state);
+  const canInit = init && state.kind === "not-repo";
+  const openSettings = settings && (
+    <Link
+      to="/settings/projects"
+      className={buttonVariants({ variant: "outline", size: "sm" })}
+    >
+      Open Settings
+    </Link>
+  );
+  if (!canInit)
+    return (
+      <RepoMessage title={title} description={description}>
+        {openSettings}
+      </RepoMessage>
+    );
   return (
-    <RepoMessage title={title} description={description}>
-      {settings && (
-        <Link
-          to="/settings/projects"
-          className={buttonVariants({ variant: "outline", size: "sm" })}
+    <RepoMessage
+      title={title}
+      description={`${state.path} has no git repository. Initialize one here, or link a different folder.`}
+    >
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button
+          size="sm"
+          disabled={init.busy}
+          aria-busy={init.busy}
+          onClick={() => {
+            if (!init.busy) init.onInit();
+          }}
         >
-          Open Settings
-        </Link>
+          {init.busy && (
+            <HugeiconsIcon
+              icon={Loading03Icon}
+              className="size-3.5 animate-spin motion-reduce:animate-none"
+              strokeWidth={1.5}
+              aria-hidden="true"
+              data-icon="inline-start"
+            />
+          )}
+          {init.busy ? "Initializing…" : "Init Git"}
+        </Button>
+        {openSettings}
+      </div>
+      {init.error && (
+        <p
+          role="alert"
+          className="text-destructive bg-destructive/10 rounded-md px-2.5 py-1.5 text-xs/relaxed break-words whitespace-pre-wrap"
+        >
+          {init.error}
+        </p>
       )}
     </RepoMessage>
   );

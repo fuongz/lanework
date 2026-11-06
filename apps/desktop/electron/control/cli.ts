@@ -114,7 +114,7 @@ and the sessions a conductor starts.
 
 Usage: ${exe} ACTION [--json JSON | --input FILE|-] [--request-id ID]
 
-A conductor's sessions, with the JSON object each one takes:
+A conversation's own actions, with the JSON object each one takes:
 ${SESSION_ACTIONS.map((action) => SESSION_HELP[action]).join("\n")}
 
 An orchestration run's actions, for its lead only:
@@ -409,7 +409,9 @@ function send(
         new SendError(
           sent
             ? `No reply from Lanework: ${error.message}`
-            : `Cannot connect to Lanework at ${endpoint}: ${error.message}. The app may have restarted, or this agent's sandbox may be blocking localhost.`,
+            : (error as NodeJS.ErrnoException).code === "ECONNREFUSED"
+              ? "Lanework app is not running. Open it and try again."
+              : `Cannot connect to Lanework at ${endpoint}: ${error.message}. The app may have restarted, or this agent's sandbox may be blocking localhost.`,
           sent,
         ),
       ),
@@ -468,7 +470,9 @@ export async function runControlCli(
     return emit({
       ok: false,
       error: sessions
-        ? "No Lanework control connection. Only a conductor's conversation in the Lanework app can start sessions."
+        ? parsed.action === "conductors.create"
+          ? "No Lanework control connection. Only a conversation the Lanework app started can create a conductor; ask the user to run this chat from Lanework."
+          : "No Lanework control connection. Only a conductor's conversation in the Lanework app can start sessions."
         : "No Lanework control connection. Only the lead of an approved orchestration run can use this; approve the plan in Lanework first.",
       retryable: false,
     });

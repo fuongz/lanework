@@ -336,6 +336,11 @@ export function SessionRow({
   const open = nested && (openState ?? (childrenGoing > 0 || background > 0));
   const shownSubagents = all ? ordered : ordered.slice(0, SUBAGENTS_FOLDED);
   const isPinned = session.pinnedAt !== null;
+  // Exempt from Settings → Power saver's idle limit (FE-126/D5).
+  const isKept = useChatEngines(
+    (state) => state.kept[project]?.includes(session.id) ?? false,
+  );
+  const keepChat = useChatEngines((state) => state.keep);
   const terminal = Boolean(tab) || chat;
   // Stop asks first while it works, as for a tab. A chat's Stop ends its
   // engine: the turn is cut off, the conversation kept.
@@ -483,6 +488,16 @@ export function SessionRow({
               {tab ? "Show terminal" : "Open in terminal"}
             </ContextMenuItem>
             <ContextMenuSeparator />
+            {/* FE-126/D5: past the idle limit, until Stop or quit. */}
+            {chat && (
+              <ContextMenuItem
+                onClick={() =>
+                  void keepChat(project, session.id, !isKept).catch(() => {})
+                }
+              >
+                {isKept ? "Let it end when idle" : "Keep running"}
+              </ContextMenuItem>
+            )}
             {onStop && <StopItem onStop={onStop} />}
             {/* Out of Lanework only, its name and pin with it; the CLI keeps
                 the transcript, so a Pull brings it back (FE-112). Nothing is

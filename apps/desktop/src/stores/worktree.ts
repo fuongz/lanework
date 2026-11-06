@@ -3,14 +3,15 @@ import { ipcMessage } from "#/lib/ipc-error";
 import { readStored, writeStored } from "#/lib/stored";
 import { desktopSurface } from "#/server/desktop";
 import type { AgentFileMarks } from "../../shared/terminal";
-import type {
-  BranchList,
-  CommitChange,
-  CommitMode,
-  CommitSummary,
-  SyncAction,
-  WorktreePatch,
-  WorktreeState,
+import {
+  type BranchList,
+  type CommitChange,
+  type CommitMode,
+  type CommitSummary,
+  refusalOf,
+  type SyncAction,
+  type WorktreePatch,
+  type WorktreeState,
 } from "../../shared/worktree";
 
 /**
@@ -127,6 +128,14 @@ interface WorktreeStore {
    */
   agentMarks: AgentFileMarks | null;
   loadAgentMarks: () => Promise<void>;
+  /**
+   * The linked folder Init Git is running in, by index, or null (FE-124).
+   *
+   * One at a time per window: the button is disabled while it is set.
+   */
+  initializing: number | null;
+  /** Why Init Git last failed, and in which folder; null after a success. */
+  initError: { folder: number; message: string } | null;
 
   open: (slug: string) => Promise<void>;
   refresh: () => Promise<void>;
@@ -163,6 +172,15 @@ interface WorktreeStore {
   openCommit: (slug: string, sha: string) => Promise<void>;
   loadBranches: (slug: string) => Promise<void>;
   switchBranch: (slug: string, name: string) => Promise<boolean>;
+  /**
+   * `git init` in the project's linked folder `folder` (FE-124).
+   *
+   * On the primary folder the new status lands in `state`; the caller reads
+   * the Files store again either way.
+   *
+   * @returns Whether the repository was created.
+   */
+  initRepo: (slug: string, folder: number) => Promise<boolean>;
 }
 
 export const useWorktree = create<WorktreeStore>((set, get) => {
@@ -220,6 +238,8 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       actionError: null,
       // Another project's conversations: never shown under this one's files.
       agentMarks: null,
+      initializing: null,
+      initError: null,
     });
   }
 
@@ -297,6 +317,8 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     switching: null,
     switchError: null,
     agentMarks: null,
+    initializing: null,
+    initError: null,
 
     loadAgentMarks: async () => {
       const { slug, state } = get();
@@ -508,6 +530,58 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       await desktopSurface("worktree")
         .askAgain(slug, folder)
         .catch(() => {});
+    },
+
+    initRepo: async (slug, folder) => {
+      if (get().initializing !== null) return false;
+      set({ initializing: folder, initError: null });
+      try {
+        const state = await desktopSurface("worktree").init(slug, folder);
+        if (get().slug !== slug) return true;
+        set({ initializing: null });
+        if (folder === 0) {
+          // A new repository: no history, no branches yet. What this project
+          // held is dropped, not kept beside the new status.
+          snapshots.delete(slug);
+          branchCache.delete(slug);
+          ticket.status++;
+          ticket.history++;
+          set({
+            state,
+            error: null,
+            history: [],
+            historyMore: false,
+            historyRead: false,
+            commit: null,
+          });
+          void get().loadAgentMarks();
+          void get().loadBranches(slug);
+          await loadPatch();
+        }
+        return true;
+      } catch (error) {
+        if (get().slug !== slug) return false;
+        const message = ipcMessage(
+          error,
+          "The git repository was not created.",
+        );
+        // NOTE: The repository was made, but the git gate held back reading
+        // it (a hook from the user's init template). That is the screen's
+        // read error, with its Ask again, not a failed Init Git.
+        if (refusalOf(message)) {
+          set({ initializing: null });
+          if (folder === 0) {
+            ticket.status++;
+            set({ state: null, error: message });
+          }
+          return true;
+        }
+        set({ initializing: null, initError: { folder, message } });
+        // The folder may have changed underneath (linked elsewhere, made a
+        // repository from a terminal); what the screen offers is read again.
+        if (folder === 0) void get().refresh();
+        return false;
+      }
     },
 
     switchBranch: async (slug, name) => {

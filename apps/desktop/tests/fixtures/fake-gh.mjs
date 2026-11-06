@@ -173,6 +173,26 @@ function main() {
     json(pick(repo, fields));
   }
 
+  // `gh issue list` / `gh issue view` (FE-75), from `scenario.issues` by
+  // `owner/repo`. A row's `comments` is what the list's `--jq` would leave —
+  // a count — or the comments themselves for a view.
+  if (group === "issue") {
+    const repo = option("--repo");
+    const rows = scenario.issues?.[repo] ?? [];
+    const fields = option("--json") ?? "";
+    if (command === "list")
+      json(
+        rows
+          .filter((row) => (row.state ?? "OPEN") === "OPEN")
+          .map((row) => pick(row, fields)),
+      );
+    if (command === "view") {
+      const row = rows.find((entry) => entry.number === Number(argv[2]));
+      if (!row) finish(1, "", notFound(`Issue with the number of ${argv[2]}`));
+      json(pick(row, fields));
+    }
+  }
+
   if (group === "pr") {
     const repo = option("--repo");
     if (command === "list") {

@@ -26,6 +26,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import {
+  CREATE_CONDUCTOR_HINT,
+  SESSIONS_ENV,
+} from "../../../shared/conductor-sessions";
+import {
   type AskQuestion,
   agentOfModel,
   type ComposerSettings,
@@ -41,7 +45,7 @@ import { isAgentSessionId } from "../../../shared/terminal";
 import { agentEnv, engineTap, safely } from "../orchestration/engine-tap";
 import type { ClaudeCli } from "./claude-cli";
 import type { ConversationEngine } from "./conversation-engine";
-import { codexMcpArgs } from "./mcp-args";
+import { codexHintArgs, codexMcpArgs } from "./mcp-args";
 import type { ContentBlock } from "./outgoing";
 import { Held, type Outgoing, sameSettings } from "./queue";
 import { cut, inputText } from "./transcript";
@@ -56,6 +60,8 @@ interface CodexEngineDeps {
   localMcp?: (project: string) => Promise<string | null>;
   /** Whether Codex's config has its own `lanework` table to switch off. */
   codexLanework?: () => Promise<boolean>;
+  /** Whether Codex's config has `developer_instructions` of its own (BE-01). */
+  codexInstructions?: () => Promise<boolean>;
   /** How long a request to the app-server is waited on. */
   requestTimeoutMs?: number;
 }
@@ -401,16 +407,24 @@ export class CodexEngine implements ConversationEngine {
     const overrides = localMcp
       ? codexMcpArgs(localMcp, (await this.deps.codexLanework?.()) ?? false)
       : [];
+    // FE-87: a lead's control endpoint, a worker's scratch; never the
+    // control variables for anyone else.
+    const env = agentEnv(cli.env, {
+      project: this.project,
+      conversation: this.conversation,
+      folder: this.folder,
+      named: () => this.conversation,
+    });
+    // BE-01: how to save a conductor, unless the user's config already
+    // gives Codex developer instructions (an override would replace them).
+    if (
+      env[SESSIONS_ENV.token] &&
+      !((await this.deps.codexInstructions?.().catch(() => true)) ?? true)
+    )
+      overrides.push(...codexHintArgs(CREATE_CONDUCTOR_HINT));
     const child = spawn(cli.file, [...overrides, "app-server"], {
       cwd: this.folder,
-      // FE-87: a lead's control endpoint, a worker's scratch; never the
-      // control variables for anyone else.
-      env: agentEnv(cli.env, {
-        project: this.project,
-        conversation: this.conversation,
-        folder: this.folder,
-        named: () => this.conversation,
-      }),
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;

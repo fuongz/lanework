@@ -1379,6 +1379,28 @@ export interface LeadsList {
   errors: { file: string; error: string }[];
 }
 
+/** A lead's name as an id: lower case, accents off, dashes between words. */
+export const leadSlug = (name: string) =>
+  name
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/, "");
+
+/** The first free `base`, `base-2`, `base-3`… among `taken`. */
+export function freeLeadId(base: string, taken: ReadonlySet<string>): string {
+  const root = base || "lead";
+  if (!taken.has(root)) return root;
+  for (let n = 2; ; n++) {
+    const id = `${root.slice(0, 44)}-${n}`;
+    if (!taken.has(id)) return id;
+  }
+}
+
 /**
  * A team lead's id.
  *

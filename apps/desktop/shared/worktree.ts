@@ -213,6 +213,7 @@ export const worktreeChannels = {
   show: "worktree:show",
   branches: "worktree:branches",
   switchBranch: "worktree:switch",
+  init: "worktree:init",
   repoTrust: "worktree:repo-trust",
   askAgain: "worktree:ask-again",
   restrict: "worktree:restrict",
@@ -347,6 +348,16 @@ export interface DesktopWorktreeApi {
    * and that refusal is the answer the screen shows.
    */
   switchBranch: (slug: string, name: string) => Promise<WorktreeState>;
+  /**
+   * `git init` in a linked folder that is not a repository yet (FE-124).
+   *
+   * Nothing else: no branch name, no commit, no remote, no `.gitignore`.
+   * Refused when the project has no folder there, the folder is gone, git is
+   * not installed, or the folder is already in a repository.
+   *
+   * @returns The folder's status afterwards.
+   */
+  init: (slug: string, folder?: number) => Promise<WorktreeState>;
   /** Where the repository's git settings stand; never asks (FE-102). */
   repoTrust: (slug: string, folder?: number) => Promise<RepoTrust>;
   /**
@@ -374,7 +385,8 @@ export const LAUNCHABLE =
  * An allowlist, not a denylist: a denylist misses whatever it did not think
  * of (`.fileloc`, `.vbs`, `.lnk`, the next one). These are documents and
  * media whose default app shows them. No archive (opening one unpacks it),
- * no HTML (a browser runs its scripts). Anything else is revealed in Finder.
+ * no HTML, and no SVG or XML either (FE-127): their default app is often a
+ * browser, which runs their scripts. Anything else is revealed in Finder.
  */
 const DOCUMENT_TYPES = new Set([
   "txt",
@@ -388,14 +400,12 @@ const DOCUMENT_TYPES = new Set([
   "yaml",
   "yml",
   "toml",
-  "xml",
   "log",
   "png",
   "jpg",
   "jpeg",
   "gif",
   "webp",
-  "svg",
   "bmp",
   "tiff",
   "heic",

@@ -47,15 +47,14 @@ __export(exports_lanework_checkpoint, {
   isSecretFile: () => isSecretFile,
   readOpencodeSession: () => readOpencodeSession,
   redact: () => redact,
-  snapshot: () => snapshot,
-  stripUserinfo: () => stripUserinfo
+  snapshot: () => snapshot
 });
 module.exports = __toCommonJS(exports_lanework_checkpoint);
-var import_node_child_process3 = require("node:child_process");
+var import_node_child_process4 = require("node:child_process");
 var import_node_crypto5 = require("node:crypto");
 var import_node_fs6 = require("node:fs");
 var import_node_os6 = require("node:os");
-var import_node_path7 = require("node:path");
+var import_node_path9 = require("node:path");
 // packages/protocol/src/auth.ts
 var LOOPBACK_CALLBACK_PATH = "/oauth/callback";
 // packages/protocol/src/boards.ts
@@ -80,6 +79,21 @@ var MACHINE_SECRET_PATTERN = new RegExp(`^${TOKEN_PREFIXES.machine}[A-Za-z0-9_-]
 function isMachineSecret(value) {
   return typeof value === "string" && MACHINE_SECRET_PATTERN.test(value);
 }
+function stripUserinfo(remote) {
+  const value = remote.trim();
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value))
+    return value;
+  try {
+    const url = new URL(value);
+    if (!url.username && !url.password)
+      return value;
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
+  }
+}
 // packages/protocol/src/endpoints.ts
 function seg(value) {
   if (value === "" || value === "." || value === "..")
@@ -97,7 +111,7 @@ var paths = {
   syncWorkspace: () => "/v1/sync/state/workspace",
   syncWorkspaceById: (id) => `/v1/sync/state/workspace/${seg(id)}`,
   syncWorkspaceOrder: () => "/v1/sync/state/workspace-order",
-  boardsForRepo: (remote) => `/v1/boards?repo=${seg(remote)}`,
+  boardsForRepo: (remote) => `/v1/boards?repo=${seg(stripUserinfo(remote))}`,
   boardRepo: (workspaceId) => `/v1/boards/${seg(workspaceId)}/repo`,
   boardConfig: (workspaceId) => `/v1/boards/${seg(workspaceId)}/config`,
   boardIcon: (workspaceId) => `/v1/boards/${seg(workspaceId)}/icon`,
@@ -130,14 +144,260 @@ function withQuery(path, query) {
   const text = query === undefined ? "" : String(query);
   return text ? `${path}?${text}` : path;
 }
+// apps/desktop/electron/main/git/runner.ts
+var import_node_child_process = require("node:child_process");
+var MAX_OUTPUT = 32 * 1024 * 1024;
+var DEFAULT_TIMEOUT = 15000;
+var BASE_FLAGS = [
+  "-c",
+  "core.quotepath=false",
+  "-c",
+  "color.ui=never",
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "log.showSignature=false",
+  "--no-pager",
+  "--literal-pathspecs"
+];
+var READ_FLAGS = [
+  ...BASE_FLAGS,
+  "--no-optional-locks",
+  "-c",
+  "core.hooksPath=/dev/null"
+];
+class GitMissingError extends Error {
+}
+function exec(flags, cwd, args, options) {
+  const ok = options.ok ?? [0];
+  return new Promise((resolve, reject) => {
+    import_node_child_process.execFile("git", [...flags, ...args], {
+      cwd,
+      timeout: options.timeout ?? DEFAULT_TIMEOUT,
+      maxBuffer: options.maxBuffer ?? MAX_OUTPUT,
+      windowsHide: true,
+      encoding: "utf8",
+      env: options.env ?? process.env
+    }, (error, stdout, stderr) => {
+      if (!error)
+        return resolve({ stdout, code: 0 });
+      const code = typeof error.code === "number" ? error.code : null;
+      if (error.code === "ENOENT")
+        return reject(new GitMissingError("git is not installed."));
+      if (code !== null && ok.includes(code))
+        return resolve({ stdout, code });
+      const said = (stderr || stdout || error.message).trim();
+      reject(new Error(said.split(`
+`).slice(-6).join(`
+`).slice(0, 800)));
+    });
+  });
+}
+function gitRead(cwd, args, options = {}) {
+  return exec(READ_FLAGS, cwd, args, options);
+}
+async function gitReadOut(cwd, args, options = {}) {
+  return (await gitRead(cwd, args, options)).stdout;
+}
+
+// apps/desktop/electron/main/git/trust-gate.ts
+var import_promises2 = require("node:fs/promises");
+var import_node_path3 = require("node:path");
+
+// apps/desktop/electron/main/paths.ts
+var import_node_os = require("node:os");
+var import_node_path = require("node:path");
+var APP_HOME_NAME = ".lanew";
+function appHomeDir() {
+  return process.env.LANEWORK_HOME || import_node_path.join(import_node_os.homedir(), APP_HOME_NAME);
+}
+
+// apps/desktop/electron/main/git/repo-trust.ts
+var import_promises = require("node:fs/promises");
+var import_node_path2 = require("node:path");
+var OFF = new Set(["false", "no", "off", "0", ""]);
+function risky(key, value) {
+  const lower = key.toLowerCase();
+  if (lower.startsWith("filter."))
+    return true;
+  if (lower === "core.fsmonitor")
+    return !OFF.has(value.trim().toLowerCase());
+  if (lower === "core.hookspath")
+    return true;
+  if (lower === "core.sshcommand")
+    return true;
+  if (lower.startsWith("gpg."))
+    return true;
+  if (lower === "diff.external")
+    return true;
+  if (lower.startsWith("diff.") && (lower.endsWith(".command") || lower.endsWith(".textconv")))
+    return true;
+  return false;
+}
+async function commonDir(folder) {
+  try {
+    const raw = await gitReadOut(folder, ["rev-parse", "--git-common-dir"], {
+      timeout: 5000
+    });
+    const dir = raw.trim();
+    return dir ? import_node_path2.resolve(folder, dir) : null;
+  } catch {
+    return null;
+  }
+}
+async function configFindings(folder) {
+  const raw = await gitReadOut(folder, ["config", "--list", "--show-scope", "-z"], {
+    timeout: 5000
+  });
+  const found = [];
+  const parts = raw.split("\x00");
+  for (let i = 0;i + 1 < parts.length; i += 2) {
+    const scope = parts[i];
+    if (scope !== "local" && scope !== "worktree")
+      continue;
+    const entry = parts[i + 1];
+    const cut = entry.indexOf(`
+`);
+    const key = cut < 0 ? entry : entry.slice(0, cut);
+    const value = cut < 0 ? "true" : entry.slice(cut + 1);
+    if (risky(key, value))
+      found.push({ kind: "config", key, value });
+  }
+  return found;
+}
+async function hookFindings(dir) {
+  const hooks = import_node_path2.join(dir, "hooks");
+  const names = await import_promises.readdir(hooks).catch(() => []);
+  const found = [];
+  for (const name of names.sort()) {
+    if (name.endsWith(".sample"))
+      continue;
+    const info = await import_promises.stat(import_node_path2.join(hooks, name)).catch(() => null);
+    if (!info?.isFile())
+      continue;
+    if (process.platform !== "win32" && (info.mode & 73) === 0)
+      continue;
+    found.push({ kind: "hook", name });
+  }
+  return found;
+}
+async function scanRepoTrust(folder) {
+  const dir = await commonDir(folder);
+  if (!dir)
+    return { risky: false, findings: [], gitDir: null };
+  const [config, hooks] = await Promise.all([
+    configFindings(folder).catch(() => []),
+    hookFindings(dir)
+  ]);
+  const findings = [...config, ...hooks];
+  return { risky: findings.length > 0, findings, gitDir: dir };
+}
+function trustFingerprint(findings) {
+  return findings.map((f) => f.kind === "hook" ? `hook:${f.name}` : `config:${f.key}=${f.value}`).sort().join(`
+`);
+}
+
+class TrustStore {
+  onChange;
+  answers = new Map;
+  constructor(initial = {}, onChange) {
+    this.onChange = onChange;
+    for (const [folder, value] of Object.entries(initial))
+      this.answers.set(import_node_path2.resolve(folder), value);
+  }
+  get(folder) {
+    return this.answers.get(import_node_path2.resolve(folder));
+  }
+  set(folder, answer, scan) {
+    this.answers.set(import_node_path2.resolve(folder), {
+      answer,
+      fingerprint: trustFingerprint(scan.findings)
+    });
+    this.onChange?.(this.toJSON());
+  }
+  forget(folder) {
+    if (this.answers.delete(import_node_path2.resolve(folder)))
+      this.onChange?.(this.toJSON());
+  }
+  async decide(folder) {
+    const scan = await scanRepoTrust(folder);
+    if (!scan.risky)
+      return { kind: "run" };
+    const known = this.get(folder);
+    if (known && known.fingerprint === trustFingerprint(scan.findings))
+      return known.answer === "trusted" ? { kind: "run" } : { kind: "restricted" };
+    return { kind: "ask", scan };
+  }
+  toJSON() {
+    return Object.fromEntries(this.answers);
+  }
+}
+
+// apps/desktop/electron/main/git/trust-gate.ts
+var FRESH_MS = 60000;
+var asker = null;
+var store = null;
+var fresh = new Map;
+var pending = new Map;
+function storeFile() {
+  return import_node_path3.join(appHomeDir(), "repo-trust.json");
+}
+async function save(all) {
+  const file = storeFile();
+  await import_promises2.mkdir(import_node_path3.dirname(file), { recursive: true, mode: 448 });
+  const temp = `${file}.${process.pid}.tmp`;
+  await import_promises2.writeFile(temp, `${JSON.stringify(all, null, 2)}
+`, { mode: 384 });
+  await import_promises2.rename(temp, file);
+}
+function load() {
+  store ??= import_promises2.readFile(storeFile(), "utf8").then((text) => JSON.parse(text)).catch(() => ({})).then((initial) => new TrustStore(initial, (all) => {
+    save(all).catch(() => {});
+  }));
+  return store;
+}
+async function readsAllowed(folder) {
+  return await readsVerdict(folder) === "run";
+}
+function readsVerdict(folder) {
+  const key = import_node_path3.resolve(folder);
+  const until = fresh.get(key);
+  if (until !== undefined && until > Date.now())
+    return Promise.resolve("run");
+  const running = pending.get(key);
+  if (running)
+    return running;
+  const decided = decide(key).catch(() => "unchecked").finally(() => pending.delete(key));
+  pending.set(key, decided);
+  return decided;
+}
+async function decide(folder) {
+  const trust = await load();
+  const verdict = await trust.decide(folder);
+  if (verdict.kind === "run") {
+    fresh.set(folder, Date.now() + FRESH_MS);
+    return "run";
+  }
+  if (verdict.kind === "restricted")
+    return "refused";
+  if (!asker)
+    return "unchecked";
+  const answer = await asker(folder, verdict.scan);
+  trust.set(folder, answer, verdict.scan);
+  if (answer !== "trusted")
+    return "refused";
+  fresh.set(folder, Date.now() + FRESH_MS);
+  return "run";
+}
+
 // apps/desktop/electron/hook/cli.ts
-var import_node_child_process2 = require("node:child_process");
+var import_node_child_process3 = require("node:child_process");
 var import_node_fs3 = require("node:fs");
 var import_node_os5 = require("node:os");
-var import_node_path5 = require("node:path");
+var import_node_path7 = require("node:path");
 
 // apps/desktop/electron/main/auth/client.ts
-var import_node_os = require("node:os");
+var import_node_os2 = require("node:os");
 
 // apps/desktop/electron/main/http-body.ts
 var JSON_BODY_CAP = 8 * 1024 * 1024;
@@ -224,7 +484,7 @@ function looksLikeUserCode(value) {
 var LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]", "localhost"]);
 var refusedApis = new Set;
 function machineFacts(name) {
-  const host = import_node_os.hostname();
+  const host = import_node_os2.hostname();
   return {
     name: (name || host || "desktop").slice(0, 120),
     hostname: host,
@@ -451,13 +711,13 @@ var import_node_os3 = require("node:os");
 
 // apps/desktop/electron/local-store/driver.ts
 var import_node_module = require("node:module");
-var import_node_path = require("node:path");
+var import_node_path4 = require("node:path");
 function sqliteDriverName() {
   return "Bun" in globalThis ? "bun:sqlite" : "node:sqlite";
 }
 function openRaw(path) {
   if (sqliteDriverName() === "bun:sqlite") {
-    const load = import_node_module.createRequire(import_node_path.join(process.cwd(), "noop.js"));
+    const load = import_node_module.createRequire(import_node_path4.join(process.cwd(), "noop.js"));
     const { Database } = load("bun:sqlite");
     return new Database(path, { create: true });
   }
@@ -653,15 +913,7 @@ function migrate(db) {
 }
 // apps/desktop/electron/local-store/store.ts
 var import_node_fs = require("node:fs");
-var import_node_path3 = require("node:path");
-
-// apps/desktop/electron/main/paths.ts
-var import_node_os2 = require("node:os");
-var import_node_path2 = require("node:path");
-var APP_HOME_NAME = ".lanew";
-function appHomeDir() {
-  return process.env.LANEWORK_HOME || import_node_path2.join(import_node_os2.homedir(), APP_HOME_NAME);
-}
+var import_node_path5 = require("node:path");
 
 // apps/desktop/electron/main/projects/review-defaults.ts
 var DEFAULT_COLUMNS = [
@@ -1109,7 +1361,7 @@ function toCardDetail(row) {
 // apps/desktop/electron/local-store/store.ts
 var DATA_FILE_NAME = "data.sqlite";
 function localStorePath() {
-  return import_node_path3.join(appHomeDir(), DATA_FILE_NAME);
+  return import_node_path5.join(appHomeDir(), DATA_FILE_NAME);
 }
 function defaultBoardConfig() {
   return {
@@ -1664,7 +1916,7 @@ function checkConfig(config) {
 function openLocalStore(options = {}) {
   const path = options.path ?? localStorePath();
   if (path !== ":memory:") {
-    import_node_fs.mkdirSync(import_node_path3.dirname(path), { recursive: true, mode: 448 });
+    import_node_fs.mkdirSync(import_node_path5.dirname(path), { recursive: true, mode: 448 });
     if (!import_node_fs.existsSync(path))
       import_node_fs.closeSync(import_node_fs.openSync(path, "a", 384));
   }
@@ -2676,15 +2928,15 @@ function runLocalMcpServer(options = {}) {
   });
 }
 // apps/desktop/electron/hook/credential.ts
-var import_node_child_process = require("node:child_process");
+var import_node_child_process2 = require("node:child_process");
 var import_node_crypto3 = require("node:crypto");
 var import_node_fs2 = require("node:fs");
 var import_node_os4 = require("node:os");
-var import_node_path4 = require("node:path");
+var import_node_path6 = require("node:path");
 var KEYCHAIN_SERVICE = "dev.lanework.checkpoint-hook";
 var SECURITY = "/usr/bin/security";
 function configDir() {
-  return import_node_path4.join(process.env.XDG_CONFIG_HOME || import_node_path4.join(import_node_os4.homedir(), ".config"), "lanework");
+  return import_node_path6.join(process.env.XDG_CONFIG_HOME || import_node_path6.join(import_node_os4.homedir(), ".config"), "lanework");
 }
 function originOf(api) {
   try {
@@ -2700,9 +2952,9 @@ function secretFile(api) {
     return null;
   const origin = originOf(api);
   if (origin === DEFAULT_API_ORIGIN)
-    return import_node_path4.join(configDir(), "credential");
+    return import_node_path6.join(configDir(), "credential");
   const key = import_node_crypto3.createHash("sha256").update(origin).digest("hex").slice(0, 16);
-  return import_node_path4.join(configDir(), `credential-${key}`);
+  return import_node_path6.join(configDir(), `credential-${key}`);
 }
 function credentialLocation(api) {
   return secretFile(api) ?? `macOS Keychain (${KEYCHAIN_SERVICE})`;
@@ -2729,7 +2981,7 @@ function readSecret(api) {
     }
   }
   try {
-    return import_node_child_process.execFileSync(SECURITY, ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    return import_node_child_process2.execFileSync(SECURITY, ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
     return null;
   }
@@ -2738,14 +2990,14 @@ function writeSecret(api, secret) {
   assertSafe("credential", secret);
   const file = secretFile(api);
   if (file) {
-    import_node_fs2.mkdirSync(import_node_path4.dirname(file), { recursive: true, mode: 448 });
+    import_node_fs2.mkdirSync(import_node_path6.dirname(file), { recursive: true, mode: 448 });
     import_node_fs2.writeFileSync(file, `${secret}
 `, { mode: 384 });
     import_node_fs2.chmodSync(file, 384);
     return;
   }
   assertSafe("API address", api);
-  import_node_child_process.execFileSync(SECURITY, ["-i"], {
+  import_node_child_process2.execFileSync(SECURITY, ["-i"], {
     input: `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "${api}" -w "${secret}"
 `,
     stdio: ["pipe", "ignore", "inherit"]
@@ -2758,12 +3010,12 @@ function deleteSecret(api) {
     return;
   }
   try {
-    import_node_child_process.execFileSync(SECURITY, ["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api], { stdio: "ignore" });
+    import_node_child_process2.execFileSync(SECURITY, ["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", api], { stdio: "ignore" });
   } catch {}
 }
 
 // apps/desktop/electron/hook/cli.ts
-var pluginConfigPath = () => import_node_path5.join(configDir(), "hook.json");
+var pluginConfigPath = () => import_node_path7.join(configDir(), "hook.json");
 function readConfig() {
   try {
     return JSON.parse(import_node_fs3.readFileSync(pluginConfigPath(), "utf8"));
@@ -2776,7 +3028,7 @@ function openBrowser(url) {
   if (!opener)
     return false;
   try {
-    import_node_child_process2.spawn(opener, [url], { stdio: "ignore", detached: true }).unref();
+    import_node_child_process3.spawn(opener, [url], { stdio: "ignore", detached: true }).unref();
     return true;
   } catch {
     return false;
@@ -2809,7 +3061,7 @@ var DEVICE_TTL_MS = 10 * 60 * 1000;
 function outcome() {
   return desktopHookInstalled() ? "The desktop app's hook is the one that runs on this machine, so this plugin's hook stays quiet and keeps not using this credential." : process.env.LANEWORK_HOOK_SECRET_FILE ? "The hook uses this credential only if LANEWORK_HOOK_SECRET_FILE is also set where Claude Code runs; otherwise it keeps using its usual one." : "Claude Code will now leave a checkpoint on the card after every turn.";
 }
-function save(api, issued) {
+function save2(api, issued) {
   writeSecret(api, issued.secret);
   if (readSecret(api) !== issued.secret)
     throw new Error("Signed in, but the credential could not be read back.");
@@ -2820,7 +3072,7 @@ async function startDeviceLogin(api, stateDir) {
   const { verifier, challenge } = pkcePair();
   const started = await startDevice(api, { challenge, facts: machineFacts() });
   import_node_fs3.mkdirSync(stateDir, { recursive: true, mode: 448 });
-  const file = import_node_path5.join(stateDir, `device-${process.pid}-${Date.now()}.json`);
+  const file = import_node_path7.join(stateDir, `device-${process.pid}-${Date.now()}.json`);
   const pending = {
     api,
     deviceCode: started.deviceCode,
@@ -2829,7 +3081,7 @@ async function startDeviceLogin(api, stateDir) {
     deadline: Date.now() + DEVICE_TTL_MS
   };
   import_node_fs3.writeFileSync(file, JSON.stringify(pending), { mode: 384 });
-  import_node_child_process2.spawn(process.execPath, [process.argv[1] ?? "", "--plugin", "login-wait", file], { detached: true, stdio: "ignore" }).unref();
+  import_node_child_process3.spawn(process.execPath, [process.argv[1] ?? "", "--plugin", "login-wait", file], { detached: true, stdio: "ignore" }).unref();
   console.log([
     `On any device, open ${started.verificationUri} and enter the code:`,
     "",
@@ -2844,7 +3096,7 @@ async function waitForDeviceLogin(file, stateDir) {
   const note = (line) => {
     try {
       import_node_fs3.mkdirSync(stateDir, { recursive: true, mode: 448 });
-      import_node_fs3.appendFileSync(import_node_path5.join(stateDir, "hook.log"), `${new Date().toISOString()} device sign-in: ${line}
+      import_node_fs3.appendFileSync(import_node_path7.join(stateDir, "hook.log"), `${new Date().toISOString()} device sign-in: ${line}
 `, { mode: 384 });
     } catch {}
   };
@@ -2864,7 +3116,7 @@ async function waitForDeviceLogin(file, stateDir) {
     if (!result)
       return;
     if (result.state === "issued") {
-      note(save(pending.api, result).split(`
+      note(save2(pending.api, result).split(`
 `)[0] ?? "signed in");
       return;
     }
@@ -2884,7 +3136,7 @@ async function login(api, device, force, stateDir) {
   }
   if (device || headless())
     return startDeviceLogin(api, stateDir);
-  console.log(save(api, await loginLoopback(api)));
+  console.log(save2(api, await loginLoopback(api)));
 }
 async function logout(api) {
   const secret = readSecret(api);
@@ -2916,7 +3168,7 @@ async function status(api, stateDir, desktopHook) {
     for (const name of import_node_fs3.readdirSync(stateDir)) {
       if (!name.startsWith("session-"))
         continue;
-      const s = JSON.parse(import_node_fs3.readFileSync(import_node_path5.join(stateDir, name), "utf8"));
+      const s = JSON.parse(import_node_fs3.readFileSync(import_node_path7.join(stateDir, name), "utf8"));
       if (typeof s.at === "number" && s.taskId && (!best || s.at > best.at))
         best = { at: s.at, taskId: s.taskId };
     }
@@ -2933,7 +3185,7 @@ async function status(api, stateDir, desktopHook) {
     ...desktopHook ? [
       "Desktop app:      its hook is installed, so this plugin's hook stays quiet (one checkpoint per turn)"
     ] : [],
-    `Log:              ${import_node_path5.join(stateDir, "hook.log")}`
+    `Log:              ${import_node_path7.join(stateDir, "hook.log")}`
   ].join(`
 `));
 }
@@ -2968,7 +3220,7 @@ function config(key, value) {
 Nothing is pushed until \`lanework config push-wip on\`.` : said);
 }
 function desktopHookInstalled() {
-  const settings = import_node_path5.join(process.env.CLAUDE_CONFIG_DIR || import_node_path5.join(import_node_os5.homedir(), ".claude"), "settings.json");
+  const settings = import_node_path7.join(process.env.CLAUDE_CONFIG_DIR || import_node_path7.join(import_node_os5.homedir(), ".claude"), "settings.json");
   if (!import_node_fs3.existsSync(settings))
     return false;
   try {
@@ -2984,7 +3236,7 @@ function mcp() {
 // apps/desktop/electron/hook/compaction.ts
 var import_node_crypto4 = require("node:crypto");
 var import_node_fs4 = require("node:fs");
-var import_node_path6 = require("node:path");
+var import_node_path8 = require("node:path");
 var COMPACT_WINDOW_MS = 15 * 60 * 1000;
 var REMINDABLE_ID = /^[A-Z][A-Z0-9]{0,9}-\d{1,6}$/;
 function isRemindableTaskId(taskId) {
@@ -3003,7 +3255,7 @@ function sessionStartOutput(context) {
 }
 function markerFile(stateDir, sessionId) {
   const id = import_node_crypto4.createHash("sha256").update(sessionId).digest("hex");
-  return import_node_path6.join(stateDir, `compact-${id}.json`);
+  return import_node_path8.join(stateDir, `compact-${id}.json`);
 }
 function writeMarker(file, marker) {
   import_node_fs4.writeFileSync(file, JSON.stringify(marker), { mode: 384 });
@@ -3179,8 +3431,8 @@ var PUSH_WIP = ARGS.flags.has("push-wip") || HOOK_CONFIG.pushWip === true;
 var PUSH_WIP_UNTRACKED = ARGS.flags.has("push-wip-untracked") || HOOK_CONFIG.pushWipUntracked === true;
 var AGENT = ARGS.flags.get("agent") === "codex" ? "codex" : ARGS.flags.get("agent") === "opencode" ? "opencode" : "claude-code";
 var AGENT_NAME = AGENT === "codex" ? "Codex" : AGENT === "opencode" ? "OpenCode" : "Claude Code";
-var STATE_DIR = import_node_path7.join(import_node_os6.homedir(), ".cache", "lanework", "checkpoint");
-var LOG = import_node_path7.join(STATE_DIR, "hook.log");
+var STATE_DIR = import_node_path9.join(import_node_os6.homedir(), ".cache", "lanework", "checkpoint");
+var LOG = import_node_path9.join(STATE_DIR, "hook.log");
 var THIN_MS = 60000;
 var PUSH_TIMEOUT_MS = 30000;
 var HTTP_TIMEOUT_MS = 1e4;
@@ -3201,7 +3453,8 @@ function log(message) {
   } catch {}
 }
 function git(cwd, args, env) {
-  return import_node_child_process3.execFileSync("git", args, {
+  const safe = args[0] === "diff" ? ["diff", "--no-ext-diff", "--no-textconv", ...args.slice(1)] : args;
+  return import_node_child_process4.execFileSync("git", [...READ_FLAGS, ...safe], {
     cwd,
     env: { ...process.env, ...env },
     encoding: "utf8",
@@ -3235,8 +3488,8 @@ function repoPath(path, root) {
   const trimmed = path.trim();
   if (!trimmed)
     return null;
-  const rel = import_node_path7.isAbsolute(trimmed) ? import_node_path7.relative(root, trimmed) : trimmed;
-  if (!rel || import_node_path7.isAbsolute(rel) || rel.startsWith("..") || rel.startsWith("~"))
+  const rel = import_node_path9.isAbsolute(trimmed) ? import_node_path9.relative(root, trimmed) : trimmed;
+  if (!rel || import_node_path9.isAbsolute(rel) || rel.startsWith("..") || rel.startsWith("~"))
     return null;
   return rel;
 }
@@ -3371,7 +3624,7 @@ function unquote(literal) {
 function findCodexRollout(sessionId) {
   if (!sessionId)
     return null;
-  const base = import_node_path7.join(process.env.CODEX_HOME || import_node_path7.join(import_node_os6.homedir(), ".codex"), "sessions");
+  const base = import_node_path9.join(process.env.CODEX_HOME || import_node_path9.join(import_node_os6.homedir(), ".codex"), "sessions");
   const ls = (dir) => {
     try {
       return import_node_fs6.readdirSync(dir).sort().reverse();
@@ -3381,14 +3634,14 @@ function findCodexRollout(sessionId) {
   };
   let days = 0;
   for (const year of ls(base))
-    for (const month of ls(import_node_path7.join(base, year)))
-      for (const day of ls(import_node_path7.join(base, year, month))) {
+    for (const month of ls(import_node_path9.join(base, year)))
+      for (const day of ls(import_node_path9.join(base, year, month))) {
         if (++days > 3)
           return null;
-        const dir = import_node_path7.join(base, year, month, day);
+        const dir = import_node_path9.join(base, year, month, day);
         const hit = ls(dir).find((name) => name.endsWith(`${sessionId}.jsonl`));
         if (hit)
-          return import_node_path7.join(dir, hit);
+          return import_node_path9.join(dir, hit);
       }
   return null;
 }
@@ -3519,8 +3772,8 @@ function opencodeDataDir() {
   if (process.env.OPENCODE_DATA_DIR)
     return process.env.OPENCODE_DATA_DIR;
   if (process.env.XDG_DATA_HOME)
-    return import_node_path7.join(process.env.XDG_DATA_HOME, "opencode");
-  return import_node_path7.join(import_node_os6.homedir(), ".local", "share", "opencode");
+    return import_node_path9.join(process.env.XDG_DATA_HOME, "opencode");
+  return import_node_path9.join(import_node_os6.homedir(), ".local", "share", "opencode");
 }
 var asObject = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 function parseData(raw) {
@@ -3610,7 +3863,7 @@ function opencodeV1Messages(db, sessionId) {
   }
   return messages;
 }
-function readOpencodeSession(sessionId, file = import_node_path7.join(opencodeDataDir(), "opencode.db")) {
+function readOpencodeSession(sessionId, file = import_node_path9.join(opencodeDataDir(), "opencode.db")) {
   if (!import_node_fs6.existsSync(file))
     return null;
   const sqlite = process.getBuiltinModule?.("node:sqlite");
@@ -3728,24 +3981,8 @@ async function http(path, init = {}) {
     }
   });
 }
-function stripUserinfo(remote) {
-  const value = remote.trim();
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
-    try {
-      const url = new URL(value);
-      if (!url.username && !url.password)
-        return value;
-      url.username = "";
-      url.password = "";
-      return url.toString();
-    } catch {
-      return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
-    }
-  }
-  return value;
-}
 var BOARD_TTL_MS = 60 * 60 * 1000;
-var BOARDS_FILE = import_node_path7.join(STATE_DIR, "boards.json");
+var BOARDS_FILE = import_node_path9.join(STATE_DIR, "boards.json");
 function boardKey(remote, secret) {
   return [API, sha256(secret).slice(0, 12), remote].join(" ");
 }
@@ -3801,7 +4038,7 @@ var SECRET_FILES = [
   /^(?:\.envrc|\.npmrc|\.pypirc|\.netrc|_netrc|\.git-credentials|\.htpasswd|\.pgpass|\.dockercfg|\.s3cfg|\.boto)$/
 ];
 function isSecretFile(path) {
-  const name = import_node_path7.basename(path).toLowerCase();
+  const name = import_node_path9.basename(path).toLowerCase();
   return SECRET_FILES.some((pattern) => pattern.test(name));
 }
 function refusal(root, env) {
@@ -3809,7 +4046,7 @@ function refusal(root, env) {
   const file = changed.find(isSecretFile);
   if (file)
     return `${file} looks like a secrets file`;
-  const patch = import_node_child_process3.execFileSync("git", [
+  const patch = import_node_child_process4.execFileSync("git", [
     "diff",
     "--cached",
     "-U0",
@@ -3837,7 +4074,7 @@ function refusal(root, env) {
   return null;
 }
 function snapshot(root, taskId, untracked = PUSH_WIP_UNTRACKED) {
-  const index = import_node_path7.resolve(root, git(root, ["rev-parse", "--git-path", `lanework-wip-${process.pid}.index`]));
+  const index = import_node_path9.resolve(root, git(root, ["rev-parse", "--git-path", `lanework-wip-${process.pid}.index`]));
   try {
     const env = { GIT_INDEX_FILE: index };
     git(root, ["read-tree", "HEAD"], env);
@@ -3978,11 +4215,15 @@ async function checkpointTo(local, d, input, root, remote, options = {}) {
     log("no credential; turn the hook on in the Lanework app (Settings → Harness)");
     return;
   }
+  if (!await readsAllowed(root)) {
+    log(`${root}: its git settings run programs and it is not trusted in Lanework; nothing sent`);
+    return;
+  }
   const head = tryGit(root, ["rev-parse", "HEAD"]);
   const status = tryGit(root, ["status", "--porcelain"]) ?? "";
   const diff = tryGit(root, ["diff", "HEAD"]) ?? "";
   const code = sha256([d.taskId, head, status, sha256(diff)].join("\x00"));
-  const stateFile = import_node_path7.join(STATE_DIR, `session-${sha256(input.session_id ?? "")}.json`);
+  const stateFile = import_node_path9.join(STATE_DIR, `session-${sha256(input.session_id ?? "")}.json`);
   const last = readJson(stateFile, null);
   if (!options.compaction && last && last.code === code && Date.now() - last.at < THIN_MS)
     return;
@@ -4154,10 +4395,10 @@ async function main() {
     if (input.hook_event_name === "PreCompact" && input.session_id)
       markCompaction(STATE_DIR, input.session_id);
     import_node_fs6.mkdirSync(STATE_DIR, { recursive: true, mode: 448 });
-    const file = import_node_path7.join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
+    const file = import_node_path9.join(STATE_DIR, `input-${process.pid}-${Date.now()}.json`);
     import_node_fs6.writeFileSync(file, stdin, { mode: 384 });
     const flags = process.argv.slice(2).filter((a) => !ARGS.positional.includes(a));
-    import_node_child_process3.spawn(process.execPath, [SELF, ...flags, "worker", file], {
+    import_node_child_process4.spawn(process.execPath, [SELF, ...flags, "worker", file], {
       detached: true,
       stdio: "ignore"
     }).unref();
@@ -4165,5 +4406,5 @@ async function main() {
     log(`hook failed: ${String(error)}`);
   }
 }
-if (import_node_path7.basename(SELF).startsWith("lanework-checkpoint"))
+if (import_node_path9.basename(SELF).startsWith("lanework-checkpoint"))
   main();

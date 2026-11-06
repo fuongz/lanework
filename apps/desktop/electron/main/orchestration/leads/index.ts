@@ -13,6 +13,7 @@ import {
   type LeadsMainHandlers,
   leadsChannels,
   type TeamLead,
+  type TeamLeadInput,
 } from "../../../../shared/orchestration";
 import { broadcast } from "../../ipc";
 import { terminalFolder } from "../../projects";
@@ -37,6 +38,18 @@ function store(): LeadStore {
  */
 export function teamLeadOf(project: string, id: string): Promise<TeamLead> {
   return store().resolve(project, id);
+}
+
+/**
+ * Save a new conductor of `project`'s own, under an id no other one has
+ * (BE-01: `lanework-control conductors.create`). The rail hears it through
+ * the store's broadcast, as it does a save from the dialog.
+ */
+export function createConductor(
+  project: string,
+  input: Omit<TeamLeadInput, "id">,
+): Promise<TeamLead> {
+  return store().createPersonal(project, input);
 }
 
 /**
