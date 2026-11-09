@@ -11,12 +11,20 @@
 
 import { join } from "node:path";
 import { app } from "electron";
+import type {
+  ConductorRunEntry,
+  ConductorRunTask,
+  RunTaskOutcome,
+} from "../../../shared/conductor-sessions";
 import {
   type JevMainHandlers,
   type OrchestrationMainHandlers,
+  type OrchestrationRun,
+  type OrchestrationTask,
   orchestrationChannels,
   type StartControlServer,
 } from "../../../shared/orchestration";
+import { conductorMemory } from "../conversation";
 import { sharedEngines } from "../conversation/engine";
 import { broadcast } from "../ipc";
 import { appHomeDir } from "../paths";
@@ -27,6 +35,49 @@ import { teamLeadOf } from "./leads";
 import { Orchestrator } from "./runtime";
 
 export { visibleText } from "./prompts";
+
+/** How a task ended, as a conductor's memory words it (FE-131). */
+function outcomeOf(task: OrchestrationTask): RunTaskOutcome {
+  if (task.accepted) return "accepted";
+  switch (task.status) {
+    case "cancelled":
+    case "cancelling":
+      return "cancelled";
+    case "failed":
+    case "blocked":
+    case "interrupted":
+      return task.status;
+    default:
+      // Completed but never reviewed, or never started.
+      return "unreviewed";
+  }
+}
+
+/** What a conductor remembers of a run that ended. */
+export function runMemoryEntry(
+  run: OrchestrationRun,
+  title: string,
+): ConductorRunEntry {
+  return {
+    runId: run.id,
+    title,
+    status: run.status === "finished" ? "finished" : "stopped",
+    createdAt: run.createdAt,
+    endedAt: Date.now(),
+    tasks: run.tasks.map((task): ConductorRunTask => {
+      const out: ConductorRunTask = {
+        title: task.title,
+        agent: task.agent,
+        model: task.model,
+        tier: task.tier,
+        effort: task.effort,
+        outcome: outcomeOf(task),
+      };
+      if (task.error) out.error = task.error;
+      return out;
+    }),
+  };
+}
 
 let instance: Orchestrator | null = null;
 let endpoint: string | null = null;
@@ -46,6 +97,15 @@ function orchestrator(): Orchestrator {
     cliPath: controlCliPath(),
     endpoint: () => endpoint,
     teamLead: teamLeadOf,
+    // A run without a team lead has no memory to write to (FE-131/D3).
+    runEnded: (run, title) =>
+      run.teamLead
+        ? conductorMemory.recordRun(
+            run.project,
+            run.teamLead,
+            runMemoryEntry(run, title),
+          )
+        : undefined,
   });
   created.setJev(jev);
   setEngineTap({

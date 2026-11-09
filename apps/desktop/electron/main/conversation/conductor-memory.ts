@@ -4,6 +4,8 @@
 //
 // - Main writes the ledger: a session's entry as `sessions.start` starts it,
 //   and again each time one of its turns ends.
+// - Main also writes the runs: one entry per orchestration run the conductor
+//   led, once, when the run finished or was stopped (FE-131).
 // - The conductor replaces its notes with `memory.write`; the user may edit
 //   them from the conductor's settings (`leads.saveMemoryNotes`). Both go
 //   through the one store here, so neither overwrites the other's write.
@@ -23,9 +25,13 @@ import { dirname } from "node:path";
 import {
   type ConductorLedgerEntry,
   type ConductorMemory,
+  type ConductorRunEntry,
   emptyConductorMemory,
   MEMORY_LEDGER_MAX,
   MEMORY_NOTES_MAX,
+  MEMORY_RUN_ERROR_MAX,
+  MEMORY_RUN_TASKS_MAX,
+  MEMORY_RUNS_MAX,
   MEMORY_SUMMARY_MAX,
   normalizeConductorMemory,
 } from "../../../shared/conductor-sessions";
@@ -107,6 +113,38 @@ export class ConductorMemoryStore {
           ),
         ].slice(0, MEMORY_LEDGER_MAX),
         updatedAt,
+      });
+    });
+  }
+
+  /**
+   * Add a finished or stopped run, or replace the one it has, and put it
+   * first. The oldest falls off past {@link MEMORY_RUNS_MAX}.
+   */
+  async recordRun(
+    project: string,
+    conductorId: string,
+    entry: ConductorRunEntry,
+  ): Promise<void> {
+    const file = await this.deps.fileOf(project, conductorId);
+    await this.queue(file, async () => {
+      const memory = await load(file);
+      const kept: ConductorRunEntry = {
+        ...entry,
+        tasks: entry.tasks.slice(0, MEMORY_RUN_TASKS_MAX).map((task) => {
+          const { error, ...rest } = task;
+          return error
+            ? { ...rest, error: error.slice(0, MEMORY_RUN_ERROR_MAX) }
+            : rest;
+        }),
+      };
+      await save(file, {
+        ...memory,
+        runs: [
+          kept,
+          ...memory.runs.filter((other) => other.runId !== entry.runId),
+        ].slice(0, MEMORY_RUNS_MAX),
+        updatedAt: Date.now(),
       });
     });
   }

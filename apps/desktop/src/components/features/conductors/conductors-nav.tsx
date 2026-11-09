@@ -65,9 +65,9 @@ function ConductorIcon({
         strokeWidth={1.5}
         aria-hidden="true"
       />
-      {/* As a session's: nothing at rest, a ping under the corner else. */}
+      {/* As a session's: nothing at rest, a dot under the corner else. */}
       {state !== "idle" && (
-        <StatusPing tone={state === "working" ? "working" : "awaiting"} />
+        <StatusPing tone={state === "needs-you" ? "awaiting" : state} />
       )}
     </span>
   );

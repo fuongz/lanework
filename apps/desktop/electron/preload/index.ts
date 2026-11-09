@@ -907,6 +907,7 @@ const projects: DesktopProjectsApi = {
         files.map((file) => webUtils.getPathForFile(file)).filter(Boolean),
       ),
     list: (slug) => ipcRenderer.invoke(projectChannels.folderList, slug),
+    roots: (slug) => ipcRenderer.invoke(projectChannels.folderRoots, slug),
     link: (slug, folders) =>
       ipcRenderer.invoke(projectChannels.folderLink, slug, folders),
     pick: (slug) => ipcRenderer.invoke(projectChannels.folderPick, slug),

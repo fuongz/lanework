@@ -1,10 +1,13 @@
-import { TaskDaily01Icon } from "@hugeicons/core-free-icons";
+import { Flowchart01Icon, TaskDaily01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import {
   type ConductorLedgerEntry,
+  type ConductorRunEntry,
+  type ConductorRunTask,
   MEMORY_NOTES_MAX,
   type ConductorMemory as Memory,
+  type RunTaskOutcome,
   type SessionStatus,
 } from "#/../shared/conductor-sessions";
 import {
@@ -27,7 +30,8 @@ import { cn } from "#/lib/utils";
 
 // A conductor's memory of one project (FE-128), on the Memory page of its
 // dialog: the ledger main keeps of the sessions it started, read-only, and
-// the notes it writes with `memory.write`, which the user may edit too.
+// the runs it led (FE-131), read-only too, and the notes it writes with
+// `memory.write`, which the user may edit too.
 //
 // NOTE: Main sends no change event for memory: it is read when the page
 // opens and again after a save.
@@ -40,7 +44,16 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
   terminal: "In a terminal",
 };
 
-/** The Memory page: ledger above, notes below. */
+const OUTCOME_LABELS: Record<RunTaskOutcome, string> = {
+  accepted: "Accepted",
+  cancelled: "Cancelled",
+  failed: "Failed",
+  blocked: "Blocked",
+  interrupted: "Interrupted",
+  unreviewed: "Not reviewed",
+};
+
+/** The Memory page: ledger and runs above, notes below. */
 export function ConductorMemory({
   project,
   conductor,
@@ -153,6 +166,43 @@ export function ConductorMemory({
           )}
         </section>
 
+        <section aria-labelledby="memory-runs" className="flex flex-col gap-2">
+          <h3 id="memory-runs" className="text-[13px] font-medium">
+            Runs it led
+          </h3>
+          {memory === undefined ? (
+            <ListSkeleton
+              label="Reading its runs"
+              rows={2}
+              lines={2}
+              className="px-0"
+            />
+          ) : memory === null ? null : memory.runs.length === 0 ? (
+            <Empty className="border p-5">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <HugeiconsIcon
+                    icon={Flowchart01Icon}
+                    strokeWidth={1.6}
+                    aria-hidden="true"
+                  />
+                </EmptyMedia>
+                <EmptyTitle>No runs yet</EmptyTitle>
+                <EmptyDescription>
+                  Each run it leads in this project is listed here once it is
+                  finished or stopped, with how each worker ended.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <ul className="divide-border flex flex-col divide-y rounded-lg border">
+              {memory.runs.map((entry) => (
+                <RunRow key={entry.runId} entry={entry} now={now} />
+              ))}
+            </ul>
+          )}
+        </section>
+
         <section aria-labelledby="memory-notes" className="flex flex-col gap-2">
           <div className="flex items-baseline gap-2">
             <h3 id="memory-notes" className="text-[13px] font-medium">
@@ -255,6 +305,63 @@ function LedgerRow({
       {entry.summary && (
         <p className="text-muted-foreground line-clamp-2 pl-5.5 text-xs leading-relaxed">
           {entry.summary}
+        </p>
+      )}
+    </li>
+  );
+}
+
+/** One run: its title, how it ended, and each worker's outcome. */
+function RunRow({ entry, now }: { entry: ConductorRunEntry; now: number }) {
+  return (
+    <li className="flex min-w-0 flex-col gap-1.5 px-3 py-2.5">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 truncate text-[13px] font-medium">
+          {entry.title}
+        </span>
+        <span className="text-muted-foreground ml-auto shrink-0 text-xs">
+          {entry.status === "finished" ? "Finished" : "Stopped"}
+        </span>
+        <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+          {relativeTime(new Date(entry.endedAt).toISOString(), now)}
+        </span>
+      </div>
+      {entry.tasks.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {entry.tasks.map((task, index) => (
+            // A run's tasks have no id of their own here, and never reorder.
+            // biome-ignore lint/suspicious/noArrayIndexKey: stored order is stable
+            <RunTaskRow key={index} task={task} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function RunTaskRow({ task }: { task: ConductorRunTask }) {
+  const bad = task.outcome === "failed" || task.outcome === "blocked";
+  return (
+    <li className="flex min-w-0 flex-col gap-0.5">
+      <div className="flex min-w-0 items-center gap-2">
+        <TerminalKindIcon kind={task.agent} className="size-3.5 shrink-0" />
+        <span className="min-w-0 truncate text-xs">{task.title}</span>
+        <span className="text-muted-foreground max-w-40 shrink-0 truncate font-mono text-xs">
+          {task.model}
+          {task.tier ? ` ${task.tier}` : ""}
+        </span>
+        <span
+          className={cn(
+            "ml-auto shrink-0 text-xs",
+            bad ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {OUTCOME_LABELS[task.outcome]}
+        </span>
+      </div>
+      {task.error && (
+        <p className="text-muted-foreground line-clamp-2 pl-5.5 text-xs leading-relaxed">
+          {task.error}
         </p>
       )}
     </li>

@@ -1089,6 +1089,8 @@ export const projectChannels = {
   folderChoose: "projects:folder:choose",
   folderDrop: "projects:folder:drop",
   folderList: "projects:folder:list",
+  /** The folders a lead agent is told about, read-only (FE-132). */
+  folderRoots: "projects:folder:roots",
   folderLink: "projects:folder:link",
   folderForget: "projects:folder:forget",
   folderReveal: "projects:folder:reveal",
@@ -1356,6 +1358,17 @@ export interface DesktopBoardApi {
  * chooser in main, so the only paths this app reads are ones a human
  * selected or ones it wrote down itself.
  */
+/**
+ * A project's folders on THIS machine as a lead agent is told about them
+ * (FE-132): the primary one it works in, and the others it may read.
+ */
+export interface ProjectRoots {
+  /** The primary folder, where every engine starts; null when it has none here. */
+  primary: string | null;
+  /** The other existing folders, in their linked order. */
+  others: string[];
+}
+
 export interface DesktopFolderApi {
   state: (slug: string) => Promise<LocalFolderState>;
   /**
@@ -1392,6 +1405,13 @@ export interface DesktopFolderApi {
    * nothing has to accept a path to keep one.
    */
   list: (slug: string) => Promise<PickedFolder[]>;
+  /**
+   * The primary folder and the other existing folders of a project (FE-132).
+   *
+   * Read-only, and resolved in main from the links it wrote down: the
+   * renderer names a project, never a path. Existing folders only.
+   */
+  roots: (slug: string) => Promise<ProjectRoots>;
   /**
    * Replace a project's folders with exactly these, primary first.
    *

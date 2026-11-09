@@ -16,8 +16,11 @@
 // - A session started or followed up with notifyOnComplete is watched from
 //   the engines' events. Once its turn ends, the conductor is sent a hidden
 //   turn naming it; a conductor that is busy hears at its next idle, with
-//   every report that piled up in one turn. What is watched lives in memory:
-//   a restart drops the reports still owed.
+//   every report that piled up in one turn. The watch and the report owed
+//   are kept on the launch too (FE-133): after a restart, a session no
+//   longer running is reported as cut off, and every report still owed is
+//   delivered once its conductor is idle. One older than a day, or whose
+//   conductor is gone, is dropped.
 //
 // Nothing here imports Electron: `index.ts` hands in the engines, the
 // transcripts, the marks and Lanework's session store (FE-112).
@@ -178,6 +181,29 @@ interface Launch {
   /** The board card `sessions.start` named. */
   taskId?: string;
   createdAt: number;
+  /**
+   * Its turn the conductor waits to hear about (FE-133), kept so a restart
+   * still reports it. Absent on a launch saved before: nothing watched.
+   */
+  notify?: Notify | null;
+  /** The report it owes its conductor, not yet handed over (FE-133). */
+  owed?: Owed | null;
+}
+
+/** A watch, as saved. */
+interface Notify {
+  started: boolean;
+  /** When it was armed. */
+  since: number;
+}
+
+/** A report owed, as saved. */
+interface Owed {
+  error: string | null;
+  /** The app restarted while the turn ran: it may be incomplete. */
+  cut: boolean;
+  /** When it became owed. */
+  since: number;
 }
 
 /** The caller, as the conductor it is. */
@@ -207,6 +233,9 @@ interface Watch {
 interface Report {
   launch: Launch;
   error: string | null;
+  cut: boolean;
+  /** Its saved form: cleared from the launch once handed over. */
+  owed: Owed;
 }
 
 /** The most sessions kept on disk, over every conductor. */
@@ -217,11 +246,32 @@ const TOKENS_MAX = 512;
 const REQUESTS_MAX = 200;
 /** The most of a session's last reply a report carries. */
 const REPORT_REPLY_MAX = 3000;
+/** A saved watch or report older than this is dropped at startup. */
+const OWED_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const hash = (token: string) =>
   createHash("sha256").update(token).digest("hex");
 const keyOf = (project: string, conversation: string) =>
   `${project}\0${conversation}`;
+
+const isTime = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+function isNotify(value: unknown): value is Notify {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<Notify>;
+  return typeof entry.started === "boolean" && isTime(entry.since);
+}
+
+function isOwed(value: unknown): value is Owed {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<Owed>;
+  return (
+    (entry.error === null || typeof entry.error === "string") &&
+    typeof entry.cut === "boolean" &&
+    isTime(entry.since)
+  );
+}
 
 function refuse(message: string): never {
   throw new ControlInputError(message);
@@ -289,6 +339,8 @@ export class ConductorSessions {
   private unresolved = new Set<Launch>();
   /** The one {@link adopt} pass running now. */
   private adopting: Promise<void> | null = null;
+  /** The one {@link restore} pass, run once at startup. */
+  private restoring: Promise<void> | null = null;
 
   constructor(private readonly deps: ConductorSessionsDeps) {}
 
@@ -645,7 +697,7 @@ export class ConductorSessions {
       try {
         await engines.start(project, launch.session, folder, out);
       } catch (error) {
-        this.watches.delete(keyOf(project, launch.session));
+        this.unwatch(keyOf(project, launch.session));
         this.running.delete(keyOf(project, launch.session));
         await this.note(launch, "failed", "");
         throw error;
@@ -745,7 +797,7 @@ export class ConductorSessions {
           `Session ${launch.session} is open in a terminal, which Lanework cannot send to.`,
         );
     } catch (error) {
-      this.watches.delete(keyOf(launch.project, launch.session));
+      this.unwatch(keyOf(launch.project, launch.session));
       throw error;
     }
     return {
@@ -801,12 +853,26 @@ export class ConductorSessions {
 
   // ── Reports ──
 
-  /** Watch a session's turn; `started` when it is known to run already. */
-  private arm(launch: Launch, started: boolean): void {
+  /**
+   * Watch a session's turn; `started` when it is known to run already. The
+   * watch is saved on the launch, so a restart still reports it.
+   */
+  private arm(launch: Launch, started: boolean, since = Date.now()): void {
     this.watches.set(keyOf(launch.project, launch.session), {
       launch,
       started,
     });
+    launch.notify = { started, since };
+    void this.save();
+  }
+
+  /** Stop watching a session's turn, on disk too. */
+  private unwatch(key: string): void {
+    const watch = this.watches.get(key);
+    if (!watch) return;
+    this.watches.delete(key);
+    watch.launch.notify = null;
+    void this.save();
   }
 
   /** Watch a session started already: its turn may have ended meanwhile. */
@@ -816,6 +882,21 @@ export class ConductorSessions {
       .engines()
       .state(launch.project, launch.session);
     this.onState(launch.project, launch.session, state);
+  }
+
+  /**
+   * Owe `launch`'s conductor a report, on disk too. The watch it ends (if
+   * any) is cleared in the same write, so a restart never sees both or
+   * neither.
+   */
+  private owe(launch: Launch, error: string | null, cut: boolean): void {
+    const owed: Owed = { error, cut, since: Date.now() };
+    const key = keyOf(launch.project, launch.conductor);
+    const list = this.reports.get(key) ?? [];
+    list.push({ launch, error, cut, owed });
+    this.reports.set(key, list);
+    launch.owed = owed;
+    void this.save();
   }
 
   /** Every engine event, as the chat's own listener hears it. */
@@ -843,19 +924,25 @@ export class ConductorSessions {
         void this.noteEnd(launch);
     }
     if (watch) {
-      if (engine.state === "running" || engine.state === "starting")
-        watch.started = true;
-      else if (engine.state === "terminal") this.watches.delete(key);
+      if (engine.state === "running" || engine.state === "starting") {
+        if (!watch.started) {
+          watch.started = true;
+          // Saved once, as it flips: not on every state event.
+          if (watch.launch.notify) {
+            watch.launch.notify.started = true;
+            void this.save();
+          }
+        }
+      } else if (engine.state === "terminal") this.unwatch(key);
       else if (watch.started) {
         this.watches.delete(key);
         const { launch } = watch;
-        const owed = keyOf(launch.project, launch.conductor);
-        const list = this.reports.get(owed) ?? [];
-        list.push({
+        launch.notify = null;
+        this.owe(
           launch,
-          error: engine.state === "error" ? engine.message : null,
-        });
-        this.reports.set(owed, list);
+          engine.state === "error" ? engine.message : null,
+          false,
+        );
         void this.flush(launch.project, launch.conductor);
       }
     }
@@ -864,6 +951,105 @@ export class ConductorSessions {
       this.reports.has(key)
     )
       void this.flush(project, conversation);
+  }
+
+  /**
+   * Pick up, once at startup, what the app owed when it last quit (FE-133):
+   * every saved report goes back in line, and every saved watch is armed
+   * again. A watched session no longer running had its turn end, or cut,
+   * while the app was down: it is reported as cut off. One older than
+   * {@link OWED_MAX_AGE_MS}, or whose conductor is gone, is dropped. Then
+   * each conductor concerned hears, if it is idle.
+   *
+   * Main runs it after {@link adopt}, once the engines answer state.
+   */
+  restore(): Promise<void> {
+    this.restoring ??= (async () => {
+      await this.adopt();
+      const engines = this.deps.engines();
+      const now = Date.now();
+      const conductors = new Map<
+        string,
+        { project: string; conductor: string }
+      >();
+      let moved = false;
+      for (const launch of [...(await this.all())]) {
+        if (!launch.notify && !launch.owed) continue;
+        const fresh = (since: number) => now - since <= OWED_MAX_AGE_MS;
+        if (launch.notify && !fresh(launch.notify.since)) {
+          launch.notify = null;
+          moved = true;
+        }
+        if (launch.owed && !fresh(launch.owed.since)) {
+          launch.owed = null;
+          moved = true;
+        }
+        if (!launch.notify && !launch.owed) continue;
+        // NOTE: The conductor must still exist and still hold the
+        // conversation the report goes to; a Reset since then hands the
+        // session to its new conversation, which reads it with
+        // sessions.list.
+        const id = launch.conductorId
+          ? await this.deps
+              .conductorOf(
+                launch.project,
+                launch.conductorAgent,
+                launch.conductor,
+              )
+              .catch(() => null)
+          : null;
+        if (!id || id !== launch.conductorId) {
+          launch.notify = null;
+          launch.owed = null;
+          moved = true;
+          continue;
+        }
+        const target = keyOf(launch.project, launch.conductor);
+        if (launch.owed) {
+          const { owed } = launch;
+          const list = this.reports.get(target) ?? [];
+          list.push({ launch, error: owed.error, cut: owed.cut, owed });
+          this.reports.set(target, list);
+          conductors.set(target, {
+            project: launch.project,
+            conductor: launch.conductor,
+          });
+        }
+        if (!launch.notify) continue;
+        const key = keyOf(launch.project, launch.session);
+        const state = await engines
+          .state(launch.project, launch.session)
+          .catch(() => null);
+        if (state?.state === "running" || state?.state === "starting") {
+          this.arm(launch, true, launch.notify.since);
+          this.running.add(key);
+        } else {
+          // NOTE: Its end was never seen: the app was down when it came, or
+          // the restart cut the turn. Open in a terminal, it is the user's
+          // now, and a watch that sees `terminal` is dropped as ever.
+          launch.notify = null;
+          moved = true;
+          if (state && state.state !== "terminal") {
+            this.owe(
+              launch,
+              state.state === "error" ? state.message : null,
+              true,
+            );
+            conductors.set(target, {
+              project: launch.project,
+              conductor: launch.conductor,
+            });
+          }
+        }
+        // NOTE: Its ledger entry may still read `working` from before the
+        // restart.
+        await this.noteEnd(launch);
+      }
+      if (moved) await this.save();
+      for (const { project, conductor } of conductors.values())
+        await this.flush(project, conductor);
+    })();
+    return this.restoring;
   }
 
   /** A session some conductor started, once the launches were read. */
@@ -945,6 +1131,11 @@ export class ConductorSessions {
         );
         if (next.state === "terminal")
           throw new Error("its conversation is open in a terminal");
+        // NOTE: Handed over: never delivered again, after a restart either.
+        // A report owed since by the same launch is left alone.
+        for (const report of taken)
+          if (report.launch.owed === report.owed) report.launch.owed = null;
+        await this.save();
       } catch (error) {
         // Kept for its next idle.
         this.reports.set(key, [...taken, ...(this.reports.get(key) ?? [])]);
@@ -957,12 +1148,12 @@ export class ConductorSessions {
 
   private async reportTurn(reports: readonly Report[]): Promise<string> {
     const lines: string[] = [];
-    for (const { launch, error } of reports) {
+    for (const { launch, error, cut: wasCut } of reports) {
       const turns = await this.turnsOf(launch).catch(() => []);
       const last = [...turns].reverse().find((turn) => replyOf(turn));
       const reply = last ? cut(replyOf(last), REPORT_REPLY_MAX, true) : "";
       lines.push(
-        `- ${launch.session} "${launch.title}": ${error ? `failed: ${cut(error, 300)}` : "finished its turn"}`,
+        `- ${launch.session} "${launch.title}": ${wasCut ? `stopped: the app restarted while it ran; its last turn may be incomplete${error ? ` (${cut(error, 300)})` : ""}` : error ? `failed: ${cut(error, 300)}` : "finished its turn"}`,
         reply
           ? `  Its last reply:\n<session_reply>\n${reply}\n</session_reply>`
           : "  It wrote no reply.",
@@ -1003,6 +1194,10 @@ Review the result (${cli} sessions.read for more), then tell the user in a few l
                   typeof entry.taskId !== "string"
                 )
                   delete entry.taskId;
+                // NOTE: A launch saved before FE-133 has neither: nothing
+                // is watched or owed. A malformed one is read the same.
+                if (!isNotify(entry.notify)) delete entry.notify;
+                if (!isOwed(entry.owed)) delete entry.owed;
                 return entry.project === undefined &&
                   typeof workspace === "string"
                   ? { ...entry, project: workspace }

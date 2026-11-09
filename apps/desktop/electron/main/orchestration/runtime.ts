@@ -177,6 +177,13 @@ export interface RuntimeDeps {
    * when it is gone or broken. Absent: a proposal naming one is refused.
    */
   teamLead?: (project: string, id: string) => Promise<TeamLead>;
+  /**
+   * Called once when a run becomes `finished` or `stopped` (FE-131), with
+   * the run as it ended and its title: the app writes it into the team
+   * lead's memory. A throw or a rejection is logged and never blocks or
+   * fails the run.
+   */
+  runEnded?: (run: OrchestrationRun, title: string) => void | Promise<void>;
 }
 
 /** A refusal the lead reads and acts on; retrying the same call cannot help. */
@@ -242,6 +249,11 @@ interface RunRecord {
    * file changes. Absent in runs saved before FE-88.
    */
   teamLead?: TeamLead | null;
+  /**
+   * The proposal's title (FE-131), for the team lead's memory. Absent in
+   * runs saved before it was kept: the first task's title stands in.
+   */
+  title?: string;
   /**
    * Every write scope the user approved: the proposal's, then each one they
    * approved on the run's panel (FE-89/D11). A `delegate` or `retry` beyond
@@ -2165,6 +2177,7 @@ export class Orchestrator {
       tasks: {},
       receipts: {},
       teamLead,
+      title: proposal.title,
       approvedScopes: [
         ...new Set(proposal.tasks.flatMap((task) => task.files)),
       ],
@@ -2318,6 +2331,7 @@ export class Orchestrator {
         record,
         run.tasks.map((task) => task.id),
       );
+      this.ended(record);
     });
     return this.shown(record);
   }
@@ -2452,6 +2466,25 @@ export class Orchestrator {
         await engines
           ?.stop(record.run.project, task.conversation)
           .catch(() => {});
+    }
+  }
+
+  /**
+   * Tell the app a run is over (FE-131), once: from `finish` and `stop`,
+   * the only two places a run ends. Never awaited, never throws: a memory
+   * that cannot be written must not hold up or fail the run.
+   */
+  private ended(record: RunRecord): void {
+    const hook = this.deps.runEnded;
+    if (!hook) return;
+    const { run } = record;
+    const title = record.title || run.tasks[0]?.title || run.id;
+    try {
+      void Promise.resolve(hook(run, title)).catch((error: unknown) =>
+        console.error("Unable to record the run in memory", error),
+      );
+    } catch (error) {
+      console.error("Unable to record the run in memory", error);
     }
   }
 
@@ -2784,6 +2817,7 @@ export class Orchestrator {
           record,
           run.tasks.map((task) => task.id),
         );
+        this.ended(record);
         return { run: this.view(record) };
       }
     }

@@ -45,6 +45,8 @@ import {
   type LeadIcon,
   MODEL_ID_PATTERN,
   PROMPT_MAX,
+  TIERS,
+  type Tier,
 } from "./orchestration";
 import {
   AGENT_NAME_MAX,
@@ -110,6 +112,12 @@ export const MEMORY_LEDGER_MAX = 30;
 export const MEMORY_SUMMARY_MAX = 600;
 /** A conductor's notes: `memory.write` refuses longer. */
 export const MEMORY_NOTES_MAX = 8000;
+/** The most orchestration runs a conductor's memory keeps, newest first. */
+export const MEMORY_RUNS_MAX = 20;
+/** The most tasks one remembered run keeps. */
+export const MEMORY_RUN_TASKS_MAX = 24;
+/** A remembered task's error, cut to this. */
+export const MEMORY_RUN_ERROR_MAX = 200;
 
 /** A board task id, as the checkpoint hook reads one: `FE-98`. */
 const TASK_ID = /^[A-Z]{2,5}-\d{1,5}$/;
@@ -226,10 +234,51 @@ export interface ConductorLedgerEntry {
   updatedAt: number;
 }
 
+/** How a worker of an orchestration run ended, as a conductor remembers it. */
+export const RUN_TASK_OUTCOMES = [
+  "accepted",
+  "cancelled",
+  "failed",
+  "blocked",
+  "interrupted",
+  "unreviewed",
+] as const;
+export type RunTaskOutcome = (typeof RUN_TASK_OUTCOMES)[number];
+
+/** How a remembered run ended. */
+export const RUN_END_STATUSES = ["finished", "stopped"] as const;
+export type RunEndStatus = (typeof RUN_END_STATUSES)[number];
+
+/** One worker of a remembered run. */
+export interface ConductorRunTask {
+  title: string;
+  agent: TerminalAgent;
+  model: string;
+  /** The tier it ran on; null when the lead named the model itself. */
+  tier: Tier | null;
+  effort: Effort | null;
+  outcome: RunTaskOutcome;
+  /** What went wrong, cut to {@link MEMORY_RUN_ERROR_MAX}; absent when nothing. */
+  error?: string;
+}
+
+/**
+ * One orchestration run the conductor led, as its memory remembers it
+ * (FE-131): written once, when the run finished or was stopped.
+ */
+export interface ConductorRunEntry {
+  runId: string;
+  title: string;
+  status: RunEndStatus;
+  createdAt: number;
+  endedAt: number;
+  tasks: ConductorRunTask[];
+}
+
 /**
  * What a conductor remembers of one project, across its conversations
- * (FE-128). One per conductor × project; main keeps the ledger, the
- * conductor its notes.
+ * (FE-128). One per conductor × project; main keeps the ledger and the
+ * runs, the conductor its notes.
  */
 export interface ConductorMemory {
   /**
@@ -237,6 +286,12 @@ export interface ConductorMemory {
    * oldest falls off. One entry per session, updated in place.
    */
   ledger: ConductorLedgerEntry[];
+  /**
+   * The runs it led, newest first, at most {@link MEMORY_RUNS_MAX}: the
+   * oldest falls off. One entry per run. Absent in a memory written before
+   * FE-131; reads as `[]`.
+   */
+  runs: ConductorRunEntry[];
   /** Its own notes, at most {@link MEMORY_NOTES_MAX} characters. */
   notes: string;
   /** When either part last changed, epoch ms; 0 for a memory never written. */
@@ -245,7 +300,7 @@ export interface ConductorMemory {
 
 /** A memory nothing was written to yet. */
 export function emptyConductorMemory(): ConductorMemory {
-  return { ledger: [], notes: "", updatedAt: 0 };
+  return { ledger: [], runs: [], notes: "", updatedAt: 0 };
 }
 
 /** What each action answers with, under `result`. */
@@ -270,7 +325,7 @@ export interface SessionResults {
     submitted: true;
     notifyOnComplete: boolean;
   };
-  /** The whole memory: ledger and notes. */
+  /** The whole memory: ledger, runs and notes. */
   "memory.read": ConductorMemory;
   /**
    * Not the memory back: only what was kept, so the notes the conductor
@@ -529,10 +584,67 @@ function ledgerEntry(value: unknown): ConductorLedgerEntry | null {
   return out;
 }
 
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+function runTask(value: unknown): ConductorRunTask | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const task = value as Record<string, unknown>;
+  if (
+    typeof task.title !== "string" ||
+    !isTerminalAgent(task.agent) ||
+    typeof task.model !== "string" ||
+    !RUN_TASK_OUTCOMES.includes(task.outcome as RunTaskOutcome)
+  )
+    return null;
+  const out: ConductorRunTask = {
+    title: task.title.slice(0, AGENT_NAME_MAX),
+    agent: task.agent,
+    model: task.model,
+    tier: TIERS.includes(task.tier as Tier) ? (task.tier as Tier) : null,
+    effort: EFFORTS.includes(task.effort as Effort)
+      ? (task.effort as Effort)
+      : null,
+    outcome: task.outcome as RunTaskOutcome,
+  };
+  if (typeof task.error === "string" && task.error)
+    out.error = task.error.slice(0, MEMORY_RUN_ERROR_MAX);
+  return out;
+}
+
+function runEntry(value: unknown): ConductorRunEntry | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entry = value as Record<string, unknown>;
+  if (
+    typeof entry.runId !== "string" ||
+    !entry.runId ||
+    typeof entry.title !== "string" ||
+    !RUN_END_STATUSES.includes(entry.status as RunEndStatus) ||
+    !isFiniteNumber(entry.createdAt) ||
+    !isFiniteNumber(entry.endedAt) ||
+    !Array.isArray(entry.tasks)
+  )
+    return null;
+  return {
+    runId: entry.runId,
+    title: entry.title.slice(0, AGENT_NAME_MAX),
+    status: entry.status as RunEndStatus,
+    createdAt: entry.createdAt,
+    endedAt: entry.endedAt,
+    tasks: entry.tasks
+      .map(runTask)
+      .filter((task): task is ConductorRunTask => task !== null)
+      .slice(0, MEMORY_RUN_TASKS_MAX),
+  };
+}
+
 /**
  * A memory as read back from disk, made safe to use: entries of a bad shape
  * and repeats of a session dropped, the ledger sorted newest first and cut
- * to {@link MEMORY_LEDGER_MAX}, summaries and notes cut to their limits.
+ * to {@link MEMORY_LEDGER_MAX}, summaries and notes cut to their limits. Runs
+ * get the same: a bad entry or a repeat of a run is dropped, the rest sorted
+ * newest first and cut to {@link MEMORY_RUNS_MAX}; a memory without runs
+ * reads with none.
  * Anything that is not a memory reads as an empty one.
  */
 export function normalizeConductorMemory(value: unknown): ConductorMemory {
@@ -543,8 +655,20 @@ export function normalizeConductorMemory(value: unknown): ConductorMemory {
     .map(ledgerEntry)
     .filter((entry): entry is ConductorLedgerEntry => entry !== null)
     .sort((a, b) => b.updatedAt - a.updatedAt);
+  const seenRuns = new Set<string>();
+  const runs = (Array.isArray(memory.runs) ? memory.runs : [])
+    .map(runEntry)
+    .filter((entry): entry is ConductorRunEntry => entry !== null)
+    .sort((a, b) => b.endedAt - a.endedAt)
+    .filter((entry) => {
+      if (seenRuns.has(entry.runId)) return false;
+      seenRuns.add(entry.runId);
+      return true;
+    })
+    .slice(0, MEMORY_RUNS_MAX);
   const seen = new Set<string>();
   return {
+    runs,
     ledger: ledger
       .filter((entry) => {
         if (seen.has(entry.sessionId)) return false;
@@ -647,7 +771,10 @@ export const SESSION_HELP: Record<SessionAction, string> = {
             Conductors only. What you remember of this project across your
             conversations: your last ${MEMORY_LEDGER_MAX} sessions (title, agent,
             model, taskId, status, a summary of at most ${MEMORY_SUMMARY_MAX}
-            characters), newest first, and your notes. Read it before you
+            characters), newest first, the last ${MEMORY_RUNS_MAX} orchestration
+            runs you led (title, status, and per worker its agent, model,
+            tier and outcome: accepted, cancelled, failed, blocked,
+            interrupted or unreviewed), and your notes. Read it before you
             plan.`,
   "memory.write": `  memory.write {"notes":"Decisions, open threads, what to check next"}
             Conductors only. Replace your notes for this project, at most

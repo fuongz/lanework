@@ -8,6 +8,7 @@ import type { OrchestrationRun, TeamLead } from "#/../shared/orchestration";
 import { useTeamLeads } from "#/components/shared/conversation/composer";
 import { useModels } from "#/components/shared/conversation/composer.models";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
+import { readProjectRoots } from "#/hooks/use-project-folders";
 import {
   type DerivedProposal,
   deriveProposals,
@@ -45,7 +46,6 @@ export function useOrchestration({
   leadAgent,
   turns,
   working,
-  cwd,
   send,
 }: {
   project: string | null;
@@ -57,8 +57,6 @@ export function useOrchestration({
   turns: Turn[];
   /** A turn is open or the engine is running. */
   working: boolean;
-  /** The checkout the lead runs in, so scopes come back relative to it. */
-  cwd: string | null;
   /** The page's own send: the planning turn is an ordinary message. */
   send: Send;
 }) {
@@ -105,15 +103,25 @@ export function useOrchestration({
         teamLead && project
           ? await withLiveContext(project, teamLead)
           : teamLead;
+      // The primary folder, so scopes come back relative to the checkout the
+      // run uses; read right before the prompt is built (FE-132).
+      const roots = await readProjectRoots(project);
       const ok = await sendRef.current(
-        planningPrompt(id, request.trim(), leadAgent, cwd, planner),
+        planningPrompt(
+          id,
+          request.trim(),
+          leadAgent,
+          roots.primary,
+          planner,
+          roots.others,
+        ),
         attachments,
         names,
       );
       if (!ok) setPending((current) => (current?.id === id ? null : current));
       return ok;
     },
-    [leadAgent, cwd, project],
+    [leadAgent, project],
   );
 
   const repair = useCallback(
@@ -124,21 +132,23 @@ export function useOrchestration({
         leads?.find((entry) => entry.id === proposal.teamLead) ?? null;
       const teamLead =
         found && project ? await withLiveContext(project, found) : found;
+      const roots = await readProjectRoots(project);
       return sendRef.current(
         repairPrompt(
           proposal.id,
           proposal.request,
           leadAgent,
-          cwd,
+          roots.primary,
           proposal.error ?? "The previous proposal was invalid.",
           proposal.response,
           teamLead,
+          roots.others,
         ),
         [],
         [],
       );
     },
-    [leadAgent, cwd, leads, project],
+    [leadAgent, leads, project],
   );
 
   // ─── The lead's runs ──────────────────────────────────────────────────────
@@ -220,6 +230,70 @@ export function useAwaitingProposal(
   return edit?.runId || edit?.cancelled ? null : latest;
 }
 
+/** A settled run, drawn where its proposal was (FE-134). */
+export interface RunInPlace {
+  proposal: DerivedProposal;
+  run: OrchestrationRun;
+}
+
+/** Runs that will not change again: they leave the bottom of the chat. */
+const SETTLED_RUNS: readonly OrchestrationRun["status"][] = [
+  "finished",
+  "stopped",
+];
+
+/**
+ * The runs drawn in the timeline, by the turn they follow (FE-134/D1).
+ *
+ * A finished or stopped run goes right after the reply that proposed it. A
+ * run still active or paused stays after the transcript, near the prompt, so
+ * its live status is in view; so does one whose reply is not on screen.
+ */
+export function useRunsInPlace(
+  orchestration: Orchestration,
+): Map<string, RunInPlace[]> {
+  const edits = useProposalEdits((state) => state.edits);
+  const { proposals, runs, turns } = orchestration;
+  return useMemo(() => {
+    const placed = new Map<string, RunInPlace[]>();
+    const shown = new Set(turns.map((turn) => turn.id));
+    for (const proposal of proposals) {
+      const runId = edits[proposal.id]?.runId;
+      const run = runId ? runs?.find((entry) => entry.id === runId) : null;
+      const after = proposal.afterTurn;
+      if (!run || !SETTLED_RUNS.includes(run.status)) continue;
+      if (!after || !shown.has(after)) continue;
+      placed.set(after, [...(placed.get(after) ?? []), { proposal, run }]);
+    }
+    return placed;
+  }, [proposals, runs, turns, edits]);
+}
+
+/** The settled runs that follow one turn (see {@link useRunsInPlace}). */
+export function RunsAfterTurn({
+  slug,
+  orchestration,
+  placed,
+}: {
+  slug: string;
+  orchestration: Orchestration;
+  placed: readonly RunInPlace[] | undefined;
+}) {
+  const { project } = orchestration;
+  if (!project || !placed?.length) return null;
+  return placed.map(({ proposal, run }) => (
+    <RunPanel
+      key={proposal.id}
+      slug={slug}
+      project={project}
+      run={run}
+      title={proposal.title}
+      focusKey={proposal.id}
+      onRun={orchestration.upsert}
+    />
+  ));
+}
+
 /** The waiting proposal's card, for the place above the prompt. */
 export function AwaitingProposal({
   orchestration,
@@ -253,8 +327,10 @@ export function AwaitingProposal({
  * The lead's proposal cards and runs, drawn after its transcript.
  *
  * The newest proposal is drawn as a card until it is approved; an approved
- * one is drawn as its run. Runs no card points to (another window approved
- * them, or the card was forgotten) follow at the end.
+ * one is drawn as its run while the run is active or paused. A settled run
+ * goes back to its proposal's place in the timeline ({@link useRunsInPlace},
+ * FE-134). Runs no card points to (another window approved them, or the
+ * card was forgotten) follow at the end.
  */
 export function OrchestrationPanel({
   slug,
@@ -269,14 +345,20 @@ export function OrchestrationPanel({
     id ? (leads?.find((entry) => entry.id === id) ?? null) : null;
   const edits = useProposalEdits((state) => state.edits);
   const awaiting = useAwaitingProposal(orchestration);
+  const inPlace = useRunsInPlace(orchestration);
   if (!project || !leadAgent) return null;
 
+  // Drawn in the timeline after their reply, not here (FE-134).
+  const placed = new Set(
+    [...inPlace.values()].flat().map((entry) => entry.proposal.id),
+  );
   const latest = proposals.at(-1);
   const linked = new Set<string>();
   const items = proposals.flatMap((proposal) => {
     const runId = edits[proposal.id]?.runId;
     if (runId) {
       linked.add(runId);
+      if (placed.has(proposal.id)) return [];
       const run = runs?.find((entry) => entry.id === runId);
       if (run)
         return [
@@ -339,6 +421,7 @@ export function OrchestrationPanel({
           response: "",
           repaired: false,
           teamLead: pending.teamLead,
+          afterTurn: null,
         }}
         teamLead={teamLeadOf(pending.teamLead)}
         leadsRead={leads !== null}

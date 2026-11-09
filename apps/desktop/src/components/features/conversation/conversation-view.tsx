@@ -8,6 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -70,6 +71,7 @@ import {
 } from "#/components/ui/empty";
 import { TooltipProvider } from "#/components/ui/tooltip";
 import { useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
+import { readProjectRoots } from "#/hooks/use-project-folders";
 import { useProjectKey } from "#/hooks/use-project-key";
 import { firstLine } from "#/lib/conversation-format";
 import { ipcMessage } from "#/lib/ipc-error";
@@ -93,8 +95,10 @@ import {
   AwaitingProposal,
   OrchestrationPanel,
   orchestrationText,
+  RunsAfterTurn,
   useAwaitingProposal,
   useOrchestration,
+  useRunsInPlace,
 } from "../orchestration/orchestration-panel";
 import { ConductorSessions } from "./conductor-sessions";
 import { FileOpenerProvider } from "./file-opener";
@@ -392,7 +396,6 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     leadAgent: canLead(agent) ? agent : null,
     turns,
     working,
-    cwd: conversation?.cwd ?? null,
     send: (text, attachments, names) => send(text, attachments, names),
   });
   const shown = orchestration.turns;
@@ -404,6 +407,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     return -1;
   }, [shown]);
   const awaiting = useAwaitingProposal(orchestration);
+  // A settled run, after the reply that proposed it (FE-134).
+  const runsInPlace = useRunsInPlace(orchestration);
   // The conductor this conversation belongs to (FE-95), once both the
   // listing (or the start that is ahead of it) and the leads are read.
   const startedFor = useNewChats((state) => state.started[id]?.conductor);
@@ -630,14 +635,18 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         ? await Promise.all([
             withLiveContext(project, conductor),
             conductorMemory(project, conductor),
-          ]).then(([live, memory]) =>
+            // NOT `conversation.cwd`: that is the agent's last shell
+            // directory, which moves whenever it runs `cd` (FE-132).
+            readProjectRoots(project),
+          ]).then(([live, memory, roots]) =>
             conductorTurn(
               typed,
               live,
               agent,
-              conversation?.cwd ?? null,
+              roots.primary,
               lastConductorContext(turns),
               memory,
+              roots.others,
             ),
           )
         : typed;
@@ -952,17 +961,23 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     conversation={id}
                   >
                     {shown.map((turn, index) => (
-                      <TurnView
-                        key={turn.id}
-                        turn={turn}
-                        delta={turn === lastOpen ? delta : ""}
-                        slug={slug}
-                        conversation={id}
-                        handlers={handlers}
-                        forking={forking}
-                        anchor={anchor}
-                        compacted={index < compactedBefore}
-                      />
+                      <Fragment key={turn.id}>
+                        <TurnView
+                          turn={turn}
+                          delta={turn === lastOpen ? delta : ""}
+                          slug={slug}
+                          conversation={id}
+                          handlers={handlers}
+                          forking={forking}
+                          anchor={anchor}
+                          compacted={index < compactedBefore}
+                        />
+                        <RunsAfterTurn
+                          slug={slug}
+                          orchestration={orchestration}
+                          placed={runsInPlace.get(turn.id)}
+                        />
+                      </Fragment>
                     ))}
                     {stream && (
                       <TurnView

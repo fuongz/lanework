@@ -674,6 +674,12 @@ export function registerConversation(
     .adopt()
     .catch((error: unknown) =>
       console.error("Unable to place a conductor's old sessions", error),
+    )
+    // FE-133: the reports owed when the app last quit, and the sessions it
+    // still watched, once the launches are placed.
+    .then(() => conductors.restore())
+    .catch((error: unknown) =>
+      console.error("Unable to restore a conductor's owed reports", error),
     );
 
   // The conversations whose engine last answered `terminal`: when a tab

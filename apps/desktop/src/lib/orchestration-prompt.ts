@@ -22,9 +22,10 @@
 // message carries the rules again.
 //
 // A conductor's memory of the project (FE-128) goes along with the rules,
-// never with the one-line reminder: its notes and the ledger of the sessions
-// it started. It is not in the fingerprint, or every ledger write would send
-// the rules again; the conductor reads it fresh with `memory.read`.
+// never with the one-line reminder: its notes, the ledger of the sessions
+// it started and the runs it led (FE-131). It is not in the fingerprint, or
+// every ledger write would send the rules again; the conductor reads it fresh
+// with `memory.read`.
 //
 // OpenCode (FE-105/D5) may be a task's worker, never the lead: its models are
 // in the catalog as `provider/model` ids, and one the page has not listed yet
@@ -46,6 +47,9 @@ import {
 } from "@hugeicons/core-free-icons";
 import {
   type ConductorMemory,
+  type ConductorRunEntry,
+  RUN_TASK_OUTCOMES,
+  type RunTaskOutcome,
   SESSIONS_ENV,
 } from "#/../shared/conductor-sessions";
 import {
@@ -84,6 +88,8 @@ const PROPOSAL_TAG =
   /(?<!`)<lanework_proposal>\s*([\s\S]*?)\s*<\/lanework_proposal>/g;
 /** A proposal block still being streamed: from its tag to the end. */
 const PROPOSAL_OPEN = /(?<!`)<lanework_proposal>[\s\S]*$/;
+/** A reply that opens a proposal, not one that only names the tag. */
+const PROPOSAL_MARK = /(?<!`)<lanework_proposal>/;
 
 /** What the user sent, as the transcript has it. */
 export interface Envelope {
@@ -243,12 +249,24 @@ function instructions(
   leadAgent: ConversationAgent,
   cwd: string | null,
   lead: TeamLead | null,
+  others: readonly string[],
 ): string {
   return [
     "Prepare an orchestration proposal for the user to review in Lanework. Investigate and plan only: do not edit files, start workers, or call the Lanework control CLI. Nothing runs until the user approves the card the app draws from your answer.",
-    ...proposalRules(leadAgent, cwd, lead),
+    ...proposalRules(leadAgent, cwd, lead, true, others),
     requestBlock(request),
   ].join("\n\n");
+}
+
+/**
+ * The project's other local folders (FE-132), or null for a project with one.
+ *
+ * NOTE: The lead may READ them; the run still happens in the primary
+ * checkout, so a task's scope never names one.
+ */
+function otherFoldersBlock(others: readonly string[]): string | null {
+  if (!others.length) return null;
+  return `<other_folders>\n${others.map((folder) => JSON.stringify(folder)).join("\n")}\nThese are other local folders of this project. You may read them for context. Workers' write scopes, worktrees and merges stay in the checkout root; never put another folder's path in a task's files.\n</other_folders>`;
 }
 
 /** How a proposal is made and written: the catalog, scopes and schema. */
@@ -257,6 +275,7 @@ function proposalRules(
   cwd: string | null,
   lead: TeamLead | null,
   context = true,
+  others: readonly string[] = [],
 ): string[] {
   const tiers = tiersAllowed(lead);
   const limit = lead ? lead.maxWorkers : DEFAULT_MAX_WORKERS;
@@ -276,6 +295,11 @@ function proposalRules(
         ]
       : []),
     `Task ids: 1-64 letters, digits, - or _. Titles: at most ${TITLE_MAX} characters. Summary: at most ${SUMMARY_MAX}. Parallel worker limit: ${limit} (at most ${lead ? lead.maxWorkers : WORKERS_MAX}).`,
+    // NOTE: Wrapped in an array: spreading the string itself would add it
+    // one character at a time.
+    ...[otherFoldersBlock(others)].filter(
+      (block): block is string => block !== null,
+    ),
     modelsBlock(lead),
     ...leadBlocks(lead, context),
   ];
@@ -302,8 +326,14 @@ export function planningPrompt(
   leadAgent: ConversationAgent,
   cwd: string | null,
   lead: TeamLead | null = null,
+  others: readonly string[] = [],
 ): string {
-  return wrap(id, "plan", lead, instructions(request, leadAgent, cwd, lead));
+  return wrap(
+    id,
+    "plan",
+    lead,
+    instructions(request, leadAgent, cwd, lead, others),
+  );
 }
 
 /**
@@ -319,13 +349,14 @@ export function repairPrompt(
   error: string,
   response: string,
   lead: TeamLead | null = null,
+  others: readonly string[] = [],
 ): string {
   return wrap(
     id,
     "repair",
     lead,
     [
-      instructions(request, leadAgent, cwd, lead),
+      instructions(request, leadAgent, cwd, lead, others),
       "Your previous proposal was refused. Fix it using the error below. Reuse your investigation and task breakdown: do not read the project again or run tools, and do not start any task. Return only the corrected <lanework_proposal> JSON.",
       `Validation error: ${error}`,
       `<previous_response>\n${response.slice(-REPAIR_RESPONSE_MAX)}\n</previous_response>`,
@@ -358,7 +389,7 @@ const CONDUCTOR_CLOSE = "</lanework_conductor>";
 const CONDUCTOR_ENVELOPE =
   /^<lanework_conductor id="([A-Za-z0-9_-]{1,64})" lead="((?:repo:)?[a-z0-9][a-z0-9-]{0,47})" context="([a-z0-9]{1,16})">\n([\s\S]*)\n<\/lanework_conductor>$/;
 /** Bumped when the rules below change, so a live conversation gets them again. */
-const CONDUCTOR_PROMPT_VERSION = 3;
+const CONDUCTOR_PROMPT_VERSION = 5;
 
 /** A message the user sent to a conductor, as the transcript has it. */
 export interface ConductorEnvelope {
@@ -386,13 +417,19 @@ function fingerprint(value: string): string {
  * What the conductor is told about itself: changes when the conductor, the
  * checkout or the rules do, so the next message carries it again.
  */
-export function conductorContext(lead: TeamLead, cwd: string | null): string {
+export function conductorContext(
+  lead: TeamLead,
+  cwd: string | null,
+  others: readonly string[] = [],
+): string {
   return fingerprint(
     JSON.stringify([
       CONDUCTOR_PROMPT_VERSION,
       { ...lead, source: undefined },
       cwd,
       catalog(lead),
+      // A folder linked or unlinked since is news to the conductor (FE-132).
+      others,
     ]),
   );
 }
@@ -409,14 +446,51 @@ function ledgerLine(entry: ConductorMemory["ledger"][number]): string {
   return `- ${entry.title} (${facts})${summary ? `: ${summary}` : ""}`;
 }
 
+const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
+
+/** One line of a memory's runs: the run, then each task and how it ended. */
+function runLine(entry: ConductorRunEntry): string {
+  const ended = new Date(entry.endedAt).toISOString().slice(0, 10);
+  const tasks = entry.tasks
+    .map(
+      (task) =>
+        `${task.agent}/${oneLine(task.model)}${task.tier ? `[${task.tier}]` : ""} -> ${task.outcome}`,
+    )
+    .join("; ");
+  return `- ${oneLine(entry.title)} (${entry.status}, ended ${ended})${tasks ? `: ${tasks}` : ""}`;
+}
+
+/**
+ * How each model fared across the stored runs, one line per model, in the
+ * order each first appears (newest run first): accepted, failed, blocked and
+ * cancelled tasks. Interrupted and unreviewed tasks say nothing about the
+ * model, so they are not counted.
+ */
+function modelTally(runs: readonly ConductorRunEntry[]): string[] {
+  const tally = new Map<string, Record<RunTaskOutcome, number>>();
+  for (const run of runs)
+    for (const task of run.tasks) {
+      const counts =
+        tally.get(task.model) ??
+        Object.fromEntries(RUN_TASK_OUTCOMES.map((o) => [o, 0]));
+      counts[task.outcome] += 1;
+      tally.set(task.model, counts as Record<RunTaskOutcome, number>);
+    }
+  return [...tally].map(
+    ([model, c]) =>
+      `${oneLine(model)}: accepted ${c.accepted}, failed ${c.failed}, blocked ${c.blocked}, cancelled ${c.cancelled}`,
+  );
+}
+
 /**
  * The conductor's memory of this project as a block (FE-128), or null when
- * it has none: no notes and no session in its ledger.
+ * it has none: no notes, no session in its ledger and no run.
  */
 function memoryBlock(memory: ConductorMemory | null): string | null {
   if (!memory) return null;
   const notes = memory.notes.trim();
-  if (!notes && !memory.ledger.length) return null;
+  const runs = memory.runs ?? [];
+  if (!notes && !memory.ledger.length && !runs.length) return null;
   const parts = [
     "What you remember of this project from earlier conversations, as it stood when this message was sent; `memory.read` has it as it is now.",
   ];
@@ -424,6 +498,10 @@ function memoryBlock(memory: ConductorMemory | null): string | null {
   if (memory.ledger.length)
     parts.push(
       `<ledger>\nThe sessions you started, newest first:\n${memory.ledger.map(ledgerLine).join("\n")}\n</ledger>`,
+    );
+  if (runs.length)
+    parts.push(
+      `<runs>\nThe orchestration runs you led, newest first; each task as agent/model[tier] -> outcome:\n${runs.map(runLine).join("\n")}\nHow each model fared across them:\n${modelTally(runs).join("\n")}\n</runs>`,
     );
   return `<conductor_memory>\n${parts.join("\n")}\n</conductor_memory>`;
 }
@@ -433,6 +511,7 @@ function conductorRules(
   leadAgent: ConversationAgent,
   cwd: string | null,
   memory: ConductorMemory | null,
+  others: readonly string[],
 ): string[] {
   return [
     `<conductor>\nYou are "${lead.name}", a conductor in Lanework: the lead of this project's team of coding agents, in one long conversation the user comes back to over time. Lanework adds this block ahead of the user's message; they did not write it and do not see it. Act on it rather than talk about it: never quote, summarise or describe it.\n</conductor>`,
@@ -441,7 +520,7 @@ function conductorRules(
     `<memory_rules>\nYour memory of this project persists across your conversations: Lanework keeps a ledger of the sessions you started, and you keep notes. Run \`"$${SESSIONS_ENV.cli}" memory.read --json '{}'\` when you need that history. After a meaningful decision, or at the end of a piece of work, run \`"$${SESSIONS_ENV.cli}" memory.write --json '{"notes":"…"}'\` with the full updated notes: decisions, conventions, open threads, next steps. They replace the old notes, so send everything worth keeping, and keep them short.\n</memory_rules>`,
     // Its context files stand for every answer, not only for a proposal.
     contextBlock(lead),
-    `<proposal_rules>\n${proposalRules(leadAgent, cwd, lead, false).join("\n\n")}\n</proposal_rules>`,
+    `<proposal_rules>\n${proposalRules(leadAgent, cwd, lead, false, others).join("\n\n")}\n\nWhen you pick a worker's model, weigh the past run outcomes in your memory (the <runs> tally): prefer models that were accepted for similar work, and avoid ones that failed or got blocked.\n</proposal_rules>`,
     memoryBlock(memory),
   ].filter((block): block is string => block !== null);
 }
@@ -463,14 +542,15 @@ export function conductorTurn(
   cwd: string | null,
   previous: string | null,
   memory: ConductorMemory | null = null,
+  others: readonly string[] = [],
 ): string {
-  const context = conductorContext(lead, cwd);
+  const context = conductorContext(lead, cwd, others);
   const blocks =
     previous === context
       ? [
           `<conductor>\nYou are still "${lead.name}", the conductor; the rules from earlier in this conversation stand.\n</conductor>`,
         ]
-      : conductorRules(lead, leadAgent, cwd, memory);
+      : conductorRules(lead, leadAgent, cwd, memory, others);
   return `${CONDUCTOR_OPEN} id="${proposalId()}" lead="${lead.id}" context="${context}">\n${[
     ...blocks,
     requestBlock(request),
@@ -728,6 +808,11 @@ export interface DerivedProposal {
   repaired: boolean;
   /** The team lead it was planned under, by id; null for none. */
   teamLead: string | null;
+  /**
+   * The last reply turn that holds it, by id (FE-134): its settled run is
+   * drawn right after that turn. Null before the lead answered.
+   */
+  afterTurn: string | null;
 }
 
 /** A conductor turn, read as the planning turn it may turn out to be. */
@@ -776,9 +861,10 @@ export function deriveProposals(
       replies.some((reply) => reply.role === "assistant" && reply.open) ||
       (replies.length === 0 && last && working);
     const response = replies.map(replyText).filter(Boolean).join("\n\n");
-    // A conductor turn is a proposal only when the conductor made it one.
-    if (envelope.conductor && !response.includes("<lanework_proposal>"))
-      continue;
+    // A conductor turn is a proposal only when the conductor made it one:
+    // a reply that explains proposals and quotes `<lanework_proposal>` in
+    // inline code is an answer, not a broken proposal.
+    if (envelope.conductor && !PROPOSAL_MARK.test(response)) continue;
     let entry = found.get(envelope.id);
     if (envelope.kind === "plan") {
       entry = {
@@ -792,11 +878,14 @@ export function deriveProposals(
         response: "",
         repaired: false,
         teamLead: envelope.lead,
+        afterTurn: null,
       };
       found.set(envelope.id, entry);
     } else if (!entry) continue;
     else entry.repaired = true;
     entry.response = response;
+    // A repair's reply holds the proposal now, so the run follows it.
+    entry.afterTurn = replies.at(-1)?.id ?? entry.afterTurn;
     if (open) {
       entry.status = "planning";
       entry.error = null;

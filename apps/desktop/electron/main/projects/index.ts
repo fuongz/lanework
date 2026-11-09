@@ -20,6 +20,7 @@ import {
   type PickedFolder,
   type Project,
   type ProjectAnswer,
+  type ProjectRoots,
   type ProjectSnapshot,
   projectChannels,
 } from "../../../shared/projects";
@@ -110,7 +111,9 @@ import {
   loadLocal,
   localList,
   localTarget,
+  projectFolders,
   rememberList,
+  terminalFolder,
 } from "./session";
 import { slugify } from "./slug";
 import {
@@ -1310,6 +1313,19 @@ export function registerProjects(devUrl?: string): void {
       const [slug] = requireId(args, 1);
       const record = await folderRecordFor(slug);
       return ((await readFolders(record))[slug] ?? []).map(registerFolder);
+    },
+  );
+  // NOTE (FE-132): what a lead agent is told its checkout is. Both come from
+  // the links main wrote down, so the renderer names a project and nothing
+  // else; a path it sent would never be read.
+  handle(
+    projectChannels.folderRoots,
+    devUrl,
+    async (args): Promise<ProjectRoots> => {
+      const [slug] = requireId(args, 1);
+      const primary = await terminalFolder(slug);
+      const all = await projectFolders(slug);
+      return { primary, others: all.filter((folder) => folder !== primary) };
     },
   );
   handle(

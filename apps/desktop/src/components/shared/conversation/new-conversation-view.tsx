@@ -20,6 +20,7 @@ import {
   WINDOW_TITLE,
   WindowTitlebar,
 } from "#/components/shared/navigation/window-titlebar";
+import { readProjectRoots, useProjectRoots } from "#/hooks/use-project-folders";
 import { useProjectKey } from "#/hooks/use-project-key";
 import { conductorConversation, orderConductors } from "#/lib/conductors";
 import { ipcMessage } from "#/lib/ipc-error";
@@ -95,17 +96,16 @@ export function NewConversationPage({
       mounted.current = false;
     };
   }, []);
-  // The checkout's folder name, as the person knows the project on disk.
+  // The checkout's folder name, as the person knows the project on disk: the
+  // primary folder on THIS machine when it has one (FE-132), else the cloud
+  // path's, else the project's name.
+  const primary = useProjectRoots(project)?.primary ?? null;
   const name = useBoard((state) => {
     const found = state.projects.find((entry) => entry.slug === slug);
     if (!found) return slug;
-    return found.path?.split(/[\\/]/).filter(Boolean).at(-1) ?? found.name;
+    const folder = primary ?? found.path;
+    return folder?.split(/[\\/]/).filter(Boolean).at(-1) ?? found.name;
   });
-  // Named in a planning prompt so the lead writes project-relative scopes.
-  const cwd = useBoard(
-    (state) =>
-      state.projects.find((entry) => entry.slug === slug)?.path ?? null,
-  );
   const [settings, setSettings] = useState<ComposerSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The usage strip follows the model picked: its CLI's quota.
@@ -144,20 +144,23 @@ export function NewConversationPage({
     setError(null);
     // A conductor's message carries who it is, and what it remembers of the
     // project from its earlier conversations (FE-128); a planning prompt
-    // already names it.
+    // already names it. The checkout it names is read now, so the FIRST
+    // message is right (FE-132).
     const outgoing =
       conductor && !readEnvelope(text)
         ? await Promise.all([
             withLiveContext(project, conductor),
             conductorMemory(project, conductor),
-          ]).then(([live, memory]) =>
+            readProjectRoots(project),
+          ]).then(([live, memory, roots]) =>
             conductorTurn(
               text,
               live,
               agentOfModel(chosen.model),
-              cwd,
+              roots.primary,
               null,
               memory,
+              roots.others,
             ),
           )
         : text;
@@ -239,13 +242,16 @@ export function NewConversationPage({
       );
       return false;
     }
+    // The folders are read here, right before the prompt is built (FE-132).
+    const roots = await readProjectRoots(project);
     return send(
       planningPrompt(
         proposalId(),
         request.trim(),
         agentOfModel(started.model),
-        cwd,
+        roots.primary,
         teamLead,
+        roots.others,
       ),
       attachments,
       names,

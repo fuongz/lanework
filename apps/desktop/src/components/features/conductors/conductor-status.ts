@@ -13,9 +13,12 @@ import { useNewChats } from "#/stores/new-chats";
  * - `needs-you`: its conversation waits on a permission, its proposal on
  *   approval, or a run under it is paused or waits on a scope.
  * - `working`: its conversation is answering, or a run under it is going.
- * - `idle`: neither.
+ * - `running`: between turns, with background jobs still going (Claude
+ *   only): its conversation is never a row under Sessions, so this row is
+ *   the rail's only sign of them.
+ * - `idle`: none of these.
  */
-export type ConductorState = "idle" | "working" | "needs-you";
+export type ConductorState = "idle" | "working" | "running" | "needs-you";
 
 export interface ConductorStatus {
   state: ConductorState;
@@ -171,6 +174,9 @@ export function useConductorStatuses(
         ((session ? (live[agentKey(session)] ?? session.working) : false) ||
           (!session && conversation in started)));
     const running = mine.some((run) => run.status === "active");
+    // Its background tasks still running; only Claude counts them (FE-42/D1).
+    const background =
+      session?.agent === "claude" ? session.background.running : 0;
     if (asking || proposing || paused || scope)
       out[conductor.id] = {
         state: "needs-you",
@@ -187,6 +193,12 @@ export function useConductorStatuses(
       out[conductor.id] = {
         state: "working",
         reason: answering ? "Working" : "Running workers",
+        conversation,
+      };
+    else if (background > 0)
+      out[conductor.id] = {
+        state: "running",
+        reason: `${background} background job${background === 1 ? "" : "s"} running`,
         conversation,
       };
     else out[conductor.id] = { ...IDLE, conversation };
