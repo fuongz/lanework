@@ -111,8 +111,9 @@ export function IssueDetail() {
           </div>
         </WindowTitlebar>
         {/* Keyed on the card: the pane stays mounted while j/k move through
-            the list, and the next card must open at its top. */}
-        <div key={taskId} className="min-h-0 flex-1 overflow-y-auto">
+            the list, and the next card must open at its top. `relative` so
+            a checklist box's hidden input scrolls with the card. */}
+        <div key={taskId} className="relative min-h-0 flex-1 overflow-y-auto">
           {loading && !card && <IssueDetailSkeleton />}
           {error && !card && (
             <ErrorState

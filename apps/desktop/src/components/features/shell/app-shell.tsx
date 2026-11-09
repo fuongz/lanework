@@ -323,7 +323,16 @@ export function AppShell() {
     // The window's ground is the rail's colour, and the page sits on it as an
     // inset card. The card's border is the edge between the two, so the
     // separator below draws nothing until it is pointed at.
-    <div className="bg-sidebar flex h-screen flex-col overflow-hidden">
+    //
+    // NOTE: `relative overflow-clip`, not `overflow-hidden`. Base UI hides a
+    // checkbox's or switch's real <input> with `position: absolute` and no
+    // offsets, so with no positioned ancestor it sits at its static place
+    // against the page: deep in a long checklist, below the window. That
+    // made the document taller than the window, and focusing the input
+    // scrolled the whole shell up out of sight. `relative` keeps such
+    // strays inside the shell; `clip`, unlike `hidden`, is no scroll
+    // container, so nothing can scroll the shell itself either.
+    <div className="bg-sidebar relative flex h-screen flex-col overflow-clip">
       {/* The window's title bar across its whole width, open or folded: the
           window controls, back and forward over the rail, and the page's
           header (`<WindowTitlebar>`) beside them. The rail and the page's

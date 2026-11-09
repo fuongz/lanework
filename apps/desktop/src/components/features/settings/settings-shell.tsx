@@ -44,7 +44,9 @@ export function SettingsShell({ children }: { children: ReactNode }) {
     // NOTE: The split is stated, not read from `--rail-width`. That variable
     // is the app rail's, and it stays on <html> at whatever width the rail had
     // when the app shell went away.
-    <div className="bg-sidebar flex h-screen flex-col">
+    // NOTE: `relative overflow-clip`, as the app shell's (app-shell.tsx):
+    // a switch's hidden input deep in a long page must not grow the document.
+    <div className="bg-sidebar relative flex h-screen flex-col overflow-clip">
       <WindowTitlebarHost
         className="settings-titlebar"
         style={{ "--titlebar-split": "15rem" } as CSSProperties}
