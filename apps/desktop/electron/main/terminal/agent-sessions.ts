@@ -117,6 +117,24 @@ export function claudePrompt(line: Line): string | null {
 }
 
 /**
+ * A Claude prompt that is only images (a screenshot pasted, nothing typed),
+ * named by what it holds: the title of last resort. Without it a chat
+ * started with an image stays off the rail until something is typed.
+ *
+ * @returns null for any other line, a tool's result included.
+ */
+export function claudeImagePrompt(line: Line): string | null {
+  if (line.type !== "user" || line.isMeta || line.isSidechain) return null;
+  const content = (line.message as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(content)) return null;
+  const parts = content as { type?: string }[];
+  if (parts.some((part) => part?.type === "tool_result")) return null;
+  const images = parts.filter((part) => part?.type === "image").length;
+  if (!images) return null;
+  return images === 1 ? "Image" : `${images} images`;
+}
+
+/**
  * How far back a transcript is read for the card its agent is on.
  *
  * A card is named at a turn's start, and a long turn writes a lot after it.
@@ -343,9 +361,10 @@ export async function claudeSubagents(
  */
 async function claudeOpening(
   file: string,
-): Promise<{ cwd: unknown; prompt: string | null }> {
+): Promise<{ cwd: unknown; prompt: string | null; images: string | null }> {
   const handle = await open(file, "r");
   let cwd: unknown;
+  let images: string | null = null;
   try {
     let pending = Buffer.alloc(0);
     let at = 0;
@@ -365,13 +384,14 @@ async function claudeOpening(
         if (!line) continue;
         if (cwd === undefined && typeof line.cwd === "string") cwd = line.cwd;
         const prompt = claudePrompt(line);
-        if (prompt) return { cwd, prompt };
+        if (prompt) return { cwd, prompt, images };
+        images ??= claudeImagePrompt(line);
       }
     }
   } finally {
     await handle.close();
   }
-  return { cwd, prompt: null };
+  return { cwd, prompt: null, images };
 }
 
 /**
@@ -402,11 +422,13 @@ export async function claudeSession(
       (line) => line.type === "ai-title" && typeof line.aiTitle === "string",
     )?.aiTitle as string | undefined;
   let prompt = head.map(claudePrompt).find(Boolean) ?? null;
+  let images: string | null = null;
   // A first prompt longer than the head, such as one with an image pasted
   // in, would leave the conversation without a title, and so off the rail.
   if (!named && !prompt) {
     const opening = await claudeOpening(file);
     prompt = opening.prompt;
+    images = opening.images;
     cwd ??= opening.cwd;
     if (cwd !== undefined && cwd !== folder) return null;
   }
@@ -416,7 +438,7 @@ export async function claudeSession(
   // not be deleted. The command names it instead.
   const title = named
     ? tidy(named)
-    : (prompt ?? head.map(claudeCommand).find(Boolean) ?? null);
+    : (prompt ?? head.map(claudeCommand).find(Boolean) ?? images);
   // Nothing was ever asked in it: a CLI opened and closed, nothing to resume.
   if (!title) return null;
   const working =

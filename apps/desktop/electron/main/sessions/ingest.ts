@@ -21,6 +21,7 @@ import type {
 } from "../../session-store/types";
 import {
   agentKey,
+  claudeImagePrompt,
   codexPrompt,
   codexRole,
   laneworkCard,
@@ -111,6 +112,11 @@ export interface ClaudeIngestState {
   cwd: string | null;
   /** The first prompt somebody typed, tidied. */
   prompt: string | null;
+  /**
+   * The first prompt that was only images ("Image", "2 images"): its title
+   * until something is typed. Absent from a state saved before it.
+   */
+  imagePrompt?: string | null;
   /** The newest title Claude gave it, as written. */
   aiTitle: string | null;
   /** The newest card a Lanework call named. */
@@ -278,6 +284,7 @@ function claudeStateOf(
     !textOrNull(state.cwd) ||
     !textOrNull(state.prompt) ||
     !textOrNull(state.aiTitle) ||
+    (state.imagePrompt !== undefined && !textOrNull(state.imagePrompt)) ||
     !textOrNull(state.createdAt) ||
     !textOrNull(state.updatedAt) ||
     (state.card !== null && !isCard(state.card)) ||
@@ -295,6 +302,7 @@ function blankClaude(): Omit<ClaudeIngestState, "tasks"> {
     agent: "claude",
     cwd: null,
     prompt: null,
+    imagePrompt: null,
     aiTitle: null,
     card: null,
     createdAt: null,
@@ -323,7 +331,10 @@ function visitClaude(
   if (wantsCwd && typeof line.cwd === "string") state.cwd = line.cwd;
   if (state.createdAt === null && typeof line.timestamp === "string")
     state.createdAt = line.timestamp;
-  if (wantsPrompt) state.prompt = claudePrompt(line);
+  if (wantsPrompt) {
+    state.prompt = claudePrompt(line);
+    state.imagePrompt ??= claudeImagePrompt(line);
+  }
   // The latest title wins: Claude renames a conversation as it goes.
   if (titled && line.type === "ai-title" && typeof line.aiTitle === "string")
     state.aiTitle = line.aiTitle;
@@ -473,7 +484,9 @@ export async function ingestClaude(
     read = await readClaude(file, folder, null);
   if (read === "foreign") return SKIP;
   const { next, head, tasks, state } = read;
-  const title = next.aiTitle ? tidy(next.aiTitle) : next.prompt;
+  const title = next.aiTitle
+    ? tidy(next.aiTitle)
+    : (next.prompt ?? next.imagePrompt ?? null);
   // Nothing was ever asked in it: a CLI opened and closed, nothing to resume.
   if (!title) return SKIP;
   const tail = await tailOf(file, state.size);
