@@ -7,6 +7,10 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import {
+  commitPlan,
+  commitScopeLabel,
+} from "#/components/shared/repo/commit-plan";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -32,36 +36,10 @@ import { Textarea } from "#/components/ui/textarea";
 import { useWorktree } from "#/stores/worktree";
 import type {
   BranchState,
-  CommitMode,
   CommitSummary,
   SyncAction,
   WorktreeFile,
 } from "../../../../shared/worktree";
-
-/**
- * What a commit made from here would take in, and the message it would get.
- *
- * Staged first, tracked otherwise (FE-22/D9). With something staged the
- * button commits exactly that. With nothing staged it says "Commit Tracked"
- * and takes every change git already follows, never an untracked file, which
- * somebody has to decide to add.
- */
-function commitPlan(files: WorktreeFile[]): {
-  mode: CommitMode;
-  scope: WorktreeFile[];
-  placeholder: string;
-} {
-  const staged = files.filter((file) => file.staged !== "none");
-  const mode: CommitMode = staged.length ? "staged" : "tracked";
-  const scope = staged.length
-    ? staged
-    : files.filter((file) => file.status !== "untracked");
-  const placeholder =
-    scope.length === 1
-      ? `Update ${scope[0].path.slice(scope[0].path.lastIndexOf("/") + 1)}`
-      : `Update ${scope.length} files`;
-  return { mode, scope, placeholder };
-}
 
 const RUNNING: Record<SyncAction, string> = {
   fetch: "Fetching…",
@@ -253,7 +231,8 @@ export function CommitBox({
   const busy = useWorktree((state) => state.busy);
   const actionError = useWorktree((state) => state.actionError);
   const clearActionError = useWorktree((state) => state.clearActionError);
-  const { mode, scope, placeholder } = commitPlan(files);
+  const plan = commitPlan(files);
+  const { mode, scope, placeholder } = plan;
   const canCommit = scope.length > 0 && busy === null;
 
   const submit = () => {
@@ -317,9 +296,7 @@ export function CommitBox({
         )}
         <div className="flex items-center gap-2">
           <span className="text-muted-foreground min-w-0 truncate text-[11px]">
-            {scope.length === 0
-              ? "Nothing to commit"
-              : `${scope.length} ${scope.length === 1 ? "file" : "files"} ${mode === "staged" ? "staged" : "tracked"}`}
+            {commitScopeLabel(plan)}
           </span>
           <Button
             size="sm"

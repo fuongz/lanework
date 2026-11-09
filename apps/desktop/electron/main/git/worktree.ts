@@ -13,6 +13,9 @@ import {
 import {
   type BranchList,
   type BranchState,
+  CO_AUTHOR_HISTORY,
+  CO_AUTHOR_LIMIT,
+  type CoAuthorCandidate,
   type CommitChange,
   type CommitHistory,
   type CommitMode,
@@ -20,6 +23,7 @@ import {
   type FileListing,
   type FileSide,
   type FileView,
+  type GitIdentity,
   HISTORY_PAGE,
   IMAGE_TYPES,
   patchStats,
@@ -769,6 +773,67 @@ export async function log(top: string, skip: number): Promise<CommitHistory> {
     commits: commits.slice(0, HISTORY_PAGE),
     more: commits.length > HISTORY_PAGE,
   };
+}
+
+/** One config value as git resolves it, or null when it is unset or empty. */
+async function configValue(top: string, key: string): Promise<string | null> {
+  // Exit 1 means "not set": an answer, not a failure.
+  const { stdout, code } = await read(top, ["config", "--get", key], {
+    ok: [1],
+  });
+  return code === 0 ? stdout.trim() || null : null;
+}
+
+/**
+ * The name and email a commit here would carry.
+ *
+ * `git config` resolves local over global itself, so this only asks.
+ */
+export async function identity(top: string): Promise<GitIdentity> {
+  const [name, email] = await Promise.all([
+    configValue(top, "user.name"),
+    configValue(top, "user.email"),
+  ]);
+  return { name, email };
+}
+
+/**
+ * Recent authors on HEAD to offer as co-authors.
+ *
+ * Distinct by lowercase email, most commits first, capped, without the
+ * current identity's email and without an author who has none. A repository
+ * with no commit yet has no one to offer.
+ */
+export async function coAuthors(top: string): Promise<CoAuthorCandidate[]> {
+  if (!(await hasHead(top))) return [];
+  const [raw, me] = await Promise.all([
+    out(top, [
+      "log",
+      `--max-count=${CO_AUTHOR_HISTORY}`,
+      "--format=%aN%x00%aE",
+    ]),
+    identity(top),
+  ]);
+  const mine = me.email?.toLowerCase() ?? null;
+  const seen = new Map<string, CoAuthorCandidate>();
+  for (const line of raw.split("\n")) {
+    const [name = "", email = ""] = line.split("\0");
+    const address = email.trim();
+    const key = address.toLowerCase();
+    if (!key || key === mine) continue;
+    const known = seen.get(key);
+    if (known) known.commits++;
+    else
+      seen.set(key, {
+        name: name.trim() || address,
+        email: address,
+        commits: 1,
+      });
+  }
+  // `sort` is stable, so equal counts keep the newest author first.
+  return [...seen.values()]
+    .sort((a, b) => b.commits - a.commits)
+    .slice(0, CO_AUTHOR_LIMIT);
 }
 
 export async function show(top: string, sha: string): Promise<CommitChange> {

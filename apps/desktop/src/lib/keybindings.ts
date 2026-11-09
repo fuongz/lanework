@@ -286,6 +286,24 @@ export const KEYBINDINGS: Keybinding[] = [
     where: "files-tree.tsx",
   },
   {
+    command: "Commits: Show Changes",
+    keys: ["⇧⌘1"],
+    when: "Commits view, terminal not focused",
+    where: "git-tabs.tsx",
+  },
+  {
+    command: "Commits: Show History",
+    keys: ["⇧⌘2"],
+    when: "Commits view, terminal not focused",
+    where: "git-tabs.tsx",
+  },
+  {
+    command: "Commits: Previous or Next Tab",
+    keys: ["←", "→"],
+    when: "Commits tabs focused",
+    where: "git-tabs.tsx",
+  },
+  {
     command: "Changes: Commit",
     keys: ["⌘↩"],
     when: "Commit message",

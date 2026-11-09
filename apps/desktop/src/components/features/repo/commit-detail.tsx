@@ -4,7 +4,6 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
 import { type LoadSides, PatchView } from "#/components/shared/diff/patch-view";
@@ -102,9 +101,11 @@ function CommitHeader({ commit }: { commit: CommitSummary }) {
  * The header rides inside the diff's scroller, above the first file, so a
  * long commit scrolls it away instead of pinning a block of prose over the
  * code somebody came to read.
+ *
+ * The commit is a prop, not read from the URL: the History tab stays mounted
+ * while Changes is shown (FE-130/D9), and keeps the commit it had open.
  */
-export function CommitDetail() {
-  const { slug, sha } = useParams({ from: "/_app/w/$slug/history/$sha" });
+export function CommitDetail({ slug, sha }: { slug: string; sha: string }) {
   const change = useWorktree((state) => state.commit);
   const error = useWorktree((state) => state.commitError);
   const openCommit = useWorktree((state) => state.openCommit);

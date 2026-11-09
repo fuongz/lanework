@@ -1,5 +1,4 @@
 import {
-  Clock01Icon,
   GitCompareIcon,
   ListViewIcon,
   PencilEdit02Icon,
@@ -11,6 +10,7 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactElement, ReactNode } from "react";
 import { AccountOrb } from "#/components/shared/common/account-orb";
+import { GitRailLink } from "#/components/shared/navigation/git-rail-link";
 import {
   Tooltip,
   TooltipContent,
@@ -178,28 +178,13 @@ export function MiniRail({
               className="flex flex-col items-center gap-1"
             >
               <Slot
-                label="Changes"
+                label="Commits"
                 icon={GitCompareIcon}
                 render={
-                  <Link
-                    to="/w/$slug/changes"
-                    params={{ slug }}
-                    aria-label="Changes"
+                  <GitRailLink
+                    slug={slug}
+                    aria-label="Commits"
                     className={SLOT}
-                    activeProps={ACTIVE}
-                  />
-                }
-              />
-              <Slot
-                label="History"
-                icon={Clock01Icon}
-                render={
-                  <Link
-                    to="/w/$slug/history"
-                    params={{ slug }}
-                    aria-label="History"
-                    className={SLOT}
-                    activeProps={ACTIVE}
                   />
                 }
               />

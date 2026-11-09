@@ -27,10 +27,6 @@ import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { splitPath } from "#/components/shared/diff/diff-file-header";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import {
-  WINDOW_TITLE,
-  WindowTitlebar,
-} from "#/components/shared/navigation/window-titlebar";
-import {
   buildTree,
   type Folder,
   INDENT,
@@ -45,7 +41,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
-import { type DiffStyle, stagedTally, useWorktree } from "#/stores/worktree";
+import { type DiffStyle, useWorktree } from "#/stores/worktree";
 import type { WorktreeFile } from "../../../../shared/worktree";
 import { ChangeAgents } from "./change-agents";
 
@@ -272,43 +268,20 @@ function Section({
 }
 
 /**
- * The screen's header, in the window's title bar.
+ * The Changes tab's controls, at the right end of the window's title bar
+ * (FE-130/D11): how the diff is drawn and walked, and Refresh.
  *
- * Its name, what the working tree adds and removes, and Refresh. Drawn by
- * `ChangesLayout`, not by the list: the list is only there while something
- * changed, and the screen still needs its name (and Refresh) when nothing
- * has.
+ * Drawn by `GitLayout` while the Changes tab is shown, in every state, so
+ * Refresh is there when nothing changed and while the repository is read.
+ * Stage All is the select-all box at the top of the list now.
  */
-export function ChangesTitlebar({ files }: { files: WorktreeFile[] }) {
+export function ChangesActions({ files }: { files: WorktreeFile[] }) {
   const refresh = useWorktree((state) => state.refresh);
   const loading = useWorktree((state) => state.loading);
-  const additions = files.reduce((sum, file) => sum + file.additions, 0);
-  const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
-  const stage = useWorktree((state) => state.stage);
-  const unstage = useWorktree((state) => state.unstage);
-  const busy = useWorktree((state) => state.busy);
-  const allStaged = files.length > 0 && stagedTally(files) === "full";
 
   return (
-    <WindowTitlebar>
-      <h1 className={WINDOW_TITLE}>Changes</h1>
-      <Counts additions={additions} deletions={deletions} />
-      {files.length > 0 ? (
-        <ChangesDiffControls files={files} />
-      ) : (
-        <span className="ml-auto" />
-      )}
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={busy !== null || files.length === 0}
-        onClick={() => {
-          const paths = files.map((file) => file.path);
-          void (allStaged ? unstage(paths) : stage(paths));
-        }}
-      >
-        {allStaged ? "Unstage All" : "Stage All"}
-      </Button>
+    <div className="ml-auto flex min-w-0 items-center gap-2">
+      {files.length > 0 && <ChangesDiffControls files={files} />}
       <Button
         variant="ghost"
         size="icon-sm"
@@ -324,7 +297,29 @@ export function ChangesTitlebar({ files }: { files: WorktreeFile[] }) {
           className={loading ? "animate-spin" : undefined}
         />
       </Button>
-    </WindowTitlebar>
+    </div>
+  );
+}
+
+/**
+ * The list's first row: every changed file at once (FE-130/D11).
+ *
+ * The box sits in the same column as each file's own, so it reads as the
+ * box for all of them, the way GitHub Desktop has it.
+ */
+function ChangesHeader({ files }: { files: WorktreeFile[] }) {
+  const additions = files.reduce((sum, file) => sum + file.additions, 0);
+  const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
+  const label =
+    files.length === 1 ? "1 changed file" : `${files.length} changed files`;
+  return (
+    <div className="border-sidebar-border flex h-8 shrink-0 items-center gap-2 border-b pr-2.5 pl-3">
+      <span className="min-w-0 flex-1 truncate text-xs font-medium">
+        {label}
+      </span>
+      <Counts additions={additions} deletions={deletions} />
+      <StageBox files={files} label="all changed files" />
+    </div>
   );
 }
 
@@ -336,8 +331,7 @@ export function ChangesList({ files }: { files: WorktreeFile[] }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* The screen's name, counts, the diff's controls, Stage All and
-          Refresh are all in the title bar: see `ChangesTitlebar`. */}
+      <ChangesHeader files={files} />
       <div className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
         <Section
           title="Tracked"
@@ -359,9 +353,8 @@ export function ChangesList({ files }: { files: WorktreeFile[] }) {
  * How the diff beside the list is drawn and walked.
  *
  * Split/Unified, the previous and next file, and staging the one in view.
- * Drawn in the window's title bar by {@link ChangesTitlebar}; the screen's
- * +/− is already beside its name there, so the diff carries no strip of its
- * own.
+ * Drawn in the window's title bar by {@link ChangesActions}; the +/− is in
+ * the list's header row, so the diff carries no strip of its own.
  *
  * Unified by default, with Split one click away: the owner's call, over
  * FE-22/D4's Split. The choice is remembered per viewer (`readStyle`).
@@ -396,7 +389,6 @@ function ChangesDiffControls({ files }: { files: WorktreeFile[] }) {
         ]}
         onChange={setDiffStyle}
       />
-      <span className="ml-auto" />
       <Button
         variant="ghost"
         size="icon-sm"

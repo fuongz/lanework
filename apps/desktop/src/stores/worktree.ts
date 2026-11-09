@@ -158,7 +158,20 @@ interface WorktreeStore {
   stage: (paths: string[]) => Promise<void>;
   unstage: (paths: string[]) => Promise<void>;
   restore: (paths: string[]) => Promise<void>;
-  commitChanges: (mode: CommitMode, fallback: string) => Promise<boolean>;
+  /**
+   * Commit what `mode` takes in.
+   *
+   * @param fallback The message when the box is empty.
+   * @param message The whole message, written elsewhere (the rail's Commit…
+   *   dialog), used as is instead of the box's. The box is cleared on success
+   *   either way: what it held went into the commit or was replaced.
+   * @returns Whether the commit landed.
+   */
+  commitChanges: (
+    mode: CommitMode,
+    fallback: string,
+    message?: string,
+  ) => Promise<boolean>;
   /**
    * Fetch, pull or push.
    *
@@ -402,10 +415,10 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       );
     },
 
-    commitChanges: async (mode, fallback) => {
+    commitChanges: async (mode, fallback, explicit) => {
       // The placeholder is the message when the box is empty (FE-22/D9). It
       // is what the button promised; refusing to commit would surprise.
-      const message = get().message.trim() || fallback;
+      const message = explicit?.trim() || get().message.trim() || fallback;
       const done = await act("commit", (slug) =>
         desktopSurface("worktree").commit(slug, message, mode),
       );

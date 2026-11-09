@@ -41,7 +41,7 @@ import { useWorktree } from "#/stores/worktree";
  * no request anywhere about who wrote this repository.
  */
 export function HistoryList() {
-  const { slug } = useParams({ from: "/_app/w/$slug/history" });
+  const { slug } = useParams({ from: "/_app/w/$slug/_git" });
   const commits = useWorktree((state) => state.history);
   const more = useWorktree((state) => state.historyMore);
   const loading = useWorktree((state) => state.historyLoading);

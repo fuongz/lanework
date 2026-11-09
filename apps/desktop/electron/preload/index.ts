@@ -169,6 +169,8 @@ const worktree: DesktopWorktreeApi = {
     ipcRenderer.invoke(worktreeChannels.askAgain, slug, folder),
   restrict: (slug, folder) =>
     ipcRenderer.invoke(worktreeChannels.restrict, slug, folder),
+  identity: (slug) => read(worktreeChannels.identity, slug),
+  coAuthors: (slug) => read(worktreeChannels.coAuthors, slug),
 };
 
 /** Settings → Notifications, and where a clicked one leads. */

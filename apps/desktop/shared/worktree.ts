@@ -140,6 +140,31 @@ export interface BranchList {
 export const HISTORY_PAGE = 100;
 
 /**
+ * Who a commit made here would be written by: `user.name` and `user.email` as
+ * git resolves them (the repository's config, then the global one).
+ *
+ * Each is null when git has none, and a commit would then be refused.
+ */
+export interface GitIdentity {
+  name: string | null;
+  email: string | null;
+}
+
+/** Somebody who recently committed here, offered as a `Co-authored-by`. */
+export interface CoAuthorCandidate {
+  name: string;
+  email: string;
+  /** Their commits among the recent history read. */
+  commits: number;
+}
+
+/** How many recent commits the co-author list is drawn from. */
+export const CO_AUTHOR_HISTORY = 500;
+
+/** The most co-author candidates one call answers. */
+export const CO_AUTHOR_LIMIT = 50;
+
+/**
  * Which side of a file to read, when the viewer expands unchanged lines.
  *
  * NOTE: A revision the renderer names is only ever a sha it was given, or the
@@ -238,6 +263,8 @@ export const worktreeChannels = {
   repoTrust: "worktree:repo-trust",
   askAgain: "worktree:ask-again",
   restrict: "worktree:restrict",
+  identity: "worktree:identity",
+  coAuthors: "worktree:co-authors",
 } as const;
 
 // ── Automatic reads the git gate held back (FE-77/D6, FE-102) ────────────────
@@ -397,6 +424,14 @@ export interface DesktopWorktreeApi {
   askAgain: (slug: string, folder?: number) => Promise<RepoTrust>;
   /** Answer "Don't run" without a prompt: Settings' Stop running. */
   restrict: (slug: string, folder?: number) => Promise<RepoTrust>;
+  /** The name and email a commit here would carry. Read-only. */
+  identity: (slug: string) => Promise<GitIdentity>;
+  /**
+   * Recent authors to offer as co-authors, most commits first, at most
+   * {@link CO_AUTHOR_LIMIT}, without the current identity. Empty for a
+   * repository with no commits. Read-only.
+   */
+  coAuthors: (slug: string) => Promise<CoAuthorCandidate[]>;
 }
 
 /**

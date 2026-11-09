@@ -1,5 +1,4 @@
 import {
-  Clock01Icon,
   FolderFileStorageIcon,
   GitCompareIcon,
   ListViewIcon,
@@ -9,16 +8,20 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ConductorsNav } from "#/components/features/conductors/conductors-nav";
+import { CommitDialog } from "#/components/features/repo/commit-dialog";
 import { LocalModeRail } from "#/components/shared/auth/local-mode";
+import { GitRailLink } from "#/components/shared/navigation/git-rail-link";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
+import { commitPlan } from "#/components/shared/repo/commit-plan";
 import { Badge } from "#/components/ui/badge";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "#/components/ui/context-menu";
 import { Kbd } from "#/components/ui/kbd";
@@ -81,9 +84,12 @@ function SectionLabel({
 function RefreshMenu({
   children,
   onRefresh,
+  items,
 }: {
   children: ReactNode;
   onRefresh: () => void;
+  /** More of the row's actions, drawn under Refresh past a separator. */
+  items?: ReactNode;
 }) {
   return (
     <ContextMenu>
@@ -92,6 +98,12 @@ function RefreshMenu({
       </ContextMenuTrigger>
       <ContextMenuContent finalFocus={false}>
         <ContextMenuItem onClick={onRefresh}>Refresh</ContextMenuItem>
+        {items && (
+          <>
+            <ContextMenuSeparator />
+            {items}
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -138,6 +150,15 @@ export function AppSidebar({
       ? state.state.unpushed
       : 0,
   );
+  // Whether Commit… has anything to take: the commit box's own rule.
+  const canCommit = useWorktree(
+    (state) =>
+      state.slug === slug &&
+      state.state?.kind === "ready" &&
+      commitPlan(state.state.files).scope.length > 0,
+  );
+  const gitBusy = useWorktree((state) => state.busy !== null);
+  const [committing, setCommitting] = useState(false);
   const unpushedLabel =
     unpushed === 1
       ? "1 commit not pushed yet"
@@ -177,10 +198,10 @@ export function AppSidebar({
     if (pulls.slug !== slug || pulls.status !== "open")
       void window.desktop?.git.pulls(slug, "open", true).catch(() => {});
   };
-  // History's badge is `git status`'s, so its refresh reads both.
-  const refreshHistory = (slug: string) => {
-    void openHistory(slug);
-    void peek(slug);
+  // The Git view's two badges are `git status`'s; its refresh reads the
+  // status, the patch and the history.
+  const refreshGit = (slug: string) => {
+    void openChanges(slug).then(() => openHistory(slug));
   };
 
   // Read with the board, not when Changes is opened: the badge is the reason
@@ -227,37 +248,45 @@ export function AppSidebar({
   if (mini !== firstMini.current) swappedOnce.current = true;
   const swapped = swappedOnce.current;
 
+  // Mounted with either rail, so folding it does not drop an open dialog.
+  const commitDialog = slug ? (
+    <CommitDialog slug={slug} open={committing} onOpenChange={setCommitting} />
+  ) : null;
+
   if (mini)
     return (
-      <MiniRail
-        slug={slug}
-        accountSeed={accountSeed}
-        projectSwitcher={<ProjectSwitcher compact />}
-        agents={
-          projectKey && slug ? (
-            <>
-              <ConductorsNav
-                project={projectKey}
-                slug={slug}
-                hasFolder={hasFolder}
-                row={ROW}
-                active={ACTIVE.className}
-                mini
-              />
-              <AgentSessionsNav
-                project={projectKey}
-                slug={slug}
-                hasFolder={hasFolder}
-                row={ROW}
-                active={ACTIVE.className}
-                mini
-              />
-            </>
-          ) : null
-        }
-        onExpand={() => onExpand?.()}
-        appear={swapped}
-      />
+      <>
+        <MiniRail
+          slug={slug}
+          accountSeed={accountSeed}
+          projectSwitcher={<ProjectSwitcher compact />}
+          agents={
+            projectKey && slug ? (
+              <>
+                <ConductorsNav
+                  project={projectKey}
+                  slug={slug}
+                  hasFolder={hasFolder}
+                  row={ROW}
+                  active={ACTIVE.className}
+                  mini
+                />
+                <AgentSessionsNav
+                  project={projectKey}
+                  slug={slug}
+                  hasFolder={hasFolder}
+                  row={ROW}
+                  active={ACTIVE.className}
+                  mini
+                />
+              </>
+            ) : null
+          }
+          onExpand={() => onExpand?.()}
+          appear={swapped}
+        />
+        {commitDialog}
+      </>
     );
 
   return (
@@ -369,12 +398,41 @@ export function AppSidebar({
               <SectionLabel className="shrink-0 py-0">Repository</SectionLabel>
               <BranchSwitcher slug={slug} />
             </div>
-            <RefreshMenu onRefresh={() => void openChanges(slug)}>
-              <Link
-                to="/w/$slug/changes"
-                params={{ slug }}
+            {/* One entry for the Git view, Changes and History its tabs
+                (FE-130/D4). Both badges stay: what the working tree changes,
+                and what the next push sends. Refresh reads both. */}
+            <RefreshMenu
+              onRefresh={() => refreshGit(slug)}
+              items={
+                canCommit || unpushed > 0 ? (
+                  <>
+                    {canCommit && (
+                      <ContextMenuItem
+                        disabled={gitBusy}
+                        onClick={() => setCommitting(true)}
+                      >
+                        Commit…
+                      </ContextMenuItem>
+                    )}
+                    {unpushed > 0 && (
+                      <ContextMenuItem
+                        disabled={gitBusy}
+                        onClick={() => void useWorktree.getState().sync("push")}
+                      >
+                        Push
+                        <span className="text-muted-foreground ml-auto pl-4 text-xs tabular-nums">
+                          ↑{unpushed}
+                        </span>
+                      </ContextMenuItem>
+                    )}
+                  </>
+                ) : null
+              }
+            >
+              <GitRailLink
+                slug={slug}
                 className={ROW}
-                activeProps={ACTIVE}
+                activeClassName={ACTIVE.className}
               >
                 <HugeiconsIcon
                   icon={GitCompareIcon}
@@ -382,55 +440,45 @@ export function AppSidebar({
                   strokeWidth={1.5}
                   aria-hidden="true"
                 />
-                <span className="min-w-0 truncate">Changes</span>
-                {(added > 0 || removed > 0) && (
-                  <span className="ml-auto shrink-0 text-xs tabular-nums">
-                    {added > 0 && (
-                      <span className="text-emerald-600 dark:text-emerald-400">
-                        +{added}
+                <span className="min-w-0 truncate">Commits</span>
+                {(added > 0 || removed > 0 || unpushed > 0) && (
+                  <span className="ml-auto flex shrink-0 items-center gap-2 text-xs tabular-nums">
+                    {(added > 0 || removed > 0) && (
+                      <span>
+                        {added > 0 && (
+                          <span className="text-emerald-600 dark:text-emerald-400">
+                            +{added}
+                          </span>
+                        )}
+                        {added > 0 && removed > 0 && " "}
+                        {removed > 0 && (
+                          <span className="text-rose-600 dark:text-rose-400">
+                            −{removed}
+                          </span>
+                        )}
                       </span>
                     )}
-                    {added > 0 && removed > 0 && " "}
-                    {removed > 0 && (
-                      <span className="text-rose-600 dark:text-rose-400">
-                        −{removed}
+                    {unpushed > 0 && (
+                      <span
+                        role="img"
+                        aria-label={unpushedLabel}
+                        title={unpushedLabel}
+                        className="flex items-center gap-1 text-blue-600 dark:text-blue-400"
+                      >
+                        <HugeiconsIcon
+                          icon={SquareArrowUp02Icon}
+                          className="size-3.5"
+                          strokeWidth={1.8}
+                          aria-hidden="true"
+                        />
+                        {unpushed > 1 && (
+                          <span aria-hidden="true">{unpushed}</span>
+                        )}
                       </span>
                     )}
                   </span>
                 )}
-              </Link>
-            </RefreshMenu>
-            <RefreshMenu onRefresh={() => refreshHistory(slug)}>
-              <Link
-                to="/w/$slug/history"
-                params={{ slug }}
-                className={ROW}
-                activeProps={ACTIVE}
-              >
-                <HugeiconsIcon
-                  icon={Clock01Icon}
-                  className="text-muted-foreground group-[[aria-current]]:text-foreground size-4 shrink-0"
-                  strokeWidth={1.5}
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 truncate">History</span>
-                {unpushed > 0 && (
-                  <span
-                    role="img"
-                    aria-label={unpushedLabel}
-                    title={unpushedLabel}
-                    className="ml-auto flex shrink-0 items-center gap-1 text-xs text-blue-600 tabular-nums dark:text-blue-400"
-                  >
-                    <HugeiconsIcon
-                      icon={SquareArrowUp02Icon}
-                      className="size-3.5"
-                      strokeWidth={1.8}
-                      aria-hidden="true"
-                    />
-                    {unpushed > 1 && <span aria-hidden="true">{unpushed}</span>}
-                  </span>
-                )}
-              </Link>
+              </GitRailLink>
             </RefreshMenu>
           </nav>
         )}
@@ -481,6 +529,7 @@ export function AppSidebar({
         </Link>
         <LocalModeRail />
       </div>
+      {commitDialog}
     </aside>
   );
 }

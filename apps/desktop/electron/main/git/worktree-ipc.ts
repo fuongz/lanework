@@ -9,12 +9,14 @@ import { stat } from "node:fs/promises";
 import { app, shell } from "electron";
 import {
   type BranchList,
+  type CoAuthorCandidate,
   type CommitChange,
   type CommitHistory,
   type CommitMode,
   type FileListing,
   type FileSide,
   type FileView,
+  type GitIdentity,
   type HeldRead,
   LAUNCHABLE,
   opensInDefaultApp,
@@ -32,9 +34,11 @@ import { askAgain, restrictTrust, trustState } from "./trust-gate";
 import {
   assertReadable,
   branches,
+  coAuthors,
   commit,
   fileImage,
   fileText,
+  identity,
   imagePreviewFile,
   initRepo,
   listDir,
@@ -546,6 +550,21 @@ export function registerWorktree(devUrl?: string): void {
       await assertReadable(found.top);
       return branches(found.top);
     },
+  );
+
+  // The commit dialog's reads: who a commit is by, and who could be credited.
+  handle(
+    worktreeChannels.identity,
+    devUrl,
+    async (args): Promise<GitIdentity> =>
+      identity(await readable(slugOf(args[0]))),
+  );
+
+  handle(
+    worktreeChannels.coAuthors,
+    devUrl,
+    async (args): Promise<CoAuthorCandidate[]> =>
+      coAuthors(await readable(slugOf(args[0]))),
   );
 
   handle(

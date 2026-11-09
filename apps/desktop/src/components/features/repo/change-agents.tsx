@@ -62,7 +62,7 @@ function Stack({ marks }: { marks: AgentFileMark[] }) {
  * through the shell carries no mark, which is not proof it did not.
  */
 export function ChangeAgents({ path }: { path: string }) {
-  const { slug } = useParams({ from: "/_app/w/$slug/changes" });
+  const { slug } = useParams({ from: "/_app/w/$slug/_git" });
   const project = useProjectKey(slug);
   const navigate = useNavigate();
   const resume = useAgentTerminals((state) => state.resume);
