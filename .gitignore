@@ -9,6 +9,11 @@ apps/desktop/src/routeTree.gen.ts
 .agents/artifacts/
 # Local agent verification logs may contain machine paths or runtime secrets.
 .agents/**/*.log
+# Agent scratch the app never runs: dated run profiles (a temp home, Claude
+# and OpenCode config), drafts and art.
+.agents/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*/
+.agents/banner-art/
+.agents/x-posts/
 
 # Personal Claude Code settings for this checkout
 .claude/settings.local.json

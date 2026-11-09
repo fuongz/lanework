@@ -176,7 +176,7 @@ function exec(flags, cwd, args, options) {
       timeout: options.timeout ?? DEFAULT_TIMEOUT,
       maxBuffer: options.maxBuffer ?? MAX_OUTPUT,
       windowsHide: true,
-      encoding: "utf8",
+      encoding: options.encoding ?? "utf8",
       env: options.env ?? process.env
     }, (error, stdout, stderr) => {
       if (!error)
@@ -186,7 +186,8 @@ function exec(flags, cwd, args, options) {
         return reject(new GitMissingError("git is not installed."));
       if (code !== null && ok.includes(code))
         return resolve({ stdout, code });
-      const said = (stderr || stdout || error.message).trim();
+      const message = options.encoding === "base64" ? Buffer.from(stderr, "base64").toString("utf8") : stderr || stdout;
+      const said = (message || error.message).trim();
       reject(new Error(said.split(`
 `).slice(-6).join(`
 `).slice(0, 800)));
