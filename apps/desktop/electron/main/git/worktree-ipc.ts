@@ -3,8 +3,10 @@
 // NOTE: Every one of them takes a SLUG and resolves the folder here, from
 // what this machine wrote down: the same rule `repoState` follows for the
 // remote. No channel accepts a directory.
+import { execFile } from "node:child_process";
+import { rmSync } from "node:fs";
 import { stat } from "node:fs/promises";
-import { shell } from "electron";
+import { app, shell } from "electron";
 import {
   type BranchList,
   type CommitChange,
@@ -31,7 +33,9 @@ import {
   assertReadable,
   branches,
   commit,
+  fileImage,
   fileText,
+  imagePreviewFile,
   initRepo,
   listDir,
   listFiles,
@@ -247,6 +251,48 @@ function pathOf(value: unknown): string {
 
 /** Register the local-repository IPC handlers. */
 export function registerWorktree(devUrl?: string): void {
+  const temporaryPreviews = new Set<string>();
+  app.once("will-quit", () => {
+    // Electron does not wait for promises from will-quit. These private
+    // directories contain only our exported image and must be removed now.
+    for (const directory of temporaryPreviews) {
+      try {
+        rmSync(directory, { recursive: true, force: true });
+      } catch {
+        /* The OS may still hold an open preview on some platforms. */
+      }
+    }
+  });
+  handle(
+    worktreeChannels.openImagePreview,
+    devUrl,
+    async (args): Promise<void> => {
+      const file = await imagePreviewFile(
+        await readable(slugOf(args[0])),
+        pathOf(args[1]),
+        sideOf(args[2]),
+      );
+      if (file.temporaryDirectory)
+        temporaryPreviews.add(file.temporaryDirectory);
+      if (process.platform === "darwin") {
+        await new Promise<void>((resolve, reject) => {
+          execFile(
+            "/usr/bin/open",
+            ["-a", "Preview", file.path],
+            { timeout: 15_000 },
+            (error) => {
+              if (error)
+                reject(new Error("Preview could not open this image."));
+              else resolve();
+            },
+          );
+        });
+      } else {
+        const failed = await shell.openPath(file.path);
+        if (failed) throw new Error(failed);
+      }
+    },
+  );
   // Repository › Files. Read-only: listing, reading, and Finder.
   handle(
     worktreeChannels.files,
@@ -356,6 +402,17 @@ export function registerWorktree(devUrl?: string): void {
         sideOf(args[2]),
       );
     },
+  );
+
+  handle(
+    worktreeChannels.fileImage,
+    devUrl,
+    async (args): Promise<FileView> =>
+      fileImage(
+        await readable(slugOf(args[0])),
+        pathOf(args[1]),
+        sideOf(args[2]),
+      ),
   );
 
   // Every write answers the NEW status. The screen redraws from what git says

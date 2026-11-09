@@ -1,6 +1,15 @@
 import { constants } from "node:fs";
-import { open, readdir, realpath, rm, stat } from "node:fs/promises";
-import { dirname, extname, isAbsolute, join, relative, sep } from "node:path";
+import { mkdtemp, open, readdir, realpath, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import {
+  basename,
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  sep,
+} from "node:path";
 import {
   type BranchList,
   type BranchState,
@@ -12,6 +21,7 @@ import {
   type FileSide,
   type FileView,
   HISTORY_PAGE,
+  IMAGE_TYPES,
   patchStats,
   READS_REFUSED_MESSAGE,
   READS_UNCHECKED_MESSAGE,
@@ -25,6 +35,7 @@ import {
 } from "../../../shared/worktree";
 import {
   GitMissingError,
+  gitReadToFile,
   gitReadOut as out,
   gitRead as read,
   gitWrite as write,
@@ -824,21 +835,77 @@ export async function fileText(
 /** The most paths one Files read hands the tree. Past it the listing stops. */
 const MAX_LISTED = 50_000;
 
-/** The images the Files screen draws, by extension. */
-const IMAGE_TYPES: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".avif": "image/avif",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-  ".bmp": "image/bmp",
-};
-
 /** The largest image the Files screen is sent — the chat's lightbox limit. */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+/** Read an image without decoding git's binary bytes as UTF-8. */
+export async function fileImage(
+  top: string,
+  path: string,
+  side: FileSide,
+): Promise<FileView> {
+  if (side.kind === "worktree") return viewFile(top, path);
+  const blob = await revisionImage(top, path, side.rev);
+  if (!blob) return { kind: "missing" };
+  const { oid, size, type } = blob;
+  if (size > MAX_IMAGE_BYTES) return { kind: "too-large", size };
+  const { stdout } = await read(top, ["cat-file", "blob", oid], {
+    encoding: "base64",
+    maxBuffer: MAX_IMAGE_BYTES + 1,
+  });
+  return { kind: "image", url: `data:${type};base64,${stdout}`, size };
+}
+
+async function revisionImage(top: string, path: string, rev: string) {
+  const base = rev.endsWith("^") ? rev.slice(0, -1) : rev;
+  if (base !== "HEAD" && !SHA.test(base))
+    throw new Error("That is not a valid commit.");
+  if (!path || isAbsolute(path) || path.split("/").includes(".."))
+    throw new Error("That file is not in this repository.");
+  const type = IMAGE_TYPES[extname(path).toLowerCase()];
+  if (!type) throw new Error("That file is not a supported image.");
+  const tree = await read(top, ["ls-tree", "-z", rev, "--", path], {
+    ok: [128],
+  });
+  // Refuse symlinks and submodules. Read the object itself, never its target.
+  const oid = /^100(?:644|755) blob ([a-f0-9]+)\t/.exec(tree.stdout)?.[1];
+  if (!oid) return null;
+  const size = Number(await out(top, ["cat-file", "-s", oid]));
+  if (!Number.isSafeInteger(size) || size < 0)
+    throw new Error("That image has an invalid size.");
+  return { oid, size, type };
+}
+
+/** A native viewer gets the disk file, or a private export of the exact blob. */
+export async function imagePreviewFile(
+  top: string,
+  path: string,
+  side: FileSide,
+): Promise<{ path: string; temporaryDirectory?: string }> {
+  if (side.kind === "worktree") {
+    const full = await locateFile(top, path);
+    if (!full) throw new Error("That image is not there any more.");
+    const info = await stat(full);
+    if (
+      !IMAGE_TYPES[extname(full).toLowerCase()] ||
+      !info.isFile() ||
+      (info.mode & 0o111) !== 0
+    )
+      throw new Error("That file is not a supported image.");
+    return { path: full };
+  }
+  const blob = await revisionImage(top, path, side.rev);
+  if (!blob) throw new Error("That image is not in this revision.");
+  const directory = await mkdtemp(join(tmpdir(), "lanework-image-preview-"));
+  const destination = join(directory, basename(path));
+  try {
+    await gitReadToFile(top, ["cat-file", "blob", blob.oid], destination);
+    return { path: destination, temporaryDirectory: directory };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
 
 /** The most entries one directory read hands the tree. More are cut off. */
 const MAX_DIR_ENTRIES = 5_000;

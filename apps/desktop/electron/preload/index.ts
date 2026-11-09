@@ -147,6 +147,10 @@ const worktree: DesktopWorktreeApi = {
   patch: (slug) => read(worktreeChannels.patch, slug),
   fileText: (slug, path, side) =>
     read(worktreeChannels.fileText, slug, path, side),
+  fileImage: (slug, path, side) =>
+    read(worktreeChannels.fileImage, slug, path, side),
+  openImagePreview: (slug, path, side) =>
+    read(worktreeChannels.openImagePreview, slug, path, side),
   stage: (slug, paths) => read(worktreeChannels.stage, slug, paths),
   unstage: (slug, paths) => read(worktreeChannels.unstage, slug, paths),
   restore: (slug, paths) => read(worktreeChannels.restore, slug, paths),

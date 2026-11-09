@@ -147,6 +147,25 @@ export const HISTORY_PAGE = 100;
  */
 export type FileSide = { kind: "worktree" } | { kind: "rev"; rev: string };
 
+/** Image formats supported by the repository's preview. */
+export const IMAGE_TYPES: Readonly<Record<string, string>> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".bmp": "image/bmp",
+};
+
+export function isImagePath(path: string): boolean {
+  return (
+    IMAGE_TYPES[path.slice(path.lastIndexOf(".")).toLowerCase()] !== undefined
+  );
+}
+
 /** How a commit is made: what is staged, or every tracked change. */
 export type CommitMode = "staged" | "tracked";
 
@@ -204,6 +223,8 @@ export const worktreeChannels = {
   status: "worktree:status",
   patch: "worktree:patch",
   fileText: "worktree:file",
+  fileImage: "worktree:image",
+  openImagePreview: "worktree:image-preview",
   stage: "worktree:stage",
   unstage: "worktree:unstage",
   restore: "worktree:restore",
@@ -316,6 +337,14 @@ export interface DesktopWorktreeApi {
     path: string,
     side: FileSide,
   ) => Promise<string | null>;
+  /** A bounded image from disk or a commit, for Changes previews. */
+  fileImage: (slug: string, path: string, side: FileSide) => Promise<FileView>;
+  /** Open the exact image side in the operating system's image viewer. */
+  openImagePreview: (
+    slug: string,
+    path: string,
+    side: FileSide,
+  ) => Promise<void>;
   stage: (slug: string, paths: string[]) => Promise<WorktreeState>;
   unstage: (slug: string, paths: string[]) => Promise<WorktreeState>;
   /** Throw a change away. NOTE: Untracked files are deleted. */

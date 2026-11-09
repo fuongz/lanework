@@ -8,7 +8,8 @@ import { StageBox } from "#/components/shared/repo/stage-box";
 import { Button } from "#/components/ui/button";
 import { desktopSurface } from "#/server/desktop";
 import { useWorktree } from "#/stores/worktree";
-import type { WorktreeFile } from "../../../../shared/worktree";
+import { isImagePath, type WorktreeFile } from "../../../../shared/worktree";
+import { ChangesImage } from "./changes-image";
 
 /**
  * Every current change as one diff, beside the list that steers it.
@@ -96,6 +97,13 @@ export function ChangesDiff({
   );
 
   const counts = byPath;
+  const previewPaths = useMemo(
+    () =>
+      new Set(
+        files.filter((file) => isImagePath(file.path)).map((file) => file.path),
+      ),
+    [files],
+  );
 
   const notes =
     patchError || (patch?.skipped ?? 0) > 0 ? (
@@ -121,6 +129,18 @@ export function ChangesDiff({
           header={notes}
           fileLeading={fileLeading}
           fileActions={fileActions}
+          preview={{
+            paths: previewPaths,
+            render: (path, previousPath) => (
+              <ChangesImage
+                slug={slug}
+                path={path}
+                previousPath={previousPath}
+                status={byPath.get(path)?.status}
+                refresh={patch}
+              />
+            ),
+          }}
         />
       )}
       <RestoreDialog files={restoring} onClose={() => setRestoring(null)} />

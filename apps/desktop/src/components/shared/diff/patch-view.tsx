@@ -2,6 +2,7 @@ import { GitCompareIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   type CodeViewItem,
+  type FileContents,
   type FileDiffLoadedFiles,
   type FileDiffMetadata,
   parsePatchFiles,
@@ -28,6 +29,10 @@ import { DiffFileHeader } from "./diff-file-header";
 interface FileCounts {
   additions: number;
   deletions: number;
+}
+
+interface PreviewAnnotation {
+  previousPath?: string;
 }
 
 /** Both sides of one file in full, to expand the lines a patch leaves out. */
@@ -59,6 +64,7 @@ export function PatchView({
   header,
   fileLeading,
   fileActions,
+  preview,
 }: {
   patch: string;
   /**
@@ -79,6 +85,11 @@ export function PatchView({
   fileLeading?: (path: string) => ReactNode;
   /** Per-file controls after the counts: restore. */
   fileActions?: (path: string) => ReactNode;
+  /** Non-text files use a file-level annotation in the same virtual scroller. */
+  preview?: {
+    paths: ReadonlySet<string>;
+    render: (path: string, previousPath?: string) => ReactNode;
+  };
 }) {
   const dark = useDark();
   // Which files are folded shut, by item id. Held HERE, not by the library:
@@ -90,7 +101,10 @@ export function PatchView({
   // file virtualization has not rendered yet. An anchor or `scrollIntoView`
   // on the header works for the files on screen and silently does nothing
   // for the rest.
-  const view = useRef<CodeViewHandle<undefined, undefined>>(null);
+  const view = useRef<CodeViewHandle<PreviewAnnotation, undefined>>(null);
+  // VirtualizedFile's prepared layout and rendered file must share identity,
+  // including when a collapsed/offscreen preview is brought back on screen.
+  const previewFiles = useRef(new Map<string, FileContents>());
 
   // Called only when somebody expands something, never to draw the diff. A
   // change touching forty files would otherwise be eighty reads for context
@@ -115,6 +129,10 @@ export function PatchView({
       diffStyle,
       overflow: "scroll" as const,
       stickyHeaders: true,
+      // Only previews are `file` items here. Hide the empty source line the
+      // library supplies below their file-level annotation, including its gutter.
+      unsafeCSS: `[data-file] [data-line], [data-file] [data-gutter] { display: none; }
+        [data-file] [data-content] { grid-column: 1 / -1; }`,
       // NOTE: The JS highlighter, not the wasm one. This window's CSP is
       // `script-src 'self'` with no `wasm-unsafe-eval` (see `protocol.ts`), so
       // the wasm engine would be blocked, silently, at highlight time.
@@ -127,14 +145,37 @@ export function PatchView({
     [dark, diffStyle, loadDiffFiles],
   );
 
-  const items = useMemo<CodeViewItem<undefined>[]>(() => {
-    if (!patch) return [];
-    const files = parsePatchFiles(patch).flatMap((parsed) => parsed.files);
+  const files = useMemo(
+    () =>
+      patch ? parsePatchFiles(patch).flatMap((parsed) => parsed.files) : [],
+    [patch],
+  );
+  const items = useMemo<CodeViewItem<PreviewAnnotation>[]>(() => {
+    const paths = new Set(files.map((file) => file.name));
+    for (const path of previewFiles.current.keys())
+      if (!paths.has(path)) previewFiles.current.delete(path);
     return files.map((fileDiff, index) => {
       // The name is unique within one change; the index rides along so a
       // malformed entry cannot collide with a real one.
       const id = `${index}:${fileDiff.name}`;
       const shut = collapsed[id] === true;
+      if (preview?.paths.has(fileDiff.name)) {
+        let file = previewFiles.current.get(fileDiff.name);
+        if (!file) {
+          file = { name: fileDiff.name, contents: "", lang: "text" };
+          previewFiles.current.set(fileDiff.name, file);
+        }
+        return {
+          id,
+          type: "file" as const,
+          file,
+          annotations: [
+            { lineNumber: 0, metadata: { previousPath: fileDiff.prevName } },
+          ],
+          collapsed: shut,
+          version: shut ? 1 : 0,
+        };
+      }
       return {
         id,
         type: "diff" as const,
@@ -146,24 +187,26 @@ export function PatchView({
         version: shut ? 1 : 0,
       };
     });
-  }, [patch, collapsed]);
+  }, [files, collapsed, preview?.paths]);
 
-  const idByPath = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const item of items)
-      if (item.type === "diff") map.set(item.fileDiff.name, item.id);
-    return map;
-  }, [items]);
+  const idByPath = useMemo(
+    () =>
+      new Map(files.map((file, index) => [file.name, `${index}:${file.name}`])),
+    [files],
+  );
 
   const renderCustomHeader = useCallback(
-    (item: CodeViewItem<undefined>) => {
-      if (item.type !== "diff") return null;
-      const path = item.fileDiff.name;
+    (item: CodeViewItem<PreviewAnnotation>) => {
+      const path = item.type === "diff" ? item.fileDiff.name : item.file.name;
+      const previousPath =
+        item.type === "diff"
+          ? item.fileDiff.prevName
+          : item.annotations?.[0]?.metadata.previousPath;
       const file = counts.get(path);
       return (
         <DiffFileHeader
           path={path}
-          previousPath={item.fileDiff.prevName ?? null}
+          previousPath={previousPath ?? null}
           additions={file?.additions ?? 0}
           deletions={file?.deletions ?? 0}
           collapsed={collapsed[item.id] === true}
@@ -190,7 +233,12 @@ export function PatchView({
     setCollapsed((current) =>
       current[id] === true ? { ...current, [id]: false } : current,
     );
-    view.current?.scrollTo({ type: "item", id, align: "start" });
+    view.current?.scrollTo({
+      type: "item",
+      id,
+      align: "start",
+      behavior: "instant",
+    });
   }, [focus, idByPath]);
 
   if (!items.length)
@@ -217,6 +265,11 @@ export function PatchView({
       items={items}
       options={options}
       renderCustomHeader={renderCustomHeader}
+      renderAnnotation={(_annotation, item) =>
+        item.type === "file"
+          ? preview?.render(item.file.name, _annotation.metadata.previousPath)
+          : null
+      }
       // NOTE: `overflow-y-auto` HERE, on CodeView's own root. It virtualizes
       // against this element, so it must be the scroller, but it does not set
       // `overflow` itself: without this the root computes `visible` and the

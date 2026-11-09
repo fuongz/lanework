@@ -1,4 +1,6 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 
 /**
  * The one way the app runs `git` in a user's folder (FE-77, D1).
@@ -94,6 +96,8 @@ export interface GitResult {
 }
 
 export interface GitOptions {
+  /** Base64 preserves binary blobs without a UTF-8 round trip. */
+  encoding?: "utf8" | "base64";
   /** Exit codes besides 0 that are an answer, not a failure. */
   ok?: number[];
   /** Milliseconds; 15 s when unset. */
@@ -120,7 +124,7 @@ function exec(
         timeout: options.timeout ?? DEFAULT_TIMEOUT,
         maxBuffer: options.maxBuffer ?? MAX_OUTPUT,
         windowsHide: true,
-        encoding: "utf8",
+        encoding: options.encoding ?? "utf8",
         env: options.env ?? process.env,
       },
       (error, stdout, stderr) => {
@@ -133,7 +137,11 @@ function exec(
         // git's own words, trimmed to fit a toast. "Author identity unknown"
         // or a pre-commit hook's output is the whole explanation. A generic
         // "commit failed" would send the user to a terminal to find it.
-        const said = (stderr || stdout || error.message).trim();
+        const message =
+          options.encoding === "base64"
+            ? Buffer.from(stderr, "base64").toString("utf8")
+            : stderr || stdout;
+        const said = (message || error.message).trim();
         reject(new Error(said.split("\n").slice(-6).join("\n").slice(0, 800)));
       },
     );
@@ -152,6 +160,55 @@ export function gitRead(
   options: GitOptions = {},
 ): Promise<GitResult> {
   return exec(READ_FLAGS, cwd, args, options);
+}
+
+/** Export a blob directly to a private file, without buffering large images. */
+export async function gitReadToFile(
+  cwd: string,
+  args: string[],
+  destination: string,
+): Promise<void> {
+  const child = spawn("git", [...READ_FLAGS, ...args], {
+    cwd,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT),
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr = (stderr + chunk).slice(-8_000);
+  });
+  const exited = new Promise<void>((resolve, reject) => {
+    child.once("error", (error: NodeJS.ErrnoException) =>
+      reject(
+        error.code === "ENOENT"
+          ? new GitMissingError("git is not installed.")
+          : error,
+      ),
+    );
+    child.once("close", (code) => {
+      if (code === 0) resolve();
+      else
+        reject(
+          new Error(
+            stderr.trim().slice(-800) || "The image could not be exported.",
+          ),
+        );
+    });
+  });
+  try {
+    await Promise.all([
+      exited,
+      pipeline(
+        child.stdout,
+        createWriteStream(destination, { flags: "wx", mode: 0o600 }),
+      ),
+    ]);
+  } catch (error) {
+    child.kill();
+    throw error;
+  }
 }
 
 /**
