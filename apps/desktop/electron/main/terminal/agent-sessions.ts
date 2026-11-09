@@ -81,14 +81,20 @@ export function typed(text: unknown): string | null {
   if (typeof text !== "string") return null;
   const clean = text.trim();
   if (!clean) return null;
-  if (clean.startsWith("<lanework_orchestrate")) {
-    // `/orchestrate` (FE-87): the person's request, inside the planning
-    // prompt the app sent for them.
+  // `/orchestrate` (FE-87) and a message to a conductor (FE-95): the
+  // person's request, inside the prompt the app wrapped it in. A conductor's
+  // conversation needs it for its title, or the rail never lists it and its
+  // conductor reads as working for good (FE-128).
+  const orchestrate = clean.startsWith("<lanework_orchestrate");
+  if (orchestrate || clean.startsWith("<lanework_conductor")) {
     const start = clean.lastIndexOf("<user_request>\n");
     const end = clean.lastIndexOf("\n</user_request>");
-    return start === -1 || end < start
-      ? null
-      : tidy(`/orchestrate ${clean.slice(start + 15, end)}`);
+    if (start === -1 || end < start) return null;
+    const request = clean.slice(start + 15, end).trim();
+    if (!request) return null;
+    return tidy(
+      orchestrate ? `/orchestrate ${request}` : mentionsAsNames(request),
+    );
   }
   if (clean.startsWith("<")) return null;
   return tidy(mentionsAsNames(clean));

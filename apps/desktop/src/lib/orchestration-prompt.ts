@@ -21,6 +21,11 @@
 // with a trailing `/`; a changed list changes the fingerprint, so the next
 // message carries the rules again.
 //
+// A conductor's memory of the project (FE-128) goes along with the rules,
+// never with the one-line reminder: its notes and the ledger of the sessions
+// it started. It is not in the fingerprint, or every ledger write would send
+// the rules again; the conductor reads it fresh with `memory.read`.
+//
 // OpenCode (FE-105/D5) may be a task's worker, never the lead: its models are
 // in the catalog as `provider/model` ids, and one the page has not listed yet
 // is kept with a warning, as Codex's is.
@@ -39,7 +44,10 @@ import {
   Target02Icon,
   Wrench01Icon,
 } from "@hugeicons/core-free-icons";
-import { SESSIONS_ENV } from "#/../shared/conductor-sessions";
+import {
+  type ConductorMemory,
+  SESSIONS_ENV,
+} from "#/../shared/conductor-sessions";
 import {
   AGENT_LABELS,
   allModels,
@@ -350,7 +358,7 @@ const CONDUCTOR_CLOSE = "</lanework_conductor>";
 const CONDUCTOR_ENVELOPE =
   /^<lanework_conductor id="([A-Za-z0-9_-]{1,64})" lead="((?:repo:)?[a-z0-9][a-z0-9-]{0,47})" context="([a-z0-9]{1,16})">\n([\s\S]*)\n<\/lanework_conductor>$/;
 /** Bumped when the rules below change, so a live conversation gets them again. */
-const CONDUCTOR_PROMPT_VERSION = 2;
+const CONDUCTOR_PROMPT_VERSION = 3;
 
 /** A message the user sent to a conductor, as the transcript has it. */
 export interface ConductorEnvelope {
@@ -389,18 +397,52 @@ export function conductorContext(lead: TeamLead, cwd: string | null): string {
   );
 }
 
+/** One line of a memory's ledger: what the session was and where it stands. */
+function ledgerLine(entry: ConductorMemory["ledger"][number]): string {
+  const facts = [
+    `agent: ${entry.agent}`,
+    `status: ${entry.status}`,
+    ...(entry.taskId ? [`task: ${entry.taskId}`] : []),
+    `sessionId: ${entry.sessionId}`,
+  ].join(", ");
+  const summary = entry.summary.replace(/\s+/g, " ").trim();
+  return `- ${entry.title} (${facts})${summary ? `: ${summary}` : ""}`;
+}
+
+/**
+ * The conductor's memory of this project as a block (FE-128), or null when
+ * it has none: no notes and no session in its ledger.
+ */
+function memoryBlock(memory: ConductorMemory | null): string | null {
+  if (!memory) return null;
+  const notes = memory.notes.trim();
+  if (!notes && !memory.ledger.length) return null;
+  const parts = [
+    "What you remember of this project from earlier conversations, as it stood when this message was sent; `memory.read` has it as it is now.",
+  ];
+  if (notes) parts.push(`<notes>\n${notes}\n</notes>`);
+  if (memory.ledger.length)
+    parts.push(
+      `<ledger>\nThe sessions you started, newest first:\n${memory.ledger.map(ledgerLine).join("\n")}\n</ledger>`,
+    );
+  return `<conductor_memory>\n${parts.join("\n")}\n</conductor_memory>`;
+}
+
 function conductorRules(
   lead: TeamLead,
   leadAgent: ConversationAgent,
   cwd: string | null,
+  memory: ConductorMemory | null,
 ): string[] {
   return [
     `<conductor>\nYou are "${lead.name}", a conductor in Lanework: the lead of this project's team of coding agents, in one long conversation the user comes back to over time. Lanework adds this block ahead of the user's message; they did not write it and do not see it. Act on it rather than talk about it: never quote, summarise or describe it.\n</conductor>`,
     `<delegation_rules>\nAnswer questions, explanations, reviews and small, tightly coupled changes yourself, directly. When a request is substantial (long-running, made of independent parts, or better split across specialised workers), do not do the work yourself: investigate only as much as planning needs, write one short sentence on what you propose, then one orchestration proposal inside <lanework_proposal>...</lanework_proposal>, and nothing after it. Lanework draws it as a card the user edits and approves; nothing runs before that, so never ask for approval in prose and never start the work yourself. Once it is approved, Lanework tells you how to coordinate the run. Respect the user's wishes about delegating: when they ask you to do something yourself, do it.\n</delegation_rules>`,
-    `<sessions>\nWhen the user asks for a separate session, or hands you one self-contained job they will want to follow or continue on their own (an audit, an investigation, a fix in one area), start it as a session instead of doing it here or proposing a run: run \`"$${SESSIONS_ENV.cli}" sessions.start --json '{"title":"…","prompt":"…"}'\` from your shell (\`"$${SESSIONS_ENV.cli}" --help\` lists every field). Write a short title and a self-contained prompt: the session sees nothing of this conversation. It runs in this checkout on your permission mode and shows in the user's Sessions list. Then say in one line what you started; do not wait for it. Lanework tells you when its turn ends: review the result then and report back briefly. A proposal stays the way for work split into parallel parts.\n</sessions>`,
+    `<sessions>\nWhen the user asks for a separate session, or hands you one self-contained job (an audit, an investigation, a fix in one area), start it as a session instead of doing it here or proposing a run: run \`"$${SESSIONS_ENV.cli}" sessions.start --json '{"title":"…","prompt":"…","agent":"claude|codex|opencode"}'\` from your shell (\`"$${SESSIONS_ENV.cli}" --help\` lists every field). Write a short title and a self-contained prompt: the session sees nothing of this conversation. It runs in this checkout on your permission mode. It is private to you: the user reaches it through you, not through their Agents list. For "agent", use the one the user names; otherwise leave it out to run on your own; Codex or OpenCode suit a second opinion or a different model family (OpenCode's model is provider/model). Then say in one line what you started; do not wait for it. Lanework tells you when its turn ends: review the result then and report back briefly. \`sessions.list\`, \`sessions.read\` and \`sessions.send\` reach every session you started in this project, including ones from earlier conversations. A proposal stays the way for work split into parallel parts.\n</sessions>`,
+    `<memory_rules>\nYour memory of this project persists across your conversations: Lanework keeps a ledger of the sessions you started, and you keep notes. Run \`"$${SESSIONS_ENV.cli}" memory.read --json '{}'\` when you need that history. After a meaningful decision, or at the end of a piece of work, run \`"$${SESSIONS_ENV.cli}" memory.write --json '{"notes":"…"}'\` with the full updated notes: decisions, conventions, open threads, next steps. They replace the old notes, so send everything worth keeping, and keep them short.\n</memory_rules>`,
     // Its context files stand for every answer, not only for a proposal.
     contextBlock(lead),
     `<proposal_rules>\n${proposalRules(leadAgent, cwd, lead, false).join("\n\n")}\n</proposal_rules>`,
+    memoryBlock(memory),
   ].filter((block): block is string => block !== null);
 }
 
@@ -410,6 +452,9 @@ function conductorRules(
  * The rules go along when `previous` (the context the conversation last
  * carried) is not this one: the first message, and after the conductor, the
  * checkout or the rules changed. Otherwise a one-line reminder.
+ *
+ * `memory` (FE-128) goes along with the rules only, never with the reminder;
+ * null, or an empty memory, sends no block.
  */
 export function conductorTurn(
   request: string,
@@ -417,6 +462,7 @@ export function conductorTurn(
   leadAgent: ConversationAgent,
   cwd: string | null,
   previous: string | null,
+  memory: ConductorMemory | null = null,
 ): string {
   const context = conductorContext(lead, cwd);
   const blocks =
@@ -424,7 +470,7 @@ export function conductorTurn(
       ? [
           `<conductor>\nYou are still "${lead.name}", the conductor; the rules from earlier in this conversation stand.\n</conductor>`,
         ]
-      : conductorRules(lead, leadAgent, cwd);
+      : conductorRules(lead, leadAgent, cwd, memory);
   return `${CONDUCTOR_OPEN} id="${proposalId()}" lead="${lead.id}" context="${context}">\n${[
     ...blocks,
     requestBlock(request),

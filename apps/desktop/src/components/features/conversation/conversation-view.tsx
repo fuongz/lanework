@@ -82,7 +82,7 @@ import {
 } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
-import { withLiveContext } from "#/stores/conductor-context";
+import { conductorMemory, withLiveContext } from "#/stores/conductor-context";
 import {
   type SentMessage,
   turnsSince,
@@ -96,6 +96,7 @@ import {
   useAwaitingProposal,
   useOrchestration,
 } from "../orchestration/orchestration-panel";
+import { ConductorSessions } from "./conductor-sessions";
 import { FileOpenerProvider } from "./file-opener";
 import { JobCapsules } from "./job-capsules";
 import { MessageQueue } from "./message-queue";
@@ -618,19 +619,26 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
     const surface = window.desktop?.conversation;
     if (!project || !surface || !settings) return false;
     setActionError(null);
-    // A conductor's message carries who it is (FE-95); a planning or repair
-    // prompt already names its lead.
+    // A conductor's message carries who it is (FE-95), and with its rules
+    // what it remembers of the project (FE-128); a planning or repair prompt
+    // already names its lead.
     const text =
       conductor &&
       agent &&
       !readEnvelope(typed) &&
       !readConductorEnvelope(typed)
-        ? conductorTurn(
-            typed,
-            await withLiveContext(project, conductor),
-            agent,
-            conversation?.cwd ?? null,
-            lastConductorContext(turns),
+        ? await Promise.all([
+            withLiveContext(project, conductor),
+            conductorMemory(project, conductor),
+          ]).then(([live, memory]) =>
+            conductorTurn(
+              typed,
+              live,
+              agent,
+              conversation?.cwd ?? null,
+              lastConductorContext(turns),
+              memory,
+            ),
           )
         : typed;
     const key = `s${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -874,6 +882,15 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
             {title}
           </h1>
           <span className="ml-auto" />
+          {/* A conductor's own sessions (FE-128): hidden from the rail, so
+              its chat is where they are found. */}
+          {conductor && project && (
+            <ConductorSessions
+              project={project}
+              slug={slug}
+              conductor={conductor.id}
+            />
+          )}
         </WindowTitlebar>
 
         <div className="relative min-h-0 flex-1">

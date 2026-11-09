@@ -1,3 +1,4 @@
+import type { ConductorMemory } from "#/../shared/conductor-sessions";
 import type { TeamLead } from "#/../shared/orchestration";
 
 // A conductor's context files as they stand now (FE-96), for the prompt.
@@ -29,4 +30,18 @@ export async function withLiveContext(
         : [entry.kind === "folder" ? `${entry.path}/` : entry.path],
     ),
   };
+}
+
+/**
+ * What `lead` remembers of `project` (FE-128), for a turn that carries its
+ * rules. Null without a preload or when main cannot answer: the turn goes
+ * without it rather than not at all.
+ */
+export async function conductorMemory(
+  project: string,
+  lead: TeamLead,
+): Promise<ConductorMemory | null> {
+  const surface = window.desktop?.leads;
+  if (!surface) return null;
+  return surface.memory(project, lead.id).catch(() => null);
 }

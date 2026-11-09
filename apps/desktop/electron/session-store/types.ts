@@ -51,7 +51,7 @@ export type SessionFields = Partial<
  * Lanework's own marks on a conversation.
  *
  * NOTE: No CLI write ever changes one: `upsertSession` and `saveIngest`
- * leave all four as they are.
+ * leave all five as they are.
  */
 export interface SessionMarks {
   /** The name given in Lanework; null means the CLI's own title. */
@@ -62,6 +62,11 @@ export interface SessionMarks {
   conductor: { id: string; project: string } | null;
   /** When it was archived in Lanework, ISO, or null. */
   archivedAt: string | null;
+  /**
+   * The conductor that started it with `sessions.start` (FE-128), and in
+   * which project; null for one the user started.
+   */
+  launchedBy: { conductor: string; project: string } | null;
 }
 
 /** One row of `agent_session`, decoded. */

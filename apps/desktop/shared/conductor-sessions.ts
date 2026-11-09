@@ -2,15 +2,22 @@
 // user keeps, instead of to a worker of an orchestration run.
 //
 // A conductor (FE-95) runs `lanework-control sessions.start …` from its
-// shell. Main starts an ordinary conversation in the project's checkout, on
-// the conductor's permission mode, and names it after the title; it shows in
-// the Sessions rail like any other. Unless told otherwise, main tells the
-// conductor once that session's turn ends, in a hidden turn of its own, so it
-// reviews the result and reports back.
+// shell. Main starts a conversation in the project's checkout, on the
+// conductor's permission mode, on Claude, Codex or OpenCode (`agent`, by
+// default the conductor's own), and names it after the title. The session is
+// private to the conductor (FE-128): it carries `launchedBy` and is hidden
+// from the Agents rail; the user reaches it through the conductor. Unless
+// told otherwise, main tells the conductor once that session's turn ends, in
+// a hidden turn of its own, so it reviews the result and reports back.
 //
 // Unlike `delegate`, nothing here is bound to a run: no write scopes, no
 // worktree, no merge. A conductor may only list, read and follow up the
 // sessions it started; the user's other conversations are not its to touch.
+//
+// Memory (FE-128): each conductor keeps one {@link ConductorMemory} per
+// project, which outlives its conversations. Main appends to its ledger as
+// the conductor's sessions start and stop; the conductor reads it with
+// `memory.read` and replaces its free-form notes with `memory.write`.
 //
 // NOTE: Shapes, limits and validators only. Imported by the CLI bundle and
 // the renderer, so no Node or Electron.
@@ -18,6 +25,7 @@
 import {
   EFFORTS,
   type Effort,
+  OPENCODE_MODEL_ID,
   PERMISSIONS,
   type Permission,
 } from "./conversation";
@@ -35,24 +43,31 @@ import {
   LEAD_NAME_MAX,
   type LeadAgent,
   type LeadIcon,
+  MODEL_ID_PATTERN,
   PROMPT_MAX,
 } from "./orchestration";
 import {
   AGENT_NAME_MAX,
   isAgentSessionId,
+  isAgentSessionIdOf,
+  isTerminalAgent,
+  TERMINAL_AGENTS,
   type TerminalAgent,
 } from "./terminal";
 
 /**
  * Every action a conversation's sessions token carries, in the order
- * `--help` lists them. `sessions.*` are a conductor's own; `conductors.create`
- * (BE-01, PD-04) any conversation the app started may call.
+ * `--help` lists them. `sessions.*` and `memory.*` (FE-128) are a
+ * conductor's own; `conductors.create` (BE-01, PD-04) any conversation the
+ * app started may call.
  */
 export const SESSION_ACTIONS = [
   "sessions.start",
   "sessions.list",
   "sessions.read",
   "sessions.send",
+  "memory.read",
+  "memory.write",
   "conductors.create",
 ] as const;
 export type SessionAction = (typeof SESSION_ACTIONS)[number];
@@ -89,6 +104,13 @@ export const READ_CHARS_DEFAULT = 1500;
 export const READ_CHARS_MIN = 200;
 export const READ_CHARS_MAX = 6000;
 
+/** The most ledger entries a conductor's memory keeps, newest first. */
+export const MEMORY_LEDGER_MAX = 30;
+/** Each ledger entry's summary, cut to this. */
+export const MEMORY_SUMMARY_MAX = 600;
+/** A conductor's notes: `memory.write` refuses longer. */
+export const MEMORY_NOTES_MAX = 8000;
+
 /** A board task id, as the checkpoint hook reads one: `FE-98`. */
 const TASK_ID = /^[A-Z]{2,5}-\d{1,5}$/;
 
@@ -97,7 +119,13 @@ export interface SessionInputs {
   "sessions.start": {
     title: string;
     prompt: string;
-    /** Absent: the conductor's own model. */
+    /** The CLI it runs on. Absent: the conductor's own (Claude or Codex). */
+    agent?: TerminalAgent;
+    /**
+     * Absent: the conductor's own model when it runs on the conductor's
+     * agent, else that agent's default. With `agent: "opencode"` it is
+     * `provider/model`.
+     */
     model?: string;
     /** Absent: the conductor's own effort. */
     effort?: Effort;
@@ -113,6 +141,12 @@ export interface SessionInputs {
     prompt: string;
     notifyOnComplete: boolean;
   };
+  "memory.read": Record<string, never>;
+  /**
+   * Replaces the notes wholesale: what is not sent is gone. An empty string
+   * clears them. Never touches the ledger, which main keeps.
+   */
+  "memory.write": { notes: string };
   /**
    * A personal conductor of the caller's project. Every field left out takes
    * the default the rail's dialog gives, or the caller's own agent and model.
@@ -166,6 +200,54 @@ export interface SessionExchange {
   reply: string;
 }
 
+const SESSION_STATUSES: readonly SessionStatus[] = [
+  "working",
+  "waiting",
+  "idle",
+  "failed",
+  "terminal",
+];
+
+/** One session a conductor started, as its memory remembers it. */
+export interface ConductorLedgerEntry {
+  sessionId: string;
+  title: string;
+  agent: TerminalAgent;
+  model: string;
+  /** The board card it works on, when `sessions.start` named one. */
+  taskId?: string;
+  status: SessionStatus;
+  /**
+   * What came of it, at most {@link MEMORY_SUMMARY_MAX} characters: its
+   * last reply, cut.
+   */
+  summary: string;
+  /** When main last wrote this entry, epoch ms. */
+  updatedAt: number;
+}
+
+/**
+ * What a conductor remembers of one project, across its conversations
+ * (FE-128). One per conductor × project; main keeps the ledger, the
+ * conductor its notes.
+ */
+export interface ConductorMemory {
+  /**
+   * Its sessions, newest first, at most {@link MEMORY_LEDGER_MAX}: the
+   * oldest falls off. One entry per session, updated in place.
+   */
+  ledger: ConductorLedgerEntry[];
+  /** Its own notes, at most {@link MEMORY_NOTES_MAX} characters. */
+  notes: string;
+  /** When either part last changed, epoch ms; 0 for a memory never written. */
+  updatedAt: number;
+}
+
+/** A memory nothing was written to yet. */
+export function emptyConductorMemory(): ConductorMemory {
+  return { ledger: [], notes: "", updatedAt: 0 };
+}
+
 /** What each action answers with, under `result`. */
 export interface SessionResults {
   "sessions.start": {
@@ -188,6 +270,13 @@ export interface SessionResults {
     submitted: true;
     notifyOnComplete: boolean;
   };
+  /** The whole memory: ledger and notes. */
+  "memory.read": ConductorMemory;
+  /**
+   * Not the memory back: only what was kept, so the notes the conductor
+   * just sent are not echoed. `memory.read` returns the rest.
+   */
+  "memory.write": { notesLength: number; updatedAt: number };
   "conductors.create": {
     /** Its id, picked by the app: never one already taken. */
     id: string;
@@ -205,8 +294,16 @@ function fail(message: string): never {
   throw new ControlInputError(message);
 }
 
+/**
+ * A session id any of the three CLIs writes: a UUID, or OpenCode's `ses_…`
+ * (FE-128: a conductor may start OpenCode sessions).
+ */
+function isSessionIdOfAny(value: unknown): value is string {
+  return isAgentSessionId(value) || isAgentSessionIdOf("opencode", value);
+}
+
 function sessionId(value: unknown): string {
-  if (!isAgentSessionId(value))
+  if (!isSessionIdOfAny(value))
     fail("sessionId must be a session id from sessions.list");
   return value;
 }
@@ -248,6 +345,24 @@ function oneOf<T extends string>(
   return value as T;
 }
 
+/** A model id of `agent`'s shape, or of a plain CLI's when it is absent. */
+function sessionModel(
+  value: unknown,
+  agent: TerminalAgent | undefined,
+): string {
+  const opencode = agent === "opencode";
+  if (
+    typeof value !== "string" ||
+    !(opencode ? OPENCODE_MODEL_ID : MODEL_ID_PATTERN).test(value)
+  )
+    fail(
+      opencode
+        ? "model must be an OpenCode model id (provider/model); leave it out for OpenCode's default"
+        : "model must be a model id; leave it out for the conductor's",
+    );
+  return value;
+}
+
 type Parsers = {
   [A in SessionAction]: (input: Record<string, unknown>) => SessionInputs[A];
 };
@@ -259,6 +374,7 @@ const SCHEMAS: {
     fields: [
       "title",
       "prompt",
+      "agent",
       "model",
       "effort",
       "taskId",
@@ -273,14 +389,10 @@ const SCHEMAS: {
         prompt: controlText(input.prompt, "prompt", PROMPT_MAX),
         notifyOnComplete: flag(input.notifyOnComplete, "notifyOnComplete"),
       };
-      if (input.model !== undefined) {
-        if (
-          typeof input.model !== "string" ||
-          !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(input.model)
-        )
-          fail("model must be a model id; leave it out for the conductor's");
-        out.model = input.model;
-      }
+      if (input.agent !== undefined)
+        out.agent = oneOf(input.agent, TERMINAL_AGENTS, "agent");
+      if (input.model !== undefined)
+        out.model = sessionModel(input.model, out.agent);
       if (input.effort !== undefined)
         out.effort = controlEffort(input.effort, "effort");
       if (input.taskId !== undefined) {
@@ -313,6 +425,19 @@ const SCHEMAS: {
       prompt: controlText(input.prompt, "prompt", PROMPT_MAX),
       notifyOnComplete: flag(input.notifyOnComplete, "notifyOnComplete"),
     }),
+  },
+  "memory.read": { fields: [], parse: () => ({}) },
+  "memory.write": {
+    fields: ["notes"],
+    parse: (input) => {
+      if (typeof input.notes !== "string")
+        fail('Provide notes as a string; "" clears them');
+      if (input.notes.length > MEMORY_NOTES_MAX)
+        fail(
+          `notes is longer than ${MEMORY_NOTES_MAX} characters: keep what matters, they replace the old ones`,
+        );
+      return { notes: input.notes.trim() };
+    },
   },
   "conductors.create": {
     fields: [
@@ -376,6 +501,68 @@ const SCHEMAS: {
   },
 };
 
+function ledgerEntry(value: unknown): ConductorLedgerEntry | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entry = value as Record<string, unknown>;
+  if (
+    !isTerminalAgent(entry.agent) ||
+    !isAgentSessionIdOf(entry.agent, entry.sessionId) ||
+    typeof entry.title !== "string" ||
+    typeof entry.model !== "string" ||
+    !SESSION_STATUSES.includes(entry.status as SessionStatus) ||
+    typeof entry.summary !== "string" ||
+    typeof entry.updatedAt !== "number" ||
+    !Number.isFinite(entry.updatedAt)
+  )
+    return null;
+  const out: ConductorLedgerEntry = {
+    sessionId: entry.sessionId,
+    title: entry.title.slice(0, AGENT_NAME_MAX),
+    agent: entry.agent,
+    model: entry.model,
+    status: entry.status as SessionStatus,
+    summary: entry.summary.slice(0, MEMORY_SUMMARY_MAX),
+    updatedAt: entry.updatedAt,
+  };
+  if (typeof entry.taskId === "string" && TASK_ID.test(entry.taskId))
+    out.taskId = entry.taskId;
+  return out;
+}
+
+/**
+ * A memory as read back from disk, made safe to use: entries of a bad shape
+ * and repeats of a session dropped, the ledger sorted newest first and cut
+ * to {@link MEMORY_LEDGER_MAX}, summaries and notes cut to their limits.
+ * Anything that is not a memory reads as an empty one.
+ */
+export function normalizeConductorMemory(value: unknown): ConductorMemory {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return emptyConductorMemory();
+  const memory = value as Record<string, unknown>;
+  const ledger = (Array.isArray(memory.ledger) ? memory.ledger : [])
+    .map(ledgerEntry)
+    .filter((entry): entry is ConductorLedgerEntry => entry !== null)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const seen = new Set<string>();
+  return {
+    ledger: ledger
+      .filter((entry) => {
+        if (seen.has(entry.sessionId)) return false;
+        seen.add(entry.sessionId);
+        return true;
+      })
+      .slice(0, MEMORY_LEDGER_MAX),
+    notes:
+      typeof memory.notes === "string"
+        ? memory.notes.slice(0, MEMORY_NOTES_MAX)
+        : "",
+    updatedAt:
+      typeof memory.updatedAt === "number" && Number.isFinite(memory.updatedAt)
+        ? memory.updatedAt
+        : 0,
+  };
+}
+
 /** The fields each action takes, for `--help` and error messages. */
 export function sessionFields(action: SessionAction): readonly string[] {
   return SCHEMAS[action].fields;
@@ -432,12 +619,15 @@ export function parseSessionRequest(
 /** `--help`'s lines for the `sessions.*` actions. */
 export const SESSION_HELP: Record<SessionAction, string> = {
   "sessions.start": `  sessions.start {"title":"Short title","prompt":"Self-contained instructions",
+                  "agent":"${TERMINAL_AGENTS.join("|")}",
                   "model":"<model id>","effort":"${EFFORTS.join("|")}",
                   "taskId":"FE-98","notifyOnComplete":true}
             Conductors only. Start a separate session in this project's
             checkout and submit the prompt as its first turn. It runs on
-            your permission mode and shows in the user's Sessions rail
-            under the title. "model" and "effort" default to yours;
+            your permission mode, under the title, and is yours alone: the
+            user reaches it through you, not the Agents rail. "agent"
+            defaults to yours; "model" and "effort" to yours on your agent,
+            else that agent's default (OpenCode's model is provider/model).
             "taskId" names the board card it works on. Unless
             notifyOnComplete is false, Lanework tells you once its turn
             ends: review it then and report to the user. Returns as soon as
@@ -453,6 +643,16 @@ export const SESSION_HELP: Record<SessionAction, string> = {
   "sessions.send": `  sessions.send {"sessionId":"...","prompt":"...","notifyOnComplete":true}
             A follow-up to one of your sessions. Refused while it works or
             waits on the user. notifyOnComplete works as in start.`,
+  "memory.read": `  memory.read {}
+            Conductors only. What you remember of this project across your
+            conversations: your last ${MEMORY_LEDGER_MAX} sessions (title, agent,
+            model, taskId, status, a summary of at most ${MEMORY_SUMMARY_MAX}
+            characters), newest first, and your notes. Read it before you
+            plan.`,
+  "memory.write": `  memory.write {"notes":"Decisions, open threads, what to check next"}
+            Conductors only. Replace your notes for this project, at most
+            ${MEMORY_NOTES_MAX} characters: send everything worth keeping, the
+            old notes are gone. "" clears them. Lanework keeps the ledger.`,
   "conductors.create": `  conductors.create {"name":"Release captain","instructions":"## Role\\n...",
                   "icon":"Robot02Icon","agent":"${LEAD_AGENTS.join('"|"')}",
                   "model":"<model id>","effort":"${EFFORTS.join("|")}",

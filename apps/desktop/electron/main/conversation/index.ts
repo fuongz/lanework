@@ -58,12 +58,15 @@ import {
 } from "../orchestration";
 import { setSessionsEnv } from "../orchestration/engine-tap";
 import { createConductor } from "../orchestration/leads";
+import { conductorMemoryFile } from "../paths";
 import { knownProject, terminalFolder } from "../projects";
+import { accountDir, isSlug } from "../projects/store";
 import {
   bindConductorConversation,
   conductorOfConversation,
   nameConversation,
   registerAgentSession,
+  settleOpencodeSession,
 } from "../terminal";
 import { opencodeDataDir } from "../terminal/opencode-sessions";
 import {
@@ -76,6 +79,7 @@ import { createAgentCli, createClaudeCli } from "./claude-cli";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { createCodexModels } from "./codex-models";
 import { codexRolloutPath, readCodexConversation } from "./codex-transcript";
+import { ConductorMemoryStore } from "./conductor-memory";
 import { ConductorSessions } from "./conductor-sessions";
 import { createEngines } from "./engine";
 import { forkConversation } from "./fork";
@@ -168,6 +172,29 @@ function withLive(turns: Turn[], live: Turn[]): Turn[] {
 
 /** A conductor's sessions, once the conversation view registered. */
 let sessions: ConductorSessions | null = null;
+
+/**
+ * Where conductor `conductorId` keeps its memory of `project` (FE-128): in
+ * the project's own folder under `<home>/projects`, as `projects/store.ts`
+ * names it.
+ */
+async function conductorMemoryPath(
+  project: string,
+  conductorId: string,
+): Promise<string> {
+  const { record, project: found } = await knownProject(project);
+  if (!isSlug(found.slug)) throw new Error("That project key is not valid.");
+  return conductorMemoryFile(join(accountDir(record), found.slug), conductorId);
+}
+
+/**
+ * Every conductor's memory, one store for the conductor's own calls and the
+ * page's (`leads.memory`, `leads.saveMemoryNotes`): writes to one file never
+ * cross.
+ */
+export const conductorMemory = new ConductorMemoryStore({
+  fileOf: conductorMemoryPath,
+});
 
 /**
  * What the control server asks of a conductor's sessions: who a token is,
@@ -531,6 +558,16 @@ export function registerConversation(
   const tell = (event: ConversationEvent) => {
     broadcast(conversationChannels.event, event);
     sessions?.onEvent(event);
+    // An OpenCode turn that ended is read in now: the rail must not wait on
+    // a database write its watch may never hear (FE-128).
+    if (
+      event.type === "state" &&
+      event.engine.state !== "running" &&
+      event.engine.state !== "starting"
+    )
+      void settleOpencodeSession(event.project, event.conversation).catch(
+        () => undefined,
+      );
     // Read once the event's other listeners ran: orchestration learns a new
     // Codex worker's id from this same event (FE-100/O1).
     queueMicrotask(() => {
@@ -614,15 +651,30 @@ export function registerConversation(
     storedSettings: (conversation) => store.of(conversation),
     conductorOf: conductorOfConversation,
     name: nameConversation,
-    register: registerAgentSession,
+    register: (project, agent, id, folder, launchedBy) =>
+      registerAgentSession(project, agent, id, folder, null, launchedBy),
     isWorkerFolder,
     endpoint: controlEndpoint,
     cliPath: controlCliPath(),
     file: join(app.getPath("userData"), "conductor-sessions.json"),
     createConductor,
+    memory: conductorMemory,
+    knowModels: async (agent, model) => {
+      await ready.catch(() => {});
+      if (agent === "codex") await codexModels();
+      else if (agent === "opencode")
+        await (model ? knowModel(model) : opencodeModels());
+    },
   });
   const conductors = sessions;
   setSessionsEnv((target) => conductors.envFor(target));
+  // Launches saved before FE-128 go to their conductor while its
+  // conversation is still bound, before a Reset could let it go.
+  void conductors
+    .adopt()
+    .catch((error: unknown) =>
+      console.error("Unable to place a conductor's old sessions", error),
+    );
 
   // The conversations whose engine last answered `terminal`: when a tab
   // stops, the composer hears it may write again, without polling.

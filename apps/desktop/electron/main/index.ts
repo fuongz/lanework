@@ -7,6 +7,7 @@ import {
   session,
   shell,
 } from "electron";
+import { MEMORY_NOTES_MAX } from "../../shared/conductor-sessions";
 import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
 import {
   type ControlServer,
@@ -17,6 +18,7 @@ import {
   LEAD_CONTEXT_FILES_MAX,
   type LeadsMainHandlers,
   leadId,
+  leadRef,
   leadsChannels,
   type OrchestrationMainHandlers,
   type OrchestrationProposal,
@@ -32,6 +34,7 @@ import { registerAgentConfig } from "./agent-config";
 import { registerAgentSetup } from "./agent-setup";
 import { registerAuth } from "./auth";
 import {
+  conductorMemory,
   conductorSessionsControl,
   pidFileBridge,
   registerConversation,
@@ -208,6 +211,26 @@ function registerLeads(
     return leads.inspectContext(
       ipcSlug(args[0]),
       paths.map((path) => contextPath(path)),
+    );
+  });
+  // A conductor's memory (FE-128): through the one store its own
+  // `memory.*` calls use, so the page's edit and the conductor's never
+  // overwrite each other.
+  handle(leadsChannels.memory, devUrl, (args) => {
+    arity(args, 2);
+    return conductorMemory.read(ipcSlug(args[0]), leadRef(args[1]));
+  });
+  handle(leadsChannels.saveMemoryNotes, devUrl, (args) => {
+    arity(args, 3);
+    const notes = args[2];
+    if (typeof notes !== "string" || notes.length > MEMORY_NOTES_MAX)
+      throw new Error(
+        `notes must be a string of at most ${MEMORY_NOTES_MAX} characters`,
+      );
+    return conductorMemory.writeNotes(
+      ipcSlug(args[0]),
+      leadRef(args[1]),
+      notes,
     );
   });
 }

@@ -364,6 +364,11 @@ const leads: DesktopLeadsApi = {
     ipcRenderer.invoke(leadsChannels.pickContext, project),
   inspectContext: (project, paths) =>
     ipcRenderer.invoke(leadsChannels.inspectContext, project, paths),
+  // A conductor's memory (FE-128).
+  memory: (project, id) =>
+    ipcRenderer.invoke(leadsChannels.memory, project, id),
+  saveMemoryNotes: (project, id, notes) =>
+    ipcRenderer.invoke(leadsChannels.saveMemoryNotes, project, id, notes),
   onChange: (listener) =>
     subscribe<LeadsEvent>(leadsChannels.changed, listener),
 };

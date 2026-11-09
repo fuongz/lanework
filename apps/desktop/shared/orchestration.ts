@@ -26,6 +26,7 @@
 // lead's agent ({@link LEAD_AGENTS}) refuses it; the ones that read a
 // worker's ({@link WORKER_AGENTS}) take it, with a `provider/model` id.
 
+import type { ConductorMemory } from "./conductor-sessions";
 import {
   type ConversationAgent,
   EFFORTS,
@@ -1635,6 +1636,10 @@ export const leadsChannels = {
   pickContext: "leads:pick-context",
   /** Whether each context file is a file, a folder, or gone. */
   inspectContext: "leads:inspect-context",
+  /** A conductor's memory of a project: ledger and notes (FE-128). */
+  memory: "leads:memory",
+  /** Replace a conductor's notes for a project, as `memory.write` does. */
+  saveMemoryNotes: "leads:save-memory-notes",
   /** Main → renderer: the leads changed. */
   changed: "leads:changed",
 } as const;
@@ -1720,6 +1725,20 @@ export interface DesktopLeadsApi {
   /** The native chooser, opened on the project's folder (FE-96). */
   pickContext: (project: string) => Promise<ContextPick>;
   inspectContext: (project: string, paths: string[]) => Promise<ContextEntry[]>;
+  /**
+   * What conductor `id` (a lead id, `repo:` ones too) remembers of
+   * `project` (FE-128): an empty memory when it has none yet.
+   */
+  memory: (project: string, id: string) => Promise<ConductorMemory>;
+  /**
+   * Replace its notes for `project`, trimmed, at most `MEMORY_NOTES_MAX`
+   * characters; "" clears them. The ledger is main's and stays.
+   */
+  saveMemoryNotes: (
+    project: string,
+    id: string,
+    notes: string,
+  ) => Promise<{ notesLength: number; updatedAt: number }>;
   onChange: (listener: (event: LeadsEvent) => void) => () => void;
 }
 

@@ -749,6 +749,8 @@ export const useAgentSessions = create<AgentSessionsState>()((set, get) => ({
             entry.updatedAt === listed[index]?.updatedAt &&
             entry.pinnedAt === listed[index]?.pinnedAt &&
             entry.conductor === listed[index]?.conductor &&
+            entry.launchedBy?.conductor ===
+              listed[index]?.launchedBy?.conductor &&
             entry.working === listed[index]?.working &&
             sameCard(entry.card, listed[index]?.card) &&
             sameSubagents(entry.subagents, listed[index]?.subagents ?? []) &&

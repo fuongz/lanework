@@ -343,6 +343,7 @@ export async function registerAgentSession(
   id: string,
   folder?: string | null,
   source?: string | null,
+  launchedBy?: { conductor: string; project: string } | null,
 ): Promise<void> {
   if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
@@ -371,6 +372,9 @@ export async function registerAgentSession(
       origin: "lanework",
       sourcePath: file,
     });
+  // A conductor's own session (FE-128), marked before anything reads it in,
+  // so the rail never lists it under Agents first.
+  if (launchedBy) sessions.setLaunchedBy(key, launchedBy);
   if (!where) return;
   watchProject(project, where);
   const read = sourceOf(agent, id, file);
@@ -391,6 +395,46 @@ function sourceOf(
   return agent === "claude"
     ? { agent: "claude", file }
     : { agent: "codex", file };
+}
+
+/** How long {@link settleOpencodeSession} waits to read a turn again. */
+const SETTLE_AGAIN_MS = 2000;
+
+/**
+ * Read an OpenCode conversation whose turn the chat's engine just ended into
+ * the store, and tell the rail where it stands.
+ *
+ * NOTE: The engine knows when its turn ends; the folder watch on OpenCode's
+ * database may never hear the last write (FE-128: a conductor's session
+ * stayed working on the rail after it finished). Only a row the store has in
+ * `project` is read; OpenCode keeps no cards, so none is said.
+ */
+export async function settleOpencodeSession(
+  project: string,
+  id: string,
+): Promise<void> {
+  if (!isAgentSessionIdOf("opencode", id)) return;
+  const key = sessionKey("opencode", id);
+  const row = sessionStore().getSession(key);
+  if (!row || row.project !== project) return;
+  const folder =
+    row.folder ?? (await terminalFolder(project).catch(() => null));
+  if (!folder) return;
+  await readInto(project, folder, key, { agent: "opencode", id });
+  // Its service may say idle a moment before the last row is committed.
+  if (sessionStore().getSession(key)?.working) {
+    await new Promise((done) => setTimeout(done, SETTLE_AGAIN_MS));
+    await readInto(project, folder, key, { agent: "opencode", id });
+  }
+  broadcast(terminalChannels.agentActivity, {
+    project,
+    agent: "opencode",
+    id,
+    working: sessionStore().getSession(key)?.working ?? false,
+    card: null,
+    subagent: null,
+    at: Date.now(),
+  });
 }
 
 /**
@@ -538,7 +582,8 @@ function watchProject(project: string, folder: string): void {
  * `project`'s rail as Lanework's session store lists it, ready to show.
  *
  * - A conversation nothing was typed in yet, registered when Lanework
- *   started it, is left out: the rail shows its tab as new until then.
+ *   started it, is left out: the rail shows its tab as new until then. A
+ *   conductor's own is kept untitled: its conductor finds it by its row.
  * - The newest {@link AGENT_SESSION_LIMIT} of the rest, every pinned and
  *   conductor's one besides.
  * - `working` is what the last read found, and nothing ages it: one not
@@ -552,8 +597,16 @@ function railOf(listed: AgentSession[], now = Date.now()): AgentSession[] {
   const out: AgentSession[] = [];
   let rest = 0;
   for (const session of listed) {
-    if (!session.cliTitle) continue;
-    const kept = session.pinnedAt !== null || session.conductor !== null;
+    // A conductor's own conversation stays untitled until a prompt of it is
+    // read for one, but it was typed in: its row is how its conductor finds
+    // it (FE-128).
+    if (!session.cliTitle && session.conductor === null) continue;
+    // A session a conductor started (FE-128) is hidden from Agents: it never
+    // takes a place the user's own sessions would have.
+    const kept =
+      session.pinnedAt !== null ||
+      session.conductor !== null ||
+      session.launchedBy !== undefined;
     if (!kept && rest >= AGENT_SESSION_LIMIT) continue;
     if (!kept) rest += 1;
     const working =

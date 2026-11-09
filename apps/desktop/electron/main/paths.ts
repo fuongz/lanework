@@ -1,6 +1,7 @@
 import { existsSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { LEAD_REF_PATTERN } from "../../shared/orchestration";
 
 /**
  * The name of the app's home folder, in the one place it is named.
@@ -51,6 +52,32 @@ export function metricsDir(home = appHomeDir()): string {
  */
 export function projectsDir(home = appHomeDir()): string {
   return join(home, "projects");
+}
+
+/**
+ * A conductor's memory of one project (FE-128):
+ * `<project folder>/conductors/<id>/memory.json`, beside the project's other
+ * state.
+ *
+ * @param projectFolder The project's own folder under {@link projectsDir}
+ *   (`<account>/<slug>`, as `projects/store.ts` names it).
+ * @param conductorId A team lead's id, or `repo:` and one. The colon becomes
+ *   a dot, which no lead id holds, so the folder name is safe on every disk
+ *   and never one another conductor's id maps to.
+ * @throws When `conductorId` is not a team lead's id.
+ */
+export function conductorMemoryFile(
+  projectFolder: string,
+  conductorId: string,
+): string {
+  if (!LEAD_REF_PATTERN.test(conductorId))
+    throw new Error("That conductor id is not valid.");
+  return join(
+    projectFolder,
+    "conductors",
+    conductorId.replace(":", "."),
+    "memory.json",
+  );
 }
 
 /** {@link projectsDir}'s name before projects were called projects. */

@@ -82,14 +82,17 @@ interface SessionRow {
   source_mtime: number | null;
   source_offset: number | null;
   ingest_state: string | null;
+  launched_by_conductor: string | null;
+  launched_by_project: string | null;
 }
 
 /**
  * The columns a CLI write sets: every one but Lanework's marks.
  *
- * NOTE: `name`, `pinned_at`, `conductor_*` and `archived_at` are left out on
- * purpose. A Pull or an ingest writes through {@link UPSERT_SQL} alone, so it
- * cannot reset a name, a pin, a conductor or an archive, whatever it read.
+ * NOTE: `name`, `pinned_at`, `conductor_*`, `archived_at` and `launched_by_*`
+ * are left out on purpose. A Pull or an ingest writes through
+ * {@link UPSERT_SQL} alone, so it cannot reset a name, a pin, a conductor, an
+ * archive or who started it, whatever it read.
  */
 const CLI_COLUMNS = [
   "key",
@@ -128,7 +131,7 @@ const UPSERT_SQL = `INSERT INTO agent_session (${CLI_COLUMNS.join(", ")})
 
 /** What the rail reads of a row; every one is in `agent_session_rail`. */
 const RAIL_COLUMNS =
-  "key, agent, cli_id, cli_title, name, updated_at, pinned_at, conductor_id, working, card_board, card_id, bg_running, bg_total";
+  "key, agent, cli_id, cli_title, name, updated_at, pinned_at, conductor_id, working, card_board, card_id, bg_running, bg_total, launched_by_conductor, launched_by_project";
 
 type RailRow = Pick<
   SessionRow,
@@ -145,6 +148,8 @@ type RailRow = Pick<
   | "card_id"
   | "bg_running"
   | "bg_total"
+  | "launched_by_conductor"
+  | "launched_by_project"
 >;
 
 /**
@@ -194,10 +199,20 @@ function toCard(
     : null;
 }
 
+/** Who started a row with `sessions.start`, or null for the user. */
+function launchedByOf(
+  row: Pick<SessionRow, "launched_by_conductor" | "launched_by_project">,
+): { conductor: string; project: string } | null {
+  return row.launched_by_conductor && row.launched_by_project
+    ? { conductor: row.launched_by_conductor, project: row.launched_by_project }
+    : null;
+}
+
 function toAgentSession(
   row: RailRow,
   subagents: AgentSubagent[],
 ): AgentSession {
+  const launchedBy = launchedByOf(row);
   return {
     id: row.cli_id,
     agent: row.agent,
@@ -213,6 +228,7 @@ function toAgentSession(
       running: Number(row.bg_running),
       total: Number(row.bg_total),
     },
+    ...(launchedBy ? { launchedBy } : {}),
   };
 }
 
@@ -241,6 +257,7 @@ function toStored(row: SessionRow, subagents: AgentSubagent[]): StoredSession {
         ? { id: row.conductor_id, project: row.conductor_project }
         : null,
     archivedAt: row.archived_at,
+    launchedBy: launchedByOf(row),
     subagents,
   };
 }
@@ -669,6 +686,33 @@ export class SessionStore {
       );
       return true;
     });
+  }
+
+  /**
+   * Note the conductor that started `key` with `sessions.start` (FE-128),
+   * or clear it. The rail hides such a conversation from Agents; the
+   * conductor's own view lists it.
+   *
+   * @returns False when there is no such row.
+   * @throws When `launchedBy` is not a team lead's id and a project.
+   */
+  setLaunchedBy(
+    key: string,
+    launchedBy: { conductor: string; project: string } | null,
+  ): boolean {
+    if (
+      launchedBy &&
+      (!LEAD_REF_PATTERN.test(launchedBy.conductor) || !launchedBy.project)
+    )
+      invalid("a valid conductor is required");
+    return (
+      this.#run(
+        "UPDATE agent_session SET launched_by_conductor = ?, launched_by_project = ? WHERE key = ?",
+        launchedBy?.conductor ?? null,
+        launchedBy?.project ?? null,
+        key,
+      ) > 0
+    );
   }
 
   /**

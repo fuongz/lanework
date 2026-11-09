@@ -58,6 +58,19 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (session_key, sub_id)
   );
   `,
+  // 2: who started a conversation with `sessions.start` (FE-128). The rail
+  // index is rebuilt with both columns so it still covers what the rail reads.
+  `
+  ALTER TABLE agent_session ADD COLUMN launched_by_conductor TEXT;
+  ALTER TABLE agent_session ADD COLUMN launched_by_project TEXT;
+  DROP INDEX agent_session_rail;
+  CREATE INDEX agent_session_rail ON agent_session(
+    project, archived_at, pinned_at, updated_at DESC,
+    conductor_id, key, agent, cli_id, cli_title, name,
+    working, card_board, card_id, bg_running, bg_total,
+    launched_by_conductor, launched_by_project
+  );
+  `,
 ];
 
 /** The version a fully migrated database reports. */

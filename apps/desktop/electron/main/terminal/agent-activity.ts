@@ -39,6 +39,12 @@ import { opencodeChanges, opencodeDataDirOf } from "./opencode-sessions";
  * leave a row spinning for good.
  */
 const SETTLE_MS = 400;
+/**
+ * How often an OpenCode session seen working is read again with no write
+ * heard: macOS can drop or merge a folder watch's events, and a turn whose
+ * last write was missed would stay working on the rail for good.
+ */
+const OPENCODE_POLL_MS = 5000;
 
 /** Codex rollouts of one folder watched file by file, at most. */
 const FOLLOW_LIMIT = 16;
@@ -453,6 +459,7 @@ export function watchAgentActivity(
   const opencodeSeen = new Map<string, { updated: number; working: boolean }>();
   let opencodeSince = Date.now() - STALE_MS;
   let opencodeTimer: NodeJS.Timeout | null = null;
+  let opencodePoll: NodeJS.Timeout | null = null;
   let opencodeReading = false;
   const opencodeCheck = async () => {
     // NOTE: A session still working is looked at again whether or not it
@@ -495,6 +502,16 @@ export function watchAgentActivity(
       for (const [id, seen] of opencodeSeen)
         if (!seen.working && seen.updated < opencodeSince - STALE_MS)
           opencodeSeen.delete(id);
+    // A turn still open is read again until it closes, whether or not its
+    // closing write is heard.
+    if (
+      !opencodePoll &&
+      [...opencodeSeen.values()].some((seen) => seen.working)
+    )
+      opencodePoll = setTimeout(() => {
+        opencodePoll = null;
+        opencodeWritten();
+      }, OPENCODE_POLL_MS);
   };
   const opencodeWritten = () => {
     if (stopped || opencodeTimer) return;
@@ -513,8 +530,10 @@ export function watchAgentActivity(
   try {
     watchers.push(
       watch(opencodeDir, (_event, name) => {
+        // No name: the event was merged or its file not said, so it may be
+        // the database's.
         const file = name ? String(name) : "";
-        if (file === "opencode.db" || file === "opencode.db-wal")
+        if (!file || file === "opencode.db" || file === "opencode.db-wal")
           opencodeWritten();
       }),
     );
@@ -526,6 +545,7 @@ export function watchAgentActivity(
   return () => {
     stopped = true;
     if (opencodeTimer) clearTimeout(opencodeTimer);
+    if (opencodePoll) clearTimeout(opencodePoll);
     for (const timer of pending.values()) clearTimeout(timer);
     for (const watcher of watchers) watcher.close();
     for (const file of [...followed.keys()]) unfollow(file);

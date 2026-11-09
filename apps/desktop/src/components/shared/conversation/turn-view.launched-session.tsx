@@ -24,36 +24,45 @@ export interface LaunchedSession {
 /** `sessions.start` or `sessions.send`, run as a shell command. */
 const SESSION_CALL = /\bsessions\.(?:start|send)\b/;
 
-/** The receipt a call printed: its last line that is an `ok` JSON object. */
-function receiptOf(call: ToolCall): LaunchedSession | null {
-  if (call.kind !== "command" || call.error || !call.output) return null;
-  if (!SESSION_CALL.test(call.input)) return null;
-  const lines = call.output.trim().split("\n").reverse();
-  for (const line of lines) {
-    if (!line.startsWith("{")) continue;
-    try {
-      const reply = JSON.parse(line) as {
-        ok?: unknown;
-        result?: { sessionId?: unknown; title?: unknown; agent?: unknown };
-      };
-      const result = reply.result;
-      if (reply.ok !== true || !result) return null;
-      const agent = isTerminalAgent(result.agent) ? result.agent : null;
-      // A UUID, or OpenCode's `ses_…`; an unnamed agent's is a UUID.
-      if (!isAgentSessionIdOf(agent ?? "claude", result.sessionId)) return null;
-      return {
-        sessionId: result.sessionId,
-        title:
-          typeof result.title === "string" && result.title
-            ? result.title
-            : "Session",
-        agent,
-      };
-    } catch {
-      // Not the receipt: an earlier line may be.
-    }
+/** One line of a call's output as a receipt, or null when it is not one. */
+function receiptLine(line: string): LaunchedSession | null {
+  if (!line.startsWith("{")) return null;
+  try {
+    const reply = JSON.parse(line) as {
+      ok?: unknown;
+      result?: { sessionId?: unknown; title?: unknown; agent?: unknown };
+    };
+    const result = reply.result;
+    if (reply.ok !== true || !result) return null;
+    const agent = isTerminalAgent(result.agent) ? result.agent : null;
+    // A UUID, or OpenCode's `ses_…`; an unnamed agent's is a UUID.
+    if (!isAgentSessionIdOf(agent ?? "claude", result.sessionId)) return null;
+    return {
+      sessionId: result.sessionId,
+      title:
+        typeof result.title === "string" && result.title
+          ? result.title
+          : "Session",
+      agent,
+    };
+  } catch {
+    return null;
   }
-  return null;
+}
+
+/**
+ * Every receipt a call printed, in order: each line that is an `ok` JSON
+ * object naming a session. One command may start several sessions (FE-128:
+ * a Codex and an OpenCode one in the same shell line), each its own receipt.
+ */
+function receiptsOf(call: ToolCall): LaunchedSession[] {
+  if (call.kind !== "command" || call.error || !call.output) return [];
+  if (!SESSION_CALL.test(call.input)) return [];
+  return call.output
+    .trim()
+    .split("\n")
+    .map((line) => receiptLine(line.trim()))
+    .filter((receipt): receipt is LaunchedSession => receipt !== null);
 }
 
 /** The sessions a group of calls started or followed up, once each. */
@@ -61,11 +70,9 @@ export function launchedSessions(
   calls: readonly ToolCall[],
 ): LaunchedSession[] {
   const found = new Map<string, LaunchedSession>();
-  for (const call of calls) {
-    const receipt = receiptOf(call);
-    if (receipt && !found.has(receipt.sessionId))
-      found.set(receipt.sessionId, receipt);
-  }
+  for (const call of calls)
+    for (const receipt of receiptsOf(call))
+      if (!found.has(receipt.sessionId)) found.set(receipt.sessionId, receipt);
   return [...found.values()];
 }
 

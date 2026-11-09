@@ -168,14 +168,20 @@ export function useAgentRail(
   // (FE-95/D13): Reset brings it back, and so does its conductor going away
   // (deleted, or its repo file removed). Until the list is read it stays out,
   // so it never flashes here first.
+  //
+  // A session a conductor started (FE-128/D1) is the conductor's too: the
+  // user reaches it from that conductor's chat, never here, under the same
+  // rule: back once its conductor is gone, out until the list is read.
   const leads = useTeamLeads(project);
   const sessions = useMemo(() => {
     const known = leads ? new Set(leads.leads.map((lead) => lead.id)) : null;
+    const orphan = (conductor: string | null | undefined) =>
+      !conductor || (known !== null && !known.has(conductor));
     return all.filter(
       (session) =>
         agents.includes(session.agent) &&
-        (!session.conductor ||
-          (known !== null && !known.has(session.conductor))),
+        orphan(session.conductor) &&
+        orphan(session.launchedBy?.conductor),
     );
   }, [all, agents, leads]);
 

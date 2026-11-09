@@ -1,4 +1,5 @@
 import {
+  Brain02Icon,
   Folder01Icon,
   NoteEditIcon,
   Settings01Icon,
@@ -36,6 +37,7 @@ import {
   iconLabel,
   slugify,
 } from "./conductor-editor";
+import { ConductorMemory } from "./conductor-memory";
 
 /** What the dialog opens on: a new conductor, or one to edit or copy. */
 export type ConductorDialogMode =
@@ -64,6 +66,14 @@ const PAGES = [
     label: "Context",
     icon: Folder01Icon,
     description: "Project files it reads before it answers.",
+    sections: [],
+  },
+  {
+    // FE-128: only a saved conductor in a project has one.
+    key: "memory",
+    label: "Memory",
+    icon: Brain02Icon,
+    description: "What it keeps of this project between conversations.",
     sections: [],
   },
 ] as const;
@@ -142,7 +152,11 @@ export function ConductorDialog({
     { title: "Identity", hideTitle: true, content: identity },
     ...editor.sections,
   ];
-  const current = PAGES.find((entry) => entry.key === page) ?? PAGES[0];
+  // Memory is per conductor and project (FE-128): a new or copied conductor
+  // has none yet, and neither has one outside a project.
+  const editing = mode.kind === "edit" && project ? mode.lead : null;
+  const pages = PAGES.filter((entry) => entry.key !== "memory" || editing);
+  const current = pages.find((entry) => entry.key === page) ?? PAGES[0];
   const name = draft.input.name.trim();
   const title =
     mode.kind === "edit" ? `Edit ${mode.lead.name}` : name || "New conductor";
@@ -179,7 +193,7 @@ export function ConductorDialog({
             />
             <span className="truncate">{name || "New conductor"}</span>
           </div>
-          {PAGES.map((entry) => (
+          {pages.map((entry) => (
             <button
               key={entry.key}
               type="button"
@@ -228,6 +242,8 @@ export function ConductorDialog({
                 className="min-h-0 flex-1"
               />
             </div>
+          ) : page === "memory" && editing ? (
+            <ConductorMemory project={project} conductor={editing.id} />
           ) : page === "context" ? (
             <ConductorContext
               project={project}

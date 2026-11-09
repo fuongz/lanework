@@ -160,6 +160,12 @@ export interface AgentSession {
    */
   conductor: string | null;
   /**
+   * The conductor that started it with `sessions.start` (FE-128), and the
+   * project it did so in. Such a session is the conductor's own: the rail
+   * hides it from Agents. Absent for any session the user started.
+   */
+  launchedBy?: { conductor: string; project: string };
+  /**
    * Whether its agent is thinking or working right now: a turn is open in
    * the transcript.
    *

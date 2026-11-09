@@ -33,7 +33,7 @@ import {
 } from "#/lib/orchestration-prompt";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useBoard } from "#/stores/board";
-import { withLiveContext } from "#/stores/conductor-context";
+import { conductorMemory, withLiveContext } from "#/stores/conductor-context";
 import { handSentMessage } from "#/stores/conversation-sends";
 import { useNewChats } from "#/stores/new-chats";
 import {
@@ -142,16 +142,23 @@ export function NewConversationPage({
     const chosen = override ?? settings;
     if (!project || !surface || !chosen) return false;
     setError(null);
-    // A conductor's message carries who it is; a planning prompt already
-    // names it.
+    // A conductor's message carries who it is, and what it remembers of the
+    // project from its earlier conversations (FE-128); a planning prompt
+    // already names it.
     const outgoing =
       conductor && !readEnvelope(text)
-        ? conductorTurn(
-            text,
-            await withLiveContext(project, conductor),
-            agentOfModel(chosen.model),
-            cwd,
-            null,
+        ? await Promise.all([
+            withLiveContext(project, conductor),
+            conductorMemory(project, conductor),
+          ]).then(([live, memory]) =>
+            conductorTurn(
+              text,
+              live,
+              agentOfModel(chosen.model),
+              cwd,
+              null,
+              memory,
+            ),
           )
         : text;
     const { begin, end } = useNewChats.getState();

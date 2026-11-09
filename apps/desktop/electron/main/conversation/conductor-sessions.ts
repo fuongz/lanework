@@ -5,7 +5,14 @@
 //   a conductor's own (FE-95), looked up on each call: a conversation bound
 //   after its process started counts, one let go of no longer does.
 // - A conductor reaches only the sessions it started, kept on disk so a
-//   restart does not hand them back to nobody.
+//   restart does not hand them back to nobody. They are the conductor's
+//   (the team lead's) in a project, not one conversation's (FE-128): after
+//   a Reset, its new conversation still reaches them. A launch saved before
+//   that names only the conversation; it is handed to the lead that
+//   conversation is bound to, while it still is.
+// - Each conductor keeps a memory per project (`conductor-memory.ts`): a
+//   ledger entry per session, written as it starts and as each of its turns
+//   ends, and the notes it writes itself.
 // - A session started or followed up with notifyOnComplete is watched from
 //   the engines' events. Once its turn ends, the conductor is sent a hidden
 //   turn naming it; a conductor that is busy hears at its next idle, with
@@ -19,6 +26,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
+  MEMORY_SUMMARY_MAX,
   READ_CHARS_DEFAULT,
   SESSIONS_ENV,
   SESSIONS_LIST_MAX,
@@ -33,6 +41,7 @@ import {
   type SessionSummary,
 } from "../../../shared/conductor-sessions";
 import {
+  AGENT_LABELS,
   agentOfModel,
   allModels,
   type ComposerSettings,
@@ -52,11 +61,13 @@ import {
   CONDUCTOR_INSTRUCTIONS,
   CONTROL_ENV,
   ControlInputError,
+  LEAD_REF_PATTERN,
   type TeamLead,
   type TeamLeadInput,
 } from "../../../shared/orchestration";
 import type { EngineTarget } from "../orchestration/engine-tap";
 import { visibleText } from "../orchestration/prompts";
+import type { ConductorMemoryStore } from "./conductor-memory";
 import type { Outgoing } from "./queue";
 
 /** The engines' calls this needs. */
@@ -109,12 +120,15 @@ export interface ConductorSessionsDeps {
   /**
    * Make a conversation just started known to Lanework's session store
    * (FE-112), so the rail lists it without a Pull. Before {@link name}.
+   * `launchedBy` marks it the conductor's own (FE-128): the rail hides it
+   * from Agents.
    */
   register: (
     project: string,
     agent: ConversationAgent,
     id: string,
     folder: string,
+    launchedBy?: { conductor: string; project: string },
   ) => Promise<void>;
   /** Give a new conversation its name in the rail. */
   name: (agent: ConversationAgent, id: string, title: string) => Promise<void>;
@@ -134,19 +148,46 @@ export interface ConductorSessionsDeps {
     project: string,
     input: Omit<TeamLeadInput, "id">,
   ) => Promise<TeamLead>;
+  /** Each conductor's memory of each project (FE-128). */
+  memory: Pick<ConductorMemoryStore, "read" | "writeNotes" | "record">;
+  /**
+   * Make sure `agent`'s model list is read, `model` among it when it is one
+   * of OpenCode's, before a session picks a model on it.
+   */
+  knowModels?: (agent: ConversationAgent, model?: string) => Promise<void>;
 }
 
 /** A session a conductor started. */
 interface Launch {
   project: string;
-  /** The conductor's own conversation. */
+  /**
+   * The conductor's conversation that hears its reports: the one that
+   * started it, then the last one of the same conductor that reached it.
+   */
   conductor: string;
   conductorAgent: ConversationAgent;
+  /**
+   * The conductor (team lead id) whose session it is (FE-128). Absent on a
+   * launch saved before, until {@link ConductorSessions.adopt} finds it.
+   */
+  conductorId?: string;
   session: string;
   agent: ConversationAgent;
   title: string;
   model: string;
+  /** The board card `sessions.start` named. */
+  taskId?: string;
   createdAt: number;
+}
+
+/** The caller, as the conductor it is. */
+interface Conductor {
+  project: string;
+  /** The caller's own conversation. */
+  conversation: string;
+  agent: ConversationAgent;
+  /** Its team lead's id. */
+  id: string;
 }
 
 /** A process's credential: the conversation it runs. */
@@ -242,6 +283,12 @@ export class ConductorSessions {
   private reports = new Map<string, Report[]>();
   /** Conductors a report is being sent to now. */
   private sending = new Set<string>();
+  /** Session key → its turn was seen running: the memory hears its end. */
+  private running = new Set<string>();
+  /** Launches whose conversation no conductor holds: not asked again. */
+  private unresolved = new Set<Launch>();
+  /** The one {@link adopt} pass running now. */
+  private adopting: Promise<void> | null = null;
 
   constructor(private readonly deps: ConductorSessionsDeps) {}
 
@@ -306,7 +353,14 @@ export class ConductorSessions {
     // user's own, and nothing runs until they open it (PD-04).
     if (call.action === "conductors.create")
       return this.createConductor(caller, call.input);
-    const conductor = await this.conductorOf(caller);
+    const memory =
+      call.action === "memory.read" || call.action === "memory.write";
+    const conductor = await this.conductorOf(
+      caller,
+      memory
+        ? "Only a conductor's own conversation has a memory. Keep what matters in this conversation, or ask the user to hand the work to a conductor."
+        : "Only a conductor's own conversation can start sessions. Do the work here, or ask the user to hand it to a conductor.",
+    );
     switch (call.action) {
       case "sessions.start":
         return this.start(conductor, call.input);
@@ -316,6 +370,14 @@ export class ConductorSessions {
         return this.read(conductor, call.input);
       case "sessions.send":
         return this.send(conductor, call.input);
+      case "memory.read":
+        return this.deps.memory.read(conductor.project, conductor.id);
+      case "memory.write":
+        return this.deps.memory.writeNotes(
+          conductor.project,
+          conductor.id,
+          call.input.notes,
+        );
     }
   }
 
@@ -406,12 +468,11 @@ export class ConductorSessions {
     };
   }
 
-  /** The caller as a conductor, or refused. */
-  private async conductorOf(caller: Caller): Promise<{
-    project: string;
-    conversation: string;
-    agent: ConversationAgent;
-  }> {
+  /** The caller as a conductor, or refused with `refusal`. */
+  private async conductorOf(
+    caller: Caller,
+    refusal: string,
+  ): Promise<Conductor> {
     const conversation = caller.conversation();
     if (!conversation)
       refuse("This conversation has no id yet. Try again in a moment.");
@@ -422,31 +483,113 @@ export class ConductorSessions {
         .agentOf(await this.deps.folderOf(project), conversation)
         .catch(() => null)) ??
       "claude";
-    const lead = await this.deps
+    const id = await this.deps
       .conductorOf(project, agent, conversation)
       .catch(() => null);
-    if (!lead)
+    if (!id) refuse(refusal);
+    return { project, conversation, agent, id };
+  }
+
+  /**
+   * The conductor's sessions in its project, oldest first: every launch of
+   * its lead, and an old one only its conversation names. Each one it
+   * reaches reports to this conversation from now on.
+   */
+  private async mine(conductor: Conductor): Promise<Launch[]> {
+    await this.adopt();
+    const out: Launch[] = [];
+    let moved = false;
+    for (const launch of await this.all()) {
+      if (launch.project !== conductor.project) continue;
+      if (!launch.conductorId && launch.conductor === conductor.conversation) {
+        // Saved before FE-128, by the conversation calling now.
+        launch.conductorId = conductor.id;
+        this.unresolved.delete(launch);
+        moved = true;
+      }
+      if (launch.conductorId !== conductor.id) continue;
+      if (launch.conductor !== conductor.conversation) {
+        // A Reset gave the conductor a new conversation: it hears now.
+        launch.conductor = conductor.conversation;
+        launch.conductorAgent = conductor.agent;
+        moved = true;
+      }
+      out.push(launch);
+    }
+    if (moved) await this.save();
+    return out;
+  }
+
+  /**
+   * Hand every launch saved before FE-128 to the conductor its conversation
+   * is bound to now, and save what moved. Main runs it once at startup, so
+   * a Reset after an upgrade does not cut a conductor off its old sessions;
+   * {@link mine} runs it again for any it could not place then.
+   */
+  adopt(): Promise<void> {
+    this.adopting ??= (async () => {
+      let moved = false;
+      for (const launch of await this.all()) {
+        if (launch.conductorId || this.unresolved.has(launch)) continue;
+        const id = await this.deps
+          .conductorOf(launch.project, launch.conductorAgent, launch.conductor)
+          .catch(() => null);
+        if (id) {
+          launch.conductorId = id;
+          moved = true;
+        } else this.unresolved.add(launch);
+      }
+      if (moved) await this.save();
+    })().finally(() => {
+      this.adopting = null;
+    });
+    return this.adopting;
+  }
+
+  /**
+   * The CLI and model a new session runs on: `agent` when given, else the
+   * model's CLI, else the conductor's own; the model when given, else the
+   * conductor's own on its CLI, else that CLI's default.
+   */
+  private async pickModel(
+    conductor: Conductor,
+    base: ComposerSettings,
+    input: SessionInputs["sessions.start"],
+  ): Promise<{ agent: ConversationAgent; model: string }> {
+    const agent =
+      input.agent ??
+      (input.model ? agentOfModel(input.model) : conductor.agent);
+    await this.deps.knowModels?.(agent, input.model).catch(() => {});
+    const offered = () =>
+      allModels()
+        .filter((entry) => entry.agent === agent && !entry.legacy)
+        .map((entry) => entry.id)
+        .join(", ");
+    if (input.model && agentOfModel(input.model) !== agent)
       refuse(
-        "Only a conductor's own conversation can start sessions. Do the work here, or ask the user to hand it to a conductor.",
+        `model "${input.model}" is not a ${AGENT_LABELS[agent]} model. Leave it out for ${AGENT_LABELS[agent]}'s default, or use one of: ${offered()}`,
       );
-    return { project, conversation, agent };
+    const model = input.model ?? settingsFor(agent, base).model;
+    if (!model)
+      refuse(
+        `Lanework does not know ${AGENT_LABELS[agent]}'s models yet. Pass "model" as provider/model, or try again in a moment.`,
+      );
+    if (
+      !allModels().some((entry) => entry.id === model && entry.agent === agent)
+    )
+      refuse(
+        `model "${model}" is not a ${AGENT_LABELS[agent]} model Lanework offers. Use one of: ${offered()}`,
+      );
+    return { agent, model };
   }
 
   private async start(
-    conductor: {
-      project: string;
-      conversation: string;
-      agent: ConversationAgent;
-    },
+    conductor: Conductor,
     input: SessionInputs["sessions.start"],
   ): Promise<SessionResults["sessions.start"]> {
     const { project } = conductor;
     const engines = this.deps.engines();
-    const mine = (await this.all()).filter(
-      (launch) =>
-        launch.project === project &&
-        launch.conductor === conductor.conversation,
-    );
+    const mine = await this.mine(conductor);
     let working = 0;
     for (const launch of mine.slice(-SESSIONS_LIST_MAX)) {
       const state = await engines.state(project, launch.session);
@@ -457,15 +600,7 @@ export class ConductorSessions {
         `${working} of your sessions are still working, the most at once. Wait for one to finish, or follow one up with sessions.send.`,
       );
     const base = await this.settingsOf(conductor.conversation, conductor.agent);
-    const model = input.model ?? base.model;
-    if (!allModels().some((entry) => entry.id === model))
-      refuse(
-        `model "${model}" is not one Lanework offers. Use one of: ${allModels()
-          .filter((entry) => !entry.legacy)
-          .map((entry) => entry.id)
-          .join(", ")}`,
-      );
-    const agent = agentOfModel(model);
+    const { agent, model } = await this.pickModel(conductor, base, input);
     // NOTE: The conductor's own permission mode, never another: a session
     // it starts may not do more without asking than the conductor may.
     const settings = checkSettings({
@@ -480,35 +615,54 @@ export class ConductorSessions {
       ? `Work on ${input.taskId}.\n\n${input.prompt}`
       : input.prompt;
     const out = outgoing(text, settings);
-    const launch: Omit<Launch, "session"> = {
+    const fields: Omit<Launch, "session"> = {
       project,
       conductor: conductor.conversation,
       conductorAgent: conductor.agent,
+      conductorId: conductor.id,
       agent,
       title: input.title,
       model,
+      ...(input.taskId ? { taskId: input.taskId } : {}),
       createdAt: Date.now(),
     };
-    let session: string;
+    let launch: Launch;
     if (agent !== "claude") {
-      session = (await engines.startNamed(agent, project, folder, out))
+      const session = (await engines.startNamed(agent, project, folder, out))
         .conversation;
-      if (input.notifyOnComplete)
-        await this.watch({ ...launch, session }, true);
+      launch = { ...fields, session };
+      // Its first turn was submitted: the memory hears when it ends.
+      this.running.add(keyOf(project, session));
+      // Its first entry before any turn end can overwrite it.
+      await this.note(launch, "working", "");
+      if (input.notifyOnComplete) await this.watch(launch, true);
     } else {
-      session = randomUUID();
+      launch = { ...fields, session: randomUUID() };
       // Watched before it starts: its turn may end before start answers.
-      if (input.notifyOnComplete) this.arm({ ...launch, session }, false);
+      if (input.notifyOnComplete) this.arm(launch, false);
+      this.running.add(keyOf(project, launch.session));
+      await this.note(launch, "working", "");
       try {
-        await engines.start(project, session, folder, out);
+        await engines.start(project, launch.session, folder, out);
       } catch (error) {
-        this.watches.delete(keyOf(project, session));
+        this.watches.delete(keyOf(project, launch.session));
+        this.running.delete(keyOf(project, launch.session));
+        await this.note(launch, "failed", "");
         throw error;
       }
     }
-    await this.deps.register(project, agent, session, folder).catch(() => {});
+    const { session } = launch;
+    await this.deps
+      .register(project, agent, session, folder, {
+        conductor: conductor.id,
+        project,
+      })
+      .catch(() => {});
     await this.deps.name(agent, session, input.title).catch(() => {});
-    await this.remember({ ...launch, session });
+    await this.remember(launch);
+    // Unwatched, its turn may have ended before it was remembered.
+    if (!input.notifyOnComplete)
+      this.onState(project, session, await engines.state(project, session));
     return {
       sessionId: session,
       title: input.title,
@@ -518,16 +672,10 @@ export class ConductorSessions {
     };
   }
 
-  private async list(conductor: {
-    project: string;
-    conversation: string;
-  }): Promise<SessionResults["sessions.list"]> {
-    const mine = (await this.all())
-      .filter(
-        (launch) =>
-          launch.project === conductor.project &&
-          launch.conductor === conductor.conversation,
-      )
+  private async list(
+    conductor: Conductor,
+  ): Promise<SessionResults["sessions.list"]> {
+    const mine = (await this.mine(conductor))
       .slice(-SESSIONS_LIST_MAX)
       .reverse();
     const sessions: SessionSummary[] = [];
@@ -547,7 +695,7 @@ export class ConductorSessions {
   }
 
   private async read(
-    conductor: { project: string; conversation: string },
+    conductor: Conductor,
     input: SessionInputs["sessions.read"],
   ): Promise<SessionResults["sessions.read"]> {
     const launch = await this.own(conductor, input.sessionId);
@@ -567,7 +715,7 @@ export class ConductorSessions {
   }
 
   private async send(
-    conductor: { project: string; conversation: string },
+    conductor: Conductor,
     input: SessionInputs["sessions.send"],
   ): Promise<SessionResults["sessions.send"]> {
     const launch = await this.own(conductor, input.sessionId);
@@ -609,15 +757,9 @@ export class ConductorSessions {
   }
 
   /** One of the conductor's sessions, or refused. */
-  private async own(
-    conductor: { project: string; conversation: string },
-    session: string,
-  ): Promise<Launch> {
-    const launch = (await this.all()).find(
-      (entry) =>
-        entry.project === conductor.project &&
-        entry.conductor === conductor.conversation &&
-        entry.session === session,
+  private async own(conductor: Conductor, session: string): Promise<Launch> {
+    const launch = (await this.mine(conductor)).find(
+      (entry) => entry.session === session,
     );
     if (!launch)
       refuse(
@@ -690,6 +832,16 @@ export class ConductorSessions {
   ): void {
     const key = keyOf(project, conversation);
     const watch = this.watches.get(key);
+    // The memory hears every turn end of a session a conductor started,
+    // watched or not.
+    const launch = watch?.launch ?? this.known(project, conversation);
+    if (launch) {
+      if (engine.state === "running" || engine.state === "starting")
+        this.running.add(key);
+      else if (engine.state === "terminal") this.running.delete(key);
+      else if (this.running.delete(key) || watch?.started)
+        void this.noteEnd(launch);
+    }
     if (watch) {
       if (engine.state === "running" || engine.state === "starting")
         watch.started = true;
@@ -712,6 +864,59 @@ export class ConductorSessions {
       this.reports.has(key)
     )
       void this.flush(project, conversation);
+  }
+
+  /** A session some conductor started, once the launches were read. */
+  private known(project: string, session: string): Launch | undefined {
+    return this.launches?.find(
+      (launch) => launch.project === project && launch.session === session,
+    );
+  }
+
+  // ── Memory ──
+
+  /**
+   * Write a session's ledger entry in its conductor's memory. A launch no
+   * conductor can be found for is left out; a failed write is logged.
+   */
+  private async note(
+    launch: Launch,
+    status: SessionStatus,
+    summary: string,
+  ): Promise<void> {
+    if (!launch.conductorId) await this.adopt();
+    if (!launch.conductorId) return;
+    await this.deps.memory
+      .record(launch.project, launch.conductorId, {
+        sessionId: launch.session,
+        title: launch.title,
+        agent: launch.agent,
+        model: launch.model,
+        ...(launch.taskId ? { taskId: launch.taskId } : {}),
+        status,
+        summary,
+      })
+      .catch((error: unknown) =>
+        console.error("Unable to update a conductor's memory", error),
+      );
+  }
+
+  /** A session's turn ended: note where it stands and its last reply. */
+  private async noteEnd(launch: Launch): Promise<void> {
+    try {
+      const turns = await this.turnsOf(launch).catch(() => []);
+      const last = [...turns].reverse().find((turn) => replyOf(turn));
+      const summary = last
+        ? cut(replyOf(last), MEMORY_SUMMARY_MAX - 1, true)
+        : "";
+      await this.note(
+        launch,
+        await this.status(launch.project, launch.session),
+        summary,
+      );
+    } catch (error) {
+      console.error("Unable to update a conductor's memory", error);
+    }
   }
 
   /** Tell an idle conductor what its sessions did; a busy one hears later. */
@@ -785,6 +990,19 @@ Review the result (${cli} sessions.read for more), then tell the user in a few l
               .map((raw) => {
                 if (!raw || typeof raw !== "object") return raw;
                 const { workspace, ...entry } = raw;
+                // NOTE: A launch saved before FE-128 has no conductorId:
+                // `adopt` finds it.
+                if (
+                  entry.conductorId !== undefined &&
+                  (typeof entry.conductorId !== "string" ||
+                    !LEAD_REF_PATTERN.test(entry.conductorId))
+                )
+                  delete entry.conductorId;
+                if (
+                  entry.taskId !== undefined &&
+                  typeof entry.taskId !== "string"
+                )
+                  delete entry.taskId;
                 return entry.project === undefined &&
                   typeof workspace === "string"
                   ? { ...entry, project: workspace }
@@ -807,6 +1025,12 @@ Review the result (${cli} sessions.read for more), then tell the user in a few l
     const all = await this.all();
     all.push(launch);
     if (all.length > LAUNCHES_MAX) all.splice(0, all.length - LAUNCHES_MAX);
+    await this.save();
+  }
+
+  /** Write every launch as it stands now, after any write before it. */
+  private async save(): Promise<void> {
+    const all = await this.all();
     const text = `${JSON.stringify({ v: 1, launches: all }, null, 2)}\n`;
     this.saving = this.saving
       .catch(() => {})

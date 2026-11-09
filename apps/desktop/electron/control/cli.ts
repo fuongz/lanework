@@ -1,6 +1,6 @@
 // `lanework-control`: the lead agent's handle on its orchestration run
-// (FE-87), and a conductor's on the sessions it starts
-// (`shared/conductor-sessions.ts`). The agent (Claude Code or Codex) runs it
+// (FE-87), and a conductor's on the sessions it starts and the memory it
+// keeps (`shared/conductor-sessions.ts`). The agent (Claude Code or Codex) runs it
 // from its shell; it sends one JSON line to the app's loopback control server
 // and prints the one line it gets back.
 //
@@ -110,7 +110,8 @@ const ACTION_HELP: Record<ControlAction, string> = {
 /** The usage text, naming `exe` as the command to run. */
 export function controlHelp(exe = "lanework-control"): string {
   return `Lanework control: supervise an orchestration run from its lead agent,
-and the sessions a conductor starts.
+and the sessions a conductor starts, on Claude, Codex or OpenCode, with the
+memory it keeps of the project across its conversations.
 
 Usage: ${exe} ACTION [--json JSON | --input FILE|-] [--request-id ID]
 
@@ -472,7 +473,9 @@ export async function runControlCli(
       error: sessions
         ? parsed.action === "conductors.create"
           ? "No Lanework control connection. Only a conversation the Lanework app started can create a conductor; ask the user to run this chat from Lanework."
-          : "No Lanework control connection. Only a conductor's conversation in the Lanework app can start sessions."
+          : parsed.action.startsWith("memory.")
+            ? "No Lanework control connection. Only a conductor's conversation in the Lanework app has a memory."
+            : "No Lanework control connection. Only a conductor's conversation in the Lanework app can start sessions."
         : "No Lanework control connection. Only the lead of an approved orchestration run can use this; approve the plan in Lanework first.",
       retryable: false,
     });

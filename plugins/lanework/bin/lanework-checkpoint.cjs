@@ -207,6 +207,74 @@ var import_node_path3 = require("node:path");
 // apps/desktop/electron/main/paths.ts
 var import_node_os = require("node:os");
 var import_node_path = require("node:path");
+
+// apps/desktop/shared/conversation.ts
+var CLAUDE_MODELS = [
+  { id: "claude-opus-5-5", label: "Opus 5.5", agent: "claude" },
+  { id: "claude-fable-5-1", label: "Fable 5.1", agent: "claude" },
+  { id: "claude-sonnet-5-5", label: "Sonnet 5.5", agent: "claude" },
+  { id: "claude-haiku-5-5", label: "Haiku 5.5", agent: "claude" },
+  { id: "claude-haiku-4-5", label: "Haiku 4.5", agent: "claude", legacy: true },
+  { id: "claude-sonnet-5", label: "Sonnet 5", agent: "claude", legacy: true },
+  { id: "claude-opus-5", label: "Opus 5", agent: "claude", legacy: true },
+  { id: "claude-fable-5", label: "Fable 5", agent: "claude", legacy: true },
+  { id: "claude-opus-4-8", label: "Opus 4.8", agent: "claude", legacy: true },
+  { id: "claude-opus-4-7", label: "Opus 4.7", agent: "claude", legacy: true },
+  { id: "claude-opus-4-6", label: "Opus 4.6", agent: "claude", legacy: true },
+  {
+    id: "claude-sonnet-4-6",
+    label: "Sonnet 4.6",
+    agent: "claude",
+    legacy: true
+  }
+];
+var CODEX_MODELS = [
+  { id: "gpt-6.1-sol", label: "GPT-6.1-Sol", agent: "codex" },
+  { id: "gpt-6-astra", label: "GPT-6-Astra", agent: "codex" },
+  { id: "gpt-6-sol", label: "GPT-6-Sol", agent: "codex" },
+  { id: "gpt-6-luna", label: "GPT-6-Luna", agent: "codex" },
+  { id: "gpt-5.6-sol", label: "GPT-5.6-Sol", agent: "codex", legacy: true },
+  { id: "gpt-5.6-terra", label: "GPT-5.6-Terra", agent: "codex", legacy: true },
+  { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", agent: "codex", legacy: true }
+];
+var OPENCODE_MODELS = [];
+var codexList = CODEX_MODELS;
+var opencodeList = OPENCODE_MODELS;
+var everyModel = [
+  ...CLAUDE_MODELS,
+  ...codexList,
+  ...opencodeList
+];
+var listeners = new Set;
+var TOOL_TEXT_MAX = 16 * 1024;
+var CONVERSATION_READ_MAX = 32 * 1024 * 1024;
+var PASTE_MAX = 5 * 1024 * 1024;
+var ACRONYMS = new Set([
+  "ai",
+  "api",
+  "ci",
+  "cli",
+  "css",
+  "html",
+  "json",
+  "mcp",
+  "pr",
+  "sdk",
+  "ui",
+  "url",
+  "ux"
+]);
+var PREVIEW_HOSTS = new Set([
+  "github.com",
+  "www.github.com",
+  "gist.github.com"
+]);
+
+// apps/desktop/shared/orchestration.ts
+var CONTROL_INPUT_MAX = 256 * 1024;
+var LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+// apps/desktop/electron/main/paths.ts
 var APP_HOME_NAME = ".lanew";
 function appHomeDir() {
   return process.env.LANEWORK_HOME || import_node_path.join(import_node_os.homedir(), APP_HOME_NAME);
@@ -481,7 +549,7 @@ function looksLikeUserCode(value) {
 }
 
 // apps/desktop/electron/main/auth/client.ts
-var LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]", "localhost"]);
+var LOOPBACK_HOSTS2 = new Set(["127.0.0.1", "[::1]", "localhost"]);
 var refusedApis = new Set;
 function machineFacts(name) {
   const host = import_node_os2.hostname();
