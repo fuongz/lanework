@@ -247,6 +247,7 @@ export const worktreeChannels = {
   openDefault: "worktree:open-default",
   mkdir: "worktree:mkdir",
   move: "worktree:move",
+  remove: "worktree:remove",
   status: "worktree:status",
   patch: "worktree:patch",
   fileText: "worktree:file",
@@ -354,6 +355,11 @@ export interface DesktopWorktreeApi {
     toDir: string,
     folder?: number,
   ) => Promise<{ moved: { from: string; to: string }[] }>;
+  /**
+   * Delete a relative path permanently; this cannot be undone.
+   * Directory paths keep their trailing `/`.
+   */
+  remove: (slug: string, path: string, folder?: number) => Promise<void>;
   /**
    * A path as somebody wrote it, as the repository path of the one file it
    * means.

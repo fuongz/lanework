@@ -14,9 +14,11 @@ import type {
  * Read on entry, on window focus and on request. Never on a timer and never
  * by a file watcher, the same rule as Changes (FE-22/D10).
  *
- * NOTE: Mostly read-only (FE-66/D1). The tree can make a folder and move
- * entries (`worktree.mkdir`, `worktree.move`); this store only learns what
- * they did ({@link FilesStore.addDir}, {@link FilesStore.applyMove}).
+ * NOTE: Mostly read-only (FE-66/D1). The tree can make a folder, move
+ * entries and delete one (`worktree.mkdir`, `worktree.move`,
+ * `worktree.remove`); this store only learns what they did
+ * ({@link FilesStore.addDir}, {@link FilesStore.applyMove},
+ * {@link FilesStore.applyRemove}).
  */
 
 /**
@@ -79,6 +81,38 @@ export function movedPath(path: string, moves: readonly MovedPath[]): string {
       return `${to}${path.slice(from.length)}`;
   }
   return path;
+}
+
+/** Whether `path` is `removed` or, for a removed folder, anything inside it. */
+export function removedPath(path: string, removed: string): boolean {
+  return (
+    path === removed || (removed.endsWith("/") && path.startsWith(removed))
+  );
+}
+
+/** A record keyed by path, without the keys `gone` names. */
+function dropKeys<T>(
+  record: Record<string, T>,
+  gone: (path: string) => boolean,
+): Record<string, T> {
+  const out: Record<string, T> = {};
+  for (const [path, value] of Object.entries(record))
+    if (!gone(path)) out[path] = value;
+  return out;
+}
+
+/** A listing without the paths `gone` names. */
+function dropListing(
+  listing: FileListing,
+  gone: (path: string) => boolean,
+): FileListing {
+  const keep = (paths: string[]) => paths.filter((path) => !gone(path));
+  return {
+    ...listing,
+    paths: keep(listing.paths),
+    lazy: keep(listing.lazy),
+    ignored: keep(listing.ignored),
+  };
 }
 
 /** A record keyed by path, with its keys moved. */
@@ -200,6 +234,13 @@ interface FilesStore {
    * after it reads the truth.
    */
   applyMove: (moves: readonly MovedPath[]) => void;
+  /**
+   * An entry `worktree.remove` has just deleted: a file, or a folder (`a/`)
+   * and everything in it. It leaves the listings, the made folders and what
+   * was read for it, and its tabs close. Changes nothing on disk and reads
+   * nothing; `refresh` after it reads the truth.
+   */
+  applyRemove: (path: string) => void;
   /**
    * Open a file in a tab.
    *
@@ -459,6 +500,45 @@ export const useFiles = create<FilesStore>((set, get) => {
           views: moveKeys(state.views, moves),
           viewErrors: moveKeys(state.viewErrors, moves),
           rendered: moveKeys(state.rendered, moves),
+        };
+      });
+      remember();
+    },
+
+    applyRemove: (removed) => {
+      const gone = (path: string) => removedPath(path, removed);
+      set((state) => {
+        const loaded: Record<string, FileListing> = {};
+        for (const [dir, listing] of Object.entries(state.loaded))
+          if (!gone(dir)) loaded[dir] = dropListing(listing, gone);
+        // The folder it was in stays on disk, perhaps empty now, which git's
+        // list would no longer show.
+        const parent = parentDir(removed);
+        const madeDirs = [
+          ...new Set([
+            ...state.madeDirs.filter((dir) => !gone(dir)),
+            ...(parent ? [parent] : []),
+          ]),
+        ];
+        const tabs = state.tabs.filter((tab) => !gone(tab.path));
+        // The file on screen went with it: the next tab still open to the
+        // right takes its place, as `close` does, else the one before.
+        let active = state.active;
+        if (active !== null && gone(active)) {
+          const at = state.tabs.findIndex((tab) => tab.path === active);
+          const kept = (tab: FileTab) => !gone(tab.path);
+          active =
+            (state.tabs.slice(at + 1).find(kept) ?? tabs.at(-1))?.path ?? null;
+        }
+        return {
+          base: state.base && dropListing(state.base, gone),
+          loaded,
+          madeDirs,
+          tabs,
+          active,
+          views: dropKeys(state.views, gone),
+          viewErrors: dropKeys(state.viewErrors, gone),
+          rendered: dropKeys(state.rendered, gone),
         };
       });
       remember();

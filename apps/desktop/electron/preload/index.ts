@@ -147,6 +147,8 @@ const worktree: DesktopWorktreeApi = {
     read(worktreeChannels.mkdir, slug, path, folder),
   move: (slug, from, toDir, folder) =>
     read(worktreeChannels.move, slug, from, toDir, folder),
+  remove: (slug, path, folder) =>
+    read(worktreeChannels.remove, slug, path, folder),
   status: (slug, folder) => read(worktreeChannels.status, slug, folder),
   patch: (slug) => read(worktreeChannels.patch, slug),
   fileText: (slug, path, side) =>

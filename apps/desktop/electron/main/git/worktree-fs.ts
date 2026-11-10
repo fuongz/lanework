@@ -1,5 +1,13 @@
 // Explicit changes to the Files tree, without invoking git.
-import { lstat, mkdir, realpath, rename, stat } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  unlink,
+} from "node:fs/promises";
 import {
   basename,
   dirname,
@@ -77,6 +85,29 @@ export async function makeDirectory(top: string, value: string): Promise<void> {
     if ((error as NodeJS.ErrnoException).code === "EEXIST")
       throw new Error(`"${path}" already exists. Choose another folder name.`);
     throw new Error(`Could not create "${path}": ${(error as Error).message}`);
+  }
+}
+
+/** Permanently remove an entry, keeping a symlink's target intact. */
+export async function removeEntry(top: string, value: string): Promise<void> {
+  const path = treePath(value);
+  const root = await realpath(top);
+  const full = await entryAt(root, path);
+  if (full === root)
+    throw new Error("Lanework cannot delete the repository root.");
+  const info = await lstat(full).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT")
+      throw new Error(`"${path}" is not there any more.`);
+    throw error;
+  });
+  const isDirectory = info.isDirectory();
+  if (value.endsWith("/") && !isDirectory)
+    throw new Error(`"${path}" is not a folder.`);
+  try {
+    if (isDirectory) await rm(full, { recursive: true, force: false });
+    else await unlink(full);
+  } catch (error) {
+    throw new Error(`Could not delete "${path}": ${(error as Error).message}`);
   }
 }
 

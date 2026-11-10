@@ -7,9 +7,10 @@
 //   (`subscribe`) for an unread folder that has just been expanded.
 // - A web component with its own shadow root, styled through variables on
 //   the host: see `treeHostStyle`.
-// - New Folder and drag and drop are the only writes. Both go through main
-//   (`worktree.mkdir`, `worktree.move`); the model shows the result before
-//   main answers and is put back when main refuses.
+// - New Folder, drag and drop and Delete are the only writes. All go
+//   through main (`worktree.mkdir`, `worktree.move`, `worktree.remove`). A
+//   new folder or a move shows in the model before main answers and is put
+//   back when main refuses; a delete waits for main.
 import {
   Cancel01Icon,
   FolderAddIcon,
@@ -40,6 +41,16 @@ import {
   rollUpFolders,
   treeHostStyle,
 } from "#/components/shared/diff/tree-style";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
 import {
   ContextMenu,
@@ -55,7 +66,13 @@ import {
 } from "#/components/ui/input-group";
 import { useDark } from "#/hooks/use-dark";
 import { ipcMessage } from "#/lib/ipc-error";
-import { type MovedPath, movedPath, parentDir, useFiles } from "#/stores/files";
+import {
+  type MovedPath,
+  movedPath,
+  parentDir,
+  removedPath,
+  useFiles,
+} from "#/stores/files";
 import {
   type FileListing,
   LAUNCHABLE,
@@ -185,8 +202,11 @@ export function FilesTree({
   const madeDirs = useFiles((state) => state.madeDirs);
   const addDir = useFiles((state) => state.addDir);
   const applyMove = useFiles((state) => state.applyMove);
+  const applyRemove = useFiles((state) => state.applyRemove);
   /** The last write main refused, shown above the tree until dismissed. */
   const [failure, setFailure] = useState<string | null>(null);
+  /** The row Delete… asks about, while its confirmation is open. */
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const paths = useMemo(() => {
     const seen = new Set(base.paths);
@@ -492,8 +512,42 @@ export function FilesTree({
       });
   };
 
+  /**
+   * Deletes `path` (a folder with everything in it) once main has.
+   *
+   * The row leaves the model where it is, so the folders open stay open; a
+   * rebuild would fold them shut. Then the tree is read again.
+   */
+  const remove = (path: string) => {
+    if (!slug || !surface || inGit(path)) return;
+    setFailure(null);
+    void surface
+      .remove(slug, path, folderIndex)
+      .then(() => {
+        const gone = (other: string) => removedPath(other, path);
+        if (model.getItem(path)) model.remove(path, { recursive: true });
+        shown.current = new Set([...shown.current].filter((p) => !gone(p)));
+        applyRemove(path);
+        onRefresh();
+      })
+      .catch((error: unknown) => {
+        // A folder can fail half way, with what came before already gone.
+        report(
+          error,
+          `${path.endsWith("/") ? "The folder" : "The file"} could not be deleted.`,
+        );
+        onRefresh();
+      });
+  };
+
   /** Where New Folder lands for a row: in a folder, or beside a file. */
   const pendingFolder = useRef<string | null>(null);
+  /**
+   * An item that hands focus on (New Folder's field, Delete's dialog) was
+   * picked: the closing menu then gives none back to the row. Cleared each
+   * time the menu opens.
+   */
+  const handoff = useRef(false);
 
   // The tab on screen is the row selected. After a tab click, Quick Open or
   // a chat badge, the tree opens down to it, as an editor's explorer follows
@@ -634,8 +688,14 @@ export function FilesTree({
           here does. The row comes from the event's composed path, which
           crosses the tree's (open) shadow root. Off a row, no menu. */}
       <ContextMenu
-        // New Folder starts once the menu has gone: the menu hands focus
-        // back as it closes, which would blur (and so commit) the field.
+        onOpenChange={(open) => {
+          if (open) handoff.current = false;
+        }}
+        // New Folder starts once the menu has gone, so nothing of the menu
+        // is left to take focus from the field. Not enough by itself: Base
+        // UI reads `finalFocus` only after this, as the popup unmounts, and
+        // a focus given back to the row then blurs the field, which commits
+        // a blank name, which drops the row. `handoff` says no.
         onOpenChangeComplete={(open) => {
           const parent = pendingFolder.current;
           if (open || parent === null) return;
@@ -683,14 +743,27 @@ export function FilesTree({
             path={menuPath}
             root={base.root}
             onNewFolder={() => {
+              handoff.current = true;
               pendingFolder.current = menuPath.endsWith("/")
                 ? menuPath
                 : parentDir(menuPath);
             }}
-            newFolderTaken={() => pendingFolder.current !== null}
+            onDelete={() => {
+              handoff.current = true;
+              setDeleting(menuPath);
+            }}
+            handsOff={() => handoff.current}
           />
         )}
       </ContextMenu>
+      <DeleteDialog
+        path={deleting}
+        onClose={() => setDeleting(null)}
+        onDelete={(path) => {
+          setDeleting(null);
+          remove(path);
+        }}
+      />
     </>
   );
 }
@@ -704,14 +777,17 @@ function RowMenu({
   path,
   root,
   onNewFolder,
-  newFolderTaken,
+  onDelete,
+  handsOff,
 }: {
   path: string;
   root: string;
   /** New Folder in this folder, or beside this file. */
   onNewFolder: () => void;
-  /** Whether New Folder was picked: focus then stays off the tree's row. */
-  newFolderTaken: () => boolean;
+  /** Ask whether to delete this row. */
+  onDelete: () => void;
+  /** Whether focus went on elsewhere: it then stays off the tree's row. */
+  handsOff: () => boolean;
 }) {
   const slug = useFiles((state) => state.slug);
   const folder = useFiles((state) => state.folder);
@@ -725,7 +801,7 @@ function RowMenu({
   const copy = (text: string) => run(() => navigator.clipboard.writeText(text));
 
   return (
-    <ContextMenuContent finalFocus={() => !newFolderTaken()}>
+    <ContextMenuContent finalFocus={() => !handsOff()}>
       <ContextMenuItem disabled={!surface || !slug} onClick={onNewFolder}>
         New Folder…
       </ContextMenuItem>
@@ -739,8 +815,11 @@ function RowMenu({
         Reveal in Finder
       </ContextMenuItem>
       <ContextMenuItem
-        // Opening an app or a script runs it; main refuses those too.
-        disabled={!surface || !slug || LAUNCHABLE.test(path)}
+        // Opening an app or a script runs it; main refuses those too. A
+        // folder is refused as well (files only): Reveal in Finder opens it.
+        disabled={
+          !surface || !slug || path.endsWith("/") || LAUNCHABLE.test(path)
+        }
         onClick={() =>
           slug &&
           surface &&
@@ -756,6 +835,69 @@ function RowMenu({
       <ContextMenuItem onClick={() => copy(relative)}>
         Copy Relative Path
       </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        variant="destructive"
+        // `.git` is never moved, and never deleted from here either.
+        disabled={!surface || !slug || inGit(path)}
+        onClick={onDelete}
+      >
+        Delete…
+      </ContextMenuItem>
     </ContextMenuContent>
+  );
+}
+
+/**
+ * Delete's confirmation: permanent, so Cancel has the focus.
+ *
+ * NOTE: Open while `path` is set. The name stays on screen while the dialog
+ * closes, so it is kept from the last open.
+ */
+function DeleteDialog({
+  path,
+  onClose,
+  onDelete,
+}: {
+  path: string | null;
+  onClose: () => void;
+  onDelete: (path: string) => void;
+}) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  const [shown, setShown] = useState(path);
+  if (path !== null && path !== shown) setShown(path);
+  const target = path ?? shown;
+  const isFolder = target?.endsWith("/") === true;
+  const name = target ? baseName(target).replace(/\/$/, "") : "";
+  return (
+    <AlertDialog
+      open={path !== null}
+      onOpenChange={(open) => !open && onClose()}
+    >
+      <AlertDialogContent initialFocus={cancel}>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="break-all">
+            Delete {name}?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {isFolder
+              ? "The folder and everything inside it are deleted from disk permanently. This cannot be undone."
+              : "The file is deleted from disk permanently. This cannot be undone."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel ref={cancel}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            // As every destructive confirmation here: see
+            // `projects-section.tsx`.
+            className="border-0"
+            onClick={() => path !== null && onDelete(path)}
+          >
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

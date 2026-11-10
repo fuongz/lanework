@@ -58,7 +58,7 @@ import {
   unstage,
   viewFile,
 } from "./worktree";
-import { makeDirectory, moveEntries } from "./worktree-fs";
+import { makeDirectory, moveEntries, removeEntry } from "./worktree-fs";
 
 /**
  * Register a worktree handler: a read the git gate held back is answered as
@@ -397,6 +397,13 @@ export function registerWorktree(devUrl?: string): void {
       await top(slugOf(args[0]), folderOf(args[3])),
       pathsOf(args[1]),
       args[2],
+    );
+  });
+
+  handle(worktreeChannels.remove, devUrl, async (args): Promise<void> => {
+    await removeEntry(
+      await top(slugOf(args[0]), folderOf(args[2])),
+      pathOf(args[1]),
     );
   });
 
