@@ -23,6 +23,7 @@ import { cn } from "#/lib/utils";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { awaitingKey, useAwaiting } from "#/stores/awaiting";
 import { useChatEngines } from "#/stores/chat-engines";
+import { notify } from "#/stores/notify";
 
 // The sessions a conductor started (FE-128), on its chat's title bar.
 //
@@ -166,6 +167,7 @@ function SessionRow({
     setConfirming(false);
     void window.desktop?.conversation
       .close(project, session.id)
+      .then(() => notify("success", `Stopped ${title}`))
       .catch(() => {})
       .finally(() => void refreshChats(project));
   };

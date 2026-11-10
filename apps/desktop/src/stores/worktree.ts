@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { ipcMessage } from "#/lib/ipc-error";
 import { readStored, writeStored } from "#/lib/stored";
 import { desktopSurface } from "#/server/desktop";
+import { notify } from "#/stores/notify";
 import type { AgentFileMarks } from "../../shared/terminal";
 import {
   type BranchList,
@@ -22,6 +23,46 @@ import {
  * another app changes when the person comes back to this one, which is when
  * the focus refresh runs.
  */
+
+const SYNC_LOADING: Record<SyncAction, string> = {
+  fetch: "Fetching…",
+  pull: "Pulling…",
+  "pull-rebase": "Pulling…",
+  push: "Pushing…",
+  "force-push": "Force pushing…",
+};
+
+/** A failed sync's title; git's own words go under it, in the panel. */
+const SYNC_FAILED: Record<SyncAction, string> = {
+  fetch: "Fetch failed",
+  pull: "Pull failed",
+  "pull-rebase": "Pull failed",
+  push: "Push failed",
+  "force-push": "Force push failed",
+};
+
+function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+/** The success title of a sync; `toPush` is what was unpushed before it. */
+function syncTitle(action: SyncAction, toPush: number, remote: string): string {
+  switch (action) {
+    case "fetch":
+      return "Fetched";
+    case "pull":
+      return "Pulled";
+    case "pull-rebase":
+      return "Pulled and rebased";
+    case "push":
+    case "force-push": {
+      const verb = action === "push" ? "Pushed" : "Force pushed";
+      return toPush > 0
+        ? `${verb} ${plural(toPush, "commit")} to ${remote}`
+        : `${verb} to ${remote}`;
+    }
+  }
+}
 
 export type DiffStyle = "split" | "unified";
 
@@ -307,6 +348,48 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     }
   }
 
+  /**
+   * Run `act` under one toast: loading, then the result.
+   *
+   * `act` keeps its failure in `actionError` rather than throwing, so it is
+   * turned back into a rejection here. A run that ended without either (the
+   * project changed under it) closes the toast instead of claiming a result.
+   *
+   * @param success Titles for the toast once the action landed.
+   * @param failed The title of a failure. Git's message is its description,
+   *   not its title: as a title it was cut to one line in the pill, with
+   *   nothing to open to read the rest.
+   */
+  function toasted(
+    loading: string,
+    run: () => Promise<boolean>,
+    success: () => { title: string; description?: string; meta?: string },
+    failed: string,
+  ): Promise<boolean> {
+    let landed = false;
+    const settled = run().then((done) => {
+      landed = done;
+      if (done) return;
+      const reason = get().actionError;
+      if (reason) throw new Error(reason);
+    });
+    const id = notify.promise(settled, {
+      loading,
+      success: () => success(),
+      error: (error) => ({
+        title: failed,
+        description: error instanceof Error ? error.message : undefined,
+      }),
+    });
+    return settled.then(
+      () => {
+        if (!landed) notify.dismiss(id);
+        return landed;
+      },
+      () => false,
+    );
+  }
+
   return {
     slug: null,
     state: null,
@@ -419,8 +502,21 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
       // The placeholder is the message when the box is empty (FE-22/D9). It
       // is what the button promised; refusing to commit would surprise.
       const message = explicit?.trim() || get().message.trim() || fallback;
-      const done = await act("commit", (slug) =>
-        desktopSurface("worktree").commit(slug, message, mode),
+      const done = await toasted(
+        "Committing…",
+        () =>
+          act("commit", (slug) =>
+            desktopSurface("worktree").commit(slug, message, mode),
+          ),
+        () => {
+          const { state } = get();
+          const branch = state?.kind === "ready" ? state.branch.name : null;
+          return {
+            title: branch ? `Committed to ${branch}` : "Committed",
+            description: message.split("\n")[0],
+          };
+        },
+        "Commit failed",
       );
       if (done) {
         set({ message: "" });
@@ -433,8 +529,23 @@ export const useWorktree = create<WorktreeStore>((set, get) => {
     },
 
     sync: async (action, remote) => {
-      const done = await act(action, (slug) =>
-        desktopSurface("worktree").sync(slug, action, remote ?? null),
+      const before = get().state;
+      const toPush =
+        before?.kind === "ready"
+          ? Math.max(before.unpushed, before.branch.ahead ?? 0)
+          : 0;
+      const where = remote ?? "origin";
+      const done = await toasted(
+        SYNC_LOADING[action],
+        () =>
+          act(action, (slug) =>
+            desktopSurface("worktree").sync(slug, action, remote ?? null),
+          ),
+        () => ({
+          title: syncTitle(action, toPush, where),
+          meta: remote,
+        }),
+        SYNC_FAILED[action],
       );
       // A pull brings commits in, and every sync moves the remote refs that
       // say which commits are unpushed; History's first page is read again on

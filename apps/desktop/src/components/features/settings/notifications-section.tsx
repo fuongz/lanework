@@ -17,6 +17,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "#/components/ui/select";
+import { Switch } from "#/components/ui/switch";
+import { usePreferences } from "#/stores/preferences";
 
 const DELIVERY_LABELS: Record<NotificationDelivery, string> = {
   push: "Push",
@@ -83,6 +85,8 @@ function TestButton() {
  */
 export function NotificationsSection() {
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
+  const islandSound = usePreferences((state) => state.islandSound);
+  const setIslandSound = usePreferences((state) => state.setIslandSound);
 
   useEffect(() => {
     let disposed = false;
@@ -171,6 +175,25 @@ export function NotificationsSection() {
                   label="Orchestration run notifications"
                   value={settings?.runs ?? null}
                   onChange={(value) => change("runs", value)}
+                />
+              ),
+            },
+          ],
+        },
+        {
+          title: "In the app",
+          rows: [
+            {
+              label: "Island sounds",
+              description:
+                "A short tone when a notice succeeds, fails or warns. Off by default.",
+              keywords:
+                "island sound sounds tone chime beep audio notice toast success error warning",
+              control: (
+                <Switch
+                  aria-label="Island sounds"
+                  checked={islandSound}
+                  onCheckedChange={setIslandSound}
                 />
               ),
             },

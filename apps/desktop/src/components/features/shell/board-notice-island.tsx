@@ -5,21 +5,21 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useParams } from "@tanstack/react-router";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
-import {
-  ISLAND_HOST,
-  ISLAND_HOST_TOP,
-  ISLAND_LEAVE_MS,
-  ISLAND_MORPH,
-  ISLAND_PANEL_RADIUS,
-  ISLAND_PILL_RADIUS,
-  ISLAND_SURFACE,
-  ISLAND_SWAP,
-} from "#/components/shared/agents/harness-island";
+import { useEffect, useRef } from "react";
+import { ISLAND_LEAVE_MS } from "#/components/shared/agents/harness-island";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 import { useBoard } from "#/stores/board";
+import {
+  announceIsland,
+  ISLAND_PRIORITY,
+  type IslandTone,
+  setIslandOpen,
+  useIsland,
+  useIslandContent,
+  useIslandFoldOutside,
+  useIslandShowing,
+} from "#/stores/island";
 import type { BoardConflict } from "../../../../shared/projects";
 
 /** How long a notice stays open before it folds into its pill (FE-63/D2a). */
@@ -76,45 +76,56 @@ export function useBoardNotice(): Notice | null {
   return { error, conflict, hasView, offline };
 }
 
+const BOARD_NOTICE_ISLAND_ID = "boardNotice";
+
+/** Its kind, as the specs read it: a lost race speaks over the rest. */
+function kindOf(notice: Notice): Kind {
+  return notice.conflict ? "conflict" : notice.error ? "error" : "offline";
+}
+
+const TONE: Record<Kind, IslandTone> = {
+  conflict: "neutral",
+  error: "error",
+  offline: "warning",
+};
+
 /**
- * A board notice as an island: the harness island's black capsule, in the
- * same place, saying a change did not save or lost a race.
+ * The board's notice on the island: a change did not save or lost a race.
  *
- * - It arrives open, unlike the harness island, since it answers something
+ * - It arrives open, unlike the harness offer, since it answers something
  *   somebody just did, and folds into its pill after `OPEN_MS`. The pill
  *   stays until Dismiss: a failed write that vanished by itself would take
  *   the only record of it along. A pointer over it, or focus in it, holds it
- *   open.
+ *   open; a press outside folds it.
  * - Offline is a condition of the window, not something that happened once.
  *   It arrives open like the rest, but its pill has no Dismiss and stays as
  *   long as the board is the saved copy. A failed write or a lost race
  *   speaks over it while both are up.
+ * - Only an open microphone outranks it ({@link ISLAND_PRIORITY}); while one
+ *   has the island it says nothing, and it arrives open again after.
  * - NOTE: Opening by itself never takes focus, and Escape is heard only from
  *   inside it. A document-wide Escape for five seconds would close the
  *   dialog or the issue somebody was in.
+ *
+ * Draws nothing itself: `<IslandHost/>` in the shell does.
  */
-export function BoardNoticeIsland({ notice }: { notice: Notice | null }) {
+export function BoardNoticeIsland() {
+  const notice = useBoardNotice();
   const dismiss = useBoard((state) => state.dismiss);
-  const [open, setOpen] = useState(true);
-  const [pinned, setPinned] = useState(false);
+  const showing = useIslandShowing(BOARD_NOTICE_ISLAND_ID);
   const timer = useRef<number | undefined>(undefined);
-  const island = useRef<HTMLDivElement>(null);
-  const reduced = useReducedMotion() ?? false;
-  // The last notice, kept for the island's way out: dismissed, it shrinks
-  // away still saying what it said rather than going blank first.
-  const last = useRef<Notice | null>(null);
-  if (notice) last.current = notice;
-  const shown = notice ?? last.current;
-  const error = notice?.error ?? null;
-  const conflict = notice?.conflict ?? null;
-  const offline = notice?.offline ?? false;
+  useIslandFoldOutside(BOARD_NOTICE_ISLAND_ID);
+  // What it says while it has the island; nothing while it waits under one.
+  const error = showing ? (notice?.error ?? null) : null;
+  const conflict = showing ? (notice?.conflict ?? null) : null;
+  const offline = showing ? (notice?.offline ?? false) : false;
 
   const fold = (after: number) => {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      setOpen(false);
-      setPinned(false);
-    }, after);
+    timer.current = window.setTimeout(
+      () => setIslandOpen(BOARD_NOTICE_ISLAND_ID, false),
+      after,
+    );
   };
   const hold = () => window.clearTimeout(timer.current);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -124,119 +135,75 @@ export function BoardNoticeIsland({ notice }: { notice: Notice | null }) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: `fold` is fresh each render and only reads refs.
   useEffect(() => {
     if (!error && !conflict && !offline) return;
-    setOpen(true);
-    setPinned(false);
+    setIslandOpen(BOARD_NOTICE_ISLAND_ID, true);
     fold(OPEN_MS);
   }, [error, conflict, offline]);
 
-  // Open: a press anywhere else folds it.
+  // Worded apart from what the island shows, so the sentence on screen is
+  // found once. A failed write interrupts; the rest wait their turn.
+  const alert = error ? `Board: ${error}` : "";
   useEffect(() => {
-    if (!open) return;
-    const onDown = (event: PointerEvent) => {
-      if (island.current?.contains(event.target as Node)) return;
-      window.clearTimeout(timer.current);
-      setOpen(false);
-      setPinned(false);
-    };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
-  }, [open]);
+    if (alert) announceIsland(alert, "assertive");
+  }, [alert]);
+  const raced = conflict
+    ? "Your change was not applied: the card changed on the board."
+    : "";
+  const saved = offline ? "Offline: changes to this board will not save." : "";
+  const said = useRef({ raced: "", saved: "" });
+  useEffect(() => {
+    // Said together when both change at once, since one would replace the
+    // other in the host's polite region.
+    const fresh = [
+      raced !== said.current.raced ? raced : "",
+      saved !== said.current.saved ? saved : "",
+    ].filter(Boolean);
+    said.current = { raced, saved };
+    if (fresh.length > 0) announceIsland(fresh.join(" "));
+  }, [raced, saved]);
 
-  const visible = notice !== null;
-  const view = open ? "panel" : "pill";
-  return (
-    <div
-      data-testid="board-notice-host"
-      className={ISLAND_HOST}
-      style={{ top: ISLAND_HOST_TOP }}
-    >
-      {/* Worded apart from what the island shows, so the sentence on screen
-          is found once. */}
-      <p className="sr-only" role="alert">
-        {error ? `Board: ${error}` : ""}
-      </p>
-      <p className="sr-only" role="status" aria-live="polite">
-        {conflict
-          ? "Your change was not applied: the card changed on the board."
-          : ""}
-      </p>
-      <p className="sr-only" role="status" aria-live="polite">
-        {offline ? "Offline: changes to this board will not save." : ""}
-      </p>
-      <AnimatePresence initial={false} mode="popLayout">
-        {visible && (
-          <motion.div
-            key={reduced ? view : "island"}
-            ref={island}
-            data-testid="board-notice-island"
-            data-state={
-              shown?.conflict ? "conflict" : shown?.error ? "error" : "offline"
-            }
-            data-view={view}
-            layout={!reduced}
-            transition={reduced ? { duration: 0.2 } : ISLAND_MORPH}
-            initial={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
-            style={{
-              borderRadius: open ? ISLAND_PANEL_RADIUS : ISLAND_PILL_RADIUS,
-            }}
-            onPointerEnter={() => {
-              hold();
-              setOpen(true);
-            }}
-            onPointerLeave={() => {
-              if (!pinned) fold(ISLAND_LEAVE_MS);
-            }}
-            onFocus={hold}
-            onBlur={(event) => {
-              if (pinned || island.current?.contains(event.relatedTarget))
-                return;
+  useIslandContent(
+    notice
+      ? {
+          id: BOARD_NOTICE_ISLAND_ID,
+          priority: ISLAND_PRIORITY.boardNotice,
+          tone: TONE[kindOf(notice)],
+          label: "Board notice",
+          open: true,
+          attributes: {
+            "data-testid": "board-notice-island",
+            "data-state": kindOf(notice),
+          },
+          onHold: (held) => {
+            if (held) hold();
+            else if (!useIsland.getState().pinned[BOARD_NOTICE_ISLAND_ID])
               fold(ISLAND_LEAVE_MS);
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "Escape") return;
-              hold();
-              setOpen(false);
-              setPinned(false);
-            }}
-            className={ISLAND_SURFACE}
-          >
-            <AnimatePresence initial={false} mode="popLayout">
-              <motion.div
-                key={view}
-                layout={reduced ? false : "position"}
-                initial={{ opacity: 0, filter: "blur(4px)" }}
-                animate={{ opacity: 1, filter: "blur(0px)" }}
-                exit={{ opacity: 0, filter: "blur(4px)" }}
-                transition={ISLAND_SWAP}
-              >
-                {open && shown ? (
-                  <Panel
-                    notice={shown}
-                    focus={pinned}
-                    onDismiss={() => {
-                      hold();
-                      dismiss();
-                    }}
-                  />
-                ) : shown ? (
-                  <Pill
-                    notice={shown}
-                    onOpen={() => {
-                      hold();
-                      setPinned(true);
-                      setOpen(true);
-                    }}
-                  />
-                ) : null}
-              </motion.div>
-            </AnimatePresence>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+          },
+          onEscape: () => {
+            hold();
+            setIslandOpen(BOARD_NOTICE_ISLAND_ID, false);
+          },
+          pill: (context) => (
+            <Pill
+              notice={notice}
+              onOpen={() => {
+                hold();
+                context.setOpen(true, true);
+              }}
+            />
+          ),
+          panel: () => (
+            <Panel
+              notice={notice}
+              onDismiss={() => {
+                hold();
+                dismiss();
+              }}
+            />
+          ),
+        }
+      : null,
   );
+  return null;
 }
 
 type Kind = "error" | "conflict" | "offline";
@@ -269,11 +236,7 @@ function Glyph({ kind, className }: { kind: Kind; className?: string }) {
  * that carries somebody else's change, and the panel shows both anyway.
  */
 function Pill({ notice, onOpen }: { notice: Notice; onOpen: () => void }) {
-  const kind: Kind = notice.conflict
-    ? "conflict"
-    : notice.error
-      ? "error"
-      : "offline";
+  const kind = kindOf(notice);
   const text =
     kind === "conflict"
       ? CONFLICT_TITLE
@@ -302,25 +265,16 @@ function Pill({ notice, onOpen }: { notice: Notice; onOpen: () => void }) {
 /** The open island: what happened, in full, and Dismiss. */
 function Panel({
   notice,
-  focus,
   onDismiss,
 }: {
   notice: Notice;
-  /** Opened by a click or the keyboard: take focus, since the pill is gone. */
-  focus: boolean;
   onDismiss: () => void;
 }) {
-  const self = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (focus) self.current?.focus({ preventScroll: true });
-  }, [focus]);
   const { conflict, error, hasView, offline } = notice;
   return (
     <section
-      ref={self}
-      tabIndex={-1}
       aria-label="Board notice"
-      className="flex w-[min(380px,calc(100vw-32px))] flex-col gap-3 p-4 pt-3.5 outline-none select-text"
+      className="flex w-[min(380px,calc(100vw-32px))] flex-col gap-3 p-4 pt-3.5 select-text"
     >
       {conflict && (
         <div className="flex items-start gap-2">

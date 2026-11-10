@@ -5,21 +5,19 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
-import {
-  HarnessIcon,
-  ISLAND_HOST,
-  ISLAND_HOST_TOP,
-  ISLAND_LEAVE_MS,
-  ISLAND_MORPH,
-  ISLAND_PANEL_RADIUS,
-  ISLAND_PILL_RADIUS,
-  ISLAND_SURFACE,
-  ISLAND_SWAP,
-} from "#/components/shared/agents/harness-island";
+import { useEffect, useState } from "react";
+import { HarnessIcon } from "#/components/shared/agents/harness-island";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
+import {
+  announceIsland,
+  ISLAND_PRIORITY,
+  type IslandTone,
+  setIslandOpen,
+  useIslandContent,
+  useIslandFoldOutside,
+  useIslandShowing,
+} from "#/stores/island";
 import {
   cloudAgents,
   MCP_LOGIN_COMMAND,
@@ -118,135 +116,73 @@ function Spinner({ className }: { className?: string }) {
   );
 }
 
+const MCP_AUTH_ISLAND_ID = "mcpAuth";
+
+const TONE: Record<Shown, IslandTone> = {
+  login: "loading",
+  done: "success",
+  failed: "error",
+  "needs-login": "warning",
+};
+
 /**
- * The Lanework MCP sign-in island, in the harness island's capsule and spot.
+ * The Lanework MCP sign-in on the island.
  *
  * It speaks when Claude Code or Codex lost, or never had, its token for the
  * cloud board, or holds one the server will not take.
  *
  * - It arrives as a pill and opens on hover or a click, like the harness
- *   island: nothing the user just did caused it, so it does not take the top
+ *   offer: nothing the user just did caused it, so it does not take the top
  *   of the window by itself. The pill stays until the agent signs in, or the
  *   user dismisses that answer; a later, different answer brings it back.
- * - `yieldTo`: a board notice outranks it, since that answers something the
- *   user just did. It outranks the harness update offer, which yields to it.
+ *   Escape anywhere, or a press outside, folds it.
+ * - A microphone, a board notice and a waiting agent outrank it; it outranks
+ *   the harness update offer ({@link ISLAND_PRIORITY}). It folds while
+ *   something else has the island.
+ *
+ * Draws nothing itself: `<IslandHost/>` in the shell does.
  */
-export function McpAuthIsland({ yieldTo = false }: { yieldTo?: boolean }) {
+export function McpAuthIsland() {
   const rows = useMcpAuthRows();
   const top = lead(rows);
-  const [open, setOpen] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const leaveTimer = useRef<number | undefined>(undefined);
-  const island = useRef<HTMLDivElement>(null);
-  const reduced = useReducedMotion() ?? false;
-  const visible = rows.length > 0 && !yieldTo;
+  const showing = useIslandShowing(MCP_AUTH_ISLAND_ID);
+  useIslandFoldOutside(MCP_AUTH_ISLAND_ID, { escapeAnywhere: true });
 
-  useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
+  // Gone means folded: the next time it shows, it starts as a pill.
   useEffect(() => {
-    if (visible) return;
-    setOpen(false);
-    setPinned(false);
-  }, [visible]);
+    if (!showing) setIslandOpen(MCP_AUTH_ISLAND_ID, false);
+  }, [showing]);
 
-  // A click opened it: Escape or a click anywhere else folds it.
+  const said = showing ? announce(top) : "";
   useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      setPinned(false);
-    };
-    const onDown = (event: PointerEvent) => {
-      if (island.current?.contains(event.target as Node)) return;
-      setOpen(false);
-      setPinned(false);
-    };
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("pointerdown", onDown);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", onDown);
-    };
-  }, [open]);
+    if (said) announceIsland(said);
+  }, [said]);
 
-  const enter = () => {
-    window.clearTimeout(leaveTimer.current);
-    setOpen(true);
-  };
-  const leave = () => {
-    if (pinned) return;
-    window.clearTimeout(leaveTimer.current);
-    leaveTimer.current = window.setTimeout(
-      () => setOpen(false),
-      ISLAND_LEAVE_MS,
-    );
-  };
-
-  const view = open ? "panel" : "pill";
-  return (
-    <div
-      data-testid="mcp-auth-island-host"
-      className={ISLAND_HOST}
-      style={{ top: ISLAND_HOST_TOP }}
-    >
-      <p className="sr-only" role="status" aria-live="polite">
-        {visible ? announce(top) : ""}
-      </p>
-      <AnimatePresence initial={false} mode="popLayout">
-        {visible && top && (
-          <motion.div
-            key={reduced ? view : "island"}
-            ref={island}
-            data-testid="mcp-auth-island"
-            data-state={top.shown}
-            data-view={view}
-            layout={!reduced}
-            transition={reduced ? { duration: 0.2 } : ISLAND_MORPH}
-            initial={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
-            style={{
-              borderRadius: open ? ISLAND_PANEL_RADIUS : ISLAND_PILL_RADIUS,
-            }}
-            onPointerEnter={enter}
-            onPointerLeave={leave}
-            className={ISLAND_SURFACE}
-          >
-            <AnimatePresence initial={false} mode="popLayout">
-              <motion.div
-                key={view}
-                layout={reduced ? false : "position"}
-                initial={{ opacity: 0, filter: "blur(4px)" }}
-                animate={{ opacity: 1, filter: "blur(0px)" }}
-                exit={{ opacity: 0, filter: "blur(4px)" }}
-                transition={ISLAND_SWAP}
-              >
-                {open ? (
-                  <Panel
-                    rows={rows}
-                    focus={pinned}
-                    onClose={() => {
-                      setOpen(false);
-                      setPinned(false);
-                    }}
-                  />
-                ) : (
-                  <Pill
-                    row={top}
-                    more={rows.length - 1}
-                    onOpen={() => {
-                      setPinned(true);
-                      setOpen(true);
-                    }}
-                  />
-                )}
-              </motion.div>
-            </AnimatePresence>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+  useIslandContent(
+    top
+      ? {
+          id: MCP_AUTH_ISLAND_ID,
+          priority: ISLAND_PRIORITY.mcpAuth,
+          tone: TONE[top.shown],
+          label: "Lanework MCP sign-in",
+          attributes: {
+            "data-testid": "mcp-auth-island",
+            "data-state": top.shown,
+          },
+          pill: (context) => (
+            <Pill
+              row={top}
+              more={rows.length - 1}
+              onOpen={() => context.setOpen(true, true)}
+            />
+          ),
+          panel: (context) => (
+            <Panel rows={rows} onClose={() => context.setOpen(false)} />
+          ),
+        }
+      : null,
   );
+  return null;
 }
 
 function Glyph({ shown, className }: { shown: Shown; className?: string }) {
@@ -303,26 +239,13 @@ const PILL_BUTTON =
   "h-7 rounded-full px-3 text-[12px] focus-visible:ring-white/40 disabled:opacity-100";
 
 /** The open island: one row per agent, and what to do about it. */
-function Panel({
-  rows,
-  focus,
-  onClose,
-}: {
-  rows: Row[];
-  /** Opened by a click or the keyboard: take focus, since the pill is gone. */
-  focus: boolean;
-  onClose: () => void;
-}) {
+function Panel({ rows, onClose }: { rows: Row[]; onClose: () => void }) {
   const login = useMcpAuth((state) => state.login);
   const cancelLogin = useMcpAuth((state) => state.cancelLogin);
   const check = useMcpAuth((state) => state.check);
   const dismiss = useMcpAuth((state) => state.dismiss);
   const view = useMcpAuth((state) => state.view);
   const [error, setError] = useState<string | null>(null);
-  const self = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (focus) self.current?.focus({ preventScroll: true });
-  }, [focus]);
 
   async function signIn(agent: LaneworkMcpAgent) {
     setError(null);
@@ -335,10 +258,8 @@ function Panel({
 
   return (
     <section
-      ref={self}
-      tabIndex={-1}
       aria-label="Lanework MCP sign-in"
-      className="flex w-[min(360px,calc(100vw-32px))] flex-col gap-3 p-4 pt-3.5 outline-none"
+      className="flex w-[min(360px,calc(100vw-32px))] flex-col gap-3 p-4 pt-3.5"
     >
       <header className="flex items-center justify-between gap-2">
         <h2 className="text-[13px] font-semibold tracking-tight">

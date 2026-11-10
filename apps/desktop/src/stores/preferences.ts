@@ -142,6 +142,12 @@ interface Preferences {
   hiddenModels: string[];
   setModelsHidden: (ids: readonly string[], hidden: boolean) => void;
   /**
+   * Whether the island's toasts make a sound: a short synthesized cue per
+   * new toast or change of status. Off unless turned on.
+   */
+  islandSound: boolean;
+  setIslandSound: (value: boolean) => void;
+  /**
    * True once `persist.rehydrate()` has settled.
    *
    * NOTE: Read this before branching on `onboarded`. Hydration is skipped at
@@ -188,6 +194,8 @@ export const usePreferences = create<Preferences>()(
             else next.delete(id);
           return { hiddenModels: readHidden([...next]) };
         }),
+      islandSound: false,
+      setIslandSound: (islandSound) => set({ islandSound }),
       hydrated: false,
     }),
     {
@@ -205,6 +213,7 @@ export const usePreferences = create<Preferences>()(
         dictationLocale,
         dictationCorrections,
         hiddenModels,
+        islandSound,
       }) => ({
         theme,
         onboarded,
@@ -215,6 +224,7 @@ export const usePreferences = create<Preferences>()(
         dictationLocale,
         dictationCorrections,
         hiddenModels,
+        islandSound,
       }),
       onRehydrateStorage: () => () =>
         usePreferences.setState({ hydrated: true }),
@@ -240,6 +250,8 @@ export const usePreferences = create<Preferences>()(
             : "vi_VN",
           dictationCorrections: readCorrections(saved?.dictationCorrections),
           hiddenModels: readHidden(saved?.hiddenModels),
+          // Missing, or anything but true, reads as off.
+          islandSound: saved?.islandSound === true,
           // A record without this key belongs to someone who has already used
           // the app; only a machine with nothing saved is new. Otherwise the
           // tour would replay for every install that predates it.

@@ -50,6 +50,7 @@ import { useAgentTerminals } from "#/stores/agent-terminals";
 import { useBoard } from "#/stores/board";
 import { NO_CHATS, useChatEngines } from "#/stores/chat-engines";
 import { useOpenProject } from "#/stores/last-route";
+import { notify } from "#/stores/notify";
 import { type ProjectSort, usePreferences } from "#/stores/preferences";
 import { isLocalProject } from "#/stores/session";
 import { ProjectReorderList } from "./project-reorder-list";
@@ -275,9 +276,13 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
     projects.length > 1 && projects.every((entry) => entry.id !== null);
   const reorder = (slugs: string[]) => {
     setReorderFailed(null);
-    void reorderProjects(slugs).then(
-      (result) => result.error && setReorderFailed(result.error),
-    );
+    void reorderProjects(slugs).then((result) => {
+      if (!result.error) return;
+      setReorderFailed(result.error);
+      notify("error", "Could not save the order", {
+        description: result.error,
+      });
+    });
   };
 
   const go = (slug: string) => {

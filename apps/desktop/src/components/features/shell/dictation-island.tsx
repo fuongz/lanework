@@ -1,14 +1,12 @@
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
-import {
-  ISLAND_HOST,
-  ISLAND_HOST_TOP,
-  ISLAND_MORPH,
-  ISLAND_PILL_RADIUS,
-  ISLAND_SURFACE,
-} from "#/components/shared/agents/harness-island";
+import { useEffect, useState } from "react";
+import { ISLAND_PILL_RADIUS } from "#/components/shared/agents/harness-island";
 import { DictationWaveform } from "#/components/shared/conversation/dictation-waveform";
 import { type LiveDictation, useLiveDictation } from "#/stores/dictation";
+import {
+  announceIsland,
+  ISLAND_PRIORITY,
+  useIslandContent,
+} from "#/stores/island";
 
 /** "01:05", as the recording's running time. */
 function elapsed(since: number | null, now: number): string {
@@ -17,56 +15,51 @@ function elapsed(since: number | null, now: number): string {
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-/** Whether a dictation is listening; the other islands give way to it. */
+/** Whether a dictation is listening. */
 export function useDictationUp(): boolean {
   return useLiveDictation((state) => state.live !== null);
 }
 
+const DICTATION_ISLAND_ID = "dictation";
+
 /**
- * The open microphone: a black capsule in the islands' spot, with the level
- * in red, the running time and a stop.
+ * The open microphone on the island, with the level in red, the running time
+ * and a stop.
  *
  * It makes it plain from anywhere in the window that Lanework is listening.
  *
- * - It outranks every other island while it is up. An update offer or a
- *   board notice can wait a minute; an open microphone nobody noticed
- *   cannot.
+ * - It outranks every other content while it is up ({@link ISLAND_PRIORITY}).
+ *   An update offer or a board notice can wait a minute; an open microphone
+ *   nobody noticed cannot.
  * - Stop keeps the words, like ✓ in the composer: the red square reads as
  *   "end the recording", not "throw it away". ✕ and Esc stay in the
  *   composer.
+ *
+ * Draws nothing itself: `<IslandHost/>` in the shell does.
  */
 export function DictationIsland() {
   const live = useLiveDictation((state) => state.live);
-  const reduced = useReducedMotion() ?? false;
-  // The last dictation, kept for the island's way out: it shrinks away still
-  // showing its time rather than going blank first.
-  const last = useRef<LiveDictation | null>(null);
-  if (live) last.current = live;
-  const shown = live ?? last.current;
-  return (
-    <div className={ISLAND_HOST} style={{ top: ISLAND_HOST_TOP }}>
-      <p className="sr-only" role="status" aria-live="polite">
-        {live?.status === "listening" ? "Dictation: listening" : ""}
-      </p>
-      <AnimatePresence initial={false}>
-        {live && shown && (
-          <motion.div
-            key="dictation"
-            data-testid="dictation-island"
-            data-status={shown.status}
-            transition={reduced ? { duration: 0.2 } : ISLAND_MORPH}
-            initial={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
-            style={{ borderRadius: ISLAND_PILL_RADIUS + 6 }}
-            className={ISLAND_SURFACE}
-          >
-            <Capsule live={shown} />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+  const said = live?.status === "listening" ? "Dictation: listening" : "";
+  useEffect(() => {
+    if (said) announceIsland(said);
+  }, [said]);
+  useIslandContent(
+    live
+      ? {
+          id: DICTATION_ISLAND_ID,
+          priority: ISLAND_PRIORITY.dictation,
+          tone: "neutral",
+          label: "Dictation",
+          pillRadius: ISLAND_PILL_RADIUS + 6,
+          attributes: {
+            "data-testid": "dictation-island",
+            "data-status": live.status,
+          },
+          pill: () => <Capsule live={live} />,
+        }
+      : null,
   );
+  return null;
 }
 
 function Capsule({ live }: { live: LiveDictation }) {

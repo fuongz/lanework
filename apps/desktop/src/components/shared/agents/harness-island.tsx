@@ -5,19 +5,23 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  AnimatePresence,
-  motion,
-  type Transition,
-  useReducedMotion,
-} from "motion/react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import type { Transition } from "motion/react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "#/components/ui/button";
 import { ClaudeAiIcon } from "#/components/ui/svgs/claudeAiIcon";
 import { CodexDark } from "#/components/ui/svgs/codexDark";
 import { OpencodeDark } from "#/components/ui/svgs/opencodeDark";
 import { cn } from "#/lib/utils";
 import { useHarness, useHarnessWatch } from "#/stores/harness";
+import {
+  announceIsland,
+  ISLAND_PRIORITY,
+  type IslandTone,
+  setIslandOpen,
+  useIslandContent,
+  useIslandFoldOutside,
+  useIslandShowing,
+} from "#/stores/island";
 import {
   type HarnessAgent,
   type HarnessInfo,
@@ -170,145 +174,70 @@ function announce(row: Row | undefined): string {
   }
 }
 
+const HARNESS_ISLAND_ID = "harness";
+
+const TONE: Record<Row["shown"], IslandTone> = {
+  updating: "loading",
+  done: "success",
+  failed: "error",
+  available: "info",
+};
+
 /**
- * The harness update island: a black capsule at the top centre of the window
- * that says a newer Claude Code or Codex is out, and updates it.
+ * The harness update offer on the island: a newer Claude Code or Codex is
+ * out, and updating it.
  *
- * - It floats (fixed, over the title bar's edge and the page) and takes no
- *   layout space, so nothing under it moves when it comes and goes. It shows
- *   only while an update is pending, running, or has just finished.
+ * - It shows only while an update is pending, running, or has just finished,
+ *   and below everything else ({@link ISLAND_PRIORITY}): an offer waits for
+ *   a microphone, a notice, a waiting agent and a sign-in.
  * - It opens on hover or a click, never by itself: an update is an offer,
- *   not something to put in front of the work.
- * - NOTE: Only the capsule is `no-drag`. The wrapper across the window has
- *   no region, so the title bar either side still drags the window. It is
- *   mounted last in the shell, because a later region wins over the title
- *   bar's drag strip.
+ *   not something to put in front of the work. Escape anywhere, or a press
+ *   outside, folds it, and it folds while something else has the island.
  *
- * @param yieldTo true while a board notice has the island (FE-63). A failed
- *   write outranks an offer, so the pill steps aside and comes back once the
- *   notice is dismissed.
+ * Draws nothing itself: `<IslandHost/>` in the shell does.
  */
-export function HarnessIsland({ yieldTo = false }: { yieldTo?: boolean }) {
+export function HarnessIsland() {
   useHarnessWatch();
   const rows = useRows();
   const top = lead(rows);
-  const [open, setOpen] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const leaveTimer = useRef<number | undefined>(undefined);
-  const island = useRef<HTMLDivElement>(null);
-  const reduced = useReducedMotion() ?? false;
-  const visible = rows.length > 0 && !yieldTo;
+  const showing = useIslandShowing(HARNESS_ISLAND_ID);
+  useIslandFoldOutside(HARNESS_ISLAND_ID, { escapeAnywhere: true });
 
-  useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
-  // Gone means folded: the next one starts as a pill.
+  // Gone means folded: the next time it shows, it starts as a pill.
   useEffect(() => {
-    if (visible) return;
-    setOpen(false);
-    setPinned(false);
-  }, [visible]);
+    if (!showing) setIslandOpen(HARNESS_ISLAND_ID, false);
+  }, [showing]);
 
-  // A click opened it: Escape or a click anywhere else folds it.
+  const said = showing ? announce(top) : "";
   useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      setPinned(false);
-    };
-    const onDown = (event: PointerEvent) => {
-      if (island.current?.contains(event.target as Node)) return;
-      setOpen(false);
-      setPinned(false);
-    };
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("pointerdown", onDown);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", onDown);
-    };
-  }, [open]);
+    if (said) announceIsland(said);
+  }, [said]);
 
-  const enter = () => {
-    window.clearTimeout(leaveTimer.current);
-    setOpen(true);
-  };
-  const leave = () => {
-    if (pinned) return;
-    window.clearTimeout(leaveTimer.current);
-    leaveTimer.current = window.setTimeout(
-      () => setOpen(false),
-      ISLAND_LEAVE_MS,
-    );
-  };
-
-  const view = open ? "panel" : "pill";
-  return (
-    <div
-      data-testid="harness-island-host"
-      className={ISLAND_HOST}
-      style={{ top: ISLAND_HOST_TOP }}
-    >
-      <p className="sr-only" role="status" aria-live="polite">
-        {visible ? announce(top) : ""}
-      </p>
-      <AnimatePresence initial={false} mode="popLayout">
-        {visible && top && (
-          <motion.div
-            // Reduced motion: one surface per view, crossfaded, with no morph
-            // or scale. Otherwise one surface whose box springs from pill to
-            // panel and back.
-            key={reduced ? view : "island"}
-            ref={island}
-            data-testid="harness-island"
-            data-state={top.shown}
-            data-view={view}
-            layout={!reduced}
-            transition={reduced ? { duration: 0.2 } : ISLAND_MORPH}
-            initial={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
-            style={{
-              borderRadius: open ? ISLAND_PANEL_RADIUS : ISLAND_PILL_RADIUS,
-            }}
-            onPointerEnter={enter}
-            onPointerLeave={leave}
-            className={ISLAND_SURFACE}
-          >
-            <AnimatePresence initial={false} mode="popLayout">
-              <motion.div
-                key={view}
-                layout={reduced ? false : "position"}
-                initial={{ opacity: 0, filter: "blur(4px)" }}
-                animate={{ opacity: 1, filter: "blur(0px)" }}
-                exit={{ opacity: 0, filter: "blur(4px)" }}
-                transition={ISLAND_SWAP}
-              >
-                {open ? (
-                  <Panel
-                    rows={rows}
-                    focus={pinned}
-                    onClose={() => {
-                      setOpen(false);
-                      setPinned(false);
-                    }}
-                  />
-                ) : (
-                  <Pill
-                    row={top}
-                    more={rows.length - 1}
-                    onOpen={() => {
-                      setPinned(true);
-                      setOpen(true);
-                    }}
-                  />
-                )}
-              </motion.div>
-            </AnimatePresence>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+  useIslandContent(
+    top
+      ? {
+          id: HARNESS_ISLAND_ID,
+          priority: ISLAND_PRIORITY.harness,
+          tone: TONE[top.shown],
+          label: "Harness updates",
+          attributes: {
+            "data-testid": "harness-island",
+            "data-state": top.shown,
+          },
+          pill: (context) => (
+            <Pill
+              row={top}
+              more={rows.length - 1}
+              onOpen={() => context.setOpen(true, true)}
+            />
+          ),
+          panel: (context) => (
+            <Panel rows={rows} onClose={() => context.setOpen(false)} />
+          ),
+        }
+      : null,
   );
+  return null;
 }
 
 /** The folded capsule: the most urgent row, in one line. */
@@ -395,30 +324,15 @@ function Version({ children }: { children: ReactNode }) {
 }
 
 /** The open island: one row per harness, and what to do about it. */
-function Panel({
-  rows,
-  focus,
-  onClose,
-}: {
-  rows: Row[];
-  /** Opened by a click or the keyboard: take focus, since the pill is gone. */
-  focus: boolean;
-  onClose: () => void;
-}) {
+function Panel({ rows, onClose }: { rows: Row[]; onClose: () => void }) {
   const update = useHarness((state) => state.update);
   const dismiss = useHarness((state) => state.dismiss);
   const openInTerminal = useHarness((state) => state.openInTerminal);
   const anyFailed = rows.some((row) => row.shown === "failed");
-  const self = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (focus) self.current?.focus({ preventScroll: true });
-  }, [focus]);
   return (
     <section
-      ref={self}
-      tabIndex={-1}
       aria-label="Harness updates"
-      className="flex w-[min(360px,calc(100vw-32px))] flex-col gap-3 p-4 pt-3.5 outline-none"
+      className="flex w-[min(360px,calc(100vw-32px))] flex-col gap-3 p-4 pt-3.5"
     >
       <header className="flex items-center justify-between gap-2">
         <h2 className="text-[13px] font-semibold tracking-tight">

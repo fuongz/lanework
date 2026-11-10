@@ -29,12 +29,14 @@ import { useMcpAuthWatch } from "#/stores/mcp-auth";
 import { terminalShown, useTerminal } from "#/stores/terminal";
 import { AgentUsageStrip } from "./agent-usage-strip";
 import { AppSidebar } from "./app-sidebar";
-import { AwaitingIsland, useAwaitingElsewhere } from "./awaiting-island";
-import { BoardNoticeIsland, useBoardNotice } from "./board-notice-island";
+import { AwaitingIsland } from "./awaiting-island";
+import { BoardNoticeIsland } from "./board-notice-island";
 import { CommandPalette } from "./command-palette";
-import { DictationIsland, useDictationUp } from "./dictation-island";
+import { DictationIsland } from "./dictation-island";
 import { HistoryButtons } from "./history-nav";
-import { McpAuthIsland, useMcpAuthRows } from "./mcp-auth-island";
+import { IslandHost } from "./island-host";
+import { McpAuthIsland } from "./mcp-auth-island";
+import { NotifyIsland } from "./notify-island";
 
 const RAIL_DEFAULT_PX = 240;
 /** The rail folded to its icons: one 36px slot and its margins. */
@@ -186,16 +188,12 @@ export function AppShell() {
     else if (!hidden && panel.isCollapsed()) showRail();
   }, [sidebarRef, showRail]);
   const terminalRef = usePanelRef();
-  const notice = useBoardNotice();
-  const dictating = useDictationUp();
   // Whether Claude Code and Codex are signed in to the cloud Lanework MCP,
   // asked again on a timer and on focus; the island speaks when they are not.
   useMcpAuthWatch();
-  const mcpAuthUp = useMcpAuthRows().length > 0;
   // Conversations whose agent waits on the person (FE-97), followed for the
   // whole window: the island and the rail's ping both read them.
   useAwaitingWatch();
-  const awaitingUp = useAwaitingElsewhere().length > 0;
   // The project in the URL, not the board store's `active`: on the project
   // picker there is no project, so no terminal (neither the panel nor its
   // bar) rather than whichever project's was open last.
@@ -493,23 +491,23 @@ export function AppShell() {
           />
         </button>
       </nav>
-      {/* The islands (harness updates, board notices, an agent waiting on
-          the person, the Lanework MCP sign-in, dictation), fixed at the top
-          centre over the title bar's edge and the page. One spot, one
-          island: an open microphone has it, then a notice, then a waiting
-          agent (FE-97), then sign-in, and the harness pill waits for all of
-          them.
+      {/* The island, fixed at the top centre over the title bar's edge and
+          the page, and what it may say: dictation, board notices, an agent
+          waiting on the person (FE-97), the Lanework MCP sign-in, `notify()`
+          toasts and harness updates. Each content registers with a priority
+          (`ISLAND_PRIORITY`, in that order) and the host shows the highest in
+          one capsule that morphs between them. The contents draw nothing.
 
-          NOTE: After the nav for the same reason as the nav: their `no-drag`
-          must be laid down after the title bar's drag strip, or the strip
-          eats their clicks. */}
-      <HarnessIsland
-        yieldTo={dictating || notice !== null || awaitingUp || mcpAuthUp}
-      />
-      <McpAuthIsland yieldTo={dictating || notice !== null || awaitingUp} />
-      <AwaitingIsland yieldTo={dictating || notice !== null} />
-      <BoardNoticeIsland notice={dictating ? null : notice} />
+          NOTE: The host after the nav for the same reason as the nav: its
+          `no-drag` must be laid down after the title bar's drag strip, or the
+          strip eats its clicks. */}
       <DictationIsland />
+      <BoardNoticeIsland />
+      <AwaitingIsland />
+      <McpAuthIsland />
+      <HarnessIsland />
+      <NotifyIsland />
+      <IslandHost />
     </div>
   );
 }

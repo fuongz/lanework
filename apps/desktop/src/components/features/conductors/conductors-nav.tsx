@@ -42,6 +42,7 @@ import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { useChatEngines } from "#/stores/chat-engines";
+import { notify } from "#/stores/notify";
 import { ConductorDialog, type ConductorDialogMode } from "./conductor-dialog";
 import {
   type ConductorState,
@@ -139,9 +140,10 @@ export function ConductorsNav({
    * under Sessions, so without this a conductor left running could not be
    * stopped from the rail.
    */
-  const stopEngine = (conversation: string) =>
+  const stopEngine = (conversation: string, name: string) =>
     void window.desktop?.conversation
       .close(project, conversation)
+      .then(() => notify("success", `Stopped ${name}`))
       .catch(() => {})
       .finally(() => void refreshChats(project));
   const { lead: viewingLead, conversation: viewing } = useParams({
@@ -298,7 +300,7 @@ export function ConductorsNav({
             const conversation = status.conversation;
             if (!conversation) return;
             if (status.state === "working") setStopping({ lead, conversation });
-            else stopEngine(conversation);
+            else stopEngine(conversation, lead.name);
           }}
         >
           Stop
@@ -340,7 +342,7 @@ export function ConductorsNav({
             onClick={() => {
               const target = stopping;
               setStopping(null);
-              if (target) stopEngine(target.conversation);
+              if (target) stopEngine(target.conversation, target.lead.name);
             }}
           >
             Stop
