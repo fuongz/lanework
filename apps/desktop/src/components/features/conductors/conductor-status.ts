@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { create } from "zustand";
 import type { TeamLead } from "#/../shared/orchestration";
 import { useProposalEdits } from "#/components/features/orchestration/orchestration-panel.store";
 import { liveRun, useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
@@ -16,9 +17,43 @@ import { useNewChats } from "#/stores/new-chats";
  * - `running`: between turns, with background jobs still going (Claude
  *   only): its conversation is never a row under Sessions, so this row is
  *   the rail's only sign of them.
+ * - `done`: idle, but its last turn or run ended while it was not open, and
+ *   it has not been opened since. Never from {@link useConductorStatuses}:
+ *   the rail lays it over `idle` ({@link useFinishedConductors}).
  * - `idle`: none of these.
  */
-export type ConductorState = "idle" | "working" | "running" | "needs-you";
+export type ConductorState =
+  | "idle"
+  | "working"
+  | "running"
+  | "needs-you"
+  | "done";
+
+/**
+ * The conductors that finished while nobody was looking, by
+ * `project:conductor`, until each is opened.
+ *
+ * Without it the dot just went out when a conductor finished, and a
+ * conductor left working in the background read the same as one never
+ * started. In memory: after a restart nothing is "just finished".
+ */
+export const useFinishedConductors = create<{
+  keys: ReadonlySet<string>;
+  mark: (key: string) => void;
+  clear: (key: string) => void;
+}>((set, get) => ({
+  keys: new Set(),
+  mark: (key) => {
+    if (get().keys.has(key)) return;
+    set({ keys: new Set(get().keys).add(key) });
+  },
+  clear: (key) => {
+    if (!get().keys.has(key)) return;
+    const keys = new Set(get().keys);
+    keys.delete(key);
+    set({ keys });
+  },
+}));
 
 export interface ConductorStatus {
   state: ConductorState;

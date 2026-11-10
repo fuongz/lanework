@@ -1,7 +1,7 @@
 import { Add01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TeamLead } from "#/../shared/orchestration";
 import { StatusPing } from "#/components/shared/agents/status-ping";
 import { useTeamLeads } from "#/components/shared/conversation/composer";
@@ -46,6 +46,7 @@ import {
   type ConductorState,
   type ConductorStatus,
   useConductorStatuses,
+  useFinishedConductors,
 } from "./conductor-status";
 
 function ConductorIcon({
@@ -67,7 +68,15 @@ function ConductorIcon({
       />
       {/* As a session's: nothing at rest, a dot under the corner else. */}
       {state !== "idle" && (
-        <StatusPing tone={state === "needs-you" ? "awaiting" : state} />
+        <StatusPing
+          tone={
+            state === "needs-you"
+              ? "awaiting"
+              : state === "done"
+                ? "done"
+                : state
+          }
+        />
       )}
     </span>
   );
@@ -106,7 +115,8 @@ export function ConductorsNav({
   const navigate = useNavigate();
   const list = useTeamLeads(project, hasFolder);
   const conductors = orderConductors(list);
-  const statuses = useConductorStatuses(project, conductors);
+  const live = useConductorStatuses(project, conductors);
+  const finished = useFinishedConductors((state) => state.keys);
   const releaseConductor = useAgentSessions((state) => state.releaseConductor);
   const openInTerminal = useOpenInTerminal(slug, project);
   const [dialog, setDialog] = useState<{
@@ -118,6 +128,32 @@ export function ConductorsNav({
   const { lead: viewingLead, conversation: viewing } = useParams({
     strict: false,
   }) as { lead?: string; conversation?: string };
+  const isCurrent = (lead: TeamLead, status: ConductorStatus) =>
+    viewingLead === lead.id ||
+    (status.conversation !== null && viewing === status.conversation);
+
+  // A conductor that stops working while another screen is open keeps a
+  // still green dot until it is opened: otherwise the dot just goes out, and
+  // work left running in the background is easy to forget.
+  const seen = useRef<Record<string, ConductorState>>({});
+  useEffect(() => {
+    const { mark, clear } = useFinishedConductors.getState();
+    for (const lead of conductors) {
+      const status = live[lead.id];
+      if (!status) continue;
+      const key = `${project}:${lead.id}`;
+      const was = seen.current[key];
+      seen.current[key] = status.state;
+      if (isCurrent(lead, status) || status.state !== "idle") clear(key);
+      else if (was === "working" || was === "running") mark(key);
+    }
+  });
+  const statuses: Record<string, ConductorStatus> = {};
+  for (const [id, status] of Object.entries(live))
+    statuses[id] =
+      status.state === "idle" && finished.has(`${project}:${id}`)
+        ? { ...status, state: "done", reason: "Finished, not opened yet" }
+        : status;
 
   if (!hasFolder || (mini && (!list || conductors.length === 0))) return null;
   // Still reading them: the section's shape, so the rail does not jump.
@@ -142,9 +178,6 @@ export function ConductorsNav({
       to: "/w/$slug/conductors/$lead",
       params: { slug, lead: lead.id },
     });
-  const isCurrent = (lead: TeamLead, status: ConductorStatus) =>
-    viewingLead === lead.id ||
-    (status.conversation !== null && viewing === status.conversation);
   const openDialog = (mode: ConductorDialogMode) =>
     setDialog({ key: Date.now(), mode });
 
