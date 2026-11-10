@@ -212,9 +212,10 @@ var import_node_path = require("node:path");
 // apps/desktop/shared/conversation.ts
 var CLAUDE_MODELS = [
   { id: "claude-opus-5-5", label: "Opus 5.5", agent: "claude" },
-  { id: "claude-fable-5-1", label: "Fable 5.1", agent: "claude" },
+  { id: "claude-fable-5-2", label: "Fable 5.2", agent: "claude" },
   { id: "claude-sonnet-5-5", label: "Sonnet 5.5", agent: "claude" },
   { id: "claude-haiku-5-5", label: "Haiku 5.5", agent: "claude" },
+  { id: "claude-fable-5-1", label: "Fable 5.1", agent: "claude", legacy: true },
   { id: "claude-haiku-4-5", label: "Haiku 4.5", agent: "claude", legacy: true },
   { id: "claude-sonnet-5", label: "Sonnet 5", agent: "claude", legacy: true },
   { id: "claude-opus-5", label: "Opus 5", agent: "claude", legacy: true },
@@ -239,10 +240,11 @@ var CODEX_MODELS = [
   { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", agent: "codex", legacy: true }
 ];
 var OPENCODE_MODELS = [];
+var claudeList = CLAUDE_MODELS;
 var codexList = CODEX_MODELS;
 var opencodeList = OPENCODE_MODELS;
 var everyModel = [
-  ...CLAUDE_MODELS,
+  ...claudeList,
   ...codexList,
   ...opencodeList
 ];
