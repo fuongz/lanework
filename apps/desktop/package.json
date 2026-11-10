@@ -11,7 +11,7 @@
     "dev:renderer": "vite dev",
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
-    "package": "bun run build && node scripts/electron-builder.mjs --dir --config electron-builder.package.yml",
+    "package": "bun run build && node scripts/electron-builder.mjs --dev --dir --config electron-builder.package.yml",
     "dist": "bun run build && node scripts/electron-builder.mjs --notarize",
     "test": "playwright test --project=production",
     "test:unit": "node scripts/test-unit.mjs",

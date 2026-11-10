@@ -37,8 +37,17 @@ app="apps/desktop/release/mac-arm64/Lanework.app"
 osascript -e 'tell application "Lanework" to quit' >/dev/null 2>&1 || true
 rm -rf /Applications/Lanework.app
 cp -R "$app" /Applications/
-echo "Installed /Applications/Lanework.app"
+version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Lanework.app/Contents/Info.plist)"
+echo "Installed /Applications/Lanework.app ($version)"
 '''
+
+[tasks."release:bump"]
+description = "Next release version: package.json + commit + tag vX.Y.Z (no push). mise run release:bump patch"
+# INF-10, docs/agents/versioning.md. Dev builds (app:package, app:install)
+# never touch package.json; only this does.
+dir = "apps/desktop"
+usage = 'arg "<part>" help="patch, minor or major"'
+run = "node scripts/release-bump.mjs ${usage_part?}"
 
 [tasks.typecheck]
 description = "Typecheck every package"

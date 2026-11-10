@@ -212,6 +212,13 @@ recur.
 - End every completed task with a **"What's next for you"** handoff (follow-up
   commands, manual checks, open decisions).
 
+## Version names (INF-10)
+
+Release `X.Y.Z` lives in `apps/desktop/package.json` and only
+`mise run release:bump <patch|minor|major>` changes it. `app:package` and
+`app:install` stamp `X.Y.(Z+1)-dev.YYYYMMDDHHmm` into the bundle and never
+write package.json. Details: [docs/agents/versioning.md](docs/agents/versioning.md).
+
 ## Git commits
 
 - After completing and verifying a code task, create a local commit for the

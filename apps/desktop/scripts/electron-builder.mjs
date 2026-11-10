@@ -18,10 +18,19 @@
 //   dropped: electron-builder notarizes after any signing it does, so one
 //   left in the environment would send each local package to Apple.
 //
+// - `--dev` (package only, so `mise run app:install` too; INF-10,
+//   docs/agents/versioning.md): stamps a dev version into the bundle,
+//   `X.Y.(Z+1)-dev.YYYYMMDDHHmm` from package.json `X.Y.Z`, so every local
+//   install carries a newer version than the last and none looks like a
+//   release. package.json is never written. Release builds (`dist`) take the
+//   package.json version as is.
+//
 // Any other argument goes to electron-builder as is.
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const NOTARIZE_ENV = [
   "APPLE_ID",
@@ -36,7 +45,44 @@ const NOTARIZE_ENV = [
 
 const args = process.argv.slice(2);
 const notarize = args.includes("--notarize");
-const builderArgs = args.filter((arg) => arg !== "--notarize");
+const dev = args.includes("--dev");
+const builderArgs = args.filter(
+  (arg) => arg !== "--notarize" && arg !== "--dev",
+);
+
+if (dev && notarize) {
+  console.error(
+    "--dev and --notarize do not go together: a dev build is never released.",
+  );
+  process.exit(1);
+}
+if (dev) {
+  const pkgPath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "package.json",
+  );
+  const { version } = JSON.parse(readFileSync(pkgPath, "utf8"));
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!match) {
+    console.error(
+      `package.json version ${version} is not X.Y.Z: a release version has no suffix.`,
+    );
+    process.exit(1);
+  }
+  const [, major, minor, patch] = match;
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
+  const devVersion = `${major}.${minor}.${Number(patch) + 1}-dev.${stamp}`;
+  // extraMetadata.version is what app.getVersion() and
+  // CFBundleShortVersionString read; buildVersion is CFBundleVersion.
+  builderArgs.push(
+    `-c.extraMetadata.version=${devVersion}`,
+    `-c.buildVersion=${devVersion}`,
+  );
+  console.log(`Dev build version ${devVersion}`);
+}
 
 const env = { ...process.env };
 for (const name of NOTARIZE_ENV) delete env[name];
@@ -48,6 +94,13 @@ if (process.platform === "darwin" && identity) {
     "-c.mac.entitlements=build/entitlements.mac.developer-id.plist",
     "-c.mac.entitlementsInherit=build/entitlements.mac.developer-id.inherit.plist",
   );
+  if (!notarize) {
+    // A secure timestamp is what notarization needs, and it costs one round
+    // trip to Apple per signed file (~360): 412 s against 89 s without. A
+    // local package/install build is never notarized, and macOS keys its
+    // permission grants to the Team ID, not to the timestamp.
+    builderArgs.push("-c.mac.timestamp=none");
+  }
   if (notarize) {
     // A maintainer's Mac: a stored notarytool profile. CI (INF-09,
     // .github/workflows/release.yml): an App Store Connect API key.
