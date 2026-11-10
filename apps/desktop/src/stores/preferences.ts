@@ -112,6 +112,18 @@ interface Preferences {
    */
   projectSort: ProjectSort;
   setProjectSort: (value: ProjectSort) => void;
+  /**
+   * The namespaces folded shut in the project switcher: the text before the
+   * first "/" of a project's name. Every group starts open.
+   */
+  collapsedNamespaces: string[];
+  /**
+   * Whether the project switcher folds projects that share a namespace under
+   * one header (Settings → Appearance). On unless turned off.
+   */
+  groupProjects: boolean;
+  setGroupProjects: (value: boolean) => void;
+  setNamespaceCollapsed: (namespace: string, collapsed: boolean) => void;
   /** The language the composer's microphone listens for (FE-69/D6). */
   dictationLocale: DictationLocale;
   setDictationLocale: (value: DictationLocale) => void;
@@ -152,6 +164,16 @@ export const usePreferences = create<Preferences>()(
       completeOnboarding: () => set({ onboarded: true }),
       projectSort: "default",
       setProjectSort: (projectSort) => set({ projectSort }),
+      collapsedNamespaces: [],
+      groupProjects: true,
+      setGroupProjects: (groupProjects) => set({ groupProjects }),
+      setNamespaceCollapsed: (namespace, collapsed) =>
+        set((state) => {
+          const next = new Set(state.collapsedNamespaces);
+          if (collapsed) next.add(namespace);
+          else next.delete(namespace);
+          return { collapsedNamespaces: readHidden([...next]) };
+        }),
       dictationLocale: "vi_VN",
       setDictationLocale: (dictationLocale) => set({ dictationLocale }),
       dictationCorrections: null,
@@ -178,6 +200,8 @@ export const usePreferences = create<Preferences>()(
         onboarded,
         fonts,
         projectSort,
+        collapsedNamespaces,
+        groupProjects,
         dictationLocale,
         dictationCorrections,
         hiddenModels,
@@ -186,6 +210,8 @@ export const usePreferences = create<Preferences>()(
         onboarded,
         fonts,
         projectSort,
+        collapsedNamespaces,
+        groupProjects,
         dictationLocale,
         dictationCorrections,
         hiddenModels,
@@ -207,6 +233,8 @@ export const usePreferences = create<Preferences>()(
           projectSort: isProjectSort(saved?.projectSort)
             ? saved.projectSort
             : "default",
+          collapsedNamespaces: readHidden(saved?.collapsedNamespaces),
+          groupProjects: saved?.groupProjects !== false,
           dictationLocale: isDictationLocale(saved?.dictationLocale)
             ? saved.dictationLocale
             : "vi_VN",

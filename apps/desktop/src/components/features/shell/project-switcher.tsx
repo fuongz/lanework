@@ -1,5 +1,6 @@
 import {
   Add01Icon,
+  ArrowRight01Icon,
   ListOrderedIcon,
   Search01Icon,
   Settings01Icon,
@@ -70,6 +71,53 @@ const fold = (text: string) =>
 type RunningAgent = Pick<TerminalSession, "id" | "kind">;
 
 /**
+ * The part of a project's name before its first "/": `hiip.ai` for
+ * `hiip.ai/content`. Null for a name without one, or one that starts or ends
+ * with it.
+ */
+function namespaceOf(project: Project): string | null {
+  const at = project.name.indexOf("/");
+  return at > 0 && at < project.name.length - 1
+    ? project.name.slice(0, at)
+    : null;
+}
+
+/** A row of the switcher's list: one project, or a namespace's projects. */
+type Entry =
+  | { kind: "project"; project: Project }
+  | { kind: "group"; namespace: string; projects: Project[] };
+
+/**
+ * The list as rows, in the order given.
+ *
+ * A namespace two or more projects share folds them under one header, drawn
+ * where its first project would sit, its projects in the order given. A
+ * project alone in its namespace, or with none, stays a row of its own: a
+ * header over one row is a click for nothing.
+ */
+function groupByNamespace(projects: Project[]): Entry[] {
+  const members = new Map<string, Project[]>();
+  for (const project of projects) {
+    const namespace = namespaceOf(project);
+    if (namespace)
+      members.set(namespace, [...(members.get(namespace) ?? []), project]);
+  }
+  const entries: Entry[] = [];
+  const placed = new Set<string>();
+  for (const project of projects) {
+    const namespace = namespaceOf(project);
+    const group = namespace ? members.get(namespace) : undefined;
+    if (!namespace || !group || group.length < 2) {
+      entries.push({ kind: "project", project });
+    } else if (!placed.has(namespace)) {
+      placed.add(namespace);
+      entries.push({ kind: "group", namespace, projects: group });
+    }
+  }
+  return entries;
+}
+
+/**
  * The agents running in a project on this machine, as overlapping marks.
  *
  * Capped at three with the rest counted: a project with five agents going
@@ -90,13 +138,18 @@ function RunningAgents({ agents }: { agents: RunningAgent[] }) {
       {shown.map((agent) => (
         <span
           key={agent.id}
-          className="bg-muted ring-popover -mr-1.5 grid size-5 place-items-center rounded-full ring-2 last:mr-0"
+          className="bg-muted ring-popover -ml-1.5 grid size-5 place-items-center rounded-full ring-2 first:ml-0"
         >
           <TerminalKindIcon kind={agent.kind} className="size-3" />
         </span>
       ))}
+      {/* The rest counted as one more mark in the stack, not text beside it.
+          `min-w-5` with padding lets "+12" widen into a pill. */}
       {rest > 0 && (
-        <span className="text-muted-foreground ml-1.5 text-[11px] tabular-nums">
+        <span
+          aria-hidden="true"
+          className="bg-muted text-muted-foreground ring-popover -ml-1.5 grid h-5 min-w-5 place-items-center rounded-full px-1 text-[10px] font-medium tabular-nums ring-2"
+        >
           +{rest}
         </span>
       )}
@@ -134,6 +187,9 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const sort = usePreferences((state) => state.projectSort);
+  const grouping = usePreferences((state) => state.groupProjects);
+  const collapsed = usePreferences((state) => state.collapsedNamespaces);
+  const setCollapsed = usePreferences((state) => state.setNamespaceCollapsed);
   const setSort = usePreferences((state) => state.setProjectSort);
   const projects = useBoard((state) => state.projects);
   const active = useBoard((state) => state.active);
@@ -180,6 +236,19 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
       )
     : sortedProjects;
 
+  // Rows as drawn. While searching every group is open: a match folded
+  // away would read as no match.
+  const toRows = (list: Project[]): Entry[] =>
+    grouping
+      ? groupByNamespace(list)
+      : list.map((project) => ({ kind: "project", project }));
+  const entries = toRows(shownProjects);
+  // ⌘1…⌘9 count down the list as drawn with every group open, so a key
+  // keeps its project whether a group is folded or not.
+  const menuOrder = toRows(sortedProjects).flatMap((entry) =>
+    entry.kind === "group" ? entry.projects : [entry.project],
+  );
+
   // Asked for every project each time the menu opens. The rail only lists the
   // open project's agents, so without this the other rows would show whatever
   // was running the last time each one was open, or nothing.
@@ -218,7 +287,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
       if (!event.metaKey && !event.ctrlKey) return;
       const at = Number(event.key) - 1;
       if (!Number.isInteger(at) || at < 0 || at > 8) return;
-      const project = sortedProjects[at];
+      const project = menuOrder[at];
       if (!project) return;
       event.preventDefault();
       go(project.slug);
@@ -226,6 +295,63 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  /**
+   * One project's row and its context menu.
+   *
+   * @param label The name as shown: whole, or without its namespace under
+   *   the namespace's header.
+   */
+  const renderRow = (project: Project, label: string) => (
+    <ContextMenu key={project.slug}>
+      <ContextMenuTrigger
+        render={
+          <button
+            type="button"
+            role="option"
+            aria-selected={project.slug === active?.slug}
+            onClick={() => go(project.slug)}
+            className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
+          />
+        }
+      >
+        <ProjectTile
+          project={project}
+          className="size-5 rounded-[5px] text-[10px]"
+        />
+        <span className="truncate">{label}</span>
+        {isLocalProject(project) && <LocalBadge />}
+        <RunningAgents agents={runningIn(project)} />
+      </ContextMenuTrigger>
+      {/* The two everyday edits from Settings → Projects,
+          without leaving the switcher. Rename is addressed by
+          cloud id, so a project without one cannot. */}
+      {/* NOTE: `finalFocus={false}`: focus handed back to the
+          row on close lights it as focused, so a second row
+          stays highlighted beside the one under the pointer. */}
+      <ContextMenuContent finalFocus={false}>
+        <ContextMenuItem
+          disabled={project.id === null}
+          onClick={() => {
+            const id = project.id;
+            if (!id) return;
+            setOpen(false);
+            setRenaming({ ...project, id });
+          }}
+        >
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => {
+            setOpen(false);
+            setEditing(project);
+          }}
+        >
+          Edit folders
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
 
   return (
     <>
@@ -325,7 +451,9 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                   } else if (event.key === "ArrowDown") {
                     event.preventDefault();
                     list.current
-                      ?.querySelector<HTMLButtonElement>("[role=option]")
+                      ?.querySelector<HTMLButtonElement>(
+                        "[role=option], [data-namespace]",
+                      )
                       ?.focus();
                   }
                 }}
@@ -354,7 +482,7 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                     return;
                   const rows = [
                     ...(list.current?.querySelectorAll<HTMLButtonElement>(
-                      "[role=option]",
+                      "[role=option], [data-namespace]",
                     ) ?? []),
                   ];
                   const at = rows.indexOf(
@@ -387,56 +515,80 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
                     </EmptyHeader>
                   </Empty>
                 )}
-                {shownProjects.map((project) => (
-                  <ContextMenu key={project.slug}>
-                    <ContextMenuTrigger
-                      render={
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={project.slug === active?.slug}
-                          onClick={() => go(project.slug)}
-                          className={`${RAIL_ROW} relative aria-selected:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none`}
-                        />
-                      }
+                {entries.map((entry) => {
+                  if (entry.kind === "project")
+                    return renderRow(entry.project, entry.project.name);
+                  const expanded =
+                    needle !== "" || !collapsed.includes(entry.namespace);
+                  const holdsActive = entry.projects.some(
+                    (project) => project.slug === active?.slug,
+                  );
+                  return (
+                    <div
+                      key={`ns:${entry.namespace}`}
+                      className="flex flex-col gap-0.5"
                     >
-                      <ProjectTile
-                        project={project}
-                        className="size-5 rounded-[5px] text-[10px]"
-                      />
-                      <span className="truncate">{project.name}</span>
-                      {isLocalProject(project) && <LocalBadge />}
-                      <RunningAgents agents={runningIn(project)} />
-                    </ContextMenuTrigger>
-                    {/* The two everyday edits from Settings → Projects,
-                        without leaving the switcher. Rename is addressed by
-                        cloud id, so a project without one cannot. */}
-                    {/* NOTE: `finalFocus={false}`: focus handed back to the
-                        row on close lights it as focused, so a second row
-                        stays highlighted beside the one under the pointer. */}
-                    <ContextMenuContent finalFocus={false}>
-                      <ContextMenuItem
-                        disabled={project.id === null}
+                      <button
+                        type="button"
+                        data-namespace={entry.namespace}
+                        aria-expanded={expanded}
+                        // While searching every group stays open. Not
+                        // `disabled`: ↑ ↓ would stop at a row it cannot focus.
+                        aria-disabled={needle !== "" || undefined}
                         onClick={() => {
-                          const id = project.id;
-                          if (!id) return;
-                          setOpen(false);
-                          setRenaming({ ...project, id });
+                          if (!needle) setCollapsed(entry.namespace, expanded);
                         }}
-                      >
-                        Rename
-                      </ContextMenuItem>
-                      <ContextMenuItem
-                        onClick={() => {
-                          setOpen(false);
-                          setEditing(project);
+                        onKeyDown={(event) => {
+                          // → opens a group and ← folds it, as in a tree.
+                          if (event.key === "ArrowRight" && !expanded)
+                            setCollapsed(entry.namespace, false);
+                          else if (event.key === "ArrowLeft" && expanded)
+                            setCollapsed(entry.namespace, true);
                         }}
+                        // Folded over the open project, the header stands in for
+                        // its row and is lit the way that row would be.
+                        className={`${RAIL_ROW} relative focus-visible:bg-foreground/[0.08] flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] focus:outline-none ${!expanded && holdsActive ? "bg-foreground/[0.08]" : ""}`}
                       >
-                        Edit folders
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                  </ContextMenu>
-                ))}
+                        <span className="grid size-5 shrink-0 place-items-center">
+                          <HugeiconsIcon
+                            icon={ArrowRight01Icon}
+                            className={`text-muted-foreground size-3.5 transition-transform duration-150 motion-reduce:transition-none ${expanded ? "rotate-90" : ""}`}
+                            strokeWidth={2}
+                            aria-hidden="true"
+                          />
+                        </span>
+                        <span className="truncate">{entry.namespace}</span>
+                        {!expanded && (
+                          <span className="text-muted-foreground shrink-0 text-[12px] tabular-nums">
+                            {entry.projects.length}
+                          </span>
+                        )}
+                        {/* Folded, its projects' agents still show here:
+                            work going on is not hidden by a fold. */}
+                        {!expanded && (
+                          <RunningAgents
+                            agents={entry.projects.flatMap(runningIn)}
+                          />
+                        )}
+                      </button>
+                      {expanded && (
+                        // The guide line runs down from the chevron, and the
+                        // indent puts the rows' tiles under the header's label.
+                        <fieldset
+                          aria-label={entry.namespace}
+                          className="border-foreground/10 ml-[17px] flex min-w-0 flex-col gap-0.5 border-l pl-3"
+                        >
+                          {entry.projects.map((project) =>
+                            renderRow(
+                              project,
+                              project.name.slice(entry.namespace.length + 1),
+                            ),
+                          )}
+                        </fieldset>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </RailHover>
           )}

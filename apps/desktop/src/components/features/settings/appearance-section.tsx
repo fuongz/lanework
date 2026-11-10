@@ -1,13 +1,17 @@
 import { ThemeChoice } from "#/components/shared/common/theme-choice";
 import { SettingsPage } from "#/components/shared/settings/settings-page";
+import { Switch } from "#/components/ui/switch";
+import { usePreferences } from "#/stores/preferences";
 import { CodePreview } from "./code-preview";
 import { FontPicker } from "./font-picker";
 
 export function AppearanceSection() {
+  const groupProjects = usePreferences((state) => state.groupProjects);
+  const setGroupProjects = usePreferences((state) => state.setGroupProjects);
   return (
     <SettingsPage
       title="Appearance"
-      description="Theme and fonts."
+      description="Theme, fonts and the project list."
       sections={[
         {
           title: "Theme",
@@ -43,6 +47,25 @@ export function AppearanceSection() {
               description: "Terminal, diffs and code blocks.",
               keywords: "font typeface family weight monospace terminal",
               control: <FontPicker font="code" label="Code font" />,
+            },
+          ],
+        },
+        {
+          title: "Projects",
+          rows: [
+            {
+              label: "Group by namespace",
+              description:
+                "In the project switcher, projects that share the part of their name before “/” fold under one header.",
+              keywords:
+                "project switcher group namespace owner organization folder collapse fold",
+              control: (
+                <Switch
+                  aria-label="Group by namespace"
+                  checked={groupProjects}
+                  onCheckedChange={setGroupProjects}
+                />
+              ),
             },
           ],
         },
