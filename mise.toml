@@ -17,7 +17,12 @@ run = "bun run package"
 [tasks."app:dmg"]
 description = "Build the macOS installer, apps/desktop/release/Lanework-<version>-arm64.dmg"
 dir = "apps/desktop"
-run = ["bun run build", "bunx electron-builder --mac"]
+# Ad hoc signed unless mise.local.toml (gitignored) sets LANEWORK_MAC_IDENTITY
+# (Developer ID, "Name (TEAMID)") and LANEWORK_NOTARY_PROFILE (a
+# `xcrun notarytool store-credentials` profile): then it is signed, notarized
+# and stapled. app:package and app:install sign with the same identity but
+# never notarize. The logic lives in apps/desktop/scripts/electron-builder.mjs.
+run = "bun run dist -- --mac"
 
 [tasks."app:install"]
 description = "Build Lanework.app and replace the copy in /Applications"
@@ -57,8 +62,8 @@ run = "bun run test"
 description = "Build, then the agent view's cases: header facts, Changes, background tasks, agent marks"
 dir = "apps/desktop"
 run = [
-  "bun run build",
-  "bunx playwright test tests/terminal.spec.ts tests/repo.spec.ts tests/agent-sessions.spec.ts --project=production -g \"FE-38: an agent's view|FE-39: Changes marks the one file|FE-41|FE-42|carries its spinner|on another machine marks\"",
+    "bun run build",
+    "bunx playwright test tests/terminal.spec.ts tests/repo.spec.ts tests/agent-sessions.spec.ts --project=production -g \"FE-38: an agent's view|FE-39: Changes marks the one file|FE-41|FE-42|carries its spinner|on another machine marks\"",
 ]
 
 [tasks."test:grep"]
@@ -66,8 +71,8 @@ description = "Build, then only the cases whose name matches: mise run test:grep
 dir = "apps/desktop"
 usage = 'arg "<pattern>" help="Part of a test name, or a regex"'
 run = [
-  "bun run build",
-  "bunx playwright test --project=production -g \"${usage_pattern?}\"",
+    "bun run build",
+    "bunx playwright test --project=production -g \"${usage_pattern?}\"",
 ]
 
 [tasks."test:packaged"]

@@ -52,14 +52,26 @@ electronFuses:
   grantFileProtocolExtraPrivileges: false
 # INF-05 (SW-05): writes <name>.dmg.sha256 next to each DMG.
 artifactBuildCompleted: ./scripts/dmg-checksum.mjs
+# INF-09: on a release build (Developer ID + notarize credentials, which only
+# `bun run dist` passes), signs, notarizes and staples each DMG, then
+# rewrites its .sha256. Does nothing on any other build.
+afterAllArtifactBuild: ./scripts/dmg-notarize.mjs
+dmg:
+  # No auto-updater reads a blockmap, and one written before the DMG is
+  # stapled would no longer match it.
+  writeUpdateInfo: false
 mac:
   icon: build/icon.icns
   # Ad hoc ("-"), not unsigned: macOS delivers no notifications from an app
-  # without a valid signature (FE-70). No Developer ID yet, so not notarized.
+  # without a valid signature (FE-70). INF-08: with LANEWORK_MAC_IDENTITY set
+  # (mise.local.toml), scripts/electron-builder.mjs replaces it with that
+  # Developer ID and the developer-id entitlements, and `dist` notarizes.
   identity: "-"
   category: public.app-category.productivity
   target: dmg
-  # INF-05 (SW-05): explicit entitlements rather than electron-builder's
+  # INF-05 (SW-05): the ad hoc build's entitlements; a Developer ID build
+  # swaps in build/entitlements.mac.developer-id*.plist (INF-08). Explicit
+  # entitlements rather than electron-builder's
   # default, which also grants allow-unsigned-executable-memory. The inherit
   # plist covers the Electron helpers and the dictation helper's microphone.
   entitlements: build/entitlements.mac.plist

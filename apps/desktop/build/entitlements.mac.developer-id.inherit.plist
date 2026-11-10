@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  INF-08: every other executable in a Developer ID signed bundle - the
+  Electron helpers and the binaries in app.asar.unpacked, among them
+  dist/electron/bin/lanework-dictation. Library validation stays on; see
+  entitlements.mac.developer-id.plist. Ad hoc builds use
+  entitlements.mac.inherit.plist instead.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!--
+      FE-69: the dictation helper opens the microphone. Under the hardened
+      runtime a process without this entitlement is refused the device
+      before macOS ever shows the prompt.
+    -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+  </dict>
+</plist>

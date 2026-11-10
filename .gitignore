@@ -18,6 +18,9 @@ apps/desktop/src/routeTree.gen.ts
 # Personal Claude Code settings for this checkout
 .claude/settings.local.json
 
+# Machine-local mise settings: code signing and notarization for app:dmg.
+mise.local.toml
+
 # Worker secrets for `wrangler dev`.
 .dev.vars
 

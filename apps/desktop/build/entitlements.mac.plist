@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  INF-05 (SW-05): the main Lanework executable. Spelled out instead of
+  INF-05 (SW-05): the main Lanework executable of an ad hoc build (no
+  LANEWORK_MAC_IDENTITY; see scripts/electron-builder.mjs). Spelled out instead of
   electron-builder's default, which also grants
   allow-unsigned-executable-memory; V8 needs only allow-jit.
 -->
@@ -11,10 +12,10 @@
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <!--
-      The build is ad-hoc signed (no Developer ID yet), so the Electron
-      framework and node-pty's .node binary do not share a Team ID with the
-      app; library validation would refuse to load them. Drop this once the
-      app is signed with a Developer ID.
+      An ad hoc build has no Team ID, so the Electron framework and
+      node-pty's .node binary cannot share one with the app; library
+      validation would refuse to load them. Developer ID builds (INF-08) use
+      entitlements.mac.developer-id.plist, which keeps it on.
     -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>

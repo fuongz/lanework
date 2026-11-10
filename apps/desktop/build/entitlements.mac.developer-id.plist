@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  INF-08: the main Lanework executable when it is signed with the Developer ID
+  (LANEWORK_MAC_IDENTITY, see scripts/electron-builder.mjs). Library
+  validation stays on: the Electron framework, node-pty's .node and every
+  helper are signed with the same Team ID, so nothing else loads into the
+  process. Ad hoc builds use entitlements.mac.plist instead.
+-->
+<plist version="1.0">
+  <dict>
+    <!-- V8's JIT under the hardened runtime. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+  </dict>
+</plist>

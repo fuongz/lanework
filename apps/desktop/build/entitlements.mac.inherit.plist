@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  INF-05 (SW-05): every other executable in the bundle - the Electron
+  INF-05 (SW-05): every other executable in an ad hoc bundle - the Electron
   helpers (renderer, GPU, utility/pty host) and the binaries in
   app.asar.unpacked, among them dist/electron/bin/lanework-dictation.
 -->
