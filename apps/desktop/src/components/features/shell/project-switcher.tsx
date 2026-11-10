@@ -238,10 +238,20 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
 
   // Rows as drawn. While searching every group is open: a match folded
   // away would read as no match.
-  const toRows = (list: Project[]): Entry[] =>
-    grouping
-      ? groupByNamespace(list)
-      : list.map((project) => ({ kind: "project", project }));
+  //
+  // Sorted by Activate, the projects with agents running stay flat rows on
+  // top, whatever their namespace, and only the rest are grouped below: a
+  // running project folded into a group would undo the sort.
+  const flat = (list: Project[]): Entry[] =>
+    list.map((project) => ({ kind: "project", project }));
+  const toRows = (list: Project[]): Entry[] => {
+    if (!grouping) return flat(list);
+    if (sort !== "activate") return groupByNamespace(list);
+    return [
+      ...flat(list.filter(hasAgents)),
+      ...groupByNamespace(list.filter((project) => !hasAgents(project))),
+    ];
+  };
   const entries = toRows(shownProjects);
   // ⌘1…⌘9 count down the list as drawn with every group open, so a key
   // keeps its project whether a group is folded or not.
