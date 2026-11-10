@@ -1605,7 +1605,7 @@ test("FE-35: a sub-agent's row opens its transcript read-only — prompt, tool c
     // since no terminal runs it (FE-62) — and still nothing is started.
     await titlebar(page)
       .getByRole("button", {
-        name: "Open its conversation, “Flaky login test”, in Claude",
+        name: "Back to its conversation, “Flaky login test”, in Claude",
       })
       .click();
     await expect(page).toHaveURL(new RegExp(`/agents/chat/${CLAUDE_ID}$`));

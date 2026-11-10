@@ -1,7 +1,7 @@
 import {
   Alert02Icon,
   ArrowDown01Icon,
-  ArrowRight01Icon,
+  ArrowLeft01Icon,
   MessageMultiple01Icon,
   SecurityCheckIcon,
 } from "@hugeicons/core-free-icons";
@@ -841,26 +841,29 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
       >
         <WindowTitlebar className="gap-2.5">
-          {/* A worker's breadcrumb: its lead's conversation, then itself. */}
+          {/* A worker's way back to its lead's conversation: Back, its
+              title only in the tooltip, so the worker's own name has the
+              bar. */}
           {asWorker && (
             <>
               <button
                 type="button"
                 onClick={openLead}
+                aria-label={`Back to the lead: ${leadTitle ?? "its conversation"}`}
                 title={`Back to the lead: ${leadTitle ?? "its conversation"}`}
-                className="text-muted-foreground hover:text-foreground flex max-w-[40%] min-w-0 shrink items-center gap-1.5 text-[13px] transition-colors"
+                className="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-1 text-[13px] transition-colors"
               >
-                <TerminalKindIcon
-                  kind={asWorker.run.leadAgent}
-                  className="size-[13px] shrink-0"
+                <HugeiconsIcon
+                  icon={ArrowLeft01Icon}
+                  className="size-3.5 shrink-0"
+                  strokeWidth={2}
+                  aria-hidden="true"
                 />
-                <span className="truncate">{leadTitle ?? "Lead"}</span>
+                Back
               </button>
-              <HugeiconsIcon
-                icon={ArrowRight01Icon}
-                className="text-muted-foreground size-3 shrink-0"
-                strokeWidth={2}
+              <span
                 aria-hidden="true"
+                className="bg-border h-3.5 w-px shrink-0"
               />
             </>
           )}

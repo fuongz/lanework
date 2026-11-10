@@ -342,21 +342,16 @@ function SubagentPage({
       {/* In the window's title bar, as the agent's own view is: the bar
           drags the window and clears its controls. */}
       <WindowTitlebar>
-        {working ? (
-          <span role="img" aria-label="Working" className="flex shrink-0">
-            <WorkingMark />
-          </span>
-        ) : (
-          <TerminalKindIcon kind={agent} className="size-[13px] shrink-0" />
-        )}
         {parent && (
           <>
+            {/* Back, its conversation's title only in the tooltip, as a
+                worker's (the sub-agent's own name has the bar). */}
             <button
               type="button"
               onClick={openParent}
-              aria-label={`Open its conversation, “${parent.title}”, in ${label}`}
-              title={parent.title}
-              className="text-muted-foreground hover:text-foreground flex min-w-0 max-w-[40%] shrink items-center gap-1 text-[13px] transition-colors"
+              aria-label={`Back to its conversation, “${parent.title}”, in ${label}`}
+              title={`Back to “${parent.title}”`}
+              className="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-1 text-[13px] transition-colors"
             >
               <HugeiconsIcon
                 icon={ArrowLeft01Icon}
@@ -364,12 +359,20 @@ function SubagentPage({
                 strokeWidth={2}
                 aria-hidden="true"
               />
-              <span className="truncate">{parent.title}</span>
+              Back
             </button>
-            <span aria-hidden="true" className="text-muted-foreground/60">
-              /
-            </span>
+            <span
+              aria-hidden="true"
+              className="bg-border h-3.5 w-px shrink-0"
+            />
           </>
+        )}
+        {working ? (
+          <span role="img" aria-label="Working" className="flex shrink-0">
+            <WorkingMark />
+          </span>
+        ) : (
+          <TerminalKindIcon kind={agent} className="size-[13px] shrink-0" />
         )}
         <h1
           className={`${WINDOW_TITLE} ${working ? "text-shimmer" : ""}`}
