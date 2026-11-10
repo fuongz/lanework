@@ -25,6 +25,7 @@ import {
   ANSWERS_MAX,
   type Awaiting,
   agentOfModel,
+  allModels,
   type ComposerSettings,
   type Conversation,
   type ConversationAgent,
@@ -41,6 +42,7 @@ import {
   type PowerSettings,
   type SendRequest,
   type Suggestion,
+  setClaudeModels,
   setCodexModels,
   setOpenCodeModels,
   type Turn,
@@ -76,6 +78,7 @@ import {
 import { agentHomeDir } from "../test-seams";
 import { awaitingNotice, createAwaitingLedger } from "./awaiting";
 import { createAgentCli, createClaudeCli } from "./claude-cli";
+import { createClaudeModels } from "./claude-models";
 import { claudeJsonFor, isClaudeTrusted } from "./claude-trust";
 import { createCodexModels } from "./codex-models";
 import { codexRolloutPath, readCodexConversation } from "./codex-transcript";
@@ -492,8 +495,27 @@ export function registerConversation(
   });
   const testing =
     !app.isPackaged && Boolean(process.env.LANEWORK_TEST_USER_DATA);
+  const claudeCli = createClaudeCli(() =>
+    testing ? process.env.LANEWORK_CLAUDE_BIN : undefined,
+  );
+  // FE-135: Claude's models as its own CLI lists them, kept between runs.
+  // Never asked under test: the specs run on the fixed list.
+  const claudeList = createClaudeModels({
+    file: join(app.getPath("userData"), "claude-models.json"),
+    cli: claudeCli,
+    onChange: setClaudeModels,
+  });
+  const claudeModels = async (): Promise<AgentModel[]> => {
+    if (!testing) {
+      const models = await claudeList.read();
+      if (models) setClaudeModels(models);
+    }
+    return allModels().filter((entry) => entry.agent === "claude");
+  };
   // NOTE: Read before any settings are checked. A Codex model is only known
   // once its list is, and a stored one not on the fallback would be dropped.
+  // So is a Claude one: the kept list is only a file read away, and asking
+  // the CLI again happens behind it.
   const readCodexModels = createCodexModels(agentHome);
   const codexModels = async (): Promise<AgentModel[]> => {
     const models = await readCodexModels().catch(() => []);
@@ -546,6 +568,7 @@ export function registerConversation(
   // NOTE: A stored OpenCode model is only known once its list is. A missing
   // or slow OpenCode does not hold the first read up for long.
   const ready = Promise.all([
+    claudeModels(),
     codexModels(),
     Promise.race([
       opencodeModels(),
@@ -617,9 +640,7 @@ export function registerConversation(
     }).catch(() => {});
   };
   const engines = createEngines({
-    cli: createClaudeCli(() =>
-      testing ? process.env.LANEWORK_CLAUDE_BIN : undefined,
-    ),
+    cli: claudeCli,
     codexCli: createAgentCli("codex", () =>
       testing ? process.env.LANEWORK_CODEX_BIN : undefined,
     ),
@@ -1049,6 +1070,15 @@ export function registerConversation(
       await ready;
       if (args.length !== 0) throw new Error("No arguments are taken");
       return store.last();
+    },
+  );
+
+  handle(
+    conversationChannels.claudeModels,
+    devUrl,
+    async (args): Promise<AgentModel[]> => {
+      if (args.length !== 0) throw new Error("No arguments are taken");
+      return claudeModels();
     },
   );
 

@@ -262,6 +262,7 @@ const conversation: DesktopConversationApi = {
     ipcRenderer.invoke(conversationChannels.permissions, project, id),
   awaiting: () => ipcRenderer.invoke(conversationChannels.awaiting),
   lastSettings: () => ipcRenderer.invoke(conversationChannels.lastSettings),
+  claudeModels: () => ipcRenderer.invoke(conversationChannels.claudeModels),
   codexModels: () => ipcRenderer.invoke(conversationChannels.codexModels),
   opencodeModels: () => ipcRenderer.invoke(conversationChannels.opencodeModels),
   linkPreview: (url) =>

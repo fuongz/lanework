@@ -23,8 +23,10 @@ import {
   type ComposerSettings,
   type ConversationAgent,
   EFFORT_LABELS,
-  EFFORTS,
   type Effort,
+  effortFor,
+  modelEfforts,
+  modelHasFast,
   modelName,
   PERMISSION_COPY,
   PERMISSIONS,
@@ -389,18 +391,24 @@ export function ModelMenu({
     : (modelName(settings.model) ?? (settings.model || "No model"));
   // A locked CLI's mark, even for a model its list has not named yet.
   const kind = agent ?? agentOfModel(settings.model);
-  const effortLabel = effortSet ? EFFORT_LABELS[settings.effort] : "Default";
+  // What the model takes: its own efforts, its fast mode if it has one
+  // (FE-135/D5). Main sends what this says, however the stored one reads.
+  const efforts = modelEfforts(settings.model);
+  const effort = effortFor(settings.model, settings.effort);
+  const hasFast = modelHasFast(settings.model);
+  const isFast = settings.fast && hasFast;
+  const effortLabel = effortSet ? EFFORT_LABELS[effort] : "Default";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         disabled={disabled}
-        aria-label={`Model: ${name}, effort ${effortLabel}${settings.fast ? ", fast" : ""}`}
+        aria-label={`Model: ${name}, effort ${effortLabel}${isFast ? ", fast" : ""}`}
         className={cn(PILL, className)}
       >
         {!automatic && <TerminalKindIcon kind={kind} className="size-3.5" />}
         <span>{name}</span>
         <span className="text-muted-foreground">{effortLabel}</span>
-        {settings.fast && (
+        {isFast && (
           <HugeiconsIcon
             icon={FlashIcon}
             className="text-tone-amber size-3.5"
@@ -421,26 +429,31 @@ export function ModelMenu({
         sideOffset={6}
         className="w-72 p-1.5"
       >
-        {/* OpenCode has no fast mode: its engine ignores it (FE-104). */}
-        {fast && kind !== "opencode" && (
+        {/* OpenCode has no fast mode: its engine ignores it (FE-104). Nor
+            has a Claude model its CLI lists without one (FE-135). */}
+        {fast && kind !== "opencode" && hasFast && (
           <DropdownMenuItem
             closeOnClick={false}
-            onClick={() => onChange({ fast: !settings.fast })}
+            onClick={() => onChange({ fast: !isFast })}
             className="h-9 rounded-lg px-2.5 text-[13px]"
           >
             <span className="flex-1">Fast</span>
             <Switch
-              checked={settings.fast}
+              checked={isFast}
               tabIndex={-1}
               aria-hidden="true"
               className="pointer-events-none"
             />
           </DropdownMenuItem>
         )}
-        <EffortSlider
-          effort={settings.effort}
-          onChange={(effort) => onChange({ effort })}
-        />
+        {/* A model that takes one effort or none has nothing to slide. */}
+        {efforts.length > 1 && (
+          <EffortSlider
+            steps={efforts}
+            effort={effort}
+            onChange={(next) => onChange({ effort: next })}
+          />
+        )}
         {auto && (
           <DropdownMenuItem
             onClick={auto.onPick}
@@ -469,7 +482,20 @@ export function ModelMenu({
               model={settings.model}
               agent={agent}
               exclude={exclude}
-              onPick={(model) => onChange({ model })}
+              // The effort and fast mode follow to what the new model takes,
+              // and are only named when they must: a proposal's "Default"
+              // effort stays unset.
+              onPick={(model) => {
+                const nextEffort = effortFor(model, settings.effort);
+                const loseFast = settings.fast && !modelHasFast(model);
+                onChange({
+                  model,
+                  ...(nextEffort !== settings.effort
+                    ? { effort: nextEffort }
+                    : {}),
+                  ...(loseFast ? { fast: false } : {}),
+                });
+              }}
             />
           </DropdownMenuSubContent>
         </DropdownMenuSub>
@@ -508,22 +534,25 @@ const SETTLE =
  *   kept from the menu, whose highlight they would move.
  */
 function EffortSlider({
+  steps,
   effort,
   onChange,
 }: {
+  /** The model's efforts, in order; two at least. */
+  steps: readonly Effort[];
   effort: Effort;
   onChange: (effort: Effort) => void;
 }) {
-  const at = EFFORTS.indexOf(effort);
-  const last = EFFORTS.length - 1;
+  const at = Math.max(0, steps.indexOf(effort));
+  const last = steps.length - 1;
   // Where the thumb is while dragging; null when it rests on `effort`.
   const [drag, setDrag] = useState<number | null>(null);
   const position = drag ?? at;
-  const shown = EFFORTS[Math.round(position)] ?? effort;
+  const shown = steps[Math.round(position)] ?? effort;
 
   function settle(value: number) {
     setDrag(null);
-    const next = EFFORTS[Math.round(value)];
+    const next = steps[Math.round(value)];
     if (next && next !== effort) onChange(next);
   }
 
@@ -585,7 +614,7 @@ function EffortSlider({
                 style={{ backgroundImage: EFFORT_GRADIENT }}
               />
             </div>
-            {EFFORTS.map((step, i) => (
+            {steps.map((step, i) => (
               <span
                 key={step}
                 aria-hidden="true"

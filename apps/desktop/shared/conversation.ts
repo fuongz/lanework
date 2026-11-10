@@ -37,19 +37,30 @@ export interface AgentModel {
   group?: string;
   /** The one its CLI starts on by itself, marked "Default" in the picker. */
   preferred?: boolean;
+  /**
+   * The efforts it takes, in the CLI's order; none when it takes none.
+   * Unset: every one of {@link EFFORTS}, as for a model the CLI never
+   * described (FE-135/D5).
+   */
+  efforts?: readonly Effort[];
+  /** False when it has no fast mode; unset when its CLI does not say. */
+  fast?: boolean;
 }
 
 /**
- * Claude's models in the picker, fixed in code (FE-62/D9).
+ * Claude's models when its CLI has not listed them yet, or could not
+ * (FE-62/D9). Main asks `claude` itself and hands its list over with
+ * {@link setClaudeModels} (FE-135).
  *
- * NOTE: `id` is checked against this list in main. It becomes an argument,
- * and nothing the page typed may.
+ * NOTE: `id` is checked against the current list in main. It becomes an
+ * argument, and nothing the page typed may.
  */
-const CLAUDE_MODELS: readonly AgentModel[] = [
+export const CLAUDE_MODELS: readonly AgentModel[] = [
   { id: "claude-opus-5-5", label: "Opus 5.5", agent: "claude" },
-  { id: "claude-fable-5-1", label: "Fable 5.1", agent: "claude" },
+  { id: "claude-fable-5-2", label: "Fable 5.2", agent: "claude" },
   { id: "claude-sonnet-5-5", label: "Sonnet 5.5", agent: "claude" },
   { id: "claude-haiku-5-5", label: "Haiku 5.5", agent: "claude" },
+  { id: "claude-fable-5-1", label: "Fable 5.1", agent: "claude", legacy: true },
   { id: "claude-haiku-4-5", label: "Haiku 4.5", agent: "claude", legacy: true },
   { id: "claude-sonnet-5", label: "Sonnet 5", agent: "claude", legacy: true },
   { id: "claude-opus-5", label: "Opus 5", agent: "claude", legacy: true },
@@ -90,6 +101,12 @@ export const CODEX_MODELS: readonly AgentModel[] = [
  */
 export const OPENCODE_MODELS: readonly AgentModel[] = [];
 
+/**
+ * What a Claude model id may be: it becomes `--model`'s value. Never a
+ * slash: that is an OpenCode id (FE-105), and never a leading dash.
+ */
+export const CLAUDE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:@[\]-]{0,127}$/;
+
 /** What a Codex model id may be: it becomes `-m`'s value. */
 export const CODEX_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
@@ -102,6 +119,8 @@ export const CODEX_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const OPENCODE_MODEL_ID =
   /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
 
+/** Claude's models as this process knows them; see {@link CLAUDE_MODELS}. */
+let claudeList: readonly AgentModel[] = CLAUDE_MODELS;
 /**
  * Codex's models as this process knows them.
  *
@@ -112,11 +131,39 @@ let codexList: readonly AgentModel[] = CODEX_MODELS;
 /** OpenCode's models as main last read them from its service. */
 let opencodeList: readonly AgentModel[] = OPENCODE_MODELS;
 let everyModel: readonly AgentModel[] = [
-  ...CLAUDE_MODELS,
+  ...claudeList,
   ...codexList,
   ...opencodeList,
 ];
 const listeners = new Set<() => void>();
+
+/** One list again from the three, and every picker told. */
+function relist(): void {
+  everyModel = [...claudeList, ...codexList, ...opencodeList];
+  for (const listener of listeners) listener();
+}
+
+/**
+ * Take `list` as Claude's models, the ones `claude` itself lists (FE-135).
+ *
+ * An empty list keeps the fallback. Ids that are not plain names are
+ * dropped, and so are efforts not in {@link EFFORTS}.
+ */
+export function setClaudeModels(list: readonly AgentModel[]): void {
+  const clean = list
+    .filter(
+      (entry) => entry.agent === "claude" && CLAUDE_MODEL_ID.test(entry.id),
+    )
+    .map((entry) =>
+      entry.efforts
+        ? { ...entry, efforts: entry.efforts.filter(isEffort) }
+        : entry,
+    );
+  const next = clean.length > 0 ? clean : CLAUDE_MODELS;
+  if (JSON.stringify(next) === JSON.stringify(claudeList)) return;
+  claudeList = next;
+  relist();
+}
 
 /**
  * Take `list` as Codex's models, the ones `codex` itself lists.
@@ -133,8 +180,7 @@ export function setCodexModels(list: readonly AgentModel[]): void {
   const next = clean.length > 0 ? clean : CODEX_MODELS;
   if (JSON.stringify(next) === JSON.stringify(codexList)) return;
   codexList = next;
-  everyModel = [...CLAUDE_MODELS, ...codexList, ...opencodeList];
-  for (const listener of listeners) listener();
+  relist();
 }
 
 /**
@@ -149,11 +195,10 @@ export function setOpenCodeModels(list: readonly AgentModel[]): void {
   );
   if (JSON.stringify(next) === JSON.stringify(opencodeList)) return;
   opencodeList = next;
-  everyModel = [...CLAUDE_MODELS, ...codexList, ...opencodeList];
-  for (const listener of listeners) listener();
+  relist();
 }
 
-/** Told when {@link setCodexModels} changed the list, so the picker redraws. */
+/** Told when one CLI's list changed, so the picker redraws. */
 export function onModelsChanged(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
@@ -180,7 +225,12 @@ const DEFAULT_MODEL = "claude-opus-5-5";
 function defaultModel(agent: ConversationAgent): string {
   switch (agent) {
     case "claude":
-      return DEFAULT_MODEL;
+      return (
+        claudeList.find((entry) => entry.preferred)?.id ??
+        (claudeList.some((entry) => entry.id === DEFAULT_MODEL)
+          ? DEFAULT_MODEL
+          : (claudeList[0]?.id ?? DEFAULT_MODEL))
+      );
     case "codex":
       return codexList[0]?.id ?? "gpt-6.1-sol";
     case "opencode":
@@ -246,6 +296,29 @@ function isEffort(value: unknown): value is Effort {
   return (
     typeof value === "string" && (EFFORTS as readonly string[]).includes(value)
   );
+}
+
+/** The efforts `model` takes: every one for a model its CLI never described. */
+export function modelEfforts(model: string): readonly Effort[] {
+  return allModels().find((m) => m.id === model)?.efforts ?? EFFORTS;
+}
+
+/**
+ * `effort` on `model`: itself when the model takes it, else the nearest
+ * one below it, else its lowest (FE-135/D5). Unchanged for a model that
+ * takes none: `--effort` is still passed, and the CLI ignores it.
+ */
+export function effortFor(model: string, effort: Effort): Effort {
+  const levels = modelEfforts(model);
+  if (levels.length === 0 || levels.includes(effort)) return effort;
+  const at = EFFORTS.indexOf(effort);
+  const below = levels.filter((level) => EFFORTS.indexOf(level) < at);
+  return below.at(-1) ?? levels[0] ?? effort;
+}
+
+/** Whether `model` has a fast mode: yes unless its CLI says it has none. */
+export function modelHasFast(model: string): boolean {
+  return allModels().find((m) => m.id === model)?.fast !== false;
 }
 
 /**
@@ -321,10 +394,12 @@ export function checkSettings(value: unknown): ComposerSettings | null {
     !isPermission(v.permission)
   )
     return null;
+  // A model that takes fewer efforts, or has no fast mode, gets what it
+  // does take (FE-135/D5).
   return {
     model: v.model,
-    effort: v.effort,
-    fast: v.fast,
+    effort: effortFor(v.model, v.effort),
+    fast: v.fast && modelHasFast(v.model),
     permission: v.permission,
   };
 }
@@ -855,6 +930,8 @@ export const conversationChannels = {
   awaiting: "conversation:awaiting",
   /** The last settings used anywhere, for one never sent from chat. */
   lastSettings: "conversation:last-settings",
+  /** Claude's models, as `claude` lists them (FE-135). */
+  claudeModels: "conversation:claude-models",
   /** Codex's models, as `codex` lists them in its own cache. */
   codexModels: "conversation:codex-models",
   /** OpenCode's models, as its service lists them (FE-104). */
@@ -935,6 +1012,11 @@ export interface DesktopConversationApi {
    */
   awaiting: () => Promise<Awaiting[]>;
   lastSettings: () => Promise<ComposerSettings>;
+  /**
+   * Claude's models as main last had `claude` list them (FE-135), or the
+   * fixed list before it has.
+   */
+  claudeModels: () => Promise<AgentModel[]>;
   /** Codex's models, read from `~/.codex/models_cache.json` by main. */
   codexModels: () => Promise<AgentModel[]>;
   /**
