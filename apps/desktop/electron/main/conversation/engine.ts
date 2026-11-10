@@ -45,8 +45,11 @@ import {
 import { isAgentSessionId } from "../../../shared/terminal";
 import {
   agentEnv,
+  type EngineTarget,
   engineTap,
+  leadGuarded,
   safely,
+  WRITE_TOOLS,
   writtenPaths,
 } from "../orchestration/engine-tap";
 import type { ClaudeCli } from "./claude-cli";
@@ -115,6 +118,9 @@ interface EngineDeps {
  * `.claude/settings*.json` hooks, `env` and `apiKeyHelper` would otherwise
  * run unasked. A trusted folder's arguments are unchanged.
  *
+ * A `guarded` lead (its run active or paused, FE-136/D1) starts without its
+ * edit tools: it delegates instead.
+ *
  * @throws When the settings are off the lists or `id` is not a session id.
  */
 export function engineArgs(
@@ -124,6 +130,7 @@ export function engineArgs(
   trusted = true,
   localMcp: string | null = null,
   hint: string | null = null,
+  guarded = false,
 ): string[] {
   const settings = checkSettings(value);
   if (!settings || !isAgentSessionId(id)) throw new Error("Unknown settings");
@@ -156,6 +163,7 @@ export function engineArgs(
   if (localMcp) args.push(...claudeMcpArgs(localMcp));
   // BE-01: what this process may ask of the app, fixed for its life.
   if (hint) args.push("--append-system-prompt", hint);
+  if (guarded) args.push("--disallowedTools", [...WRITE_TOOLS].join(","));
   return args;
 }
 
@@ -282,6 +290,12 @@ class Engine implements ConversationEngine {
    * the next one, to load (or drop) the repo's settings (FE-101).
    */
   stale = false;
+  /**
+   * The running process started without its edit tools: a lead whose run
+   * was active or paused (FE-136/D1). A turn that finds this changed
+   * restarts the process first.
+   */
+  guarded = false;
 
   constructor(
     readonly project: string,
@@ -408,11 +422,13 @@ class Engine implements ConversationEngine {
     const localMcp = (await this.deps.localMcp?.(this.project)) ?? null;
     // FE-87: a lead's control endpoint, a worker's scratch; never the
     // control variables for anyone else.
-    const env = agentEnv(cli.env, {
+    const target: EngineTarget = {
       project: this.project,
       conversation: this.conversation,
       folder: this.folder,
-    });
+    };
+    const env = agentEnv(cli.env, target);
+    const guarded = leadGuarded(target);
     const child = spawn(
       cli.file,
       engineArgs(
@@ -422,11 +438,13 @@ class Engine implements ConversationEngine {
         trusted,
         localMcp,
         env[SESSIONS_ENV.token] ? CREATE_CONDUCTOR_HINT : null,
+        guarded,
       ),
       { cwd: this.folder, env, stdio: ["pipe", "pipe", "pipe"] },
     );
     this.child = child;
     this.applied = settings;
+    this.guarded = guarded;
     this.starting = true;
     this.stopping = false;
     this.error = null;
@@ -907,6 +925,13 @@ class Engine implements ConversationEngine {
         !this.child ||
         !was ||
         this.stale ||
+        // FE-136/D1: the lead's edit tools go off, or back on, by a restart.
+        this.guarded !==
+          leadGuarded({
+            project: this.project,
+            conversation: this.conversation,
+            folder: this.folder,
+          }) ||
         was.effort !== out.settings.effort ||
         was.fast !== out.settings.fast;
       if (!restart && was) {

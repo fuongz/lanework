@@ -8,6 +8,7 @@ import {
 import { MotionConfig } from "motion/react";
 import { type ReactNode, useEffect } from "react";
 import { AuthGate } from "#/components/features/auth/auth-gate";
+import { UpdaterDialogs } from "#/components/features/updater/updater-dialogs";
 import { StartupLoading } from "#/components/shared/loading/startup-loading";
 import { useFonts } from "#/hooks/use-fonts";
 import { useNotificationRouting } from "#/hooks/use-notification-routing";
@@ -44,6 +45,7 @@ function RootShell() {
       <AuthGate>
         <Outlet />
       </AuthGate>
+      <UpdaterDialogs />
     </ClientOnly>
   );
 }

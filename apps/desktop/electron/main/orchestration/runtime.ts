@@ -59,6 +59,8 @@ import {
   ControlInputError,
   type ControlInputs,
   canLead,
+  checkLeadGuardEvent,
+  checkRunReport,
   type DelegateInput,
   type JevMainHandlers,
   type JudgeMode,
@@ -73,6 +75,8 @@ import {
   type OrchestrationTask,
   type ProposedTask,
   type RunLeftovers,
+  type RunReport,
+  SETTLED_STATUSES,
   TASKS_MAX,
   type TeamLead,
   TIERS,
@@ -102,6 +106,7 @@ import {
 } from "./git";
 import {
   approvedTurn,
+  leadGuardTurn,
   recoveryTurn,
   resumedTurn,
   updateTurn,
@@ -112,6 +117,7 @@ import {
   checkWrite,
   inScopes,
   isAgentConfig,
+  leadWriteInside,
   mayWrite,
   readsInside,
   scopesOverlap,
@@ -261,6 +267,11 @@ interface RunRecord {
    * scopes of the tasks the run holds when it is loaded.
    */
   approvedScopes?: string[];
+  /**
+   * Why the guard last stopped the lead (FE-136/D1), put before the next
+   * envelope it is sent, then cleared. Absent when there is nothing to tell.
+   */
+  leadNotice?: string | null;
 }
 
 const RECEIPTS_MAX = 512;
@@ -430,6 +441,43 @@ function inputField(input: string, name: string): string | null {
   }
 }
 
+/** Blocked for a write outside its scope: the user decides what next. */
+const SCOPE_BLOCK = /outside its scope/;
+
+/**
+ * What a run came to, by task (FE-136/D4). In order, so a task is in one
+ * list at most: `done` (accepted, or completed and awaiting review), then
+ * `needsYou` (an approval or a question, scopes awaiting the user, blocked
+ * for its scope), then `failed` (failed, cancelled, blocked otherwise). A
+ * task fitting none (queued, interrupted) is in none.
+ */
+export function runReport(run: OrchestrationRun, now = Date.now()): RunReport {
+  const report: RunReport = {
+    done: [],
+    failed: [],
+    needsYou: [],
+    finishedAt: now,
+    seen: false,
+  };
+  for (const task of run.tasks) {
+    if (task.accepted || task.status === "completed") report.done.push(task.id);
+    else if (
+      task.needsInput ||
+      task.scopeApproval?.length ||
+      (task.status === "blocked" && SCOPE_BLOCK.test(task.error ?? ""))
+    )
+      report.needsYou.push(task.id);
+    else if (
+      task.status === "failed" ||
+      task.status === "cancelled" ||
+      task.status === "cancelling" ||
+      (task.status === "blocked" && task.error)
+    )
+      report.failed.push(task.id);
+  }
+  return report;
+}
+
 /**
  * Whether `scope` is within what the user approved (FE-89/D11). An agent
  * config scope must be approved itself, or under one approved that names
@@ -442,6 +490,26 @@ function approvedScope(approved: readonly string[], scope: string): boolean {
 }
 
 // ─── The engine ─────────────────────────────────────────────────────────────
+
+/**
+ * Each worker's running time, from its status as it stands now (FE-137):
+ * `startedAt` the first time it runs, `endedAt` each time it settles,
+ * cleared while it runs again. Stamped wherever a change is saved, so no
+ * path that moves a task has to remember it.
+ */
+function stampTimes(tasks: readonly OrchestrationTask[], now: number): void {
+  for (const task of tasks) {
+    if (task.status === "running") {
+      task.startedAt ??= now;
+      task.endedAt = null;
+    } else if (
+      SETTLED_STATUSES.includes(task.status) &&
+      task.startedAt &&
+      !task.endedAt
+    )
+      task.endedAt = now;
+  }
+}
 
 export class Orchestrator {
   private records = new Map<string, RunRecord>();
@@ -526,6 +594,10 @@ export class Orchestrator {
         record.approvedScopes ??= [
           ...new Set(record.run.tasks.flatMap((task) => task.files)),
         ];
+        if (record.run.report !== undefined)
+          record.run.report = checkRunReport(record.run.report);
+        if (record.run.leadGuard !== undefined)
+          record.run.leadGuard = checkLeadGuardEvent(record.run.leadGuard);
         this.recover(record);
         this.records.set(record.run.id, record);
         for (const task of record.run.tasks) {
@@ -610,6 +682,7 @@ export class Orchestrator {
   /** Save, tell the page, wake waiters on `taskIds`. */
   private touch(record: RunRecord, taskIds: string[] = []): void {
     record.run.updatedAt = Date.now();
+    stampTimes(record.run.tasks, record.run.updatedAt);
     void this.save(record).catch((error: unknown) =>
       console.error("Unable to save orchestration run", error),
     );
@@ -735,6 +808,37 @@ export class Orchestrator {
     return this.workerAt(folder) !== null;
   }
 
+  /**
+   * The run `conversation` leads in `project` while it is active or paused
+   * (FE-136/D1); null when it leads none.
+   */
+  private leadRunOf(
+    project: string,
+    conversation: string | null,
+  ): RunRecord | null {
+    if (!conversation) return null;
+    for (const record of this.records.values()) {
+      const { run } = record;
+      if (run.project !== project || run.lead !== conversation) continue;
+      if (run.status === "active" || run.status === "paused") return record;
+    }
+    return null;
+  }
+
+  /**
+   * Whether an engine process is a lead whose run is active or paused: its
+   * edit tools are off (FE-136/D1). After the run, nothing restricts it.
+   */
+  guardsLead(target: EngineTarget): boolean {
+    if (this.workerAt(target.folder)) return false;
+    return (
+      this.leadRunOf(
+        target.project,
+        target.conversation ?? target.named?.() ?? null,
+      ) !== null
+    );
+  }
+
   /** The extra environment one engine process starts with. */
   envFor(target: EngineTarget): Record<string, string> | null {
     const worker = this.workerAt(target.folder);
@@ -801,7 +905,11 @@ export class Orchestrator {
 
   onWrite(write: EngineWrite): void {
     const worker = this.workerAt(write.folder);
-    if (worker?.task.status !== "running") return;
+    if (!worker) {
+      this.onLeadWrite(write);
+      return;
+    }
+    if (worker.task.status !== "running") return;
     const { record, task, own } = worker;
     void (async () => {
       for (const path of write.paths) {
@@ -824,6 +932,70 @@ export class Orchestrator {
     })().catch((error: unknown) =>
       console.error("Orchestration write guard failed", error),
     );
+  }
+
+  /**
+   * A write a lead still made while its run is active or paused, its edit
+   * tools off (FE-136/D1): one inside the project's checkout and outside
+   * `.agents/` pauses the run, and the run shows it.
+   */
+  private onLeadWrite(write: EngineWrite): void {
+    const record = this.leadRunOf(
+      write.project,
+      write.conversation ?? write.named?.() ?? null,
+    );
+    if (!record) return;
+    void (async () => {
+      for (const path of write.paths) {
+        const inside = await leadWriteInside(record.folder, write.folder, path);
+        if (inside === null) continue;
+        await this.leadWrote(record, inside);
+        return;
+      }
+    })().catch((error: unknown) =>
+      console.error("Orchestration lead guard failed", error),
+    );
+  }
+
+  /**
+   * Record that the lead wrote `path`, and pause the run when it is active:
+   * its workers are interrupted and the lead's turn stopped, as the user's
+   * Pause does. The lead hears why in its next envelope.
+   */
+  private async leadWrote(record: RunRecord, path: string): Promise<void> {
+    await this.serial(record.run.id, async () => {
+      const { run } = record;
+      if (run.status !== "active" && run.status !== "paused") return;
+      const paused = run.status === "active";
+      run.leadGuard = { path, at: Date.now(), paused };
+      record.leadNotice = leadGuardTurn(run, cut(path, 300), paused);
+      if (paused) {
+        run.status = "paused";
+        run.reason = `Paused because the lead wrote ${cut(path, 300)} itself instead of delegating it. Look at the change, then Resume.`;
+        await this.stopWorkers(
+          record,
+          "interrupted",
+          "the lead wrote into the checkout and the run paused",
+        );
+        await this.deps
+          .engines()
+          ?.stop(run.project, run.lead)
+          .catch(() => {});
+      }
+      this.touch(
+        record,
+        run.tasks.map((task) => task.id),
+      );
+    });
+  }
+
+  /** `text`, after why the guard stopped the lead, when it has not heard. */
+  private withNotice(record: RunRecord, text: string): string {
+    const notice = record.leadNotice;
+    if (!notice) return text;
+    record.leadNotice = null;
+    void this.save(record).catch(() => {});
+    return `${notice}\n\n${text}`;
   }
 
   private onWorkerEvent(
@@ -1855,7 +2027,7 @@ export class Orchestrator {
         run.lead,
         await this.leadFolder(record),
         outgoing(
-          updateTurn(run, changed, this.deps.cliPath),
+          this.withNotice(record, updateTurn(run, changed, this.deps.cliPath)),
           this.leadSettings(record),
         ),
         run.leadAgent,
@@ -1972,7 +2144,7 @@ export class Orchestrator {
         run.project,
         run.lead,
         await this.leadFolder(record),
-        outgoing(text, this.leadSettings(record)),
+        outgoing(this.withNotice(record, text), this.leadSettings(record)),
         run.leadAgent,
       );
     } finally {
@@ -2327,6 +2499,7 @@ export class Orchestrator {
         ?.stop(run.project, run.lead)
         .catch(() => {});
       await this.cleanup(record, false);
+      run.report = runReport(run);
       this.touch(
         record,
         run.tasks.map((task) => task.id),
@@ -2421,6 +2594,23 @@ export class Orchestrator {
         );
     });
     return this.shown(record);
+  }
+
+  /**
+   * The user opened a finished or stopped run: its report is seen, saved
+   * and sent to the page like any change (FE-136/D4). Nothing happens to a
+   * run without a report, or one already seen.
+   */
+  async markReportSeen(runId: string): Promise<void> {
+    await this.load();
+    const record = this.records.get(runId);
+    if (!record) throw new Error("Run not found");
+    await this.serial(runId, async () => {
+      const { report } = record.run;
+      if (!report || report.seen) return;
+      report.seen = true;
+      this.touch(record);
+    });
   }
 
   async cancelTask(
@@ -2813,6 +3003,7 @@ export class Orchestrator {
         run.reason = null;
         this.revoke(run.id);
         await this.cleanup(record, true);
+        run.report = runReport(run);
         this.touch(
           record,
           run.tasks.map((task) => task.id),

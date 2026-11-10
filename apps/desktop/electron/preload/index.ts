@@ -18,7 +18,12 @@ import {
   conversationChannels,
   type DesktopConversationApi,
 } from "../../shared/conversation";
-import { channels, type DesktopApi } from "../../shared/desktop";
+import {
+  attentionChannels,
+  channels,
+  type DesktopApi,
+  type DesktopAttentionApi,
+} from "../../shared/desktop";
 import {
   type DesktopDictationApi,
   type DictationEvent,
@@ -74,6 +79,7 @@ import {
   type TerminalViewHandlers,
   terminalChannels,
 } from "../../shared/terminal";
+import { type DesktopUpdaterApi, updaterChannels } from "../../shared/updater";
 import {
   type DesktopWorktreeApi,
   isHeldRead,
@@ -179,6 +185,14 @@ const worktree: DesktopWorktreeApi = {
   coAuthors: (slug) => read(worktreeChannels.coAuthors, slug),
 };
 
+/** What needs the person: report seen, proposals waiting (FE-136/D6). */
+const attention: DesktopAttentionApi = {
+  markReportSeen: (project, runId) =>
+    ipcRenderer.invoke(attentionChannels.markReportSeen, project, runId),
+  setProposals: (proposals) =>
+    ipcRenderer.invoke(attentionChannels.setProposals, proposals),
+};
+
 /** Settings → Notifications, and where a clicked one leads. */
 const notifications: DesktopNotificationsApi = {
   get: () => ipcRenderer.invoke(notificationChannels.get),
@@ -201,6 +215,21 @@ const notifications: DesktopNotificationsApi = {
 };
 
 /** Settings → About: the resource log (FE-115). */
+/** INF-11: updates and What's New. */
+const updater: DesktopUpdaterApi = {
+  get: () => ipcRenderer.invoke(updaterChannels.get),
+  setAuto: (auto) => ipcRenderer.invoke(updaterChannels.setAuto, auto),
+  check: () => ipcRenderer.invoke(updaterChannels.check),
+  install: (force) => ipcRenderer.invoke(updaterChannels.install, force),
+  later: () => ipcRenderer.invoke(updaterChannels.later),
+  pendingWhatsNew: () => ipcRenderer.invoke(updaterChannels.pendingWhatsNew),
+  markWhatsNewSeen: () => ipcRenderer.invoke(updaterChannels.markWhatsNewSeen),
+  releaseNotes: () => ipcRenderer.invoke(updaterChannels.releaseNotes),
+  onChange: (listener) => subscribe(updaterChannels.changed, listener),
+  onShowWhatsNew: (listener) =>
+    subscribe(updaterChannels.showWhatsNew, () => listener()),
+};
+
 const metrics: DesktopMetricsApi = {
   get: () => ipcRenderer.invoke(metricsChannels.get),
   set: (enabled) => ipcRenderer.invoke(metricsChannels.set, enabled),
@@ -937,7 +966,9 @@ const desktop: DesktopApi = {
   conversation,
   dictation,
   notifications,
+  attention,
   metrics,
+  updater,
   handoff,
   readiness,
   harness,

@@ -3,7 +3,7 @@
 // off from Settings → Notifications.
 
 /** What can notify. One row each in Settings → Notifications. */
-const NOTIFICATION_KINDS = ["sessions", "input", "pulls"] as const;
+const NOTIFICATION_KINDS = ["sessions", "input", "pulls", "runs"] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 /**
@@ -26,6 +26,8 @@ const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   sessions: "push",
   input: "push",
   pulls: "push",
+  /** An orchestration run finished or stopped (FE-136/D6). */
+  runs: "push",
 };
 
 export function isNotificationKind(value: unknown): value is NotificationKind {
@@ -57,7 +59,9 @@ export function checkNotificationSettings(
 /** Where clicking a notification takes the window (FE-70/D5). */
 export type NotificationTarget =
   | { kind: "session"; slug: string; conversation: string }
-  | { kind: "pull"; slug: string; number: number };
+  | { kind: "pull"; slug: string; number: number }
+  /** A run (FE-136/D6): `conversation` is its lead's, `run` its id. */
+  | { kind: "run"; slug: string; conversation: string; run: string };
 
 export const notificationChannels = {
   get: "notifications:get",

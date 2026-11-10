@@ -47,8 +47,27 @@ export function handle<T>(
   });
 }
 
-/** Send `payload` to every open window's top frame. */
+type BroadcastListener = (channel: string, payload: unknown) => void;
+const broadcastListeners = new Set<BroadcastListener>();
+
+/**
+ * Hear every broadcast in main too, open window or not (FE-136: the
+ * attention count follows `orchestration:changed`). Returns the unsubscribe.
+ */
+export function onBroadcast(listener: BroadcastListener): () => void {
+  broadcastListeners.add(listener);
+  return () => broadcastListeners.delete(listener);
+}
+
+/** Send `payload` to every open window's top frame, and to main's listeners. */
 export function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows())
     window.webContents.send(channel, payload);
+  for (const listener of broadcastListeners) {
+    try {
+      listener(channel, payload);
+    } catch (error) {
+      console.error(`broadcast listener failed on ${channel}`, error);
+    }
+  }
 }

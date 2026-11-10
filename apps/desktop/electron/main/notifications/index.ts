@@ -66,9 +66,10 @@ export function windowLocation(): string | null {
 /** The path a target opens, as the renderer's router spells it. */
 function targetPath(target: NotificationTarget): string {
   const slug = encodeURIComponent(target.slug);
-  return target.kind === "session"
-    ? `/w/${slug}/agents/chat/${encodeURIComponent(target.conversation)}`
-    : `/w/${slug}/issues/pulls/${target.number}`;
+  // A run opens its lead's chat, where the run panel lives (FE-136/D6).
+  return target.kind === "pull"
+    ? `/w/${slug}/issues/pulls/${target.number}`
+    : `/w/${slug}/agents/chat/${encodeURIComponent(target.conversation)}`;
 }
 
 /** Delivered notifications, kept alive so their click listeners survive GC. */
@@ -104,6 +105,17 @@ export async function notify(options: NotifyOptions): Promise<void> {
   )
     return;
   deliver(options.title, options.body, options.target);
+}
+
+/**
+ * Bring the window forward and send it to `target`: a clicked notification
+ * and a menu-bar item both end here. A window made just now has no screen to
+ * navigate yet, so it opens where it always does.
+ */
+export function openTarget(target: NotificationTarget): void {
+  const window = showWindow();
+  if (!window || window.isDestroyed()) return;
+  window.webContents.send(notificationChannels.open, target);
 }
 
 /**
@@ -145,9 +157,7 @@ function deliver(
     });
     notification.once("click", () => {
       release();
-      const window = showWindow();
-      if (!target || !window || window.isDestroyed()) return;
-      window.webContents.send(notificationChannels.open, target);
+      if (target) openTarget(target);
     });
     notification.show();
     return true;

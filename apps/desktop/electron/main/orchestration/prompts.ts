@@ -86,7 +86,7 @@ export function approvedTurn(run: OrchestrationRun, cli: string): string {
   return `<${ORCHESTRATION_TAG}>
 The user approved orchestration run ${run.id}. Its workers are already queued below; do not delegate them again.
 Coordinate the run with ${command}. Run \`${command} --help\` first: it lists every action, its JSON fields and the retry rule. The credentials are already in your environment; never print them. The CLI only works while you are in a turn.
-Workers never ask the user: when one needs a tool approval or an answer, its task shows needsInput and you decide with respond or answer. Use wait to follow them, get for a full result, steer to correct a running worker, message or retry for a stopped one. completed means a turn ended, not that the work is right: check it, then review to merge it into this checkout. A task blocked for writing outside its scope stays blocked until you message, retry (with corrected files) or cancel it. Do not edit project files yourself while workers run. Call finish when every task is reviewed or cancelled.
+Workers never ask the user: when one needs a tool approval or an answer, its task shows needsInput and you decide with respond or answer. Use wait to follow them, get for a full result, steer to correct a running worker, message or retry for a stopped one. completed means a turn ended, not that the work is right: check it, then review to merge it into this checkout. A task blocked for writing outside its scope stays blocked until you message, retry (with corrected files) or cancel it. Do not edit project files yourself while the run is active or paused: your edit tools are off, and a write into this checkout outside .agents/ pauses the run. Call finish when every task is reviewed or cancelled.
 Queued workers: ${JSON.stringify(tasks)}
 </${ORCHESTRATION_TAG}>`;
 }
@@ -111,6 +111,23 @@ export function updateTurn(
 Orchestration run ${run.id} changed while you were idle:
 ${lines.join("\n")}
 Read the details with \`${shellPath(cli)} get\` and act on them.
+</${ORCHESTRATION_TAG}>`;
+}
+
+/**
+ * Why the run paused under the lead (FE-136/D1), put before its next
+ * envelope.
+ */
+export function leadGuardTurn(
+  run: OrchestrationRun,
+  path: string,
+  paused: boolean,
+): string {
+  const what = paused
+    ? `Lanework paused orchestration run ${run.id} because you wrote ${path} in this checkout yourself.`
+    : `You wrote ${path} in this checkout yourself while orchestration run ${run.id} was paused.`;
+  return `<${ORCHESTRATION_TAG}>
+${what} While a run is active or paused, delegate every change to a worker; only .agents/ is yours to write. Do not undo or redo that change unless the user asks.
 </${ORCHESTRATION_TAG}>`;
 }
 

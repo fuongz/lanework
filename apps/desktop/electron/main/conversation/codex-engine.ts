@@ -42,7 +42,12 @@ import {
   type Turn,
 } from "../../../shared/conversation";
 import { isAgentSessionId } from "../../../shared/terminal";
-import { agentEnv, engineTap, safely } from "../orchestration/engine-tap";
+import {
+  agentEnv,
+  engineTap,
+  leadGuarded,
+  safely,
+} from "../orchestration/engine-tap";
 import type { ClaudeCli } from "./claude-cli";
 import type { ConversationEngine } from "./conversation-engine";
 import { codexHintArgs, codexMcpArgs } from "./mcp-args";
@@ -93,13 +98,27 @@ const str = (value: unknown): string | null =>
  *
  * NOTE: Full access stays `on-request`, not `never`: `never` refuses an
  * escalation before it reaches us, and Full access answers it with yes.
+ *
+ * A `guarded` lead (its run active or paused, FE-136/D1) runs read-only, so
+ * every write asks the user, whatever its permission; its network stays on,
+ * so its control CLI still reaches the run.
  */
-function codexPolicy(permission: Permission): {
+function codexPolicy(
+  permission: Permission,
+  guarded = false,
+): {
   approvalPolicy: "untrusted" | "on-request";
   approvalsReviewer: "user" | "auto_review";
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   sandboxPolicy: Json;
 } {
+  if (guarded)
+    return {
+      approvalPolicy: permission === "manual" ? "untrusted" : "on-request",
+      approvalsReviewer: "user",
+      sandbox: "read-only",
+      sandboxPolicy: { type: "readOnly", networkAccess: true },
+    };
   switch (permission) {
     case "manual":
       return {
@@ -328,6 +347,15 @@ export class CodexEngine implements ConversationEngine {
   /** The running turn's last agent message, told when the turn ends. */
   lastText = "";
 
+  /** A lead whose run is active or paused: it runs read-only (FE-136/D1). */
+  guarded(): boolean {
+    return leadGuarded({
+      project: this.project,
+      conversation: this.conversation,
+      folder: this.folder,
+    });
+  }
+
   /** Tell orchestration the files a file-change item writes (FE-87). */
   tellWrites(item: Json): void {
     const tap = engineTap().write;
@@ -484,7 +512,7 @@ export class CodexEngine implements ConversationEngine {
       capabilities: { experimentalApi: false, requestAttestation: false },
     });
     this.write({ method: "initialized" });
-    const policy = codexPolicy(settings.permission);
+    const policy = codexPolicy(settings.permission, this.guarded());
     const thread = {
       cwd: this.folder,
       model: settings.model,
@@ -1014,7 +1042,7 @@ export class CodexEngine implements ConversationEngine {
       const { input, dir } = await inputOf(out.content);
       if (dir) this.dirs.push(dir);
       this.applied = settings;
-      const policy = codexPolicy(settings.permission);
+      const policy = codexPolicy(settings.permission, this.guarded());
       if (this.conversation) this.deps.remember(this.conversation, settings);
       const started = await this.request("turn/start", {
         threadId: this.conversation,

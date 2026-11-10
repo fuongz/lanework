@@ -4,6 +4,11 @@
 // Developer ID, notarizes and staples it, then rewrites its .sha256, which
 // stapling made stale.
 //
+// INF-11: DMGs only. The zip (and its blockmap and latest-mac.yml) is left
+// exactly as electron-builder wrote it: the app inside it is already signed,
+// notarized and stapled, and latest-mac.yml carries the zip's sha512, which
+// any change here would break.
+//
 // It runs only when scripts/electron-builder.mjs left both a Developer ID
 // (LANEWORK_MAC_IDENTITY) and notarize credentials in the environment, which
 // it does for `bun run dist` alone: package builds, ad hoc builds and

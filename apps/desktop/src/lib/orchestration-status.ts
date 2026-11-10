@@ -44,3 +44,28 @@ export const taskTone = (task: OrchestrationTask): string =>
   task.status === "completed" && task.accepted
     ? "text-tone-teal"
     : TONES[shownStatus(task)];
+
+const BARS: Record<TaskStatus, string> = {
+  queued: "bg-foreground/10",
+  running: "bg-tone-sky motion-safe:animate-pulse",
+  cancelling: "bg-tone-sky",
+  completed: "bg-tone-emerald",
+  failed: "bg-tone-rose",
+  blocked: "bg-tone-amber",
+  interrupted: "bg-tone-amber",
+  cancelled: "bg-foreground/25",
+};
+
+/** A task's segment of the run's progress bar (FE-137), as its colour. */
+export const taskBar = (task: OrchestrationTask): string =>
+  task.status === "completed" && task.accepted
+    ? "bg-tone-teal"
+    : BARS[shownStatus(task)];
+
+/** What each label means, for its tooltip: Done and Accepted read alike. */
+export const taskHint = (task: OrchestrationTask): string =>
+  task.status === "completed"
+    ? task.accepted
+      ? "Accepted: the lead reviewed the result and took it"
+      : "Done: the worker finished; the lead has not reviewed it yet"
+    : taskLabel(task);

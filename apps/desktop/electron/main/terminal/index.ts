@@ -103,6 +103,16 @@ import { codexCli, codexDirs, registerUsage } from "./usage";
 
 let host: UtilityProcess | null = null;
 /**
+ * INF-11: the updater already asked about live work before it restarts the
+ * app, so `before-quit` must not ask again. Set by {@link quitForUpdate}.
+ */
+let updateConfirmed = false;
+
+/** Let the next quit through without the "terminals still running" prompt. */
+export function quitForUpdate(): void {
+  updateConfirmed = true;
+}
+/**
  * The argument an unpackaged build forks the pty host with. `host.ts` spells
  * the same string: it cannot import this module, which is main-only.
  */
@@ -1539,7 +1549,7 @@ export function registerTerminal(devUrl?: string): void {
 
   let quitting = false;
   app.on("before-quit", (event) => {
-    if (quitting || !host) return;
+    if (quitting || updateConfirmed || !host) return;
     event.preventDefault();
     void confirmQuit().then((go) => {
       if (!go) return;

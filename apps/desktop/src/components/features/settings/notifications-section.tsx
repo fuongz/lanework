@@ -158,6 +158,22 @@ export function NotificationsSection() {
                 />
               ),
             },
+            // A run finished or stopped, with what is done and what needs you
+            // (FE-136/D4).
+            {
+              label: "Orchestration runs",
+              description:
+                "Get notified when a run finishes or stops, with what is done and what needs you.",
+              keywords:
+                "run runs orchestration orchestrate finished stopped done failed needs you lead workers",
+              control: (
+                <DeliverySelect
+                  label="Orchestration run notifications"
+                  value={settings?.runs ?? null}
+                  onChange={(value) => change("runs", value)}
+                />
+              ),
+            },
           ],
         },
         {

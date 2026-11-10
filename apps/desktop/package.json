@@ -21,6 +21,9 @@
     "gallery:index": "GALLERY_INDEX_ONLY=1 playwright test --project=gallery",
     "showcase": "playwright test --project=showcase"
   },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
   "devDependencies": {
     "@base-ui/react": "^1.8.0",
     "@codemirror/commands": "^6.11.0",

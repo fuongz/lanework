@@ -3,6 +3,11 @@
 # .sha256 to a DRAFT GitHub Release. A maintainer reviews the draft and
 # presses Publish.
 #
+# INF-11: the same build makes the update zip (the same notarized, stapled
+# app), its blockmap and latest-mac.yml, which go on the draft too. Installed
+# apps read latest-mac.yml from the latest PUBLISHED release, so nothing is
+# offered to anyone until the maintainer presses Publish.
+#
 #   git tag v0.2.0 && git push origin v0.2.0   # tag == apps/desktop/package.json version
 #
 # Setup, once, in Settings > Environments > `release`:
@@ -96,7 +101,7 @@ jobs:
           umask 077
           printf '%s\n' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
 
-      - name: Build, sign and notarize the DMG
+      - name: Build, sign and notarize the DMG and update zip
         working-directory: apps/desktop
         env:
           LANEWORK_MAC_IDENTITY: ${{ vars.LANEWORK_MAC_IDENTITY }}
@@ -114,6 +119,37 @@ jobs:
             shasum -a 256 -c "$dmg.sha256"
           done
 
+      # What Squirrel.Mac will install: latest-mac.yml must describe this zip
+      # (name, version, sha512), and the app inside must pass Gatekeeper as
+      # it is, signed, notarized and stapled.
+      - name: Check the update zip
+        working-directory: apps/desktop/release
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          shopt -s nullglob
+          zips=(*-mac.zip)
+          if [ "${#zips[@]}" -ne 1 ]; then
+            echo "::error::Expected one *-mac.zip, found ${#zips[@]}"
+            exit 1
+          fi
+          zip="${zips[0]}"
+          [ -f "$zip.blockmap" ] || { echo "::error::No blockmap for $zip"; exit 1; }
+          [ -f latest-mac.yml ] || { echo "::error::latest-mac.yml was not written"; exit 1; }
+          grep -qx "version: ${TAG#v}" latest-mac.yml \
+            || { echo "::error::latest-mac.yml is not for ${TAG#v}"; exit 1; }
+          grep -qx "path: $zip" latest-mac.yml \
+            || { echo "::error::latest-mac.yml does not name $zip"; exit 1; }
+          want="$(sed -n 's/^sha512: //p' latest-mac.yml)"
+          got="$(openssl dgst -sha512 -binary "$zip" | base64)"
+          [ "$want" = "$got" ] \
+            || { echo "::error::$zip does not match the sha512 in latest-mac.yml"; exit 1; }
+          dir="$(mktemp -d "$RUNNER_TEMP/update-zip.XXXXXX")"
+          ditto -x -k "$zip" "$dir"
+          codesign --verify --deep --strict --verbose=2 "$dir/Lanework.app"
+          spctl -a -t exec -vv "$dir/Lanework.app"
+          xcrun stapler validate "$dir/Lanework.app"
+
       - name: Draft the GitHub Release
         working-directory: apps/desktop/release
         env:
@@ -122,7 +158,8 @@ jobs:
         run: |
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
             --title "Lanework ${TAG#v}" --generate-notes \
-            ./*.dmg ./*.dmg.sha256
+            ./*.dmg ./*.dmg.sha256 \
+            ./*-mac.zip ./*-mac.zip.blockmap ./latest-mac.yml
 
       - name: Remove the keychain and key
         if: always()

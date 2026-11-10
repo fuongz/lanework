@@ -11,6 +11,9 @@
 // - `event`: every event an engine emits, with the folder it runs in.
 // - `write`: a tool call that writes files, as soon as the CLI names it.
 // - `result`: the text a turn ended with.
+// - `guard`: whether a process is a lead whose run is active or paused
+//   (FE-136/D1). Its edit tools are off: Claude starts without them, Codex
+//   runs read-only so a write asks. Asked again when each turn starts.
 //
 // A conductor's sessions add their own `env` (`setSessionsEnv`): the token
 // any conversation but a worker's starts with, checked on each call.
@@ -55,6 +58,7 @@ export interface EngineTap {
   event?: (event: ConversationEvent, folder: string) => void;
   write?: (write: EngineWrite) => void;
   result?: (result: EngineResult) => void;
+  guard?: (target: EngineTarget) => boolean;
 }
 
 let tap: EngineTap = {};
@@ -101,6 +105,18 @@ export function agentEnv(
   };
   // The run's env last: a worker's scratch, or a lead's own endpoint.
   return { ...env, ...extra(sessionsEnv), ...extra(tap.env) };
+}
+
+/**
+ * Whether `target` is a lead whose run is active or paused (FE-136/D1): its
+ * edit tools are off. False when nothing answers, or the answer throws.
+ */
+export function leadGuarded(target: EngineTarget): boolean {
+  try {
+    return tap.guard?.(target) === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Tools that write the file their input names. */

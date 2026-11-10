@@ -1,6 +1,7 @@
 import { BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { channels, type ViewCommand } from "../../shared/desktop";
 import { sendTerminalCommand } from "./terminal";
+import { showReleaseNotes } from "./updater";
 
 /** Send a View command to the focused window, or else to the first one. */
 function sendViewCommand(command: ViewCommand): void {
@@ -33,6 +34,9 @@ function sendViewCommand(command: ViewCommand): void {
  *   handles never reaches the menu anyway.
  * - Settings is ⌘,, the key of every Mac app's Settings…. It sits in the app
  *   menu on macOS, where people look for it, and in File elsewhere.
+ * - What's New (INF-11/D8) opens this version's release notes again, the
+ *   ones shown once after an update. Beside About on macOS, in File
+ *   elsewhere.
  */
 export function installMenu(): void {
   const mac = process.platform === "darwin";
@@ -63,6 +67,11 @@ export function installMenu(): void {
     accelerator: "CommandOrControl+,",
     click: () => sendViewCommand("open-settings"),
   };
+  const whatsNew: MenuItemConstructorOptions = {
+    id: "whats-new",
+    label: "What's New",
+    click: () => showReleaseNotes(),
+  };
   const closeWindow: MenuItemConstructorOptions = {
     id: "close-window",
     label: mac ? "Close Window" : "Close",
@@ -75,6 +84,7 @@ export function installMenu(): void {
             role: "appMenu",
             submenu: [
               { role: "about" },
+              whatsNew,
               { type: "separator" },
               settings,
               { type: "separator" },
@@ -95,6 +105,7 @@ export function installMenu(): void {
         ? [closeWindow]
         : [
             settings,
+            whatsNew,
             { type: "separator" },
             closeWindow,
             { type: "separator" },

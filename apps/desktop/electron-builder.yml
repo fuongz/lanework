@@ -3,12 +3,17 @@ productName: Lanework
 asar: true
 directories:
   output: release
-# INF-05 (SR-04): with `files` and no runtime `dependencies` in package.json,
-# app.asar holds dist/ and package.json and nothing else. electron-builder
-# copies every production dependency's node_modules on top of `files`, so a
-# package the renderer needs goes in devDependencies (Vite bundles it), and
-# node-pty, the one module main loads unbundled, is staged into dist/ by
-# scripts/electron-bundle.mjs.
+# INF-05 (SR-04): app.asar holds `files` (dist/ and package.json) plus the
+# node_modules of every runtime `dependencies` entry in package.json, which
+# electron-builder copies on top of `files`. So a package the renderer or main
+# bundles goes in devDependencies (Vite or esbuild inlines it), and only a
+# module main loads unbundled at run time is a dependency.
+# - INF-11: electron-updater is the one runtime dependency. electron-builder
+#   copies it and its own dependencies into app.asar/node_modules, and
+#   electron/main/updater/index.ts requires that copy at run time (on a
+#   packaged release build only), so esbuild never inlines it.
+# - node-pty, which main also loads unbundled, stays a devDependency: its
+#   native binary is staged into dist/ by scripts/electron-bundle.mjs.
 files:
   - dist/electron/**/*
   - dist/client/**/*
@@ -57,9 +62,20 @@ artifactBuildCompleted: ./scripts/dmg-checksum.mjs
 # rewrites its .sha256. Does nothing on any other build.
 afterAllArtifactBuild: ./scripts/dmg-notarize.mjs
 dmg:
-  # No auto-updater reads a blockmap, and one written before the DMG is
-  # stapled would no longer match it.
+  # INF-11: the updater installs from the zip, never the DMG. No update info
+  # or blockmap for it: one written before the DMG is stapled would no longer
+  # match it.
   writeUpdateInfo: false
+# INF-11 (D1): where electron-updater looks for releases. electron-builder
+# writes it into the app as Contents/Resources/app-update.yml, and writes
+# latest-mac.yml (version, zip name, size, sha512) beside the zip. It never
+# publishes: scripts/electron-builder.mjs always passes `--publish never`, and
+# the release workflow uploads to a draft the maintainer publishes by hand.
+# A draft is never offered: the updater reads only published releases.
+publish:
+  provider: github
+  owner: fuongz
+  repo: lanework
 mac:
   icon: build/icon.icns
   # Ad hoc ("-"), not unsigned: macOS delivers no notifications from an app
@@ -68,7 +84,14 @@ mac:
   # Developer ID and the developer-id entitlements, and `dist` notarizes.
   identity: "-"
   category: public.app-category.productivity
-  target: dmg
+  # INF-11: the DMG is what people download; the zip is what Squirrel.Mac
+  # installs an update from, and latest-mac.yml describes it. Both from the
+  # same signed, notarized and stapled app. Apple silicon only.
+  target:
+    - target: dmg
+      arch: arm64
+    - target: zip
+      arch: arm64
   # INF-05 (SW-05): the ad hoc build's entitlements; a Developer ID build
   # swaps in build/entitlements.mac.developer-id*.plist (INF-08). Explicit
   # entitlements rather than electron-builder's

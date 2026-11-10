@@ -25,6 +25,12 @@
 //   release. package.json is never written. Release builds (`dist`) take the
 //   package.json version as is.
 //
+// - INF-11: always `--publish never`. electron-builder.yml names GitHub as
+//   the update feed (for electron-updater), and electron-builder would
+//   otherwise publish to it on its own when it sees a CI tag and a token.
+//   Releases are drafted by .github/workflows/release.yml and published by
+//   hand; a `--publish` argument here is refused.
+//
 // Any other argument goes to electron-builder as is.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -49,6 +55,14 @@ const dev = args.includes("--dev");
 const builderArgs = args.filter(
   (arg) => arg !== "--notarize" && arg !== "--dev",
 );
+
+if (args.some((arg) => arg === "-p" || arg.startsWith("--publish"))) {
+  console.error(
+    "electron-builder never publishes here: the release workflow drafts the GitHub Release.",
+  );
+  process.exit(1);
+}
+builderArgs.push("--publish", "never");
 
 if (dev && notarize) {
   console.error(

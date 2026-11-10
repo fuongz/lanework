@@ -171,10 +171,42 @@ Playwright specs in `apps/desktop/tests/` boot the built app
 (`bun run test`, after `bun run build`). Test artifacts are stored in
 `.agents/artifacts/`.
 
-Only macOS Apple Silicon is verified. The macOS build is ad hoc signed, not
+Only macOS Apple Silicon is verified. A local build is ad hoc signed, not
 notarized, with explicit entitlements (`build/entitlements.mac*.plist`); each
-DMG gets a `.sha256` next to it. Automatic updates are not configured. Local
-packaging is intended for development, not a signed public release.
+DMG gets a `.sha256` next to it. Local packaging is intended for development,
+not a signed public release. Releases are built by
+`.github/workflows/release.yml`, signed with the Developer ID and notarized.
+
+### How updates reach users (INF-11)
+
+1. `mise run release:bump <patch|minor|major>` tags `vX.Y.Z`; pushing the tag
+   starts the release workflow ([versioning](docs/agents/versioning.md)).
+2. The workflow builds one signed, notarized and stapled app and packs it
+   twice: the DMG people download, and `Lanework-X.Y.Z-arm64-mac.zip`, which
+   Squirrel.Mac installs updates from. electron-builder writes
+   `latest-mac.yml` (version, zip name, size, sha512) beside the zip. The
+   workflow checks the zip against it, unzips it and runs `spctl` on the app,
+   then attaches the DMG, its `.sha256`, the zip, its blockmap and
+   `latest-mac.yml` to a **draft** GitHub Release. electron-builder never
+   publishes anything itself (`--publish never` in
+   `scripts/electron-builder.mjs`).
+3. Nothing reaches anyone until the maintainer reviews the draft and presses
+   **Publish**. Installed apps read `latest-mac.yml` from the latest published
+   release of `fuongz/lanework` through electron-updater; drafts and
+   prereleases are never offered.
+4. A release build checks on launch and every 4 hours while Settings → About →
+   **Update automatically** is on (the default), and whenever **Check now** is
+   pressed. It downloads in the background, then asks: **Restart now** or
+   **Later**. If terminals (agent or shell) or orchestration runs are live,
+   it says how many and asks again before restarting. Later installs the update the next
+   time Lanework quits.
+5. The first launch of the new version shows that release's notes, read from
+   the GitHub API, once. The app menu's **What's New** opens them again.
+
+Each check, download and install is logged to
+`~/Library/Logs/Lanework/updater.log`. Dev builds (`X.Y.Z-dev.…`) and runs
+from source never check or install. The code is in
+`apps/desktop/electron/main/updater/`.
 
 Windows (`nsis`) and Linux (`AppImage`) targets are configured but must not
 ship until these are fixed:

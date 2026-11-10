@@ -174,3 +174,30 @@ export async function readsInside(
   const rel = within(root, resolved);
   return rel !== null && rel !== ".git" && !rel.startsWith(".git/");
 }
+
+/** The folder a lead may still write in its own checkout (FE-136/D1). */
+export const LEAD_FREE_FOLDER = ".agents";
+
+/**
+ * Where a write a lead reports lands in its project's checkout (FE-136/D1):
+ * the project-relative path when it is inside the checkout and outside
+ * `.agents/`; null when it is outside the checkout, or under `.agents/`.
+ * A path that cannot be resolved (a dangling symlink) is judged as given.
+ *
+ * @param root The project's checkout, resolved.
+ * @param folder The folder the lead runs in: a relative path is under it.
+ * @param path Absolute, or relative to `folder`.
+ */
+export async function leadWriteInside(
+  root: string,
+  folder: string,
+  path: string,
+): Promise<string | null> {
+  const absolute = isAbsolute(path) ? path : join(folder, path);
+  const resolved = await resolvedPath(absolute).catch(() => absolute);
+  const rel = within(root, resolved);
+  if (rel === null) return null;
+  // Lower case: a macOS volume ignores it (FE-127).
+  const head = rel.split("/")[0]?.toLowerCase();
+  return head === LEAD_FREE_FOLDER ? null : rel;
+}

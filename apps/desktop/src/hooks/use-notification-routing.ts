@@ -23,7 +23,8 @@ export function useNotificationRouting(): void {
   useEffect(
     () =>
       window.desktop?.notifications.onOpen((target) => {
-        if (target.kind === "session")
+        // FE-136: a run opens its lead's chat, where the run panel is.
+        if (target.kind === "session" || target.kind === "run")
           void navigate({
             to: "/w/$slug/agents/chat/$conversation",
             params: { slug: target.slug, conversation: target.conversation },

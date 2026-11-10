@@ -199,6 +199,16 @@ export interface OrchestrationTask {
   /** The worker's branch in its own worktree, once it has one. */
   branch: string | null;
   /**
+   * When its worker first ran, epoch ms (FE-137). Absent before it started,
+   * and in runs saved before this was kept.
+   */
+  startedAt?: number | null;
+  /**
+   * When it last settled, epoch ms (FE-137); cleared while it runs again.
+   * Absent or null while it has not ended.
+   */
+  endedAt?: number | null;
+  /**
    * Why a queued task has not started, as main worked it out when it sent
    * the task (FE-100/O5): a dependency, files another task holds (in this
    * run or another open run of the project), a worker slot, the user.
@@ -237,12 +247,81 @@ export interface OrchestrationRun {
   teamLead: string | null;
   tasks: OrchestrationTask[];
   /**
+   * What the run came to, set once when it finishes or stops (FE-136/D4).
+   * Absent on a run that is still going and on a run stored before it
+   * existed.
+   */
+  report?: RunReport | null;
+  /**
+   * The lead wrote into the project outside its worker (FE-136/D1); the run
+   * paused on it. Absent when it never did, and on older runs.
+   */
+  leadGuard?: LeadGuardEvent | null;
+  /**
    * When the user removed what a stopped run left behind: its worktrees,
    * branches and refs (FE-100/O2). Absent until then.
    */
   cleanedAt?: number | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * A run's outcome by task id (FE-136/D4).
+ *
+ * - `done`: accepted or in review (`accepted`, or completed awaiting review).
+ * - `failed`: `failed`, `cancelled`, or `blocked` with an error.
+ * - `needsYou`: `needsInput`, awaiting scope approval, or blocked by scope.
+ *
+ * A task is in at most one list; one that fits none (still queued) is in none.
+ */
+export interface RunReport {
+  done: string[];
+  failed: string[];
+  needsYou: string[];
+  finishedAt: number;
+  /** The user opened the run after it finished; clears its attention dot. */
+  seen: boolean;
+}
+
+/** The lead wrote a file it should have delegated (FE-136/D1). */
+export interface LeadGuardEvent {
+  /** The path the lead wrote, as the tool reported it. */
+  path: string;
+  at: number;
+  /** The guard paused the run because of it. */
+  paused: boolean;
+}
+
+function reportIds(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === "string")
+    : [];
+}
+
+/** A stored report, or null when absent or not one. Missing fields default. */
+export function checkRunReport(value: unknown): RunReport | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  return {
+    done: reportIds(raw.done),
+    failed: reportIds(raw.failed),
+    needsYou: reportIds(raw.needsYou),
+    finishedAt: typeof raw.finishedAt === "number" ? raw.finishedAt : 0,
+    seen: raw.seen === true,
+  };
+}
+
+/** A stored guard event, or null when absent or without a path. */
+export function checkLeadGuardEvent(value: unknown): LeadGuardEvent | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.path !== "string" || !raw.path) return null;
+  return {
+    path: raw.path,
+    at: typeof raw.at === "number" ? raw.at : 0,
+    paused: raw.paused !== false,
+  };
 }
 
 /**

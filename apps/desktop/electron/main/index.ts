@@ -51,6 +51,7 @@ import { installMenu } from "./menu";
 import { installMenuBar } from "./menu-bar";
 import { registerMetrics } from "./metrics";
 import { registerNotifications } from "./notifications";
+import { registerAttention } from "./notifications/attention";
 import { startPullWatcher } from "./notifications/pull-watcher";
 import { orchestrationMain, setJev, startControlServer } from "./orchestration";
 import type { SessionsControl } from "./orchestration/control-server";
@@ -66,7 +67,10 @@ import {
   killTerminal,
   onRunningChanged,
   registerTerminal,
+  terminalActivity,
 } from "./terminal";
+import { registerUpdater } from "./updater";
+import { countActiveRuns } from "./updater/live-work";
 
 // ─── Orchestration and Jev (FE-87) ─────────────────────────────────────────
 //
@@ -486,7 +490,19 @@ app
       return window;
     };
     registerNotifications(devUrl, showWindow);
+    registerAttention(devUrl);
     registerMetrics(devUrl);
+    // INF-11: what a restart to install an update would stop.
+    registerUpdater(devUrl, {
+      liveWork: async () => ({
+        terminals: (await terminalActivity()).terminals,
+        runs: await countActiveRuns(
+          join(app.getPath("userData"), "orchestration", "runs"),
+          async (project, runId) =>
+            (await orchestrationMain.run(project, runId))?.status ?? null,
+        ),
+      }),
+    });
     startPullWatcher(readLinkedOpenPulls);
     installMenu();
     createWindow();

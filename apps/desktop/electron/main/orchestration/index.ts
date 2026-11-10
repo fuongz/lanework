@@ -113,6 +113,7 @@ function orchestrator(): Orchestrator {
     event: (event, folder) => created.onEvent(event, folder),
     write: (write) => created.onWrite(write),
     result: (result) => created.onResult(result),
+    guard: (target) => created.guardsLead(target),
   });
   instance = created;
   // Saved runs are read now, not on the page's first call: until then a
@@ -164,7 +165,14 @@ export function isWorkerConversation(
   return orchestrator().workerFolder(project, conversation) !== null;
 }
 
-export const orchestrationMain: OrchestrationMainHandlers = {
+/**
+ * What main offers the page. `markReportSeen` (FE-136/D4) is main's own
+ * until the shared handler type names it: the notification IPC calls it.
+ */
+export const orchestrationMain: OrchestrationMainHandlers & {
+  /** The user opened a finished or stopped run: its report is seen. */
+  markReportSeen: (runId: string) => Promise<void>;
+} = {
   runs: (project) => orchestrator().runs(project),
   run: (project, runId) => orchestrator().run(project, runId),
   approve: (proposal) => orchestrator().approve(proposal),
@@ -179,6 +187,7 @@ export const orchestrationMain: OrchestrationMainHandlers = {
   cleanUp: (project, runId) => orchestrator().cleanUp(project, runId),
   control: (runId, call, requestId) =>
     orchestrator().control(runId, call, requestId),
+  markReportSeen: (runId) => orchestrator().markReportSeen(runId),
 };
 
 /**

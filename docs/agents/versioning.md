@@ -31,6 +31,16 @@ running from the version alone.
 - `--dev` and `--notarize` are refused together: a dev build is never
   released.
 
+## Dev builds never update (INF-11)
+
+The updater (`electron/main/updater/`) is off in any build whose
+`app.getVersion()` has a prerelease tag, and in an unpackaged run: it never
+checks, downloads or installs, and electron-updater is not even loaded. So a
+dev install is never replaced by a release behind your back, and stays on the
+build you made until the next `mise run app:install`. Settings → About says so
+beside **Check now**. Only a release build (`X.Y.Z`, from the release
+workflow) updates, from published GitHub Releases.
+
 ## Where it shows
 
 `mise run app:install` prints the installed version. Finder's Get Info,

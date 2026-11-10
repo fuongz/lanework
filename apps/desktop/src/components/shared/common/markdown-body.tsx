@@ -318,7 +318,7 @@ function ColorBadge({
  *
  * The icon is the one the Changes list and the diff draw for the file.
  */
-function FileBadge({
+export function FileBadge({
   value,
   path,
   chat,

@@ -18,7 +18,35 @@ import type {
 import type { DesktopProjectsApi } from "./projects";
 import type { DesktopReadinessApi } from "./readiness";
 import type { DesktopTerminalApi } from "./terminal";
+import type { DesktopUpdaterApi } from "./updater";
 import type { DesktopWorktreeApi } from "./worktree";
+
+/** What needs the person: the dock badge and the menu bar (FE-136/D6). */
+export const attentionChannels = {
+  /** Renderer → main: the run's report was opened, so it stops counting. */
+  markReportSeen: "attention:mark-report-seen",
+  /** Renderer → main: the proposals now awaiting approval, replacing the last. */
+  setProposals: "attention:set-proposals",
+} as const;
+
+/** A proposal card waiting for the user's approval, in its lead's chat. */
+export interface AttentionProposal {
+  id: string;
+  project: string;
+  /** The lead's conversation, where the card is. */
+  conversation: string;
+  title: string;
+}
+
+export interface DesktopAttentionApi {
+  /**
+   * Mark a run's report seen: it leaves the attention count and the menu bar.
+   * Call it when the user opens the run.
+   */
+  markReportSeen: (project: string, runId: string) => Promise<void>;
+  /** Tell main which proposals await approval; an empty list clears them. */
+  setProposals: (proposals: AttentionProposal[]) => Promise<void>;
+}
 
 export const channels = {
   appInfo: "app:get-info",
@@ -87,8 +115,12 @@ export interface DesktopApi {
   dictation: DesktopDictationApi;
   /** Settings → Notifications, and where a clicked one leads. */
   notifications: DesktopNotificationsApi;
+  /** The attention count's dock badge and menu bar list (FE-136/D6). */
+  attention: DesktopAttentionApi;
   /** Settings → About: the resource log, off until switched on (FE-115). */
   metrics: DesktopMetricsApi;
+  /** Updates from GitHub Releases, and What's New after one (INF-11). */
+  updater: DesktopUpdaterApi;
   /** Settings → Agents: the checkpoint hook for Claude Code. */
   handoff: DesktopHandoffApi;
   /** Whether a project's folder is ready for an agent to work its board. */
