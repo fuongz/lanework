@@ -58,6 +58,7 @@ import {
   unstage,
   viewFile,
 } from "./worktree";
+import { makeDirectory, moveEntries } from "./worktree-fs";
 
 /**
  * Register a worktree handler: a read the git gate held back is answered as
@@ -297,7 +298,7 @@ export function registerWorktree(devUrl?: string): void {
       }
     },
   );
-  // Repository › Files. Read-only: listing, reading, and Finder.
+  // Repository › Files: listing, reading, Finder, and explicit file changes.
   handle(
     worktreeChannels.files,
     devUrl,
@@ -378,6 +379,25 @@ export function registerWorktree(devUrl?: string): void {
     );
     if (!full) throw new Error("That file is not there any more.");
     shell.showItemInFolder(full);
+  });
+
+  // NOTE: Like Reveal, these explicit filesystem actions resolve the linked
+  // folder through `top`; they do not run git past locating the repository.
+  handle(worktreeChannels.mkdir, devUrl, async (args): Promise<void> => {
+    await makeDirectory(
+      await top(slugOf(args[0]), folderOf(args[2])),
+      pathOf(args[1]),
+    );
+  });
+
+  handle(worktreeChannels.move, devUrl, async (args) => {
+    if (typeof args[2] !== "string" || args[2].length > 4_096)
+      throw new Error("Choose a destination folder in this repository.");
+    return moveEntries(
+      await top(slugOf(args[0]), folderOf(args[3])),
+      pathsOf(args[1]),
+      args[2],
+    );
   });
 
   handle(

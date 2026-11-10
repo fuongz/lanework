@@ -245,6 +245,8 @@ export const worktreeChannels = {
   reveal: "worktree:reveal",
   locate: "worktree:locate",
   openDefault: "worktree:open-default",
+  mkdir: "worktree:mkdir",
+  move: "worktree:move",
   status: "worktree:status",
   patch: "worktree:patch",
   fileText: "worktree:file",
@@ -340,6 +342,18 @@ export interface DesktopWorktreeApi {
   view: (slug: string, path: string, folder?: number) => Promise<FileView>;
   /** Show one file of the working tree in Finder / Explorer. */
   reveal: (slug: string, path: string, folder?: number) => Promise<void>;
+  /** Create one folder at a relative path; its parent must exist. */
+  mkdir: (slug: string, path: string, folder?: number) => Promise<void>;
+  /**
+   * Move entries into a folder (`''` or `'/'` for the root).
+   * Directory paths keep their trailing `/`.
+   */
+  move: (
+    slug: string,
+    from: string[],
+    toDir: string,
+    folder?: number,
+  ) => Promise<{ moved: { from: string; to: string }[] }>;
   /**
    * A path as somebody wrote it, as the repository path of the one file it
    * means.

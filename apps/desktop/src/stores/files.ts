@@ -14,7 +14,9 @@ import type {
  * Read on entry, on window focus and on request. Never on a timer and never
  * by a file watcher, the same rule as Changes (FE-22/D10).
  *
- * NOTE: Read-only (FE-66/D1). Nothing here writes to the folder.
+ * NOTE: Mostly read-only (FE-66/D1). The tree can make a folder and move
+ * entries (`worktree.mkdir`, `worktree.move`); this store only learns what
+ * they did ({@link FilesStore.addDir}, {@link FilesStore.applyMove}).
  */
 
 /**
@@ -36,6 +38,73 @@ interface FileTab {
  */
 const tabMemory = new Map<string, { tabs: FileTab[]; active: string | null }>();
 const memoryKey = (slug: string, folder: number) => `${slug}#${folder}`;
+
+/** The empty folders made or emptied here, per project and folder. */
+const madeMemory = new Map<string, string[]>();
+
+/** The folder a tree path sits in: `a/b/` for `a/b/c` or `a/b/c/`; `''` at the top. */
+export function parentDir(path: string): string {
+  const trimmed = path.endsWith("/") ? path.slice(0, -1) : path;
+  const at = trimmed.lastIndexOf("/");
+  return at < 0 ? "" : trimmed.slice(0, at + 1);
+}
+
+/** The folders a file listing has a file in, at any depth. */
+function filedFolders(paths: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  for (const path of paths) {
+    if (path.endsWith("/")) continue;
+    for (let dir = parentDir(path); dir; dir = parentDir(dir)) {
+      if (out.has(dir)) break;
+      out.add(dir);
+    }
+  }
+  return out;
+}
+
+/** One entry moved: tree paths, a folder's keeping its trailing `/`. */
+export interface MovedPath {
+  from: string;
+  to: string;
+}
+
+/**
+ * Where `path` is after `moves`: the entry itself, or anything inside a
+ * moved folder. Any other path comes back as it was.
+ */
+export function movedPath(path: string, moves: readonly MovedPath[]): string {
+  for (const { from, to } of moves) {
+    if (path === from) return to;
+    if (from.endsWith("/") && path.startsWith(from))
+      return `${to}${path.slice(from.length)}`;
+  }
+  return path;
+}
+
+/** A record keyed by path, with its keys moved. */
+function moveKeys<T>(
+  record: Record<string, T>,
+  moves: readonly MovedPath[],
+): Record<string, T> {
+  const out: Record<string, T> = {};
+  for (const [path, value] of Object.entries(record))
+    out[movedPath(path, moves)] = value;
+  return out;
+}
+
+/** A listing with every path in it moved. */
+function moveListing(
+  listing: FileListing,
+  moves: readonly MovedPath[],
+): FileListing {
+  const move = (paths: string[]) => paths.map((p) => movedPath(p, moves));
+  return {
+    ...listing,
+    paths: move(listing.paths),
+    lazy: move(listing.lazy),
+    ignored: move(listing.ignored),
+  };
+}
 
 /**
  * The storage key of the folder Files last showed, per project.
@@ -98,6 +167,14 @@ interface FilesStore {
   base: FileListing | null;
   /** Directories read since, by their path (`node_modules/`). */
   loaded: Record<string, FileListing>;
+  /**
+   * Folders known to be on disk that git's list cannot show.
+   *
+   * `ls-files` prints files, so an empty folder (one just made, or one a
+   * move just emptied) is not in `base`. These are drawn with it until the
+   * project is closed; a refresh drops the ones gone from their parent.
+   */
+  madeDirs: string[];
   loading: boolean;
   error: string | null;
   tabs: FileTab[];
@@ -114,6 +191,15 @@ interface FilesStore {
   open: (slug: string, folder?: number) => Promise<void>;
   refresh: () => Promise<void>;
   loadDir: (dir: string) => Promise<void>;
+  /** A folder `worktree.mkdir` has just made (`a/b/`), drawn until git lists it. */
+  addDir: (dir: string) => void;
+  /**
+   * Entries `worktree.move` has just moved: the listings, the tabs, the file
+   * on screen and what was read for them follow, so an open file stays open
+   * on its new path. Changes nothing on disk and reads nothing; `refresh`
+   * after it reads the truth.
+   */
+  applyMove: (moves: readonly MovedPath[]) => void;
   /**
    * Open a file in a tab.
    *
@@ -157,8 +243,40 @@ export const useFiles = create<FilesStore>((set, get) => {
   }
 
   function remember() {
-    const { slug, folder, tabs, active } = get();
-    if (slug) tabMemory.set(memoryKey(slug, folder), { tabs, active });
+    const { slug, folder, tabs, active, madeDirs } = get();
+    if (!slug) return;
+    tabMemory.set(memoryKey(slug, folder), { tabs, active });
+    madeMemory.set(memoryKey(slug, folder), madeDirs);
+  }
+
+  /**
+   * The made folders still in their parent folder.
+   *
+   * NOTE: One at the top is kept: the top cannot be read with `dir`, and
+   * git's list says nothing about an empty folder.
+   */
+  async function stillMade(
+    slug: string,
+    folder: number,
+    made: string[],
+  ): Promise<string[]> {
+    const byParent = new Map<string, string[]>();
+    for (const dir of made) {
+      const parent = parentDir(dir);
+      byParent.set(parent, [...(byParent.get(parent) ?? []), dir]);
+    }
+    const kept = await Promise.all(
+      [...byParent].map(async ([parent, dirs]) => {
+        if (!parent) return dirs;
+        const listing = await desktopSurface("worktree")
+          .dir(slug, parent, folder)
+          .catch(() => null);
+        if (!listing) return dirs;
+        const there = new Set(listing.paths);
+        return dirs.filter((dir) => there.has(dir));
+      }),
+    );
+    return kept.flat();
   }
 
   /**
@@ -177,6 +295,7 @@ export const useFiles = create<FilesStore>((set, get) => {
       folderStatus: null,
       base: null,
       loaded: {},
+      madeDirs: madeMemory.get(memoryKey(slug, folder)) ?? [],
       error: null,
       tabs: kept?.tabs ?? [],
       active: kept?.active ?? null,
@@ -193,6 +312,7 @@ export const useFiles = create<FilesStore>((set, get) => {
     folderStatus: null,
     base: null,
     loaded: {},
+    madeDirs: [],
     loading: false,
     error: null,
     tabs: [],
@@ -241,8 +361,10 @@ export const useFiles = create<FilesStore>((set, get) => {
         // refresh never folds `node_modules/` shut under them. One that has
         // gone since is dropped.
         const dirs = Object.keys(get().loaded);
-        const [base, ...again] = await Promise.all([
+        const made = get().madeDirs;
+        const [base, madeDirs, ...again] = await Promise.all([
           desktopSurface("worktree").files(slug, folder),
+          stillMade(slug, folder, made),
           ...dirs.map((dir) =>
             desktopSurface("worktree")
               .dir(slug, dir, folder)
@@ -255,7 +377,19 @@ export const useFiles = create<FilesStore>((set, get) => {
           const listing = again[index];
           if (listing) loaded[dir] = listing;
         });
-        set({ base, loaded, loading: false, error: null });
+        // A folder made while this read was out is not in its answer. One
+        // git lists a file in needs no keeping: it shows anyway, and goes
+        // when it is deleted.
+        const since = get().madeDirs.filter((dir) => !made.includes(dir));
+        const listed = filedFolders(base.paths);
+        set({
+          base,
+          loaded,
+          madeDirs: [...madeDirs, ...since].filter((dir) => !listed.has(dir)),
+          loading: false,
+          error: null,
+        });
+        remember();
       } catch (error) {
         if (mine !== ticket || get().slug !== slug) return;
         set({
@@ -283,6 +417,51 @@ export const useFiles = create<FilesStore>((set, get) => {
       } finally {
         reading.delete(dir);
       }
+    },
+
+    addDir: (dir) => {
+      if (get().madeDirs.includes(dir)) return;
+      set((state) => ({ madeDirs: [...state.madeDirs, dir] }));
+      remember();
+    },
+
+    applyMove: (moves) => {
+      if (!moves.length) return;
+      set((state) => {
+        const loaded: Record<string, FileListing> = {};
+        for (const [dir, listing] of Object.entries(state.loaded))
+          loaded[movedPath(dir, moves)] = moveListing(listing, moves);
+        // The folders moved out of stay on disk, perhaps empty now, which
+        // git's list would no longer show.
+        const left = moves
+          .map(({ from }) => parentDir(from))
+          .filter((dir) => dir !== "");
+        const madeDirs = [
+          ...new Set([
+            ...state.madeDirs.map((dir) => movedPath(dir, moves)),
+            ...left,
+          ]),
+        ];
+        const seen = new Set<string>();
+        const tabs: FileTab[] = [];
+        for (const tab of state.tabs) {
+          const path = movedPath(tab.path, moves);
+          if (seen.has(path)) continue;
+          seen.add(path);
+          tabs.push({ ...tab, path });
+        }
+        return {
+          base: state.base && moveListing(state.base, moves),
+          loaded,
+          madeDirs,
+          tabs,
+          active: state.active && movedPath(state.active, moves),
+          views: moveKeys(state.views, moves),
+          viewErrors: moveKeys(state.viewErrors, moves),
+          rendered: moveKeys(state.rendered, moves),
+        };
+      });
+      remember();
     },
 
     openFile: (path, pin = false) => {
