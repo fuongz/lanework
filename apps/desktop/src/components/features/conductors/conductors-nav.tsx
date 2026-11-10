@@ -41,6 +41,7 @@ import { ipcMessage } from "#/lib/ipc-error";
 import { leadIcon } from "#/lib/orchestration-prompt";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
+import { useChatEngines } from "#/stores/chat-engines";
 import { ConductorDialog, type ConductorDialogMode } from "./conductor-dialog";
 import {
   type ConductorState,
@@ -125,6 +126,24 @@ export function ConductorsNav({
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<TeamLead | null>(null);
+  // Stop asks first while it answers, as a session's row does.
+  const [stopping, setStopping] = useState<{
+    lead: TeamLead;
+    conversation: string;
+  } | null>(null);
+  const alive = useChatEngines((state) => state.alive[project]);
+  const refreshChats = useChatEngines((state) => state.refresh);
+  /**
+   * End a conductor's engine: a turn in progress is cut off, the
+   * conversation kept, and the next message starts it again. Its row is not
+   * under Sessions, so without this a conductor left running could not be
+   * stopped from the rail.
+   */
+  const stopEngine = (conversation: string) =>
+    void window.desktop?.conversation
+      .close(project, conversation)
+      .catch(() => {})
+      .finally(() => void refreshChats(project));
   const { lead: viewingLead, conversation: viewing } = useParams({
     strict: false,
   }) as { lead?: string; conversation?: string };
@@ -273,6 +292,18 @@ export function ConductorsNav({
       >
         Reset conversation
       </Item>
+      {status.conversation !== null && alive?.includes(status.conversation) && (
+        <Item
+          onClick={() => {
+            const conversation = status.conversation;
+            if (!conversation) return;
+            if (status.state === "working") setStopping({ lead, conversation });
+            else stopEngine(conversation);
+          }}
+        >
+          Stop
+        </Item>
+      )}
       {lead.source === "personal" && (
         <>
           <Separator />
@@ -286,6 +317,37 @@ export function ConductorsNav({
         </>
       )}
     </>
+  );
+
+  const stopDialog = (
+    <AlertDialog
+      open={stopping !== null}
+      onOpenChange={(open) => !open && setStopping(null)}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Stop {stopping?.lead.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            It is answering now. The turn is cut off and the conversation is
+            kept; your next message starts it again.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep it running</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            className="border-0"
+            onClick={() => {
+              const target = stopping;
+              setStopping(null);
+              if (target) stopEngine(target.conversation);
+            }}
+          >
+            Stop
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 
   const dialogNode = dialog && (
@@ -342,6 +404,7 @@ export function ConductorsNav({
           );
         })}
         {dialogNode}
+        {stopDialog}
       </>
     );
 
@@ -456,6 +519,7 @@ export function ConductorsNav({
         </p>
       )}
       {dialogNode}
+      {stopDialog}
       <AlertDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}

@@ -1,19 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { create } from "zustand";
-import type { TeamLead } from "#/../shared/orchestration";
-import { useProposalEdits } from "#/components/features/orchestration/orchestration-panel.store";
+import type { OrchestrationRun, TeamLead } from "#/../shared/orchestration";
+import {
+  proposalRun,
+  useProposalEdits,
+} from "#/components/features/orchestration/orchestration-panel.store";
 import { liveRun, useOrchestrationRuns } from "#/hooks/use-orchestration-runs";
 import { conductorConversation } from "#/lib/conductors";
 import { deriveProposals } from "#/lib/orchestration-prompt";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
+import { awaitingKey, useAwaiting } from "#/stores/awaiting";
 import { useNewChats } from "#/stores/new-chats";
 
 /**
  * Where a conductor stands, as its dot says it (FE-95/D4).
  *
  * - `needs-you`: its conversation waits on a permission, its proposal on
- *   approval, or a run under it is paused or waits on a scope.
- * - `working`: its conversation is answering, or a run under it is going.
+ *   approval, a run under it is paused or waits on a scope, or a session it
+ *   started waits on the person.
+ * - `working`: its conversation is answering, a run under it is going, or
+ *   a session it started is working: those are never rows under Sessions
+ *   either, so its dot stays lit while they research or build (FE-128).
  * - `running`: between turns, with background jobs still going (Claude
  *   only): its conversation is never a row under Sessions, so this row is
  *   the rail's only sign of them.
@@ -110,6 +117,7 @@ function useWaitingProposals(
   project: string,
   conversations: readonly string[],
   leads: readonly TeamLead[],
+  runs: readonly OrchestrationRun[],
 ): ReadonlySet<string> {
   const edits = useProposalEdits((state) => state.edits);
   // Each conversation's latest ready proposal id, or null.
@@ -152,11 +160,15 @@ function useWaitingProposals(
   return useMemo(() => {
     const waiting = new Set<string>();
     for (const [id, proposal] of Object.entries(latest)) {
-      const edit = proposal ? edits[proposal] : undefined;
-      if (proposal && !edit?.runId && !edit?.cancelled) waiting.add(id);
+      if (
+        proposal &&
+        !proposalRun(proposal, edits, runs) &&
+        !edits[proposal]?.cancelled
+      )
+        waiting.add(id);
     }
     return waiting;
-  }, [latest, edits]);
+  }, [latest, edits, runs]);
 }
 
 /** Every conductor's status in `project`, by its id. */
@@ -170,6 +182,7 @@ export function useConductorStatuses(
   const starting = useNewChats((state) => state.starting[project]);
   const runs = useOrchestrationRuns(project);
   const permissions = useWaitingPermissions(project);
+  const awaiting = useAwaiting((state) => state.byKey);
 
   const own = useMemo(() => {
     const out: Record<string, string | null> = {};
@@ -186,7 +199,12 @@ export function useConductorStatuses(
     () => Object.values(own).filter((id): id is string => id !== null),
     [own],
   );
-  const proposals = useWaitingProposals(project, conversations, conductors);
+  const proposals = useWaitingProposals(
+    project,
+    conversations,
+    conductors,
+    runs,
+  );
 
   const out: Record<string, ConductorStatus> = {};
   for (const conductor of conductors) {
@@ -209,10 +227,19 @@ export function useConductorStatuses(
         ((session ? (live[agentKey(session)] ?? session.working) : false) ||
           (!session && conversation in started)));
     const running = mine.some((run) => run.status === "active");
+    // The sessions it started: hidden from the Sessions rail, so its dot
+    // speaks for them, as their own rows would (ConductorSessions).
+    let launchedWaiting = false;
+    let launchedWorking = 0;
+    for (const entry of sessions ?? []) {
+      if (entry.launchedBy?.conductor !== conductor.id) continue;
+      if (awaiting[awaitingKey(project, entry.id)]) launchedWaiting = true;
+      else if (live[agentKey(entry)] ?? entry.working) launchedWorking += 1;
+    }
     // Its background tasks still running; only Claude counts them (FE-42/D1).
     const background =
       session?.agent === "claude" ? session.background.running : 0;
-    if (asking || proposing || paused || scope)
+    if (asking || proposing || paused || scope || launchedWaiting)
       out[conductor.id] = {
         state: "needs-you",
         reason: asking
@@ -221,13 +248,19 @@ export function useConductorStatuses(
             ? "A proposal waits for your approval"
             : paused
               ? "A run is paused"
-              : "A worker waits for a wider scope",
+              : scope
+                ? "A worker waits for a wider scope"
+                : "A session it started waits for you",
         conversation,
       };
-    else if (answering || running)
+    else if (answering || running || launchedWorking > 0)
       out[conductor.id] = {
         state: "working",
-        reason: answering ? "Working" : "Running workers",
+        reason: answering
+          ? "Working"
+          : running
+            ? "Running workers"
+            : `${launchedWorking} session${launchedWorking === 1 ? "" : "s"} working`,
         conversation,
       };
     else if (background > 0)

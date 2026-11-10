@@ -71,3 +71,22 @@ export const useProposalEdits = create<EditsState>((set, get) => ({
     set({ edits: next });
   },
 }));
+
+/**
+ * The run a proposal's approval started, by id; undefined while none did.
+ *
+ * Its edits name it, but those live in this window's storage, which another
+ * origin (`bun dev`) or a cleared profile does not have. Main names a run
+ * after the proposal it came from, so a run under the proposal's id is that
+ * approval too; without this, a finished proposal reads "Waiting for you"
+ * again and its Approve would start it twice.
+ */
+export function proposalRun(
+  id: string,
+  edits: Readonly<Record<string, ProposalEdits>>,
+  runs: readonly { id: string }[] | null | undefined,
+): string | undefined {
+  return (
+    edits[id]?.runId ?? (runs?.some((run) => run.id === id) ? id : undefined)
+  );
+}

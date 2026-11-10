@@ -81,7 +81,7 @@ const SUMMARY_MAX = 2000;
 const OPEN = "<lanework_orchestrate";
 const CLOSE = "</lanework_orchestrate>";
 const ENVELOPE =
-  /^<lanework_orchestrate id="([A-Za-z0-9_-]{1,64})" kind="(plan|repair)"(?: lead="((?:repo:)?[a-z0-9][a-z0-9-]{0,47})")?>\n([\s\S]*)\n<\/lanework_orchestrate>$/;
+  /^<lanework_orchestrate id="([A-Za-z0-9_-]{1,64})" kind="(plan|repair)"(?: lead="((?:repo:)?[a-z0-9][a-z0-9-]{0,47})")?>\n([\s\S]*)\n<\/lanework_orchestrate>(?:\s+(@[\s\S]*))?$/;
 // A tag right after a backtick is one quoted in inline code (a reply that
 // talks about proposals), not a proposal: neither read nor hidden.
 const PROPOSAL_TAG =
@@ -100,6 +100,11 @@ export interface Envelope {
   request: string;
   /** The team lead it was planned under, by id; null for none (FE-87). */
   lead: string | null;
+  /**
+   * The files attached to it, as the `@path` mentions main writes after the
+   * envelope for every file that is not an image; "" for none.
+   */
+  attached: string;
 }
 
 /** Each {@link LeadIcon}'s drawing, for the composer and the card. */
@@ -379,6 +384,7 @@ export function readEnvelope(text: string): Envelope | null {
     kind: match[2] === "repair" ? "repair" : "plan",
     request: body.slice(start + "<user_request>\n".length, end),
     lead: match[3] ?? null,
+    attached: match[5] ?? "",
   };
 }
 
@@ -387,7 +393,7 @@ export function readEnvelope(text: string): Envelope | null {
 const CONDUCTOR_OPEN = "<lanework_conductor";
 const CONDUCTOR_CLOSE = "</lanework_conductor>";
 const CONDUCTOR_ENVELOPE =
-  /^<lanework_conductor id="([A-Za-z0-9_-]{1,64})" lead="((?:repo:)?[a-z0-9][a-z0-9-]{0,47})" context="([a-z0-9]{1,16})">\n([\s\S]*)\n<\/lanework_conductor>$/;
+  /^<lanework_conductor id="([A-Za-z0-9_-]{1,64})" lead="((?:repo:)?[a-z0-9][a-z0-9-]{0,47})" context="([a-z0-9]{1,16})">\n([\s\S]*)\n<\/lanework_conductor>(?:\s+(@[\s\S]*))?$/;
 /** Bumped when the rules below change, so a live conversation gets them again. */
 const CONDUCTOR_PROMPT_VERSION = 5;
 
@@ -401,6 +407,8 @@ export interface ConductorEnvelope {
   context: string;
   /** What the user wrote. */
   request: string;
+  /** Its attached files' `@path` mentions, as on {@link Envelope}. */
+  attached: string;
 }
 
 /** A short, stable fingerprint: FNV-1a, base 36. */
@@ -571,6 +579,7 @@ export function readConductorEnvelope(text: string): ConductorEnvelope | null {
     lead: match[2] ?? "",
     context: match[3] ?? "",
     request: body.slice(start + "<user_request>\n".length, end),
+    attached: match[5] ?? "",
   };
 }
 
@@ -599,6 +608,15 @@ export function lastConductorContext(turns: readonly Turn[]): string | null {
 const RUNTIME_BLOCKS =
   /(?:\r?\n[ \t]*)*<(lanework_assignment|lanework_orchestration|lanework_sessions)\b[^>]*>[\s\S]*?<\/\1>/g;
 
+/**
+ * What the user wrote, then the `@path` mentions of the files they attached,
+ * as main writes them after an envelope: the chat draws each as a file badge,
+ * as it does in a message with no envelope.
+ */
+function withAttached(request: string, attached: string): string {
+  return [request.trim(), attached.trim()].filter(Boolean).join("\n\n");
+}
+
 export function visibleText(raw: string): string {
   const text = raw.includes("<lanework_")
     ? raw.replace(RUNTIME_BLOCKS, "").trim()
@@ -606,10 +624,13 @@ export function visibleText(raw: string): string {
   const envelope = readEnvelope(text);
   if (envelope)
     return envelope.kind === "plan"
-      ? `/orchestrate ${envelope.lead ? `@${envelope.lead} ` : ""}${envelope.request}`
+      ? withAttached(
+          `/orchestrate ${envelope.lead ? `@${envelope.lead} ` : ""}${envelope.request}`,
+          envelope.attached,
+        )
       : "Asked the lead to fix its proposal.";
   const conductor = readConductorEnvelope(text);
-  if (conductor) return conductor.request;
+  if (conductor) return withAttached(conductor.request, conductor.attached);
   if (!text.includes("<lanework_proposal>")) return text;
   return text.replace(PROPOSAL_TAG, "").replace(PROPOSAL_OPEN, "").trimEnd();
 }
@@ -826,6 +847,7 @@ function conductorAsEnvelope(
     kind: "plan",
     request: conductor.request,
     lead: conductor.lead,
+    attached: conductor.attached,
     conductor: true,
   };
 }

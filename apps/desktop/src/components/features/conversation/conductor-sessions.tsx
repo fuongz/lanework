@@ -22,6 +22,7 @@ import { shortAge } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { awaitingKey, useAwaiting } from "#/stores/awaiting";
+import { useChatEngines } from "#/stores/chat-engines";
 
 // The sessions a conductor started (FE-128), on its chat's title bar.
 //
@@ -153,39 +154,75 @@ function SessionRow({
   );
   const working = !awaiting && (live ?? session.working);
   const title = session.title || "Session";
+  const alive = useChatEngines(
+    (state) => state.alive[project]?.includes(session.id) ?? false,
+  );
+  const refreshChats = useChatEngines((state) => state.refresh);
+  // A second press confirms while it works: a turn is cut off by Stop.
+  const [confirming, setConfirming] = useState(false);
+  // The Agents rail hides these sessions, so their Stop lives here.
+  const stop = () => {
+    if (working && !confirming) return setConfirming(true);
+    setConfirming(false);
+    void window.desktop?.conversation
+      .close(project, session.id)
+      .catch(() => {})
+      .finally(() => void refreshChats(project));
+  };
   return (
-    <button
-      type="button"
-      onClick={() => {
-        onOpen();
-        void navigate({
-          to: "/w/$slug/agents/chat/$conversation",
-          params: { slug, conversation: session.id },
-        });
-      }}
-      aria-label={`Open “${title}”${awaiting ? ", waiting for you" : working ? ", working" : ""}`}
-      className="hover:bg-foreground/[0.04] flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-[13px] transition-colors"
-    >
-      <span className="relative flex shrink-0">
-        <TerminalKindIcon kind={session.agent} className="size-3.5" />
-        {(awaiting || working) && (
-          <StatusPing tone={awaiting ? "awaiting" : "working"} />
-        )}
-      </span>
-      <span
-        className={cn("min-w-0 flex-1 truncate", working && "text-shimmer")}
+    <div className="group/row flex min-w-0 items-center gap-1">
+      <button
+        type="button"
+        onClick={() => {
+          onOpen();
+          void navigate({
+            to: "/w/$slug/agents/chat/$conversation",
+            params: { slug, conversation: session.id },
+          });
+        }}
+        aria-label={`Open “${title}”${awaiting ? ", waiting for you" : working ? ", working" : ""}`}
+        className="hover:bg-foreground/[0.04] flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-left text-[13px] transition-colors"
       >
-        {title}
-      </span>
-      {awaiting ? (
-        <span className="text-destructive shrink-0 text-xs">
-          Waiting for you
+        <span className="relative flex shrink-0">
+          <TerminalKindIcon kind={session.agent} className="size-3.5" />
+          {(awaiting || working) && (
+            <StatusPing tone={awaiting ? "awaiting" : "working"} />
+          )}
         </span>
-      ) : (
-        <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-          {shortAge(session.updatedAt, now)}
+        <span
+          className={cn("min-w-0 flex-1 truncate", working && "text-shimmer")}
+        >
+          {title}
         </span>
+        {awaiting ? (
+          <span className="text-destructive shrink-0 text-xs">
+            Waiting for you
+          </span>
+        ) : (
+          <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+            {shortAge(session.updatedAt, now)}
+          </span>
+        )}
+      </button>
+      {alive && (
+        <button
+          type="button"
+          onClick={stop}
+          onBlur={() => setConfirming(false)}
+          aria-label={
+            confirming ? `Confirm stopping “${title}”` : `Stop “${title}”`
+          }
+          title="Ends its agent. A turn in progress is cut off; the conversation is kept."
+          className={cn(
+            "hover:bg-foreground/[0.06] h-7 shrink-0 rounded-md px-2 text-xs transition-colors",
+            confirming
+              ? "text-destructive"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {confirming ? "Stop now?" : "Stop"}
+        </button>
       )}
-    </button>
+    </div>
   );
 }

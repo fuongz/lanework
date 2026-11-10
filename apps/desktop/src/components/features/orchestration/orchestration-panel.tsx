@@ -19,7 +19,7 @@ import {
   visibleTurns,
 } from "#/lib/orchestration-prompt";
 import { withLiveContext } from "#/stores/conductor-context";
-import { useProposalEdits } from "./orchestration-panel.store";
+import { proposalRun, useProposalEdits } from "./orchestration-panel.store";
 import { ProposalCard } from "./proposal-card";
 import { RunPanel } from "./run-panel";
 
@@ -226,8 +226,12 @@ export function useAwaitingProposal(
   const edits = useProposalEdits((state) => state.edits);
   const latest = orchestration.proposals.at(-1);
   if (latest?.status !== "ready") return null;
-  const edit = edits[latest.id];
-  return edit?.runId || edit?.cancelled ? null : latest;
+  // Its run may be among those not read yet: no Approve until they are.
+  if (orchestration.runs === null && !edits[latest.id]) return null;
+  return proposalRun(latest.id, edits, orchestration.runs) ||
+    edits[latest.id]?.cancelled
+    ? null
+    : latest;
 }
 
 /** A settled run, drawn where its proposal was (FE-134). */
@@ -258,7 +262,7 @@ export function useRunsInPlace(
     const placed = new Map<string, RunInPlace[]>();
     const shown = new Set(turns.map((turn) => turn.id));
     for (const proposal of proposals) {
-      const runId = edits[proposal.id]?.runId;
+      const runId = proposalRun(proposal.id, edits, runs);
       const run = runId ? runs?.find((entry) => entry.id === runId) : null;
       const after = proposal.afterTurn;
       if (!run || !SETTLED_RUNS.includes(run.status)) continue;
@@ -355,7 +359,7 @@ export function OrchestrationPanel({
   const latest = proposals.at(-1);
   const linked = new Set<string>();
   const items = proposals.flatMap((proposal) => {
-    const runId = edits[proposal.id]?.runId;
+    const runId = proposalRun(proposal.id, edits, runs);
     if (runId) {
       linked.add(runId);
       if (placed.has(proposal.id)) return [];
