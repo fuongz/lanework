@@ -14,6 +14,7 @@ apps/desktop/src/routeTree.gen.ts
 .agents/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*/
 .agents/banner-art/
 .agents/x-posts/
+.agents/research/
 .agents/scratch/
 
 # Personal Claude Code settings for this checkout
