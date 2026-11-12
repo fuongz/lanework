@@ -34,7 +34,7 @@ import {
 } from "#/../shared/conversation";
 import { canLead } from "#/../shared/orchestration";
 import type { AgentSession } from "#/../shared/terminal";
-import { PermissionCard } from "#/components/features/conversation/permission-card";
+import { PermissionStack } from "#/components/features/conversation/permission-stack";
 import { ContextButton } from "#/components/shared/agents/conversation-facts";
 import { useConversationFacts } from "#/components/shared/agents/use-agent-facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
@@ -84,6 +84,7 @@ import {
   readConductorEnvelope,
   readEnvelope,
 } from "#/lib/orchestration-prompt";
+import { quoteBlock, quoteOf } from "#/lib/quote";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
 import { conductorMemory, withLiveContext } from "#/stores/conductor-context";
@@ -117,6 +118,7 @@ import { RollingText } from "./conversation-view.rolling";
 import { FileOpenerProvider } from "./file-opener";
 import { JobCapsules } from "./job-capsules";
 import { MessageQueue } from "./message-queue";
+import { SelectionActions } from "./selection-actions";
 import { TocRail } from "./toc-rail";
 import { useConversation } from "./use-conversation";
 
@@ -621,16 +623,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
       // A worker has no composer to reply into (FE-91/U18).
       onReply: asWorker
         ? undefined
-        : (text) => {
-            const lines = text
-              .split("\n")
-              .map((line) => line.trim())
-              .filter(Boolean)
-              .slice(0, 3);
-            composer.current?.insert(
-              `${lines.map((line) => `> ${line}`).join("\n")}\n\n`,
-            );
-          },
+        : (text) => composer.current?.quote(text, "reply"),
       onAnswer: answer,
       agent: label,
       kind: agent ?? "claude",
@@ -929,10 +922,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           <span className="ml-auto" />
           {/* A conductor's own sessions (FE-128): hidden from the rail, so
               its chat is where they are found, in a panel beside it. */}
-          {conductor && project && (
+          {project && (
             <ConductorSessionsToggle
               project={project}
-              conductor={conductor.id}
+              conductor={conductor?.id ?? null}
               chat={sessionsChat}
               open={sessionsPanel.open}
               onOpenChange={sessionsPanel.setOpen}
@@ -947,7 +940,10 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           style={
             {
               "--side-panel":
-                conductor && project && sessionsPanel.open
+                // NOT `project && …`: the project is read after the first
+                // render, and the padding would then glide in on every
+                // visit to a chat whose panel was left open.
+                sessionsPanel.open
                   ? `${SESSIONS_PANEL_PX + SESSIONS_PANEL_GUTTER}px`
                   : "0px",
             } as CSSProperties
@@ -1179,17 +1175,13 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     />
                   </div>
                 )}
-                {!asWorker &&
-                  asking.map((request) => (
-                    // The composer's shadow: it stands where the prompt is.
-                    <div key={request.id} className="rounded-xl shadow-xs">
-                      <PermissionCard
-                        request={request}
-                        agent={label}
-                        onAnswer={answer}
-                      />
-                    </div>
-                  ))}
+                {!asWorker && (
+                  <PermissionStack
+                    requests={asking}
+                    agent={label}
+                    onAnswer={answer}
+                  />
+                )}
                 {asWorker && (
                   <p className="text-muted-foreground border-border rounded-xl border px-4 py-3 text-[13px]">
                     Read-only. This worker takes its instructions from{" "}
@@ -1202,6 +1194,19 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                     </button>
                     , which answers its questions and reviews its work.
                   </p>
+                )}
+                {project && settings && !asWorker && (
+                  <SelectionActions
+                    root={content}
+                    onAsk={(text, question) => {
+                      const quote = quoteOf(text, "mention");
+                      if (quote)
+                        void send(`${quoteBlock([quote])}${question}`, [], []);
+                    }}
+                    onMention={(text) =>
+                      composer.current?.quote(text, "mention")
+                    }
+                  />
                 )}
                 {project && settings && !asWorker && (
                   <div className={asking.length ? "hidden" : "flex flex-col"}>
@@ -1227,6 +1232,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                         )
                       }
                       working={running}
+                      suspended={asking.length > 0}
                       queued={queue.length}
                       onSend={send}
                       // OpenCode never leads (FE-105/D5): `/orchestrate` goes as typed.
@@ -1250,33 +1256,39 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
               </div>
             </div>
           </div>
-          {conductor && project && (
-            // Its files open in Files, as the chat's file badges do.
+          {project && (
+            // Its files open in Files, as the chat's file badges do. A chat
+            // that is no conductor's gets the panel too, with its own
+            // details only.
             <FileOpenerProvider slug={slug} project={project} conversation={id}>
               <ConductorSessionsPanel
                 project={project}
                 slug={slug}
-                conductor={conductor.id}
+                conductor={conductor?.id ?? null}
                 chat={sessionsChat}
                 open={sessionsPanel.open}
                 self={conductorSelf}
                 runs={
-                  <LeadRuns
-                    slug={slug}
-                    orchestration={orchestration}
-                    frame={(count, rows) => (
-                      <PanelSection>
-                        <PanelGroup
-                          icon={Flowchart01Icon}
-                          label="Runs"
-                          count={count}
-                          defaultOpen
-                        >
-                          {rows}
-                        </PanelGroup>
-                      </PanelSection>
-                    )}
-                  />
+                  conductor && (
+                    <LeadRuns
+                      slug={slug}
+                      orchestration={orchestration}
+                      frame={(count, rows) => (
+                        <PanelSection>
+                          <PanelGroup
+                            icon={Flowchart01Icon}
+                            label="Runs"
+                            count={count}
+                            // LeadRuns counts "N running" while one runs, else
+                            // a number.
+                            live={typeof count === "string"}
+                          >
+                            {rows}
+                          </PanelGroup>
+                        </PanelSection>
+                      )}
+                    />
+                  )
                 }
               />
             </FileOpenerProvider>

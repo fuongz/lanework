@@ -5,6 +5,7 @@ import {
   FolderGitTwoIcon,
   GitBranchIcon,
   GitCommitIcon,
+  Globe02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
@@ -44,7 +45,19 @@ import { Badge } from "#/components/ui/badge";
 import { ipcMessage } from "#/lib/ipc-error";
 import { relativeTime } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
+import {
+  mergeWebSearches,
+  type WebSearch,
+  webSources,
+} from "#/lib/web-sources";
 import { useWorktree } from "#/stores/worktree";
+import { SourceRows } from "./conductor-sessions.sources";
+
+/**
+ * Each set of conversations' last read, by project and conversations, for
+ * the app's session: the panel shows it at once on coming back.
+ */
+const lastReads = new Map<string, Reads[]>();
 
 /** Files listed before "Show all": a long session would bury its commits. */
 const FILES_SHOWN = 12;
@@ -53,6 +66,8 @@ const FILES_SHOWN = 12;
 interface Reads {
   workspace: AgentWorkspace | null;
   files: AgentFiles | null;
+  /** The web searches it ran and pages it read; null when unread. */
+  web: { searches: WebSearch[]; partial: boolean } | null;
   /** Both reads failed: why. */
   error: string | null;
 }
@@ -73,9 +88,18 @@ export interface ReadSource {
  */
 function useReads(project: string, slug: string, sources: ReadSource[]) {
   const peek = useWorktree((state) => state.peek);
-  const [reads, setReads] = useState<Reads[] | null>(null);
-  const asked = useRef(0);
   const key = sources.map((source) => `${source.agent}:${source.id}`).join(",");
+  const cacheKey = `${project}|${key}`;
+  // The last read of the same conversations, drawn at once while they are
+  // read again: coming back to a chat shows its panel as it was, not a
+  // skeleton that then pushes the groups down.
+  const [read, setRead] = useState<{ key: string; reads: Reads[] } | null>(
+    () => {
+      const known = lastReads.get(cacheKey);
+      return known ? { key: cacheKey, reads: known } : null;
+    },
+  );
+  const asked = useRef(0);
   const latest = useRef(sources);
   latest.current = sources;
 
@@ -87,13 +111,19 @@ function useReads(project: string, slug: string, sources: ReadSource[]) {
     void peek(slug);
     const out = await Promise.all(
       latest.current.map(async ({ agent, id }): Promise<Reads> => {
-        const [workspace, files] = await Promise.allSettled([
+        const [workspace, files, chat] = await Promise.allSettled([
           surface.agentWorkspace(project, agent, id),
           surface.agentFiles(project, agent, id),
+          // Its tool calls, for the pages it searched and read: nothing is
+          // fetched, the transcript already holds them.
+          window.desktop?.conversation.read(project, id) ??
+            Promise.reject(new Error("No conversation surface")),
         ]);
         return {
           workspace: workspace.status === "fulfilled" ? workspace.value : null,
           files: files.status === "fulfilled" ? files.value : null,
+          web:
+            chat.status === "fulfilled" ? webSources(chat.value.turns) : null,
           error:
             workspace.status === "rejected" && files.status === "rejected"
               ? ipcMessage(workspace.reason, "This session could not be read.")
@@ -101,7 +131,10 @@ function useReads(project: string, slug: string, sources: ReadSource[]) {
         };
       }),
     );
-    if (mine === asked.current) setReads(out);
+    if (mine !== asked.current) return;
+    const readKey = `${project}|${latest.current.map((source) => `${source.agent}:${source.id}`).join(",")}`;
+    lastReads.set(readKey, out);
+    setRead({ key: readKey, reads: out });
   }, [project, slug, peek]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` stands for the list.
@@ -119,7 +152,9 @@ function useReads(project: string, slug: string, sources: ReadSource[]) {
     was.current = busy;
   }, [busyKey, load]);
 
-  return reads;
+  return read?.key === cacheKey
+    ? read.reads
+    : (lastReads.get(cacheKey) ?? null);
 }
 
 /** A worktree some of the conversations work in, and on which branch. */
@@ -137,7 +172,9 @@ function merge(reads: Reads[]) {
   const byPath = new Map<string, AgentFileTouch>();
   const commits = new Map<string, AgentCommit>();
   let partial = false;
+  let webPartial = false;
   for (const read of reads) {
+    webPartial ||= read.web?.partial ?? false;
     const where = read.workspace?.worktree;
     if (where) {
       const key = `${where.path}\n${read.workspace?.branch ?? ""}`;
@@ -175,6 +212,10 @@ function merge(reads: Reads[]) {
     commits: [...commits.values()].sort((a, b) =>
       (b.at ?? "").localeCompare(a.at ?? ""),
     ),
+    web: {
+      searches: mergeWebSearches(reads.map((read) => read.web?.searches ?? [])),
+      partial: webPartial,
+    },
   };
 }
 
@@ -339,7 +380,10 @@ function Facts({
   merged: ReturnType<typeof merge>;
   tasks: ReactNode;
 }) {
-  const { workspaces, files, commits } = merged;
+  const { workspaces, files, commits, web } = merged;
+  const pages = new Set(
+    web.searches.flatMap((search) => search.sources.map((s) => s.url)),
+  ).size;
   const single = workspaces.length === 1 ? workspaces[0] : null;
   const where =
     workspaces.length === 0 ? null : (
@@ -389,7 +433,10 @@ function Facts({
       </Section>
     );
   const work =
-    commits.length > 0 || files.files.length > 0 || tasks ? (
+    commits.length > 0 ||
+    files.files.length > 0 ||
+    web.searches.length > 0 ||
+    tasks ? (
       <Section>
         {commits.length > 0 && <CommitsGroup commits={commits} now={now} />}
         {files.files.length > 0 && (
@@ -400,6 +447,11 @@ function Facts({
             // status says nothing about its files.
             mainCheckout={workspaces.every((workspace) => !workspace.linked)}
           />
+        )}
+        {web.searches.length > 0 && (
+          <Group icon={Globe02Icon} label="Sources" count={pages}>
+            <SourceRows searches={web.searches} partial={web.partial} />
+          </Group>
         )}
         {tasks}
       </Section>
@@ -531,6 +583,7 @@ export function Group({
   count,
   aside,
   defaultOpen = false,
+  live = false,
   children,
 }: {
   icon: IconSvgElement;
@@ -538,8 +591,10 @@ export function Group({
   /** How many, or how many are busy ("2 running"). */
   count: ReactNode;
   aside?: ReactNode;
-  /** Unfolded to start with: Runs and Sessions, the lists one goes to. */
+  /** Unfolded to start with. Every group of the panel starts folded. */
   defaultOpen?: boolean;
+  /** Something in it works now: the count turns blue, with a ping. */
+  live?: boolean;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -565,8 +620,20 @@ export function Group({
         <span className="shrink-0 font-medium">{label}</span>
         <Badge
           variant="secondary"
-          className="text-muted-foreground rounded-[5px] px-1.5 leading-none tabular-nums"
+          className={cn(
+            "rounded-[5px] px-1.5 leading-none tabular-nums",
+            live
+              ? "bg-tone-blue/10 text-tone-blue gap-1.5"
+              : "text-muted-foreground",
+          )}
         >
+          {live && (
+            // The rail's working dot (StatusPing): blue, pinging.
+            <span aria-hidden="true" className="relative grid size-1.5">
+              <span className="bg-tone-blue absolute size-full animate-ping rounded-full opacity-75 motion-reduce:hidden" />
+              <span className="bg-tone-blue relative size-full rounded-full" />
+            </span>
+          )}
           {count}
         </Badge>
         <span className="ml-auto flex items-center">{aside}</span>

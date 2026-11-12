@@ -216,6 +216,10 @@ html[data-window-inactive]
   --accent-brand: oklch(0.557 0.158 45.4);
   --accent-brand-foreground: oklch(0.985 0 0);
 
+  /* Selected text: the brand's 50-ish tint, so a selection reads as the
+     app's own colour rather than the system blue. The text keeps its own. */
+  --selection: oklch(0.93 0.055 52);
+
   /* Board tones. The board names these (`column.tone`, `category.tone`), so
      the set is fixed by the service rather than chosen here.
 
@@ -282,6 +286,7 @@ html[data-window-inactive]
      NOTE: Every surface on it (card, popover, muted, accent) carries the same
      warm hue. Left neutral, a settings card reads as a third, grey tone
      between two brown ones. */
+  --selection: oklch(0.557 0.158 45.4 / 0.38);
   --background: oklch(0.168 0.009 59);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0.008 58);
@@ -457,6 +462,9 @@ html[data-window-inactive]
   }
   body {
     @apply bg-background text-foreground;
+  }
+  ::selection {
+    background-color: var(--selection);
   }
   /* Reveal the native macOS material without changing opaque card tokens. */
   html[data-vibrancy="true"],

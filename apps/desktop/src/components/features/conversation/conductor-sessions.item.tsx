@@ -109,10 +109,10 @@ function SessionActions({
             confirming ? `Confirm stopping “${title}”` : `Stop “${title}”`
           }
           title="Ends its agent. A turn in progress is cut off; the conversation is kept."
+          // The button's destructive variant: it ends the agent.
           className={cn(
-            ROW_ACTION,
-            confirming &&
-              "text-destructive hover:text-destructive w-auto px-2 text-xs",
+            "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 grid size-7 shrink-0 place-items-center rounded-md transition-colors outline-none focus-visible:ring-2",
+            confirming && "w-auto px-2 text-xs font-medium",
           )}
         >
           {confirming ? (

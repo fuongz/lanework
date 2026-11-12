@@ -111,13 +111,19 @@ const WRITE_TOOLS = new Set([
   "multiedit",
 ]);
 
+/** OpenCode's tools that only read this checkout: never asked about. */
+const READ_ONLY = ["read", "glob", "grep", "list"] as const;
+
 /**
  * The composer's permission as an OpenCode session's rules (v2's
  * `{ action, resource, effect }`), as Monocode sets them.
  *
- * - Supervised asks before anything but a question.
- * - Auto-accept edits lets edits through too; Auto, reads as well (OpenCode
- *   has no reviewer to hand a decision to).
+ * - Supervised lets a question and the read-only tools through (`read`,
+ *   `glob`, `grep`, `list`), as Claude Code's default mode does, and asks
+ *   before anything else: a shell command, an edit, and the web tools, which
+ *   send something off this Mac.
+ * - Auto-accept edits lets edits through too; Auto the same (OpenCode has no
+ *   reviewer to hand a decision to).
  * - Full access allows everything.
  */
 export function opencodeRules(
@@ -129,10 +135,13 @@ export function opencodeRules(
     effect,
   });
   if (permission === "bypassPermissions") return [rule("*", "allow")];
-  const rules = [rule("*", "ask"), rule("question", "allow")];
+  const rules = [
+    rule("*", "ask"),
+    rule("question", "allow"),
+    ...READ_ONLY.map((action) => rule(action, "allow")),
+  ];
   if (permission === "acceptEdits" || permission === "auto")
     rules.push(rule("edit", "allow"));
-  if (permission === "auto") rules.push(rule("read", "allow"));
   return rules;
 }
 

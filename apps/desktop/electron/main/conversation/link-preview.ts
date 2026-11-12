@@ -25,7 +25,11 @@ import http from "node:http";
 import https from "node:https";
 import { isIP } from "node:net";
 import { join } from "node:path";
-import { isPreviewUrl, type LinkPreview } from "../../../shared/conversation";
+import {
+  isFaviconUrl,
+  isPreviewUrl,
+  type LinkPreview,
+} from "../../../shared/conversation";
 
 /** The most of a page read, in bytes: enough for its `<head>`. */
 const PAGE_MAX = 512 * 1024;
@@ -596,7 +600,36 @@ export function createLinkPreviews(options: LinkPreviewOptions) {
     return { url, title, icon };
   }
 
+  /**
+   * A well-known site's favicon alone (FAVICON_HOSTS): the page is never
+   * asked for, only `https://<host>/favicon.ico`, kept with the domain.
+   */
+  async function iconOnly(host: string): Promise<LinkPreview> {
+    const origin = `https://${host}/`;
+    const entry = await load(host);
+    const time = now();
+    if (entry !== null && time - entry.at < TTL_MS)
+      return { url: origin, title: null, icon: entry.icon };
+    const failedAt = failed.get(host);
+    if (failedAt !== undefined && time - failedAt < FAILED_TTL_MS)
+      return { url: origin, title: null, icon: null };
+    const icon = await fetchIcon(`${origin}favicon.ico`);
+    if (!icon) failed.set(host, time);
+    else await save(host, { at: time, icon, titles: entry?.titles ?? {} });
+    return { url: origin, title: null, icon };
+  }
+
   return function linkPreview(value: unknown): Promise<LinkPreview> {
+    if (!isPreviewUrl(value) && isFaviconUrl(value)) {
+      const host = new URL(value).hostname.toLowerCase();
+      const key = `icon:${host}`;
+      let task = inflight.get(key);
+      if (!task) {
+        task = iconOnly(host).finally(() => inflight.delete(key));
+        inflight.set(key, task);
+      }
+      return task.then((preview) => ({ ...preview, url: value }));
+    }
     if (!isPreviewUrl(value))
       throw new Error("Only http(s) links to a previewed host.");
     const url = new URL(value);

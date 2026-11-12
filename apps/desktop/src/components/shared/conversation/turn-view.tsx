@@ -2,11 +2,19 @@ import {
   CommandLineIcon,
   CubeIcon,
   Folder01Icon,
+  QuoteDownIcon,
   SlashIcon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { createContext, memo, useContext } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useId,
+  useMemo,
+  useState,
+} from "react";
 import type {
   AssistantTurn,
   Attachment,
@@ -22,6 +30,11 @@ import {
 } from "#/components/shared/common/markdown-body";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "#/components/ui/tooltip";
+import {
   clock,
   downloadMarkdown,
   fileNameFor,
@@ -30,7 +43,9 @@ import {
   turnText,
 } from "#/lib/conversation-format";
 import { leadIcon } from "#/lib/orchestration-prompt";
+import { splitQuotes } from "#/lib/quote";
 import { cn } from "#/lib/utils";
+import { answerSources } from "#/lib/web-sources";
 import { useKnown } from "./composer.known";
 import { AssistantActions, UserActions } from "./turn-view.actions";
 import { CompactionDivider } from "./turn-view.compaction";
@@ -39,6 +54,7 @@ import {
   launchedSessions,
 } from "./turn-view.launched-session";
 import { chatLink, liveChatLink } from "./turn-view.link-chip";
+import { SourcesButton, SourcesList } from "./turn-view.sources";
 import { ToolGroup } from "./turn-view.tool-group";
 
 /**
@@ -174,7 +190,7 @@ function PromptToken({ token }: { token: string }) {
           : `@${named}`
       }
       className={cn(
-        "mx-px inline-flex items-start gap-1 align-baseline font-medium",
+        "mx-px inline-flex items-baseline gap-1 align-baseline font-medium",
         token === "/orchestrate"
           ? "text-tone-violet"
           : conductor
@@ -190,7 +206,7 @@ function PromptToken({ token }: { token: string }) {
             path={named}
             inherit
             // The first line's middle, not the badge's: a long name wraps.
-            className="mt-[0.3em] size-3.5 shrink-0"
+            className="mt-[0.3em] size-3.5 shrink-0 self-start"
           />
         ) : (
           <HugeiconsIcon
@@ -208,7 +224,7 @@ function PromptToken({ token }: { token: string }) {
                         : Folder01Icon
             }
             // The first line's middle, not the badge's: a long name wraps.
-            className="mt-[0.3em] size-3.5 shrink-0"
+            className="mt-[0.3em] size-3.5 shrink-0 self-start"
             strokeWidth={1.8}
             aria-hidden="true"
           />
@@ -262,30 +278,64 @@ export function UserBubble({
   /** Sent from here, not in the transcript yet: queued or starting. */
   pending?: string;
 }) {
+  const { quotes, rest } = splitQuotes(text);
   return (
     <div className="group/turn flex flex-col items-end">
+      {/* The bubble and, on its top edge, a tab with what it replies to or
+          mentions (the composer's quotes tab). The tab takes the bubble's
+          width, never sets it: `contain` keeps its text from widening it. */}
       <div
         className={cn(
-          "bg-muted flex max-w-[85%] min-w-0 flex-col gap-2 rounded-2xl px-3.5 py-2.5 dark:bg-foreground/[0.07]",
+          "flex max-w-[85%] min-w-0 flex-col",
           pending && "opacity-70",
         )}
       >
-        {attachments.length > 0 && (
-          <div className="flex flex-wrap justify-end gap-1.5">
-            {attachments.map((attachment, index) => (
-              <AttachmentChip
-                // biome-ignore lint/suspicious/noArrayIndexKey: attachments are positional and never reorder.
+        {quotes.length > 0 && (
+          <div className="bg-muted/50 text-muted-foreground mx-3 flex min-w-40 flex-col rounded-t-xl px-3 py-1 text-xs [contain:inline-size] dark:bg-foreground/[0.04]">
+            {quotes.map((lines, index) => (
+              // One line each; the whole quote on hover.
+              <Tooltip
+                // biome-ignore lint/suspicious/noArrayIndexKey: quotes are positional and never reorder.
                 key={index}
-                attachment={attachment}
-              />
+              >
+                <TooltipTrigger
+                  render={
+                    <p className="flex h-6 min-w-0 items-center gap-1.5" />
+                  }
+                >
+                  <HugeiconsIcon
+                    icon={QuoteDownIcon}
+                    className="size-3.5 shrink-0"
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                  <span className="truncate">{lines.join(" ")}</span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {lines.join("\n")}
+                </TooltipContent>
+              </Tooltip>
             ))}
           </div>
         )}
-        {text && (
-          <p className="font-content text-[14px] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere]">
-            <PromptText text={text} />
-          </p>
-        )}
+        <div className="bg-muted flex min-w-0 flex-col gap-2 rounded-2xl px-3.5 py-2.5 dark:bg-foreground/[0.07]">
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-1.5">
+              {attachments.map((attachment, index) => (
+                <AttachmentChip
+                  // biome-ignore lint/suspicious/noArrayIndexKey: attachments are positional and never reorder.
+                  key={index}
+                  attachment={attachment}
+                />
+              ))}
+            </div>
+          )}
+          {rest.trim() && (
+            <p className="font-content text-[14px] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere]">
+              <PromptText text={rest.trim()} />
+            </p>
+          )}
+        </div>
       </div>
       {pending ? (
         <span className="text-muted-foreground flex h-8 items-center text-xs">
@@ -349,6 +399,14 @@ function AssistantView({
   }
   const text = turnText({ ...turn, blocks });
   const lastIndex = blocks.length - 1;
+  // The pages it stands on, once it is written: its searches and fetches,
+  // and the links in its text.
+  const sources = useMemo(
+    () => (turn.open ? [] : answerSources(turn, text)),
+    [turn, text],
+  );
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const sourcesId = useId();
   return (
     <div className="group/turn flex min-w-0 flex-col gap-3">
       {blocks.map((block, index) => {
@@ -415,7 +473,20 @@ function AssistantView({
           onReply={
             handlers.onReply ? () => handlers.onReply?.(text) : undefined
           }
+          sources={
+            sources.length > 0 ? (
+              <SourcesButton
+                sources={sources}
+                open={sourcesOpen}
+                onToggle={() => setSourcesOpen(!sourcesOpen)}
+                controls={sourcesId}
+              />
+            ) : null
+          }
         />
+      )}
+      {!turn.open && sourcesOpen && sources.length > 0 && (
+        <SourcesList id={sourcesId} sources={sources} />
       )}
     </div>
   );

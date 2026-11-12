@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AGENT_LABELS } from "#/../shared/conversation";
 import {
   HarnessIcon,
@@ -26,7 +26,10 @@ const OPEN_MS = 5000;
 /** A waiting conversation the island can take the window to. */
 interface Waiting extends AwaitingEntry {
   slug: string;
+  /** Its project's name, for the panel. */
   project: string;
+  /** Its project's key, as main names it: what an answer is sent with. */
+  projectId: string;
   /** Its title on the rail, once listed. */
   title: string | null;
 }
@@ -85,6 +88,7 @@ export function useAwaitingElsewhere(): Waiting[] {
       );
       out.push({
         ...entry,
+        projectId: entry.project,
         slug: project.slug,
         project: project.name,
         title: listed?.title ?? null,
@@ -201,7 +205,7 @@ export function AwaitingIsland() {
             setIslandOpen(AWAITING_ISLAND_ID, false);
           },
           pill: () => <Pill waiting={waiting} onOpen={go} />,
-          panel: () => <Panel waiting={waiting} onOpen={go} />,
+          panel: () => <Panel waiting={waiting} onOpen={go} onHold={hold} />,
         }
       : null,
   );
@@ -254,19 +258,49 @@ function Pill({ waiting, onOpen }: { waiting: Waiting[]; onOpen: () => void }) {
 function Panel({
   waiting,
   onOpen,
+  onHold,
 }: {
   waiting: Waiting[];
   onOpen: () => void;
+  /** Keeps the island open while an answer is on its way. */
+  onHold: () => void;
 }) {
   const [oldest] = waiting;
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   if (!oldest) return null;
   const request = oldest.requests[0];
   const asked = request?.question ?? request?.summary ?? "";
   const more = waiting.length - 1;
+  // A tool's permission is answered here; a question needs its card.
+  const answerable = request && !request.question;
+  const answer = (behavior: "allow" | "deny") => {
+    if (!request) return;
+    onHold();
+    setBusy(request.id);
+    setError(null);
+    void window.desktop?.conversation
+      .answerPermission(oldest.projectId, oldest.conversation, request.id, {
+        behavior,
+      })
+      .catch(() => setError("Could not answer. Open the conversation."))
+      .finally(() => setBusy(null));
+  };
+  const answering = busy !== null && busy === request?.id;
   return (
+    // A press anywhere but its answers opens the conversation; Enter on the
+    // focused card does the same.
     <section
-      aria-label="Agent waiting for you"
-      className="flex w-[min(380px,calc(100vw-32px))] flex-col gap-3 p-4 pt-3.5 select-text"
+      aria-label="Agent waiting for you. Press Enter to open the conversation."
+      tabIndex={-1}
+      onClick={(event) => {
+        if (!(event.target as HTMLElement).closest("button")) onOpen();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && event.target === event.currentTarget)
+          onOpen();
+      }}
+      className="flex w-[min(380px,calc(100vw-32px))] cursor-pointer flex-col gap-3 p-4 pt-3.5 outline-none"
     >
       <div className="flex items-start gap-2">
         <span className="mt-0.5 flex">
@@ -303,13 +337,32 @@ function Panel({
             ? `${more} more ${more === 1 ? "session needs" : "sessions need"} you`
             : ""}
         </span>
-        <Button
-          onClick={onOpen}
-          className="h-7 rounded-full bg-white/[0.14] px-3 text-[12px] text-white hover:bg-white/[0.22] focus-visible:ring-white/40"
-        >
-          Open
-        </Button>
+        <div className="flex items-center gap-1.5">
+          {answerable && (
+            <>
+              <Button
+                disabled={answering}
+                onClick={() => answer("deny")}
+                className="h-7 rounded-full bg-white/[0.14] px-3 text-[12px] text-white hover:bg-white/[0.22] focus-visible:ring-white/40"
+              >
+                Deny
+              </Button>
+              <Button
+                disabled={answering}
+                onClick={() => answer("allow")}
+                className="h-7 rounded-full bg-white px-3 text-[12px] text-black hover:bg-white/85 focus-visible:ring-white/40"
+              >
+                Allow
+              </Button>
+            </>
+          )}
+        </div>
       </div>
+      {error && (
+        <p role="alert" className="text-[11px] text-rose-300">
+          {error}
+        </p>
+      )}
     </section>
   );
 }

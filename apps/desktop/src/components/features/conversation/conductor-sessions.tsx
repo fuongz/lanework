@@ -78,7 +78,7 @@ export function useSessionsPanel(chat: string) {
  * `conductor`'s sessions in `project` and where each stands: the active
  * (working or waiting for the user) first, then newest first.
  */
-function useConductorSessions(project: string, conductor: string) {
+function useConductorSessions(project: string, conductor: string | null) {
   const all = useAgentSessions((state) => state.byProject[project] ?? NONE);
   const listing = useAgentSessions(
     (state) => state.byProject[project] === undefined,
@@ -92,6 +92,9 @@ function useConductorSessions(project: string, conductor: string) {
         : (live[agentKey(session)] ?? session.working)
           ? "working"
           : "idle";
+    // A chat that is no conductor's (FE-128's panel, opened on any chat)
+    // has no sessions of its own.
+    if (!conductor) return [];
     return all
       .filter((session) => session.launchedBy?.conductor === conductor)
       .map((session) => ({ session, activity: activity(session) }))
@@ -119,8 +122,8 @@ export function ConductorSessionsToggle({
   onOpenChange,
 }: {
   project: string;
-  /** The conductor, by id. */
-  conductor: string;
+  /** The conductor, by id; null on a chat that is no conductor's. */
+  conductor: string | null;
   /** The chat it is on, as `useSessionsPanel` keys it. */
   chat: string;
   open: boolean;
@@ -136,8 +139,20 @@ export function ConductorSessionsToggle({
       onClick={() => onOpenChange(!open)}
       aria-pressed={open}
       aria-controls={panelId(chat)}
-      aria-label={`Sessions this conductor started: ${sessions.length}`}
-      title={open ? "Hide sessions" : "Sessions this conductor started"}
+      aria-label={
+        conductor
+          ? `Sessions this conductor started: ${sessions.length}`
+          : "This session's details"
+      }
+      title={
+        open
+          ? conductor
+            ? "Hide sessions"
+            : "Hide details"
+          : conductor
+            ? "Sessions this conductor started"
+            : "This session's details"
+      }
       className="text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground aria-pressed:bg-foreground/[0.06] aria-pressed:text-foreground relative grid size-7 shrink-0 place-items-center rounded-md transition-colors"
     >
       <HugeiconsIcon
@@ -176,7 +191,8 @@ export function ConductorSessionsPanel({
 }: {
   project: string;
   slug: string;
-  conductor: string;
+  /** null on a chat that is no conductor's: its own details only. */
+  conductor: string | null;
   chat: string;
   open: boolean;
   /** The conductor's own conversation, counted in the overview. */
@@ -244,7 +260,7 @@ function SessionsList({
 }: {
   project: string;
   slug: string;
-  conductor: string;
+  conductor: string | null;
   chat: string;
   self: ConductorSelf | null;
   runs?: ReactNode;
@@ -338,7 +354,7 @@ function SessionsList({
                 icon={UserGroupIcon}
                 label="Sessions"
                 count={working > 0 ? `${working} working` : sessions.length}
-                defaultOpen
+                live={working > 0}
               >
                 {sessions.map(({ session, activity }) => (
                   <li key={session.id}>

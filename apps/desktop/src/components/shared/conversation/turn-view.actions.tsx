@@ -170,6 +170,7 @@ export function AssistantActions({
   onFork,
   onReply,
   forking,
+  sources,
 }: {
   text: string;
   time: string | null;
@@ -179,6 +180,8 @@ export function AssistantActions({
   onFork?: () => void;
   onReply?: () => void;
   forking: boolean;
+  /** "N sources", after the actions, when the answer stands on any. */
+  sources?: ReactNode;
 }) {
   return (
     <Row align="start" time={time}>
@@ -198,6 +201,7 @@ export function AssistantActions({
       {usage && (
         <Action label="Usage" icon={Analytics01Icon} tip={usageTip(usage)} />
       )}
+      {sources}
     </Row>
   );
 }

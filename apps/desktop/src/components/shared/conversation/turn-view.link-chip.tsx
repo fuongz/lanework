@@ -1,11 +1,7 @@
 import { Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useEffect, useState } from "react";
-import {
-  isOpenableUrl,
-  isPreviewUrl,
-  type LinkPreview,
-} from "#/../shared/conversation";
+import { memo } from "react";
+import { isOpenableUrl, isPreviewUrl } from "#/../shared/conversation";
 import type { LinkRenderer } from "#/components/shared/common/markdown-body";
 import {
   ContextMenu,
@@ -18,60 +14,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
+import { cn } from "#/lib/utils";
 import { notify } from "#/stores/notify";
-
-/**
- * Each URL's preview, kept for the whole session.
- *
- * A link drawn twice, or redrawn by the next read, never asks main again.
- * Main keeps its own cache on disk per domain; this one only saves the round
- * trip.
- */
-const previews = new Map<string, LinkPreview | Promise<LinkPreview>>();
-
-function preview(url: string): LinkPreview | Promise<LinkPreview> {
-  const known = previews.get(url);
-  if (known) return known;
-  const surface = window.desktop?.conversation;
-  if (!surface) {
-    const none = { url, title: null, icon: null };
-    previews.set(url, none);
-    return none;
-  }
-  const pending = surface
-    .linkPreview(url)
-    .catch(() => ({ url, title: null, icon: null }))
-    .then((found) => {
-      previews.set(url, found);
-      return found;
-    });
-  previews.set(url, pending);
-  return pending;
-}
-
-function usePreview(url: string | null): LinkPreview | null {
-  const [found, setFound] = useState<LinkPreview | null>(() => {
-    if (!url) return null;
-    const known = previews.get(url);
-    return known && !(known instanceof Promise) ? known : null;
-  });
-  useEffect(() => {
-    if (!url) return;
-    const next = preview(url);
-    if (!(next instanceof Promise)) {
-      setFound(next);
-      return;
-    }
-    let gone = false;
-    void next.then((value) => {
-      if (!gone) setFound(value);
-    });
-    return () => {
-      gone = true;
-    };
-  }, [url]);
-  return found && found.url === url ? found : null;
-}
+import { LinkIcon, usePreview } from "./link-icon";
 
 /** A link's host, for a link written as its own URL that main won't preview. */
 function hostOf(href: string): string {
@@ -144,7 +89,9 @@ const LinkChip = memo(function LinkChip({
                     event.preventDefault();
                     open();
                   }}
-                  className="text-accent-brand decoration-accent-brand/50 hover:decoration-accent-brand underline underline-offset-[3px] transition-colors [overflow-wrap:anywhere]"
+                  // A badge: the page's mark and its host (or the link's
+                  // words), on one line within the sentence.
+                  className="bg-muted/70 border-border hover:bg-muted text-foreground mx-px inline-flex max-w-full translate-y-[-1px] items-center gap-1 rounded-md border px-1.5 align-middle text-[0.86em] leading-[1.6] no-underline transition-colors dark:bg-foreground/[0.06] dark:hover:bg-foreground/[0.1]"
                 />
               ) : (
                 <span className="decoration-foreground/30 underline decoration-dotted underline-offset-[3px] [overflow-wrap:anywhere]" />
@@ -156,21 +103,39 @@ const LinkChip = memo(function LinkChip({
                 src={found.icon}
                 alt=""
                 aria-hidden="true"
-                className="mr-1 inline-block size-4 -translate-y-px rounded-full align-middle"
+                className="size-3.5 shrink-0 rounded-[4px]"
               />
             ) : (
-              // NOTE: A globe, not the site's favicon: fetching one for any host
-              // would let a reply make main reach a host it chose (FE-79/D4).
-              web && (
+              // NOTE: A well-known site's favicon, else the globe: any other
+              // host is never reached (FE-79/D4). Nothing while it streams.
+              web &&
+              (live ? (
                 <HugeiconsIcon
                   icon={Globe02Icon}
-                  className="mr-1 inline-block size-3.5 -translate-y-px align-middle opacity-70"
+                  className="text-muted-foreground size-3.5 shrink-0"
                   strokeWidth={1.8}
                   aria-hidden="true"
                 />
-              )
+              ) : (
+                <LinkIcon
+                  host={hostOf(href)}
+                  className="text-muted-foreground"
+                />
+              ))
             )}
-            {label}
+            {web ? (
+              <span
+                className={cn(
+                  "min-w-0 truncate",
+                  // The host of a bare URL reads as an address.
+                  text === href && !found?.title && "font-mono",
+                )}
+              >
+                {label}
+              </span>
+            ) : (
+              label
+            )}
           </TooltipTrigger>
           <TooltipContent className="max-w-md break-all">{href}</TooltipContent>
         </Tooltip>

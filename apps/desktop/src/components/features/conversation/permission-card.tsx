@@ -3,11 +3,11 @@ import {
   ArrowRight01Icon,
   ArrowUp01Icon,
   Cancel01Icon,
-  Shield01Icon,
+  SquareUnlock02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import {
   ANSWER_MAX,
   type AskQuestion,
@@ -17,6 +17,26 @@ import {
 } from "#/../shared/conversation";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
+
+/** Both cards' shell: a white card lifted by a soft, wide shadow. */
+const CARD =
+  "bg-card border-border/70 flex flex-col gap-3 rounded-2xl border px-4 pt-3.5 pb-3 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_8px_24px_-6px_rgb(0_0_0/0.10)]";
+
+/** Both cards' answers: round pills. */
+const PILL = "h-8 min-w-20 rounded-full px-5 text-[13px]";
+
+/**
+ * What the stack says beside the title (its first line): how many wait, and
+ * its Show all. Nothing for a lone request.
+ */
+function Pending({ children }: { children: ReactNode }) {
+  if (!children) return null;
+  return (
+    <span className="text-muted-foreground flex shrink-0 items-center gap-2 text-xs leading-[19.25px] font-normal whitespace-nowrap tabular-nums">
+      {children}
+    </span>
+  );
+}
 
 /**
  * The CLI asked to use a tool and is waiting for an answer.
@@ -28,11 +48,17 @@ export function PermissionCard({
   request,
   agent = "Claude",
   onAnswer,
+  inputOpen = true,
+  pending,
 }: {
   request: PermissionRequest;
   /** Who asks, by name: Claude, Codex or OpenCode. */
   agent?: string;
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
+  /** Whether a tool's Input shows until the user opens or closes it. */
+  inputOpen?: boolean;
+  /** The stack's count and Show all, by the title; none for one request. */
+  pending?: ReactNode;
 }) {
   if (request.questions)
     return (
@@ -41,10 +67,17 @@ export function PermissionCard({
         agent={agent}
         questions={request.questions}
         onAnswer={onAnswer}
+        pending={pending}
       />
     );
   return (
-    <ToolPermissionCard request={request} agent={agent} onAnswer={onAnswer} />
+    <ToolPermissionCard
+      request={request}
+      agent={agent}
+      onAnswer={onAnswer}
+      inputOpen={inputOpen}
+      pending={pending}
+    />
   );
 }
 
@@ -52,72 +85,86 @@ function ToolPermissionCard({
   request,
   agent,
   onAnswer,
+  inputOpen,
+  pending,
 }: {
   request: PermissionRequest;
   agent: string;
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
+  inputOpen: boolean;
+  pending: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
+  // The Input follows `inputOpen` (open alone, closed in a stack) until the
+  // user opens or closes it; then it stays as they left it.
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? inputOpen;
   const [busy, setBusy] = useState(false);
   const answer = (value: PermissionAnswer) => {
     setBusy(true);
     void onAnswer(request.id, value).finally(() => setBusy(false));
   };
   return (
-    <section
-      aria-label={`Permission for ${request.tool}`}
-      className="border-tone-amber/40 bg-tone-amber/[0.06] flex flex-col gap-2.5 rounded-xl border p-3"
-    >
-      <div className="flex min-w-0 items-start gap-2">
-        <HugeiconsIcon
-          icon={Shield01Icon}
-          className="text-tone-amber mt-0.5 size-4 shrink-0"
-          strokeWidth={1.8}
-          aria-hidden="true"
-        />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-[13px] font-medium">
+    <section aria-label={`Permission for ${request.tool}`} className={CARD}>
+      {/* The question card's shell (AskUserQuestion): a title, its detail,
+          then the answers at the bottom right. */}
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <h3 className="flex min-w-0 items-start gap-2 text-[14px] leading-snug font-medium text-pretty">
+          <HugeiconsIcon
+            icon={SquareUnlock02Icon}
+            className="text-tone-amber mt-[0.2em] size-4 shrink-0"
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+          <span className="min-w-0 flex-1">
             {agent} wants to use {request.tool}
           </span>
-          <span className="text-muted-foreground text-[13px] [overflow-wrap:anywhere]">
+          <Pending>{pending}</Pending>
+        </h3>
+        {request.summary && (
+          <p className="text-muted-foreground ps-6 text-[13px] [overflow-wrap:anywhere]">
             {request.summary}
-          </span>
-        </div>
+          </p>
+        )}
       </div>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        className="text-muted-foreground hover:text-foreground flex items-center gap-1 self-start text-xs transition-colors"
-      >
-        <HugeiconsIcon
-          icon={ArrowRight01Icon}
-          className={cn(
-            "size-3 transition-transform motion-reduce:transition-none",
-            open && "rotate-90",
-          )}
-          strokeWidth={2}
-          aria-hidden="true"
-        />
-        Input
-      </button>
       {open && (
         <pre className="bg-foreground/[0.04] max-h-64 overflow-auto rounded-lg p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
           <code>{request.input || "{}"}</code>
         </pre>
       )}
       <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setChosen(!open)}
+          className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs transition-colors"
+        >
+          <HugeiconsIcon
+            icon={ArrowRight01Icon}
+            className={cn(
+              "size-3 transition-transform motion-reduce:transition-none",
+              open && "rotate-90",
+            )}
+            strokeWidth={2}
+            aria-hidden="true"
+          />
+          Input
+        </button>
+        <span className="ml-auto" />
         <Button
           size="sm"
+          // Muted: the quiet answer beside Allow.
+          variant="secondary"
+          className={PILL}
           disabled={busy}
-          onClick={() => answer({ behavior: "allow" })}
+          onClick={() => answer({ behavior: "deny" })}
         >
-          Allow
+          Deny
         </Button>
         {request.suggestMode && (
           <Button
             size="sm"
             variant="outline"
+            className={PILL}
             disabled={busy}
             onClick={() =>
               answer({
@@ -131,11 +178,11 @@ function ToolPermissionCard({
         )}
         <Button
           size="sm"
-          variant="ghost"
+          className={PILL}
           disabled={busy}
-          onClick={() => answer({ behavior: "deny" })}
+          onClick={() => answer({ behavior: "allow" })}
         >
-          Deny
+          Allow
         </Button>
       </div>
     </section>
@@ -167,11 +214,13 @@ function QuestionCard({
   agent,
   questions,
   onAnswer,
+  pending,
 }: {
   id: string;
   agent: string;
   questions: AskQuestion[];
   onAnswer: (id: string, answer: PermissionAnswer) => Promise<void>;
+  pending: ReactNode;
 }) {
   const [index, setIndex] = useState(0);
   const [picks, setPicks] = useState<Picked[]>(() =>
@@ -221,12 +270,13 @@ function QuestionCard({
   return (
     <section
       aria-label={`${agent} asks: ${question.question}`}
-      className="bg-card border-border flex flex-col gap-3 rounded-xl border px-3.5 pt-3 pb-2.5 shadow-xs"
+      className={CARD}
     >
       <div className="flex min-w-0 items-start gap-3">
         <h3 className="min-w-0 flex-1 text-[14px] leading-snug font-medium text-pretty">
           {question.question}
         </h3>
+        <Pending>{pending}</Pending>
         <button
           type="button"
           aria-label="Dismiss the questions"
@@ -361,6 +411,7 @@ function QuestionCard({
         <Button
           size="sm"
           variant="secondary"
+          className={PILL}
           disabled={busy}
           onClick={() => {
             const final = picks.map((entry, at) =>
@@ -374,6 +425,7 @@ function QuestionCard({
         </Button>
         <Button
           size="sm"
+          className={PILL}
           disabled={busy || !said(picked)}
           onClick={() => next(picks)}
         >

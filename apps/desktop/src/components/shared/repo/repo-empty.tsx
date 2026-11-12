@@ -1,5 +1,6 @@
 import {
   GitBranchIcon,
+  GithubIcon,
   Loading03Icon,
   RefreshIcon,
 } from "@hugeicons/core-free-icons";
@@ -64,7 +65,7 @@ function copy(state: Exclude<WorktreeState, { kind: "ready" }>): {
 }
 
 /**
- * Init Git, offered beside Open Settings on a folder that is not a
+ * Initialize Git, offered beside Open Settings on a folder that is not a
  * repository (FE-124). Opt-in: only the Files screen passes it.
  */
 export interface RepoInitAction {
@@ -112,16 +113,18 @@ export function RepoEmpty({
             if (!init.busy) init.onInit();
           }}
         >
-          {init.busy && (
-            <HugeiconsIcon
-              icon={Loading03Icon}
-              className="size-3.5 animate-spin motion-reduce:animate-none"
-              strokeWidth={1.5}
-              aria-hidden="true"
-              data-icon="inline-start"
-            />
-          )}
-          {init.busy ? "Initializing…" : "Init Git"}
+          <HugeiconsIcon
+            icon={init.busy ? Loading03Icon : GithubIcon}
+            className={
+              init.busy
+                ? "size-3.5 animate-spin motion-reduce:animate-none"
+                : "size-3.5"
+            }
+            strokeWidth={1.5}
+            aria-hidden="true"
+            data-icon="inline-start"
+          />
+          {init.busy ? "Initializing…" : "Initialize Git"}
         </Button>
         {openSettings}
       </div>

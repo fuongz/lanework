@@ -855,6 +855,90 @@ export function isPreviewUrl(value: unknown): value is string {
   );
 }
 
+/**
+ * Well-known sites whose favicon main fetches, and nothing else of theirs.
+ *
+ * NOTE: Only `https://<host>/favicon.ico`, never the page: the path and
+ * query, where an agent could hide what it read, never leave this Mac. What
+ * a fetch tells the host is only that a chat named it, and every one here is
+ * a large public site. A host matches itself and its subdomains
+ * (`en.wikipedia.org`, `developer.apple.com`). Never a third-party favicon
+ * service: that would hand it every host the chats name.
+ */
+export const FAVICON_HOSTS: readonly string[] = [
+  // Platforms and code hosts
+  "apple.com",
+  "google.com",
+  "microsoft.com",
+  "amazon.com",
+  "cloudflare.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "docker.com",
+  "vercel.com",
+  // Reference and docs
+  "wikipedia.org",
+  "mozilla.org",
+  "w3.org",
+  "whatwg.org",
+  "web.dev",
+  "caniuse.com",
+  "python.org",
+  "nodejs.org",
+  "npmjs.com",
+  "typescriptlang.org",
+  "react.dev",
+  "nextjs.org",
+  "electronjs.org",
+  "bun.sh",
+  "deno.com",
+  "rust-lang.org",
+  "docs.rs",
+  "crates.io",
+  "go.dev",
+  "kubernetes.io",
+  "postgresql.org",
+  "sqlite.org",
+  // AI vendors
+  "anthropic.com",
+  "claude.com",
+  "openai.com",
+  // Q&A and writing
+  "stackoverflow.com",
+  "stackexchange.com",
+  "medium.com",
+  "dev.to",
+  "reddit.com",
+  "ycombinator.com",
+  // Video
+  "youtube.com",
+  "youtu.be",
+];
+
+/** Whether `hostname` is one of {@link FAVICON_HOSTS} or under one. */
+export function isFaviconHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  return FAVICON_HOSTS.some(
+    (known) => host === known || host.endsWith(`.${known}`),
+  );
+}
+
+/**
+ * A URL main may fetch the favicon of: https, on the default port, without
+ * credentials, to one of the {@link FAVICON_HOSTS}.
+ */
+export function isFaviconUrl(value: unknown): value is string {
+  const url = webUrl(value);
+  return (
+    url !== null &&
+    url.protocol === "https:" &&
+    !url.username &&
+    !url.password &&
+    url.port === "" &&
+    isFaviconHost(url.hostname)
+  );
+}
+
 // ─── IPC ────────────────────────────────────────────────────────────────────
 
 /** The idle limits Settings → Power saver offers, in minutes (FE-126). */
