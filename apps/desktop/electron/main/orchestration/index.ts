@@ -32,6 +32,7 @@ import { terminalFolder } from "../projects";
 import { listenControl, type SessionsControl } from "./control-server";
 import { setEngineTap } from "./engine-tap";
 import { teamLeadOf } from "./leads";
+import { RunOwnership } from "./owner";
 import { Orchestrator } from "./runtime";
 
 export { visibleText } from "./prompts";
@@ -89,10 +90,20 @@ export const controlCliPath = () =>
 
 function orchestrator(): Orchestrator {
   if (instance) return instance;
+  const dataDir = join(app.getPath("userData"), "orchestration");
+  // The installed app and a dev build share this folder: one drives the
+  // runs, the other follows them read-only (FE-138).
+  const ownership = new RunOwnership(
+    join(dataDir, "owner.json"),
+    app.isPackaged ? "Lanework (Applications)" : "Lanework dev",
+    () => instance?.takeOver(),
+  );
+  app.on("will-quit", () => ownership.release());
   const created = new Orchestrator({
+    ownership,
     engines: () => sharedEngines(),
     folderOf: terminalFolder,
-    dataDir: join(app.getPath("userData"), "orchestration"),
+    dataDir,
     broadcast: (event) => broadcast(orchestrationChannels.changed, event),
     cliPath: controlCliPath(),
     endpoint: () => endpoint,

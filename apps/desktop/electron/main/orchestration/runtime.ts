@@ -25,6 +25,7 @@
 // engines and the broadcast, so a script can drive it in a temp folder.
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { type FSWatcher, watch } from "node:fs";
 import {
   chmod,
   mkdir,
@@ -190,6 +191,17 @@ export interface RuntimeDeps {
    * fails the run.
    */
   runEnded?: (run: OrchestrationRun, title: string) => void | Promise<void>;
+  /**
+   * Which Lanework drives the runs (FE-138): the installed app and a dev
+   * build share one data folder. Absent: this one always does.
+   */
+  ownership?: {
+    /** Settled once this instance knows whether it owns the runs. */
+    ready: Promise<void>;
+    owns: () => boolean;
+    /** The owner's label, when it is another instance. */
+    heldBy: () => string | null;
+  };
 }
 
 /** A refusal the lead reads and acts on; retrying the same call cannot help. */
@@ -513,6 +525,8 @@ function stampTimes(tasks: readonly OrchestrationTask[], now: number): void {
 
 export class Orchestrator {
   private records = new Map<string, RunRecord>();
+  /** The runs folder, watched while another instance drives (FE-138). */
+  private watcher: FSWatcher | null = null;
   private loading: Promise<void> | null = null;
   /** Token hash → run id. */
   private tokens = new Map<string, string>();
@@ -573,47 +587,125 @@ export class Orchestrator {
   }
 
   private async loadAll(): Promise<void> {
+    await this.deps.ownership?.ready;
+    const drives = this.drives();
     const dir = join(this.deps.dataDir, "runs");
     const names = await readdir(dir).catch(() => [] as string[]);
     for (const name of names) {
       if (!name.endsWith(".json")) continue;
-      try {
-        const record = JSON.parse(
-          await readFile(join(dir, name), "utf8"),
-        ) as RunRecord;
-        if (record.version !== 1 || !record.run?.id) continue;
-        // NOTE: A run saved before FE-107 names its project `workspace`. It
-        // is read as `project` and saved that way on the next write.
-        const legacy = record.run as { workspace?: unknown };
-        if (
-          record.run.project === undefined &&
-          typeof legacy.workspace === "string"
-        )
-          record.run.project = legacy.workspace;
-        delete legacy.workspace;
-        record.approvedScopes ??= [
-          ...new Set(record.run.tasks.flatMap((task) => task.files)),
-        ];
-        if (record.run.report !== undefined)
-          record.run.report = checkRunReport(record.run.report);
-        if (record.run.leadGuard !== undefined)
-          record.run.leadGuard = checkLeadGuardEvent(record.run.leadGuard);
-        this.recover(record);
-        this.records.set(record.run.id, record);
-        for (const task of record.run.tasks) {
-          const own = record.tasks[task.id];
-          if (!own) continue;
-          own.transcriptFolder ??=
-            own.worktree ??
-            (task.conversation
-              ? join(this.deps.dataDir, "worktrees", record.run.id, task.id)
-              : null);
-          if (own.worktree && record.run.status !== "finished")
-            this.workers.set(own.worktree, { record, task });
-        }
-      } catch {
-        // A file we cannot read is left for a person to look at.
-      }
+      const record = await this.readRecord(join(dir, name));
+      if (!record) continue;
+      // NOTE: Only the instance that drives the runs recovers them: in a
+      // follower, an active run is active in the owner, not abandoned
+      // (FE-138).
+      if (drives) this.recover(record);
+      this.place(record);
+    }
+    if (!drives) this.follow();
+  }
+
+  /** A saved run, checked and brought up to date; null when unreadable. */
+  private async readRecord(file: string): Promise<RunRecord | null> {
+    try {
+      const record = JSON.parse(await readFile(file, "utf8")) as RunRecord;
+      if (record.version !== 1 || !record.run?.id) return null;
+      // NOTE: A run saved before FE-107 names its project `workspace`. It
+      // is read as `project` and saved that way on the next write.
+      const legacy = record.run as { workspace?: unknown };
+      if (
+        record.run.project === undefined &&
+        typeof legacy.workspace === "string"
+      )
+        record.run.project = legacy.workspace;
+      delete legacy.workspace;
+      record.approvedScopes ??= [
+        ...new Set(record.run.tasks.flatMap((task) => task.files)),
+      ];
+      if (record.run.report !== undefined)
+        record.run.report = checkRunReport(record.run.report);
+      if (record.run.leadGuard !== undefined)
+        record.run.leadGuard = checkLeadGuardEvent(record.run.leadGuard);
+      return record;
+    } catch {
+      // A file we cannot read is left for a person to look at.
+      return null;
+    }
+  }
+
+  /** Keep `record`, and know its workers' folders. */
+  private place(record: RunRecord): void {
+    this.records.set(record.run.id, record);
+    for (const task of record.run.tasks) {
+      const own = record.tasks[task.id];
+      if (!own) continue;
+      own.transcriptFolder ??=
+        own.worktree ??
+        (task.conversation
+          ? join(this.deps.dataDir, "worktrees", record.run.id, task.id)
+          : null);
+      if (own.worktree && record.run.status !== "finished")
+        this.workers.set(own.worktree, { record, task });
+    }
+  }
+
+  // ── Following another instance (FE-138) ──
+
+  /** Whether this instance drives the runs. */
+  private drives(): boolean {
+    return this.deps.ownership?.owns() ?? true;
+  }
+
+  /** Refuse a change while another instance drives the runs. */
+  private refuseFollower(): void {
+    if (this.drives()) return;
+    throw new Error(
+      `Runs are driven by ${this.deps.ownership?.heldBy() ?? "another Lanework"}. Use that window.`,
+    );
+  }
+
+  /**
+   * Re-read each run the owner saves, so the page follows it live. A file
+   * that changes many times at once is read once.
+   */
+  private follow(): void {
+    if (this.watcher) return;
+    const dir = join(this.deps.dataDir, "runs");
+    const due = new Map<string, ReturnType<typeof setTimeout>>();
+    try {
+      this.watcher = watch(dir, (_event, name) => {
+        if (!name?.endsWith(".json")) return;
+        clearTimeout(due.get(name));
+        due.set(
+          name,
+          setTimeout(() => {
+            due.delete(name);
+            void this.reread(join(dir, name));
+          }, 150),
+        );
+      });
+    } catch (error) {
+      console.error("Unable to follow the orchestration runs", error);
+    }
+  }
+
+  private async reread(file: string): Promise<void> {
+    if (this.drives()) return;
+    const record = await this.readRecord(file);
+    if (!record) return;
+    this.place(record);
+    this.tellPage(record);
+  }
+
+  /**
+   * The owner is gone (FE-138): drive the runs from here, as a restart
+   * would. Every active run reads paused, for the user to Run again.
+   */
+  takeOver(): void {
+    this.watcher?.close();
+    this.watcher = null;
+    for (const record of this.records.values()) {
+      this.recover(record);
+      this.tellPage(record);
     }
   }
 
@@ -659,6 +751,8 @@ export class Orchestrator {
    * record as it is when it starts, so nothing is lost.
    */
   private save(record: RunRecord): Promise<void> {
+    // A follower never writes a run: the owner's file is the truth (FE-138).
+    if (!this.drives()) return Promise.resolve();
     const id = record.run.id;
     const queued = this.queuedSaves.get(id);
     if (queued) return queued;
@@ -2207,6 +2301,9 @@ export class Orchestrator {
   private shown(record: RunRecord): OrchestrationRun {
     return {
       ...record.run,
+      drivenBy: this.drives()
+        ? null
+        : (this.deps.ownership?.heldBy() ?? "another Lanework"),
       tasks: record.run.tasks.map((task) => this.withWaiting(record, task)),
     };
   }
@@ -2264,6 +2361,7 @@ export class Orchestrator {
     proposal: OrchestrationProposal,
   ): Promise<OrchestrationRun> {
     await this.load();
+    this.refuseFollower();
     // The page's check, again: OpenCode cannot lead (FE-105/D5).
     if (!canLead(proposal.leadAgent))
       throw new Error(
@@ -2414,6 +2512,7 @@ export class Orchestrator {
     taskId: string,
   ): Promise<OrchestrationRun> {
     const record = await this.recordIn(project, runId);
+    this.refuseFollower();
     await this.serial(runId, async () => {
       const task = this.task(record, taskId);
       const scopes = task.scopeApproval ?? [];
@@ -2430,6 +2529,7 @@ export class Orchestrator {
 
   async pause(project: string, runId: string): Promise<OrchestrationRun> {
     const record = await this.recordIn(project, runId);
+    this.refuseFollower();
     await this.serial(runId, async () => {
       const { run } = record;
       if (run.status !== "active") return;
@@ -2451,6 +2551,7 @@ export class Orchestrator {
 
   async resume(project: string, runId: string): Promise<OrchestrationRun> {
     const record = await this.recordIn(project, runId);
+    this.refuseFollower();
     const run = await this.serial(runId, async () => {
       const { run } = record;
       if (run.status !== "paused") return run;
@@ -2484,6 +2585,7 @@ export class Orchestrator {
 
   async stop(project: string, runId: string): Promise<OrchestrationRun> {
     const record = await this.recordIn(project, runId);
+    this.refuseFollower();
     await this.serial(runId, async () => {
       const { run } = record;
       if (run.status === "stopped" || run.status === "finished") return;
@@ -2553,6 +2655,7 @@ export class Orchestrator {
    */
   async cleanUp(project: string, runId: string): Promise<OrchestrationRun> {
     const record = await this.recordIn(project, runId);
+    this.refuseFollower();
     await this.serial(runId, async () => {
       const { run } = record;
       if (run.status !== "stopped")
@@ -2603,6 +2706,8 @@ export class Orchestrator {
    */
   async markReportSeen(runId: string): Promise<void> {
     await this.load();
+    // Seen here or not, the owner keeps the report as it is (FE-138).
+    if (!this.drives()) return;
     const record = this.records.get(runId);
     if (!record) throw new Error("Run not found");
     await this.serial(runId, async () => {
@@ -2619,6 +2724,7 @@ export class Orchestrator {
     taskId: string,
   ): Promise<OrchestrationRun> {
     const record = await this.recordIn(project, runId);
+    this.refuseFollower();
     await this.serial(runId, () =>
       this.cancel(record, this.task(record, taskId)),
     );
@@ -2738,6 +2844,10 @@ export class Orchestrator {
     requestId: string,
   ): Promise<unknown> {
     await this.load();
+    if (!this.drives())
+      refuse(
+        `Runs are driven by ${this.deps.ownership?.heldBy() ?? "another Lanework"}; this instance only follows them.`,
+      );
     const record = this.records.get(runId);
     if (!record) refuse("Connection revoked or unauthorized");
     const { run } = record;

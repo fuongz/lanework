@@ -751,7 +751,8 @@ export function RunPanel({
       setBusy(null);
     }
   };
-  const surface = window.desktop?.orchestration;
+  // Driven by another Lanework (FE-138): shown, never acted on from here.
+  const surface = run.drivenBy ? undefined : window.desktop?.orchestration;
 
   // Read again each time the cleanup dialog opens: the list it confirms is
   // what is there now (FE-100/O2).
@@ -848,6 +849,15 @@ export function RunPanel({
             </ButtonGroupText>
           )}
           {total && <span className="sr-only">Running time {total}</span>}
+          {run.drivenBy && (
+            <Tip
+              label={`${run.drivenBy} drives this run. This window follows it live; pause, stop or review it there.`}
+            >
+              <ButtonGroupText className="text-muted-foreground h-6 px-2 font-normal">
+                Running in {run.drivenBy}
+              </ButtonGroupText>
+            </Tip>
+          )}
           {live && surface && run.status === "paused" && (
             <Tip label="Resume the run: interrupted workers continue">
               <Button

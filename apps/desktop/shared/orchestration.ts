@@ -245,6 +245,12 @@ export interface OrchestrationRun {
    * conversation.
    */
   teamLead: string | null;
+  /**
+   * Who drives this run when it is not this instance (FE-138): the
+   * installed app and a dev build share their runs, and only one drives
+   * them. Null or absent: this instance does, and may act on it.
+   */
+  drivenBy?: string | null;
   tasks: OrchestrationTask[];
   /**
    * What the run came to, set once when it finishes or stops (FE-136/D4).
