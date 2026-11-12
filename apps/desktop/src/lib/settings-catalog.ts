@@ -4,6 +4,7 @@ import {
   BatteryEcoChargingIcon,
   CommandLineIcon,
   DashboardSquare02Icon,
+  HardDriveIcon,
   InformationCircleIcon,
   JusticeScale01Icon,
   KeyboardIcon,
@@ -82,6 +83,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         icon: BatteryEcoChargingIcon,
         keywords:
           "power saver battery energy idle end stop chat agent engine keep running heat cpu memory",
+      },
+      {
+        to: "/settings/storage",
+        label: "Storage",
+        icon: HardDriveIcon,
+        keywords:
+          "storage disk space size cache clear free app data folder worktrees runs checkouts",
       },
       {
         to: "/settings/keybindings",

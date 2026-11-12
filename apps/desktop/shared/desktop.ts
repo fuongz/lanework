@@ -17,6 +17,7 @@ import type {
 } from "./orchestration";
 import type { DesktopProjectsApi } from "./projects";
 import type { DesktopReadinessApi } from "./readiness";
+import type { DesktopStorageApi } from "./storage";
 import type { DesktopTerminalApi } from "./terminal";
 import type { DesktopUpdaterApi } from "./updater";
 import type { DesktopWorktreeApi } from "./worktree";
@@ -136,6 +137,8 @@ export interface DesktopApi {
   attention: DesktopAttentionApi;
   /** Settings → About: the resource log, off until switched on (FE-115). */
   metrics: DesktopMetricsApi;
+  /** Settings → Storage: the app folder's size, and clearing its cache. */
+  storage: DesktopStorageApi;
   /** Updates from GitHub Releases, and What's New after one (INF-11). */
   updater: DesktopUpdaterApi;
   /** Settings → Agents: the checkpoint hook for Claude Code. */

@@ -71,6 +71,7 @@ import {
   type DesktopReadinessApi,
   readinessChannels,
 } from "../../shared/readiness";
+import { type DesktopStorageApi, storageChannels } from "../../shared/storage";
 import {
   type DesktopTerminalApi,
   type TerminalClientMessage,
@@ -235,6 +236,12 @@ const metrics: DesktopMetricsApi = {
   get: () => ipcRenderer.invoke(metricsChannels.get),
   set: (enabled) => ipcRenderer.invoke(metricsChannels.set, enabled),
   reveal: () => ipcRenderer.invoke(metricsChannels.reveal),
+};
+
+const storage: DesktopStorageApi = {
+  usage: () => ipcRenderer.invoke(storageChannels.usage),
+  clearCache: () => ipcRenderer.invoke(storageChannels.clearCache),
+  reveal: (folder) => ipcRenderer.invoke(storageChannels.reveal, folder),
 };
 
 /** Settings → Agents: the checkpoint hook, on and off. */
@@ -971,6 +978,7 @@ const desktop: DesktopApi = {
   notifications,
   attention,
   metrics,
+  storage,
   updater,
   handoff,
   readiness,

@@ -68,6 +68,7 @@ import { migrateProjectsLayout } from "./projects/layout-migration";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
 import { appOrigin, isTrustedUrl } from "./security";
+import { registerStorage } from "./storage";
 import {
   agentTerminalOn,
   killTerminal,
@@ -507,6 +508,7 @@ app
     registerNotifications(devUrl, showWindow);
     registerAttention(devUrl);
     registerMetrics(devUrl);
+    registerStorage(devUrl);
     // INF-11: what a restart to install an update would stop.
     registerUpdater(devUrl, {
       liveWork: async () => ({
