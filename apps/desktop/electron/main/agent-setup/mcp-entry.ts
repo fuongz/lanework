@@ -96,8 +96,13 @@ export interface InstallFacts {
   platform: NodeJS.Platform;
   /** The user's home, for `~/Applications`. */
   home: string;
-  /** `LANEWORK_HOME` is set: a dev or test run with its own app home. */
-  appHomeOverride: boolean;
+  /**
+   * A spec drives this unpackaged build (`LANEWORK_TEST_USER_DATA` or
+   * `LANEWORK_TEST_AGENT_HOME`), so the agents' config it would write is a
+   * fixture. `LANEWORK_HOME` alone is not enough: `mise run dev` sets it
+   * and still reads the real `~/.claude.json`.
+   */
+  testRun: boolean;
   /** `$APPIMAGE` is set: a Linux AppImage, run from a temporary mount. */
   appImage: boolean;
 }
@@ -118,13 +123,14 @@ export type ShimRefusal = "dev" | "not-installed" | "appimage";
  * - Packaged, on Linux: never an AppImage. Its FUSE mount under /tmp is gone
  *   once the app quits, and another local user could create that path.
  * - Packaged anywhere: never from a temp folder.
- * - Unpackaged (`bun run dev`, the test suite): only with `LANEWORK_HOME`
- *   set, so a dev build never repoints the installed app's shims.
+ * - Unpackaged: only when a spec drives it ({@link InstallFacts.testRun}).
+ *   `mise run dev` never writes them: with its own `~/.lanew-dev` it would
+ *   point the real agents' `lanework` entry at the dev build (2026-11-12).
  *
  * @returns Null when it may, else why not.
  */
 export function shimRefusal(facts: InstallFacts): ShimRefusal | null {
-  if (!facts.packaged) return facts.appHomeOverride ? null : "dev";
+  if (!facts.packaged) return facts.testRun ? null : "dev";
   const path = facts.execPath;
   if (
     facts.platform === "linux" &&
@@ -148,7 +154,7 @@ export function shimRefusal(facts: InstallFacts): ShimRefusal | null {
 export function shimRefusalMessage(refusal: ShimRefusal): string {
   switch (refusal) {
     case "dev":
-      return "A development build does not install agent hooks or the offline MCP server. Set LANEWORK_HOME to a scratch folder to try them.";
+      return "A development build leaves agent hooks and the Lanework MCP server to the installed app.";
     case "appimage":
       return "The AppImage runs from a temporary mount, so it cannot install agent hooks or the offline MCP server.";
     case "not-installed":
@@ -193,6 +199,9 @@ export function lockAgentConfig(reason: string): void {
 /** @throws The lock's reason, when the agents' config is locked. */
 function assertUnlocked(): void {
   if (agentConfigLock) throw new Error(agentConfigLock);
+  // A dev build never writes the real agents' config, not even on a click.
+  if (currentShimRefusal() === "dev")
+    throw new Error(shimRefusalMessage("dev"));
 }
 
 /** `~/.lanew/bin/lanework-mcp` — what a stdio entry runs. */
@@ -706,6 +715,9 @@ export async function syncLaneworkMcp(
     );
     return;
   }
+  // A dev build writes no agent's config at all, cloud entry included: the
+  // installed app owns them, as it does against the Preview.
+  if (currentShimRefusal() === "dev") return;
   // A copy that may not write the shim leaves stdio entries as they are: the
   // installed app repoints them on its next launch (INF-05, GAP-02).
   if (mode === "local" && currentShimRefusal()) return;

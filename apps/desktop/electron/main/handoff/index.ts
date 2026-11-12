@@ -54,7 +54,7 @@ import { refuseInPreview, skipInPreview } from "../channel";
 import { updateConfigFile } from "../config-file";
 import { handle } from "../ipc";
 import { appHomeDir } from "../paths";
-import { agentHomeDir } from "../test-seams";
+import { agentHomeDir, isTestRun, testAgentHome } from "../test-seams";
 import {
   buildHookCommand,
   buildShim,
@@ -95,7 +95,7 @@ function installFacts(): InstallFacts {
     execPath: process.execPath,
     platform: process.platform,
     home: homedir(),
-    appHomeOverride: Boolean(process.env.LANEWORK_HOME),
+    testRun: isTestRun() || testAgentHome() !== undefined,
     appImage: Boolean(process.env.APPIMAGE),
   };
 }
