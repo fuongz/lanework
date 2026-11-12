@@ -22,6 +22,7 @@ import {
   type AgentPullResult,
   type AgentSession,
   type AgentUsage,
+  type AgentWorkspace,
   type AgentWrite,
   type ArchivedAgentSession,
   type BackgroundTask,
@@ -89,6 +90,7 @@ import {
 } from "./agent-marks";
 import { notifyAgentCompleted } from "./agent-notifications";
 import { agentKey } from "./agent-sessions";
+import { readAgentWorkspace } from "./agent-workspace";
 import {
   backgroundRequest,
   readBackgroundTasksWithPids,
@@ -1507,6 +1509,18 @@ export function registerTerminal(devUrl?: string): void {
       const folder = await terminalFolder(project);
       if (!folder) throw new Error("This project has no folder here.");
       return readAgentFiles(agentHome(), folder, which);
+    },
+  );
+  // By ids alone, like agentFiles; a missing folder is an empty answer.
+  handle(
+    terminalChannels.agentWorkspace,
+    devUrl,
+    async (args): Promise<AgentWorkspace> => {
+      const { project, ...which } = agentFilesRequest(args);
+      const folder = await terminalFolder(project);
+      if (!folder)
+        return { cwd: null, branch: null, worktree: null, commits: [] };
+      return readAgentWorkspace(agentHome(), folder, which);
     },
   );
   // Only the conversations Lanework lists for this project (FE-39/D2,

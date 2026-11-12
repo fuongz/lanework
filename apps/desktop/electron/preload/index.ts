@@ -725,6 +725,8 @@ function createTerminal(): DesktopTerminalApi {
       ipcRenderer.invoke(terminalChannels.stopPort, project, pid, start),
     agentFiles: (project, agent, id) =>
       ipcRenderer.invoke(terminalChannels.agentFiles, project, agent, id),
+    agentWorkspace: (project, agent, id) =>
+      ipcRenderer.invoke(terminalChannels.agentWorkspace, project, agent, id),
     agentFilesForWorktree: (project) =>
       ipcRenderer.invoke(terminalChannels.agentFilesForWorktree, project),
     onAgentActivity: (listener) =>

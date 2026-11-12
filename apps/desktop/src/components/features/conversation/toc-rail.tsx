@@ -30,7 +30,7 @@ export function TocRail({
     <nav
       aria-label="Prompts in this conversation"
       onPointerLeave={() => setHover(null)}
-      className="absolute top-1/2 right-2 z-10 flex w-7 -translate-y-1/2 flex-col"
+      className="absolute top-1/2 right-4 z-10 flex w-7 -translate-y-1/2 flex-col"
       style={{ height: `min(${entries.length * TICK}px, 70%)` }}
     >
       {entries.map((entry, index) => {

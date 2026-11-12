@@ -520,6 +520,35 @@ export interface AgentFiles {
   partial: boolean;
 }
 
+/** One commit a conversation made, found from its own `git commit` calls. */
+export interface AgentCommit {
+  /** The full hash, as git resolves it now. */
+  sha: string;
+  shortSha: string;
+  subject: string;
+  /** When it was committed (ISO 8601); null when git gave no date. */
+  at: string | null;
+  /** Still reachable from the folder's HEAD: false once reset or rebased away. */
+  onBranch: boolean;
+}
+
+/**
+ * Where a conversation works and what it committed.
+ *
+ * Every field degrades alone: a missing transcript or folder is nulls and no
+ * commits, never an error.
+ */
+export interface AgentWorkspace {
+  /** The conversation's newest working directory, per its transcript. */
+  cwd: string | null;
+  /** The branch checked out there now; null when detached or unknown. */
+  branch: string | null;
+  /** The checkout `cwd` is in; `linked` for a linked worktree, not the main one. */
+  worktree: { path: string; linked: boolean } | null;
+  /** Newest first, at most 20. */
+  commits: AgentCommit[];
+}
+
 /** A conversation that edited a file since HEAD's commit (FE-39/D2). */
 export interface AgentFileMark {
   agent: TerminalAgent;
@@ -1061,6 +1090,7 @@ export const terminalChannels = {
   agentFiles: "terminal:agent-files",
   /** Which conversations edited each changed file, for Changes (FE-39/D2). */
   agentFilesForWorktree: "terminal:agent-files-for-worktree",
+  agentWorkspace: "terminal:agent-workspace",
   /** Main → renderer: a transcript was written. */
   agentActivity: "terminal:agent-activity",
   /** The Codex account's usage, and its conversations' goals. */
@@ -1303,6 +1333,19 @@ export interface DesktopTerminalApi {
     agent: TerminalAgent,
     id: string,
   ) => Promise<AgentFiles>;
+  /**
+   * Where conversation `id` works (its newest working directory, the branch
+   * and worktree git reports there now) and the commits its own tool calls
+   * made.
+   *
+   * By ids only, as `agentFiles`. Read-only; a missing transcript or folder
+   * answers nulls and no commits rather than an error.
+   */
+  agentWorkspace: (
+    project: string,
+    agent: TerminalAgent,
+    id: string,
+  ) => Promise<AgentWorkspace>;
   /**
    * Which of `project`'s conversations edited each file since HEAD's
    * commit (FE-39/D2, D3); empty without a repository.

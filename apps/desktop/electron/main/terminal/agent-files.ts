@@ -556,7 +556,7 @@ function fromTop(path: string, roots: RepoRoots): string | null {
 }
 
 /** A transcript to read, and the sub-agent that wrote it (null: its own). */
-interface Source {
+export interface Source {
   file: string;
   via: AgentFileTouch["via"];
 }
@@ -569,7 +569,7 @@ const codexMetas = new Map<string, Record<string, unknown> | null>();
  *
  * @returns null when the rollout has none written yet.
  */
-async function codexMeta(
+export async function codexMeta(
   file: string,
 ): Promise<Record<string, unknown> | null> {
   if (codexMetas.has(file)) return codexMetas.get(file) ?? null;
@@ -594,7 +594,7 @@ async function codexMeta(
  *
  * @throws when the transcript is not one of `folder`'s.
  */
-async function claudeSources(
+export async function claudeSources(
   home: string,
   folder: string,
   id: string,
@@ -638,7 +638,7 @@ async function claudeSources(
  *
  * @throws when the rollout is not one of `folder`'s conversations.
  */
-async function codexSources(
+export async function codexSources(
   home: string,
   folder: string,
   id: string,

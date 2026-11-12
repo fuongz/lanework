@@ -342,12 +342,46 @@ export function backgroundCue(session: AgentSession | undefined): string {
 }
 
 /**
- * One task in the popover.
+ * Where a task opens: a shell or monitor its own page, an agent its
+ * transcript in the sub-agent viewer, a workflow's agent the same viewer
+ * within its run.
+ */
+export function useOpenBackgroundTask(slug: string, conversation: string) {
+  const navigate = useNavigate();
+  const openTask = (task: BackgroundTask) => {
+    if (task.kind === "agent") {
+      if (!task.subagentId) return;
+      void navigate({
+        to: "/w/$slug/agents/sub/$conversation/$sub",
+        params: { slug, conversation, sub: task.subagentId },
+        search: { agent: "claude" },
+      });
+      return;
+    }
+    void navigate({
+      to: "/w/$slug/agents/task/$conversation/$task",
+      params: { slug, conversation, task: task.id },
+    });
+  };
+  const openAgent = (task: BackgroundTask, agent: WorkflowAgent) => {
+    if (!task.workflow) return;
+    void navigate({
+      to: "/w/$slug/agents/sub/$conversation/$sub",
+      params: { slug, conversation, sub: agent.id },
+      search: { agent: "claude", run: task.workflow.runId },
+    });
+  };
+  return { openTask, openAgent };
+}
+
+/**
+ * One task: in the agent view's popover, and in a conductor chat's Sessions
+ * panel.
  *
  * A shell or monitor opens its own page; an agent opens its transcript in the
  * sub-agent viewer.
  */
-function TaskRow({
+export function BackgroundTaskRow({
   task,
   now,
   onOpen,
@@ -471,7 +505,7 @@ export function BackgroundTasksButton({
   project: string;
   session: AgentSession;
 }) {
-  const navigate = useNavigate();
+  const opener = useOpenBackgroundTask(slug, session.id);
   const [open, setOpen] = useState(false);
   /**
    * The user's fold choice for the Finished group.
@@ -503,30 +537,13 @@ export function BackgroundTasksButton({
   const now = Date.now();
 
   const openAgent = (task: BackgroundTask, agent: WorkflowAgent) => {
-    if (!task.workflow) return;
     setOpen(false);
-    void navigate({
-      to: "/w/$slug/agents/sub/$conversation/$sub",
-      params: { slug, conversation: session.id, sub: agent.id },
-      search: { agent: "claude", run: task.workflow.runId },
-    });
+    opener.openAgent(task, agent);
   };
 
   const openTask = (task: BackgroundTask) => {
     setOpen(false);
-    if (task.kind === "agent") {
-      if (!task.subagentId) return;
-      void navigate({
-        to: "/w/$slug/agents/sub/$conversation/$sub",
-        params: { slug, conversation: session.id, sub: task.subagentId },
-        search: { agent: "claude" },
-      });
-      return;
-    }
-    void navigate({
-      to: "/w/$slug/agents/task/$conversation/$task",
-      params: { slug, conversation: session.id, task: task.id },
-    });
+    opener.openTask(task);
   };
 
   return (
@@ -598,7 +615,7 @@ export function BackgroundTasksButton({
           ) : (
             <div className="flex max-h-80 min-h-0 flex-col overflow-y-auto">
               {running.map((task) => (
-                <TaskRow
+                <BackgroundTaskRow
                   key={task.id}
                   task={task}
                   now={now}
@@ -631,7 +648,7 @@ export function BackgroundTasksButton({
                   </button>
                   {finishedOpen &&
                     finished.map((task) => (
-                      <TaskRow
+                      <BackgroundTaskRow
                         key={task.id}
                         task={task}
                         now={now}

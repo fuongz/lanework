@@ -1,230 +1,362 @@
-import { UserGroupIcon } from "@hugeicons/core-free-icons";
+import { LayoutListIcon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import type { AgentSession } from "#/../shared/terminal";
-import { StatusPing } from "#/components/shared/agents/status-ping";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import type { AgentSession, TerminalAgent } from "#/../shared/terminal";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
-import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "#/components/ui/empty";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "#/components/ui/popover";
-import { shortAge } from "#/lib/relative-time";
-import { cn } from "#/lib/utils";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { awaitingKey, useAwaiting } from "#/stores/awaiting";
-import { useChatEngines } from "#/stores/chat-engines";
-import { notify } from "#/stores/notify";
+import {
+  ConductorOverview,
+  Group,
+  PanelCard,
+  Section,
+  SessionDetails,
+} from "./conductor-sessions.details";
 
-// The sessions a conductor started (FE-128), on its chat's title bar.
+/** The panel's block and foldable group, for blocks drawn elsewhere (Runs). */
+export { Group as PanelGroup, Section as PanelSection };
+
+import {
+  type SessionActivity,
+  SessionHeader,
+  SessionItem,
+} from "./conductor-sessions.item";
+
+// The conductor's work and the sessions it started (FE-128), docked beside
+// its chat.
 //
-// They are the conductor's own: the Agents rail hides them, so this is where
-// the user finds them, newest first, each with the state the rail would show
-// and a click that opens it.
+// The sessions are the conductor's own: the Agents rail hides them, so this
+// is where the user finds them. A toggle on the chat's title bar shows or
+// hides a panel on the right; the chat narrows to make room, never sits
+// under it. The panel opens on an overview of the conductor and every
+// session together; a session's own details are one click in.
 
 /** Stable empty list: a selector that allocates one re-renders forever. */
 const NONE: AgentSession[] = [];
 
-/** The title bar's Sessions control for `conductor`'s chat in `project`. */
-export function ConductorSessions({
-  project,
-  slug,
-  conductor,
-}: {
-  project: string;
-  slug: string;
-  /** The conductor, by id. */
-  conductor: string;
-}) {
+/** The panel's width, px: the size of the popover it replaced. */
+export const SESSIONS_PANEL_PX = 320;
+const PANEL_PX = SESSIONS_PANEL_PX;
+/**
+ * The strip left free at the window's edge, px: the chat's contents rail
+ * (`right-4`, `w-7`) and its scrollbar stay there, beside the panel.
+ */
+export const SESSIONS_PANEL_GUTTER = 48;
+/** As long as the rail's glide (`RAIL_GLIDE_MS`, app-shell.tsx). */
+const GLIDE_MS = 240;
+
+/**
+ * Which chats had the panel open, and which session's details it showed,
+ * by `slug:conversation`.
+ *
+ * For the app's session only: leaving the chat for one of its sessions and
+ * coming back finds the panel as it was.
+ */
+const shownIn = new Map<string, boolean>();
+const selectedIn = new Map<string, string | null>();
+
+/** Whether `chat`'s Sessions panel is open, remembered while the app runs. */
+export function useSessionsPanel(chat: string) {
+  const [open, setOpenState] = useState(() => shownIn.get(chat) ?? false);
+  const setOpen = useCallback(
+    (next: boolean) => {
+      shownIn.set(chat, next);
+      setOpenState(next);
+    },
+    [chat],
+  );
+  return { open, setOpen };
+}
+
+/**
+ * `conductor`'s sessions in `project` and where each stands: the active
+ * (working or waiting for the user) first, then newest first.
+ */
+function useConductorSessions(project: string, conductor: string) {
   const all = useAgentSessions((state) => state.byProject[project] ?? NONE);
   const listing = useAgentSessions(
     (state) => state.byProject[project] === undefined,
   );
-  const [open, setOpen] = useState(false);
-  const sessions = useMemo(
-    () =>
-      all
-        .filter((session) => session.launchedBy?.conductor === conductor)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [all, conductor],
-  );
-  const now = Date.now();
+  const live = useAgentSessions((state) => state.live);
+  const waiting = useAwaiting((state) => state.byKey);
+  const sessions = useMemo(() => {
+    const activity = (session: AgentSession): SessionActivity =>
+      waiting[awaitingKey(project, session.id)]
+        ? "awaiting"
+        : (live[agentKey(session)] ?? session.working)
+          ? "working"
+          : "idle";
+    return all
+      .filter((session) => session.launchedBy?.conductor === conductor)
+      .map((session) => ({ session, activity: activity(session) }))
+      .sort(
+        (a, b) =>
+          Number(b.activity !== "idle") - Number(a.activity !== "idle") ||
+          b.session.updatedAt.localeCompare(a.session.updatedAt),
+      );
+  }, [all, conductor, live, waiting, project]);
+  return { sessions, listing };
+}
 
+/** The panel's id, for its toggle's `aria-controls`. */
+const panelId = (chat: string) => `conductor-sessions:${chat}`;
+
+/**
+ * The title bar's Sessions toggle for `conductor`'s chat: an icon, with a
+ * count while any of its sessions works.
+ */
+export function ConductorSessionsToggle({
+  project,
+  conductor,
+  chat,
+  open,
+  onOpenChange,
+}: {
+  project: string;
+  /** The conductor, by id. */
+  conductor: string;
+  /** The chat it is on, as `useSessionsPanel` keys it. */
+  chat: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { sessions } = useConductorSessions(project, conductor);
+  const working = sessions.filter(
+    (entry) => entry.activity === "working",
+  ).length;
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={<button type="button" />}
-        aria-label={`Sessions this conductor started: ${sessions.length}`}
-        title="Sessions this conductor started"
-        className="text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground aria-expanded:bg-foreground/[0.04] aria-expanded:text-foreground flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs tabular-nums transition-colors"
-      >
-        <HugeiconsIcon
-          icon={UserGroupIcon}
-          className="size-3.5 shrink-0"
-          strokeWidth={1.6}
+    <button
+      type="button"
+      onClick={() => onOpenChange(!open)}
+      aria-pressed={open}
+      aria-controls={panelId(chat)}
+      aria-label={`Sessions this conductor started: ${sessions.length}`}
+      title={open ? "Hide sessions" : "Sessions this conductor started"}
+      className="text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground aria-pressed:bg-foreground/[0.06] aria-pressed:text-foreground relative grid size-7 shrink-0 place-items-center rounded-md transition-colors"
+    >
+      <HugeiconsIcon
+        icon={LayoutListIcon}
+        className="size-4"
+        strokeWidth={1.6}
+        aria-hidden="true"
+      />
+      {working > 0 && (
+        <span
           aria-hidden="true"
-        />
-        <span>Sessions</span>
-        {sessions.length > 0 && (
-          <span className="text-foreground font-medium">{sessions.length}</span>
-        )}
-      </PopoverTrigger>
-      <PopoverContent
-        side="bottom"
-        align="end"
-        sideOffset={6}
-        className="w-80 gap-0 p-1"
-        aria-label="Sessions this conductor started"
-      >
-        <div className="flex items-baseline gap-2 px-2 pt-1.5 pb-1">
-          <span className="text-[13px] font-medium">Sessions</span>
-          <span className="text-muted-foreground truncate text-xs">
-            Started by this conductor in this project
-          </span>
-        </div>
-        {listing ? (
-          <ListSkeleton
-            label="Reading the sessions"
-            rows={3}
-            className="px-0"
-          />
-        ) : sessions.length === 0 ? (
-          <Empty className="gap-2 p-4">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <HugeiconsIcon
-                  icon={UserGroupIcon}
-                  strokeWidth={1.6}
-                  aria-hidden="true"
-                />
-              </EmptyMedia>
-              <EmptyTitle>No sessions yet</EmptyTitle>
-              <EmptyDescription>
-                Ask the conductor to start one, on Claude, Codex or OpenCode. It
-                shows here, not in the Agents list.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          <ul className="flex max-h-80 flex-col overflow-y-auto">
-            {sessions.map((session) => (
-              <li key={session.id}>
-                <SessionRow
-                  session={session}
-                  project={project}
-                  slug={slug}
-                  now={now}
-                  onOpen={() => setOpen(false)}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-      </PopoverContent>
-    </Popover>
+          className="bg-tone-blue ring-background absolute -top-0.5 -right-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full px-[3px] text-[9px] leading-none font-semibold text-white tabular-nums ring-2"
+        >
+          {working}
+        </span>
+      )}
+    </button>
   );
 }
 
-/** One session: its agent and live state, its title, its age. */
-function SessionRow({
-  session,
+/**
+ * The Sessions panel, docked on the right of `conductor`'s chat.
+ *
+ * It glides open and shut the way the rail does: its width moves, its
+ * content stays at full width and is clipped, so nothing re-wraps on the
+ * way. Shut, it is unmounted once the glide is over.
+ */
+export function ConductorSessionsPanel({
   project,
   slug,
-  now,
-  onOpen,
+  conductor,
+  chat,
+  open,
+  self,
+  runs,
 }: {
-  session: AgentSession;
   project: string;
   slug: string;
-  now: number;
-  onOpen: () => void;
+  conductor: string;
+  chat: string;
+  open: boolean;
+  /** The conductor's own conversation, counted in the overview. */
+  self: ConductorSelf | null;
+  /** The runs it led, drawn between the overview and the sessions. */
+  runs?: ReactNode;
 }) {
-  const navigate = useNavigate();
-  const live = useAgentSessions((state) => state.live[agentKey(session)]);
-  const awaiting = useAwaiting((state) =>
-    Boolean(state.byKey[awaitingKey(project, session.id)]),
-  );
-  const working = !awaiting && (live ?? session.working);
-  const title = session.title || "Session";
-  const alive = useChatEngines(
-    (state) => state.alive[project]?.includes(session.id) ?? false,
-  );
-  const refreshChats = useChatEngines((state) => state.refresh);
-  // A second press confirms while it works: a turn is cut off by Stop.
-  const [confirming, setConfirming] = useState(false);
-  // The Agents rail hides these sessions, so their Stop lives here.
-  const stop = () => {
-    if (working && !confirming) return setConfirming(true);
-    setConfirming(false);
-    void window.desktop?.conversation
-      .close(project, session.id)
-      .then(() => notify("success", `Stopped ${title}`))
-      .catch(() => {})
-      .finally(() => void refreshChats(project));
-  };
+  // Still drawn while it glides shut.
+  const [present, setPresent] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setPresent(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setPresent(false), GLIDE_MS + 20);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
   return (
-    <div className="group/row flex min-w-0 items-center gap-1">
-      <button
-        type="button"
-        onClick={() => {
-          onOpen();
-          void navigate({
-            to: "/w/$slug/agents/chat/$conversation",
-            params: { slug, conversation: session.id },
-          });
-        }}
-        aria-label={`Open “${title}”${awaiting ? ", waiting for you" : working ? ", working" : ""}`}
-        className="hover:bg-foreground/[0.04] flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-left text-[13px] transition-colors"
-      >
-        <span className="relative flex shrink-0">
-          <TerminalKindIcon kind={session.agent} className="size-3.5" />
-          {(awaiting || working) && (
-            <StatusPing tone={awaiting ? "awaiting" : "working"} />
-          )}
-        </span>
-        <span
-          className={cn("min-w-0 flex-1 truncate", working && "text-shimmer")}
-        >
-          {title}
-        </span>
-        {awaiting ? (
-          <span className="text-destructive shrink-0 text-xs">
-            Waiting for you
-          </span>
-        ) : (
-          <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-            {shortAge(session.updatedAt, now)}
-          </span>
-        )}
-      </button>
-      {alive && (
-        <button
-          type="button"
-          onClick={stop}
-          onBlur={() => setConfirming(false)}
-          aria-label={
-            confirming ? `Confirm stopping “${title}”` : `Stop “${title}”`
-          }
-          title="Ends its agent. A turn in progress is cut off; the conversation is kept."
-          className={cn(
-            "hover:bg-foreground/[0.06] h-7 shrink-0 rounded-md px-2 text-xs transition-colors",
-            confirming
-              ? "text-destructive"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {confirming ? "Stop now?" : "Stop"}
-        </button>
+    <div
+      id={panelId(chat)}
+      inert={!open}
+      style={{ width: open ? PANEL_PX : 0, right: SESSIONS_PANEL_GUTTER }}
+      // NOTE: Over the chat rather than beside it: the chat keeps its width
+      // and pads its content clear (`--side-panel`), so its contents rail
+      // and scrollbar stay at the window's edge, in the gutter on the
+      // panel's right.
+      className="bg-background absolute inset-y-0 z-20 overflow-hidden transition-[width] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+    >
+      {(open || present) && (
+        <SessionsList
+          project={project}
+          slug={slug}
+          conductor={conductor}
+          chat={chat}
+          self={self}
+          runs={runs}
+        />
       )}
     </div>
+  );
+}
+
+/** The conductor's own conversation, as the overview reads it. */
+export interface ConductorSelf {
+  agent: TerminalAgent;
+  id: string;
+  /** A turn of it runs now. */
+  working: boolean;
+  /** As the rail lists it, once listed: its background tasks. */
+  session: AgentSession | null;
+}
+
+/**
+ * The panel's content: the overview with the sessions under it, or one
+ * session's details.
+ */
+function SessionsList({
+  project,
+  slug,
+  conductor,
+  chat,
+  self,
+  runs,
+}: {
+  project: string;
+  slug: string;
+  conductor: string;
+  chat: string;
+  self: ConductorSelf | null;
+  runs?: ReactNode;
+}) {
+  const { sessions, listing } = useConductorSessions(project, conductor);
+  const [selected, setSelectedState] = useState<string | null>(
+    () => selectedIn.get(chat) ?? null,
+  );
+  const select = (id: string | null) => {
+    selectedIn.set(chat, id);
+    setSelectedState(id);
+  };
+  const now = Date.now();
+  const shown = selected
+    ? sessions.find((entry) => entry.session.id === selected)
+    : undefined;
+  const working = sessions.filter(
+    (entry) => entry.activity === "working",
+  ).length;
+  const overviewSessions = useMemo(
+    () =>
+      sessions.map(({ session, activity }) => ({
+        session,
+        working: activity === "working",
+      })),
+    [sessions],
+  );
+
+  // One session's details, until Back. A session gone from the list (reset,
+  // removed) falls back to the overview.
+  if (shown)
+    return (
+      <aside
+        aria-label={`Session: ${shown.session.title || "Session"}`}
+        style={{ width: PANEL_PX }}
+        className="flex h-full min-h-0 flex-col"
+      >
+        <div className="shrink-0 px-2 pt-2 pb-1">
+          <SessionHeader
+            session={shown.session}
+            activity={shown.activity}
+            project={project}
+            slug={slug}
+            onBack={() => select(null)}
+          />
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-1 pb-3">
+          <PanelCard>
+            <SessionDetails
+              key={shown.session.id}
+              session={shown.session}
+              working={shown.activity === "working"}
+              project={project}
+              slug={slug}
+              now={now}
+            />
+          </PanelCard>
+        </div>
+      </aside>
+    );
+
+  return (
+    <aside
+      aria-label="The conductor's work and its sessions"
+      style={{ width: PANEL_PX }}
+      className="flex h-full min-h-0 flex-col"
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-2 pb-3">
+        {/* One card: where and what (the overview), the runs, the
+            sessions, a hairline between. A block with nothing to show draws
+            nothing, and takes its line with it. */}
+        <PanelCard>
+          {listing ? (
+            <Section>
+              <ListSkeleton label="Reading the conductor's work" rows={4} />
+            </Section>
+          ) : (
+            <ConductorOverview
+              project={project}
+              slug={slug}
+              self={self}
+              sessions={overviewSessions}
+              now={now}
+              onOpenSession={select}
+            />
+          )}
+          {runs}
+          {sessions.length > 0 && (
+            <Section>
+              <Group
+                icon={UserGroupIcon}
+                label="Sessions"
+                count={working > 0 ? `${working} working` : sessions.length}
+                defaultOpen
+              >
+                {sessions.map(({ session, activity }) => (
+                  <li key={session.id}>
+                    <SessionItem
+                      session={session}
+                      activity={activity}
+                      project={project}
+                      slug={slug}
+                      now={now}
+                      onSelect={() => select(session.id)}
+                    />
+                  </li>
+                ))}
+              </Group>
+            </Section>
+          )}
+        </PanelCard>
+      </div>
+    </aside>
   );
 }

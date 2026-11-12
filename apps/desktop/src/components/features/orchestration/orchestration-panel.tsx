@@ -1,13 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import type {
   ConversationAgent,
   OutgoingAttachment,
   Turn,
 } from "#/../shared/conversation";
 import type { OrchestrationRun, TeamLead } from "#/../shared/orchestration";
+import { durationText } from "#/components/shared/agents/facts";
+import { StatusPing } from "#/components/shared/agents/status-ping";
 import { useTeamLeads } from "#/components/shared/conversation/composer";
 import { useModels } from "#/components/shared/conversation/composer.models";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
+import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
+import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
 import { readProjectRoots } from "#/hooks/use-project-folders";
 import {
   type DerivedProposal,
@@ -18,6 +30,7 @@ import {
   visibleText,
   visibleTurns,
 } from "#/lib/orchestration-prompt";
+import { cn } from "#/lib/utils";
 import { withLiveContext } from "#/stores/conductor-context";
 import { proposalRun, useProposalEdits } from "./orchestration-panel.store";
 import { ProposalCard } from "./proposal-card";
@@ -296,6 +309,136 @@ export function RunsAfterTurn({
       onRun={orchestration.upsert}
     />
   ));
+}
+
+/** How long a run has gone: to now while it runs, else to when it settled. */
+function runTime(run: OrchestrationRun, now: number): string | null {
+  const end =
+    run.status === "active"
+      ? now
+      : (run.report?.finishedAt ?? 0) || run.updatedAt;
+  return durationText(end - run.createdAt);
+}
+
+/** A run waits on the person: paused, or a worker asks or needs a scope. */
+function needsYou(run: OrchestrationRun): boolean {
+  return (
+    run.status === "paused" ||
+    (run.status === "active" &&
+      run.tasks.some(
+        (task) => task.needsInput || (task.scopeApproval?.length ?? 0) > 0,
+      ))
+  );
+}
+
+/**
+ * Every run the lead started, newest first, for the conductor's Sessions
+ * panel: one line each, its full card in a dialog on click. The timeline
+ * keeps its own cards; this is a second view of them, not a move.
+ *
+ * Null while there is no run, so the panel leaves the section out.
+ */
+export function LeadRuns({
+  slug,
+  orchestration,
+  frame,
+}: {
+  slug: string;
+  orchestration: Orchestration;
+  /**
+   * How the panel draws a block: its title row, with how many or how many
+   * run, over the rows. The panel's own foldable group, so Runs reads as
+   * Changes and Sessions do.
+   */
+  frame: (count: string | number, rows: ReactNode) => ReactNode;
+}) {
+  const edits = useProposalEdits((state) => state.edits);
+  const { project, proposals, runs } = orchestration;
+  const [opened, setOpened] = useState<string | null>(null);
+  const active = runs?.some((run) => run.status === "active") ?? false;
+  // The clocks move while a run goes.
+  const [, redraw] = useReducer((tick: number) => tick + 1, 0);
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(redraw, 1000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+
+  if (!project || !runs?.length) return null;
+  const titled = new Map<string, string>();
+  for (const proposal of proposals) {
+    const runId = proposalRun(proposal.id, edits, runs);
+    if (runId) titled.set(runId, proposal.title);
+  }
+  const newest = [...runs].sort((a, b) => b.createdAt - a.createdAt);
+  const shown = opened ? runs.find((run) => run.id === opened) : undefined;
+  const now = Date.now();
+  const running = runs.filter((run) => run.status === "active").length;
+
+  return (
+    <>
+      {frame(
+        running > 0 ? `${running} running` : runs.length,
+        newest.map((run) => {
+          const title = titled.get(run.id) ?? "Run";
+          const waiting = needsYou(run);
+          const going = run.status === "active";
+          const agent = run.tasks[0]?.agent ?? run.leadAgent;
+          return (
+            <li key={run.id}>
+              <button
+                type="button"
+                onClick={() => setOpened(run.id)}
+                aria-label={`${title}, ${run.status}${waiting ? ", waiting for you" : ""}: show the run`}
+                className="hover:bg-foreground/[0.03] focus-visible:ring-accent-brand flex h-8 w-full min-w-0 items-center gap-2.5 px-3 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-inset"
+              >
+                <span className="relative flex shrink-0">
+                  <TerminalKindIcon kind={agent} className="size-4" />
+                  {(going || waiting) && (
+                    <StatusPing tone={waiting ? "awaiting" : "working"} />
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate",
+                    going && !waiting && "text-shimmer",
+                    run.status === "stopped" && "text-muted-foreground",
+                  )}
+                  title={title}
+                >
+                  {title}
+                </span>
+                <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                  {runTime(run, now)}
+                </span>
+              </button>
+            </li>
+          );
+        }),
+      )}
+      <Dialog
+        open={shown !== undefined}
+        onOpenChange={(open) => !open && setOpened(null)}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto p-3 pt-10 sm:max-w-3xl">
+          <DialogTitle className="sr-only">
+            {shown ? (titled.get(shown.id) ?? "Run") : "Run"}
+          </DialogTitle>
+          {shown && (
+            <RunPanel
+              slug={slug}
+              project={project}
+              run={shown}
+              title={titled.get(shown.id) ?? null}
+              // Never the focus's target: the timeline's card is.
+              focusKey={null}
+              onRun={orchestration.upsert}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 /** The waiting proposal's card, for the place above the prompt. */

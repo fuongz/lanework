@@ -2,12 +2,14 @@ import {
   Alert02Icon,
   ArrowDown01Icon,
   ArrowLeft01Icon,
+  Flowchart01Icon,
   MessageMultiple01Icon,
   SecurityCheckIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
+  type CSSProperties,
   Fragment,
   useCallback,
   useEffect,
@@ -93,6 +95,7 @@ import {
 import { useNewChats } from "#/stores/new-chats";
 import {
   AwaitingProposal,
+  LeadRuns,
   OrchestrationPanel,
   orchestrationText,
   RunsAfterTurn,
@@ -100,7 +103,15 @@ import {
   useOrchestration,
   useRunsInPlace,
 } from "../orchestration/orchestration-panel";
-import { ConductorSessions } from "./conductor-sessions";
+import {
+  ConductorSessionsPanel,
+  ConductorSessionsToggle,
+  PanelGroup,
+  PanelSection,
+  SESSIONS_PANEL_GUTTER,
+  SESSIONS_PANEL_PX,
+  useSessionsPanel,
+} from "./conductor-sessions";
 import { useClearConversation } from "./conversation-view.clear";
 import { FileOpenerProvider } from "./file-opener";
 import { JobCapsules } from "./job-capsules";
@@ -417,6 +428,16 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const conductor = conductorId
     ? (orchestration.leads?.find((entry) => entry.id === conductorId) ?? null)
     : null;
+  // Its Sessions panel (FE-128), open or not as it was left in this chat.
+  // Keyed by the route's slug, which is known before the project is.
+  const sessionsChat = `${slug}:${id}`;
+  const sessionsPanel = useSessionsPanel(sessionsChat);
+  // The conductor's own conversation, counted in the panel's overview.
+  const conductorSelf = useMemo(
+    () =>
+      agent ? { agent, id, working: running, session: listed ?? null } : null,
+    [agent, id, running, listed],
+  );
   // The composer's `/clear`: asks, then resets a conductor's conversation or
   // ends a session for a new one.
   const clearing = useClearConversation({
@@ -906,294 +927,358 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
           </h1>
           <span className="ml-auto" />
           {/* A conductor's own sessions (FE-128): hidden from the rail, so
-              its chat is where they are found. */}
+              its chat is where they are found, in a panel beside it. */}
           {conductor && project && (
-            <ConductorSessions
+            <ConductorSessionsToggle
               project={project}
-              slug={slug}
               conductor={conductor.id}
+              chat={sessionsChat}
+              open={sessionsPanel.open}
+              onOpenChange={sessionsPanel.setOpen}
             />
           )}
         </WindowTitlebar>
 
-        <div className="relative min-h-0 flex-1">
-          <div
-            ref={scroller}
-            onScroll={onScroll}
-            className="h-full overflow-y-auto [overflow-anchor:none]"
-          >
-            <div
-              ref={content}
-              className="mx-auto flex w-full max-w-[920px] min-w-0 flex-col gap-6 px-10 pt-6 pb-10"
-            >
-              {conversation?.truncated && (
-                <Alert>
-                  <HugeiconsIcon icon={Alert02Icon} strokeWidth={1.8} />
-                  <AlertDescription>
-                    This conversation is longer than one read takes: its start
-                    is not shown.
-                  </AlertDescription>
-                </Alert>
-              )}
-              {!conversation ? (
-                error ? (
-                  <Empty className="py-16">
-                    <EmptyHeader>
-                      <EmptyMedia variant="icon">
-                        <HugeiconsIcon icon={Alert02Icon} strokeWidth={1.8} />
-                      </EmptyMedia>
-                      <EmptyTitle>Could not open this conversation</EmptyTitle>
-                      <EmptyDescription>{error}</EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                ) : (
-                  <ConversationSkeleton label="Reading the conversation" />
-                )
-              ) : turns.length === 0 &&
-                waiting.length === 0 &&
-                !stream &&
-                !thinking ? (
-                <Empty className="py-16">
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <HugeiconsIcon
-                        icon={MessageMultiple01Icon}
-                        strokeWidth={1.8}
-                      />
-                    </EmptyMedia>
-                    <EmptyTitle>Nothing said yet</EmptyTitle>
-                    <EmptyDescription>
-                      Write the first message below.
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              ) : (
-                <ConductorNames.Provider value={conductorNames}>
-                  <FileOpenerProvider
-                    slug={slug}
-                    project={project}
-                    conversation={id}
-                  >
-                    {shown.map((turn, index) => (
-                      <Fragment key={turn.id}>
-                        <TurnView
-                          turn={turn}
-                          delta={turn === lastOpen ? delta : ""}
-                          slug={slug}
-                          conversation={id}
-                          handlers={handlers}
-                          forking={forking}
-                          anchor={anchor}
-                          compacted={index < compactedBefore}
-                        />
-                        <RunsAfterTurn
+        <div
+          className="relative flex min-h-0 flex-1"
+          // How much of the right edge the Sessions panel covers: the chat
+          // keeps its full width and pads its content clear of it.
+          style={
+            {
+              "--side-panel":
+                conductor && project && sessionsPanel.open
+                  ? `${SESSIONS_PANEL_PX + SESSIONS_PANEL_GUTTER}px`
+                  : "0px",
+            } as CSSProperties
+          }
+        >
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="relative min-h-0 flex-1">
+              <div
+                ref={scroller}
+                onScroll={onScroll}
+                // NOTE: Padding, not a narrower box, clears the Sessions panel:
+                // the scrollbar stays at the window's edge instead of floating
+                // beside the panel.
+                className="h-full overflow-y-auto pr-[var(--side-panel,0px)] [overflow-anchor:none] transition-[padding] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+              >
+                <div
+                  ref={content}
+                  className="mx-auto flex w-full max-w-[920px] min-w-0 flex-col gap-6 px-10 pt-6 pb-10"
+                >
+                  {conversation?.truncated && (
+                    <Alert>
+                      <HugeiconsIcon icon={Alert02Icon} strokeWidth={1.8} />
+                      <AlertDescription>
+                        This conversation is longer than one read takes: its
+                        start is not shown.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {!conversation ? (
+                    error ? (
+                      <Empty className="py-16">
+                        <EmptyHeader>
+                          <EmptyMedia variant="icon">
+                            <HugeiconsIcon
+                              icon={Alert02Icon}
+                              strokeWidth={1.8}
+                            />
+                          </EmptyMedia>
+                          <EmptyTitle>
+                            Could not open this conversation
+                          </EmptyTitle>
+                          <EmptyDescription>{error}</EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    ) : (
+                      <ConversationSkeleton label="Reading the conversation" />
+                    )
+                  ) : turns.length === 0 &&
+                    waiting.length === 0 &&
+                    !stream &&
+                    !thinking ? (
+                    <Empty className="py-16">
+                      <EmptyHeader>
+                        <EmptyMedia variant="icon">
+                          <HugeiconsIcon
+                            icon={MessageMultiple01Icon}
+                            strokeWidth={1.8}
+                          />
+                        </EmptyMedia>
+                        <EmptyTitle>Nothing said yet</EmptyTitle>
+                        <EmptyDescription>
+                          Write the first message below.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  ) : (
+                    <ConductorNames.Provider value={conductorNames}>
+                      <FileOpenerProvider
+                        slug={slug}
+                        project={project}
+                        conversation={id}
+                      >
+                        {shown.map((turn, index) => (
+                          <Fragment key={turn.id}>
+                            <TurnView
+                              turn={turn}
+                              delta={turn === lastOpen ? delta : ""}
+                              slug={slug}
+                              conversation={id}
+                              handlers={handlers}
+                              forking={forking}
+                              anchor={anchor}
+                              compacted={index < compactedBefore}
+                            />
+                            <RunsAfterTurn
+                              slug={slug}
+                              orchestration={orchestration}
+                              placed={runsInPlace.get(turn.id)}
+                            />
+                          </Fragment>
+                        ))}
+                        {stream && (
+                          <TurnView
+                            turn={stream}
+                            delta={delta}
+                            slug={slug}
+                            conversation={id}
+                            handlers={handlers}
+                            forking={forking}
+                          />
+                        )}
+                        {waiting.map((entry) => (
+                          <UserBubble
+                            key={entry.key}
+                            text={orchestrationText(entry.text)}
+                            attachments={entry.attachments}
+                            time={null}
+                            pending="Sending…"
+                          />
+                        ))}
+                        {thinking && (
+                          <WorkingLine
+                            label={
+                              engine.state === "starting"
+                                ? `Starting ${label}…`
+                                : "Working…"
+                            }
+                            since={lastPromptAt}
+                          />
+                        )}
+                        <OrchestrationPanel
                           slug={slug}
                           orchestration={orchestration}
-                          placed={runsInPlace.get(turn.id)}
                         />
-                      </Fragment>
-                    ))}
-                    {stream && (
-                      <TurnView
-                        turn={stream}
-                        delta={delta}
-                        slug={slug}
-                        conversation={id}
-                        handlers={handlers}
-                        forking={forking}
-                      />
-                    )}
-                    {waiting.map((entry) => (
-                      <UserBubble
-                        key={entry.key}
-                        text={orchestrationText(entry.text)}
-                        attachments={entry.attachments}
-                        time={null}
-                        pending="Sending…"
-                      />
-                    ))}
-                    {thinking && (
-                      <WorkingLine
-                        label={
-                          engine.state === "starting"
-                            ? `Starting ${label}…`
-                            : "Working…"
-                        }
-                        since={lastPromptAt}
-                      />
-                    )}
-                    <OrchestrationPanel
-                      slug={slug}
-                      orchestration={orchestration}
-                    />
-                  </FileOpenerProvider>
-                </ConductorNames.Provider>
+                      </FileOpenerProvider>
+                    </ConductorNames.Provider>
+                  )}
+                </div>
+              </div>
+
+              <TocRail entries={entries} current={current} onJump={jump} />
+
+              {showDown && (
+                <button
+                  type="button"
+                  aria-label="Scroll to the end"
+                  onClick={() => {
+                    atBottom.current = true;
+                    toBottom(true);
+                  }}
+                  className="bg-popover text-muted-foreground hover:text-foreground ring-foreground/10 absolute bottom-3 left-[calc((100%-var(--side-panel,0px))/2)] z-10 flex size-7 -translate-x-1/2 items-center justify-center rounded-full shadow-md ring-1 transition-colors"
+                >
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    className="size-4"
+                    strokeWidth={2}
+                  />
+                </button>
               )}
             </div>
-          </div>
 
-          <TocRail entries={entries} current={current} onJump={jump} />
-
-          {showDown && (
-            <button
-              type="button"
-              aria-label="Scroll to the end"
-              onClick={() => {
-                atBottom.current = true;
-                toBottom(true);
-              }}
-              className="bg-popover text-muted-foreground hover:text-foreground ring-foreground/10 absolute bottom-3 left-1/2 z-10 flex size-7 -translate-x-1/2 items-center justify-center rounded-full shadow-md ring-1 transition-colors"
-            >
-              <HugeiconsIcon
-                icon={ArrowDown01Icon}
-                className="size-4"
-                strokeWidth={2}
-              />
-            </button>
-          )}
-        </div>
-
-        <div className="mx-auto flex w-full max-w-[940px] min-w-0 flex-col gap-1.5 px-8 pb-4">
-          {(actionError || engine.state === "error") && (
-            <p role="alert" className="text-destructive px-1 text-xs">
-              {actionError ??
-                (engine.state === "error" ? engine.message : null)}
-            </p>
-          )}
-          {untrusted && agent && (
-            <div
-              role="status"
-              className="text-muted-foreground flex items-center gap-3 px-1 text-xs"
-            >
-              <p className="min-w-0 flex-1">
-                {agent === "claude" ? (
-                  <>
-                    This chat runs without the project’s <code>.claude</code>{" "}
-                    settings, because Claude Code doesn’t trust this folder.
-                  </>
-                ) : (
-                  <>
-                    This chat runs without the project’s <code>.codex</code>{" "}
-                    config and <code>AGENTS.md</code>, because Codex doesn’t
-                    trust this folder.
-                  </>
+            {/* Clear of the Sessions panel, which lies over the right edge. */}
+            <div className="pr-[var(--side-panel,0px)] transition-[padding] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none">
+              <div className="mx-auto flex w-full max-w-[940px] min-w-0 flex-col gap-1.5 px-8 pb-4">
+                {(actionError || engine.state === "error") && (
+                  <p role="alert" className="text-destructive px-1 text-xs">
+                    {actionError ??
+                      (engine.state === "error" ? engine.message : null)}
+                  </p>
                 )}
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={trusting !== null}
-                onClick={() => setTrustAsk({ agent, on: true })}
-              >
-                <HugeiconsIcon
-                  icon={SecurityCheckIcon}
-                  strokeWidth={1.5}
-                  data-icon="inline-start"
+                {untrusted && agent && (
+                  <div
+                    role="status"
+                    className="text-muted-foreground flex items-center gap-3 px-1 text-xs"
+                  >
+                    <p className="min-w-0 flex-1">
+                      {agent === "claude" ? (
+                        <>
+                          This chat runs without the project’s{" "}
+                          <code>.claude</code> settings, because Claude Code
+                          doesn’t trust this folder.
+                        </>
+                      ) : (
+                        <>
+                          This chat runs without the project’s{" "}
+                          <code>.codex</code> config and <code>AGENTS.md</code>,
+                          because Codex doesn’t trust this folder.
+                        </>
+                      )}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={trusting !== null}
+                      onClick={() => setTrustAsk({ agent, on: true })}
+                    >
+                      <HugeiconsIcon
+                        icon={SecurityCheckIcon}
+                        strokeWidth={1.5}
+                        data-icon="inline-start"
+                      />
+                      {trusting === agent ? "Trusting…" : "Trust this folder"}
+                    </Button>
+                  </div>
+                )}
+                {trustError && (
+                  <p role="alert" className="text-destructive px-1 text-xs">
+                    {trustError}
+                  </p>
+                )}
+                <TrustDialog
+                  ask={trustAsk}
+                  folder={trust?.folder ?? null}
+                  onClose={() => setTrustAsk(null)}
+                  onConfirm={(request) => {
+                    setTrustAsk(null);
+                    void setTrust(request.agent, request.on);
+                  }}
                 />
-                {trusting === agent ? "Trusting…" : "Trust this folder"}
-              </Button>
-            </div>
-          )}
-          {trustError && (
-            <p role="alert" className="text-destructive px-1 text-xs">
-              {trustError}
-            </p>
-          )}
-          <TrustDialog
-            ask={trustAsk}
-            folder={trust?.folder ?? null}
-            onClose={() => setTrustAsk(null)}
-            onConfirm={(request) => {
-              setTrustAsk(null);
-              void setTrust(request.agent, request.on);
-            }}
-          />
-          {project && (
-            <JobCapsules
-              slug={slug}
-              project={project}
-              session={listed}
-              since={lastPromptAt}
-            />
-          )}
-          {/* NOTE: Claude's question stands where the prompt is typed, the
+                {project && (
+                  <JobCapsules
+                    slug={slug}
+                    project={project}
+                    session={listed}
+                    since={lastPromptAt}
+                  />
+                )}
+                {/* NOTE: Claude's question stands where the prompt is typed, the
               way the CLI asks it at its own prompt. The composer stays
               mounted under it — hidden, not unmounted — so a draft
               survives. */}
-          {/* A proposal waiting for Approve stands here too, above the
+                {/* A proposal waiting for Approve stands here too, above the
               prompt, so it is never scrolled away (FE-95). */}
-          {awaiting && !asWorker && (
-            <div className="max-h-[50vh] overflow-y-auto rounded-xl shadow-xs">
-              <AwaitingProposal
-                orchestration={orchestration}
-                proposal={awaiting}
-              />
-            </div>
-          )}
-          {!asWorker &&
-            asking.map((request) => (
-              // The composer's shadow: it stands where the prompt is.
-              <div key={request.id} className="rounded-xl shadow-xs">
-                <PermissionCard
-                  request={request}
-                  agent={label}
-                  onAnswer={answer}
-                />
+                {awaiting && !asWorker && (
+                  <div className="max-h-[50vh] overflow-y-auto rounded-xl shadow-xs">
+                    <AwaitingProposal
+                      orchestration={orchestration}
+                      proposal={awaiting}
+                    />
+                  </div>
+                )}
+                {!asWorker &&
+                  asking.map((request) => (
+                    // The composer's shadow: it stands where the prompt is.
+                    <div key={request.id} className="rounded-xl shadow-xs">
+                      <PermissionCard
+                        request={request}
+                        agent={label}
+                        onAnswer={answer}
+                      />
+                    </div>
+                  ))}
+                {asWorker && (
+                  <p className="text-muted-foreground border-border rounded-xl border px-4 py-3 text-[13px]">
+                    Read-only. This worker takes its instructions from{" "}
+                    <button
+                      type="button"
+                      onClick={openLead}
+                      className="text-foreground underline-offset-2 hover:underline"
+                    >
+                      its lead
+                    </button>
+                    , which answers its questions and reviews its work.
+                  </p>
+                )}
+                {project && settings && !asWorker && (
+                  <div className={asking.length ? "hidden" : "flex flex-col"}>
+                    <MessageQueue
+                      queue={queue}
+                      paused={paused}
+                      onEdit={editQueued}
+                      onRemove={removeQueued}
+                      onResume={resumeQueue}
+                      onClear={clearQueue}
+                    />
+                    <Composer
+                      ref={composer}
+                      slug={slug}
+                      draftKey={id}
+                      corner={<ContextButton facts={facts} />}
+                      project={project}
+                      agent={agent}
+                      settings={settings}
+                      onSettings={(next) =>
+                        setSettings((previous) =>
+                          previous ? { ...previous, ...next } : previous,
+                        )
+                      }
+                      working={running}
+                      queued={queue.length}
+                      onSend={send}
+                      // OpenCode never leads (FE-105/D5): `/orchestrate` goes as typed.
+                      onOrchestrate={canLead(agent) ? orchestrate : undefined}
+                      onClear={clearing.onClear}
+                      onStop={stop}
+                      onEditLastQueued={() => {
+                        // A queued repair has nothing typed to give back (FE-91).
+                        const last = [...queue]
+                          .reverse()
+                          .find(
+                            (item) =>
+                              readEnvelope(item.text)?.kind !== "repair",
+                          );
+                        if (last) editQueued(last.id);
+                      }}
+                    />
+                    {clearing.dialog}
+                  </div>
+                )}
               </div>
-            ))}
-          {asWorker && (
-            <p className="text-muted-foreground border-border rounded-xl border px-4 py-3 text-[13px]">
-              Read-only. This worker takes its instructions from{" "}
-              <button
-                type="button"
-                onClick={openLead}
-                className="text-foreground underline-offset-2 hover:underline"
-              >
-                its lead
-              </button>
-              , which answers its questions and reviews its work.
-            </p>
-          )}
-          {project && settings && !asWorker && (
-            <div className={asking.length ? "hidden" : "flex flex-col"}>
-              <MessageQueue
-                queue={queue}
-                paused={paused}
-                onEdit={editQueued}
-                onRemove={removeQueued}
-                onResume={resumeQueue}
-                onClear={clearQueue}
-              />
-              <Composer
-                ref={composer}
-                slug={slug}
-                draftKey={id}
-                corner={<ContextButton facts={facts} />}
-                project={project}
-                agent={agent}
-                settings={settings}
-                onSettings={(next) =>
-                  setSettings((previous) =>
-                    previous ? { ...previous, ...next } : previous,
-                  )
-                }
-                working={running}
-                queued={queue.length}
-                onSend={send}
-                // OpenCode never leads (FE-105/D5): `/orchestrate` goes as typed.
-                onOrchestrate={canLead(agent) ? orchestrate : undefined}
-                onClear={clearing.onClear}
-                onStop={stop}
-                onEditLastQueued={() => {
-                  // A queued repair has nothing typed to give back (FE-91).
-                  const last = [...queue]
-                    .reverse()
-                    .find((item) => readEnvelope(item.text)?.kind !== "repair");
-                  if (last) editQueued(last.id);
-                }}
-              />
-              {clearing.dialog}
             </div>
+          </div>
+          {conductor && project && (
+            // Its files open in Files, as the chat's file badges do.
+            <FileOpenerProvider slug={slug} project={project} conversation={id}>
+              <ConductorSessionsPanel
+                project={project}
+                slug={slug}
+                conductor={conductor.id}
+                chat={sessionsChat}
+                open={sessionsPanel.open}
+                self={conductorSelf}
+                runs={
+                  <LeadRuns
+                    slug={slug}
+                    orchestration={orchestration}
+                    frame={(count, rows) => (
+                      <PanelSection>
+                        <PanelGroup
+                          icon={Flowchart01Icon}
+                          label="Runs"
+                          count={count}
+                          defaultOpen
+                        >
+                          {rows}
+                        </PanelGroup>
+                      </PanelSection>
+                    )}
+                  />
+                }
+              />
+            </FileOpenerProvider>
           )}
         </div>
       </section>

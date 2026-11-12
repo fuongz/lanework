@@ -375,3 +375,65 @@ export function opencodeUsage(
     });
   });
 }
+
+/** Shell tool parts read for one conversation's commits. */
+const SHELL_ROWS_MAX = 2_000;
+
+/**
+ * The output of each of conversation `id`'s completed `bash` calls whose
+ * command runs `git commit`, oldest first.
+ *
+ * NOTE: Schema v2 only, as {@link opencodeEdits}; the legacy schema reads as
+ * none. Never throws: a missing database or conversation is an empty list.
+ */
+export function opencodeShellCalls(
+  dataDir: string,
+  folder: string,
+  id: string,
+): Promise<string[]> {
+  return withOpencodeDb(dataDir, [] as string[], (db, schema) => {
+    if (!schema.v2 || !opencodeSessionIn(db, schema, folder, id)) return [];
+    const rows = db
+      .prepare(
+        `SELECT json_extract(c.value, '$.state.input') AS input,
+                json_extract(c.value, '$.state.output') AS output,
+                json_extract(c.value, '$.state.metadata') AS metadata
+           FROM session_message m, json_each(m.data, '$.content') c
+          WHERE m.session_id = ? AND m.type = 'assistant'
+            AND json_extract(c.value, '$.type') = 'tool'
+            AND json_extract(c.value, '$.name') = 'bash'
+            AND json_extract(c.value, '$.state.status') = 'completed'
+          ORDER BY m.time_created DESC
+          LIMIT ?`,
+      )
+      .all(id, SHELL_ROWS_MAX) as unknown as {
+      input: unknown;
+      output: unknown;
+      metadata: unknown;
+    }[];
+    const out: string[] = [];
+    for (const row of rows.reverse()) {
+      try {
+        const input = JSON.parse(String(row.input ?? "{}")) as {
+          command?: unknown;
+        };
+        if (typeof input.command !== "string") continue;
+        if (!/\bgit\b(?:\s+-[cC]\s+\S+)*\s+commit\b/.test(input.command))
+          continue;
+        const meta = JSON.parse(String(row.metadata ?? "{}")) as {
+          output?: unknown;
+        };
+        const text =
+          typeof row.output === "string"
+            ? row.output
+            : typeof meta.output === "string"
+              ? meta.output
+              : "";
+        if (text) out.push(text);
+      } catch {
+        // Not JSON we know: skip the call.
+      }
+    }
+    return out;
+  });
+}
