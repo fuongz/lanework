@@ -1283,7 +1283,10 @@ export async function locateInRepo(
     const rel = relative(root, real);
     if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
     const info = await stat(real).catch(() => null);
-    return info?.isFile() ? rel.split(sep).join("/") : null;
+    const posix = rel.split(sep).join("/");
+    if (info?.isFile()) return posix;
+    // A folder (an `.app` bundle, a build output) ends in "/".
+    return info?.isDirectory() ? `${posix}/` : null;
   };
   if (isAbsolute(asked)) return fileAt(asked);
   if (asked.split(/[\\/]/).includes("..")) return null;

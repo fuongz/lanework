@@ -384,7 +384,8 @@ export interface DesktopWorktreeApi {
    * The input may be relative to the project's folder or to the repository,
    * absolute, or a bare name.
    *
-   * @returns null when it is not in the repository, or is ambiguous.
+   * @returns null when it is not in the repository, or is ambiguous. A
+   *   folder, named by its full path, comes back ending in "/".
    */
   locate: (slug: string, path: string) => Promise<string | null>;
   /**

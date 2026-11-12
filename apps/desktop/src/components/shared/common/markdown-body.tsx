@@ -27,6 +27,7 @@ import {
   type Inline,
   inlines,
   type LinkSpan,
+  type ListBlock,
   parseMarkdown,
 } from "#/lib/markdown";
 
@@ -578,6 +579,29 @@ export function MarkdownBody({
   );
 }
 
+/** A list, with the lists nested under its items drawn inside them. */
+function ListView({ list, chat }: { list: ListBlock; chat: boolean }) {
+  const Tag = list.ordered ? "ol" : "ul";
+  return (
+    <Tag
+      start={list.ordered && list.start !== 1 ? list.start : undefined}
+      className={`flex flex-col ${chat ? "gap-1.5 pl-6" : "gap-1 pl-5"} ${list.ordered ? "list-decimal" : "list-disc"}`}
+    >
+      {list.items.map((item, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a parsed document is positional and never reorders — the index is the row's identity.
+        <li key={index}>
+          <Spans spans={item.spans} />
+          {item.children && (
+            <div className={chat ? "mt-1.5" : "mt-1"}>
+              <ListView list={item.children} chat={chat} />
+            </div>
+          )}
+        </li>
+      ))}
+    </Tag>
+  );
+}
+
 function BlockView({ block }: { block: Block }) {
   const links = useContext(LinkContext) !== null;
   const chat = useContext(VariantContext) === "chat";
@@ -595,21 +619,7 @@ function BlockView({ block }: { block: Block }) {
     );
   }
   if (block.kind === "code") return <CodeBlock text={block.text} />;
-  if (block.kind === "list") {
-    const Tag = block.ordered ? "ol" : "ul";
-    return (
-      <Tag
-        className={`flex flex-col ${chat ? "gap-1.5 pl-6" : "gap-1 pl-5"} ${block.ordered ? "list-decimal" : "list-disc"}`}
-      >
-        {block.items.map((item, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: a parsed document is positional and never reorders — the index is the row's identity.
-          <li key={index}>
-            <Spans spans={item} />
-          </li>
-        ))}
-      </Tag>
-    );
-  }
+  if (block.kind === "list") return <ListView list={block} chat={chat} />;
   if (block.kind === "quote")
     return (
       <blockquote className="border-border text-muted-foreground border-l-2 pl-3">

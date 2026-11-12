@@ -25,7 +25,8 @@ const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|svg)$/i;
  * kept tab, with the tree opened down to it.
  *
  * - Main finds the file (`worktree.locate`): Claude writes paths relative to
- *   the project's folder, to the repository, absolute, or as a bare name.
+ *   the project's folder, to the repository, absolute, or as a bare name. A
+ *   folder (an `.app` bundle, a build output) opens in Finder instead.
  * - An image chip on a tool call opens the lightbox directly on Cmd/Ctrl-click
  *   or from its context menu (`ImageViewerContext`).
  * - An image drawn in place (a reply's `![alt](path)`, a generated image)
@@ -87,6 +88,11 @@ export function FileOpenerProvider({
         .then((found) => {
           if (mine !== latest.current) return;
           if (!found) return lightbox(path, mine);
+          // Files opens files; a folder (an `.app` bundle) shows in Finder.
+          if (found.endsWith("/"))
+            return void surface
+              .reveal(slug, found.slice(0, -1))
+              .catch((error: unknown) => console.warn(error));
           reveal(slug, found);
           void navigate({ to: "/w/$slug/files", params: { slug } });
         });
@@ -105,7 +111,8 @@ export function FileOpenerProvider({
     const find = async (path: string) => {
       const surface = window.desktop?.worktree;
       if (!surface) return null;
-      return surface.locate(slug, path).catch(() => null);
+      const found = await surface.locate(slug, path).catch(() => null);
+      return found?.replace(/\/$/, "") ?? null;
     };
     const copy = (text: Promise<string>) =>
       void text
