@@ -12,6 +12,7 @@ import {
   QuestionIcon,
   SquareLock02Icon,
   StopIcon,
+  Target02Icon,
   Tick02Icon,
   TickDouble02Icon,
 } from "@hugeicons/core-free-icons";
@@ -111,14 +112,6 @@ const CANCELLABLE: readonly TaskStatus[] = [
 
 /** An error longer than this, or on several lines, folds behind "Show all". */
 const ERROR_FOLD = 160;
-
-/** The run's dot beside its title (FE-137), by its status. */
-const RUN_DOTS: Record<RunStatus, string> = {
-  active: "bg-tone-sky",
-  paused: "bg-tone-amber",
-  stopped: "bg-foreground/30",
-  finished: "bg-tone-emerald",
-};
 
 /** Draw again every second while `on`, so the clocks move (FE-137). */
 function useTicking(on: boolean): number {
@@ -805,13 +798,12 @@ export function RunPanel({
         {announcement}
       </p>
       <header className="flex min-w-0 items-center gap-2 px-3 pt-2.5 pb-1.5">
-        <span
+        {/* The run's mark: the title's height, muted (FE-137). */}
+        <HugeiconsIcon
+          icon={Target02Icon}
+          strokeWidth={2}
           aria-hidden="true"
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            RUN_DOTS[run.status],
-            run.status === "active" && "motion-safe:animate-pulse",
-          )}
+          className="text-muted-foreground size-[13px] shrink-0"
         />
         <Tip label={heading}>
           <h2

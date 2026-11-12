@@ -1,3 +1,5 @@
+import { Globe02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useEffect, useState } from "react";
 import {
   isOpenableUrl,
@@ -6,10 +8,17 @@ import {
 } from "#/../shared/conversation";
 import type { LinkRenderer } from "#/components/shared/common/markdown-body";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "#/components/ui/context-menu";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "#/components/ui/tooltip";
+import { notify } from "#/stores/notify";
 
 /**
  * Each URL's preview, kept for the whole session.
@@ -73,8 +82,17 @@ function hostOf(href: string): string {
   }
 }
 
+/** Put `text` on the clipboard, and say so on the island. */
+function copyLink(text: string) {
+  void navigator.clipboard
+    .writeText(text)
+    .then(() => notify("success", "Link copied"))
+    .catch(() => notify("error", "Could not copy the link"));
+}
+
 /**
  * A link in the chat: the site's favicon and page title, the URL in a tooltip.
+ * Right-click offers Open in Browser and Copy Link.
  *
  * Without a favicon and title from main, it shows the link's own text; a
  * link written as its own URL to a host main won't preview shows its host.
@@ -108,38 +126,64 @@ const LinkChip = memo(function LinkChip({
         : web && !previewed
           ? hostOf(href)
           : text;
+  const open = () => void window.desktop?.conversation.openLink(href);
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          web ? (
-            // biome-ignore lint/a11y/useAnchorContent: the trigger's children — the icon and the label — are drawn inside this anchor.
-            <a
-              href={href}
-              rel="noreferrer noopener"
-              onClick={(event) => {
-                event.preventDefault();
-                void window.desktop?.conversation.openLink(href);
-              }}
-              className="text-accent-brand decoration-accent-brand/50 hover:decoration-accent-brand underline underline-offset-[3px] transition-colors [overflow-wrap:anywhere]"
-            />
-          ) : (
-            <span className="decoration-foreground/30 underline decoration-dotted underline-offset-[3px] [overflow-wrap:anywhere]" />
-          )
-        }
-      >
-        {found?.icon && (
-          <img
-            src={found.icon}
-            alt=""
-            aria-hidden="true"
-            className="mr-1 inline-block size-4 -translate-y-px rounded-full align-middle"
-          />
+    <ContextMenu>
+      {/* NOTE: `contents`: the menu's trigger adds no box, so the link
+          still wraps inline with the sentence it is in. */}
+      <ContextMenuTrigger render={<span className="contents" />}>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              web ? (
+                // biome-ignore lint/a11y/useAnchorContent: the trigger's children — the icon and the label — are drawn inside this anchor.
+                <a
+                  href={href}
+                  rel="noreferrer noopener"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    open();
+                  }}
+                  className="text-accent-brand decoration-accent-brand/50 hover:decoration-accent-brand underline underline-offset-[3px] transition-colors [overflow-wrap:anywhere]"
+                />
+              ) : (
+                <span className="decoration-foreground/30 underline decoration-dotted underline-offset-[3px] [overflow-wrap:anywhere]" />
+              )
+            }
+          >
+            {found?.icon ? (
+              <img
+                src={found.icon}
+                alt=""
+                aria-hidden="true"
+                className="mr-1 inline-block size-4 -translate-y-px rounded-full align-middle"
+              />
+            ) : (
+              // NOTE: A globe, not the site's favicon: fetching one for any host
+              // would let a reply make main reach a host it chose (FE-79/D4).
+              web && (
+                <HugeiconsIcon
+                  icon={Globe02Icon}
+                  className="mr-1 inline-block size-3.5 -translate-y-px align-middle opacity-70"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+              )
+            )}
+            {label}
+          </TooltipTrigger>
+          <TooltipContent className="max-w-md break-all">{href}</TooltipContent>
+        </Tooltip>
+      </ContextMenuTrigger>
+      <ContextMenuContent finalFocus={false}>
+        {web && (
+          <ContextMenuItem onClick={open}>Open in Browser</ContextMenuItem>
         )}
-        {label}
-      </TooltipTrigger>
-      <TooltipContent className="max-w-md break-all">{href}</TooltipContent>
-    </Tooltip>
+        <ContextMenuItem onClick={() => copyLink(href)}>
+          {web ? "Copy Link" : "Copy"}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 });
 

@@ -174,7 +174,13 @@ export function ConductorsNav({
     statuses[id] =
       status.state === "idle" && finished.has(`${project}:${id}`)
         ? { ...status, state: "done", reason: "Finished, not opened yet" }
-        : status;
+        : // Its engine still runs between turns (the row offers Stop): a
+          // still green dot, as a session's (StatusPing `running`).
+          status.state === "idle" &&
+            status.conversation !== null &&
+            alive?.includes(status.conversation)
+          ? { ...status, state: "running", reason: "Running, between turns" }
+          : status;
 
   if (!hasFolder || (mini && (!list || conductors.length === 0))) return null;
   // Still reading them: the section's shape, so the rail does not jump.

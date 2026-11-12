@@ -113,6 +113,7 @@ import {
   useSessionsPanel,
 } from "./conductor-sessions";
 import { useClearConversation } from "./conversation-view.clear";
+import { RollingText } from "./conversation-view.rolling";
 import { FileOpenerProvider } from "./file-opener";
 import { JobCapsules } from "./job-capsules";
 import { MessageQueue } from "./message-queue";
@@ -1315,7 +1316,7 @@ function WorkingLine({
       <OrbitSpinner className="size-[13px]" />
       <span className="text-shimmer">{label}</span>
       {seconds !== null && seconds > 0 && (
-        <span className="tabular-nums">{elapsed(seconds)}</span>
+        <RollingText text={elapsed(seconds)} />
       )}
     </div>
   );
