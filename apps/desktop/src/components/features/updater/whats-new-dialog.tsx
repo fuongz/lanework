@@ -105,7 +105,13 @@ export function WhatsNewDialog() {
             className="p-0"
           />
         ) : notes ? (
-          <ScrollArea className="-mx-4 min-h-0 flex-1" viewportClassName="px-4">
+          // The dialog has only a max-height, so a percentage height on the
+          // viewport never resolves and it grows past the dialog instead of
+          // scrolling. A flex column hands the viewport the area's real size.
+          <ScrollArea
+            className="-mx-4 flex min-h-0 flex-1 flex-col"
+            viewportClassName="min-h-0 flex-1 px-4"
+          >
             <MarkdownBody
               source={notes.body}
               empty="This release was published without notes."

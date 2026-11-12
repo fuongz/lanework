@@ -5,15 +5,18 @@
 //   Squirrel.Mac installs from). A draft is never in the feed: the provider
 //   reads the public releases.atom and /releases/latest, neither of which
 //   lists drafts or prereleases.
-// - Checks on launch and every 4 hours while "Update automatically" is on,
-//   and when Settings → About's Check for updates is pressed. Downloads in the
-//   background, then the page shows the prompt.
+// - Checks on launch and every 4 hours while "Check automatically" is on,
+//   and when Settings → About's Check for updates is pressed. A newer release
+//   is only offered (`available`): it downloads when the person asks, from
+//   the island, Settings → About or the menu's answer; then they choose when
+//   to restart.
 // - D4: Restart now counts live terminals and active runs first and answers
 //   `confirm` while either is nonzero; the page asks again before `force`.
 //   Later closes the prompt, and the update installs on the next quit.
 // - D6: off entirely in a dev build (`X.Y.Z-dev.…`, INF-10), an unpackaged
 //   run, and on any platform but macOS. electron-updater is never even
-//   loaded there.
+//   loaded there. An unpackaged run with LANEWORK_UPDATER_SIMULATE set walks
+//   the whole flow against a pretend feed instead (`./simulate`).
 // - D8: the first launch of a newer version shows its notes once
 //   (`pendingWhatsNew`); the app menu's What's New opens them again.
 import { createRequire } from "node:module";
@@ -42,9 +45,15 @@ import { quitForUpdate } from "../terminal";
 import { updaterLog } from "./log";
 import { fetchReleaseNotes } from "./release-notes";
 import { readSettings, writeSettings } from "./settings";
+import { createSimulatedUpdater, simulatedScenario } from "./simulate";
 
 /** The launch check waits this long, so it never competes with startup. */
 const LAUNCH_CHECK_DELAY_MS = 15_000;
+/** A simulated run checks sooner: someone is sitting there waiting for it. */
+const SIMULATED_LAUNCH_CHECK_DELAY_MS = 3_000;
+
+/** The pretend feed's scenario, read once at registration; null when real. */
+let simulated: ReturnType<typeof simulatedScenario> = null;
 
 export interface UpdaterDeps {
   /** What a restart would stop right now. */
@@ -52,6 +61,7 @@ export interface UpdaterDeps {
 }
 
 function disabledReason(): UpdaterDisabledReason | null {
+  if (simulated) return null;
   if (!app.isPackaged) return "unpackaged";
   if (isPrereleaseVersion(app.getVersion())) return "dev";
   if (process.platform !== "darwin") return "platform";
@@ -96,23 +106,51 @@ function said(error: unknown): string {
  */
 function loadUpdater(): AppUpdater {
   if (updater) return updater;
+  if (simulated) {
+    updater = createSimulatedUpdater(simulated, (version) => {
+      // Nothing to install and no reason to quit: say what would happen and
+      // land where a restart on the new version would.
+      updaterLog.info(`simulated: would quit and install ${version} now`);
+      setState({
+        status: "up-to-date",
+        version: null,
+        progress: null,
+        error: null,
+        postponed: false,
+        checkedAt: Date.now(),
+      });
+    });
+    wire(updater);
+    return updater;
+  }
   const runtimeRequire = createRequire(__filename);
   const { autoUpdater } = runtimeRequire("electron-updater") as {
     autoUpdater: AppUpdater;
   };
   autoUpdater.logger = updaterLog;
-  autoUpdater.autoDownload = true;
+  // Never on its own: the person decides whether to take a release at all.
+  autoUpdater.autoDownload = false;
   // NOTE: True from the start, not only after Later. MacUpdater hands the
   // download to Squirrel.Mac (which stages it for install on quit) only when
   // this is set at download time; set later, a quit would install nothing.
-  // So an update nobody answered still installs on the next quit, as D4's
-  // Later does.
+  // A download only ever starts because the person asked for it, so a
+  // downloaded update installs on the next quit, as D4's Later does.
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.allowPrerelease = false;
   autoUpdater.allowDowngrade = false;
   autoUpdater.fullChangelog = false;
+  wire(autoUpdater);
+  // Squirrel.Mac's own event, as quitAndInstall starts closing the windows.
+  nativeUpdater.on("before-quit-for-update", () =>
+    updaterLog.info(`quitting to install ${state.version}`),
+  );
+  updater = autoUpdater;
+  return autoUpdater;
+}
 
+/** Follow an updater's events into `state`; the real one or the pretend. */
+function wire(autoUpdater: AppUpdater): void {
   autoUpdater.on("checking-for-update", () => {
     setState({ status: "checking", error: null });
   });
@@ -126,11 +164,13 @@ function loadUpdater(): AppUpdater {
     });
   });
   autoUpdater.on("update-available", (info: UpdateInfo) => {
-    updaterLog.info(`update available: ${info.version}, downloading`);
+    updaterLog.info(
+      `update available: ${info.version}, waiting for the person`,
+    );
     setState({
-      status: "downloading",
+      status: "available",
       version: info.version,
-      progress: 0,
+      progress: null,
       checkedAt: Date.now(),
       postponed: info.version === state.version ? state.postponed : false,
     });
@@ -158,12 +198,6 @@ function loadUpdater(): AppUpdater {
       checkedAt: Date.now(),
     });
   });
-  // Squirrel.Mac's own event, as quitAndInstall starts closing the windows.
-  nativeUpdater.on("before-quit-for-update", () =>
-    updaterLog.info(`quitting to install ${state.version}`),
-  );
-  updater = autoUpdater;
-  return autoUpdater;
 }
 
 /** Ask GitHub for a newer release; answers once the check has ended. */
@@ -184,9 +218,7 @@ function check(
   updaterLog.info(`check (${reason}) from ${app.getVersion()}`);
   checking = (async () => {
     try {
-      const result = await loadUpdater().checkForUpdates();
-      // The download's failure is reported through the `error` event.
-      void result?.downloadPromise?.catch(() => undefined);
+      await loadUpdater().checkForUpdates();
     } catch (error) {
       // Already logged by the `error` event; make sure the state says so.
       if (state.status !== "error")
@@ -212,6 +244,22 @@ function schedule(on: boolean): void {
   timer.unref();
 }
 
+/** The person asked for the available update: download it. */
+function download(): UpdaterState {
+  const ready = updater;
+  if (state.status !== "available" || !ready) return state;
+  updaterLog.info(`downloading ${state.version}, as asked`);
+  setState({
+    status: "downloading",
+    progress: 0,
+    error: null,
+    postponed: false,
+  });
+  // Its failure is reported through the `error` event.
+  ready.downloadUpdate().catch(() => undefined);
+  return state;
+}
+
 async function install(force: boolean): Promise<UpdaterInstallAnswer> {
   const ready = updater;
   if (state.status !== "ready" || !ready) return { result: "not-ready" };
@@ -231,7 +279,8 @@ async function install(force: boolean): Promise<UpdaterInstallAnswer> {
   );
   // After the answer is on its way back to the page.
   setImmediate(() => {
-    quitForUpdate();
+    // A pretend install stops nothing: the terminals stay.
+    if (!simulated) quitForUpdate();
     ready.quitAndInstall();
   });
   return { result: "installing" };
@@ -316,9 +365,19 @@ export async function checkForUpdatesFromMenu(): Promise<void> {
     case "downloading":
       await tell(
         `Lanework v${now.version ?? "?"} is downloading`,
-        "It installs the next time you quit, or you can restart from Settings → About once it is ready.",
+        "Lanework asks you to restart once it is ready. It also installs the next time you quit.",
       );
       return;
+    case "available": {
+      const { response } = await tell(
+        `Lanework v${now.version ?? "?"} is available`,
+        `You have v${current}. Download it now? Lanework asks before restarting.`,
+        ["Download", "Not Now"],
+      );
+      if (response === 0) download();
+      else if (now.version) setState({ postponed: true });
+      return;
+    }
     case "error":
       await tell("Could not check for updates", now.error ?? undefined);
       return;
@@ -376,6 +435,8 @@ export function registerUpdater(
   given: UpdaterDeps,
 ) {
   deps = given;
+  simulated = simulatedScenario();
+  if (simulated) updaterLog.info(`simulating updates: ${simulated}`);
   const disabled = disabledReason();
   state = { ...state, disabled };
   updaterLog.info(
@@ -388,7 +449,10 @@ export function registerUpdater(
     setState({ auto: settings.auto });
     if (disabled || !settings.auto) return;
     schedule(true);
-    setTimeout(() => void check("launch"), LAUNCH_CHECK_DELAY_MS).unref();
+    setTimeout(
+      () => void check("launch"),
+      simulated ? SIMULATED_LAUNCH_CHECK_DELAY_MS : LAUNCH_CHECK_DELAY_MS,
+    ).unref();
   });
   if (app.isPackaged && !isPrereleaseVersion(app.getVersion()))
     pending = prepareWhatsNew().catch(() => null);
@@ -405,7 +469,7 @@ export function registerUpdater(
       throw new Error("On or off is required.");
     await writeSettings({ auto });
     setState({ auto });
-    updaterLog.info(`update automatically: ${auto ? "on" : "off"}`);
+    updaterLog.info(`check automatically: ${auto ? "on" : "off"}`);
     schedule(auto);
     if (auto) void check("manual");
     return state;
@@ -413,6 +477,10 @@ export function registerUpdater(
   handle(updaterChannels.check, devUrl, (args) => {
     noArgs(args);
     return check("manual");
+  });
+  handle(updaterChannels.download, devUrl, (args): UpdaterState => {
+    noArgs(args);
+    return download();
   });
   handle(updaterChannels.install, devUrl, (args) => {
     const [force] = args;
@@ -425,6 +493,9 @@ export function registerUpdater(
     if (updater) updater.autoInstallOnAppQuit = true;
     if (state.status === "ready") {
       updaterLog.info(`install ${state.version} later, on the next quit`);
+      setState({ postponed: true });
+    } else if (state.status === "available") {
+      updaterLog.info(`${state.version} not now`);
       setState({ postponed: true });
     }
     return state;

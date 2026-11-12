@@ -4,10 +4,25 @@ import {
   SettingsPage,
   SettingsValue,
 } from "#/components/shared/settings/settings-page";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "#/components/ui/alert-dialog";
 import { Button } from "#/components/ui/button";
 import { Switch } from "#/components/ui/switch";
+import {
+  liveSentence,
+  useUpdateActions,
+  useUpdaterState,
+} from "#/hooks/use-updater";
 import type { AppInfo } from "../../../../shared/desktop";
-import type { UpdaterState } from "../../../../shared/updater";
+import type { UpdaterLiveWork, UpdaterState } from "../../../../shared/updater";
 
 /**
  * The resource log's switch (FE-115). Off until switched on: it notes this
@@ -53,31 +68,6 @@ function ResourceLogSwitch() {
   );
 }
 
-/** The updater's state, kept current from main (INF-11). */
-function useUpdaterState(): [
-  UpdaterState | null,
-  (next: UpdaterState) => void,
-] {
-  const [state, setState] = useState<UpdaterState | null>(null);
-  useEffect(() => {
-    const updater = window.desktop?.updater;
-    if (!updater) return;
-    let disposed = false;
-    const off = updater.onChange((next) => setState(next));
-    void updater
-      .get()
-      .then((next) => {
-        if (!disposed) setState(next);
-      })
-      .catch(() => {});
-    return () => {
-      disposed = true;
-      off();
-    };
-  }, []);
-  return [state, setState];
-}
-
 /** What the updater is doing, in one sentence, for the Check row. */
 function updaterStatus(state: UpdaterState | null): string {
   if (!state) return "Checks GitHub for a newer release of Lanework.";
@@ -94,6 +84,8 @@ function updaterStatus(state: UpdaterState | null): string {
   switch (state.status) {
     case "checking":
       return "Checking GitHub for a newer release.";
+    case "available":
+      return `Lanework ${state.version ?? ""} is available. Download it when you are ready.`;
     case "downloading":
       return `Downloading Lanework ${state.version ?? ""}${state.progress !== null ? ` (${state.progress}%)` : ""}.`;
     case "ready":
@@ -110,7 +102,8 @@ function updaterStatus(state: UpdaterState | null): string {
 }
 
 /**
- * "Update automatically" (INF-11): on by default. Main holds the choice,
+ * "Check automatically" (INF-11): on by default. It only checks; a newer
+ * release downloads when the person asks. Main holds the choice,
  * since main is what checks.
  */
 function AutoUpdateSwitch({
@@ -132,7 +125,7 @@ function AutoUpdateSwitch({
   };
   return (
     <Switch
-      aria-label="Update automatically"
+      aria-label="Check automatically"
       checked={state?.auto ?? false}
       disabled={!state || state.disabled !== null}
       onCheckedChange={change}
@@ -153,10 +146,8 @@ export function AboutSection() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [updater, setUpdater] = useUpdaterState();
   const [checking, setChecking] = useState(false);
-  const busy =
-    checking ||
-    updater?.status === "checking" ||
-    updater?.status === "downloading";
+  const actions = useUpdateActions(updater, setUpdater);
+  const busy = checking || updater?.status === "checking";
 
   const checkNow = () => {
     setChecking(true);
@@ -183,96 +174,203 @@ export function AboutSection() {
   }, []);
 
   return (
-    <SettingsPage
-      title="About"
-      description="This version of Lanework, how it updates, and what it records about itself."
-      sections={[
-        {
-          title: "Application",
-          rows: [
-            {
-              label: "Version",
-              keywords: "build release",
-              control: (
-                <SettingsValue>
-                  {info?.version ? `v${info.version}` : "—"}
-                </SettingsValue>
-              ),
-            },
-            {
-              label: "Platform",
-              keywords: "os system",
-              control: <SettingsValue>{info?.platform ?? "—"}</SettingsValue>,
-            },
-          ],
-        },
-        {
-          title: "Updates",
-          rows: [
-            {
-              label: "Update automatically",
-              description:
-                "Check GitHub for a new release when Lanework starts and every 4 hours, and download it in the background. You choose when to restart.",
-              keywords:
-                "update automatic auto-update upgrade release new version download",
-              control: (
-                <AutoUpdateSwitch state={updater} onChange={setUpdater} />
-              ),
-            },
-            {
-              label: "Check for updates",
-              description: updaterStatus(updater),
-              keywords: "update check upgrade release new version latest",
-              control: (
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className={SETTINGS_BUTTON}
-                  disabled={
-                    !updater ||
-                    updater.disabled !== null ||
-                    updater.status === "ready" ||
-                    busy
-                  }
-                  onClick={checkNow}
-                >
-                  {busy ? "Checking…" : "Check now"}
-                </Button>
-              ),
-            },
-          ],
-        },
-        {
-          title: "Diagnostics",
-          rows: [
-            {
-              label: "Resource log",
-              description:
-                "Record Lanework's CPU and memory use every 30 seconds. The last 24 hours stay on this Mac and are never sent anywhere.",
-              keywords:
-                "resource log diagnostics telemetry metrics cpu memory performance usage monitoring",
-              control: <ResourceLogSwitch />,
-            },
-            {
-              label: "Log folder",
-              description: "Where the resource log keeps its hourly files.",
-              keywords: "resource log folder metrics files open finder",
-              control: (
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className={SETTINGS_BUTTON}
-                  onClick={() =>
-                    void window.desktop?.metrics.reveal().catch(() => {})
-                  }
-                >
-                  Open folder
-                </Button>
-              ),
-            },
-          ],
-        },
-      ]}
-    />
+    <>
+      <RestartConfirm
+        live={actions.live}
+        busy={actions.busy}
+        version={updater?.version ?? ""}
+        onRestart={() => void actions.restart()}
+        onCancel={actions.cancelRestart}
+      />
+      <SettingsPage
+        title="About"
+        description="This version of Lanework, how it updates, and what it records about itself."
+        sections={[
+          {
+            title: "Application",
+            rows: [
+              {
+                label: "Version",
+                keywords: "build release",
+                control: (
+                  <SettingsValue>
+                    {info?.version ? `v${info.version}` : "—"}
+                  </SettingsValue>
+                ),
+              },
+              {
+                label: "Platform",
+                keywords: "os system",
+                control: <SettingsValue>{info?.platform ?? "—"}</SettingsValue>,
+              },
+            ],
+          },
+          {
+            title: "Updates",
+            rows: [
+              {
+                label: "Check automatically",
+                description:
+                  "Check GitHub for a new release when Lanework starts and every 4 hours. Nothing downloads until you choose Download, and you choose when to restart.",
+                keywords:
+                  "update automatic auto-update upgrade release new version download",
+                control: (
+                  <AutoUpdateSwitch state={updater} onChange={setUpdater} />
+                ),
+              },
+              {
+                label: "Check for updates",
+                description: updaterStatus(updater),
+                keywords: "update check upgrade release new version latest",
+                control: (
+                  <UpdateButton
+                    state={updater}
+                    checking={busy}
+                    restarting={actions.busy}
+                    onCheck={checkNow}
+                    onDownload={actions.download}
+                    onRestart={() => void actions.restart()}
+                  />
+                ),
+              },
+            ],
+          },
+          {
+            title: "Diagnostics",
+            rows: [
+              {
+                label: "Resource log",
+                description:
+                  "Record Lanework's CPU and memory use every 30 seconds. The last 24 hours stay on this Mac and are never sent anywhere.",
+                keywords:
+                  "resource log diagnostics telemetry metrics cpu memory performance usage monitoring",
+                control: <ResourceLogSwitch />,
+              },
+              {
+                label: "Log folder",
+                description: "Where the resource log keeps its hourly files.",
+                keywords: "resource log folder metrics files open finder",
+                control: (
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className={SETTINGS_BUTTON}
+                    onClick={() =>
+                      void window.desktop?.metrics.reveal().catch(() => {})
+                    }
+                  >
+                    Open folder
+                  </Button>
+                ),
+              },
+            ],
+          },
+        ]}
+      />
+    </>
+  );
+}
+
+/**
+ * The Updates row's one button, for where the update is: Check now, then
+ * Download once a release is out, then Restart now once it is downloaded.
+ */
+function UpdateButton({
+  state,
+  checking,
+  restarting,
+  onCheck,
+  onDownload,
+  onRestart,
+}: {
+  state: UpdaterState | null;
+  checking: boolean;
+  restarting: boolean;
+  onCheck: () => void;
+  onDownload: () => void;
+  onRestart: () => void;
+}) {
+  const off = !state || state.disabled !== null;
+  if (!off && state.status === "available")
+    return (
+      <Button size="lg" className={SETTINGS_BUTTON} onClick={onDownload}>
+        Download
+      </Button>
+    );
+  if (!off && state.status === "downloading")
+    return (
+      <Button size="lg" variant="outline" className={SETTINGS_BUTTON} disabled>
+        Downloading…
+      </Button>
+    );
+  if (!off && state.status === "ready")
+    return (
+      <Button
+        size="lg"
+        className={SETTINGS_BUTTON}
+        disabled={restarting}
+        onClick={onRestart}
+      >
+        {restarting ? "Restarting…" : "Restart now"}
+      </Button>
+    );
+  return (
+    <Button
+      size="lg"
+      variant="outline"
+      className={SETTINGS_BUTTON}
+      disabled={off || checking}
+      onClick={onCheck}
+    >
+      {checking ? "Checking…" : "Check now"}
+    </Button>
+  );
+}
+
+/** Restart now while terminals or runs are live: ask once more. */
+function RestartConfirm({
+  live,
+  busy,
+  version,
+  onRestart,
+  onCancel,
+}: {
+  live: UpdaterLiveWork | null;
+  busy: boolean;
+  version: string;
+  onRestart: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <AlertDialog
+      open={live !== null}
+      onOpenChange={(next) => {
+        if (!next && !busy) onCancel();
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Restart with work still running?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {live
+              ? `${liveSentence(live)} Restarting Lanework stops ${live.terminals + live.runs === 1 ? "it" : "them"}. Lanework ${version} also installs the next time you quit.`
+              : ""}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            // `border-0`: without it the popup shows through as a 1px ring
+            // (see account-section's Sign out for why it lives here).
+            className="border-0"
+            disabled={busy}
+            onClick={onRestart}
+          >
+            {busy ? "Restarting…" : "Restart anyway"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

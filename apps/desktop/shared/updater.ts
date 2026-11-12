@@ -2,9 +2,10 @@
 //
 // A release build (`X.Y.Z`, packaged, macOS) checks the published GitHub
 // Releases of fuongz/lanework through electron-updater: on launch and every
-// 4 hours while "Update automatically" is on, and whenever the person presses
-// Check for updates. It downloads in the background, then the page asks
-// whether to restart now or later. A dev build (`X.Y.Z-dev.…`, INF-10) or an
+// 4 hours while "Check automatically" is on, and whenever the person presses
+// Check for updates. A newer release is only offered: nothing downloads until
+// the person says so (the island outside Settings, Settings → About, or the
+// app menu's answer), and once it is downloaded they choose when to restart. A dev build (`X.Y.Z-dev.…`, INF-10) or an
 // unpackaged run never checks.
 //
 // After an update, the first launch of the newer version shows that release's
@@ -35,7 +36,10 @@ export type UpdaterDisabledReason = "dev" | "unpackaged" | "platform";
  * Where the updater is.
  *
  * - `idle`: nothing checked yet this run.
- * - `checking`, `downloading`: under way.
+ * - `checking`: under way.
+ * - `available`: a newer release is out; nothing is downloaded until the
+ *   person asks (`download`).
+ * - `downloading`: the person asked, and it is under way.
  * - `ready`: an update is downloaded and waits to be installed.
  * - `up-to-date`: the last check found nothing newer.
  * - `error`: the last check or download failed; `error` says why.
@@ -43,6 +47,7 @@ export type UpdaterDisabledReason = "dev" | "unpackaged" | "platform";
 export type UpdaterStatus =
   | "idle"
   | "checking"
+  | "available"
   | "downloading"
   | "ready"
   | "up-to-date"
@@ -51,10 +56,10 @@ export type UpdaterStatus =
 export interface UpdaterState {
   /** Null when this build checks; otherwise why it never does. */
   disabled: UpdaterDisabledReason | null;
-  /** "Update automatically": check on launch and every 4 hours. On by default. */
+  /** "Check automatically": check on launch and every 4 hours. On by default. */
   auto: boolean;
   status: UpdaterStatus;
-  /** The version being downloaded or ready; null otherwise. */
+  /** The version available, being downloaded or ready; null otherwise. */
   version: string | null;
   /** Download progress, 0 to 100, while `downloading`. */
   progress: number | null;
@@ -63,8 +68,9 @@ export interface UpdaterState {
   /** When the last check finished, ms since the epoch. */
   checkedAt: number | null;
   /**
-   * The person chose Later for the ready update: the prompt stays closed and
-   * the update installs the next time Lanework quits.
+   * The person chose Later for this version: the island stops offering it
+   * for this run. A ready update still installs the next time Lanework
+   * quits; an available one stays undownloaded.
    */
   postponed: boolean;
 }
@@ -114,6 +120,8 @@ export const updaterChannels = {
   get: "updater:get",
   setAuto: "updater:set-auto",
   check: "updater:check",
+  /** Download the available update; the person asked for it. */
+  download: "updater:download",
   install: "updater:install",
   later: "updater:later",
   /** The notes of a version this Mac just updated to, once; else null. */
@@ -134,12 +142,17 @@ export interface DesktopUpdaterApi {
   setAuto: (auto: boolean) => Promise<UpdaterState>;
   /** Check now, whatever the switch says; answers once the check ends. */
   check: () => Promise<UpdaterState>;
+  /** Download the available update; answers once the download started. */
+  download: () => Promise<UpdaterState>;
   /**
    * Restart now and install the ready update. Without `force`, main answers
    * `confirm` while terminals or runs are live, and does nothing.
    */
   install: (force: boolean) => Promise<UpdaterInstallAnswer>;
-  /** Later: close the prompt; the update installs on the next quit. */
+  /**
+   * Later: stop offering this version for this run. A ready update installs
+   * on the next quit.
+   */
   later: () => Promise<UpdaterState>;
   pendingWhatsNew: () => Promise<ReleaseNotes | null>;
   markWhatsNewSeen: () => Promise<void>;

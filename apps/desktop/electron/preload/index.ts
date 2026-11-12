@@ -220,6 +220,7 @@ const updater: DesktopUpdaterApi = {
   get: () => ipcRenderer.invoke(updaterChannels.get),
   setAuto: (auto) => ipcRenderer.invoke(updaterChannels.setAuto, auto),
   check: () => ipcRenderer.invoke(updaterChannels.check),
+  download: () => ipcRenderer.invoke(updaterChannels.download),
   install: (force) => ipcRenderer.invoke(updaterChannels.install, force),
   later: () => ipcRenderer.invoke(updaterChannels.later),
   pendingWhatsNew: () => ipcRenderer.invoke(updaterChannels.pendingWhatsNew),

@@ -74,6 +74,16 @@ build you made until the next `mise run app:install`. Settings → About says so
 beside **Check now**. Only a release build (`X.Y.Z`, from the release
 workflow) updates, from published GitHub Releases.
 
+### Trying the update flow in dev
+
+`mise run dev:updater` starts a dev run against a pretend feed
+(`electron/main/updater/simulate.ts`): it checks 3 s after launch, offers the
+next patch version, downloads it in about 6 s when you press Download, and
+Restart now only logs and lands on "up to date" (nothing quits, no terminal
+stops). Pick a scenario with `LANEWORK_UPDATER_SIMULATE=available|none|error|download-error`
+and the offered version with `LANEWORK_UPDATER_SIMULATE_VERSION`. Only an
+unpackaged run reads these; a packaged build ignores them.
+
 ## Where it shows
 
 `mise run app:install` prints the installed Preview's version. Finder's Get Info,

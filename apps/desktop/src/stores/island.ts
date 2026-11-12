@@ -14,6 +14,7 @@ import { create } from "zustand";
  * | `awaiting`       | 300      | An agent stopped and waits on the person.   |
  * | `mcpAuth`        | 200      | An agent lost its Lanework sign-in.         |
  * | `notify`         | 150      | A toast from `notify()`.                    |
+ * | `update`         | 120      | A newer Lanework is out, or ready.          |
  * | `harness`        | 100      | A newer Claude Code or Codex is out.        |
  *
  * Gaps of 50 or more leave room between neighbours.
@@ -24,6 +25,7 @@ export const ISLAND_PRIORITY = {
   awaiting: 300,
   mcpAuth: 200,
   notify: 150,
+  update: 120,
   harness: 100,
 } as const;
 

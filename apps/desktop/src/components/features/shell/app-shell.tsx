@@ -13,6 +13,7 @@ import { PortsStrip } from "#/components/features/terminal/ports-strip";
 import { TerminalMinibar } from "#/components/features/terminal/terminal-minibar";
 import { TerminalPanel } from "#/components/features/terminal/terminal-panel";
 import { useTerminalSessions } from "#/components/features/terminal/use-terminal-sessions";
+import { UpdateIsland } from "#/components/features/updater/update-island";
 import { HarnessIsland } from "#/components/shared/agents/harness-island";
 import { WindowTitlebarHost } from "#/components/shared/navigation/window-titlebar";
 import {
@@ -494,7 +495,7 @@ export function AppShell() {
       {/* The island, fixed at the top centre over the title bar's edge and
           the page, and what it may say: dictation, board notices, an agent
           waiting on the person (FE-97), the Lanework MCP sign-in, `notify()`
-          toasts and harness updates. Each content registers with a priority
+          toasts, a Lanework update and harness updates. Each content registers with a priority
           (`ISLAND_PRIORITY`, in that order) and the host shows the highest in
           one capsule that morphs between them. The contents draw nothing.
 
@@ -505,6 +506,7 @@ export function AppShell() {
       <BoardNoticeIsland />
       <AwaitingIsland />
       <McpAuthIsland />
+      <UpdateIsland />
       <HarnessIsland />
       <NotifyIsland />
       <IslandHost />

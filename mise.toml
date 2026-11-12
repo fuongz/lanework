@@ -6,6 +6,10 @@
 description = "Desktop app in dev: renderer HMR, main/preload restart; its own data in ~/.lanew-dev (LANEWORK_HOME=~/.lanew for the real data)"
 run = "bun run dev"
 
+[tasks."dev:updater"]
+description = "Dev run against a pretend update feed: LANEWORK_UPDATER_SIMULATE=available|none|error|download-error (default available)"
+run = "LANEWORK_UPDATER_SIMULATE=${LANEWORK_UPDATER_SIMULATE:-available} bun run dev"
+
 [tasks.build]
 description = "Build the desktop app bundle (dist/)"
 run = "bun run build"
