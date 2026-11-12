@@ -39,11 +39,21 @@ export type Node<F extends { path: string } = WorktreeFile> =
   | Folder<F>
   | { kind: "file"; file: F };
 
+/**
+ * What a file's row is called: its last segment.
+ *
+ * An untracked folder listed as one row (`node_modules/`) is called by its
+ * own name, not the empty string after its slash.
+ */
+export function entryName(path: string): string {
+  return splitPath(path.endsWith("/") ? path.slice(0, -1) : path).name;
+}
+
 /** Folders first, then files, each alphabetical: a file tree's order. */
 function byKind<F extends { path: string }>(a: Node<F>, b: Node<F>): number {
   if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
-  const left = a.kind === "folder" ? a.name : splitPath(a.file.path).name;
-  const right = b.kind === "folder" ? b.name : splitPath(b.file.path).name;
+  const left = a.kind === "folder" ? a.name : entryName(a.file.path);
+  const right = b.kind === "folder" ? b.name : entryName(b.file.path);
   return left.localeCompare(right);
 }
 
@@ -68,7 +78,10 @@ export function buildTree<F extends { path: string }>(files: F[]): Node<F>[] {
   };
   const folders = new Map<string, Folder<F>>();
   for (const file of files) {
-    const segments = file.path.split("/");
+    // An untracked folder listed as one row sits where the folder would.
+    const segments = (
+      file.path.endsWith("/") ? file.path.slice(0, -1) : file.path
+    ).split("/");
     let parent = root;
     for (let depth = 1; depth < segments.length; depth++) {
       const path = segments.slice(0, depth).join("/");

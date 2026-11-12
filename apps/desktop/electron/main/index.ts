@@ -269,8 +269,14 @@ protocol.registerSchemesAsPrivileged([
 const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined;
 if (devUrl && new URL(devUrl).origin !== "http://127.0.0.1:5175")
   throw new Error("Unexpected development origin");
-if (!app.isPackaged && process.env.LANEWORK_TEST_USER_DATA)
-  app.setPath("userData", process.env.LANEWORK_TEST_USER_DATA);
+// A spec's userData, or `mise run dev`'s own (`scripts/dev.mjs`). Only the
+// first makes this a test run; the dev one moves the data and nothing else.
+{
+  const userData = app.isPackaged
+    ? undefined
+    : process.env.LANEWORK_TEST_USER_DATA || process.env.LANEWORK_DEV_USER_DATA;
+  if (userData) app.setPath("userData", userData);
+}
 // Before anything reads the project state: it lived in `workspaces/` until
 // FE-107, and in one flat folder until FE-108.
 moveLegacyProjectsDir();

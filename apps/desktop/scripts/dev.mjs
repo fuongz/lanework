@@ -36,7 +36,12 @@ import {
  *
  * To work on the real data, set the home yourself:
  * `LANEWORK_HOME=~/.lanew mise run dev` (userData follows only when
- * `LANEWORK_TEST_USER_DATA` is set too).
+ * `LANEWORK_DEV_USER_DATA` is set too).
+ *
+ * NOTE: `LANEWORK_DEV_USER_DATA`, never `LANEWORK_TEST_USER_DATA`: that one
+ * tells main a spec drives it, and main then finds no agent CLI, no sign-in
+ * and no usage (the test seams), so the dev app showed every agent "Not
+ * installed" and no quota.
  */
 const pad = (n) => String(n).padStart(2, "0");
 const started = new Date();
@@ -45,8 +50,8 @@ const DEV_STAMP = `${started.getFullYear()}${pad(started.getMonth() + 1)}${pad(s
 
 const DEV_DATA = {
   LANEWORK_HOME: process.env.LANEWORK_HOME || join(homedir(), ".lanew-dev"),
-  LANEWORK_TEST_USER_DATA:
-    process.env.LANEWORK_TEST_USER_DATA ||
+  LANEWORK_DEV_USER_DATA:
+    process.env.LANEWORK_DEV_USER_DATA ||
     (process.env.LANEWORK_HOME
       ? undefined
       : join(homedir(), "Library", "Application Support", "Lanework (Dev)")),
@@ -261,7 +266,7 @@ await ctx.watch();
 say("dev", "renderer HMR + main/preload restart");
 say(
   "dev",
-  `data in ${DEV_DATA.LANEWORK_HOME}${DEV_DATA.LANEWORK_TEST_USER_DATA ? ` and ${DEV_DATA.LANEWORK_TEST_USER_DATA}` : ""} (LANEWORK_HOME=~/.lanew for the real data)`,
+  `data in ${DEV_DATA.LANEWORK_HOME}${DEV_DATA.LANEWORK_DEV_USER_DATA ? ` and ${DEV_DATA.LANEWORK_DEV_USER_DATA}` : ""} (LANEWORK_HOME=~/.lanew for the real data)`,
 );
 say(
   "dev",

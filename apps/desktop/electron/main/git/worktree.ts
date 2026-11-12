@@ -26,6 +26,7 @@ import {
   type GitIdentity,
   HISTORY_PAGE,
   IMAGE_TYPES,
+  isFolderEntry,
   patchStats,
   READS_REFUSED_MESSAGE,
   READS_UNCHECKED_MESSAGE,
@@ -83,6 +84,20 @@ const SHA = /^[0-9a-f]{7,64}$/i;
  * Past this they are only listed.
  */
 const MAX_UNTRACKED_READS = 200;
+
+/**
+ * How many untracked files the Changes list names one by one.
+ *
+ * An untracked folder git lists as one entry (`src/feature/`) is opened into
+ * its files while the total stays under this, smallest folders first. Past
+ * it a folder stays one row with its count: an `npm install` or a `cargo
+ * build` nothing ignores is tens of thousands of files, and listing, sizing
+ * and drawing each one froze the app.
+ */
+const MAX_UNTRACKED_LISTED = 1000;
+
+/** How many `diff --no-index` run at once for the untracked files' patch. */
+const UNTRACKED_DIFFS_AT_ONCE = 8;
 
 /** The largest file read in full for the viewer. A diff needs no more. */
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -215,6 +230,8 @@ interface RawEntry {
   previousPath: string | null;
   status: WorktreeFileStatus;
   staged: StagedState;
+  /** An untracked folder's file count ({@link WorktreeFile.contents}). */
+  contents?: number;
 }
 
 function stagedOf(x: string, y: string): StagedState {
@@ -383,6 +400,15 @@ function lineCount(text: string): number {
   return text.endsWith("\n") ? lines - 1 : lines;
 }
 
+/**
+ * Git's status, with each small untracked folder opened into its files.
+ *
+ * NOTE: `--untracked-files=normal`, git's default, not `all`. It names a
+ * wholly untracked folder once (`node_modules/`) instead of every file in
+ * it, and does not walk it. {@link openFolders} then lists the folders'
+ * files and opens the ones that fit under {@link MAX_UNTRACKED_LISTED}, so a
+ * new folder of a few files reads exactly as `all` would list it.
+ */
 async function readEntries(top: string) {
   const [statusRaw, head] = await Promise.all([
     out(top, [
@@ -390,11 +416,90 @@ async function readEntries(top: string) {
       "--porcelain=v2",
       "-z",
       "--branch",
-      "--untracked-files=all",
+      "--untracked-files=normal",
     ]),
     hasHead(top),
   ]);
-  return { ...parseStatus(statusRaw), head };
+  const { branch, entries } = parseStatus(statusRaw);
+  return { branch, entries: await openFolders(top, entries), head };
+}
+
+/**
+ * Replace each untracked folder entry with its files while they fit, and
+ * count the files of the ones that stay folded.
+ *
+ * Smallest folders first: the agent's new `src/feature/` is opened before a
+ * `target/`. One `ls-files` for all of them, which honours the same ignore
+ * rules as `status`. When that read fails (too much output, a timeout), every
+ * folder stays one row, uncounted, rather than the status failing.
+ */
+async function openFolders(
+  top: string,
+  entries: RawEntry[],
+): Promise<RawEntry[]> {
+  const folders = entries.filter(
+    (entry) => entry.status === "untracked" && isFolderEntry(entry),
+  );
+  if (!folders.length) return entries;
+  let listed: string[];
+  try {
+    listed = (
+      await out(top, [
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        ...folders.map((folder) => folder.path),
+      ])
+    ).split("\0");
+  } catch {
+    return entries;
+  }
+  const inside = new Map<string, string[]>(
+    folders.map((folder) => [folder.path, []]),
+  );
+  for (const path of listed) {
+    if (!path) continue;
+    // NOTE: The folders git names never nest, so the first one that is a
+    // prefix is the one. A repository inside one is listed as itself
+    // (`sub/`), which is its folder's whole content.
+    for (
+      let cut = path.indexOf("/");
+      cut !== -1;
+      cut = path.indexOf("/", cut + 1)
+    ) {
+      const files = inside.get(path.slice(0, cut + 1));
+      if (files) {
+        files.push(path);
+        break;
+      }
+    }
+  }
+  let room =
+    MAX_UNTRACKED_LISTED -
+    entries.filter(
+      (entry) => entry.status === "untracked" && !isFolderEntry(entry),
+    ).length;
+  const opened = new Map<string, string[]>();
+  for (const [folder, files] of [...inside].sort(
+    (a, b) => a[1].length - b[1].length,
+  )) {
+    if (!files.length || files.length > room) continue;
+    room -= files.length;
+    opened.set(folder, files);
+  }
+  return entries.flatMap((entry): RawEntry[] => {
+    const files = inside.get(entry.path);
+    if (!files) return [entry];
+    if (!opened.has(entry.path)) return [{ ...entry, contents: files.length }];
+    return files.map((path) => ({
+      path,
+      previousPath: null,
+      status: "untracked",
+      staged: "none",
+    }));
+  });
 }
 
 function toCommit(record: string): CommitSummary | null {
@@ -446,7 +551,11 @@ export async function status(top: string): Promise<WorktreeState> {
       deletions: 0,
       binary: false,
     };
-    if (entry.status === "untracked" && reads < MAX_UNTRACKED_READS) {
+    if (
+      entry.status === "untracked" &&
+      !isFolderEntry(entry) &&
+      reads < MAX_UNTRACKED_READS
+    ) {
       reads++;
       const text = await readText(join(top, entry.path));
       counts =
@@ -489,17 +598,42 @@ export async function patch(top: string): Promise<WorktreePatch> {
         "--no-textconv",
       ]),
     );
-  const untracked = entries.filter((entry) => entry.status === "untracked");
-  for (const entry of untracked.slice(0, MAX_UNTRACKED_READS)) {
-    // NOTE: Exit 1 is the answer here, not a failure. `--no-index` reports
-    // "these differ" the way `diff(1)` does.
-    const { stdout } = await read(
-      top,
-      ["diff", "--no-index", "--no-ext-diff", "--", "/dev/null", entry.path],
-      { ok: [1] },
-    );
-    parts.push(stdout);
-  }
+  // A folder listed as one row has no patch of its own; the list counts it.
+  const untracked = entries.filter(
+    (entry) => entry.status === "untracked" && !isFolderEntry(entry),
+  );
+  const shown = untracked.slice(0, MAX_UNTRACKED_READS);
+  // A few at a time, not one after another: each is a process, and two
+  // hundred in a row kept the diff waiting for seconds.
+  const diffs = new Array<string>(shown.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < shown.length) {
+      const at = next++;
+      // NOTE: Exit 1 is the answer here, not a failure. `--no-index` reports
+      // "these differ" the way `diff(1)` does.
+      const { stdout } = await read(
+        top,
+        [
+          "diff",
+          "--no-index",
+          "--no-ext-diff",
+          "--",
+          "/dev/null",
+          shown[at].path,
+        ],
+        { ok: [1] },
+      );
+      diffs[at] = stdout;
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(UNTRACKED_DIFFS_AT_ONCE, shown.length) },
+      worker,
+    ),
+  );
+  parts.push(...diffs);
   return {
     patch: parts.filter(Boolean).join(""),
     skipped: Math.max(0, untracked.length - MAX_UNTRACKED_READS),
@@ -567,6 +701,12 @@ export async function restore(top: string, paths: string[]): Promise<void> {
   const fromHead: string[] = [];
   const dropFromIndex: string[] = [];
   const remove: string[] = [];
+  // NOTE: Never a folder listed as one row. Discard deletes one file at a
+  // time, and `node_modules/` is thousands; the list offers no Discard on it.
+  if (picked.some(isFolderEntry))
+    throw new Error(
+      "A whole untracked folder is not discarded from here. Delete it in Finder or a terminal.",
+    );
   for (const entry of picked) {
     if (entry.status === "untracked") remove.push(entry.path);
     else if (!head || entry.status === "added") {

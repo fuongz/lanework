@@ -10,6 +10,10 @@
 //   component with its own shadow root, and every row here carries a
 //   checkbox and a restore button that have to be real, focusable controls
 //   in this document.
+// - Windowed past a few hundred rows: only the rows in view (and a margin)
+//   are drawn. Every row is 22px, so where each one sits is arithmetic. A
+//   working tree with thousands of changes drew thousands of rows, each with
+//   its own tooltip, checkbox and store subscriptions, and froze the app.
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
@@ -22,12 +26,19 @@ import {
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo, useState } from "react";
+import {
+  type RefObject,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { SegmentedControl } from "#/components/shared/common/segmented-control";
 import { splitPath } from "#/components/shared/diff/diff-file-header";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import {
   buildTree,
+  entryName,
   type Folder,
   INDENT,
   MARK,
@@ -42,7 +53,7 @@ import {
   TooltipTrigger,
 } from "#/components/ui/tooltip";
 import { type DiffStyle, useWorktree } from "#/stores/worktree";
-import type { WorktreeFile } from "../../../../shared/worktree";
+import { isFolderEntry, type WorktreeFile } from "../../../../shared/worktree";
 import { ChangeAgents } from "./change-agents";
 
 function Counts({
@@ -64,6 +75,60 @@ function Counts({
         <span className="text-rose-600 dark:text-rose-400">−{deletions}</span>
       )}
     </span>
+  );
+}
+
+/** How many files a change list stands for: a folded folder is all of its. */
+function fileCount(files: WorktreeFile[]): number {
+  return files.reduce((sum, file) => sum + (file.contents ?? 1), 0);
+}
+
+function filesLabel(count: number): string {
+  return `${count.toLocaleString()} ${count === 1 ? "file" : "files"}`;
+}
+
+/**
+ * An untracked folder listed as one row (`node_modules/`), with its count.
+ *
+ * It has no diff to open and no Discard: deleting a folder of thousands of
+ * files is not a one-click undo. Its box stages all of it, as `git add` would.
+ */
+function FolderEntryRow({ file, pad }: { file: WorktreeFile; pad: number }) {
+  const mark = MARK[file.status];
+  const count = file.contents === undefined ? null : filesLabel(file.contents);
+  return (
+    <div className="hover:bg-foreground/[0.04] flex h-[22px] min-w-0 items-center gap-1.5 rounded pr-1.5">
+      <div
+        title={
+          count
+            ? `${file.path}: ${count}, not listed one by one`
+            : `${file.path}: not listed one by one`
+        }
+        style={{ paddingLeft: pad }}
+        className="flex h-full min-w-0 flex-1 items-center gap-[5px] text-xs"
+      >
+        <HugeiconsIcon
+          icon={Folder01Icon}
+          className="text-muted-foreground size-3.5 shrink-0"
+          strokeWidth={1.5}
+          aria-hidden="true"
+        />
+        <span className="min-w-0 truncate">{entryName(file.path)}/</span>
+        <span
+          className={`shrink-0 font-mono text-[10px] font-semibold ${mark.tone}`}
+          title={file.status}
+        >
+          {mark.letter}
+        </span>
+        <span className="ml-auto" />
+        {count && (
+          <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+            {count}
+          </span>
+        )}
+      </div>
+      <StageBox files={[file]} label={file.path} />
+    </div>
   );
 }
 
@@ -191,7 +256,7 @@ function FolderRow({
         </span>
         {shut && (
           <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
-            {folder.files.length}
+            {fileCount(folder.files).toLocaleString()}
           </span>
         )}
       </button>
@@ -200,70 +265,87 @@ function FolderRow({
   );
 }
 
-function Section({
+/** One row of the list: a section's header, a folder, or a file. */
+type ListRow =
+  | { kind: "section"; title: string; files: WorktreeFile[]; open: boolean }
+  | { kind: "folder"; section: string; folder: Folder; depth: number }
+  | { kind: "file"; file: WorktreeFile; depth: number };
+
+/** Every row's height, in pixels: the rows' `h-[22px]`. */
+const ROW = 22;
+/** The list's top padding (`py-1`), before the first row. */
+const PAD = 4;
+/** Rows drawn above and below the ones in view, so a fast scroll lands on drawn rows. */
+const OVERSCAN = 20;
+/** At or under this many rows the list draws them all. */
+const WINDOW_FROM = 300;
+
+/**
+ * Which rows of `count` the scroller shows now, as `[start, end)`.
+ *
+ * Re-renders only when that range moves, not on every scroll event.
+ */
+function useWindow(
+  scroller: RefObject<HTMLDivElement | null>,
+  count: number,
+): [number, number] {
+  const [range, setRange] = useState<[number, number]>([0, 3 * OVERSCAN]);
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (!element || count <= WINDOW_FROM) return;
+    const read = () => {
+      const first = Math.floor((element.scrollTop - PAD) / ROW);
+      const shown = Math.ceil(element.clientHeight / ROW);
+      const start = Math.max(0, first - OVERSCAN);
+      const end = Math.min(count, first + shown + OVERSCAN);
+      setRange((current) =>
+        current[0] === start && current[1] === end ? current : [start, end],
+      );
+    };
+    read();
+    element.addEventListener("scroll", read, { passive: true });
+    const observer = new ResizeObserver(read);
+    observer.observe(element);
+    return () => {
+      element.removeEventListener("scroll", read);
+      observer.disconnect();
+    };
+  }, [scroller, count]);
+  return count <= WINDOW_FROM ? [0, count] : range;
+}
+
+function SectionRow({
   title,
   files,
-  onRestore,
+  open,
+  onToggle,
 }: {
   title: string;
   files: WorktreeFile[];
-  onRestore: (file: WorktreeFile) => void;
+  open: boolean;
+  onToggle: () => void;
 }) {
-  const [open, setOpen] = useState(true);
-  // Folders folded shut, by path. Open by default: a change list is read
-  // whole.
-  const [shut, setShut] = useState<Set<string>>(() => new Set());
-  const toggle = (dir: string) =>
-    setShut((current) => {
-      const next = new Set(current);
-      if (next.has(dir)) next.delete(dir);
-      else next.add(dir);
-      return next;
-    });
-  const tree = useMemo(() => buildTree(files), [files]);
-  const rows = useMemo(() => visibleRows(tree, shut), [tree, shut]);
-
-  if (!files.length) return null;
   return (
-    <section aria-label={title} className="flex flex-col">
-      <div className="flex h-[22px] items-center gap-1.5 pr-1.5">
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-          className="text-muted-foreground hover:text-foreground focus-visible:ring-accent-brand flex min-w-0 flex-1 items-center gap-1.5 rounded pl-1.5 text-left text-[11px] font-medium outline-none focus-visible:ring-2"
-        >
-          <HugeiconsIcon
-            icon={open ? ArrowDown01Icon : ArrowRight01Icon}
-            className="size-3 shrink-0"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-          {title}
-          <span className="tabular-nums">{files.length}</span>
-        </button>
-        <StageBox files={files} label={`all ${title.toLowerCase()} files`} />
-      </div>
-      {open &&
-        rows.map((row) =>
-          row.kind === "folder" ? (
-            <FolderRow
-              key={`folder:${row.folder.path}`}
-              folder={row.folder}
-              pad={6 + row.depth * INDENT}
-              shut={shut.has(row.folder.path)}
-              onToggle={() => toggle(row.folder.path)}
-            />
-          ) : (
-            <FileRow
-              key={row.file.path}
-              file={row.file}
-              pad={6 + row.depth * INDENT}
-              onRestore={onRestore}
-            />
-          ),
-        )}
-    </section>
+    <div className="flex h-[22px] items-center gap-1.5 pr-1.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="text-muted-foreground hover:text-foreground focus-visible:ring-accent-brand flex min-w-0 flex-1 items-center gap-1.5 rounded pl-1.5 text-left text-[11px] font-medium outline-none focus-visible:ring-2"
+      >
+        <HugeiconsIcon
+          icon={open ? ArrowDown01Icon : ArrowRight01Icon}
+          className="size-3 shrink-0"
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+        {title}
+        <span className="tabular-nums">
+          {fileCount(files).toLocaleString()}
+        </span>
+      </button>
+      <StageBox files={files} label={`all ${title.toLowerCase()} files`} />
+    </div>
   );
 }
 
@@ -310,8 +392,9 @@ export function ChangesActions({ files }: { files: WorktreeFile[] }) {
 function ChangesHeader({ files }: { files: WorktreeFile[] }) {
   const additions = files.reduce((sum, file) => sum + file.additions, 0);
   const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
+  const count = fileCount(files);
   const label =
-    files.length === 1 ? "1 changed file" : `${files.length} changed files`;
+    count === 1 ? "1 changed file" : `${count.toLocaleString()} changed files`;
   return (
     <div className="border-sidebar-border flex h-8 shrink-0 items-center gap-2 border-b pr-2.5 pl-3">
       <span className="min-w-0 flex-1 truncate text-xs font-medium">
@@ -323,26 +406,115 @@ function ChangesHeader({ files }: { files: WorktreeFile[] }) {
   );
 }
 
+/** Add `key` to a set, or take it out, as a new set. */
+function toggled(set: Set<string>, key: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
 export function ChangesList({ files }: { files: WorktreeFile[] }) {
   const [restoring, setRestoring] = useState<WorktreeFile[] | null>(null);
+  // Sections folded shut, by title, and folders folded shut, by section and
+  // path. Open by default: a change list is read whole.
+  const [closed, setClosed] = useState<Set<string>>(() => new Set());
+  const [shut, setShut] = useState<Set<string>>(() => new Set());
+  const scroller = useRef<HTMLDivElement>(null);
 
-  const tracked = files.filter((file) => file.status !== "untracked");
-  const untracked = files.filter((file) => file.status === "untracked");
+  const sections = useMemo(
+    () =>
+      [
+        {
+          title: "Tracked",
+          files: files.filter((file) => file.status !== "untracked"),
+        },
+        {
+          title: "Untracked",
+          files: files.filter((file) => file.status === "untracked"),
+        },
+      ].map((section) => ({ ...section, tree: buildTree(section.files) })),
+    [files],
+  );
+
+  const rows = useMemo(() => {
+    const out: ListRow[] = [];
+    for (const { title, files: inSection, tree } of sections) {
+      if (!inSection.length) continue;
+      const open = !closed.has(title);
+      out.push({ kind: "section", title, files: inSection, open });
+      if (!open) continue;
+      const folded = new Set(
+        [...shut]
+          .filter((key) => key.startsWith(`${title}:`))
+          .map((key) => key.slice(title.length + 1)),
+      );
+      for (const row of visibleRows(tree, folded))
+        out.push(
+          row.kind === "folder"
+            ? {
+                kind: "folder",
+                section: title,
+                folder: row.folder,
+                depth: row.depth,
+              }
+            : { kind: "file", file: row.file, depth: row.depth },
+        );
+    }
+    return out;
+  }, [sections, closed, shut]);
+
+  const [start, end] = useWindow(scroller, rows.length);
+  const onRestore = (file: WorktreeFile) => setRestoring([file]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ChangesHeader files={files} />
-      <div className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
-        <Section
-          title="Tracked"
-          files={tracked}
-          onRestore={(file) => setRestoring([file])}
-        />
-        <Section
-          title="Untracked"
-          files={untracked}
-          onRestore={(file) => setRestoring([file])}
-        />
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
+        <div className="relative" style={{ height: rows.length * ROW }}>
+          <div
+            className="absolute inset-x-0 top-0 flex flex-col"
+            style={{ transform: `translateY(${start * ROW}px)` }}
+          >
+            {rows.slice(start, end).map((row) => {
+              if (row.kind === "section")
+                return (
+                  <SectionRow
+                    key={`section:${row.title}`}
+                    title={row.title}
+                    files={row.files}
+                    open={row.open}
+                    onToggle={() =>
+                      setClosed((current) => toggled(current, row.title))
+                    }
+                  />
+                );
+              const pad = 6 + row.depth * INDENT;
+              if (row.kind === "folder") {
+                const key = `${row.section}:${row.folder.path}`;
+                return (
+                  <FolderRow
+                    key={`folder:${key}`}
+                    folder={row.folder}
+                    pad={pad}
+                    shut={shut.has(key)}
+                    onToggle={() => setShut((current) => toggled(current, key))}
+                  />
+                );
+              }
+              return isFolderEntry(row.file) ? (
+                <FolderEntryRow key={row.file.path} file={row.file} pad={pad} />
+              ) : (
+                <FileRow
+                  key={row.file.path}
+                  file={row.file}
+                  pad={pad}
+                  onRestore={onRestore}
+                />
+              );
+            })}
+          </div>
+        </div>
       </div>
       <RestoreDialog files={restoring} onClose={() => setRestoring(null)} />
     </div>
@@ -368,13 +540,18 @@ function ChangesDiffControls({ files }: { files: WorktreeFile[] }) {
   const unstage = useWorktree((state) => state.unstage);
   const busy = useWorktree((state) => state.busy);
 
+  // A folder listed as one row has no diff to step to.
+  const diffed = useMemo(
+    () => files.filter((file) => !isFolderEntry(file)),
+    [files],
+  );
   const current = focus
-    ? files.find((file) => file.path === focus.path)
+    ? diffed.find((file) => file.path === focus.path)
     : undefined;
-  const index = current ? files.indexOf(current) : -1;
+  const index = current ? diffed.indexOf(current) : -1;
   const step = (delta: number) => {
-    if (!files.length) return;
-    const next = files[(index + delta + files.length) % files.length];
+    if (!diffed.length) return;
+    const next = diffed[(index + delta + diffed.length) % diffed.length];
     if (next) focusFile(next.path);
   };
 
@@ -394,7 +571,7 @@ function ChangesDiffControls({ files }: { files: WorktreeFile[] }) {
         size="icon-sm"
         aria-label="Previous file"
         title="Previous file"
-        disabled={files.length < 2}
+        disabled={diffed.length < 2}
         onClick={() => step(-1)}
       >
         <HugeiconsIcon
@@ -408,7 +585,7 @@ function ChangesDiffControls({ files }: { files: WorktreeFile[] }) {
         size="icon-sm"
         aria-label="Next file"
         title="Next file"
-        disabled={files.length < 2}
+        disabled={diffed.length < 2}
         onClick={() => step(1)}
       >
         <HugeiconsIcon

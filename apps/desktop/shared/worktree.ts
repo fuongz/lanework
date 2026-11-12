@@ -36,6 +36,23 @@ export interface WorktreeFile {
   deletions: number;
   /** True when git calls it binary: there are no lines to count or show. */
   binary: boolean;
+  /**
+   * How many untracked files an untracked folder listed as one row holds.
+   *
+   * Such a row's path ends with `/` ({@link isFolderEntry}). Absent when the
+   * folder was not counted, or is another repository git does not look into.
+   */
+  contents?: number;
+}
+
+/**
+ * An untracked folder listed as one row (`node_modules/`), not a file.
+ *
+ * Git's own spelling: its path ends with `/`. It has no diff and no lines;
+ * staging it stages everything in it.
+ */
+export function isFolderEntry(file: { path: string }): boolean {
+  return file.path.endsWith("/");
 }
 
 export interface CommitSummary {
