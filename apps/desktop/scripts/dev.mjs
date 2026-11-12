@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { context } from "esbuild";
 import { createLogger, createServer } from "vite";
 import { brandDevBundle } from "./brand-dev-bundle.mjs";
@@ -26,6 +28,32 @@ import {
  * an isTTY-off but TERM-on buffer (an app's embedded pane) is still a
  * terminal. A log redirected to a file (`TERM` gone or `dumb`) stays plain.
  */
+/**
+ * Where a dev session keeps its state: apart from the installed release by
+ * default, so `mise run dev` beside an open Lanework never writes the same
+ * database or settings, and a migration in code under way never runs on the
+ * real data. `~/.lanew-dev` for the app home, `Lanework (Dev)` for userData.
+ *
+ * To work on the real data, set the home yourself:
+ * `LANEWORK_HOME=~/.lanew mise run dev` (userData follows only when
+ * `LANEWORK_TEST_USER_DATA` is set too).
+ */
+const pad = (n) => String(n).padStart(2, "0");
+const started = new Date();
+/** When this session started: the stamp in its `0.1.0-dev-…` version. */
+const DEV_STAMP = `${started.getFullYear()}${pad(started.getMonth() + 1)}${pad(started.getDate())}${pad(started.getHours())}${pad(started.getMinutes())}`;
+
+const DEV_DATA = {
+  LANEWORK_HOME: process.env.LANEWORK_HOME || join(homedir(), ".lanew-dev"),
+  LANEWORK_TEST_USER_DATA:
+    process.env.LANEWORK_TEST_USER_DATA ||
+    (process.env.LANEWORK_HOME
+      ? undefined
+      : join(homedir(), "Library", "Application Support", "Lanework (Dev)")),
+};
+for (const [key, value] of Object.entries(DEV_DATA))
+  if (value === undefined) delete DEV_DATA[key];
+
 const NO = process.env.NO_COLOR !== undefined;
 const FORCE = process.env.FORCE_COLOR;
 const FORCE_OFF = FORCE === "0";
@@ -149,6 +177,8 @@ const ctx = await context({
           const env = {
             ...process.env,
             ELECTRON_RENDERER_URL: "http://127.0.0.1:5175",
+            ...DEV_DATA,
+            LANEWORK_DEV_STAMP: DEV_STAMP,
           };
           delete env.ELECTRON_RUN_AS_NODE;
           const args = ["."];
@@ -229,6 +259,10 @@ process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 await ctx.watch();
 say("dev", "renderer HMR + main/preload restart");
+say(
+  "dev",
+  `data in ${DEV_DATA.LANEWORK_HOME}${DEV_DATA.LANEWORK_TEST_USER_DATA ? ` and ${DEV_DATA.LANEWORK_TEST_USER_DATA}` : ""} (LANEWORK_HOME=~/.lanew for the real data)`,
+);
 say(
   "dev",
   `vite at http://127.0.0.1:${server.config.server.port}, Electron restarting on every main/preload change`,

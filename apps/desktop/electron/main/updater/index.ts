@@ -17,7 +17,12 @@
 // - D8: the first launch of a newer version shows its notes once
 //   (`pendingWhatsNew`); the app menu's What's New opens them again.
 import { createRequire } from "node:module";
-import { app, BrowserWindow, autoUpdater as nativeUpdater } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  autoUpdater as nativeUpdater,
+} from "electron";
 import type { AppUpdater, ProgressInfo, UpdateInfo } from "electron-updater";
 import {
   isNewerRelease,
@@ -270,6 +275,80 @@ async function releaseNotes(): Promise<ReleaseNotesResult> {
   return notes
     ? { ok: true, notes }
     : { ok: false, reason: "unavailable", url: RELEASES_URL };
+}
+
+// ─── Check for Updates… (the app menu) ─────────────────────────────────────
+
+/** Why a build never checks, as the menu's answer says it. */
+const OFF_REASONS: Record<NonNullable<UpdaterState["disabled"]>, string> = {
+  dev: "This is a Preview build. It never updates; install the release to get updates.",
+  unpackaged:
+    "This is a development run. Updates come only to the installed release.",
+  platform: "Updates are not available on this system yet.",
+};
+
+/**
+ * The app menu's Check for Updates…: check now, then answer in a dialog, as
+ * a Mac app does. A ready update offers Restart; live work asks first.
+ */
+export async function checkForUpdatesFromMenu(): Promise<void> {
+  const parent =
+    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const tell = (message: string, detail?: string, buttons = ["OK"]) =>
+    parent
+      ? dialog.showMessageBox(parent, { message, detail, buttons })
+      : dialog.showMessageBox({ message, detail, buttons });
+  if (state.disabled) {
+    await tell("Updates are off in this build", OFF_REASONS[state.disabled]);
+    return;
+  }
+  const now = await check("manual");
+  const current = app.getVersion();
+  switch (now.status) {
+    case "up-to-date":
+    case "idle":
+      await tell(
+        "You're up to date",
+        `Lanework v${current} is the newest version.`,
+      );
+      return;
+    case "checking":
+    case "downloading":
+      await tell(
+        `Lanework v${now.version ?? "?"} is downloading`,
+        "It installs the next time you quit, or you can restart from Settings → About once it is ready.",
+      );
+      return;
+    case "error":
+      await tell("Could not check for updates", now.error ?? undefined);
+      return;
+    case "ready": {
+      const { response } = await tell(
+        `Lanework v${now.version ?? "?"} is ready to install`,
+        "Restart now to update, or it installs the next time you quit.",
+        ["Restart Now", "Later"],
+      );
+      if (response !== 0) return;
+      const answer = await install(false);
+      if (answer.result !== "confirm") return;
+      const { terminals, runs } = answer.live;
+      const live = [
+        terminals
+          ? `${terminals} agent ${terminals === 1 ? "tab" : "tabs"}`
+          : "",
+        runs ? `${runs} ${runs === 1 ? "run" : "runs"}` : "",
+      ]
+        .filter(Boolean)
+        .join(" and ");
+      const again = await tell(
+        "Restart anyway?",
+        `${live} still running will stop.`,
+        ["Restart Anyway", "Cancel"],
+      );
+      if (again.response === 0) await install(true);
+      return;
+    }
+  }
 }
 
 /** The app menu's What's New: the page opens the notes for this version. */

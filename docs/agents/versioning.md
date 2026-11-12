@@ -7,7 +7,8 @@ running from the version alone.
 | Kind | Format | Built by | Example |
 | --- | --- | --- | --- |
 | Release | `X.Y.Z` | `bun run dist`, `mise run app:dmg`, the release workflow | `0.2.0` |
-| Dev | `X.Y.(Z+1)-dev.YYYYMMDDHHmm` | `bun run package`, `mise run app:package`, `mise run app:install` | `0.2.1-dev.202611101432` |
+| Preview | `X.Y.Z-preview-YYYYMMDDHHmm` | `bun run package`, `mise run app:package`, `mise run app:install` | `0.1.0-preview-202611121432` |
+| Dev (unpackaged) | `X.Y.Z-dev-YYYYMMDDHHmm`, shown only | `mise run dev` | `0.1.0-dev-202611121432` |
 
 ## Rules
 
@@ -24,12 +25,44 @@ running from the version alone.
   --dev` stamps the version into the bundle at build time
   (`extraMetadata.version` → `app.getVersion()` and
   `CFBundleShortVersionString`, `buildVersion` → `CFBundleVersion`).
-- A dev build is a SemVer prerelease of the **next patch**: it sorts above the
-  release it was built after and below the next one. The suffix is the local
-  build time to the minute, so every install is newer than the last, with no
-  counter to keep and nothing to commit.
+- A Preview names the **release it was built after** (`X.Y.Z` from
+  package.json) and the local build time to the minute: `0.1.0-preview-…`.
+  It never updates, so where it sorts against releases does not matter; the
+  stamp alone tells two Previews apart, with no counter to keep and nothing
+  to commit.
+- `mise run dev` is unpackaged: `app.getVersion()` stays package.json's, and
+  the app SHOWS `X.Y.Z-dev-YYYYMMDDHHmm` (the session's start, from
+  `scripts/dev.mjs`) in About, so a report from it is never mistaken for the
+  release. Settings → About prefixes every version with `v`.
 - `--dev` and `--notarize` are refused together: a dev build is never
   released.
+
+## Preview builds
+
+A dev build is also a different app, so it installs **beside** the release and
+neither replaces the other. `scripts/electron-builder.mjs --dev` overrides:
+
+| | Release | Preview (dev build) |
+| --- | --- | --- |
+| Name (`CFBundleName`, `CFBundleDisplayName`) | `Lanework` | `Lanework (Preview)` |
+| Bundle | `Lanework.app` | `Lanework (Preview).app` |
+| appId | `com.lanework.desktop` | `com.lanework.desktop.preview` |
+| Icon | `build/icon.icns` | `build/icon-preview.icns` (amber PREVIEW band) |
+| Data home | `~/.lanew` | `~/.lanew-preview` |
+| `userData` | its own | its own, separate from the release's |
+
+- **Both can be installed and run at once.** `mise run app:install` replaces
+  only `/Applications/Lanework (Preview).app` and quits only `Lanework
+  (Preview)`; it never touches `/Applications/Lanework.app`.
+- **No global agent config.** The Preview does not write the user's global
+  agent config (`~/.claude.json`, Codex config and the like), so it cannot
+  repoint the release's hooks or MCP entry.
+- **The icon** is generated: `node apps/desktop/scripts/make-preview-icon.mjs`
+  re-marks `build/icon.png` into `build/icon-preview.png` and
+  `build/icon-preview.icns` (needs ImageMagick, `sips` and `iconutil`). Run it
+  and commit both files when `build/icon.png` changes.
+- Release builds (`dist`, `--notarize`) keep the `electron-builder.yml`
+  values; only `--dev` overrides them.
 
 ## Dev builds never update (INF-11)
 
@@ -43,6 +76,14 @@ workflow) updates, from published GitHub Releases.
 
 ## Where it shows
 
-`mise run app:install` prints the installed version. Finder's Get Info,
+`mise run app:install` prints the installed Preview's version. Finder's Get Info,
 `app.getVersion()` and metrics (`v`) all carry the dev version, so a report
 from a dev build is never mistaken for one from a release.
+
+## `mise run dev` keeps its own data
+
+An unpackaged dev session (`mise run dev`, `scripts/dev.mjs`) uses
+`~/.lanew-dev` as its app home and `~/Library/Application Support/Lanework
+(Dev)` as its userData, so it can run beside an open release or Preview
+without sharing a database, and a migration in code under way never touches
+real data. To work on the real data: `LANEWORK_HOME=~/.lanew mise run dev`.

@@ -20,10 +20,16 @@
 //
 // - `--dev` (package only, so `mise run app:install` too; INF-10,
 //   docs/agents/versioning.md): stamps a dev version into the bundle,
-//   `X.Y.(Z+1)-dev.YYYYMMDDHHmm` from package.json `X.Y.Z`, so every local
+//   `X.Y.Z-preview-YYYYMMDDHHmm` from package.json `X.Y.Z`, so every local
 //   install carries a newer version than the last and none looks like a
 //   release. package.json is never written. Release builds (`dist`) take the
 //   package.json version as is.
+//   It also makes the build a different app, so it installs beside the
+//   release: appId com.lanework.desktop.preview, productName "Lanework
+//   (Preview)" (the bundle is `Lanework (Preview).app`; electron-builder
+//   writes productName to CFBundleName and CFBundleDisplayName) and the
+//   build/icon-preview.icns icon (scripts/make-preview-icon.mjs). Release
+//   builds keep the electron-builder.yml values.
 //
 // - INF-11: always `--publish never`. electron-builder.yml names GitHub as
 //   the update feed (for electron-updater), and electron-builder would
@@ -77,23 +83,28 @@ if (dev) {
     "package.json",
   );
   const { version } = JSON.parse(readFileSync(pkgPath, "utf8"));
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-  if (!match) {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) {
     console.error(
       `package.json version ${version} is not X.Y.Z: a release version has no suffix.`,
     );
     process.exit(1);
   }
-  const [, major, minor, patch] = match;
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
-  const devVersion = `${major}.${minor}.${Number(patch) + 1}-dev.${stamp}`;
+  // The release it was built after, then what it is and when: a Preview
+  // reads as the latest release plus a build stamp (`0.1.0-preview-…`).
+  const devVersion = `${version}-preview-${stamp}`;
   // extraMetadata.version is what app.getVersion() and
   // CFBundleShortVersionString read; buildVersion is CFBundleVersion.
   builderArgs.push(
     `-c.extraMetadata.version=${devVersion}`,
     `-c.buildVersion=${devVersion}`,
+    // A different app from the release: its own bundle id (so its own
+    // userData and macOS permission grants), name and icon.
+    "-c.appId=com.lanework.desktop.preview",
+    "-c.productName=Lanework (Preview)",
+    "-c.mac.icon=build/icon-preview.icns",
   );
   console.log(`Dev build version ${devVersion}`);
 }

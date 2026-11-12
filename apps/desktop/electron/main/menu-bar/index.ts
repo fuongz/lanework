@@ -1,4 +1,5 @@
 import { app, Menu, Tray } from "electron";
+import { APP_DISPLAY_NAME } from "../channel";
 import { menuBarIcon } from "./icon";
 
 /** One thing that needs the person, listed above Open (FE-136/D6). */
@@ -48,7 +49,7 @@ export function installMenuBar(showWindow: () => void): void {
   openWindow = showWindow;
   const own = new Tray(menuBarIcon());
   tray = own;
-  own.setToolTip("Lanework");
+  own.setToolTip(APP_DISPLAY_NAME);
   own.setContextMenu(buildMenu());
   app.once("will-quit", () => {
     own.destroy();

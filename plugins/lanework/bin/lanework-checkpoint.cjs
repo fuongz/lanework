@@ -279,8 +279,9 @@ var LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 // apps/desktop/electron/main/paths.ts
 var APP_HOME_NAME = ".lanew";
+var homeName = APP_HOME_NAME;
 function appHomeDir() {
-  return process.env.LANEWORK_HOME || import_node_path.join(import_node_os.homedir(), APP_HOME_NAME);
+  return process.env.LANEWORK_HOME || import_node_path.join(import_node_os.homedir(), homeName);
 }
 
 // apps/desktop/electron/main/git/repo-trust.ts

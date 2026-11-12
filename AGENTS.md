@@ -202,7 +202,7 @@ recur.
 
 Release `X.Y.Z` lives in `apps/desktop/package.json` and only
 `mise run release:bump <patch|minor|major>` changes it. `app:package` and
-`app:install` stamp `X.Y.(Z+1)-dev.YYYYMMDDHHmm` into the bundle and never
+`app:install` stamp `X.Y.Z-preview-YYYYMMDDHHmm` into the bundle and never
 write package.json. Details: [docs/agents/versioning.md](docs/agents/versioning.md).
 
 ## Git commits

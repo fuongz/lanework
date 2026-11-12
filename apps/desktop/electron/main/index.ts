@@ -34,6 +34,12 @@ import { registerAgentConfig } from "./agent-config";
 import { registerAgentSetup } from "./agent-setup";
 import { registerAuth } from "./auth";
 import {
+  APP_CHANNEL,
+  APP_DISPLAY_NAME,
+  APP_DISPLAY_VERSION,
+  applyChannel,
+} from "./channel";
+import {
   conductorMemory,
   conductorSessionsControl,
   pidFileBridge,
@@ -241,10 +247,12 @@ function registerLeads(
 
 let controlServer: ControlServer | null = null;
 
-app.setName("Lanework");
+// The release, or "Lanework (Preview)" with its own userData and app home:
+// first, before anything reads either (`channel.ts`).
+applyChannel();
 app.setAboutPanelOptions({
-  applicationName: "Lanework",
-  applicationVersion: app.getVersion(),
+  applicationName: APP_DISPLAY_NAME,
+  applicationVersion: APP_DISPLAY_VERSION,
 });
 
 protocol.registerSchemesAsPrivileged([
@@ -320,7 +328,7 @@ function createWindow() {
     minWidth: 760,
     minHeight: 560,
     show: false,
-    title: "Lanework",
+    title: APP_DISPLAY_NAME,
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hidden",
@@ -410,9 +418,10 @@ app
     handle(channels.appInfo, devUrl, (args): AppInfo => {
       if (args.length) throw new Error("This operation takes no arguments");
       return {
-        name: "Lanework",
-        version: app.getVersion(),
+        name: APP_DISPLAY_NAME,
+        version: APP_DISPLAY_VERSION,
         platform: process.platform,
+        channel: APP_CHANNEL,
       };
     });
     // `nativeTheme`, not a class the renderer sets alone. It also drives the

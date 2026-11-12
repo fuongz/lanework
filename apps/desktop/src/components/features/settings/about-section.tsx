@@ -193,7 +193,11 @@ export function AboutSection() {
             {
               label: "Version",
               keywords: "build release",
-              control: <SettingsValue>{info?.version ?? "—"}</SettingsValue>,
+              control: (
+                <SettingsValue>
+                  {info?.version ? `v${info.version}` : "—"}
+                </SettingsValue>
+              ),
             },
             {
               label: "Platform",

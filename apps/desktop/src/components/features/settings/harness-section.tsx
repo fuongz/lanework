@@ -16,6 +16,7 @@ import {
   type SettingsSectionSpec,
   SettingsValue,
 } from "#/components/shared/settings/settings-page";
+import { Alert, AlertDescription } from "#/components/ui/alert";
 import { Button } from "#/components/ui/button";
 import {
   Select,
@@ -56,6 +57,7 @@ import type {
   LaneworkMcpStatus,
   LaneworkMcpToolset,
 } from "../../../../shared/auth";
+import { PREVIEW_AGENT_SETUP_REFUSAL } from "../../../../shared/desktop";
 import type {
   AgentHookStatus,
   HandoffStatus,
@@ -63,6 +65,7 @@ import type {
 } from "../../../../shared/handoff";
 import type { HarnessAgent } from "../../../../shared/harness";
 import { HarnessCard } from "./harness-section.card";
+import { useIsPreview } from "./harness-section.preview";
 import { usePullAllSection } from "./harness-section.pull";
 
 /** What each toolset is called in its select (FE-119/D1). */
@@ -145,6 +148,9 @@ export function HarnessSection() {
   // so its switches stay. Only the credential row is cloud-only (FE-52/D9).
   const local = useIsLocalMode();
   const handoff = signedIn || local;
+  // The Preview build reads the agents' setup but never changes it: the
+  // release app owns the Lanework MCP entries and the hooks (`channel.ts`).
+  const preview = useIsPreview();
 
   // Which version of each CLI runs here and which is out: the same facts the
   // update island works from, with a way to ask again now.
@@ -296,11 +302,13 @@ export function HarnessSection() {
       aria-label={`Save progress for the next agent — ${NAMES[agent]}`}
       checked={hook?.installed ?? false}
       disabled={
+        preview ||
         !surface ||
         busy ||
         blocked ||
         (!hook?.installed && !!hook?.settingsUnreadable)
       }
+      title={preview ? PREVIEW_AGENT_SETUP_REFUSAL : undefined}
       onCheckedChange={(checked) =>
         surface &&
         void run(
@@ -416,6 +424,8 @@ export function HarnessSection() {
                   size="lg"
                   className={SETTINGS_BUTTON}
                   variant="outline"
+                  disabled={preview}
+                  title={preview ? PREVIEW_AGENT_SETUP_REFUSAL : undefined}
                   onClick={() => void loginMcp(agent)}
                 >
                   Log in
@@ -447,7 +457,9 @@ export function HarnessSection() {
         <Switch
           aria-label={`Lanework MCP — ${NAMES[agent]}`}
           checked={!!entry?.installed && !!entry.ours}
+          title={preview ? PREVIEW_AGENT_SETUP_REFUSAL : undefined}
           disabled={
+            preview ||
             !mcpSurface ||
             busy ||
             !entry ||
@@ -496,7 +508,9 @@ export function HarnessSection() {
       control: (
         <Select
           value={chosen}
-          disabled={!mcpSurface || busy || !chosen || !canWork || edited}
+          disabled={
+            preview || !mcpSurface || busy || !chosen || !canWork || edited
+          }
           onValueChange={(next) =>
             mcpSurface &&
             (next === "full" || next === "worker") &&
@@ -596,7 +610,7 @@ export function HarnessSection() {
                   size="lg"
                   className={SETTINGS_BUTTON}
                   variant="outline"
-                  disabled={busy || !project || !projectKey}
+                  disabled={preview || busy || !project || !projectKey}
                   onClick={() => void approveInCodex()}
                 >
                   Approve in Codex
@@ -655,7 +669,27 @@ export function HarnessSection() {
     },
   );
 
-  const sections: SettingsSectionSpec[] = [...cardSections, pullSection];
+  const sections: SettingsSectionSpec[] = [
+    ...(preview
+      ? [
+          {
+            title: "Preview build",
+            keywords: "preview dev build release mcp hooks",
+            content: (
+              <Alert>
+                <AlertDescription>
+                  The Lanework release app manages the agents’ Lanework MCP
+                  entry, hooks and folder trust. This Preview build only reads
+                  them.
+                </AlertDescription>
+              </Alert>
+            ),
+          },
+        ]
+      : []),
+    ...cardSections,
+    pullSection,
+  ];
 
   if (handoff)
     sections.push({
@@ -674,7 +708,7 @@ export function HarnessSection() {
             <Switch
               aria-label="Also push unfinished code to GitHub"
               checked={status?.pushWip ?? false}
-              disabled={!surface || busy || !anyOn}
+              disabled={preview || !surface || busy || !anyOn}
               onCheckedChange={(checked) =>
                 surface &&
                 void run(
@@ -700,7 +734,7 @@ export function HarnessSection() {
             <Switch
               aria-label="Include new files in the pushed work"
               checked={status?.pushWipUntracked ?? false}
-              disabled={!surface || busy || !status?.pushWip}
+              disabled={preview || !surface || busy || !status?.pushWip}
               onCheckedChange={(checked) =>
                 surface &&
                 void run(

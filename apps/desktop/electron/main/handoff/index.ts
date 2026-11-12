@@ -19,6 +19,10 @@
 // `shimRefusal` in `agent-setup/mcp-entry.ts`. A copy run from a DMG, an App
 // Translocation path, an AppImage mount or a dev checkout would point every
 // agent session at a binary that is gone once it quits.
+//
+// NOTE: The Preview writes none of it (`channel.ts`): not the CLIs' settings,
+// not OpenCode's plugin, not the shared Keychain item, not the hook's cache.
+// The release app owns the hooks; the Preview only reads their state.
 import {
   chmod,
   mkdir,
@@ -46,6 +50,7 @@ import { opencodeConfigDir } from "../agent-setup/opencode";
 import { resolveApi } from "../auth/client";
 import { readLocalMode } from "../auth/local-mode";
 import { type MachineRecord, readRecord } from "../auth/store";
+import { refuseInPreview, skipInPreview } from "../channel";
 import { updateConfigFile } from "../config-file";
 import { handle } from "../ipc";
 import { appHomeDir } from "../paths";
@@ -296,6 +301,7 @@ async function handoffStatus(): Promise<HandoffStatus> {
 }
 
 async function enable(agent: HookAgent): Promise<HandoffStatus> {
+  refuseInPreview();
   if (!secretStoreAvailable())
     throw new Error("Handing work between agents needs macOS for now.");
   const refusal = currentShimRefusal();
@@ -362,6 +368,7 @@ async function enableOpencode(
 }
 
 async function disable(agent: HookAgent): Promise<HandoffStatus> {
+  refuseInPreview();
   if (agent === "opencode") {
     // Only our own file goes; one somebody else wrote stays.
     const path = opencodePlugin();
@@ -425,6 +432,7 @@ async function confirmPushWip(): Promise<boolean> {
 }
 
 async function setPushWip(on: boolean): Promise<HandoffStatus> {
+  refuseInPreview();
   const config = await readConfig();
   if (!anyInstalled(config))
     throw new Error("Turn on handing work between agents first.");
@@ -459,6 +467,7 @@ async function confirmPushWipUntracked(): Promise<boolean> {
 }
 
 async function setPushWipUntracked(on: boolean): Promise<HandoffStatus> {
+  refuseInPreview();
   const config = await readConfig();
   if (!config.pushWip)
     throw new Error("Turn on pushing work in progress first.");
@@ -473,8 +482,12 @@ async function setPushWipUntracked(on: boolean): Promise<HandoffStatus> {
  *
  * The hooks stay installed and log "no credential" until someone signs in
  * again, when {@link syncHandoff} hands them the new one.
+ *
+ * NOTE: Not in the Preview. The Keychain item is the release's hooks', and
+ * the Preview's sign-out is not the release's.
  */
 export async function forgetHookCredential(apiUrl: string): Promise<void> {
+  if (skipInPreview("forgetting the hooks' credential")) return;
   await deleteHookSecret(resolveApi(apiUrl)).catch(() => undefined);
 }
 
@@ -484,8 +497,12 @@ export async function forgetHookCredential(apiUrl: string): Promise<void> {
  * The hook caches which board a repo's remote resolves to and never asks
  * again, so after a sign-out (or a switch to local mode) it would keep
  * writing checkpoints to boards of the account that left. Called on both.
+ *
+ * NOTE: Not in the Preview, whose account is not the one the release's hooks
+ * write for.
  */
 export async function forgetBoardsCache(): Promise<void> {
+  if (skipInPreview("clearing the hooks' board cache")) return;
   await rm(join(HOOK_STATE_DIR, "boards.json"), { force: true }).catch(
     () => undefined,
   );
@@ -504,6 +521,7 @@ export async function forgetBoardsCache(): Promise<void> {
  */
 export async function syncHandoff(): Promise<void> {
   if (!secretStoreAvailable()) return;
+  if (skipInPreview("syncing the agent hooks")) return;
   // Not a stable install: the installed copy keeps the shim pointed at itself
   // (INF-05, GAP-02).
   if (currentShimRefusal()) return;

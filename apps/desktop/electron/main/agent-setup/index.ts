@@ -11,6 +11,10 @@
 // (`mcp-entry.ts`), and only that entry (FE-52/D8); and each CLI's trust
 // record for the project's own folder, on the user's confirmed click
 // (FE-101).
+//
+// NOTE: The Preview makes neither (`channel.ts`): the release app owns the
+// agents' config. Its writes answer with `PREVIEW_AGENT_SETUP_REFUSAL`, and
+// `mcp-entry.ts` refuses them again under the lock main sets.
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
@@ -34,6 +38,7 @@ import { agentHome } from "../agent-home";
 import { currentSession } from "../auth";
 import { readLocalMode } from "../auth/local-mode";
 import { readRecord } from "../auth/store";
+import { refuseInPreview } from "../channel";
 import { readClaudeTrust, setClaudeTrust } from "../conversation/claude-trust";
 import { readCodexTrust, setCodexTrust } from "../conversation/codex-trust";
 import { sharedEngines } from "../conversation/engine";
@@ -203,6 +208,7 @@ async function setTrust(
   agent: SetupAgent,
   on: boolean,
 ): Promise<ProjectTrust> {
+  refuseInPreview();
   // OpenCode asks no trust question for a folder (FE-104): nothing to write.
   if (agent === "opencode")
     throw new Error("OpenCode has no folder trust to change.");
@@ -238,6 +244,7 @@ async function mcpStatus(): Promise<LaneworkMcpStatus> {
 }
 
 async function mcpInstall(agent: LaneworkMcpAgent): Promise<LaneworkMcpStatus> {
+  refuseInPreview();
   const session = await currentSession();
   const mode = modeFor(session.principal.kind);
   if (!mode)
@@ -249,6 +256,7 @@ async function mcpInstall(agent: LaneworkMcpAgent): Promise<LaneworkMcpStatus> {
 }
 
 async function mcpRemove(agent: LaneworkMcpAgent): Promise<LaneworkMcpStatus> {
+  refuseInPreview();
   await removeLaneworkMcp(agent);
   return mcpStatus();
 }
@@ -261,6 +269,7 @@ async function mcpSetToolset(
   agent: LaneworkMcpAgent,
   toolset: LaneworkMcpToolset,
 ): Promise<LaneworkMcpStatus> {
+  refuseInPreview();
   await setLaneworkMcpToolset(agent, toolset);
   return mcpStatus();
 }
@@ -289,6 +298,8 @@ export function registerAgentSetup(devUrl?: string): void {
   handle(laneworkMcpChannels.login, devUrl, (args) => {
     if (args.length !== 1 || !isMcpAgent(args[0]))
       throw new Error('login takes "claude-code", "codex" or "opencode"');
+    // `mcp login` stores the agent's credential in its own config.
+    refuseInPreview();
     return loginLaneworkMcp(args[0], (url) => {
       void shell.openExternal(url).catch(() => {});
     });

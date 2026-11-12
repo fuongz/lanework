@@ -157,7 +157,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-            --title "Lanework ${TAG#v}" --generate-notes \
+            --title "$TAG" --generate-notes \
             ./*.dmg ./*.dmg.sha256 \
             ./*-mac.zip ./*-mac.zip.blockmap ./latest-mac.yml
 

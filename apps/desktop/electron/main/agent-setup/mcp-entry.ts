@@ -174,6 +174,27 @@ export function currentShimRefusal(): ShimRefusal | null {
   return installFacts ? shimRefusal(installFacts()) : null;
 }
 
+// ── The Preview never writes the agents' config ──────────────────────────────
+
+/**
+ * Why this build may not write any agent's config, or null.
+ *
+ * Set by main in the Preview (`channel.ts`), where the release app owns the
+ * `lanework` entries. Reads stay allowed, so Settings still shows them. Null
+ * under plain Node (the specs) and in every other build.
+ */
+let agentConfigLock: string | null = null;
+
+/** Refuse every write into the agents' config from now on, for `reason`. */
+export function lockAgentConfig(reason: string): void {
+  agentConfigLock = reason;
+}
+
+/** @throws The lock's reason, when the agents' config is locked. */
+function assertUnlocked(): void {
+  if (agentConfigLock) throw new Error(agentConfigLock);
+}
+
 /** `~/.lanew/bin/lanework-mcp` — what a stdio entry runs. */
 export function mcpShimPath(): string {
   return join(appHomeDir(), "bin", "lanework-mcp");
@@ -561,6 +582,7 @@ export async function installLaneworkMcp(
   agent: LaneworkMcpAgent,
   mode: LaneworkMcpMode,
 ): Promise<void> {
+  assertUnlocked();
   const path = configPathOf(agent);
   if (agent === "claude-code" && !parseObject(await readOptional(path)))
     throw notJson(path);
@@ -610,6 +632,7 @@ export async function installLaneworkMcp(
 export async function removeLaneworkMcp(
   agent: LaneworkMcpAgent,
 ): Promise<void> {
+  assertUnlocked();
   const path = configPathOf(agent);
   if (agent === "opencode") {
     await updateConfigFile(path, (text) =>
@@ -676,6 +699,13 @@ export async function syncLaneworkMcp(
 ): Promise<void> {
   const mode = modeFor(kind);
   if (!mode) return;
+  // The Preview leaves every entry to the release app.
+  if (agentConfigLock) {
+    console.info(
+      "Preview build: skipped syncing the Lanework MCP entries; the release app manages them.",
+    );
+    return;
+  }
   // A copy that may not write the shim leaves stdio entries as they are: the
   // installed app repoints them on its next launch (INF-05, GAP-02).
   if (mode === "local" && currentShimRefusal()) return;
@@ -708,6 +738,7 @@ export async function setLaneworkMcpToolset(
   agent: LaneworkMcpAgent,
   toolset: LaneworkMcpToolset,
 ): Promise<void> {
+  assertUnlocked();
   await setToolsetPref(agent, toolset);
   const status = await entryStatus(agent);
   if (status.mode === "cloud" && needsRewrite(status, "cloud", toolset))

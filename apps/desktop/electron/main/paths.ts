@@ -12,15 +12,39 @@ import { LEAD_REF_PATTERN } from "../../shared/orchestration";
 export const APP_HOME_NAME = ".lanew";
 
 /**
- * Absolute path of the app home (`~/.lanew`).
+ * The Preview's app home folder (`channel.ts`): a packaged dev build keeps
+ * its credential, boards and shims apart from the release's.
+ */
+export const PREVIEW_APP_HOME_NAME = ".lanew-preview";
+
+/** The folder {@link appHomeDir} names: the release's until main says. */
+let homeName = APP_HOME_NAME;
+
+/**
+ * Make {@link appHomeDir} the Preview's, `~/.lanew-preview`.
+ *
+ * Main calls it once, at startup, before anything reads the app home
+ * (`applyChannel` in `channel.ts`). Electron-free on purpose: the local store,
+ * the control CLI and the offline MCP server import this file in processes
+ * with no Electron. Those get the Preview's home through the `LANEWORK_HOME`
+ * their shim exports.
+ */
+export function selectPreviewAppHome(): void {
+  homeName = PREVIEW_APP_HOME_NAME;
+}
+
+/**
+ * Absolute path of the app home: `~/.lanew`, or `~/.lanew-preview` in the
+ * Preview.
  *
  * NOTE: `LANEWORK_HOME` is not a convenience. Tests isolate state with
  * `LANEWORK_TEST_USER_DATA`, which only moves `app.getPath("userData")`. A
  * fixed dotfolder under `$HOME` does not follow it, so without this override
- * a test run would write into the developer's real credential.
+ * a test run would write into the developer's real credential. It wins over
+ * the Preview's folder too.
  */
 export function appHomeDir(): string {
-  return process.env.LANEWORK_HOME || join(homedir(), APP_HOME_NAME);
+  return process.env.LANEWORK_HOME || join(homedir(), homeName);
 }
 
 /**

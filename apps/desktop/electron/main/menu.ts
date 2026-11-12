@@ -1,7 +1,7 @@
 import { BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { channels, type ViewCommand } from "../../shared/desktop";
 import { sendTerminalCommand } from "./terminal";
-import { showReleaseNotes } from "./updater";
+import { checkForUpdatesFromMenu, showReleaseNotes } from "./updater";
 
 /** Send a View command to the focused window, or else to the first one. */
 function sendViewCommand(command: ViewCommand): void {
@@ -72,6 +72,11 @@ export function installMenu(): void {
     label: "What's New",
     click: () => showReleaseNotes(),
   };
+  const checkUpdates: MenuItemConstructorOptions = {
+    id: "check-for-updates",
+    label: "Check for Updates…",
+    click: () => void checkForUpdatesFromMenu(),
+  };
   const closeWindow: MenuItemConstructorOptions = {
     id: "close-window",
     label: mac ? "Close Window" : "Close",
@@ -84,6 +89,7 @@ export function installMenu(): void {
             role: "appMenu",
             submenu: [
               { role: "about" },
+              checkUpdates,
               whatsNew,
               { type: "separator" },
               settings,
@@ -105,6 +111,7 @@ export function installMenu(): void {
         ? [closeWindow]
         : [
             settings,
+            checkUpdates,
             whatsNew,
             { type: "separator" },
             closeWindow,

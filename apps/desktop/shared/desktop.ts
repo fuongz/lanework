@@ -72,10 +72,27 @@ export type ThemeSource = (typeof THEME_SOURCES)[number];
 export function isThemeSource(value: unknown): value is ThemeSource {
   return THEME_SOURCES.includes(value as ThemeSource);
 }
+/**
+ * Which build of the app runs.
+ *
+ * `preview` is a packaged dev build (`X.Y.Z-preview-YYYYMMDDHHmm`), installed as
+ * "Lanework (Preview)" beside the release. It keeps its own app home and
+ * userData, and never writes the agents' config: the release app owns the
+ * Lanework MCP entry, the hooks and the folder trust. Everything else,
+ * `bun run dev` and the test suite included, is `release`.
+ */
+export type AppChannel = "release" | "preview";
+
+/** What the Preview answers to any write into the agents' own config. */
+export const PREVIEW_AGENT_SETUP_REFUSAL =
+  "The Lanework release app manages agent setup; this Preview build does not change it.";
+
 export interface AppInfo {
+  /** The name the app shows: "Lanework", or "Lanework (Preview)". */
   name: string;
   version: string;
   platform: string;
+  channel: AppChannel;
 }
 export interface DesktopApi {
   getAppInfo: () => Promise<AppInfo>;

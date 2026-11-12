@@ -13,6 +13,7 @@ import {
   type NotificationTarget,
   notificationChannels,
 } from "../../../shared/notifications";
+import { APP_DISPLAY_NAME } from "../channel";
 import { handle } from "../ipc";
 import { seenAt, unseenPullCounts } from "./unseen-pulls";
 
@@ -210,7 +211,7 @@ export function registerNotifications(
     if (args.length) throw new Error("This operation takes no arguments");
     if (!Notification.isSupported()) return false;
     return deliver(
-      "Lanework",
+      APP_DISPLAY_NAME,
       "Test notification — notifications from Lanework will look like this.",
       null,
     );

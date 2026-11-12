@@ -3,7 +3,7 @@
 # definition of how things are built and checked.
 
 [tasks.dev]
-description = "Desktop app in dev: renderer HMR, main/preload restart"
+description = "Desktop app in dev: renderer HMR, main/preload restart; its own data in ~/.lanew-dev (LANEWORK_HOME=~/.lanew for the real data)"
 run = "bun run dev"
 
 [tasks.build]
@@ -11,7 +11,7 @@ description = "Build the desktop app bundle (dist/)"
 run = "bun run build"
 
 [tasks."app:package"]
-description = "Build Lanework.app, unpacked, into apps/desktop/release/mac-arm64"
+description = "Build the Preview app, \"Lanework (Preview).app\", unpacked, into apps/desktop/release/mac-arm64"
 run = "bun run package"
 
 [tasks."app:dmg"]
@@ -25,20 +25,22 @@ dir = "apps/desktop"
 run = "bun run dist -- --mac"
 
 [tasks."app:install"]
-description = "Build Lanework.app and replace the copy in /Applications"
+description = "Build Lanework (Preview).app and replace the copy in /Applications (the release Lanework.app is never touched)"
 depends = ["app:package"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-app="apps/desktop/release/mac-arm64/Lanework.app"
+app="apps/desktop/release/mac-arm64/Lanework (Preview).app"
+dest="/Applications/Lanework (Preview).app"
 [ -d "$app" ] || { echo "No $app — the package step did not produce it." >&2; exit 1; }
-# Quit a running copy first: replacing an app that is open leaves the old
-# build running, which looks exactly like the update did nothing.
-osascript -e 'tell application "Lanework" to quit' >/dev/null 2>&1 || true
-rm -rf /Applications/Lanework.app
+# Quit a running Preview first: replacing an app that is open leaves the old
+# build running, which looks exactly like the update did nothing. Only the
+# Preview: a release Lanework that is open keeps running.
+osascript -e 'tell application "Lanework (Preview)" to quit' >/dev/null 2>&1 || true
+rm -rf "$dest"
 cp -R "$app" /Applications/
-version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Lanework.app/Contents/Info.plist)"
-echo "Installed /Applications/Lanework.app ($version)"
+version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$dest/Contents/Info.plist")"
+echo "Installed $dest ($version)"
 '''
 
 [tasks."release:bump"]
