@@ -37,7 +37,11 @@ import {
   SessionsEmpty,
   useSessionsPull,
 } from "./agent-sessions-nav.pull";
-import { SessionRow, StopItem } from "./agent-sessions-nav.row";
+import {
+  SessionRow,
+  type StopConfirm,
+  StopItem,
+} from "./agent-sessions-nav.row";
 import { useAgentRail } from "./agent-sessions-nav.sessions";
 import { RenameAgentDialog } from "./rename-agent-dialog";
 
@@ -202,10 +206,7 @@ function AgentSessionsList({
     error: string | null;
   } | null>(null);
   /** The working agent whose Stop asked first (FE-26/D5), as the view does. */
-  const [confirming, setConfirming] = useState<{
-    stop: () => void;
-    label: string;
-  } | null>(null);
+  const [confirming, setConfirming] = useState<StopConfirm | null>(null);
 
   const shown = expanded ? rest : rest.slice(0, FOLDED);
   // Pinned lead the list whether or not they run, newest pin on top.
@@ -241,6 +242,7 @@ function AgentSessionsList({
         tab={rail.runningFor(session)}
         chat={rail.chatFor(session)}
         workers={rail.runFor(session)?.tasks}
+        run={rail.runFor(session)}
         allShown={all}
         onToggleAll={() =>
           setAllSubagents((keys) => {
@@ -411,11 +413,12 @@ function AgentSessionsList({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Stop {confirming?.label} while it is working?
+              {confirming?.title ??
+                `Stop ${confirming?.label} while it is working?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Whatever it is doing now is interrupted. The conversation is kept
-              and can be resumed from Sessions.
+              {confirming?.description ??
+                "Whatever it is doing now is interrupted. The conversation is kept and can be resumed from Sessions."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -427,7 +430,7 @@ function AgentSessionsList({
                 setConfirming(null);
               }}
             >
-              Stop
+              {confirming?.action ?? "Stop"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

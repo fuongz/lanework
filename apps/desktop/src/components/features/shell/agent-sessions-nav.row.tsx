@@ -2,7 +2,10 @@ import { ArrowRight01Icon, PinIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import type { OrchestrationTask } from "#/../shared/orchestration";
+import type {
+  OrchestrationRun,
+  OrchestrationTask,
+} from "#/../shared/orchestration";
 import type {
   AgentSession,
   AgentSubagent,
@@ -178,6 +181,15 @@ export function AwaitingDot({ className = "size-3" }: { className?: string }) {
 /** What hover hides to make room for the sub-agents' chevron. */
 const MAKES_ROOM = "group-hover/row:invisible group-focus-within/row:invisible";
 
+/** What a Stop asks before it runs (FE-26/D5); the defaults suit an agent. */
+export interface StopConfirm {
+  stop: () => void;
+  label: string;
+  title?: string;
+  description?: string;
+  action?: string;
+}
+
 /** A running agent's Stop, in its row's context menu. */
 export function StopItem({ onStop }: { onStop: () => void }) {
   return (
@@ -208,6 +220,7 @@ export function SessionRow({
   tab,
   chat,
   workers = NO_TASKS,
+  run,
   allShown: all,
   onToggleAll,
   onResume,
@@ -236,6 +249,8 @@ export function SessionRow({
   chat: boolean;
   /** Its orchestration run's workers, in the run's order (FE-87). */
   workers?: OrchestrationTask[];
+  /** The run it leads while that holds workers: active or paused. */
+  run?: OrchestrationRun;
   /** Every sub-agent shown, past the fold (FE-33/D4). */
   allShown: boolean;
   onToggleAll: () => void;
@@ -246,7 +261,7 @@ export function SessionRow({
   /** Delete its transcript, once its dialog is confirmed. */
   onDelete: () => void;
   /** A working agent's Stop asks first (FE-26/D5). */
-  onConfirmStop: (confirm: { stop: () => void; label: string }) => void;
+  onConfirmStop: (confirm: StopConfirm) => void;
 }) {
   const navigate = useNavigate();
   const {
@@ -375,7 +390,30 @@ export function SessionRow({
     : chat
       ? () =>
           working ? onConfirmStop({ stop: stopChat, label: agent }) : stopChat()
-      : undefined;
+      : // Only its run keeps it running (its tab and engine gone, e.g. a
+        // conductor's conversation after a reset): Stop ends the run, as the
+        // run panel's Stop run does. That cannot be undone, so it asks.
+        run
+        ? () =>
+            onConfirmStop({
+              label: agent,
+              title: "Stop the run it leads?",
+              description:
+                run.status === "paused"
+                  ? "The paused run ends and its workers never resume. The conversation is kept."
+                  : "Its running workers are cancelled and queued ones never start. The conversation is kept.",
+              action: "Stop run",
+              stop: () =>
+                void window.desktop?.orchestration
+                  .stop(project, run.id)
+                  .catch((failure) =>
+                    onError(
+                      "Could not stop the run",
+                      ipcMessage(failure, "Could not stop the run."),
+                    ),
+                  ),
+            })
+        : undefined;
   /** A sub-agent opens read-only, in the main view (FE-35/D9). */
   const view = (sub: AgentSubagent) =>
     void navigate({

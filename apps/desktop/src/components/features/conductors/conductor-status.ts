@@ -213,8 +213,14 @@ export function useConductorStatuses(
       ? sessions?.find((entry) => entry.id === conversation)
       : undefined;
     const mine = runs.filter((run) => run.teamLead === conductor.id);
-    const paused = mine.some((run) => run.status === "paused");
-    const scope = mine.some(
+    // Only its current conversation's runs can wait on the person: the
+    // panel draws no other (`run.lead`), so a run left paused under a reset
+    // conversation would keep the dot red with nothing to answer.
+    const current = mine.filter(
+      (run) => conversation !== null && run.lead === conversation,
+    );
+    const paused = current.some((run) => run.status === "paused");
+    const scope = current.some(
       (run) =>
         liveRun(run) &&
         run.tasks.some((task) => (task.scopeApproval?.length ?? 0) > 0),
