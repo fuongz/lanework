@@ -3,6 +3,7 @@ import {
   Cancel01Icon,
   CommandLineIcon,
   CubeIcon,
+  EraserIcon,
   Folder01Icon,
   Loading03Icon,
   SlashIcon,
@@ -126,6 +127,19 @@ const ORCHESTRATE: Suggestion = {
   source: "builtin",
 };
 
+/**
+ * `/clear`, offered among the `/` commands when the page takes it: the page
+ * asks first, then starts the conversation over. Caught here, never sent,
+ * so a CLI's own `/clear` never runs behind the app's back.
+ */
+const CLEAR: Suggestion = {
+  value: "/clear",
+  detail: "Start this conversation over, after you confirm",
+  label: "Clear",
+  kind: "command",
+  source: "builtin",
+};
+
 const SOURCE_LABELS: Record<CommandSource, string> = {
   project: "Project",
   personal: "Personal",
@@ -135,6 +149,7 @@ const SOURCE_LABELS: Record<CommandSource, string> = {
 /** A `/` suggestion's icon: the team-lead one for `/orchestrate`. */
 function commandIcon(item: Suggestion) {
   if (item.value === ORCHESTRATE.value) return UserGroupIcon;
+  if (item.value === CLEAR.value) return EraserIcon;
   if (item.kind === "skill") return CubeIcon;
   if (item.kind === "builtin") return CommandLineIcon;
   return SlashIcon;
@@ -353,6 +368,12 @@ export const Composer = forwardRef<
       names: { name: string; image: boolean }[],
       teamLead: TeamLead | null,
     ) => Promise<boolean>;
+    /**
+     * `/clear`, sent alone: called instead of `onSend`, and the page asks
+     * before it starts over. Absent: `/clear` is neither offered nor caught,
+     * and goes as written.
+     */
+    onClear?: () => void;
   }
 >(function Composer(
   {
@@ -370,6 +391,7 @@ export const Composer = forwardRef<
     onStop,
     onEditLastQueued,
     onOrchestrate,
+    onClear,
   },
   ref,
 ) {
@@ -442,7 +464,9 @@ export const Composer = forwardRef<
         ? onOrchestrate
           ? ORCHESTRATE
           : null
-        : (known.get(token) ?? null);
+        : token === CLEAR.value && onClear
+          ? CLEAR
+          : (known.get(token) ?? null);
     return item ? chipSpec(item) : null;
   };
   // Leads read after the text was drawn: drawn again, so `@lead` is a chip.
@@ -465,6 +489,7 @@ export const Composer = forwardRef<
   ].filter(
     (token) =>
       token !== ORCHESTRATE.value &&
+      !(onClear && token === CLEAR.value) &&
       !leadFor(token) &&
       !known.has(token) &&
       !looked.has(token),
@@ -594,12 +619,19 @@ export const Composer = forwardRef<
     const surface = window.desktop?.conversation;
     if (!surface) return;
     // The app's own command, ahead of the CLI's: only where it is handled.
-    const own =
-      onOrchestrate &&
+    const query = found.query.toLowerCase();
+    const own = [
+      ...(onOrchestrate &&
       kind === "command" &&
-      ORCHESTRATE.value.slice(1).startsWith(found.query.toLowerCase())
+      ORCHESTRATE.value.slice(1).startsWith(query)
         ? [ORCHESTRATE]
-        : [];
+        : []),
+      ...(onClear &&
+      kind === "command" &&
+      CLEAR.value.slice(1).startsWith(query)
+        ? [CLEAR]
+        : []),
+    ];
     void surface
       .suggest(project, kind, found.query, agent)
       .catch(() => [] as Suggestion[])
@@ -608,7 +640,12 @@ export const Composer = forwardRef<
         if (mine !== asked.current) return;
         const items = [
           ...own,
-          ...listed.filter((item) => item.value !== ORCHESTRATE.value),
+          // The app's own commands once, ahead of a CLI's of the same name.
+          ...listed.filter(
+            (item) =>
+              item.value !== ORCHESTRATE.value &&
+              !(onClear && item.value === CLEAR.value),
+          ),
         ];
         setSuggest(
           items.length
@@ -758,6 +795,15 @@ export const Composer = forwardRef<
 
   const send = async () => {
     if (empty || isSending()) return;
+    // `/clear` alone is the page's, and asks first: the words go, nothing is
+    // sent. With attachments it is a message, and goes as written.
+    if (onClear && text.trim() === CLEAR.value && attachments.length === 0) {
+      setText("");
+      setSuggest(null);
+      setError(null);
+      onClear();
+      return;
+    }
     const raw = onOrchestrate ? orchestrateRequest(text) : null;
     const split = raw === null ? null : splitLead(raw);
     if (split && !split.request) {

@@ -101,6 +101,7 @@ import {
   useRunsInPlace,
 } from "../orchestration/orchestration-panel";
 import { ConductorSessions } from "./conductor-sessions";
+import { useClearConversation } from "./conversation-view.clear";
 import { FileOpenerProvider } from "./file-opener";
 import { JobCapsules } from "./job-capsules";
 import { MessageQueue } from "./message-queue";
@@ -416,6 +417,16 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
   const conductor = conductorId
     ? (orchestration.leads?.find((entry) => entry.id === conductorId) ?? null)
     : null;
+  // The composer's `/clear`: asks, then resets a conductor's conversation or
+  // ends a session for a new one.
+  const clearing = useClearConversation({
+    slug,
+    project,
+    id,
+    conductor,
+    session: listed,
+    running,
+  });
   // `@id` in a prompt shows the conductor's name (FE-95).
   const conductorNames = useMemo(
     () =>
@@ -1171,6 +1182,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 onSend={send}
                 // OpenCode never leads (FE-105/D5): `/orchestrate` goes as typed.
                 onOrchestrate={canLead(agent) ? orchestrate : undefined}
+                onClear={clearing.onClear}
                 onStop={stop}
                 onEditLastQueued={() => {
                   // A queued repair has nothing typed to give back (FE-91).
@@ -1180,6 +1192,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                   if (last) editQueued(last.id);
                 }}
               />
+              {clearing.dialog}
             </div>
           )}
         </div>
