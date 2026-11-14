@@ -6,6 +6,7 @@ import {
   PlayIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { ReactNode } from "react";
 import type { QueuedMessage } from "#/../shared/conversation";
 import { readEnvelope, visibleText } from "#/lib/orchestration-prompt";
 
@@ -21,6 +22,7 @@ import { readEnvelope, visibleText } from "#/lib/orchestration-prompt";
  * user typed, so it cannot be taken back to edit, only dropped.
  */
 export function MessageQueue({
+  lead,
   queue,
   paused,
   onEdit,
@@ -28,6 +30,8 @@ export function MessageQueue({
   onResume,
   onClear,
 }: {
+  /** A notice row stacked above the queue's own, inside the same tab. */
+  lead?: ReactNode;
   queue: QueuedMessage[];
   paused: boolean;
   onEdit: (id: string) => void;
@@ -35,52 +39,57 @@ export function MessageQueue({
   onResume: () => void;
   onClear: () => void;
 }) {
-  if (queue.length === 0) return null;
+  if (queue.length === 0 && !lead) return null;
   const failed = queue.some((message) => message.error);
   return (
     <section
-      aria-label="Queued messages"
+      aria-label={queue.length > 0 ? "Queued messages" : "Notices"}
       className="bg-muted/60 border-border text-muted-foreground mx-3 rounded-t-lg border border-b-0 px-2.5 py-1 text-xs"
     >
-      <div className="flex h-6 items-center gap-2">
-        {paused && (
-          <HugeiconsIcon
-            icon={PauseIcon}
-            className="size-3.5 shrink-0"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        )}
-        <span className="min-w-0 flex-1 truncate">
-          {paused
-            ? failed
-              ? "A message could not be sent"
-              : "Queue paused because you stopped"
-            : `${queue.length} queued`}
-        </span>
-        {paused && (
-          <button
-            type="button"
-            onClick={onResume}
-            className="hover:bg-foreground/[0.06] hover:text-foreground flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 transition-colors"
-          >
+      {lead}
+      {queue.length > 0 && (
+        <div
+          className={`flex h-6 items-center gap-2 ${lead ? "border-border/60 border-t" : ""}`}
+        >
+          {paused && (
             <HugeiconsIcon
-              icon={PlayIcon}
-              className="size-3.5"
+              icon={PauseIcon}
+              className="size-3.5 shrink-0"
               strokeWidth={1.8}
               aria-hidden="true"
             />
-            {failed ? "Retry" : "Resume"}
+          )}
+          <span className="min-w-0 flex-1 truncate">
+            {paused
+              ? failed
+                ? "A message could not be sent"
+                : "Queue paused because you stopped"
+              : `${queue.length} queued`}
+          </span>
+          {paused && (
+            <button
+              type="button"
+              onClick={onResume}
+              className="hover:bg-foreground/[0.06] hover:text-foreground flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 transition-colors"
+            >
+              <HugeiconsIcon
+                icon={PlayIcon}
+                className="size-3.5"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+              {failed ? "Retry" : "Resume"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClear}
+            className="hover:text-foreground shrink-0 underline underline-offset-2 transition-colors"
+          >
+            Clear
           </button>
-        )}
-        <button
-          type="button"
-          onClick={onClear}
-          className="hover:text-foreground shrink-0 underline underline-offset-2 transition-colors"
-        >
-          Clear
-        </button>
-      </div>
+        </div>
+      )}
       <ul>
         {queue.map((message) => {
           const said = visibleText(message.text).trim();

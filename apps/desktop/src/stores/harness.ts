@@ -217,6 +217,9 @@ function makeFake(): DesktopHarnessApi | null {
     openInTerminal: async (agent) => {
       console.info(`[harness fake] open in terminal: ${agent}`);
     },
+    signIn: async (agent) => {
+      console.info(`[harness fake] sign in: ${agent}`);
+    },
     onChanged: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

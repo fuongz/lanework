@@ -795,7 +795,39 @@ export type ConversationEvent =
       project: string;
       conversation: string;
       id: string;
+    }
+  /**
+   * How Claude's own sign-in fared on the turn that just ended (FE-139).
+   *
+   * `failed` with the CLI's words when it refused the turn for a sign-in that
+   * has to be done again (`claude auth login`); `ok` when a turn went through.
+   */
+  | {
+      type: "claude-auth";
+      project: string;
+      conversation: string;
+      state: "failed" | "ok";
+      message: string | null;
     };
+
+/**
+ * Whether a failed Claude turn's words say its sign-in must be done again
+ * (FE-139).
+ *
+ * The CLI prefixes every 401 and 403 with "Failed to authenticate", a 403
+ * from a proxy or Cloudflare's bot check included; those are the network's,
+ * and signing in again does not help. Only words that send the person to
+ * log in, or name an expired or revoked token, count.
+ */
+export function needsClaudeSignIn(text: string): boolean {
+  return (
+    /\bclaude (auth )?login\b/i.test(text) ||
+    /\brun \/login\b/i.test(text) ||
+    /\bAPI Error: 401\b/.test(text) ||
+    /\bOAuth token (has expired|(was )?revoked)\b/i.test(text) ||
+    /\bInvalid API key\b/i.test(text)
+  );
+}
 
 // ─── Links ──────────────────────────────────────────────────────────────────
 

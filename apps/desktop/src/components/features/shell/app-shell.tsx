@@ -25,6 +25,7 @@ import { usePersistedLayout } from "#/hooks/use-persisted-layout";
 import { readStored, writeStored } from "#/lib/stored";
 import { useAwaitingWatch } from "#/stores/awaiting";
 import { useBoard } from "#/stores/board";
+import { useClaudeAuthWatch } from "#/stores/claude-auth";
 import { useLayout } from "#/stores/layout";
 import { useMcpAuthWatch } from "#/stores/mcp-auth";
 import { terminalShown, useTerminal } from "#/stores/terminal";
@@ -32,6 +33,7 @@ import { AgentUsageStrip } from "./agent-usage-strip";
 import { AppSidebar } from "./app-sidebar";
 import { AwaitingIsland } from "./awaiting-island";
 import { BoardNoticeIsland } from "./board-notice-island";
+import { ClaudeAuthIsland } from "./claude-auth-island";
 import { CommandPalette } from "./command-palette";
 import { DictationIsland } from "./dictation-island";
 import { HistoryButtons } from "./history-nav";
@@ -192,6 +194,7 @@ export function AppShell() {
   // Whether Claude Code and Codex are signed in to the cloud Lanework MCP,
   // asked again on a timer and on focus; the island speaks when they are not.
   useMcpAuthWatch();
+  useClaudeAuthWatch();
   // Conversations whose agent waits on the person (FE-97), followed for the
   // whole window: the island and the rail's ping both read them.
   useAwaitingWatch();
@@ -505,6 +508,7 @@ export function AppShell() {
       <DictationIsland />
       <BoardNoticeIsland />
       <AwaitingIsland />
+      <ClaudeAuthIsland />
       <McpAuthIsland />
       <UpdateIsland />
       <HarnessIsland />

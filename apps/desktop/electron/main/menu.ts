@@ -29,6 +29,8 @@ function sendViewCommand(command: ViewCommand): void {
  *   press to close a tab would take the whole app off the screen. Close
  *   Window stays in File without a key, and the window's own close button is
  *   untouched.
+ *   The page takes ⌘W instead: Files closes the open file, a chat asks
+ *   before stopping its live agent.
  * - Toggle Sidebar is ⌘B (FE-20/D5, as in VS Code). Nothing in the app claims
  *   it: CodeMirror, the one editor, binds no Mod-B, and a key the page
  *   handles never reaches the menu anyway.

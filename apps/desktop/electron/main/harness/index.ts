@@ -260,10 +260,31 @@ function update(agent: HarnessAgent): HarnessInfo[] {
 async function openInTerminal(agent: HarnessAgent): Promise<void> {
   const command = (entries.get(agent) as Entry).updateCommand;
   if (!command) throw new Error("The app cannot tell how to update this CLI.");
+  await runInTerminal(`update-${agent}`, command, "update");
+}
+
+/**
+ * Run `claude auth login` in Terminal (FE-139).
+ *
+ * In Terminal, not a hidden shell: the CLI opens the browser, and when its
+ * callback cannot land it asks for the code to be pasted, which needs a TTY
+ * the person can type in. The credential stays the CLI's; the app never
+ * reads or writes it.
+ */
+async function signInInTerminal(): Promise<void> {
+  await runInTerminal("sign-in-claude", "claude auth login", "sign-in");
+}
+
+/** Write `<name>.command` and have Terminal open it. */
+async function runInTerminal(
+  name: string,
+  command: string,
+  what: "update" | "sign-in",
+): Promise<void> {
   const dir = join(app.getPath("userData"), "harness");
-  const file = join(dir, `update-${agent}.command`);
+  const file = join(dir, `${name}.command`);
   await mkdir(dir, { recursive: true, mode: 0o700 });
-  await writeFile(file, terminalScript(defaultShell().file, command), {
+  await writeFile(file, terminalScript(defaultShell().file, command, what), {
     mode: 0o700,
   });
   // NOTE: `mode` applies only when the file is created. An older file keeps
@@ -321,6 +342,11 @@ export function registerHarness(devUrl?: string): void {
     if (args.length !== 1) throw new Error("openInTerminal takes one agent");
     await ready;
     return openInTerminal(agentArg(args[0]));
+  });
+  handle(harnessChannels.signIn, devUrl, async (args) => {
+    if (args.length !== 1 || args[0] !== "claude")
+      throw new Error('signIn takes "claude"');
+    return signInInTerminal();
   });
   // On launch, then every 6 hours. The island's own check is on demand.
   void ready.then(check).catch(() => {});

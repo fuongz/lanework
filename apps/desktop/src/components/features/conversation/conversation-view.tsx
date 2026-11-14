@@ -63,7 +63,6 @@ import {
 import { useProjectTrust } from "#/components/shared/settings/use-project-trust";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { Alert, AlertDescription } from "#/components/ui/alert";
-import { Button } from "#/components/ui/button";
 import {
   Empty,
   EmptyDescription,
@@ -115,6 +114,7 @@ import {
 } from "./conductor-sessions";
 import { useClearConversation } from "./conversation-view.clear";
 import { RollingText } from "./conversation-view.rolling";
+import { useStopShortcut } from "./conversation-view.stop";
 import { FileOpenerProvider } from "./file-opener";
 import { JobCapsules } from "./job-capsules";
 import { MessageQueue } from "./message-queue";
@@ -735,6 +735,8 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         setActionError(ipcMessage(caught, "Could not stop.")),
       );
   };
+  // ⌘W asks, then stops the session: the turn cut off, the agent ended.
+  const stopDialog = useStopShortcut({ label, project, id, running });
 
   /**
    * Takes queued messages out: dropped, or back to the composer.
@@ -1104,41 +1106,6 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                       (engine.state === "error" ? engine.message : null)}
                   </p>
                 )}
-                {untrusted && agent && (
-                  <div
-                    role="status"
-                    className="text-muted-foreground flex items-center gap-3 px-1 text-xs"
-                  >
-                    <p className="min-w-0 flex-1">
-                      {agent === "claude" ? (
-                        <>
-                          This chat runs without the project’s{" "}
-                          <code>.claude</code> settings, because Claude Code
-                          doesn’t trust this folder.
-                        </>
-                      ) : (
-                        <>
-                          This chat runs without the project’s{" "}
-                          <code>.codex</code> config and <code>AGENTS.md</code>,
-                          because Codex doesn’t trust this folder.
-                        </>
-                      )}
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={trusting !== null}
-                      onClick={() => setTrustAsk({ agent, on: true })}
-                    >
-                      <HugeiconsIcon
-                        icon={SecurityCheckIcon}
-                        strokeWidth={1.5}
-                        data-icon="inline-start"
-                      />
-                      {trusting === agent ? "Trusting…" : "Trust this folder"}
-                    </Button>
-                  </div>
-                )}
                 {trustError && (
                   <p role="alert" className="text-destructive px-1 text-xs">
                     {trustError}
@@ -1211,6 +1178,15 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 {project && settings && !asWorker && (
                   <div className={asking.length ? "hidden" : "flex flex-col"}>
                     <MessageQueue
+                      lead={
+                        untrusted && agent ? (
+                          <TrustNotice
+                            agent={agent}
+                            trusting={trusting}
+                            onTrust={() => setTrustAsk({ agent, on: true })}
+                          />
+                        ) : undefined
+                      }
                       queue={queue}
                       paused={paused}
                       onEdit={editQueued}
@@ -1251,6 +1227,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                       }}
                     />
                     {clearing.dialog}
+                    {stopDialog}
                   </div>
                 )}
               </div>
@@ -1296,6 +1273,46 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
         </div>
       </section>
     </TooltipProvider>
+  );
+}
+
+/**
+ * The untrusted-folder notice, the top row of the tab on the composer. Its
+ * words go in `title` too, since the row is one truncated line.
+ */
+function TrustNotice({
+  agent,
+  trusting,
+  onTrust,
+}: {
+  agent: "claude" | "codex";
+  trusting: string | null;
+  onTrust: () => void;
+}) {
+  const text =
+    agent === "claude"
+      ? "This chat runs without the project’s .claude settings, because Claude Code doesn’t trust this folder."
+      : "This chat runs without the project’s .codex config and AGENTS.md, because Codex doesn’t trust this folder.";
+  return (
+    <div role="status" className="flex h-6 items-center gap-2">
+      <HugeiconsIcon
+        icon={SecurityCheckIcon}
+        className="size-3.5 shrink-0"
+        strokeWidth={1.8}
+        aria-hidden="true"
+      />
+      <span className="min-w-0 flex-1 truncate" title={text}>
+        {text}
+      </span>
+      <button
+        type="button"
+        disabled={trusting !== null}
+        onClick={onTrust}
+        className="hover:bg-foreground/[0.06] hover:text-foreground flex h-6 shrink-0 items-center rounded-md px-1.5 transition-colors disabled:pointer-events-none disabled:opacity-50"
+      >
+        {trusting === agent ? "Trusting…" : "Trust this folder"}
+      </button>
+    </div>
   );
 }
 

@@ -110,6 +110,7 @@ export const harnessChannels = {
   update: "harness:update",
   dismiss: "harness:dismiss",
   openInTerminal: "harness:open-in-terminal",
+  signIn: "harness:sign-in",
   /** Main → renderer: the list changed. Carries `HarnessInfo[]`. */
   changed: "harness:changed",
 } as const;
@@ -125,6 +126,8 @@ export interface DesktopHarnessApi {
   dismiss: (agent: HarnessAgent, version: string) => Promise<HarnessInfo[]>;
   /** Run the update command in Terminal, where its output can be read. */
   openInTerminal: (agent: HarnessAgent) => Promise<void>;
+  /** Run `claude auth login` in Terminal (FE-139). */
+  signIn: (agent: "claude") => Promise<void>;
   /** Who each CLI is signed in as. */
   accounts: () => Promise<HarnessAccount[]>;
   onChanged: (listener: (list: HarnessInfo[]) => void) => () => void;

@@ -338,6 +338,7 @@ const harness: DesktopHarnessApi = {
     ipcRenderer.invoke(harnessChannels.dismiss, agent, version),
   openInTerminal: (agent) =>
     ipcRenderer.invoke(harnessChannels.openInTerminal, agent),
+  signIn: (agent) => ipcRenderer.invoke(harnessChannels.signIn, agent),
   onChanged: (listener) =>
     subscribe<HarnessInfo[]>(harnessChannels.changed, listener),
 };

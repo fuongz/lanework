@@ -12,6 +12,7 @@ import { create } from "zustand";
  * | `dictation`      | 500      | An open microphone nobody noticed.          |
  * | `boardNotice`    | 400      | A write the user just made did not save.    |
  * | `awaiting`       | 300      | An agent stopped and waits on the person.   |
+ * | `claudeAuth`     | 250      | Claude refused a turn: sign in again.       |
  * | `mcpAuth`        | 200      | An agent lost its Lanework sign-in.         |
  * | `notify`         | 150      | A toast from `notify()`.                    |
  * | `update`         | 120      | A newer Lanework is out, or ready.          |
@@ -23,6 +24,7 @@ export const ISLAND_PRIORITY = {
   dictation: 500,
   boardNotice: 400,
   awaiting: 300,
+  claudeAuth: 250,
   mcpAuth: 200,
   notify: 150,
   update: 120,

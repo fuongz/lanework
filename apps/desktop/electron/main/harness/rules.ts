@@ -236,21 +236,30 @@ export function shQuote(value: string): string {
 /**
  * The `.command` file Terminal runs for "Open in Terminal".
  *
- * It runs the update command, then a shell, so the window stays open on its
+ * It runs the command, then a shell, so the window stays open on its
  * output. The interpreter is zsh or bash, login and interactive, like the
  * probe: the profile puts `brew`, `npm` and an aliased `claude` on PATH. A
  * fish or nu user still gets zsh here, because the script is POSIX syntax.
+ *
+ * @param what What the command is, in its last line: "update" (FE-61) or
+ *   "sign-in" (FE-139).
  */
-export function terminalScript(shellFile: string, command: string): string {
+export function terminalScript(
+  shellFile: string,
+  command: string,
+  what: "update" | "sign-in" = "update",
+): string {
   const name = posix.basename(shellFile);
   const interpreter = ["zsh", "bash"].includes(name) ? shellFile : "/bin/zsh";
   return [
     `#!${interpreter} -il`,
-    "# Written by Lanework to update an agent CLI (FE-61).",
+    what === "update"
+      ? "# Written by Lanework to update an agent CLI (FE-61)."
+      : "# Written by Lanework to sign an agent CLI in again (FE-139).",
     `printf '%s\\n\\n' ${shQuote(`$ ${command}`)}`,
     command,
     "code=$?",
-    `printf '\\n%s\\n' "Lanework: the update exited with status $code."`,
+    `printf '\\n%s\\n' "Lanework: the ${what} exited with status $code."`,
     `exec "\${SHELL:-${interpreter}}" -l`,
     "",
   ].join("\n");

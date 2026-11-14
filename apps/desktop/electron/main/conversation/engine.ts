@@ -37,6 +37,7 @@ import {
   type EngineQueue,
   type EngineState,
   isPermission,
+  needsClaudeSignIn,
   type Permission,
   type PermissionAnswer,
   type PermissionRequest,
@@ -219,6 +220,23 @@ function resultText(line: Record<string, unknown>): string {
   return typeof line.subtype === "string" && line.subtype !== "success"
     ? `The turn failed (${line.subtype}).`
     : "The turn failed.";
+}
+
+/** The text blocks of an `assistant` line, joined; "" for any other line. */
+function assistantText(line: Record<string, unknown>): string {
+  if (line.type !== "assistant") return "";
+  const content = (line.message as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block: unknown) =>
+      block &&
+      typeof block === "object" &&
+      (block as { type?: unknown }).type === "text" &&
+      typeof (block as { text?: unknown }).text === "string"
+        ? (block as { text: string }).text
+        : "",
+    )
+    .join("\n");
 }
 
 /** A control request of ours the CLI has not answered yet. */
@@ -479,6 +497,7 @@ class Engine implements ConversationEngine {
         this.error =
           said?.slice(0, 300) ||
           `Claude stopped (${signal ?? `exit ${code ?? "?"}`}).`;
+        if (said && needsClaudeSignIn(said)) this.tellAuth(said);
         this.held.paused = this.held.length > 0;
       }
       // Never taken in: they wait again, not lost.
@@ -616,19 +635,46 @@ class Engine implements ConversationEngine {
         this.emitLast();
         return;
       }
-      case "result":
+      case "result": {
+        const text = resultText(line);
         safely(() =>
           engineTap().result?.({
             project: this.project,
             conversation: this.conversation,
             folder: this.folder,
-            text: resultText(line),
+            text,
             error: line.is_error === true,
           }),
         );
+        this.tellAuth(line.is_error === true ? text : null);
         this.onResult();
         return;
+      }
     }
+  }
+
+  /**
+   * Tell the page whether Claude's sign-in held on the turn that ended
+   * (FE-139).
+   *
+   * @param failed The failed turn's words, or null when it went through.
+   *   The last assistant text is read too: an API error may leave the
+   *   `result` line with only its subtype.
+   */
+  tellAuth(failed: string | null): void {
+    if (failed === null) {
+      this.emit({ type: "claude-auth", state: "ok", message: null });
+      return;
+    }
+    const said = [failed, ...this.rows.map(assistantText)]
+      .filter(Boolean)
+      .find(needsClaudeSignIn);
+    if (said)
+      this.emit({
+        type: "claude-auth",
+        state: "failed",
+        message: said.trim().slice(0, 300),
+      });
   }
 
   /** Keep a line of the running turn, stamped when the stream did not. */
