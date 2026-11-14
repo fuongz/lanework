@@ -1,6 +1,7 @@
 import type { DesktopAgentConfigApi } from "./agent-config";
 import type { DesktopAgentSetupApi } from "./agent-setup";
 import type { DesktopAuthApi, DesktopLaneworkMcpApi } from "./auth";
+import type { DesktopConductorsApi } from "./conductor-sessions";
 import type { DesktopConversationApi } from "./conversation";
 import type { DesktopDictationApi } from "./dictation";
 import type { DesktopGitApi } from "./git";
@@ -165,4 +166,6 @@ export interface DesktopApi {
   jev: DesktopJevApi;
   /** Team lead presets for `/orchestrate` (FE-88). */
   leads: DesktopLeadsApi;
+  /** Stop on a conductor's rail row: every engine it still runs. */
+  conductors: DesktopConductorsApi;
 }

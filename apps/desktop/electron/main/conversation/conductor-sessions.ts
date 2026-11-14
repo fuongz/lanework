@@ -341,6 +341,11 @@ export class ConductorSessions {
   private adopting: Promise<void> | null = null;
   /** The one {@link restore} pass, run once at startup. */
   private restoring: Promise<void> | null = null;
+  /**
+   * Conductor conversations the user stopped, by key: a report owed to one
+   * waits until it runs again, so it never starts it by itself.
+   */
+  private held = new Set<string>();
 
   constructor(private readonly deps: ConductorSessionsDeps) {}
 
@@ -570,6 +575,48 @@ export class ConductorSessions {
     }
     if (moved) await this.save();
     return out;
+  }
+
+  /**
+   * The sessions conductor `conductorId` started in `project`, oldest
+   * first, whatever conversation of it started them.
+   */
+  async sessionsOf(project: string, conductorId: string): Promise<string[]> {
+    await this.adopt();
+    return (await this.all())
+      .filter(
+        (launch) =>
+          launch.project === project && launch.conductorId === conductorId,
+      )
+      .map((launch) => launch.session);
+  }
+
+  /**
+   * Before Stop ends a conductor's engines: no turn of its sessions is
+   * watched any more, and no report goes to `conversations`, or to any
+   * conversation its sessions report to, until that one runs again. The
+   * reports owed stay owed: its next turn's end hands them over. The memory
+   * still hears each session's end.
+   */
+  async hold(
+    project: string,
+    conductorId: string,
+    conversations: readonly string[],
+  ): Promise<void> {
+    await this.adopt();
+    for (const conversation of conversations)
+      this.held.add(keyOf(project, conversation));
+    let moved = false;
+    for (const launch of await this.all()) {
+      if (launch.project !== project || launch.conductorId !== conductorId)
+        continue;
+      this.held.add(keyOf(project, launch.conductor));
+      const key = keyOf(project, launch.session);
+      if (!this.watches.delete(key) && !launch.notify) continue;
+      launch.notify = null;
+      moved = true;
+    }
+    if (moved) await this.save();
   }
 
   /**
@@ -912,6 +959,10 @@ export class ConductorSessions {
     engine: EngineState,
   ): void {
     const key = keyOf(project, conversation);
+    // A stopped conductor that runs again was sent a message: what it is
+    // owed goes when that turn ends.
+    if (engine.state === "running" || engine.state === "starting")
+      this.held.delete(key);
     const watch = this.watches.get(key);
     // The memory hears every turn end of a session a conductor started,
     // watched or not.
@@ -1109,7 +1160,7 @@ export class ConductorSessions {
   private async flush(project: string, conductor: string): Promise<void> {
     const key = keyOf(project, conductor);
     const owed = this.reports.get(key);
-    if (!owed?.length || this.sending.has(key)) return;
+    if (!owed?.length || this.sending.has(key) || this.held.has(key)) return;
     this.sending.add(key);
     try {
       const engines = this.deps.engines();

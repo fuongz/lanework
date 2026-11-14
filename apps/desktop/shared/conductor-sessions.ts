@@ -802,3 +802,55 @@ export const SESSION_HELP: Record<SessionAction, string> = {
  * prompt prefix never changes between its turns.
  */
 export const CREATE_CONDUCTOR_HINT = `Lanework: when the user asks you to create a conductor (a saved team lead in the Lanework app's Conductors rail), run \`"$${SESSIONS_ENV.cli}" conductors.create --json '{"name":"..."}'\` in the shell; add "instructions", "agent", "model", "effort", "contextFiles", "icon" or "permission" only when the user asked for them. Run it with --help for the fields. It prints one JSON line with the new conductor's id. Never print the LANEWORK_* environment variables.`;
+
+// ─── Stop a conductor (the rail's Stop) ─────────────────────────────────────
+//
+// Stop on a conductor's row ends every engine it still has in the project:
+// its conversations (the current one and any earlier one still running),
+// the sessions it started, and the run it leads. A turn in progress is cut
+// off; conversations, transcripts, the ledger and memory stay, and the next
+// message starts it again.
+
+export const conductorChannels = {
+  /** What Stop would end now, without ending anything. */
+  stopPreview: "conductors:stop-preview",
+  /** End it all; answers with what was ended. */
+  stopAll: "conductors:stop-all",
+} as const;
+
+/** The run a conductor leads, as Stop ends it. */
+export interface ConductorStopRun {
+  id: string;
+  title: string;
+  /** Its workers with a turn running now. */
+  workers: number;
+}
+
+/** What Stop ended, or would end. */
+export interface ConductorStopSummary {
+  /** Its conversations with a live engine: the current one, earlier ones. */
+  conversations: number;
+  /** Sessions it started, with a live engine. */
+  sessions: number;
+  /** The newest run it leads that is active or paused; null for none. */
+  run: ConductorStopRun | null;
+}
+
+/** {@link ConductorStopSummary} before Stop, with what the dialog says. */
+export interface ConductorStopPreview extends ConductorStopSummary {
+  /** One of its conversations is in the middle of a turn. */
+  answering: boolean;
+}
+
+/** Whether Stop has anything to end. */
+export function hasConductorStop(summary: ConductorStopSummary): boolean {
+  return (
+    summary.conversations > 0 || summary.sessions > 0 || summary.run !== null
+  );
+}
+
+/** Stop for a conductor in the renderer. `lead` is a lead ref. */
+export interface DesktopConductorsApi {
+  stopPreview: (project: string, lead: string) => Promise<ConductorStopPreview>;
+  stopAll: (project: string, lead: string) => Promise<ConductorStopSummary>;
+}

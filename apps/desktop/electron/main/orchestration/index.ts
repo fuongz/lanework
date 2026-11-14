@@ -179,10 +179,13 @@ export function isWorkerConversation(
 /**
  * What main offers the page. `markReportSeen` (FE-136/D4) is main's own
  * until the shared handler type names it: the notification IPC calls it.
+ * So is `title`: a conductor's Stop names the run it ends.
  */
 export const orchestrationMain: OrchestrationMainHandlers & {
   /** The user opened a finished or stopped run: its report is seen. */
   markReportSeen: (runId: string) => Promise<void>;
+  /** A run's title, for a conductor's Stop dialog. */
+  title: (project: string, runId: string) => Promise<string>;
 } = {
   runs: (project) => orchestrator().runs(project),
   run: (project, runId) => orchestrator().run(project, runId),
@@ -199,6 +202,7 @@ export const orchestrationMain: OrchestrationMainHandlers & {
   control: (runId, call, requestId) =>
     orchestrator().control(runId, call, requestId),
   markReportSeen: (runId) => orchestrator().markReportSeen(runId),
+  title: (project, runId) => orchestrator().title(project, runId),
 };
 
 /**

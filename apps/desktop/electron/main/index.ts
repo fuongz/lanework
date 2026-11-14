@@ -7,7 +7,11 @@ import {
   session,
   shell,
 } from "electron";
-import { MEMORY_NOTES_MAX } from "../../shared/conductor-sessions";
+import {
+  type ConductorStopRun,
+  conductorChannels,
+  MEMORY_NOTES_MAX,
+} from "../../shared/conductor-sessions";
 import { type AppInfo, channels, isThemeSource } from "../../shared/desktop";
 import {
   type ControlServer,
@@ -40,11 +44,17 @@ import {
   applyChannel,
 } from "./channel";
 import {
+  conductorEngines,
   conductorMemory,
   conductorSessionsControl,
   pidFileBridge,
   registerConversation,
 } from "./conversation";
+import {
+  type ConductorStopDeps,
+  previewConductorStop,
+  stopConductor,
+} from "./conversation/conductor-stop";
 import { registerDictation } from "./dictation";
 import { readLinkedOpenPulls, registerGit } from "./git";
 import { registerHandoff } from "./handoff";
@@ -243,6 +253,52 @@ function registerLeads(
       leadRef(args[1]),
       notes,
     );
+  });
+}
+
+// ─── A conductor's Stop ─────────────────────────────────────────────────────
+
+/**
+ * The runs `lead` leads in `project` that its Stop ends: active or paused,
+ * and driven here (another instance's refuses a stop), newest first. Its
+ * runs are those approved under it, as its rail dot counts them.
+ */
+async function conductorRuns(
+  project: string,
+  lead: string,
+): Promise<ConductorStopRun[]> {
+  const runs = (await orchestrationMain.runs(project)).filter(
+    (run) =>
+      run.teamLead === lead &&
+      (run.status === "active" || run.status === "paused") &&
+      !run.drivenBy,
+  );
+  return Promise.all(
+    runs.map(async (run) => ({
+      id: run.id,
+      title: await orchestrationMain.title(project, run.id),
+      workers: run.tasks.filter((task) => task.status === "running").length,
+    })),
+  );
+}
+
+/**
+ * Register `conductors.*`: Stop on a conductor's row, and what it would
+ * end. A run stops through `orchestration.stop`, as its panel's Stop does.
+ */
+function registerConductors(devUrl: string | undefined): void {
+  const deps: ConductorStopDeps = {
+    ...conductorEngines,
+    runsOf: conductorRuns,
+    stopRun: (project, runId) => orchestrationMain.stop(project, runId),
+  };
+  handle(conductorChannels.stopPreview, devUrl, (args) => {
+    arity(args, 2);
+    return previewConductorStop(deps, ipcSlug(args[0]), leadRef(args[1]));
+  });
+  handle(conductorChannels.stopAll, devUrl, (args) => {
+    arity(args, 2);
+    return stopConductor(deps, ipcSlug(args[0]), leadRef(args[1]));
   });
 }
 
@@ -472,6 +528,7 @@ app
     registerDictation(devUrl);
     registerOrchestration(devUrl, orchestrationMain, jevMain);
     registerLeads(devUrl, leadsMain);
+    registerConductors(devUrl);
     // Rewritten on every launch, like the Stop hook, so it always matches
     // this app's Node and bundle.
     void installControlCli().catch((error: unknown) =>

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { create } from "zustand";
+import type { ConductorStopPreview } from "#/../shared/conductor-sessions";
 import type { OrchestrationRun, TeamLead } from "#/../shared/orchestration";
 import {
   proposalRun,
@@ -10,6 +11,7 @@ import { conductorConversation } from "#/lib/conductors";
 import { deriveProposals } from "#/lib/orchestration-prompt";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { awaitingKey, useAwaiting } from "#/stores/awaiting";
+import { useChatEngines } from "#/stores/chat-engines";
 import { useNewChats } from "#/stores/new-chats";
 
 /**
@@ -278,4 +280,72 @@ export function useConductorStatuses(
     else out[conductor.id] = { ...IDLE, conversation };
   }
   return out;
+}
+
+/**
+ * What Stop on each conductor's row would end now, by its id: its
+ * conversations, the sessions it started and the run it leads, as main
+ * counts them. Read again whenever the project's chat engines, their turns
+ * or its runs change, and on `refresh`.
+ *
+ * NOTE: Main's answer, not worked out here: an earlier conversation still
+ * running after a Reset is known to main alone.
+ */
+export function useConductorStops(
+  project: string,
+  conductors: readonly TeamLead[],
+): {
+  stops: Record<string, ConductorStopPreview>;
+  refresh: () => void;
+} {
+  const [stops, setStops] = useState<Record<string, ConductorStopPreview>>({});
+  const [tick, setTick] = useState(0);
+  const alive = useChatEngines((state) => state.alive[project]);
+  const runs = useOrchestrationRuns(project);
+  const ids = conductors.map((lead) => lead.id).join("\n");
+  const aliveKey = alive?.join("\n") ?? "";
+  // What a run's Stop would say changes with its status and its workers.
+  const runsKey = runs
+    .map(
+      (run) =>
+        `${run.id}:${run.status}:${run.tasks.filter((task) => task.status === "running").length}`,
+    )
+    .join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the keys stand for the lists, `tick` for a refresh.
+  useEffect(() => {
+    const surface = window.desktop?.conductors;
+    if (!surface || !ids) {
+      setStops({});
+      return;
+    }
+    let gone = false;
+    void Promise.all(
+      ids.split("\n").map((id) =>
+        surface
+          .stopPreview(project, id)
+          .then((preview) => [id, preview] as const)
+          .catch(() => null),
+      ),
+    ).then((entries) => {
+      if (gone) return;
+      const next: Record<string, ConductorStopPreview> = {};
+      for (const entry of entries) if (entry) next[entry[0]] = entry[1];
+      setStops(next);
+    });
+    return () => {
+      gone = true;
+    };
+  }, [project, ids, aliveKey, runsKey, tick]);
+  const refresh = useCallback(() => setTick((value) => value + 1), []);
+  // A new conversation is bound to its conductor only once its engine
+  // runs, so the alive list alone can be read too early: each turn's start
+  // and end are read again.
+  useEffect(() => {
+    const surface = window.desktop?.conversation;
+    if (!surface) return;
+    return surface.onEvent((event) => {
+      if (event.type === "state" && event.project === project) refresh();
+    });
+  }, [project, refresh]);
+  return { stops, refresh };
 }

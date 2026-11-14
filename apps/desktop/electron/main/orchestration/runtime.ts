@@ -301,6 +301,10 @@ const JEV_TIMEOUT_MS = 2 * JUDGE_TIMEOUT_MS + 5_000;
 /** The reason a run shows while its lead cannot be reached (FE-90/D7). */
 const LEAD_UNREACHABLE = "Lanework could not reach the lead:";
 const ACTIVE = new Set(["running", "cancelling"]);
+
+/** A run's title: the proposal's, else its first task's, else its id. */
+const recordTitle = (record: RunRecord): string =>
+  record.title || record.run.tasks[0]?.title || record.run.id;
 /** What a stop, pause or cancel leaves a running task as. */
 const STOPPED = new Set(["cancelling", "cancelled", "interrupted"]);
 /**
@@ -2324,6 +2328,14 @@ export class Orchestrator {
     return record && record.run.project === project ? this.shown(record) : null;
   }
 
+  /**
+   * A run's title, as its conductor's memory keeps it: the proposal's, or
+   * for a run saved before it was kept, its first task's.
+   */
+  async title(project: string, runId: string): Promise<string> {
+    return recordTitle(await this.recordIn(project, runId));
+  }
+
   private async recordIn(project: string, runId: string): Promise<RunRecord> {
     await this.load();
     const record = this.records.get(runId);
@@ -2774,7 +2786,7 @@ export class Orchestrator {
     const hook = this.deps.runEnded;
     if (!hook) return;
     const { run } = record;
-    const title = record.title || run.tasks[0]?.title || run.id;
+    const title = recordTitle(record);
     try {
       void Promise.resolve(hook(run, title)).catch((error: unknown) =>
         console.error("Unable to record the run in memory", error),

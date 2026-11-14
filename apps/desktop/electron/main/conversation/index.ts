@@ -84,6 +84,7 @@ import { createCodexModels } from "./codex-models";
 import { codexRolloutPath, readCodexConversation } from "./codex-transcript";
 import { ConductorMemoryStore } from "./conductor-memory";
 import { ConductorSessions } from "./conductor-sessions";
+import type { ConductorStopDeps } from "./conductor-stop";
 import { createEngines } from "./engine";
 import { forkConversation } from "./fork";
 import { type ImageScope, openableImage, previewImage } from "./image-preview";
@@ -175,6 +176,36 @@ function withLive(turns: Turn[], live: Turn[]): Turn[] {
 
 /** A conductor's sessions, once the conversation view registered. */
 let sessions: ConductorSessions | null = null;
+
+/**
+ * What a conductor's Stop asks of the chat's engines, once the conversation
+ * view registered.
+ */
+let stoppable: Omit<ConductorStopDeps, "runsOf" | "stopRun"> | null = null;
+
+/**
+ * The chat's side of a conductor's Stop: its engines, its sessions, its
+ * held reports. The runs are orchestration's, added by `main/index.ts`.
+ * Refused before the conversation view registered.
+ */
+export const conductorEngines: Omit<ConductorStopDeps, "runsOf" | "stopRun"> = {
+  alive: (project) => ready().alive(project),
+  working: (project, conversation) => ready().working(project, conversation),
+  conductorOf: (project, conversation) =>
+    ready().conductorOf(project, conversation),
+  sessionsOf: (project, lead) => ready().sessionsOf(project, lead),
+  hold: (project, lead, conversations) =>
+    ready().hold(project, lead, conversations),
+  close: (project, conversation) => ready().close(project, conversation),
+};
+
+function ready(): Omit<ConductorStopDeps, "runsOf" | "stopRun"> {
+  if (!stoppable) throw new Error("Conversations are not ready yet.");
+  return stoppable;
+}
+
+/** The most conversations {@link registerConversation} remembers a conductor of. */
+const CONDUCTOR_SEEN_MAX = 256;
 
 /**
  * Where conductor `conductorId` keeps its memory of `project` (FE-128): in
@@ -578,9 +609,43 @@ export function registerConversation(
   // FE-97: what every engine waits on the person for, followed from the
   // same events the page gets.
   const awaiting = createAwaitingLedger();
+  /**
+   * The conductor each conversation was seen running for, by project and
+   * id. A Reset lets a conversation go from its conductor, not its engine:
+   * the conductor's Stop still ends it.
+   */
+  const conductorSeen = new Map<string, string>();
+  const seenKey = (project: string, conversation: string) =>
+    `${project}\0${conversation}`;
+  const sawConductor = (
+    project: string,
+    conversation: string,
+    conductor: string,
+  ) => {
+    const key = seenKey(project, conversation);
+    conductorSeen.delete(key);
+    conductorSeen.set(key, conductor);
+    if (conductorSeen.size > CONDUCTOR_SEEN_MAX)
+      conductorSeen.delete(conductorSeen.keys().next().value as string);
+  };
+  /** The conductor whose own conversation this is now, or null. */
+  const conductorNow = (project: string, conversation: string) =>
+    conductorOfConversation(
+      project,
+      engines.pending(project, conversation)?.agent ?? "claude",
+      conversation,
+    ).catch(() => null);
+  /** Note the conductor a conversation runs for, the first time it is seen. */
+  const learnConductor = async (project: string, conversation: string) => {
+    if (conductorSeen.has(seenKey(project, conversation))) return;
+    const conductor = await conductorNow(project, conversation);
+    if (conductor) sawConductor(project, conversation, conductor);
+  };
   const tell = (event: ConversationEvent) => {
     broadcast(conversationChannels.event, event);
     sessions?.onEvent(event);
+    if (event.type === "state" && typeof event.conversation === "string")
+      void learnConductor(event.project, event.conversation);
     // An OpenCode turn that ended is read in now: the rail must not wait on
     // a database write its watch may never hear (FE-128).
     if (
@@ -689,6 +754,24 @@ export function registerConversation(
   });
   const conductors = sessions;
   setSessionsEnv((target) => conductors.envFor(target));
+  stoppable = {
+    alive: (project) =>
+      engines.alive(project).filter((id) => !isWorkerConversation(project, id)),
+    working: (project, conversation) =>
+      engines.pending(project, conversation)?.working ?? false,
+    conductorOf: async (project, conversation) =>
+      (await conductorNow(project, conversation)) ??
+      conductorSeen.get(seenKey(project, conversation)) ??
+      null,
+    sessionsOf: (project, lead) => conductors.sessionsOf(project, lead),
+    hold: (project, lead, conversations) =>
+      conductors.hold(project, lead, conversations),
+    // As `conversation.close`.
+    close: async (project, conversation) => {
+      await engines.close(project, conversation);
+      awaiting.clear(project, conversation);
+    },
+  };
   // Launches saved before FE-128 go to their conductor while its
   // conversation is still bound, before a Reset could let it go.
   void conductors
@@ -818,13 +901,16 @@ export function registerConversation(
         started.conversation,
         folder,
       ).catch(() => undefined);
-      if (conductor)
+      if (conductor) {
         await bindConductorConversation(
           request.project,
           agent,
           started.conversation,
           conductor,
         );
+        // Its first state events came before it was bound.
+        sawConductor(request.project, started.conversation, conductor);
+      }
       return started;
     },
   );

@@ -2,6 +2,10 @@ import { Add01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import {
+  type ConductorStopPreview,
+  hasConductorStop,
+} from "#/../shared/conductor-sessions";
 import type { TeamLead } from "#/../shared/orchestration";
 import { StatusPing } from "#/components/shared/agents/status-ping";
 import { useTeamLeads } from "#/components/shared/conversation/composer";
@@ -48,8 +52,39 @@ import {
   type ConductorState,
   type ConductorStatus,
   useConductorStatuses,
+  useConductorStops,
   useFinishedConductors,
 } from "./conductor-status";
+
+/**
+ * What Stop ends, one short line each, for its dialog: its conversations,
+ * the sessions it started, the run it leads.
+ */
+function stopLines(preview: ConductorStopPreview): string[] {
+  const lines: string[] = [];
+  const { conversations, sessions, run } = preview;
+  if (conversations === 1)
+    lines.push(
+      preview.answering
+        ? "Its conversation (answering now)"
+        : "Its conversation",
+    );
+  else if (conversations > 1)
+    lines.push(
+      `${conversations} of its conversations${preview.answering ? " (one answering now)" : ""}`,
+    );
+  if (sessions > 0)
+    lines.push(
+      `${sessions} ${sessions === 1 ? "session" : "sessions"} it started`,
+    );
+  if (run)
+    lines.push(
+      run.workers > 0
+        ? `Run "${run.title}" and ${run.workers} working ${run.workers === 1 ? "worker" : "workers"}`
+        : `Run "${run.title}"`,
+    );
+  return lines;
+}
 
 function ConductorIcon({
   lead,
@@ -94,6 +129,8 @@ function ConductorIcon({
  * - `+` opens the New conductor dialog; a row's menu (right click, or `⋯`)
  *   edits, copies, makes it the default, or resets its conversation. Reset
  *   only lets the conversation go: it stays, under Agents.
+ * - Stop, in the same menu, ends every engine the conductor still runs in
+ *   the project, after a dialog that lists them.
  *
  * Draws nothing for a project with no folder here: a conductor's
  * conversation runs in it.
@@ -127,25 +164,56 @@ export function ConductorsNav({
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<TeamLead | null>(null);
-  // Stop asks first while it answers, as a session's row does.
+  // Stop always asks first, listing what it ends.
   const [stopping, setStopping] = useState<{
     lead: TeamLead;
-    conversation: string;
+    preview: ConductorStopPreview;
   } | null>(null);
   const alive = useChatEngines((state) => state.alive[project]);
   const refreshChats = useChatEngines((state) => state.refresh);
+  const loadSessions = useAgentSessions((state) => state.load);
+  const { stops, refresh: refreshStops } = useConductorStops(
+    project,
+    conductors,
+  );
+  /** Open Stop's dialog, then bring what it lists up to date. */
+  const askStop = (lead: TeamLead, preview: ConductorStopPreview) => {
+    setStopping({ lead, preview });
+    void window.desktop?.conductors
+      .stopPreview(project, lead.id)
+      .then((fresh) =>
+        setStopping((current) =>
+          current?.lead.id === lead.id ? { lead, preview: fresh } : current,
+        ),
+      )
+      .catch(() => {});
+  };
   /**
-   * End a conductor's engine: a turn in progress is cut off, the
-   * conversation kept, and the next message starts it again. Its row is not
-   * under Sessions, so without this a conductor left running could not be
-   * stopped from the rail.
+   * End every engine a conductor runs here: its conversations, the
+   * sessions it started, the run it leads. A turn in progress is cut off;
+   * conversations, transcripts and memory are kept, and the next message
+   * starts it again. Its row is not under Sessions, so without this a
+   * conductor left running could not be stopped from the rail.
    */
-  const stopEngine = (conversation: string, name: string) =>
-    void window.desktop?.conversation
-      .close(project, conversation)
-      .then(() => notify("success", `Stopped ${name}`))
-      .catch(() => {})
-      .finally(() => void refreshChats(project));
+  const stopAll = (lead: TeamLead) => {
+    const surface = window.desktop?.conductors;
+    if (!surface) return;
+    void surface
+      .stopAll(project, lead.id)
+      .then(() => notify("success", `Stopped ${lead.name}`))
+      .catch((failure: unknown) =>
+        notify("error", `Could not stop ${lead.name}`, {
+          description: ipcMessage(failure, "Try again in a moment."),
+        }),
+      )
+      .finally(() => {
+        // The switcher's marks and this row read these: clear them now,
+        // not on the next event.
+        void refreshChats(project);
+        void loadSessions(project);
+        refreshStops();
+      });
+  };
   const { lead: viewingLead, conversation: viewing } = useParams({
     strict: false,
   }) as { lead?: string; conversation?: string };
@@ -300,17 +368,9 @@ export function ConductorsNav({
       >
         Reset conversation
       </Item>
-      {status.conversation !== null && alive?.includes(status.conversation) && (
-        <Item
-          onClick={() => {
-            const conversation = status.conversation;
-            if (!conversation) return;
-            if (status.state === "working") setStopping({ lead, conversation });
-            else stopEngine(conversation, lead.name);
-          }}
-        >
-          Stop
-        </Item>
+      {/* Whenever it runs anything here, not only its current conversation. */}
+      {stops[lead.id] && hasConductorStop(stops[lead.id]) && (
+        <Item onClick={() => askStop(lead, stops[lead.id])}>Stop</Item>
       )}
       {lead.source === "personal" && (
         <>
@@ -335,9 +395,14 @@ export function ConductorsNav({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Stop {stopping?.lead.name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            It is answering now. The turn is cut off and the conversation is
-            kept; your next message starts it again.
+          <AlertDialogDescription render={<div />}>
+            <ul className="mb-2 flex list-disc flex-col gap-0.5 ps-4">
+              {stopping &&
+                stopLines(stopping.preview).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+            </ul>
+            <p>Conversations are kept; your next message starts it again.</p>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -348,7 +413,7 @@ export function ConductorsNav({
             onClick={() => {
               const target = stopping;
               setStopping(null);
-              if (target) stopEngine(target.conversation, target.lead.name);
+              if (target) stopAll(target.lead);
             }}
           >
             Stop

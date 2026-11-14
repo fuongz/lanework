@@ -14,6 +14,10 @@ import {
   laneworkMcpChannels,
 } from "../../shared/auth";
 import {
+  conductorChannels,
+  type DesktopConductorsApi,
+} from "../../shared/conductor-sessions";
+import {
   type ConversationEvent,
   conversationChannels,
   type DesktopConversationApi,
@@ -422,6 +426,17 @@ const leads: DesktopLeadsApi = {
     ipcRenderer.invoke(leadsChannels.saveMemoryNotes, project, id, notes),
   onChange: (listener) =>
     subscribe<LeadsEvent>(leadsChannels.changed, listener),
+};
+
+/**
+ * Stop on a conductor's rail row: what it would end, then ending it. Main
+ * finds the engines; the page only names the conductor.
+ */
+const conductors: DesktopConductorsApi = {
+  stopPreview: (project, lead) =>
+    ipcRenderer.invoke(conductorChannels.stopPreview, project, lead),
+  stopAll: (project, lead) =>
+    ipcRenderer.invoke(conductorChannels.stopAll, project, lead),
 };
 
 /** Dictation in the composer: the helper's events, by session. */
@@ -992,5 +1007,6 @@ const desktop: DesktopApi = {
   orchestration,
   jev,
   leads,
+  conductors,
 };
 contextBridge.exposeInMainWorld("desktop", desktop);

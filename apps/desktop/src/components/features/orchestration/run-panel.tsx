@@ -1,22 +1,15 @@
 import {
-  Alert02Icon,
   ArrowDown01Icon,
   ArrowRight01Icon,
   ArrowUpRight01Icon,
   Cancel01Icon,
-  Clock01Icon,
   Delete02Icon,
   Folder01Icon,
-  PauseIcon,
   PlayIcon,
-  QuestionIcon,
-  SquareLock02Icon,
   StopIcon,
   Target02Icon,
-  Tick02Icon,
-  TickDouble02Icon,
 } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   type ReactElement,
@@ -38,7 +31,6 @@ import type {
 } from "#/../shared/orchestration";
 import { durationText } from "#/components/shared/agents/facts";
 import { FileBadge } from "#/components/shared/common/markdown-body";
-import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import {
@@ -66,15 +58,11 @@ import {
   TooltipTrigger,
 } from "#/components/ui/tooltip";
 import { ipcMessage } from "#/lib/ipc-error";
-import {
-  shownStatus,
-  taskBar,
-  taskHint,
-  taskLabel,
-} from "#/lib/orchestration-status";
+import { taskBar, taskHint, taskLabel } from "#/lib/orchestration-status";
 import { cn } from "#/lib/utils";
 import { useProposalEdits } from "./orchestration-panel.store";
 import { RunReportSummary } from "./run-report-summary";
+import { StepGlyph, taskWaves } from "./run-steps";
 
 /**
  * A tooltip on `children` (FE-137): the app's own, never a bare `title`.
@@ -281,130 +269,15 @@ function LeftoverList({ left }: { left: RunLeftovers }) {
 }
 
 /**
- * A run's workers (FE-87): each one's status, what it waits on, and the
- * controls the user has over the run. A worker opens its transcript,
- * read-only. A task the lead gave wider write scopes than the user approved
- * waits here for Allow, or the cancel button (FE-89/D11).
- *
- * Pause sits in the header; Stop, which cannot be undone, sits apart at the
- * foot and asks first (FE-91). A stopped run offers to remove the checkouts,
- * branches and refs it left, after listing them (FE-100/O2). A queued task
- * says what it waits on (FE-100/O5). A polite live region says when a worker
- * fails, is blocked, or waits on the lead.
- */
-/** A round mark the height of the row's text, on a soft fill (FE-137). */
-const ROUND = "grid size-4 shrink-0 place-items-center rounded-full";
-
-/** A round mark with an icon in it. */
-function IconMark({
-  icon,
-  className,
-}: {
-  icon: IconSvgElement;
-  className: string;
-}) {
-  return (
-    <span className={cn(ROUND, className)}>
-      <HugeiconsIcon
-        icon={icon}
-        strokeWidth={2.5}
-        className="size-2.5"
-        aria-hidden="true"
-      />
-    </span>
-  );
-}
-
-/**
- * A worker's status as one round mark the height of its title (FE-137); the
- * row draws no other status. Each is an icon on a soft fill of its colour:
- *
- * - Accepted: teal, a double tick. Done, not yet reviewed: emerald, a tick.
- * - Working: sky, a spinner. Stopping: rose, a spinner.
- * - Waiting on the lead: amber, a question mark.
- * - Queued: violet, a clock; waiting for you to allow a wider scope: amber,
- *   a lock.
- * - Failed: rose, a warning. Blocked: amber, a warning. Interrupted: amber,
- *   a pause. Cancelled: grey, a cross.
+ * A worker's status as one square glyph the height of its title (see
+ * `StepGlyph`), with what it means as its tooltip.
  */
 function StepMark({ task }: { task: OrchestrationTask }) {
-  const status = shownStatus(task);
-  const mark = (() => {
-    if (status === "completed")
-      return task.accepted ? (
-        <IconMark
-          icon={TickDouble02Icon}
-          className="bg-tone-teal/15 text-tone-teal"
-        />
-      ) : (
-        <IconMark
-          icon={Tick02Icon}
-          className="bg-tone-emerald/15 text-tone-emerald"
-        />
-      );
-    if (task.needsInput)
-      return (
-        <IconMark
-          icon={QuestionIcon}
-          className="bg-tone-amber/15 text-tone-amber"
-        />
-      );
-    if (status === "running" || status === "cancelling")
-      return (
-        <span
-          className={cn(
-            ROUND,
-            status === "running"
-              ? "bg-tone-sky/15 text-tone-sky"
-              : "bg-tone-rose/15 text-tone-rose",
-          )}
-        >
-          <OrbitSpinner className="size-2.5" />
-        </span>
-      );
-    if (status === "queued")
-      return task.scopeApproval?.length ? (
-        <IconMark
-          icon={SquareLock02Icon}
-          className="bg-tone-amber/15 text-tone-amber"
-        />
-      ) : (
-        <IconMark
-          icon={Clock01Icon}
-          className="bg-tone-violet/15 text-tone-violet"
-        />
-      );
-    if (status === "failed")
-      return (
-        <IconMark
-          icon={Alert02Icon}
-          className="bg-tone-rose/15 text-tone-rose"
-        />
-      );
-    if (status === "blocked")
-      return (
-        <IconMark
-          icon={Alert02Icon}
-          className="bg-tone-amber/15 text-tone-amber"
-        />
-      );
-    if (status === "interrupted")
-      return (
-        <IconMark
-          icon={PauseIcon}
-          className="bg-tone-amber/15 text-tone-amber"
-        />
-      );
-    return (
-      <IconMark
-        icon={Cancel01Icon}
-        className="bg-foreground/10 text-muted-foreground"
-      />
-    );
-  })();
   return (
     <Tip label={taskHint(task)}>
-      <span className="flex shrink-0">{mark}</span>
+      <span className="flex shrink-0">
+        <StepGlyph task={task} />
+      </span>
     </Tip>
   );
 }
@@ -492,14 +365,16 @@ function ScopeBadge({ slug, scope }: { slug: string; scope: string }) {
 }
 
 /**
- * One worker of the run (FE-137): a row that opens and folds, its status as
- * a pill, and its facts and actions below a guide line. A worker that runs,
- * waits on the lead or went wrong starts open.
+ * One worker of the run (FE-137): a checklist row that opens and folds, its
+ * status as a square, its id in a column of its own so every title starts at
+ * the same x, and its facts and actions hooked under the square. A worker
+ * that runs, waits on the lead or went wrong starts open.
  */
 function WorkerRow({
   slug,
   id,
   task,
+  idWidth,
   time,
   wider,
   waitingFor,
@@ -511,6 +386,8 @@ function WorkerRow({
   slug: string;
   id: string;
   task: OrchestrationTask;
+  /** The id column's width, the same on every row of the run. */
+  idWidth: string;
   time: string | null;
   wider: string[] | null;
   waitingFor: string | null;
@@ -526,23 +403,33 @@ function WorkerRow({
   const open = chosen ?? attention;
   const bodyId = `${id}-body`;
   return (
-    <li id={`${id}-row`} className="border-border border-b last:border-b-0">
+    <li id={`${id}-row`}>
       <button
         type="button"
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => setChosen(!open)}
-        className="hover:bg-foreground/[0.03] flex w-full min-w-0 items-center gap-2.5 px-3 py-2.5 text-left"
+        className="hover:bg-foreground/[0.03] flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left"
       >
         <StepMark task={task} />
         <span className="sr-only">{taskLabel(task)}: </span>
+        {/* The column stays narrow; a long id is cut, and shown whole on
+            hover. */}
+        <Tip label={task.id}>
+          <span
+            className="text-muted-foreground shrink-0 truncate text-[12px] tabular-nums"
+            style={{ width: idWidth }}
+          >
+            {task.id}
+          </span>
+        </Tip>
         <Tip label={task.title}>
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+          <span className="text-foreground min-w-0 flex-1 truncate text-[13px]">
             {task.title}
           </span>
         </Tip>
         {time && (
-          <span className="text-muted-foreground shrink-0 text-[12px] tabular-nums">
+          <span className="text-muted-foreground/80 shrink-0 text-[11px] tabular-nums">
             {time}
           </span>
         )}
@@ -550,11 +437,11 @@ function WorkerRow({
         <Tip
           label={`${modelName(task.model) ?? task.model}${task.effort ? `, ${EFFORT_LABELS[task.effort]} effort` : ""}${task.tier ? `, ${task.tier} tier` : ""}`}
         >
-          <span className="border-border text-foreground/80 hidden shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] sm:flex">
-            <TerminalKindIcon kind={task.agent} className="size-3 shrink-0" />
+          <span className="border-border text-muted-foreground hidden shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-[10.5px] sm:flex">
+            <TerminalKindIcon kind={task.agent} className="size-2.5 shrink-0" />
             <span>{modelName(task.model) ?? task.model}</span>
             {(task.effort || task.tier) && (
-              <span className="text-muted-foreground">
+              <span className="text-muted-foreground/70">
                 {task.effort ? EFFORT_LABELS[task.effort] : task.tier}
               </span>
             )}
@@ -565,16 +452,24 @@ function WorkerRow({
           strokeWidth={2}
           aria-hidden="true"
           className={cn(
-            "text-muted-foreground size-3.5 shrink-0 transition-transform duration-150",
+            "text-muted-foreground/70 size-3 shrink-0 transition-transform duration-150",
             open && "rotate-180",
           )}
         />
       </button>
       {open && (
+        // Lined up with the id column: the row's padding, the square and
+        // the gap after it.
         <div
           id={bodyId}
-          className="border-border mt-1 mr-3 mb-3 ml-[19px] flex min-w-0 flex-col gap-1.5 border-l pl-[18px] text-[12px]"
+          className="relative mr-3 mb-2.5 ml-9 flex min-w-0 flex-col gap-1.5 text-[12px]"
         >
+          {/* The hook: down from under the square, then right into the
+              first line of what it holds. */}
+          <span
+            aria-hidden="true"
+            className="border-muted-foreground/40 pointer-events-none absolute -top-1.5 -left-4 h-[15px] w-3 rounded-bl-[6px] border-b border-l"
+          />
           {/* The files and folders it may change, with no label (FE-137):
               the chat's own badges, click to open, right-click for more. */}
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px]">
@@ -671,6 +566,22 @@ function WorkerRow({
   );
 }
 
+/**
+ * A run's workers (FE-87): each one's status, what it waits on, and the
+ * controls the user has over the run. A worker opens its transcript,
+ * read-only. A task the lead gave wider write scopes than the user approved
+ * waits here for Allow, or the cancel button (FE-89/D11).
+ *
+ * Pause sits in the header; Stop, which cannot be undone, sits apart at the
+ * foot and asks first (FE-91). A stopped run offers to remove the checkouts,
+ * branches and refs it left, after listing them (FE-100/O2). A queued task
+ * says what it waits on (FE-100/O5). A polite live region says when a worker
+ * fails, is blocked, or waits on the lead.
+ *
+ * The workers read as a checklist in dependency waves: "Step 1" holds those
+ * that wait on nothing, each later step those whose dependencies all sit in
+ * the steps above. A run of one wave draws no step heading.
+ */
 export function RunPanel({
   slug,
   project,
@@ -786,6 +697,77 @@ export function RunPanel({
   // Only a running run's clocks move; a paused or settled one holds still.
   const now = useTicking(run.status === "active");
   const total = runTime(run, now);
+
+  // The run's dependency waves, and one id column wide enough for the
+  // longest id (capped, it truncates past that).
+  const waves = taskWaves(run.tasks);
+  const longest = Math.max(4, ...run.tasks.map((task) => task.id.length));
+  const idWidth = `${Math.min(12, longest)}ch`;
+
+  // One worker's row, wherever its wave puts it.
+  const workerRow = (task: OrchestrationTask) => {
+    // The lead asked for more than the user approved (FE-89/D11).
+    const wider =
+      live && task.status === "queued" && task.scopeApproval?.length
+        ? task.scopeApproval
+        : null;
+    // Why it has not started (FE-100/O5); a wider scope says so
+    // itself, below.
+    // A paused or stopped run says so in its header; the line would
+    // only repeat it (FE-137).
+    const waitingFor =
+      run.status === "active" &&
+      task.status === "queued" &&
+      !wider &&
+      task.waitingFor
+        ? task.waitingFor
+        : null;
+    return (
+      <WorkerRow
+        key={task.id}
+        slug={slug}
+        id={`${base}-${task.id}`}
+        task={task}
+        idWidth={idWidth}
+        time={taskTime(task, run, now)}
+        wider={wider}
+        waitingFor={waitingFor}
+        busy={busy}
+        onOpen={
+          task.conversation
+            ? () =>
+                void navigate({
+                  to: "/w/$slug/agents/chat/$conversation",
+                  params: {
+                    slug,
+                    conversation: task.conversation ?? "",
+                  },
+                })
+            : null
+        }
+        onCancel={
+          live && surface && CANCELLABLE.includes(task.status)
+            ? () =>
+                void act(
+                  `cancel:${task.id}`,
+                  () => surface.cancelTask(project, run.id, task.id),
+                  "Could not cancel the worker.",
+                )
+            : null
+        }
+        onAllow={
+          wider && surface
+            ? () =>
+                void act(
+                  `scope:${task.id}`,
+                  () => surface.approveScope(project, run.id, task.id),
+                  "Could not approve the write scope.",
+                )
+            : null
+        }
+      />
+    );
+  };
 
   return (
     <article
@@ -943,70 +925,37 @@ export function RunPanel({
       )}
 
       {run.tasks.length > 0 && (
-        <ul aria-label="Workers" className="border-border border-t">
-          {run.tasks.map((task) => {
-            // The lead asked for more than the user approved (FE-89/D11).
-            const wider =
-              live && task.status === "queued" && task.scopeApproval?.length
-                ? task.scopeApproval
-                : null;
-            // Why it has not started (FE-100/O5); a wider scope says so
-            // itself, below.
-            // A paused or stopped run says so in its header; the line would
-            // only repeat it (FE-137).
-            const waitingFor =
-              run.status === "active" &&
-              task.status === "queued" &&
-              !wider &&
-              task.waitingFor
-                ? task.waitingFor
-                : null;
+        <div className="border-border border-t">
+          {waves.map((wave, index) => {
+            const stepId = `${base}-step-${index + 1}`;
+            const stepped = waves.length > 1;
             return (
-              <WorkerRow
-                key={task.id}
-                slug={slug}
-                id={`${base}-${task.id}`}
-                task={task}
-                time={taskTime(task, run, now)}
-                wider={wider}
-                waitingFor={waitingFor}
-                busy={busy}
-                onOpen={
-                  task.conversation
-                    ? () =>
-                        void navigate({
-                          to: "/w/$slug/agents/chat/$conversation",
-                          params: {
-                            slug,
-                            conversation: task.conversation ?? "",
-                          },
-                        })
-                    : null
-                }
-                onCancel={
-                  live && surface && CANCELLABLE.includes(task.status)
-                    ? () =>
-                        void act(
-                          `cancel:${task.id}`,
-                          () => surface.cancelTask(project, run.id, task.id),
-                          "Could not cancel the worker.",
-                        )
-                    : null
-                }
-                onAllow={
-                  wider && surface
-                    ? () =>
-                        void act(
-                          `scope:${task.id}`,
-                          () => surface.approveScope(project, run.id, task.id),
-                          "Could not approve the write scope.",
-                        )
-                    : null
-                }
-              />
+              // Each step set off from the one above by a hairline the
+              // panel's width.
+              <section
+                key={stepId}
+                aria-labelledby={stepped ? stepId : undefined}
+                className={cn("py-1", index > 0 && "border-border border-t")}
+              >
+                {stepped && (
+                  <h3
+                    id={stepId}
+                    className="text-muted-foreground px-3 pt-1.5 pb-0.5 text-[11px] font-medium"
+                  >
+                    Step {index + 1}
+                  </h3>
+                )}
+                <ul
+                  aria-label={
+                    stepped ? `Workers, step ${index + 1}` : "Workers"
+                  }
+                >
+                  {wave.map(workerRow)}
+                </ul>
+              </section>
             );
           })}
-        </ul>
+        </div>
       )}
 
       {error && (

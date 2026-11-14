@@ -82,7 +82,10 @@ export function RunReportSummary({
     }))
     .filter((group) => group.tasks.length > 0);
 
-  if (shown.length === 0 && !leadGuard) return null;
+  // A run that only went well says so in its progress line and its ticked
+  // rows; a summary of Done alone would list the same tasks twice.
+  const problems = shown.some((group) => group.key !== "done");
+  if (!problems && !leadGuard) return null;
   return (
     <section
       aria-label="Run summary"
