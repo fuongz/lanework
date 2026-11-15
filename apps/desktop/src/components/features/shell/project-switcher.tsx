@@ -9,10 +9,13 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Project } from "#/../shared/projects";
 import type { TerminalSession } from "#/../shared/terminal";
-import { LocalBadge } from "#/components/shared/auth/local-mode";
+import {
+  LocalBadge,
+  listedProjects,
+} from "#/components/shared/auth/local-mode";
 import { RAIL_ROW, RailHover } from "#/components/shared/navigation/rail-hover";
 import { CreateProjectDialog } from "#/components/shared/projects/create-project-dialog";
 import { ProjectTile } from "#/components/shared/projects/project-tile";
@@ -192,8 +195,12 @@ export function ProjectSwitcher({ compact = false }: { compact?: boolean }) {
   const collapsed = usePreferences((state) => state.collapsedNamespaces);
   const setCollapsed = usePreferences((state) => state.setNamespaceCollapsed);
   const setSort = usePreferences((state) => state.setProjectSort);
-  const projects = useBoard((state) => state.projects);
+  const allProjects = useBoard((state) => state.projects);
   const active = useBoard((state) => state.active);
+  const projects = useMemo(
+    () => listedProjects(allProjects, active?.id ?? null),
+    [allProjects, active?.id],
+  );
   const openProject = useOpenProject();
   const navigate = useNavigate();
   const agentsByKey = useAgentTerminals((state) => state.sessions);

@@ -37,6 +37,25 @@ export function isMovedProject(
   return isLocalProject(project) && !!project?.movedTo;
 }
 
+/**
+ * The projects a picker lists (FE-142): a synced local board is left out once
+ * the cloud board it moved to is on the list, so one board never shows twice.
+ * Signed out, its cloud board is not listed, and it stays. The active one
+ * always stays, so the picker never loses the project on screen.
+ */
+export function listedProjects(
+  projects: Project[],
+  activeId: string | null = null,
+): Project[] {
+  const ids = new Set(projects.map((project) => project.id));
+  return projects.filter(
+    (project) =>
+      !isMovedProject(project) ||
+      project.id === activeId ||
+      !ids.has(project.movedTo ?? null),
+  );
+}
+
 /** The "Local" badge: saved on this machine only. */
 export function LocalBadge({ className }: { className?: string }) {
   return (

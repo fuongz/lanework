@@ -143,6 +143,44 @@ export {
 const syncing = new Set<string>();
 
 /**
+ * What else moves with a synced board (FE-142): its conversations and its
+ * conductors, keyed by the project id. Main wires it (`main/index.ts`), as
+ * the stores that hold them import this module.
+ */
+type ProjectMover = (from: string, to: string) => Promise<void>;
+let mover: ProjectMover | null = null;
+
+export function onProjectMoved(next: ProjectMover): void {
+  mover = next;
+}
+
+/**
+ * The cloud board a local board was synced into, by local id; null for any
+ * other key. Its old key must no longer collect conversations (FE-142).
+ */
+export function movedProjectTarget(key: string): string | null {
+  const project = findLocalProject(key);
+  return project?.syncedAt && project.cloudId ? project.cloudId : null;
+}
+
+/**
+ * Hand everything a synced board kept under its local id to its cloud id
+ * (FE-142). Run after every sync, and once at launch for boards synced before
+ * the move existed; a board with nothing left under its old id costs a read.
+ */
+export async function adoptMovedProjects(): Promise<void> {
+  if (!mover) return;
+  for (const project of localStore()?.listProjects() ?? []) {
+    if (!project.syncedAt || !project.cloudId) continue;
+    try {
+      await mover(project.id, project.cloudId);
+    } catch (error) {
+      console.warn(`Could not move ${project.slug}'s conversations`, error);
+    }
+  }
+}
+
+/**
  * Moves a local board to the signed-in account, then opens its cloud copy
  * (FE-52/D7a).
  *
@@ -172,6 +210,12 @@ async function syncToCloud(localId: string): Promise<LocalSyncResult> {
     const slug = cloud?.slug ?? outcome.cloudSlug;
     const linked = (await readFolders(record))[slug] ?? [];
     if (paths.length && !linked.length) await writeFolders(record, slug, paths);
+    // The board's conversations and conductors follow it (FE-142). The
+    // cards are on the cloud already: a failure here leaves them where they
+    // were, for the next launch to move.
+    await mover?.(localId, outcome.cloudId).catch((error: unknown) =>
+      console.warn("Could not move the board's conversations", error),
+    );
     const snapshot = await load(outcome.cloudId);
     return {
       localId,

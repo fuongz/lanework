@@ -54,6 +54,7 @@ import { appHomeDir, sessionStorePath } from "../paths";
 import {
   knownProject,
   menuBarProjects,
+  movedProjectTarget,
   projectFolders,
   terminalFolder,
 } from "../projects";
@@ -313,6 +314,21 @@ function touchRail(project: string): void {
 }
 
 /**
+ * Hand project `from`'s conversations to project `to` (FE-142): a local board
+ * synced to the cloud keeps its rail. The old key's watcher stops, so no
+ * write puts a conversation back under it.
+ */
+export function moveProjectSessions(from: string, to: string): void {
+  watching.get(from)?.stop();
+  watching.delete(from);
+  const moved = sessionStore().moveProject(from, to);
+  if (moved > 0) {
+    touchRail(from);
+    touchRail(to);
+  }
+}
+
+/**
  * Read one conversation's new bytes into the store, and have the rail list
  * it again when that gave it its first title.
  *
@@ -350,7 +366,7 @@ async function readInto(
  * @throws When `id` is not `agent`'s, or the store cannot be opened.
  */
 export async function registerAgentSession(
-  project: string,
+  projectKey: string,
   agent: TerminalAgent,
   id: string,
   folder?: string | null,
@@ -359,6 +375,8 @@ export async function registerAgentSession(
 ): Promise<void> {
   if (!isAgentSessionIdOf(agent, id))
     throw new Error("A valid conversation is required");
+  // Started from a synced board's old key: it belongs to the cloud board.
+  const project = movedProjectTarget(projectKey) ?? projectKey;
   const where =
     folder === undefined
       ? await terminalFolder(project).catch(() => null)
@@ -652,6 +670,8 @@ function storedRail(project: string): AgentSession[] {
  * the rows it has up to date.
  */
 async function agentSessionsOf(project: string): Promise<AgentSession[]> {
+  // A synced board's conversations list under its cloud board (FE-142).
+  if (movedProjectTarget(project)) return [];
   const folder = await terminalFolder(project);
   if (!folder) return [];
   watchProject(project, folder);
@@ -1269,6 +1289,10 @@ export function registerTerminal(devUrl?: string): void {
       const agents = pullAgents(args[1]);
       return pullInto(
         async () => {
+          if (movedProjectTarget(project))
+            throw new Error(
+              "This board moved to the cloud. Pull from the cloud project.",
+            );
           const folder = await terminalFolder(project);
           if (!folder)
             throw new Error("This project has no folder here to pull from.");
@@ -1293,6 +1317,8 @@ export function registerTerminal(devUrl?: string): void {
           for (const entry of await menuBarProjects()) {
             // The key the rail lists it by (`useProjectKey`).
             const project = entry.id ?? entry.slug;
+            // Its conversations are its cloud board's (FE-142).
+            if (movedProjectTarget(project)) continue;
             const folder = await terminalFolder(project).catch(() => null);
             if (folder) targets.push({ project, folder });
           }

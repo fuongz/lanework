@@ -716,6 +716,45 @@ export class SessionStore {
   }
 
   /**
+   * Hand every conversation of project `from` to project `to` (FE-142): a
+   * local board synced to the cloud keeps its rail under the cloud board's
+   * id.
+   *
+   * NOTE: A conductor's own conversation moves only when `to` has none for
+   * that conductor yet: one per conductor per project. The one left behind
+   * still lists under `from`.
+   *
+   * @returns How many rows now list under `to` that did not before.
+   */
+  moveProject(from: string, to: string): number {
+    if (!from || !to || from === to) return 0;
+    return this.#write(() => {
+      this.#run(
+        `UPDATE agent_session SET conductor_project = ?
+          WHERE conductor_project = ?
+            AND NOT EXISTS (
+              SELECT 1 FROM agent_session AS other
+              WHERE other.conductor_id = agent_session.conductor_id
+                AND other.conductor_project = ?
+            )`,
+        to,
+        from,
+        to,
+      );
+      this.#run(
+        "UPDATE agent_session SET launched_by_project = ? WHERE launched_by_project = ?",
+        to,
+        from,
+      );
+      return this.#run(
+        "UPDATE agent_session SET project = ? WHERE project = ?",
+        to,
+        from,
+      );
+    });
+  }
+
+  /**
    * Archive a conversation in Lanework, or bring it back.
    *
    * Archiving drops the pin (FE-72/D3) and keeps the name, for when it comes

@@ -94,3 +94,12 @@ export const leadsMain: LeadsMainHandlers = {
   pickContext,
   inspectContext: (project, paths) => store().inspectContext(project, paths),
 };
+
+/**
+ * Hand project `from`'s own conductors to project `to` (FE-142).
+ *
+ * @returns How many moved.
+ */
+export function moveConductors(from: string, to: string): Promise<number> {
+  return store().moveProject(from, to);
+}

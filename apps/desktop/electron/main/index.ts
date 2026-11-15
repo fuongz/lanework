@@ -71,9 +71,13 @@ import { registerAttention } from "./notifications/attention";
 import { startPullWatcher } from "./notifications/pull-watcher";
 import { orchestrationMain, setJev, startControlServer } from "./orchestration";
 import type { SessionsControl } from "./orchestration/control-server";
-import { leadsMain } from "./orchestration/leads";
+import { leadsMain, moveConductors } from "./orchestration/leads";
 import { moveLegacyProjectsDir } from "./paths";
-import { registerProjects } from "./projects";
+import {
+  adoptMovedProjects,
+  onProjectMoved,
+  registerProjects,
+} from "./projects";
 import { migrateProjectsLayout } from "./projects/layout-migration";
 import { registerAppProtocol } from "./protocol";
 import { registerReadiness } from "./readiness";
@@ -82,6 +86,7 @@ import { registerStorage } from "./storage";
 import {
   agentTerminalOn,
   killTerminal,
+  moveProjectSessions,
   onRunningChanged,
   registerTerminal,
   terminalActivity,
@@ -529,6 +534,13 @@ app
     registerOrchestration(devUrl, orchestrationMain, jevMain);
     registerLeads(devUrl, leadsMain);
     registerConductors(devUrl);
+    // A board synced to the cloud takes its conversations and conductors
+    // along (FE-142); boards synced before this get theirs now.
+    onProjectMoved(async (from, to) => {
+      moveProjectSessions(from, to);
+      await moveConductors(from, to);
+    });
+    void adoptMovedProjects();
     // Rewritten on every launch, like the Stop hook, so it always matches
     // this app's Node and bundle.
     void installControlCli().catch((error: unknown) =>

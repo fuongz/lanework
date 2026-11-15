@@ -92,6 +92,17 @@ export interface LeadStore extends Omit<LeadsMainHandlers, "pickContext"> {
     project: string,
     input: Omit<TeamLeadInput, "id">,
   ) => Promise<TeamLead>;
+  /**
+   * Hand project `from`'s own conductors to project `to` (FE-142): a local
+   * board synced to the cloud keeps them under the cloud board's id.
+   *
+   * `to`'s own set wins: a conductor it has under the same id stays, and so
+   * does its default when it has one. Past {@link PERSONAL_LEADS_MAX}, the
+   * rest stay under `from`.
+   *
+   * @returns How many conductors moved.
+   */
+  moveProject: (from: string, to: string) => Promise<number>;
 }
 
 /** One project's own conductors, and its default. */
@@ -483,5 +494,35 @@ export function createLeadStore(deps: LeadStoreDeps): LeadStore {
           bucket.defaultId = id;
         }),
       ).then(() => list(project)),
+
+    moveProject: (from, to) =>
+      serial(async () => {
+        if (!from || !to || from === to) return 0;
+        const file = await readPersonal();
+        const source = file.projects[from];
+        if (!source) return 0;
+        const target = file.projects[to] ?? emptyBucket();
+        const taken = new Set(target.leads.map((entry) => entry.id));
+        const kept: TeamLead[] = [];
+        let moved = 0;
+        for (const lead of source.leads) {
+          if (taken.has(lead.id)) continue;
+          if (target.leads.length >= PERSONAL_LEADS_MAX) {
+            kept.push(lead);
+            continue;
+          }
+          target.leads.push(lead);
+          taken.add(lead.id);
+          moved += 1;
+        }
+        target.defaultId ??= source.defaultId;
+        file.projects[to] = target;
+        if (kept.length) file.projects[from] = { leads: kept, defaultId: null };
+        else delete file.projects[from];
+        await writePersonal(file);
+        changed(from);
+        changed(to);
+        return moved;
+      }),
   };
 }

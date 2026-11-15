@@ -9,6 +9,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type BoardCard, matchesSearch } from "#/../shared/projects";
+import { listedProjects } from "#/components/shared/auth/local-mode";
 import { StatusIcon } from "#/components/shared/board/glyphs";
 import { Dialog, DialogContent, DialogTitle } from "#/components/ui/dialog";
 import {
@@ -136,7 +137,7 @@ export function CommandPalette() {
         },
       );
     }
-    for (const project of projects)
+    for (const project of listedProjects(projects, projectId))
       out.push({
         id: `project:${project.slug}`,
         label: `Open ${project.name}`,
@@ -159,7 +160,7 @@ export function CommandPalette() {
       },
     );
     return out;
-  }, [navigate, openProject, setTheme, slug, theme, projects]);
+  }, [navigate, openProject, setTheme, slug, theme, projects, projectId]);
 
   const answered = remote?.query === trimmed ? remote : null;
   const cardCommands = useMemo<Command[]>(() => {
