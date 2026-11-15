@@ -106,9 +106,16 @@ export async function assertCanUse(): Promise<void> {
   await authorizedRecord();
 }
 
-/** Local boards as the project list carries them, each with its folder. */
+/**
+ * Local boards still owned by this machine, each with its folder.
+ * A sealed migration leaves a redirect in the store for old project ids,
+ * but its project now lives on the cloud and must not be listed locally.
+ * An incomplete upload has no syncedAt and stays available for retry.
+ */
 export async function localList(): Promise<Project[]> {
-  const locals = listLocalProjects();
+  const locals = listLocalProjects().filter(
+    (project) => !(project.syncedAt && project.cloudId),
+  );
   if (!locals.length) return [];
   const folders = await readFolders(LOCAL_RECORD);
   return locals.map((project) =>
