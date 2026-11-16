@@ -1,12 +1,18 @@
 // How a worker's status reads wherever it is drawn (FE-87): its label and its
 // colour, the same in the lead's run panel and in the rail.
-import type { OrchestrationTask, TaskStatus } from "#/../shared/orchestration";
+import type {
+  OrchestrationRun,
+  OrchestrationTask,
+  TaskStatus,
+} from "#/../shared/orchestration";
 
 export const TASK_LABELS: Record<TaskStatus, string> = {
   queued: "Queued",
   running: "Working",
   cancelling: "Stopping",
-  completed: "Done",
+  // Finished by its worker, not yet taken by the lead: under review. Once
+  // the lead accepts it, it is Done (see `taskLabel`).
+  completed: "Review",
   failed: "Failed",
   blocked: "Blocked",
   interrupted: "Interrupted",
@@ -22,10 +28,13 @@ export const shownStatus = (task: OrchestrationTask): TaskStatus =>
     ? "blocked"
     : task.status;
 
-/** A task's label: accepted once the lead took its result. */
+/**
+ * A task's label. Its worker finished: Review, while the lead reviews it;
+ * Done once the lead accepted it. Working > Review > Done.
+ */
 export const taskLabel = (task: OrchestrationTask): string =>
   task.status === "completed" && task.accepted
-    ? "Accepted"
+    ? "Done"
     : TASK_LABELS[shownStatus(task)];
 
 /**
@@ -92,10 +101,45 @@ export const taskBar = (task: OrchestrationTask): string => {
   }[tone];
 };
 
-/** What each label means, for its tooltip: Done and Accepted read alike. */
+/** What each label means, for its tooltip. */
 export const taskHint = (task: OrchestrationTask): string =>
   task.status === "completed"
     ? task.accepted
-      ? "Accepted: the lead reviewed the result and took it"
-      : "Done: the worker finished; the lead has not reviewed it yet"
+      ? "Done: the lead reviewed the result and took it"
+      : "Review: the worker finished; the lead reviews it"
     : taskLabel(task);
+
+/**
+ * A run's one status, from its tasks (the pill at the top of its card):
+ * what the reader most needs to know about the whole of it, in this order.
+ *
+ * Stopped or paused by someone; a task failed; a task waits on someone (the
+ * lead or you); a worker is at it; every task is done; nothing started yet.
+ */
+export function runOverall(run: OrchestrationRun): {
+  label: string;
+  tone: TaskToneName;
+  /** Still moving: its dot pulses. */
+  live: boolean;
+} {
+  const tones = run.tasks.map(taskToneName);
+  if (run.status === "stopped")
+    return { label: "Stopped", tone: "neutral", live: false };
+  if (run.status === "paused")
+    return { label: "Paused", tone: "neutral", live: false };
+  if (run.tasks.some((task) => task.status === "failed"))
+    return { label: "Failed", tone: "rose", live: false };
+  if (tones.includes("amber"))
+    return { label: "Needs you", tone: "amber", live: true };
+  if (tones.includes("sky"))
+    return { label: "In progress", tone: "sky", live: true };
+  if (run.tasks.length > 0 && tones.every((tone) => tone === "emerald"))
+    return {
+      label: run.tasks.every((task) => task.accepted) ? "Done" : "In review",
+      tone: "emerald",
+      live: false,
+    };
+  if (run.status === "finished")
+    return { label: "Finished", tone: "neutral", live: false };
+  return { label: "Queued", tone: "neutral", live: run.status === "active" };
+}

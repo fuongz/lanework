@@ -4,9 +4,9 @@ import {
   ArrowUpRight01Icon,
   Cancel01Icon,
   Delete02Icon,
+  EllipsisIcon,
   Folder01Icon,
   PlayIcon,
-  ShieldCheckIcon,
   StopIcon,
   Target02Icon,
   Tick02Icon,
@@ -38,6 +38,12 @@ import {
   StepGlyph,
   taskWaves,
 } from "#/components/shared/orchestration/run-steps";
+import {
+  ReadOnlyBadge,
+  StatusPill,
+  TaskBadge,
+  TaskRow,
+} from "#/components/shared/orchestration/task-row";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import {
   AlertDialog,
@@ -65,7 +71,9 @@ import {
 } from "#/components/ui/tooltip";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
+  runOverall,
   shownStatus,
+  TONE_TEXT,
   taskBadge,
   taskBar,
   taskHint,
@@ -294,7 +302,7 @@ function StepMark({
   return (
     <Tip label={taskHint(task)}>
       <span className="flex shrink-0">
-        <StepGlyph task={task} size="size-9" number={number} />
+        <StepGlyph task={task} size="size-6" number={number} />
       </span>
     </Tip>
   );
@@ -307,24 +315,23 @@ function StepMark({
 function StatusBadge({ task }: { task: OrchestrationTask }) {
   const done = task.status === "completed";
   return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "flex h-5 shrink-0 items-center gap-1 rounded-full border border-current/25 bg-current/10 px-2 text-[10.5px] font-semibold tracking-[0.05em] uppercase",
-        taskTone(task),
-      )}
+    <TaskBadge
+      tone={taskTone(task)}
+      icon={
+        done ? (
+          <HugeiconsIcon
+            // Done (the lead reviewed and took it): a tick; under review,
+            // an ellipsis, as the mark beside it.
+            icon={task.accepted ? Tick02Icon : EllipsisIcon}
+            className="size-3"
+            strokeWidth={2.4}
+            aria-hidden="true"
+          />
+        ) : undefined
+      }
     >
-      {done && (
-        <HugeiconsIcon
-          // Verified (the lead reviewed and took it) wears a shield.
-          icon={task.accepted ? ShieldCheckIcon : Tick02Icon}
-          className="size-3"
-          strokeWidth={2.4}
-          aria-hidden="true"
-        />
-      )}
       {taskBadge(task)}
-    </span>
+    </TaskBadge>
   );
 }
 
@@ -420,8 +427,8 @@ function WorkerRow({
   slug,
   id,
   task,
-  idWidth,
   number,
+  last,
   time,
   wider,
   waitingFor,
@@ -433,10 +440,10 @@ function WorkerRow({
   slug: string;
   id: string;
   task: OrchestrationTask;
-  /** The id column's width, the same on every row of the run. */
-  idWidth: string;
   /** Its place in the run, 1-based. */
   number: number;
+  /** The last row of its step: no line runs down from its mark. */
+  last: boolean;
   time: string | null;
   wider: string[] | null;
   waitingFor: string | null;
@@ -449,168 +456,163 @@ function WorkerRow({
     task.needsInput || task.error || wider || task.status === "running",
   );
   const [chosen, setChosen] = useState<boolean | null>(null);
-  const open = chosen ?? attention;
+  // Anything to show under the row? A finished read-only worker has
+  // nothing, so it gets no chevron and never opens on an empty body.
+  const hasBody = Boolean(
+    task.files.length ||
+      waitingFor ||
+      task.needsInput ||
+      wider ||
+      task.error ||
+      onCancel,
+  );
+  const open = hasBody && (chosen ?? attention);
   const bodyId = `${id}-body`;
   return (
-    <li id={`${id}-row`}>
-      {/* Two lines, as the proposal card's rows: the task, then its id and
-          time in muted words; the model pill and chevron at the end. The
-          row lifts on hover and stays lifted while open. */}
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={bodyId}
-        onClick={() => setChosen(!open)}
-        className={cn(
-          "flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors duration-150",
-          open ? "bg-muted/70" : "hover:bg-muted/50",
-        )}
-      >
-        <StepMark task={task} number={number} />
-        <span className="sr-only">{taskLabel(task)}: </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex min-w-0 items-center gap-2">
-            <Tip label={task.title}>
-              <span className="text-foreground min-w-0 truncate text-[13px] leading-snug font-semibold">
-                {task.title}
-              </span>
-            </Tip>
-            <StatusBadge task={task} />
-          </span>
-          <span className="text-muted-foreground flex min-w-0 items-center gap-2.5 text-[11.5px] leading-snug">
-            <span
-              className="truncate font-mono text-[11px]"
-              style={{ maxWidth: idWidth }}
-              title={task.id}
-            >
-              {task.id}
+    <TaskRow
+      expandable={hasBody}
+      id={`${id}-row`}
+      mark={<StepMark task={task} number={number} />}
+      title={task.title}
+      tip={`${task.title} (${task.id})`}
+      badge={
+        <>
+          <StatusBadge task={task} />
+          {task.files.length === 0 && <ReadOnlyBadge />}
+        </>
+      }
+      trailing={
+        <>
+          {/* Model and effort as one outlined pill, as the proposal card's. */}
+          <Tip
+            label={`${modelName(task.model) ?? task.model}${task.effort ? `, ${EFFORT_LABELS[task.effort]} effort` : ""}${task.tier ? `, ${task.tier} tier` : ""}`}
+          >
+            <span className="border-border bg-background text-muted-foreground hidden h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] sm:flex">
+              <TerminalKindIcon
+                kind={task.agent}
+                className="size-3.5 shrink-0"
+              />
+              <span>{modelName(task.model) ?? task.model}</span>
+              {(task.effort || task.tier) && (
+                <span className="text-muted-foreground/70">
+                  {task.effort ? EFFORT_LABELS[task.effort] : task.tier}
+                </span>
+              )}
             </span>
-            {time && <span className="shrink-0 tabular-nums">{time}</span>}
-          </span>
-        </span>
-        {/* Model and effort as one outlined pill, as the proposal card's. */}
-        <Tip
-          label={`${modelName(task.model) ?? task.model}${task.effort ? `, ${EFFORT_LABELS[task.effort]} effort` : ""}${task.tier ? `, ${task.tier} tier` : ""}`}
-        >
-          <span className="border-border bg-background text-muted-foreground hidden h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] sm:flex">
-            <TerminalKindIcon kind={task.agent} className="size-3.5 shrink-0" />
-            <span>{modelName(task.model) ?? task.model}</span>
-            {(task.effort || task.tier) && (
-              <span className="text-muted-foreground/70">
-                {task.effort ? EFFORT_LABELS[task.effort] : task.tier}
-              </span>
-            )}
-          </span>
-        </Tip>
-        <HugeiconsIcon
-          icon={ArrowDown01Icon}
-          strokeWidth={2}
-          aria-hidden="true"
-          className={cn(
-            "text-muted-foreground/70 size-3 shrink-0 transition-transform duration-150",
-            open && "rotate-180",
+          </Tip>
+          {time && (
+            <span className="text-muted-foreground w-10 shrink-0 text-right text-[11.5px] tabular-nums">
+              {time}
+            </span>
           )}
-        />
-      </button>
-      {open && (
-        // Lined up with the title, under the lifted row.
-        <div
-          id={bodyId}
-          className="mt-2 mr-2 mb-3 ml-14 flex min-w-0 flex-col gap-1.5 text-[12px]"
-        >
-          {/* The files and folders it may change, with no label (FE-137):
-              the chat's own badges, click to open, right-click for more. */}
+        </>
+      }
+      actions={
+        onOpen ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onOpen}
+            className="hover:bg-background h-7 rounded-full px-2.5 text-[12px]"
+          >
+            <HugeiconsIcon
+              icon={ArrowUpRight01Icon}
+              strokeWidth={2}
+              data-icon="inline-start"
+              aria-hidden="true"
+            />
+            Open chat
+          </Button>
+        ) : undefined
+      }
+      open={open}
+      onToggle={() => setChosen(!open)}
+      label={`${taskLabel(task)}: ${task.title}`}
+      last={last}
+      done={task.status === "completed"}
+    >
+      <div id={bodyId} className="contents">
+        {/* The files and folders it may change, with no label (FE-137):
+              the chat's own badges, click to open, right-click for more.
+              Read only says so beside the title instead. */}
+        {task.files.length > 0 && (
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px]">
-            {task.files.length ? (
-              task.files.map((file) => (
-                <ScopeBadge key={file} slug={slug} scope={file} />
-              ))
-            ) : (
-              <span className="text-muted-foreground">Read only</span>
-            )}
+            {task.files.map((file) => (
+              <ScopeBadge key={file} slug={slug} scope={file} />
+            ))}
           </div>
-          {waitingFor && (
-            <Tip label={waitingFor}>
-              <p
-                className={cn(
-                  "line-clamp-2 text-[11px] break-words",
-                  task.cancelledDependency
-                    ? "text-tone-amber"
-                    : "text-muted-foreground",
-                )}
-              >
-                {waitingFor}
-              </p>
-            </Tip>
-          )}
-          {task.needsInput && (
-            <p className="text-tone-amber line-clamp-2 text-[11px]">
-              {needsInputText(task.needsInput)}
+        )}
+        {waitingFor && (
+          <Tip label={waitingFor}>
+            <p
+              className={cn(
+                "line-clamp-2 text-[11px] break-words",
+                task.cancelledDependency
+                  ? "text-tone-amber"
+                  : "text-muted-foreground",
+              )}
+            >
+              {waitingFor}
             </p>
-          )}
-          {task.needsInput?.kind === "permission" && task.needsInput.input && (
-            <Tip label={task.needsInput.input}>
-              <span className="text-muted-foreground line-clamp-3 font-mono text-[11px] break-all whitespace-pre-wrap">
-                {task.needsInput.input}
-              </span>
-            </Tip>
-          )}
-          {wider && (
-            <span className="text-tone-amber text-[11px] break-words">
-              The lead wants it to write beyond what you approved:{" "}
-              <span className="font-mono">{wider.join(", ")}</span>
+          </Tip>
+        )}
+        {task.needsInput && (
+          <p className="text-tone-amber line-clamp-2 text-[11px]">
+            {needsInputText(task.needsInput)}
+          </p>
+        )}
+        {task.needsInput?.kind === "permission" && task.needsInput.input && (
+          <Tip label={task.needsInput.input}>
+            <span className="text-muted-foreground line-clamp-3 font-mono text-[11px] break-all whitespace-pre-wrap">
+              {task.needsInput.input}
             </span>
-          )}
-          {task.error && <WorkerError id={`${id}-error`} error={task.error} />}
-          {(onOpen || onAllow || onCancel) && (
-            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-              {onOpen && (
-                <Button size="sm" variant="outline" onClick={onOpen}>
-                  <HugeiconsIcon
-                    icon={ArrowUpRight01Icon}
-                    strokeWidth={2}
-                    data-icon="inline-start"
-                    aria-hidden="true"
-                  />
-                  Open chat
-                </Button>
-              )}
-              {onAllow && wider && (
-                <Tip label="Allow these write scopes, then the worker starts">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    aria-label={`Allow ${task.title} to write ${wider.join(", ")}`}
-                    disabled={busy !== null}
-                    onClick={onAllow}
-                  >
-                    {busy === `scope:${task.id}` ? "Allowing…" : "Allow"}
-                  </Button>
-                </Tip>
-              )}
-              {onCancel && (
+          </Tip>
+        )}
+        {wider && (
+          <span className="text-tone-amber text-[11px] break-words">
+            The lead wants it to write beyond what you approved:{" "}
+            <span className="font-mono">{wider.join(", ")}</span>
+          </span>
+        )}
+        {task.error && <WorkerError id={`${id}-error`} error={task.error} />}
+        {/* Open chat is the row's hover action now. */}
+        {(onAllow || onCancel) && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+            {onAllow && wider && (
+              <Tip label="Allow these write scopes, then the worker starts">
                 <Button
                   size="sm"
                   variant="outline"
-                  aria-label={`Cancel ${task.title}`}
+                  aria-label={`Allow ${task.title} to write ${wider.join(", ")}`}
                   disabled={busy !== null}
-                  onClick={onCancel}
-                  className="text-destructive hover:text-destructive"
+                  onClick={onAllow}
                 >
-                  <HugeiconsIcon
-                    icon={Cancel01Icon}
-                    strokeWidth={2}
-                    data-icon="inline-start"
-                    aria-hidden="true"
-                  />
-                  {busy === `cancel:${task.id}` ? "Cancelling…" : "Cancel"}
+                  {busy === `scope:${task.id}` ? "Allowing…" : "Allow"}
                 </Button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </li>
+              </Tip>
+            )}
+            {onCancel && (
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label={`Cancel ${task.title}`}
+                disabled={busy !== null}
+                onClick={onCancel}
+                className="text-destructive hover:text-destructive"
+              >
+                <HugeiconsIcon
+                  icon={Cancel01Icon}
+                  strokeWidth={2}
+                  data-icon="inline-start"
+                  aria-hidden="true"
+                />
+                {busy === `cancel:${task.id}` ? "Cancelling…" : "Cancel"}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    </TaskRow>
   );
 }
 
@@ -745,15 +747,13 @@ export function RunPanel({
   // Only a running run's clocks move; a paused or settled one holds still.
   const now = useTicking(run.status === "active");
   const total = runTime(run, now);
+  const overall = runOverall(run);
 
-  // The run's dependency waves, and one id column wide enough for the
-  // longest id (capped, it truncates past that).
+  // The run's dependency waves.
   const waves = taskWaves(run.tasks);
-  const longest = Math.max(4, ...run.tasks.map((task) => task.id.length));
-  const idWidth = `${Math.min(12, longest)}ch`;
 
   // One worker's row, wherever its wave puts it.
-  const workerRow = (task: OrchestrationTask) => {
+  const workerRow = (task: OrchestrationTask, last: boolean) => {
     // The lead asked for more than the user approved (FE-89/D11).
     const wider =
       live && task.status === "queued" && task.scopeApproval?.length
@@ -776,8 +776,8 @@ export function RunPanel({
         slug={slug}
         id={`${base}-${task.id}`}
         task={task}
-        idWidth={idWidth}
         number={run.tasks.indexOf(task) + 1}
+        last={last}
         time={taskTime(task, run, now)}
         wider={wider}
         waitingFor={waitingFor}
@@ -845,12 +845,11 @@ export function RunPanel({
               <span>Run</span>
               {run.tasks.length > 0 && (
                 <span className="text-muted-foreground/70 flex min-w-0 items-center gap-x-2.5 truncate tracking-normal normal-case tabular-nums">
+                  {/* Working > Review > Done: done is what the lead took. */}
                   <span>
-                    {done} of {run.tasks.length} done
-                    {accepted > 0 && accepted < done
-                      ? `, ${accepted} accepted`
-                      : ""}
+                    {accepted} of {run.tasks.length} done
                   </span>
+                  {done > accepted && <span>{done - accepted} in review</span>}
                   {running > 0 && <span>{running} working</span>}
                   {waiting > 0 && (
                     <span className="text-tone-amber">
@@ -880,25 +879,28 @@ export function RunPanel({
           </div>
           {/* Status and clock, then the one action the run allows now:
             Run while it is paused, Stop while it runs (FE-137). */}
+          {/* The run's one status, from its tasks; why it paused or
+              stopped on hover (FE-137). */}
+          {run.reason ? (
+            <Tip label={run.reason}>
+              <span className="flex">
+                <StatusPill tone={TONE_TEXT[overall.tone]} live={overall.live}>
+                  {overall.label}
+                </StatusPill>
+              </span>
+            </Tip>
+          ) : (
+            <StatusPill tone={TONE_TEXT[overall.tone]} live={overall.live}>
+              {overall.label}
+            </StatusPill>
+          )}
           <ButtonGroup className="shrink-0">
-            {run.reason ? (
-              // Why it paused or stopped, kept off the card (FE-137).
-              <Tip label={run.reason}>
-                <ButtonGroupText
-                  aria-hidden="true"
-                  className="bg-muted text-muted-foreground h-6 gap-1.5 px-2 font-normal tabular-nums"
-                >
-                  <span>{RUN_LABELS[run.status]}</span>
-                  {total && <span className="text-foreground/80">{total}</span>}
-                </ButtonGroupText>
-              </Tip>
-            ) : (
+            {total && (
               <ButtonGroupText
                 aria-hidden="true"
-                className="bg-muted text-muted-foreground h-6 gap-1.5 px-2 font-normal tabular-nums"
+                className="bg-muted text-muted-foreground h-6 px-2 font-normal tabular-nums"
               >
-                <span>{RUN_LABELS[run.status]}</span>
-                {total && <span className="text-foreground/80">{total}</span>}
+                {total}
               </ButtonGroupText>
             )}
             {total && <span className="sr-only">Running time {total}</span>}
@@ -1028,7 +1030,9 @@ export function RunPanel({
                       stepped ? `Workers, step ${index + 1}` : "Workers"
                     }
                   >
-                    {wave.map(workerRow)}
+                    {wave.map((task, at) =>
+                      workerRow(task, at === wave.length - 1),
+                    )}
                   </ul>
                 </section>
               );

@@ -1,6 +1,6 @@
 // The run panel's checklist parts: its tasks in dependency waves, and each
 // task's status as one small square glyph, as a sub-issue list draws them.
-import { Loading03Icon } from "@hugeicons/core-free-icons";
+import { EllipsisIcon, Loading03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import type { OrchestrationTask } from "#/../shared/orchestration";
@@ -101,10 +101,6 @@ function Square({
 
 /** A tick. */
 const TICK = <path d="M4.75 8.25 6.9 10.4l4.35-4.65" fill="none" />;
-/** Two ticks, the second ahead of the first: reviewed and taken. */
-const DOUBLE_TICK = (
-  <path d="M3.4 8.4 5.3 10.3l4-4.3M7.6 10.1l.2.2 4-4.3" fill="none" />
-);
 /** Two short vertical bars: the worker is at it. */
 const BARS = <path d="M6.25 5.5v5M9.75 5.5v5" fill="none" />;
 /** A question mark, its dot a filled circle. */
@@ -176,7 +172,7 @@ function Numbered({
     <span
       aria-hidden="true"
       className={cn(
-        "bg-background text-muted-foreground ring-border grid shrink-0 place-items-center rounded-full text-[13px] font-medium tabular-nums ring-1",
+        "bg-background text-muted-foreground ring-border grid shrink-0 place-items-center rounded-full text-[11px] font-medium tabular-nums ring-1",
         size,
       )}
     >
@@ -192,9 +188,9 @@ const MUTED = "text-muted-foreground/70";
  * A worker's status as one rounded square the height of its title; the row
  * draws no other status:
  *
- * - Done: a green ring with a green tick. Accepted (the lead reviewed it):
- *   a green fill with two white ticks (the badge beside the title wears
- *   the shield).
+ * - Review (the worker finished): a green ring with an ellipsis. Done (the
+ *   lead reviewed and accepted it):
+ *   a green fill with a white tick.
  * - Working: a soft blue ringed disc with a spinner at its centre (still with
  *   reduced motion). Stopping: a rose outline with two bars.
  * - Waiting on the lead: an amber outline with a question mark.
@@ -220,17 +216,29 @@ export function StepGlyph({
   number?: number;
 }) {
   const status = shownStatus(task);
-  // Done, not reviewed yet: a green ring and tick, no fill. Accepted by the
-  // lead: a green fill with two ticks.
+  // Review, the lead not done with it yet: a green ring and an ellipsis.
+  // Done, accepted by the lead: a green fill with a tick.
   if (status === "completed")
     return task.accepted ? (
       <Square size={size} shape="fill" tone={TONE_TEXT.emerald}>
-        {DOUBLE_TICK}
-      </Square>
-    ) : (
-      <Square size={size} shape="outline" tone={TONE_TEXT.emerald}>
         {TICK}
       </Square>
+    ) : (
+      // Under review: a green ring holding an ellipsis, the lead not done.
+      <span
+        aria-hidden="true"
+        className={cn(
+          "grid shrink-0 place-items-center rounded-full ring-[1.5px] ring-current ring-inset",
+          size ?? "size-4",
+          TONE_TEXT.emerald,
+        )}
+      >
+        <HugeiconsIcon
+          icon={EllipsisIcon}
+          className="size-[58%]"
+          strokeWidth={2.4}
+        />
+      </span>
     );
   if (task.needsInput)
     return (

@@ -36,6 +36,11 @@ import {
   TextSkeleton,
 } from "#/components/shared/loading/skeletons";
 import { taskWaves } from "#/components/shared/orchestration/run-steps";
+import {
+  ReadOnlyBadge,
+  StatusPill,
+  TaskRow as TaskRowFrame,
+} from "#/components/shared/orchestration/task-row";
 import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
 import { Textarea } from "#/components/ui/textarea";
@@ -53,6 +58,7 @@ import {
   leadIcon,
   tiersAllowed,
 } from "#/lib/orchestration-prompt";
+import { TONE_TEXT } from "#/lib/orchestration-status";
 import { cn } from "#/lib/utils";
 import { useProposalEdits } from "./orchestration-panel.store";
 
@@ -316,6 +322,7 @@ function TaskRow({
   onChange,
   toggled,
   onToggle,
+  last,
 }: {
   /** The card's id prefix for its fields. */
   base: string;
@@ -331,6 +338,8 @@ function TaskRow({
    * another step, which mounts it anew. */
   toggled: boolean;
   onToggle: (open: boolean) => void;
+  /** Its step's last task: no thread down from its number. */
+  last: boolean;
 }) {
   const setToggled = onToggle;
   const invalid = Boolean(errors && Object.keys(errors).length);
@@ -357,64 +366,30 @@ function TaskRow({
     .map((dep) => tasks.findIndex((other) => other.id === dep) + 1)
     .filter((at) => at > 0)
     .sort((x, y) => x - y);
-  // Two lines, as a lesson list reads: the task, then what it is in muted
-  // words set apart by space. The number in a soft circle; the row lifts on
-  // hover and stays lifted while open.
+  // The run card's row (shared/orchestration/task-row): the number, the
+  // task, a Read only badge when it writes nothing, the model menu.
   return (
-    <li id={`${base}-${task.id}-row`} className="flex flex-col">
-      <div
-        className={cn(
-          "flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 transition-colors duration-150",
-          open ? "bg-muted/70" : "hover:bg-muted/50",
-        )}
-      >
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-label={`Details for ${index + 1}. ${task.title}${invalid ? ", needs a fix" : ""}`}
-          // Not closed while it holds an error.
-          onClick={() => setToggled(invalid ? true : !open)}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left outline-none"
+    <TaskRowFrame
+      id={`${base}-${task.id}-row`}
+      mark={
+        <span
+          aria-hidden="true"
+          className={cn(
+            "grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-medium tabular-nums",
+            invalid
+              ? "bg-destructive/10 text-destructive"
+              : "bg-background text-muted-foreground ring-border ring-1",
+          )}
         >
-          <span
-            aria-hidden="true"
-            className={cn(
-              // The height of the two lines beside it.
-              "grid size-9 shrink-0 place-items-center rounded-full text-[13px] font-medium tabular-nums",
-              invalid
-                ? "bg-destructive/10 text-destructive"
-                : "bg-background text-muted-foreground ring-border ring-1",
-            )}
-          >
-            {invalid ? "!" : index + 1}
-          </span>
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span
-              className="text-foreground truncate text-[13px] leading-snug font-semibold"
-              title={task.title}
-            >
-              {task.title}
-            </span>
-            <span className="text-muted-foreground flex min-w-0 items-center gap-2.5 text-[11.5px] leading-snug">
-              <span className="shrink-0 font-mono text-[11px]">{task.id}</span>
-              <span
-                className={cn(
-                  "truncate",
-                  // Writing nothing is worth seeing at a glance.
-                  task.files.length === 0 && "text-tone-teal",
-                )}
-                title={task.files.join(", ")}
-              >
-                {writes}
-              </span>
-              {after.length > 0 && (
-                <span className="shrink-0">After {after.join(", ")}</span>
-              )}
-            </span>
-          </span>
-        </button>
-        {/* The composer's own model pill (FE-95): model and effort in one,
-            with Auto when the run may pick by tier. */}
+          {invalid ? "!" : index + 1}
+        </span>
+      }
+      title={task.title}
+      tip={`${task.title} (${task.id})\n${writes}${after.length ? `, after ${after.join(", ")}` : ""}`}
+      badge={task.files.length === 0 ? <ReadOnlyBadge /> : undefined}
+      // The composer's own model pill (FE-95): model and effort in one,
+      // with Auto when the run may pick by tier.
+      trailing={
         <ModelMenu
           side="bottom"
           fast={false}
@@ -443,140 +418,126 @@ function TaskRow({
             })
           }
         />
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-hidden="true"
-          onClick={() => setToggled(invalid ? true : !open)}
-          className="text-muted-foreground/70 hover:text-foreground grid size-5 shrink-0 place-items-center"
-        >
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            strokeWidth={2}
-            className={cn(
-              "size-3 transition-transform duration-150",
-              open && "rotate-180",
-            )}
-          />
-        </button>
+      }
+      open={open}
+      // Not closed while it holds an error.
+      onToggle={() => setToggled(invalid ? true : !open)}
+      label={`Details for ${index + 1}. ${task.title}${invalid ? ", needs a fix" : ""}`}
+      last={last}
+      done={false}
+      below={
+        missing && task.model ? (
+          <p
+            id={warning}
+            className="text-muted-foreground flex items-start gap-1.5 pt-1 pr-2 pb-1.5 pl-11 text-[11px]"
+          >
+            {/* Said, not blocked: Approve still tries it; main has the last word. */}
+            {modelName(task.model) ?? task.model} is not in{" "}
+            {AGENT_LABELS[task.agent ?? "claude"]}'s model list. Pick another to
+            be safe, or approve to try it as it is.
+          </p>
+        ) : null
+      }
+    >
+      <div>
+        <label htmlFor={id("title")} className={label}>
+          Task
+        </label>
+        <Input
+          id={id("title")}
+          value={task.title}
+          disabled={!editable}
+          aria-invalid={errors?.title ? true : undefined}
+          aria-describedby={errorId("title")}
+          onChange={(event) => onChange({ title: event.target.value })}
+        />
+        <FieldError id={`${id("title")}-error`} message={errors?.title} />
       </div>
-      {missing && task.model && (
-        <p
-          id={warning}
-          className="text-muted-foreground flex items-start gap-1.5 pt-1 pr-2 pb-1.5 pl-14 text-[11px]"
+      <div>
+        <label htmlFor={id("prompt")} className={label}>
+          Instructions
+        </label>
+        <Textarea
+          id={id("prompt")}
+          value={task.prompt}
+          disabled={!editable}
+          aria-invalid={errors?.prompt ? true : undefined}
+          aria-describedby={errorId("prompt")}
+          onChange={(event) => onChange({ prompt: event.target.value })}
+          className="max-h-60"
+        />
+        <FieldError id={`${id("prompt")}-error`} message={errors?.prompt} />
+      </div>
+      <div>
+        <label htmlFor={id("files")} className={label}>
+          Write scopes
+        </label>
+        <ScopeField
+          id={id("files")}
+          task={task}
+          disabled={!editable}
+          error={errorId("files")}
+          onChange={(files) => onChange({ files })}
+        />
+        <FieldError id={`${id("files")}-error`} message={errors?.files} />
+      </div>
+      {others.length > 0 && (
+        <fieldset
+          className="flex flex-col"
+          aria-describedby={errorId("dependsOn")}
         >
-          {/* Said, not blocked: Approve still tries it; main has the last word. */}
-          {modelName(task.model) ?? task.model} is not in{" "}
-          {AGENT_LABELS[task.agent ?? "claude"]}'s model list. Pick another to
-          be safe, or approve to try it as it is.
-        </p>
+          <legend className={label}>Starts after</legend>
+          <div className="flex flex-wrap gap-1.5">
+            {others.map((other) => {
+              const on = task.dependsOn.includes(other.id);
+              return (
+                <button
+                  key={other.id}
+                  // The first chip it waits on takes the focus for a
+                  // loop's error.
+                  id={other.id === firstOn ? id("dependsOn") : undefined}
+                  type="button"
+                  aria-pressed={on}
+                  aria-invalid={errors?.dependsOn && on ? true : undefined}
+                  aria-describedby={on ? errorId("dependsOn") : undefined}
+                  title={`${tasks.indexOf(other) + 1}. ${other.title}`}
+                  disabled={!editable}
+                  data-dep-chip={`${base}-${task.id}-${other.id}`}
+                  onClick={() => {
+                    onChange({
+                      dependsOn: on
+                        ? task.dependsOn.filter((entry) => entry !== other.id)
+                        : [...task.dependsOn, other.id],
+                    });
+                    // The row may move to another step and mount anew:
+                    // the focus follows it to the same chip.
+                    requestAnimationFrame(() =>
+                      document
+                        .querySelector<HTMLElement>(
+                          `[data-dep-chip="${base}-${task.id}-${other.id}"]`,
+                        )
+                        ?.focus(),
+                    );
+                  }}
+                  className={cn(
+                    "border-border max-w-56 truncate rounded-md border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-60",
+                    on
+                      ? "bg-foreground/10 text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {tasks.indexOf(other) + 1}. {other.title}
+                </button>
+              );
+            })}
+          </div>
+          <FieldError
+            id={`${id("dependsOn")}-error`}
+            message={errors?.dependsOn}
+          />
+        </fieldset>
       )}
-      {open && (
-        // Lined up with the title, under the lifted row.
-        <div className="mt-2 mr-2 mb-3 ml-14 flex min-w-0 flex-col gap-2.5">
-          <div>
-            <label htmlFor={id("title")} className={label}>
-              Task
-            </label>
-            <Input
-              id={id("title")}
-              value={task.title}
-              disabled={!editable}
-              aria-invalid={errors?.title ? true : undefined}
-              aria-describedby={errorId("title")}
-              onChange={(event) => onChange({ title: event.target.value })}
-            />
-            <FieldError id={`${id("title")}-error`} message={errors?.title} />
-          </div>
-          <div>
-            <label htmlFor={id("prompt")} className={label}>
-              Instructions
-            </label>
-            <Textarea
-              id={id("prompt")}
-              value={task.prompt}
-              disabled={!editable}
-              aria-invalid={errors?.prompt ? true : undefined}
-              aria-describedby={errorId("prompt")}
-              onChange={(event) => onChange({ prompt: event.target.value })}
-              className="max-h-60"
-            />
-            <FieldError id={`${id("prompt")}-error`} message={errors?.prompt} />
-          </div>
-          <div>
-            <label htmlFor={id("files")} className={label}>
-              Write scopes
-            </label>
-            <ScopeField
-              id={id("files")}
-              task={task}
-              disabled={!editable}
-              error={errorId("files")}
-              onChange={(files) => onChange({ files })}
-            />
-            <FieldError id={`${id("files")}-error`} message={errors?.files} />
-          </div>
-          {others.length > 0 && (
-            <fieldset
-              className="flex flex-col"
-              aria-describedby={errorId("dependsOn")}
-            >
-              <legend className={label}>Starts after</legend>
-              <div className="flex flex-wrap gap-1.5">
-                {others.map((other) => {
-                  const on = task.dependsOn.includes(other.id);
-                  return (
-                    <button
-                      key={other.id}
-                      // The first chip it waits on takes the focus for a
-                      // loop's error.
-                      id={other.id === firstOn ? id("dependsOn") : undefined}
-                      type="button"
-                      aria-pressed={on}
-                      aria-invalid={errors?.dependsOn && on ? true : undefined}
-                      aria-describedby={on ? errorId("dependsOn") : undefined}
-                      title={`${tasks.indexOf(other) + 1}. ${other.title}`}
-                      disabled={!editable}
-                      data-dep-chip={`${base}-${task.id}-${other.id}`}
-                      onClick={() => {
-                        onChange({
-                          dependsOn: on
-                            ? task.dependsOn.filter(
-                                (entry) => entry !== other.id,
-                              )
-                            : [...task.dependsOn, other.id],
-                        });
-                        // The row may move to another step and mount anew:
-                        // the focus follows it to the same chip.
-                        requestAnimationFrame(() =>
-                          document
-                            .querySelector<HTMLElement>(
-                              `[data-dep-chip="${base}-${task.id}-${other.id}"]`,
-                            )
-                            ?.focus(),
-                        );
-                      }}
-                      className={cn(
-                        "border-border max-w-56 truncate rounded-md border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-60",
-                        on
-                          ? "bg-foreground/10 text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {tasks.indexOf(other) + 1}. {other.title}
-                    </button>
-                  );
-                })}
-              </div>
-              <FieldError
-                id={`${id("dependsOn")}-error`}
-                message={errors?.dependsOn}
-              />
-            </fieldset>
-          )}
-        </div>
-      )}
-    </li>
+    </TaskRowFrame>
   );
 }
 
@@ -618,30 +579,22 @@ function ProposalStatus({
   invalid: boolean;
 }) {
   const [label, tone] = planning
-    ? ["Planning", "text-muted-foreground text-shimmer"]
+    ? ["Planning", TONE_TEXT.neutral]
     : approved
-      ? ["Approved", "text-tone-emerald"]
+      ? ["Approved", TONE_TEXT.emerald]
       : cancelled
-        ? ["Cancelled", "text-muted-foreground"]
+        ? ["Cancelled", TONE_TEXT.neutral]
         : invalid
-          ? ["Needs a fix", "text-destructive"]
-          : ["Waiting for you", "text-tone-violet"];
-  const waiting = !planning && !approved && !cancelled && !invalid;
+          ? ["Needs a fix", TONE_TEXT.rose]
+          : ["Waiting for you", TONE_TEXT.amber];
+  // The run card's pill: the proposal's one status, in the task tones.
   return (
-    <span
-      className={cn(
-        "bg-muted flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px]",
-        tone,
-      )}
+    <StatusPill
+      tone={tone}
+      live={planning || (!approved && !cancelled && !invalid)}
     >
-      {waiting && (
-        <span
-          aria-hidden="true"
-          className="bg-tone-violet size-1.5 animate-pulse rounded-full motion-reduce:animate-none"
-        />
-      )}
       {label}
-    </span>
+    </StatusPill>
   );
 }
 
@@ -1054,9 +1007,10 @@ export function ProposalCard({
                     </h3>
                   )}
                   <ul aria-label={stepped ? `Tasks, step ${step}` : "Tasks"}>
-                    {wave.map((task) => (
+                    {wave.map((task, at) => (
                       <TaskRow
                         key={task.id}
+                        last={at === wave.length - 1}
                         base={base}
                         task={task}
                         index={tasks.indexOf(task)}

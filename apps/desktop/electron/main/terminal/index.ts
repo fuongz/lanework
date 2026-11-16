@@ -50,6 +50,7 @@ import {
   sessionKey,
 } from "../../session-store";
 import { assertTrustedSender, broadcast, handle } from "../ipc";
+import { workerFolderOf } from "../orchestration";
 import { appHomeDir, sessionStorePath } from "../paths";
 import {
   knownProject,
@@ -1524,6 +1525,17 @@ export function registerTerminal(devUrl?: string): void {
       return readAgentUsage(agentHome(), folder);
     },
   );
+  /**
+   * The folder a conversation's transcript is filed under: an orchestration
+   * worker's own worktree (its transcript names that `cwd`, not the
+   * project's, so read under the project it matched nothing and the
+   * Sessions panel of a worker's chat stayed empty), else the project's.
+   */
+  const transcriptFolder = async (
+    project: string,
+    conversation: string,
+  ): Promise<string | null> =>
+    workerFolderOf(project, conversation) ?? (await terminalFolder(project));
   // NOTE: By ids alone, as a sub-agent is (FE-39): `agentFilesRequest` refuses
   // any other shape, and every transcript's path is built inside the CLI's
   // folder for this project's own folder.
@@ -1532,7 +1544,7 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<AgentFiles> => {
       const { project, ...which } = agentFilesRequest(args);
-      const folder = await terminalFolder(project);
+      const folder = await transcriptFolder(project, which.id);
       if (!folder) throw new Error("This project has no folder here.");
       return readAgentFiles(agentHome(), folder, which);
     },
@@ -1543,7 +1555,7 @@ export function registerTerminal(devUrl?: string): void {
     devUrl,
     async (args): Promise<AgentWorkspace> => {
       const { project, ...which } = agentFilesRequest(args);
-      const folder = await terminalFolder(project);
+      const folder = await transcriptFolder(project, which.id);
       if (!folder)
         return { cwd: null, branch: null, worktree: null, commits: [] };
       return readAgentWorkspace(agentHome(), folder, which);
