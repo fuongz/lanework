@@ -401,7 +401,7 @@ export function LeadRuns({
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate",
-                    going && !waiting && "text-shimmer",
+                    going && !waiting && "text-breathe",
                     run.status === "stopped" && "text-muted-foreground",
                   )}
                   title={title}

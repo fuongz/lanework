@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { AgentSession, TerminalAgent } from "#/../shared/terminal";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
+import { cn } from "#/lib/utils";
 import { agentKey, useAgentSessions } from "#/stores/agent-sessions";
 import { awaitingKey, useAwaiting } from "#/stores/awaiting";
 import {
@@ -215,12 +216,19 @@ export function ConductorSessionsPanel({
     <div
       id={panelId(chat)}
       inert={!open}
-      style={{ width: open ? PANEL_PX : 0, right: SESSIONS_PANEL_GUTTER }}
+      style={{ width: PANEL_PX, right: SESSIONS_PANEL_GUTTER }}
       // NOTE: Over the chat rather than beside it: the chat keeps its width
       // and pads its content clear (`--side-panel`), so its contents rail
       // and scrollbar stay at the window's edge, in the gutter on the
       // panel's right.
-      className="bg-background absolute inset-y-0 z-20 overflow-hidden transition-[width] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+      // It glides in by `transform` and `opacity` at a fixed width: growing
+      // its width re-laid out the panel, and the chat beside it, every frame.
+      className={cn(
+        "bg-background absolute inset-y-0 z-20 overflow-hidden transition-[transform,opacity] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+        open
+          ? "translate-x-0 opacity-100"
+          : "pointer-events-none translate-x-4 opacity-0",
+      )}
     >
       {(open || present) && (
         <SessionsList

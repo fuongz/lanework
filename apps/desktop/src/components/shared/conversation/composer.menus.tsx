@@ -295,7 +295,7 @@ function ModelPanel({
                     // The group being scrolled through stays named on top. No
                     // fill of its own, so it is the panel's colour; the blur
                     // keeps the rows passing under it from showing through.
-                    className="sticky -top-1 z-10 -mx-1 px-3.5 pt-2.5 pb-1 text-[12px] backdrop-blur-3xl"
+                    className="sticky -top-1 z-10 -mx-1 px-3.5 pt-2.5 pb-1 text-[12px] backdrop-blur-xl"
                   >
                     {run.group}
                   </DropdownMenuLabel>

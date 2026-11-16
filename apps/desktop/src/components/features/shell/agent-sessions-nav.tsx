@@ -345,7 +345,7 @@ function AgentSessionsList({
                 {entry.working && <StatusPing tone="working" />}
               </span>
               <span
-                className={`min-w-0 flex-1 truncate ${entry.working ? "text-shimmer" : "text-muted-foreground"}`}
+                className={`min-w-0 flex-1 truncate ${entry.working ? "text-breathe" : "text-muted-foreground"}`}
               >
                 {entry.label}
               </span>

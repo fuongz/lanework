@@ -146,7 +146,7 @@ function Capsule({
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate",
-                    row.running ? "text-shimmer" : "text-muted-foreground",
+                    row.running ? "text-breathe" : "text-muted-foreground",
                   )}
                 >
                   {row.label}

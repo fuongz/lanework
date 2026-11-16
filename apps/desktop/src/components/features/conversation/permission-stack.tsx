@@ -164,7 +164,10 @@ export function PermissionStack({
           came forward, and jump by the height difference before sliding. */}
       <div
         ref={stack}
-        className={cn("relative transition-[height]", MOTION)}
+        // Its height follows the front card at once: eased, it re-laid out
+        // the chat above it every frame. The cards themselves still glide
+        // (transform, opacity, clip-path).
+        className="relative"
         style={stacked && front > 0 ? { height: reserve + front } : undefined}
       >
         {requests.map((request, index) => {

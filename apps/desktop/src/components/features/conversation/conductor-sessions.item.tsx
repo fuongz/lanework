@@ -164,7 +164,7 @@ export function SessionItem({
       >
         <SessionMark session={session} activity={activity} />
         <span
-          className={cn("min-w-0 flex-1 truncate", working && "text-shimmer")}
+          className={cn("min-w-0 flex-1 truncate", working && "text-breathe")}
           title={title}
         >
           {title}
@@ -235,7 +235,7 @@ export function SessionHeader({
       <h2
         className={cn(
           "min-w-0 flex-1 truncate ps-1 text-[13px] font-medium",
-          working && "text-shimmer",
+          working && "text-breathe",
         )}
         title={title}
       >

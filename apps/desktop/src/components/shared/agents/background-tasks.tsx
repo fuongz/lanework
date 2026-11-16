@@ -313,7 +313,7 @@ export function WorkflowPhases({
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate",
-                    agent.working ? "text-shimmer" : "text-muted-foreground",
+                    agent.working ? "text-breathe" : "text-muted-foreground",
                   )}
                 >
                   {agent.label}

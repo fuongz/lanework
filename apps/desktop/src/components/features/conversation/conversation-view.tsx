@@ -959,7 +959,9 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
                 // NOTE: Padding, not a narrower box, clears the Sessions panel:
                 // the scrollbar stays at the window's edge instead of floating
                 // beside the panel.
-                className="h-full overflow-y-auto pr-[var(--side-panel,0px)] [overflow-anchor:none] transition-[padding] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+                // It changes at once, never animated: an animated padding
+                // re-wrapped the whole transcript on every frame.
+                className="h-full overflow-y-auto pr-[var(--side-panel,0px)] [overflow-anchor:none]"
               >
                 <div
                   ref={content}
@@ -1098,7 +1100,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
             </div>
 
             {/* Clear of the Sessions panel, which lies over the right edge. */}
-            <div className="pr-[var(--side-panel,0px)] transition-[padding] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none">
+            <div className="pr-[var(--side-panel,0px)]">
               <div className="mx-auto flex w-full max-w-[940px] min-w-0 flex-col gap-1.5 px-8 pb-4">
                 {(actionError || engine.state === "error") && (
                   <p role="alert" className="text-destructive px-1 text-xs">

@@ -256,7 +256,7 @@ export function CardAgentsLine({ card }: { card: CardRef }) {
               {TERMINAL_KIND_LABELS[session.agent]}
             </span>
             <span className="text-muted-foreground shrink-0">working on</span>
-            <span className="text-shimmer min-w-0 truncate">
+            <span className="text-breathe min-w-0 truncate">
               {session.title}
             </span>
           </button>

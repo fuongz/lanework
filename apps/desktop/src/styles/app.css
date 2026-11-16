@@ -99,6 +99,21 @@
 /* A working agent's title (with OrbitSpinner): a band of the full ink
    sweeping through muted text. Only with motion allowed: reduced motion
    keeps the text as it is, readable, rather than a still gradient. */
+/* A working row in a list (the rail, the Sessions panel, job capsules): its
+   text breathes. Opacity only, so it composites; the shimmer's moving
+   gradient repaints its text every frame, which a dozen working rows at
+   once, during a stream, cannot afford. The shimmer stays for the one
+   thing in view that works: the open chat's title and its tool groups. */
+@keyframes text-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 @keyframes text-shimmer {
   from {
     background-position: 100% 0;
@@ -123,6 +138,9 @@
   }
   .orbit-spinner [data-orbit] {
     animation: orbit-spinner 0.8s linear infinite;
+  }
+  .text-breathe {
+    animation: text-breathe 1.6s ease-in-out infinite;
   }
   .startup-loading img {
     animation: startup-shimmer 0.9s linear infinite;

@@ -535,7 +535,7 @@ export function ConductorsNav({
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate",
-                    status.state === "working" && "text-shimmer",
+                    status.state === "working" && "text-breathe",
                   )}
                 >
                   {lead.name}

@@ -13,7 +13,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
-import { type MouseEvent, memo, useContext, useState } from "react";
+import { type MouseEvent, memo, useContext, useEffect, useState } from "react";
 import type {
   ConversationAgent,
   ToolCall,
@@ -60,6 +60,12 @@ const KIND_ICONS: Record<ToolKind, IconSvgElement> = {
  */
 const EASE = "duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]";
 const PANEL = `h-(--collapsible-panel-height) overflow-hidden transition-[height,opacity] ${EASE} data-starting-style:h-0 data-starting-style:opacity-0 data-ending-style:h-0 data-ending-style:opacity-0 motion-reduce:transition-none`;
+/**
+ * The same panel, opening and closing at once. Used while the turn streams:
+ * a height eased then costs layout on every frame of a page that is already
+ * re-rendering per token, and the stream's own scroll-to-end follows it.
+ */
+const PANEL_AT_ONCE = "overflow-hidden";
 
 /**
  * The image a call made, else null: Codex's `image_gen` saves one and names
@@ -159,10 +165,13 @@ function CallRow({
   call,
   slug,
   conversation,
+  atOnce,
 }: {
   call: ToolCall;
   slug: string;
   conversation: string;
+  /** The turn streams: open and close without easing the height. */
+  atOnce: boolean;
 }) {
   const running = call.output === null;
   const image = madeImage(call);
@@ -182,7 +191,8 @@ function CallRow({
           className={cn(
             "hover:bg-foreground/[0.04] flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left text-[13px] transition-colors",
             call.error ? "text-destructive" : "text-muted-foreground",
-            running && "text-shimmer",
+            // Breathes, not shimmers: several calls may run at once.
+            running && "text-breathe",
           )}
         >
           <HugeiconsIcon
@@ -207,7 +217,7 @@ function CallRow({
           </Link>
         )}
       </div>
-      <Collapsible.Panel className={PANEL}>
+      <Collapsible.Panel className={atOnce ? PANEL_AT_ONCE : PANEL}>
         {/* Wide output scrolls inside its own box; the page never scrolls sideways. */}
         <div className="bg-foreground/[0.04] my-1 ms-6 flex max-h-96 flex-col gap-2 overflow-auto rounded-lg p-3 font-mono text-[11px] leading-relaxed">
           <pre className="whitespace-pre-wrap break-all">
@@ -270,6 +280,16 @@ export const ToolGroup = memo(function ToolGroup({
 }) {
   const [chosen, setChosen] = useState<boolean | null>(null);
   const open = chosen ?? running;
+  // It opens by itself as its calls start and folds as they end, while the
+  // turn streams: those moves, and any while it runs, are not eased. Only a
+  // click of the reader's, once it is quiet, eases the height.
+  const [clicked, setClicked] = useState(false);
+  useEffect(() => {
+    // `running` flipped: the fold that follows is the group's own.
+    void running;
+    setClicked(false);
+  }, [running]);
+  const atOnce = running || !clicked;
   const failed = calls.some((call) => call.error);
   // The images the group made stay in sight while it is folded; open, each
   // one sits in its own call's output instead.
@@ -280,7 +300,10 @@ export const ToolGroup = memo(function ToolGroup({
   return (
     <Collapsible.Root
       open={open}
-      onOpenChange={setChosen}
+      onOpenChange={(next) => {
+        setClicked(true);
+        setChosen(next);
+      }}
       className="flex min-w-0 flex-col"
     >
       <Collapsible.Trigger
@@ -340,7 +363,7 @@ export const ToolGroup = memo(function ToolGroup({
           ))}
         </div>
       )}
-      <Collapsible.Panel className={PANEL}>
+      <Collapsible.Panel className={atOnce ? PANEL_AT_ONCE : PANEL}>
         <ul className="ms-[7px] flex min-w-0 flex-col ps-3">
           {calls.map((call) => (
             <CallRow
@@ -348,6 +371,7 @@ export const ToolGroup = memo(function ToolGroup({
               call={call}
               slug={slug}
               conversation={conversation}
+              atOnce={running}
             />
           ))}
         </ul>

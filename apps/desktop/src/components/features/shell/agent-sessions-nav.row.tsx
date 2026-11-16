@@ -461,7 +461,7 @@ export function SessionRow({
               )}
             </span>
             <span
-              className={`min-w-0 flex-1 truncate ${working ? "text-shimmer" : ""}`}
+              className={`min-w-0 flex-1 truncate ${working ? "text-breathe" : ""}`}
             >
               {session.title}
             </span>
@@ -644,7 +644,7 @@ export function SessionRow({
               {busy && <StatusPing tone="working" />}
             </span>
             <span
-              className={`min-w-0 flex-1 truncate ${busy ? "text-shimmer" : viewed(sub) ? "" : "text-muted-foreground"}`}
+              className={`min-w-0 flex-1 truncate ${busy ? "text-breathe" : viewed(sub) ? "" : "text-muted-foreground"}`}
             >
               {sub.title}
             </span>
@@ -687,7 +687,7 @@ export function SessionRow({
                 {busy && <StatusPing tone="working" />}
               </span>
               <span
-                className={`min-w-0 flex-1 truncate ${busy ? "text-shimmer" : seen ? "" : "text-muted-foreground"}`}
+                className={`min-w-0 flex-1 truncate ${busy ? "text-breathe" : seen ? "" : "text-muted-foreground"}`}
               >
                 {task.title}
               </span>

@@ -66,12 +66,14 @@ export function TocRail({
             <span
               aria-hidden="true"
               className={cn(
-                "h-[1.5px] rounded-full transition-[width,background-color] duration-150 motion-reduce:transition-none",
+                // Always 18px wide, scaled from the right: `scaleX`
+                // composites where a changing width re-laid out the rail.
+                "h-[1.5px] w-[18px] origin-right rounded-full transition-[transform,background-color] duration-150 motion-reduce:transition-none",
                 // Hovered or focused, a tick reads as the current one: long
                 // and in full ink, so the eye knows where a click lands.
                 active
-                  ? "bg-foreground w-[18px]"
-                  : "bg-foreground/25 group-hover/tick:bg-foreground group-focus-visible/tick:bg-foreground w-3 group-hover/tick:w-[18px] group-focus-visible/tick:w-[18px]",
+                  ? "bg-foreground"
+                  : "bg-foreground/25 group-hover/tick:bg-foreground group-focus-visible/tick:bg-foreground scale-x-[0.667] group-hover/tick:scale-x-100 group-focus-visible/tick:scale-x-100",
               )}
             />
           </button>
@@ -81,7 +83,7 @@ export function TocRail({
         // Glass, as the composer's menus: the chat blurred under it.
         <div
           role="tooltip"
-          className="text-popover-foreground ring-foreground/12 dark:ring-foreground/15 bg-popover/40 dark:bg-muted/45 pointer-events-none absolute right-9 flex w-80 -translate-y-1/2 flex-col gap-1.5 rounded-2xl px-4 py-3.5 text-[13px] shadow-[0_12px_40px_-8px_rgb(0_0_0/0.45),inset_0_1px_0_0_rgb(255_255_255/0.06)] ring-1 before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-3xl before:backdrop-saturate-[1.8]"
+          className="text-popover-foreground ring-foreground/12 dark:ring-foreground/15 bg-popover/40 dark:bg-muted/45 pointer-events-none absolute right-9 flex w-80 -translate-y-1/2 flex-col gap-1.5 rounded-2xl px-4 py-3.5 text-[13px] shadow-[0_12px_40px_-8px_rgb(0_0_0/0.45),inset_0_1px_0_0_rgb(255_255_255/0.06)] ring-1 before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:backdrop-blur-xl before:backdrop-saturate-[1.8]"
           style={{ top: hover.top }}
         >
           <p className="truncate text-[14px] font-medium">{shown.prompt}</p>

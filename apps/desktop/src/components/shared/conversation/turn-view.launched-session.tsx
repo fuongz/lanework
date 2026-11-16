@@ -129,7 +129,7 @@ export function LaunchedSessionCard({
       <span
         className={cn(
           "min-w-0 truncate font-medium",
-          working && "text-shimmer",
+          working && "text-breathe",
         )}
       >
         {title}
