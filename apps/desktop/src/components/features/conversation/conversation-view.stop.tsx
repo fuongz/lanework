@@ -90,7 +90,9 @@ export function useStopShortcut({
 
   return (
     <AlertDialog open={asking} onOpenChange={setAsking}>
-      <AlertDialogContent>
+      {/* Opened by a key: it appears at once, without the dialog's zoom.
+          A shortcut's answer should not wait on motion. */}
+      <AlertDialogContent className="transition-none">
         <AlertDialogHeader>
           <AlertDialogTitle>Stop this {label} session?</AlertDialogTitle>
           <AlertDialogDescription>

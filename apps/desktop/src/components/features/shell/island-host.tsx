@@ -242,9 +242,11 @@ export function IslandHost() {
             data-view={view}
             layout={!reduced}
             transition={reduced ? { duration: 0.2 } : ISLAND_MORPH}
-            initial={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
+            // From 0.95, not further: from 0.7 it seemed to shoot out of a
+            // point, every time any island came.
+            initial={{ opacity: 0, scale: reduced ? 1 : 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: reduced ? 1 : 0.7 }}
+            exit={{ opacity: 0, scale: reduced ? 1 : 0.95 }}
             style={{
               borderRadius: context.open
                 ? ISLAND_PANEL_RADIUS

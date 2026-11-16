@@ -6,6 +6,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "#/lib/utils";
 
 /** The toolbar's height and the gap it keeps from the selection, in px. */
 const BAR = 36;
@@ -165,7 +166,12 @@ export function SelectionActions({
       role="toolbar"
       aria-label="Selection actions"
       style={{ top, left }}
-      className="bg-popover text-popover-foreground border-border/70 animate-in fade-in-0 zoom-in-95 fixed z-50 flex h-9 items-center gap-0.5 rounded-full border ps-3 pe-1 shadow-[0_1px_2px_rgb(0_0_0/0.05),0_10px_30px_-8px_rgb(0_0_0/0.18)] duration-100 motion-reduce:animate-none"
+      // It grows out of the selection's edge it sits on, not its own
+      // centre, with a strong ease-out: it comes tens of times a day.
+      className={cn(
+        "bg-popover text-popover-foreground border-border/70 animate-in fade-in-0 zoom-in-95 fixed z-50 flex h-9 items-center gap-0.5 rounded-full border ps-3 pe-1 shadow-[0_1px_2px_rgb(0_0_0/0.05),0_10px_30px_-8px_rgb(0_0_0/0.18)] duration-100 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none",
+        below ? "origin-top" : "origin-bottom",
+      )}
       // A press in the bar must not drop the selection it acts on.
       onMouseDown={(event) => {
         if (!(event.target instanceof HTMLInputElement)) event.preventDefault();

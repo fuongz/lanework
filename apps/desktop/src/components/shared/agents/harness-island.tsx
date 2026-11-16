@@ -56,7 +56,8 @@ export const ISLAND_MORPH: Transition = {
 /** The content swap, faster than the container moves so it never squeezes. */
 export const ISLAND_SWAP: Transition = {
   duration: 0.16,
-  ease: [0.25, 0.1, 0.25, 1],
+  // A strong ease-out: the new words are there at once, not eased in.
+  ease: [0.23, 1, 0.32, 1],
 };
 export const ISLAND_PILL_RADIUS = 14;
 export const ISLAND_PANEL_RADIUS = 24;

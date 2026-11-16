@@ -521,7 +521,7 @@ const EFFORT_GRADIENT =
  * dragging, where they follow the pointer instead.
  */
 const SETTLE =
-  "duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-data-[dragging]/effort:duration-0 motion-reduce:duration-0";
+  "duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] group-data-[dragging]/effort:duration-0 motion-reduce:duration-0";
 
 /**
  * Effort as a slider: a track that fills with the gradient up to the thumb,
@@ -597,23 +597,17 @@ function EffortSlider({
       >
         <SliderPrimitive.Control className="relative flex h-7 w-full cursor-pointer touch-none items-center select-none">
           <SliderPrimitive.Track className="bg-foreground/[0.08] @container relative h-full w-full overflow-hidden rounded-full">
+            {/* As wide as the track, so the gradient's colours stay put:
+                a clip-path reveals it up to the thumb. Clipped, not
+                resized: an eased width re-laid it out on every frame. */}
             <div
               aria-hidden="true"
-              className={cn(
-                "absolute inset-y-0 left-0 overflow-hidden rounded-full transition-[width]",
-                SETTLE,
-              )}
+              className={cn("absolute inset-0 transition-[clip-path]", SETTLE)}
               style={{
-                width: `calc((100% - ${THUMB}px) * ${position / last} + ${THUMB}px)`,
+                backgroundImage: EFFORT_GRADIENT,
+                clipPath: `inset(0 calc((100% - ${THUMB}px) * ${1 - position / last}) 0 0 round 9999px)`,
               }}
-            >
-              {/* As wide as the track, so the gradient's colours stay put
-                  and the fill only reveals more of them. */}
-              <div
-                className="absolute inset-y-0 left-0 w-[100cqw]"
-                style={{ backgroundImage: EFFORT_GRADIENT }}
-              />
-            </div>
+            />
             {steps.map((step, i) => (
               <span
                 key={step}

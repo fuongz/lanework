@@ -19,7 +19,7 @@ const PEEKING = 2;
 const SHADOW = 48;
 
 const MOTION =
-  "duration-[220ms] ease-out motion-reduce:transition-none motion-reduce:duration-0";
+  "duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none motion-reduce:duration-0";
 
 /**
  * Every request the CLI is waiting on, as one stacked toast above the prompt.

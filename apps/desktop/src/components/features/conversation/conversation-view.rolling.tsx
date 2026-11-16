@@ -2,7 +2,9 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "#/lib/utils";
 
 /** One digit's flip: quick, settling without a bounce. */
-const FLIP = { duration: 0.32, ease: [0.22, 1, 0.36, 1] } as const;
+// 200ms: it flips once a second, and a third of every second spent turning
+// read as sluggish.
+const FLIP = { duration: 0.2, ease: [0.22, 1, 0.36, 1] } as const;
 
 /**
  * A short text whose digits flip, split-flap style, when they change: the
