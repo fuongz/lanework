@@ -1,16 +1,15 @@
 import {
   ArrowUp02Icon,
-  Cancel01Icon,
   CommandLineIcon,
   CubeIcon,
   EraserIcon,
   Folder01Icon,
   Loading03Icon,
   SlashIcon,
-  StopIcon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   forwardRef,
   type KeyboardEvent,
@@ -33,9 +32,16 @@ import {
 } from "#/../shared/conversation";
 import { insertDictation } from "#/../shared/dictation";
 import type { LeadsList, TeamLead } from "#/../shared/orchestration";
+import { StopGlyph } from "#/components/shared/common/stop-glyph";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { BranchSwitcher } from "#/components/shared/repo/branch-switcher";
+import { Kbd } from "#/components/ui/kbd";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "#/components/ui/tooltip";
 import {
   LEAD_SOURCE_LABELS,
   leadIcon,
@@ -49,6 +55,7 @@ import {
   type PendingAttachment as Pending,
   useComposerDraft,
 } from "#/stores/conversation-sends";
+import { AttachmentTile } from "./composer.attachments";
 import {
   DictationBar,
   DictationButton,
@@ -62,6 +69,14 @@ import {
 import { known, looked, remember } from "./composer.known";
 import { AttachMenu, ModelMenu, PermissionMenu } from "./composer.menus";
 import { QuotesTab } from "./composer.quotes";
+
+/**
+ * Send and Stop: glassy, the brand colour lit from above. A gradient from a
+ * lighter to the full primary, a darker hairline border, a white inner
+ * highlight on the top edge and a soft drop shadow.
+ */
+const GLASS =
+  "text-primary-foreground flex size-8 items-center justify-center rounded-xl border border-[color-mix(in_oklch,var(--primary),black_18%)] bg-[linear-gradient(180deg,color-mix(in_oklch,var(--primary),white_24%),var(--primary)_70%)] shadow-[inset_0_1px_0_rgb(255_255_255/0.38),inset_0_-1px_0_rgb(0_0_0/0.08),0_1px_2px_rgb(0_0_0/0.14),0_4px_10px_-4px_color-mix(in_oklch,var(--primary),transparent_45%)] transition-[filter] duration-150 hover:brightness-[1.06] active:brightness-95";
 
 export interface ComposerHandle {
   /** Put `text` in the composer and focus it. */
@@ -587,6 +602,34 @@ export const Composer = forwardRef<
     ? insertDictation(text, dictation.heard, anchor.current).text
     : text;
 
+  // One line, or none: +, the words, then voice and send on one row. Two
+  // lines or more: the words take the full width and the controls move to a
+  // row under them. A wrapped line stacks it too; it unstacks once the text
+  // is shorter than where it wrapped (or loses its line break), so the
+  // widening it causes cannot flip it back and forth.
+  const [stacked, setStacked] = useState(false);
+  const wrappedAt = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (shown.includes("\n")) {
+      wrappedAt.current = null;
+      setStacked(true);
+      return;
+    }
+    if (stacked) {
+      if (wrappedAt.current === null || shown.length < wrappedAt.current) {
+        wrappedAt.current = null;
+        setStacked(false);
+      }
+      return;
+    }
+    const box = root.current?.querySelector<HTMLElement>('[role="textbox"]');
+    // One line of 14px text at leading-relaxed, with its padding, is 36px.
+    if (box && box.scrollHeight > 48) {
+      wrappedAt.current = shown.length;
+      setStacked(true);
+    }
+  }, [shown, stacked]);
+
   useImperativeHandle(ref, () => ({
     quote: (value, kind) => {
       const next = quoteOf(value, kind);
@@ -736,6 +779,12 @@ export const Composer = forwardRef<
     asked.current++;
   };
 
+  /**
+   * The images attached in this sitting, by attachment key, to draw them as
+   * thumbnails and open them large. An image restored with a draft has
+   * none, and shows as a chip.
+   */
+  const [previews, setPreviews] = useState<Record<string, string>>({});
   const addFiles = async (
     files: File[],
     pasted: boolean,
@@ -744,6 +793,7 @@ export const Composer = forwardRef<
     const surface = window.desktop?.conversation;
     if (!surface) return;
     const added: Pending[] = [];
+    const seen: Record<string, string> = {};
     for (const file of files) {
       const image = file.type.startsWith("image/");
       let path = "";
@@ -753,8 +803,10 @@ export const Composer = forwardRef<
         path = "";
       }
       if (path) {
+        const key = `a${++keys}`;
+        if (image) seen[key] = URL.createObjectURL(file);
         added.push({
-          key: `a${++keys}`,
+          key,
           name: file.name,
           image,
           folder: folders.has(file),
@@ -771,8 +823,10 @@ export const Composer = forwardRef<
           continue;
         }
         const data = await readBase64(file);
+        const key = `a${++keys}`;
+        seen[key] = `data:${file.type};base64,${data}`;
         added.push({
-          key: `a${++keys}`,
+          key,
           name: file.name || "image.png",
           image,
           out: {
@@ -786,6 +840,8 @@ export const Composer = forwardRef<
       }
       setError(`Could not attach ${file.name}.`);
     }
+    if (Object.keys(seen).length)
+      setPreviews((previous) => ({ ...previous, ...seen }));
     if (added.length) setAttachments((previous) => [...previous, ...added]);
   };
 
@@ -990,6 +1046,15 @@ export const Composer = forwardRef<
   }, [error, setError]);
 
   const stopping = working && empty;
+  /** Which control has the field's right-hand place. */
+  const slot = dictating
+    ? "dictating"
+    : stopping
+      ? "stop"
+      : !empty
+        ? "send"
+        : "mic";
+  const reduceMotion = useReducedMotion() ?? false;
 
   return (
     <>
@@ -1026,281 +1091,318 @@ export const Composer = forwardRef<
           }
           void addFiles(files, false, folders);
         }}
-        className={cn(
-          "bg-card border-border relative flex flex-col gap-1 rounded-xl border px-3 pt-2.5 pb-2 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_20px_-4px_rgb(0_0_0/0.10)] transition-[color,background-color,border-color,box-shadow] focus-within:shadow-[0_1px_2px_rgb(0_0_0/0.05),0_8px_28px_-6px_rgb(0_0_0/0.14)]",
-          dragging && "border-ring",
-        )}
+        className="flex min-w-0 flex-col gap-1.5"
       >
-        {suggest && (
-          <div
-            ref={list}
-            id={listId}
-            role="listbox"
-            aria-label={
-              suggest.kind === "command"
-                ? "Commands"
-                : suggest.kind === "lead"
-                  ? "Conductors"
-                  : "Files"
-            }
-            className="bg-popover text-popover-foreground ring-foreground/10 absolute right-0 bottom-full left-0 z-20 mb-1.5 max-h-56 overflow-y-auto rounded-xl p-1 shadow-lg ring-1"
-          >
-            {suggest.kind === "lead" && !leads && (
-              <ListSkeleton label="Reading the conductors" rows={2} />
-            )}
-            {suggest.items.map((item, index) =>
-              item.lead ? (
-                <button
-                  key={item.value}
-                  type="button"
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={index === suggest.index}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => choose(item)}
-                  onPointerEnter={() => setSuggest({ ...suggest, index })}
-                  className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left"
-                >
-                  <HugeiconsIcon
-                    icon={leadIcon(item.lead.icon)}
-                    className="text-muted-foreground size-3.5 shrink-0"
-                    strokeWidth={1.8}
-                    aria-hidden="true"
-                  />
-                  <span className="min-w-0 truncate text-[13px]">
-                    {item.lead.name}
-                  </span>
-                  <span className="text-muted-foreground shrink-0 font-mono text-[11px]">
-                    {item.value}
-                  </span>
-                  <span className="text-muted-foreground ml-auto shrink-0 text-[11px]">
-                    {leads?.defaultId === item.lead.id
-                      ? `Default, ${LEAD_SOURCE_LABELS[item.lead.source].toLowerCase()}`
-                      : LEAD_SOURCE_LABELS[item.lead.source]}
-                  </span>
-                </button>
-              ) : item.kind ? (
-                <button
-                  key={item.value}
-                  type="button"
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={index === suggest.index}
-                  title={item.value}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => choose(item)}
-                  onPointerEnter={() => setSuggest({ ...suggest, index })}
-                  className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1 text-left"
-                >
-                  <SuggestionIcon item={item} tinted />
-                  <span className="shrink-0 text-[13px]">
-                    <Matched
-                      label={item.label ?? item.value}
-                      query={suggest.query}
-                    />
-                  </span>
-                  {item.detail && (
-                    <span className="text-muted-foreground min-w-0 truncate text-[13px]">
-                      {item.detail}
-                    </span>
-                  )}
-                  {item.source && (
-                    <span className="text-muted-foreground ml-auto shrink-0 ps-2 text-[11px]">
-                      {SOURCE_LABELS[item.source]}
-                    </span>
-                  )}
-                </button>
-              ) : (
-                <button
-                  key={item.value}
-                  type="button"
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={index === suggest.index}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => choose(item)}
-                  onPointerEnter={() => setSuggest({ ...suggest, index })}
-                  className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left"
-                >
-                  <span className="shrink-0 font-mono text-[12px]">
-                    {item.value}
-                  </span>
-                  {item.detail && (
-                    <span className="text-muted-foreground min-w-0 truncate text-xs">
-                      {item.detail}
-                    </span>
-                  )}
-                </button>
-              ),
-            )}
-          </div>
-        )}
-
-        <div className="text-muted-foreground flex min-h-6 min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px] empty:hidden">
-          {/* The checkout's branch — where the next turn runs — and the way to
-            another one. Attached files follow it on the same line. */}
-          {!suspended && <BranchSwitcher slug={slug} variant="composer" />}
-          {attachments.length > 0 && (
-            <div className="flex min-w-0 flex-wrap gap-1.5">
-              {attachments.map((file) => (
-                <span
-                  key={file.key}
-                  className="bg-foreground/[0.06] text-foreground flex h-6 max-w-60 items-center gap-1.5 rounded-md ps-2 pe-1 text-xs"
-                >
-                  {file.folder ? (
+        {/* The field: attach, what is typed, send and voice, in one line
+            while it is short. Where it runs, the model, the access and the
+            context sit under it, out of the way of the words. */}
+        <div
+          className={cn(
+            "bg-card border-border relative flex flex-col gap-1 rounded-2xl border px-2 py-1.5 shadow-[0_1px_2px_rgb(0_0_0/0.03),0_4px_12px_-4px_rgb(0_0_0/0.06)] transition-[color,background-color,border-color,box-shadow] focus-within:shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_16px_-6px_rgb(0_0_0/0.09)]",
+            dragging && "border-ring",
+          )}
+        >
+          {suggest && (
+            <div
+              ref={list}
+              id={listId}
+              role="listbox"
+              aria-label={
+                suggest.kind === "command"
+                  ? "Commands"
+                  : suggest.kind === "lead"
+                    ? "Conductors"
+                    : "Files"
+              }
+              className="bg-popover text-popover-foreground ring-foreground/10 absolute right-0 bottom-full left-0 z-20 mb-1.5 max-h-56 overflow-y-auto rounded-xl p-1 shadow-lg ring-1"
+            >
+              {suggest.kind === "lead" && !leads && (
+                <ListSkeleton label="Reading the conductors" rows={2} />
+              )}
+              {suggest.items.map((item, index) =>
+                item.lead ? (
+                  <button
+                    key={item.value}
+                    type="button"
+                    id={optionId(index)}
+                    role="option"
+                    aria-selected={index === suggest.index}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => choose(item)}
+                    onPointerEnter={() => setSuggest({ ...suggest, index })}
+                    className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left"
+                  >
                     <HugeiconsIcon
-                      icon={Folder01Icon}
+                      icon={leadIcon(item.lead.icon)}
                       className="text-muted-foreground size-3.5 shrink-0"
                       strokeWidth={1.8}
                       aria-hidden="true"
                     />
-                  ) : (
-                    <FileTypeIcon
-                      path={file.name}
-                      className="size-3.5 shrink-0"
-                    />
-                  )}
-                  <span className="truncate">{file.name}</span>
+                    <span className="min-w-0 truncate text-[13px]">
+                      {item.lead.name}
+                    </span>
+                    <span className="text-muted-foreground shrink-0 font-mono text-[11px]">
+                      {item.value}
+                    </span>
+                    <span className="text-muted-foreground ml-auto shrink-0 text-[11px]">
+                      {leads?.defaultId === item.lead.id
+                        ? `Default, ${LEAD_SOURCE_LABELS[item.lead.source].toLowerCase()}`
+                        : LEAD_SOURCE_LABELS[item.lead.source]}
+                    </span>
+                  </button>
+                ) : item.kind ? (
                   <button
+                    key={item.value}
                     type="button"
-                    aria-label={`Remove ${file.name}`}
-                    onClick={() =>
+                    id={optionId(index)}
+                    role="option"
+                    aria-selected={index === suggest.index}
+                    title={item.value}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => choose(item)}
+                    onPointerEnter={() => setSuggest({ ...suggest, index })}
+                    className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1 text-left"
+                  >
+                    <SuggestionIcon item={item} tinted />
+                    <span className="shrink-0 text-[13px]">
+                      <Matched
+                        label={item.label ?? item.value}
+                        query={suggest.query}
+                      />
+                    </span>
+                    {item.detail && (
+                      <span className="text-muted-foreground min-w-0 truncate text-[13px]">
+                        {item.detail}
+                      </span>
+                    )}
+                    {item.source && (
+                      <span className="text-muted-foreground ml-auto shrink-0 ps-2 text-[11px]">
+                        {SOURCE_LABELS[item.source]}
+                      </span>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    key={item.value}
+                    type="button"
+                    id={optionId(index)}
+                    role="option"
+                    aria-selected={index === suggest.index}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => choose(item)}
+                    onPointerEnter={() => setSuggest({ ...suggest, index })}
+                    className="aria-selected:bg-foreground/[0.08] flex w-full min-w-0 items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left"
+                  >
+                    <span className="shrink-0 font-mono text-[12px]">
+                      {item.value}
+                    </span>
+                    {item.detail && (
+                      <span className="text-muted-foreground min-w-0 truncate text-xs">
+                        {item.detail}
+                      </span>
+                    )}
+                  </button>
+                ),
+              )}
+            </div>
+          )}
+
+          <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 px-1.5 pt-1 text-[13px] empty:hidden">
+            {attachments.length > 0 && (
+              <div className="flex min-w-0 flex-wrap items-end gap-2 pt-1.5 pr-1.5">
+                {attachments.map((file) => (
+                  <AttachmentTile
+                    key={file.key}
+                    file={file}
+                    preview={previews[file.key]}
+                    onRemove={() =>
                       setAttachments((previous) =>
                         previous.filter((entry) => entry.key !== file.key),
                       )
                     }
-                    className="text-muted-foreground hover:text-foreground flex size-4 items-center justify-center rounded transition-colors"
-                  >
-                    <HugeiconsIcon
-                      icon={Cancel01Icon}
-                      className="size-3"
-                      strokeWidth={2}
-                    />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+                  />
+                ))}
+              </div>
+            )}
+          </div>
 
-        <ChipEditor
-          ref={field}
-          value={shown}
-          chipFor={chipFor}
-          chipsVersion={chipsVersion}
-          readOnly={dictating}
-          label="Message Claude"
-          placeholder={
-            dictation.status === "preparing"
-              ? "Downloading the speech model…"
-              : dictating
-                ? "Listening…"
-                : "Ask, build, / for commands, @ for references…"
-          }
-          onChange={(next, at) => {
-            setText(next);
-            lookup(next, at);
-          }}
-          onKeyDown={onKeyDown}
-          onBlur={() => setSuggest(null)}
-          onPaste={(event) => {
-            const files = [...event.clipboardData.files];
-            if (!files.length) return;
-            event.preventDefault();
-            void addFiles(files, true);
-          }}
-          className={cn(
-            "font-content max-h-60 min-h-11 w-full overflow-y-auto py-2 text-[14px] leading-relaxed",
-            dictating && "text-muted-foreground italic",
-          )}
-        />
-
-        {error && (
-          <p role="alert" className="text-destructive text-xs">
-            {error}
-          </p>
-        )}
-
-        <div className="flex min-w-0 items-center gap-1.5">
-          <input
-            ref={picker}
-            type="file"
-            multiple
-            hidden
-            onChange={(event) => {
-              const files = [...(event.target.files ?? [])];
-              event.target.value = "";
-              void addFiles(files, false);
-            }}
-          />
-          {!suspended && (
-            <AttachMenu onUpload={() => picker.current?.click()} />
-          )}
-          {!dictating && !suspended && (
-            <>
-              <ModelMenu
-                settings={settings}
-                agent={agent}
-                onChange={onSettings}
-              />
-              <PermissionMenu
-                permission={settings.permission}
-                onChange={(permission) => onSettings({ permission })}
-              />
-            </>
-          )}
-          <span className="ml-auto" />
-          {/* Working, and the context ring, beside the voice button. */}
-          {working && !dictating && (
-            <span role="status" aria-label="Working" className="flex">
-              <HugeiconsIcon
-                icon={Loading03Icon}
-                className="size-4 animate-spin motion-reduce:animate-none"
-                strokeWidth={1.8}
-                aria-hidden="true"
-              />
-            </span>
-          )}
-          {!dictating && corner}
-          {dictating ? (
-            <DictationBar
-              status={dictation.status}
-              levels={dictation.levels}
-              onCancel={dictation.cancel}
-              onDone={dictation.finish}
+          <div
+            className={cn(
+              "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-x-1",
+              stacked
+                ? "[grid-template-areas:'field_field_field'_'plus_gap_actions']"
+                : "[grid-template-areas:'plus_field_actions']",
+            )}
+          >
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              onChange={(event) => {
+                const files = [...(event.target.files ?? [])];
+                event.target.value = "";
+                void addFiles(files, false);
+              }}
             />
-          ) : (
-            dictation.available && <DictationButton onStart={startDictation} />
-          )}
-          {dictating ? null : stopping ? (
-            <button
-              type="button"
-              aria-label="Stop"
-              onClick={onStop}
-              className="bg-primary text-primary-foreground hover:bg-primary/85 flex size-7 items-center justify-center rounded-lg transition-colors"
-            >
-              <HugeiconsIcon
-                icon={StopIcon}
-                className="size-3.5"
-                strokeWidth={2}
-              />
-            </button>
-          ) : (
-            <button
-              type="button"
-              aria-label={working ? "Queue message" : "Send"}
-              disabled={empty || sending}
-              onClick={() => void send()}
-              className="bg-primary text-primary-foreground hover:bg-primary/85 disabled:bg-foreground/10 disabled:text-muted-foreground flex size-7 items-center justify-center rounded-lg transition-colors"
-            >
-              <HugeiconsIcon
-                icon={ArrowUp02Icon}
-                className="size-4"
-                strokeWidth={2}
-              />
-            </button>
+            {!suspended && (
+              <span className="flex h-9 shrink-0 items-center [grid-area:plus]">
+                <AttachMenu
+                  onUpload={() => picker.current?.click()}
+                  onSlash={() => {
+                    // Typed as if by hand, at the caret: the field's own
+                    // input handling opens the command list.
+                    window.setTimeout(() => {
+                      field.current?.focus();
+                      document.execCommand("insertText", false, "/");
+                    });
+                  }}
+                />
+              </span>
+            )}
+            <ChipEditor
+              ref={field}
+              value={shown}
+              chipFor={chipFor}
+              chipsVersion={chipsVersion}
+              readOnly={dictating}
+              label="Message Claude"
+              placeholder={
+                dictation.status === "preparing"
+                  ? "Downloading the speech model…"
+                  : dictating
+                    ? "Listening…"
+                    : "Ask, build, / for commands, @ for references…"
+              }
+              onChange={(next, at) => {
+                setText(next);
+                lookup(next, at);
+              }}
+              onKeyDown={onKeyDown}
+              onBlur={() => setSuggest(null)}
+              onPaste={(event) => {
+                const files = [...event.clipboardData.files];
+                if (!files.length) return;
+                event.preventDefault();
+                void addFiles(files, true);
+              }}
+              className={cn(
+                "font-content max-h-60 min-h-9 min-w-0 overflow-y-auto py-1.5 text-[14px] leading-relaxed [grid-area:field]",
+                stacked ? "px-1.5 pt-2" : "px-1",
+                dictating && "text-muted-foreground italic",
+              )}
+            />
+            <span className="flex h-9 shrink-0 items-center gap-1 [grid-area:actions]">
+              {/* Mic, Send and Stop share one place: the one leaving shrinks
+                  and fades as the next grows in, quick, so typing the first
+                  letter turns the mic into Send without a jump. */}
+              <AnimatePresence initial={false} mode="popLayout">
+                <motion.span
+                  key={slot}
+                  className="flex items-center"
+                  initial={
+                    reduceMotion
+                      ? { opacity: 0 }
+                      : { opacity: 0, scale: 0.6, filter: "blur(2px)" }
+                  }
+                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                  exit={
+                    reduceMotion
+                      ? { opacity: 0 }
+                      : { opacity: 0, scale: 0.6, filter: "blur(2px)" }
+                  }
+                  transition={{ duration: 0.16, ease: [0.23, 1, 0.32, 1] }}
+                >
+                  {dictating ? (
+                    <DictationBar
+                      status={dictation.status}
+                      levels={dictation.levels}
+                      onCancel={dictation.cancel}
+                      onDone={dictation.finish}
+                    />
+                  ) : stopping ? (
+                    <button
+                      type="button"
+                      aria-label="Stop"
+                      onClick={onStop}
+                      className={GLASS}
+                    >
+                      <StopGlyph className="size-3.5" />
+                    </button>
+                  ) : !empty ? (
+                    // Something typed: the mic's place sends it (Return).
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label={working ? "Queue message" : "Send"}
+                            disabled={sending}
+                            onClick={() => void send()}
+                            className={cn(GLASS, "disabled:opacity-50")}
+                          />
+                        }
+                      >
+                        <HugeiconsIcon
+                          icon={ArrowUp02Icon}
+                          className="size-4"
+                          strokeWidth={2}
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent className="gap-3">
+                        {working ? "Queue" : "Send"}
+                        <Kbd>↵</Kbd>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    dictation.available && (
+                      <DictationButton onStart={startDictation} />
+                    )
+                  )}
+                </motion.span>
+              </AnimatePresence>
+            </span>
+          </div>
+
+          {error && (
+            <p role="alert" className="text-destructive text-xs">
+              {error}
+            </p>
           )}
         </div>
+
+        {/* Under the field: where it runs on the left; the model, the
+            access, working and the context ring on the right. */}
+        {!suspended && (
+          <div className="text-muted-foreground flex min-h-7 min-w-0 items-center gap-1.5 px-1.5 text-[13px]">
+            <BranchSwitcher slug={slug} variant="composer" />
+            <span className="ml-auto" />
+            {!dictating && (
+              <>
+                <ModelMenu
+                  settings={settings}
+                  agent={agent}
+                  onChange={onSettings}
+                />
+                <PermissionMenu
+                  permission={settings.permission}
+                  onChange={(permission) => onSettings({ permission })}
+                />
+              </>
+            )}
+            {working && !dictating && (
+              <span role="status" aria-label="Working" className="flex">
+                <HugeiconsIcon
+                  icon={Loading03Icon}
+                  className="size-4 animate-spin motion-reduce:animate-none"
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+              </span>
+            )}
+            {!dictating && corner}
+          </div>
+        )}
       </div>
     </>
   );

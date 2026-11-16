@@ -98,7 +98,9 @@ export function BranchSwitcher({
                 strokeWidth={1.8}
                 aria-hidden="true"
               />
-              <span className="min-w-0 truncate">{label}</span>
+              <span className="min-w-0 truncate font-mono text-[0.92em]">
+                {label}
+              </span>
               <HugeiconsIcon
                 icon={ArrowDown01Icon}
                 className="size-3.5 shrink-0 opacity-60"
@@ -121,7 +123,9 @@ export function BranchSwitcher({
                 strokeWidth={1.8}
                 aria-hidden="true"
               />
-              <span className="min-w-0 truncate">{label}</span>
+              <span className="min-w-0 truncate font-mono text-[0.92em]">
+                {label}
+              </span>
               <HugeiconsIcon
                 icon={ArrowDown01Icon}
                 strokeWidth={1.8}
@@ -169,7 +173,8 @@ export function BranchSwitcher({
                     />
                     <span
                       className={cn(
-                        "min-w-0 flex-1 truncate",
+                        // Branch names in mono, as git prints them.
+                        "min-w-0 flex-1 truncate font-mono text-[12px]",
                         current && "font-medium",
                       )}
                       title={name}

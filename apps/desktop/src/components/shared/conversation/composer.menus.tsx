@@ -1,15 +1,17 @@
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import {
   Add01Icon,
+  Alert02Icon,
   ArrowDown01Icon,
-  FileAddIcon,
+  Attachment01Icon,
   FlashIcon,
   PencilEdit02Icon,
   Search01Icon,
+  SecurityCheckIcon,
   SecurityWarningIcon,
   Settings01Icon,
-  SparklesIcon,
   SquareLock02Icon,
+  SquareSlashIcon,
   StarIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -408,6 +410,14 @@ export function ModelMenu({
         {!automatic && <TerminalKindIcon kind={kind} className="size-3.5" />}
         <span>{name}</span>
         <span className="text-muted-foreground">{effortLabel}</span>
+        {effortSet && effort === "max" && (
+          <HugeiconsIcon
+            icon={Alert02Icon}
+            className="text-tone-amber size-3.5"
+            strokeWidth={2}
+            aria-label="3.5× or more usage"
+          />
+        )}
         {isFast && (
           <HugeiconsIcon
             icon={FlashIcon}
@@ -632,6 +642,18 @@ function EffortSlider({
           />
         </SliderPrimitive.Control>
       </SliderPrimitive.Root>
+      {shown === "max" && (
+        // Max costs far more than the steps below it: say so as it is chosen.
+        <span className="text-tone-amber bg-tone-amber/10 flex h-6 items-center gap-1.5 self-start rounded-full px-2.5 text-[12px] font-medium">
+          <HugeiconsIcon
+            icon={Alert02Icon}
+            className="size-3.5 shrink-0"
+            strokeWidth={2}
+            aria-hidden="true"
+          />
+          3.5× or more usage
+        </span>
+      )}
     </div>
   );
 }
@@ -639,7 +661,9 @@ function EffortSlider({
 const PERMISSION_ICONS: Record<Permission, IconSvgElement> = {
   manual: SquareLock02Icon,
   acceptEdits: PencilEdit02Icon,
-  auto: SparklesIcon,
+  // A shield with a check: safe actions go through on their own, the
+  // shield of Full access's warning without its alarm.
+  auto: SecurityCheckIcon,
   bypassPermissions: SecurityWarningIcon,
 };
 
@@ -728,17 +752,23 @@ export function PermissionMenu({
 }
 
 /**
- * The composer's +: what can be added to the message.
- *
- * Upload file is the only entry; the menu is where the next ones go.
+ * The composer's +: one plain line per thing to add, icon and label, as a
+ * short list rather than a described menu.
  */
 export function AttachMenu({
   onUpload,
+  onSlash,
   disabled,
 }: {
   onUpload: () => void;
+  /** Starts a `/` command at the caret, which opens the command list. */
+  onSlash?: () => void;
   disabled?: boolean;
 }) {
+  // One line each: the icon, what it adds, and a muted word on how.
+  const item = "gap-3 rounded-lg px-2.5 py-2 text-[13px]";
+  const icon = "text-muted-foreground size-4 shrink-0";
+  const how = "text-muted-foreground ms-1 truncate";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -752,29 +782,31 @@ export function AttachMenu({
         side="top"
         align="start"
         sideOffset={6}
-        className="flex w-[17rem] flex-col gap-1 p-1.5"
+        className="w-max max-w-[min(26rem,calc(100vw-2rem))] min-w-56 p-1"
       >
         <DropdownMenuGroup>
-          <DropdownMenuLabel className="px-3 pt-1.5 pb-1 text-[11px] font-medium tracking-wide uppercase">
-            Add to message
-          </DropdownMenuLabel>
-          <DropdownMenuItem
-            onClick={onUpload}
-            className="items-start gap-3 rounded-lg px-3 py-2.5"
-          >
+          <DropdownMenuItem onClick={onUpload} className={item}>
             <HugeiconsIcon
-              icon={FileAddIcon}
-              className="mt-0.5 size-4 shrink-0"
+              icon={Attachment01Icon}
+              className={icon}
               strokeWidth={1.8}
               aria-hidden="true"
             />
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-[13px] font-medium">Upload file</span>
-              <span className="text-muted-foreground text-xs leading-snug">
-                Attach files or images
-              </span>
-            </span>
+            <span className="shrink-0">Add photos & files</span>
+            <span className={how}>Upload from your computer</span>
           </DropdownMenuItem>
+          {onSlash && (
+            <DropdownMenuItem onClick={onSlash} className={item}>
+              <HugeiconsIcon
+                icon={SquareSlashIcon}
+                className={icon}
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+              <span className="shrink-0">Slash commands</span>
+              <span className={how}>Run a command or a skill</span>
+            </DropdownMenuItem>
+          )}
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -1,5 +1,4 @@
 import {
-  ArrowDown01Icon,
   Cancel01Icon,
   Mic01Icon,
   Tick02Icon,
@@ -10,18 +9,9 @@ import {
   applyCorrections,
   DEFAULT_CORRECTIONS,
   DICTATION_LOCALE_LABELS,
-  DICTATION_LOCALES,
   type DictationEvent,
   HINT_MAX,
 } from "#/../shared/dictation";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "#/components/ui/dropdown-menu";
 import { type DictationStatus, useLiveDictation } from "#/stores/dictation";
 import { usePreferences } from "#/stores/preferences";
 import { DictationWaveform } from "./dictation-waveform";
@@ -247,59 +237,18 @@ export function DictationBar({
  * Two hit targets side by side, like a split button.
  */
 export function DictationButton({ onStart }: { onStart: () => void }) {
+  // The language is chosen in Settings → Dictation, not here: the field
+  // keeps one button.
   const locale = usePreferences((state) => state.dictationLocale);
-  const setLocale = usePreferences((state) => state.setDictationLocale);
   return (
-    <div className="text-muted-foreground flex h-7 items-center">
-      <button
-        type="button"
-        aria-label="Dictate"
-        title={`Dictate in ${DICTATION_LOCALE_LABELS[locale]} (⌘⇧M)`}
-        onClick={onStart}
-        className="hover:text-foreground hover:bg-foreground/[0.08] flex size-7 items-center justify-center rounded-lg transition-colors"
-      >
-        <HugeiconsIcon icon={Mic01Icon} className="size-4" strokeWidth={1.8} />
-      </button>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          aria-label={`Dictation language: ${DICTATION_LOCALE_LABELS[locale]}`}
-          className="hover:text-foreground hover:bg-foreground/[0.08] aria-expanded:bg-foreground/[0.08] flex h-7 w-4 items-center justify-center rounded-md transition-colors outline-none"
-        >
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            className="size-3"
-            strokeWidth={2}
-          />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          side="top"
-          align="end"
-          sideOffset={6}
-          className="w-44 p-1"
-        >
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-xs">
-              Dictation language
-            </DropdownMenuLabel>
-            {DICTATION_LOCALES.map((entry) => (
-              <DropdownMenuItem
-                key={entry}
-                onClick={() => setLocale(entry)}
-                className="justify-between rounded-lg text-[13px]"
-              >
-                {DICTATION_LOCALE_LABELS[entry]}
-                {entry === locale && (
-                  <HugeiconsIcon
-                    icon={Tick02Icon}
-                    className="size-3.5"
-                    strokeWidth={2}
-                  />
-                )}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+    <button
+      type="button"
+      aria-label="Dictate"
+      title={`Dictate in ${DICTATION_LOCALE_LABELS[locale]} (⌘⇧M)`}
+      onClick={onStart}
+      className="text-muted-foreground hover:text-foreground hover:bg-foreground/[0.08] flex size-8 items-center justify-center rounded-xl transition-colors"
+    >
+      <HugeiconsIcon icon={Mic01Icon} className="size-4" strokeWidth={1.8} />
+    </button>
   );
 }
