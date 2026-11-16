@@ -265,6 +265,28 @@ function PromptText({ text }: { text: string }) {
   return <>{parts}</>;
 }
 
+/**
+ * Whether a prompt is written in markdown worth drawing: a fence, a list, a
+ * heading, emphasis or inline code. A prompt with the composer's tokens
+ * (`@file`, `/command`, a conductor) keeps its chips and stays plain text,
+ * and so does plain prose, whose line breaks are kept as typed.
+ */
+function looksLikeMarkdown(text: string): boolean {
+  if (
+    new RegExp(PROMPT_TOKEN.source, PROMPT_TOKEN.flags.replace("g", "")).test(
+      text,
+    )
+  )
+    return false;
+  return (
+    /^\s*(```|~~~)/m.test(text) ||
+    /^\s{0,3}([-*+]|\d+[.)])\s+\S/m.test(text) ||
+    /^\s{0,3}#{1,6}\s+\S/m.test(text) ||
+    /\*\*[^*\n]+\*\*|__[^_\n]+__/.test(text) ||
+    /`[^`\n]+`/.test(text)
+  );
+}
+
 /** What the person wrote: a bubble on the right, attachments above. */
 export function UserBubble({
   text,
@@ -330,11 +352,22 @@ export function UserBubble({
               ))}
             </div>
           )}
-          {rest.trim() && (
-            <p className="font-content text-[14px] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere]">
-              <PromptText text={rest.trim()} />
-            </p>
-          )}
+          {rest.trim() &&
+            (looksLikeMarkdown(rest) ? (
+              // Code blocks, lists, headings, emphasis: drawn as a reply is.
+              <div className="min-w-0 [overflow-wrap:anywhere]">
+                <MarkdownBody
+                  source={rest.trim()}
+                  link={chatLink}
+                  variant="chat"
+                  empty=""
+                />
+              </div>
+            ) : (
+              <p className="font-content text-[14px] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere]">
+                <PromptText text={rest.trim()} />
+              </p>
+            ))}
         </div>
       </div>
       {pending ? (

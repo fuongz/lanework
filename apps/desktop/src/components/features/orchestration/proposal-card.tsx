@@ -2,6 +2,7 @@ import {
   Alert02Icon,
   ArrowDown01Icon,
   ArrowRight01Icon,
+  HelpCircleIcon,
   PlayIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -28,14 +29,21 @@ import {
   TITLE_MAX,
   WORKERS_MAX,
 } from "#/../shared/orchestration";
+import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
 import { ModelMenu } from "#/components/shared/conversation/composer.menus";
 import {
   ListSkeleton,
   TextSkeleton,
 } from "#/components/shared/loading/skeletons";
+import { taskWaves } from "#/components/shared/orchestration/run-steps";
 import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
 import { Textarea } from "#/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "#/components/ui/tooltip";
 import { ipcMessage } from "#/lib/ipc-error";
 import {
   catalog,
@@ -306,6 +314,8 @@ function TaskRow({
   editable,
   errors,
   onChange,
+  toggled,
+  onToggle,
 }: {
   /** The card's id prefix for its fields. */
   base: string;
@@ -317,8 +327,12 @@ function TaskRow({
   /** Its fields' errors, once Approve was tried. */
   errors: Partial<Record<Field, string>> | undefined;
   onChange: (patch: Partial<ProposedTask>) => void;
+  /** Opened by the user. Held by the card: a new dependency moves the row to
+   * another step, which mounts it anew. */
+  toggled: boolean;
+  onToggle: (open: boolean) => void;
 }) {
-  const [toggled, setToggled] = useState(false);
+  const setToggled = onToggle;
   const invalid = Boolean(errors && Object.keys(errors).length);
   // A row with an error stays open: its field is where the error is said.
   const open = toggled || invalid;
@@ -332,37 +346,72 @@ function TaskRow({
     others.find((other) => task.dependsOn.includes(other.id))?.id ??
     others[0]?.id;
   const label = "text-muted-foreground mb-1 block text-[11px]";
+  const writes = task.files.includes(".")
+    ? "Writes anywhere"
+    : task.files.length === 0
+      ? "Read only"
+      : task.files.length === 1
+        ? `Writes ${task.files[0]}`
+        : `Writes ${task.files.length} paths`;
+  const after = task.dependsOn
+    .map((dep) => tasks.findIndex((other) => other.id === dep) + 1)
+    .filter((at) => at > 0)
+    .sort((x, y) => x - y);
+  // Two lines, as a lesson list reads: the task, then what it is in muted
+  // words set apart by space. The number in a soft circle; the row lifts on
+  // hover and stays lifted while open.
   return (
-    <li className="flex flex-col">
-      <div className="hover:bg-foreground/[0.02] flex min-h-8 min-w-0 items-center gap-1 px-2 py-0.5">
+    <li id={`${base}-${task.id}-row`} className="flex flex-col">
+      <div
+        className={cn(
+          "flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 transition-colors duration-150",
+          open ? "bg-muted/70" : "hover:bg-muted/50",
+        )}
+      >
         <button
           type="button"
           aria-expanded={open}
-          aria-label={`Details for ${task.title}${invalid ? ", needs a fix" : ""}`}
+          aria-label={`Details for ${index + 1}. ${task.title}${invalid ? ", needs a fix" : ""}`}
           // Not closed while it holds an error.
           onClick={() => setToggled(invalid ? true : !open)}
-          className="text-foreground/80 hover:text-foreground flex min-w-0 flex-1 items-center gap-2 py-1 text-left"
+          className="flex min-w-0 flex-1 items-center gap-3 text-left outline-none"
         >
-          <HugeiconsIcon
-            icon={open ? ArrowDown01Icon : ArrowRight01Icon}
-            className="size-3.5 shrink-0"
-            strokeWidth={2}
+          <span
             aria-hidden="true"
-          />
-          <span className="text-muted-foreground shrink-0 font-mono text-[11px]">
-            {index + 1}
+            className={cn(
+              // The height of the two lines beside it.
+              "grid size-9 shrink-0 place-items-center rounded-full text-[13px] font-medium tabular-nums",
+              invalid
+                ? "bg-destructive/10 text-destructive"
+                : "bg-background text-muted-foreground ring-border ring-1",
+            )}
+          >
+            {invalid ? "!" : index + 1}
           </span>
-          <span className="truncate text-[12px]" title={task.title}>
-            {task.title}
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span
+              className="text-foreground truncate text-[13px] leading-snug font-semibold"
+              title={task.title}
+            >
+              {task.title}
+            </span>
+            <span className="text-muted-foreground flex min-w-0 items-center gap-2.5 text-[11.5px] leading-snug">
+              <span className="shrink-0 font-mono text-[11px]">{task.id}</span>
+              <span
+                className={cn(
+                  "truncate",
+                  // Writing nothing is worth seeing at a glance.
+                  task.files.length === 0 && "text-tone-teal",
+                )}
+                title={task.files.join(", ")}
+              >
+                {writes}
+              </span>
+              {after.length > 0 && (
+                <span className="shrink-0">After {after.join(", ")}</span>
+              )}
+            </span>
           </span>
-          {invalid && (
-            <HugeiconsIcon
-              icon={Alert02Icon}
-              className="text-destructive size-3.5 shrink-0"
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-          )}
         </button>
         {/* The composer's own model pill (FE-95): model and effort in one,
             with Auto when the run may pick by tier. */}
@@ -370,7 +419,7 @@ function TaskRow({
           side="bottom"
           fast={false}
           disabled={!editable}
-          className="h-7 shrink-0 text-xs"
+          className="border-border text-muted-foreground bg-background h-7 shrink-0 rounded-full border px-2.5 text-[11.5px]"
           settings={{
             ...DEFAULT_SETTINGS,
             model: task.model ?? DEFAULT_SETTINGS.model,
@@ -394,11 +443,27 @@ function TaskRow({
             })
           }
         />
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-hidden="true"
+          onClick={() => setToggled(invalid ? true : !open)}
+          className="text-muted-foreground/70 hover:text-foreground grid size-5 shrink-0 place-items-center"
+        >
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            strokeWidth={2}
+            className={cn(
+              "size-3 transition-transform duration-150",
+              open && "rotate-180",
+            )}
+          />
+        </button>
       </div>
       {missing && task.model && (
         <p
           id={warning}
-          className="text-muted-foreground flex items-start gap-1.5 px-3 pb-1.5 pl-9 text-[11px]"
+          className="text-muted-foreground flex items-start gap-1.5 pt-1 pr-2 pb-1.5 pl-14 text-[11px]"
         >
           {/* Said, not blocked: Approve still tries it; main has the last word. */}
           {modelName(task.model) ?? task.model} is not in{" "}
@@ -407,7 +472,8 @@ function TaskRow({
         </p>
       )}
       {open && (
-        <div className="flex flex-col gap-2.5 px-3 pt-1 pb-3 pl-9">
+        // Lined up with the title, under the lifted row.
+        <div className="mt-2 mr-2 mb-3 ml-14 flex min-w-0 flex-col gap-2.5">
           <div>
             <label htmlFor={id("title")} className={label}>
               Task
@@ -471,15 +537,25 @@ function TaskRow({
                       aria-describedby={on ? errorId("dependsOn") : undefined}
                       title={`${tasks.indexOf(other) + 1}. ${other.title}`}
                       disabled={!editable}
-                      onClick={() =>
+                      data-dep-chip={`${base}-${task.id}-${other.id}`}
+                      onClick={() => {
                         onChange({
                           dependsOn: on
                             ? task.dependsOn.filter(
                                 (entry) => entry !== other.id,
                               )
                             : [...task.dependsOn, other.id],
-                        })
-                      }
+                        });
+                        // The row may move to another step and mount anew:
+                        // the focus follows it to the same chip.
+                        requestAnimationFrame(() =>
+                          document
+                            .querySelector<HTMLElement>(
+                              `[data-dep-chip="${base}-${task.id}-${other.id}"]`,
+                            )
+                            ?.focus(),
+                        );
+                      }}
                       className={cn(
                         "border-border max-w-56 truncate rounded-md border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-60",
                         on
@@ -502,6 +578,31 @@ function TaskRow({
       )}
     </li>
   );
+}
+
+/**
+ * Whether a line-clamped paragraph hides some of its text, measured, not
+ * guessed from its length: kept current as the card is resized. While it is
+ * open, the answer from when it was clamped stands.
+ */
+function useClamped(
+  ref: { current: HTMLElement | null },
+  open: boolean,
+  text: string,
+): boolean {
+  const [cut, setCut] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: measured again when the text changes.
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || open) return;
+    const measure = () =>
+      setCut(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref, open, text]);
+  return cut;
 }
 
 /** Where the proposal stands, as one small badge. */
@@ -528,7 +629,10 @@ function ProposalStatus({
   const waiting = !planning && !approved && !cancelled && !invalid;
   return (
     <span
-      className={cn("flex items-center gap-1.5 text-[11px] font-medium", tone)}
+      className={cn(
+        "bg-muted flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px]",
+        tone,
+      )}
     >
       {waiting && (
         <span
@@ -587,6 +691,8 @@ export function ProposalCard({
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  /** The task rows the user opened, by id. */
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
   // Approve was tried: from then on each field says what is wrong with it.
   const [checked, setChecked] = useState(false);
   /** Where the focus goes after the next render: "heading", "undo", a DOM id. */
@@ -613,6 +719,15 @@ export function ProposalCard({
     !starting &&
     leadKnown;
   const visible = showAll ? tasks : tasks.slice(0, FOLDED);
+  // The tasks in dependency waves, as the run will start them; folded, only
+  // the first FOLDED tasks show, each still under its own step.
+  const waves = taskWaves(tasks);
+  const shownWaves = waves
+    .map((wave, at) => ({
+      step: at + 1,
+      tasks: wave.filter((task) => visible.includes(task)),
+    }))
+    .filter((wave) => wave.tasks.length > 0);
   const errors = checked && editable ? checkTasks(tasks) : {};
 
   useEffect(() => {
@@ -738,230 +853,314 @@ export function ProposalCard({
     !planning && proposal.status === "ready" && !approved && !cancelled;
   const line = "border-border";
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const summaryRef = useRef<HTMLParagraphElement>(null);
+  const summaryCut = useClamped(summaryRef, summaryOpen, proposal.summary);
   // Approved, its run gone: only that is said, not the tasks it ran.
   const gone = approved && runMissing;
 
   return (
     <article
       aria-label="Orchestration proposal"
-      className="bg-card border-border overflow-hidden rounded-xl border"
+      // The run panel's soft lift, so the card and the run it becomes match.
+      // The muted shell shows only below the card: the footer sits on it as
+      // an ear, the way a composer's agent strip sits on top of its field.
+      className="bg-muted/60 border-border overflow-hidden rounded-2xl border shadow-[0_1px_2px_rgb(0_0_0/0.04),0_8px_24px_-8px_rgb(0_0_0/0.12)]"
     >
-      <header className="flex min-w-0 items-start gap-3 px-3 py-3">
-        {/* The conductor's mark, in Orchestrate's violet: who proposes. */}
-        <span className="bg-tone-violet/10 text-tone-violet grid size-8 shrink-0 place-items-center rounded-lg">
-          <HugeiconsIcon
-            icon={leadIcon(teamLead?.icon)}
-            className="size-4"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">
-            {proposal.teamLead ? (
-              teamLead || leadsRead ? (
-                <span
-                  className="min-w-0 truncate"
-                  title={`Conductor @${proposal.teamLead}`}
-                >
-                  <span className="text-foreground/80 font-medium">
-                    {teamLead?.name ?? `@${proposal.teamLead}`}
-                  </span>{" "}
-                  proposes
-                </span>
+      <div className="bg-card border-border -m-px overflow-hidden rounded-2xl border">
+        <header className="flex min-w-0 items-start gap-3 px-4 pt-3.5 pb-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            {/* A small caps eyebrow: who proposes, and how much. */}
+            <p className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] uppercase">
+              {planning ? (
+                // Still planning: the app's working mark, in the conductor's
+                // violet, where its icon will be; no word for it.
+                <OrbitSpinner className="text-tone-violet size-3 gap-px p-0" />
               ) : (
-                <TextSkeleton label="Reading the conductor" className="w-20" />
-              )
-            ) : (
-              <span>Proposal</span>
-            )}
-          </p>
-          <h2
-            ref={headingRef}
-            // Not in the tab order: the focus is only moved here, after a
-            // cancel is undone or an approval leaves no run to show.
-            tabIndex={-1}
-            className="focus-visible:ring-ring/30 mt-0.5 line-clamp-2 rounded-sm text-[14px] leading-snug font-medium text-balance outline-none focus-visible:ring-2"
-            title={title}
-          >
-            {title}
-          </h2>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
-          <ProposalStatus
-            planning={planning}
-            approved={approved}
-            cancelled={cancelled}
-            invalid={proposal.status === "invalid"}
-          />
-          {!planning && tasks.length > 0 && (
-            <span className="bg-foreground/[0.05] text-muted-foreground rounded-md px-1.5 py-0.5 text-[11px] tabular-nums">
-              {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {proposal.status === "invalid" &&
-            !cancelled &&
-            !proposal.repaired && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={asking}
-                onClick={() => void repair()}
-              >
-                {asking ? "Asking…" : "Ask to fix"}
-              </Button>
-            )}
-          {/* Not ready to approve, yet still the user's to drop. */}
-          {!approved &&
-            !cancelled &&
-            !planning &&
-            proposal.status !== "ready" && (
-              <Button size="sm" variant="ghost" onClick={cancel}>
-                Cancel
-              </Button>
-            )}
-          {cancelled && (
-            <Button
-              ref={undoRef}
-              size="sm"
-              variant="ghost"
-              onClick={undoCancel}
+                <HugeiconsIcon
+                  icon={leadIcon(teamLead?.icon)}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                  className="text-tone-violet size-3 shrink-0"
+                />
+              )}
+              {proposal.teamLead ? (
+                teamLead || leadsRead ? (
+                  <span
+                    className="truncate"
+                    title={`Conductor @${proposal.teamLead}`}
+                  >
+                    {teamLead?.name ?? `@${proposal.teamLead}`}
+                  </span>
+                ) : (
+                  <TextSkeleton
+                    label="Reading the conductor"
+                    className="w-20"
+                  />
+                )
+              ) : (
+                <span>Proposal</span>
+              )}
+              {!planning && tasks.length > 0 && (
+                <span className="text-muted-foreground/70 shrink-0 tabular-nums normal-case tracking-normal">
+                  {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
+                  {waves.length > 1 ? `, ${waves.length} steps` : ""}
+                </span>
+              )}
+            </p>
+            <h2
+              ref={headingRef}
+              // Not in the tab order: the focus is only moved here, after a
+              // cancel is undone or an approval leaves no run to show.
+              tabIndex={-1}
+              className="focus-visible:ring-ring/30 line-clamp-2 rounded-sm text-[15px] leading-snug font-medium text-balance outline-none focus-visible:ring-2"
+              title={title}
             >
-              Undo cancel
-            </Button>
-          )}
-        </div>
-      </header>
-
-      {planning && (
-        <ListSkeleton
-          label="Planning the tasks"
-          rows={3}
-          className={cn("border-t", line)}
-        />
-      )}
-
-      {gone && (
-        <div
-          className={cn(
-            "flex items-start gap-2 border-t px-3 py-2 text-[12px]",
-            line,
-          )}
-        >
-          <HugeiconsIcon
-            icon={Alert02Icon}
-            className="text-tone-amber mt-0.5 size-3.5 shrink-0"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-          <p className="min-w-0">
-            <span className="font-medium">This run no longer exists.</span>{" "}
-            <span className="text-muted-foreground">
-              It was approved, but the app no longer has it: it was removed, or
-              its data was cleared. Send /orchestrate again to plan a new run.
-            </span>
-          </p>
-        </div>
-      )}
-
-      {!planning && !gone && proposal.summary && !cancelled && (
-        <div className={cn("border-t px-3 py-2", line)}>
-          <p
-            className={cn(
-              "text-muted-foreground text-[12px] leading-relaxed whitespace-pre-wrap",
-              !summaryOpen && "line-clamp-3",
-            )}
-          >
-            {proposal.summary}
-          </p>
-          {proposal.summary.length > 240 && (
-            <button
-              type="button"
-              aria-expanded={summaryOpen}
-              onClick={() => setSummaryOpen(!summaryOpen)}
-              className="text-muted-foreground hover:text-foreground mt-1 text-[11px] font-medium"
-            >
-              {summaryOpen ? "Show less" : "Show more"}
-            </button>
-          )}
-        </div>
-      )}
-
-      {!planning && !gone && !cancelled && teamLead && (
-        <TeamLeadTerms lead={teamLead} className={line} />
-      )}
-
-      {!planning && !gone && !cancelled && tasks.length > 0 && (
-        <ul className={cn("divide-border divide-y border-t", line)}>
-          {visible.map((task) => (
-            <TaskRow
-              key={task.id}
-              base={base}
-              task={task}
-              index={tasks.indexOf(task)}
-              tasks={tasks}
-              teamLead={teamLead}
-              editable={editable}
-              errors={errors[task.id]}
-              onChange={(next) => change(task.id, next)}
+              {title}
+              {planning && <span className="sr-only">, planning</span>}
+            </h2>
+          </div>
+          {!planning && (
+            <ProposalStatus
+              planning={planning}
+              approved={approved}
+              cancelled={cancelled}
+              invalid={proposal.status === "invalid"}
             />
-          ))}
-        </ul>
-      )}
-      {!planning && !gone && !cancelled && tasks.length > FOLDED && (
-        <button
-          type="button"
-          aria-expanded={showAll}
-          onClick={() => setShowAll(!showAll)}
-          className={cn(
-            "text-muted-foreground hover:text-foreground flex h-8 w-full items-center gap-1.5 border-t px-3 text-left text-[11px]",
-            line,
           )}
-        >
-          <HugeiconsIcon
-            icon={showAll ? ArrowDown01Icon : ArrowRight01Icon}
-            className="size-3.5"
-            strokeWidth={2}
-            aria-hidden="true"
-          />
-          {showAll ? "Show fewer tasks" : `Show ${tasks.length - FOLDED} more`}
-        </button>
-      )}
+          <div className="flex shrink-0 items-center gap-1">
+            {proposal.status === "invalid" &&
+              !cancelled &&
+              !proposal.repaired && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={asking}
+                  onClick={() => void repair()}
+                >
+                  {asking ? "Asking…" : "Ask to fix"}
+                </Button>
+              )}
+            {/* Not ready to approve, yet still the user's to drop. */}
+            {!approved &&
+              !cancelled &&
+              !planning &&
+              proposal.status !== "ready" && (
+                <Button size="sm" variant="ghost" onClick={cancel}>
+                  Cancel
+                </Button>
+              )}
+            {cancelled && (
+              <Button
+                ref={undoRef}
+                size="sm"
+                variant="ghost"
+                onClick={undoCancel}
+              >
+                Undo cancel
+              </Button>
+            )}
+          </div>
+        </header>
 
-      {(error || (proposal.status === "invalid" && !cancelled)) && (
-        <div
-          role="alert"
-          className={cn(
-            "text-destructive flex items-start gap-2 border-t px-3 py-2 text-[12px]",
-            line,
-          )}
-        >
-          <HugeiconsIcon
-            icon={Alert02Icon}
-            className="mt-0.5 size-3.5 shrink-0"
-            strokeWidth={1.8}
-            aria-hidden="true"
+        {planning && (
+          <ListSkeleton
+            label="Planning the tasks"
+            rows={3}
+            className={cn("border-t", line)}
           />
-          <span className="min-w-0 break-words">
-            {error ??
-              `Could not read the lead's proposal: ${proposal.error ?? "it is invalid."}${proposal.repaired ? " The lead was already asked to fix it once; send /orchestrate again to start over." : ""}`}
-          </span>
-        </div>
-      )}
+        )}
+
+        {gone && (
+          <div
+            className={cn(
+              "flex items-start gap-2 border-t px-3 py-2 text-[12px]",
+              line,
+            )}
+          >
+            <HugeiconsIcon
+              icon={Alert02Icon}
+              className="text-tone-amber mt-0.5 size-3.5 shrink-0"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <p className="min-w-0">
+              <span className="font-medium">This run no longer exists.</span>{" "}
+              <span className="text-muted-foreground">
+                It was approved, but the app no longer has it: it was removed,
+                or its data was cleared. Send /orchestrate again to plan a new
+                run.
+              </span>
+            </p>
+          </div>
+        )}
+
+        {!planning && !gone && proposal.summary && !cancelled && (
+          <div className="px-4 pb-3">
+            <p
+              ref={summaryRef}
+              className={cn(
+                "text-muted-foreground text-[12.5px] leading-relaxed whitespace-pre-wrap",
+                !summaryOpen && "line-clamp-2",
+              )}
+            >
+              {proposal.summary}
+            </p>
+            {/* Only when the two lines actually cut it short. */}
+            {(summaryCut || summaryOpen) && (
+              <button
+                type="button"
+                aria-expanded={summaryOpen}
+                onClick={() => setSummaryOpen(!summaryOpen)}
+                className="text-muted-foreground hover:text-foreground mt-1 text-[11px] font-medium"
+              >
+                {summaryOpen ? "Show less" : "Show more"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {!planning && !gone && !cancelled && teamLead && (
+          <TeamLeadTerms lead={teamLead} className={line} />
+        )}
+
+        {!planning && !gone && !cancelled && tasks.length > 0 && (
+          <div className="px-2 pb-2">
+            {shownWaves.map(({ step, tasks: wave }, index) => {
+              const stepId = `${base}-step-${step}`;
+              const stepped = waves.length > 1;
+              return (
+                // Steps as the run panel draws them: a hairline between.
+                <section
+                  key={stepId}
+                  aria-labelledby={stepped ? stepId : undefined}
+                  className={cn(
+                    index > 0 && "border-border mt-1 border-t pt-1",
+                  )}
+                >
+                  {stepped && (
+                    // A step heads its tasks as a module heads its lessons:
+                    // its name, then a soft badge with how many.
+                    <h3
+                      id={stepId}
+                      className="flex items-center gap-2 px-2 pt-2 pb-1 text-[13px] font-medium"
+                    >
+                      Step {step}
+                      <span className="bg-muted text-muted-foreground rounded-md px-1.5 py-px text-[11px] font-normal tabular-nums">
+                        {waves[step - 1]?.length ?? 0}{" "}
+                        {(waves[step - 1]?.length ?? 0) === 1
+                          ? "task"
+                          : "tasks"}
+                      </span>
+                    </h3>
+                  )}
+                  <ul aria-label={stepped ? `Tasks, step ${step}` : "Tasks"}>
+                    {wave.map((task) => (
+                      <TaskRow
+                        key={task.id}
+                        base={base}
+                        task={task}
+                        index={tasks.indexOf(task)}
+                        tasks={tasks}
+                        teamLead={teamLead}
+                        editable={editable}
+                        errors={errors[task.id]}
+                        onChange={(next) => change(task.id, next)}
+                        toggled={opened.has(task.id)}
+                        onToggle={(next) =>
+                          setOpened((before) => {
+                            const after = new Set(before);
+                            if (next) after.add(task.id);
+                            else after.delete(task.id);
+                            return after;
+                          })
+                        }
+                      />
+                    ))}
+                  </ul>
+                </section>
+              );
+            })}
+          </div>
+        )}
+        {!planning && !gone && !cancelled && tasks.length > FOLDED && (
+          <button
+            type="button"
+            aria-expanded={showAll}
+            onClick={() => setShowAll(!showAll)}
+            className={cn(
+              "text-muted-foreground hover:text-foreground -mt-1 flex h-8 w-full items-center gap-1.5 px-4 pb-1 text-left text-[11px]",
+              line,
+            )}
+          >
+            <HugeiconsIcon
+              icon={showAll ? ArrowDown01Icon : ArrowRight01Icon}
+              className="size-3.5"
+              strokeWidth={2}
+              aria-hidden="true"
+            />
+            {showAll
+              ? "Show fewer tasks"
+              : `Show ${tasks.length - FOLDED} more`}
+          </button>
+        )}
+
+        {(error || (proposal.status === "invalid" && !cancelled)) && (
+          <div
+            role="alert"
+            className={cn(
+              "text-destructive flex items-start gap-2 border-t px-3 py-2 text-[12px]",
+              line,
+            )}
+          >
+            <HugeiconsIcon
+              icon={Alert02Icon}
+              className="mt-0.5 size-3.5 shrink-0"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <span className="min-w-0 break-words">
+              {error ??
+                `Could not read the lead's proposal: ${proposal.error ?? "it is invalid."}${proposal.repaired ? " The lead was already asked to fix it once; send /orchestrate again to start over." : ""}`}
+            </span>
+          </div>
+        )}
+      </div>
 
       {!planning && !gone && !cancelled && proposal.status === "ready" && (
         <footer
           className={cn(
-            "text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-2 border-t px-3 py-2 text-[11px]",
+            "text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-2 pb-2 text-[11px]",
             line,
           )}
         >
-          <span className="min-w-0 flex-1 truncate">
-            {approved
-              ? "Approved"
-              : "Nothing runs until you approve. Each worker gets its own checkout."}
+          <span className="flex min-w-0 flex-1 items-center">
+            {approved ? (
+              <span className="truncate">Approved</span>
+            ) : (
+              // What approving does, kept off the ear until asked.
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="What happens when you approve"
+                      className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 -ml-1 grid size-6 place-items-center rounded-full outline-none focus-visible:ring-2"
+                    />
+                  }
+                >
+                  <HugeiconsIcon
+                    icon={HelpCircleIcon}
+                    strokeWidth={1.8}
+                    className="size-4"
+                    aria-hidden="true"
+                  />
+                </TooltipTrigger>
+                <TooltipContent>
+                  Nothing runs until you approve. Each worker gets its own
+                  checkout.
+                </TooltipContent>
+              </Tooltip>
+            )}
           </span>
           <div className="flex items-center gap-1.5">
             <span id={`workers-${proposal.id}`}>Parallel workers</span>
@@ -995,17 +1194,20 @@ export function ProposalCard({
           </div>
           {!approved && (
             <div className="flex items-center gap-1.5">
+              {/* The answer the card waits for: full-size, wider buttons. */}
               <Button
-                size="sm"
-                variant="ghost"
+                size="lg"
+                variant="secondary"
                 disabled={starting}
                 onClick={cancel}
+                className="h-8 min-w-20 px-4 text-[13px]"
               >
                 Cancel
               </Button>
               <Button
-                size="sm"
+                size="lg"
                 disabled={!editable}
+                className="h-8 min-w-28 gap-1.5 px-5 text-[13px] has-data-[icon=inline-start]:pl-4"
                 onClick={() => void approve()}
               >
                 <HugeiconsIcon
@@ -1024,7 +1226,8 @@ export function ProposalCard({
       {cancelled && (
         <p
           className={cn(
-            "text-muted-foreground border-t px-3 py-2 text-[12px]",
+            // An ear under the card, as the footer is.
+            "text-muted-foreground px-4 py-2 text-[12px]",
             line,
           )}
         >

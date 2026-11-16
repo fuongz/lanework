@@ -22,6 +22,11 @@ import {
 } from "#/components/ui/context-menu";
 import { Empty, EmptyDescription, EmptyHeader } from "#/components/ui/empty";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "#/components/ui/tooltip";
+import {
   type Block,
   type ImageSpan,
   type Inline,
@@ -30,6 +35,7 @@ import {
   type ListBlock,
   parseMarkdown,
 } from "#/lib/markdown";
+import { cn } from "#/lib/utils";
 
 /** Draws a link, for the readers that follow links. */
 export type LinkRenderer = (span: LinkSpan) => ReactNode;
@@ -298,18 +304,43 @@ function ColorBadge({
   color: string;
   chat: boolean;
 }) {
+  // Hovered (or focused), the colour shows large in a tooltip: a swatch
+  // the size of a thumbnail, with the value under it.
   return (
-    <code
-      data-color={color}
-      className={`${badgeClass(chat)} items-center gap-[0.4em] whitespace-nowrap`}
-    >
-      <span
-        aria-hidden="true"
-        className="ring-foreground/20 size-[0.8em] shrink-0 rounded-full ring-1 ring-inset"
-        style={{ background: color }}
-      />
-      <span>{value}</span>
-    </code>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <code
+            data-color={color}
+            // Focusable, so the keyboard reaches the large swatch too.
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: it opens a tooltip.
+            tabIndex={0}
+            className={`${badgeClass(chat)} focus-visible:ring-ring/40 cursor-default items-center gap-[0.4em] whitespace-nowrap outline-none focus-visible:ring-2`}
+          />
+        }
+      >
+        <span
+          aria-hidden="true"
+          className="ring-foreground/20 size-[0.8em] shrink-0 rounded-full ring-1 ring-inset"
+          style={{ background: color }}
+        />
+        <span>{value}</span>
+      </TooltipTrigger>
+      <TooltipContent className="flex-col items-stretch gap-1.5 p-1.5">
+        {/* The swatch copies too: hovered, a copy button at its centre. */}
+        <span
+          className="group/swatch grid h-20 w-32 place-items-center rounded-[5px] ring-1 ring-white/15 ring-inset"
+          style={{ background: color }}
+        >
+          <ColorCopy value={value} overlay />
+        </span>
+        {/* The popup stays open under the pointer: the value copies. */}
+        <span className="flex items-center justify-between gap-2 pl-0.5">
+          <span className="font-mono text-[11px]">{value}</span>
+          <ColorCopy value={value} />
+        </span>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -665,6 +696,55 @@ function BlockView({ block }: { block: Block }) {
     <p>
       <Spans spans={block.spans} />
     </p>
+  );
+}
+
+/** The colour tooltip's copy button: the value as written, then a tick. */
+function ColorCopy({
+  value,
+  overlay = false,
+}: {
+  value: string;
+  /**
+   * On the swatch: a dark disc with a white icon, readable on any colour,
+   * shown while the swatch is hovered or the button focused.
+   */
+  overlay?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1200);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      aria-label={copied ? "Copied" : `Copy ${value}`}
+      onClick={() => {
+        void navigator.clipboard
+          .writeText(value)
+          .then(() => setCopied(true))
+          .catch(() => {
+            // A refused clipboard write should not claim it was copied.
+          });
+      }}
+      className={
+        overlay
+          ? cn(
+              "grid size-8 place-items-center rounded-full bg-black/45 text-white opacity-0 backdrop-blur-sm transition-opacity duration-150 outline-none group-hover/swatch:opacity-100 hover:bg-black/60 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-white/60",
+              copied && "opacity-100",
+            )
+          : "text-background/70 hover:text-background hover:bg-background/15 focus-visible:ring-background/40 grid size-6 shrink-0 place-items-center rounded-md outline-none focus-visible:ring-2"
+      }
+    >
+      <HugeiconsIcon
+        icon={copied ? Tick02Icon : Copy01Icon}
+        className="size-3.5"
+        strokeWidth={1.8}
+        aria-hidden="true"
+      />
+    </button>
   );
 }
 

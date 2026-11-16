@@ -1,5 +1,6 @@
 import {
   ArrowDown01Icon,
+  ArrowRight01Icon,
   CommandLineIcon,
   FileDiffIcon,
   FolderGitTwoIcon,
@@ -36,6 +37,10 @@ import {
 } from "#/components/shared/agents/background-tasks";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
 import { FileOpenerContext } from "#/components/shared/common/markdown-body";
+import {
+  PanelPages,
+  usePanelPage,
+} from "#/components/shared/common/panel-pages";
 import { splitPath } from "#/components/shared/diff/diff-file-header";
 import { FileTypeIcon } from "#/components/shared/diff/diff-icons";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
@@ -390,15 +395,12 @@ function Facts({
       <Section>
         {single ? (
           <>
-            <Fact
-              icon={FolderGitTwoIcon}
-              aside={<CheckoutKind linked={single.linked} />}
-            >
+            <Fact icon={FolderGitTwoIcon} label="Worktree">
               <span className="truncate" title={single.path}>
-                {folderName(single.path)}
+                {placeName(single)}
               </span>
             </Fact>
-            <Fact icon={GitBranchIcon}>
+            <Fact icon={GitBranchIcon} label="Branch">
               <BranchName branch={single.branch} />
             </Fact>
           </>
@@ -418,7 +420,7 @@ function Facts({
                   className="text-muted-foreground min-w-0 flex-1 truncate text-right text-xs"
                   title={workspace.path}
                 >
-                  {folderName(workspace.path)}
+                  {placeName(workspace)}
                 </span>
                 <span
                   className="text-muted-foreground shrink-0 text-[11px] tabular-nums"
@@ -465,13 +467,13 @@ function Facts({
   );
 }
 
-/** "Main checkout" or "Worktree", small, at a worktree row's end. */
-function CheckoutKind({ linked }: { linked: boolean }) {
-  return (
-    <span className="bg-foreground/[0.05] text-muted-foreground shrink-0 rounded px-1.5 py-px text-[11px]">
-      {linked ? "Worktree" : "Main checkout"}
-    </span>
-  );
+/**
+ * What a worktree row calls the place: "main" for the project's main
+ * checkout (its folder name says nothing the project name does not), the
+ * folder's name for a linked worktree. The full path stays on hover.
+ */
+function placeName(workspace: { path: string; linked: boolean }): string {
+  return workspace.linked ? folderName(workspace.path) : "main";
 }
 
 function BranchName({ branch }: { branch: string | null }) {
@@ -533,8 +535,15 @@ function CommitsGroup({
  */
 export function PanelCard({ children }: { children: ReactNode }) {
   return (
-    <div className="divide-border bg-card shadow-card flex flex-col divide-y overflow-hidden rounded-2xl">
-      {children}
+    <div
+      // The composer's border and layered shadow, so the panel's card and
+      // the prompt box read as one family.
+      className="bg-card border-border flex flex-col overflow-hidden rounded-2xl border shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_20px_-4px_rgb(0_0_0/0.10)]"
+    >
+      {/* A group opens as a page of the card, with Back at its top. */}
+      <PanelPages>
+        <div className="divide-border flex flex-col divide-y">{children}</div>
+      </PanelPages>
     </div>
   );
 }
@@ -549,13 +558,21 @@ const ROW = "flex h-8 w-full min-w-0 items-center gap-2.5 px-3 text-[13px]";
 /** A row inside an unfolded group: flush with the card's edge, as Runs. */
 const SUB_ROW = "flex h-8 w-full min-w-0 items-center gap-2.5 px-3 text-[13px]";
 
-/** One fact on one line: its icon, its value, anything at its end. */
+/** The row's icon and its value: a step lighter than the label. */
+const QUIET = "text-muted-foreground/80";
+
+/**
+ * One fact on one line: `[icon] [label] ··· [value]`, the icon and the
+ * value a step lighter than the label.
+ */
 function Fact({
   icon,
+  label,
   aside,
   children,
 }: {
   icon: IconSvgElement;
+  label: string;
   aside?: ReactNode;
   children: ReactNode;
 }) {
@@ -563,11 +580,19 @@ function Fact({
     <div className={ROW}>
       <HugeiconsIcon
         icon={icon}
-        className="text-muted-foreground size-4 shrink-0"
+        className={cn(QUIET, "size-4 shrink-0")}
         strokeWidth={1.6}
         aria-hidden="true"
       />
-      <span className="flex min-w-0 flex-1 items-center">{children}</span>
+      <span className="shrink-0 font-medium">{label}</span>
+      <span
+        className={cn(
+          QUIET,
+          "ml-auto flex min-w-0 items-center justify-end text-right",
+        )}
+      >
+        {children}
+      </span>
       {aside}
     </div>
   );
@@ -599,13 +624,20 @@ export function Group({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const id = useId();
+  // In the panel's card a group opens as a page of its own, with Back at
+  // its top, rather than unfolding in place.
+  const page = usePanelPage(label, count);
+  const paged = page.paged;
   return (
     <section aria-label={label} className="flex flex-col">
       <button
         type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        aria-controls={id}
+        onClick={(event) =>
+          paged ? page.open(event.currentTarget) : setOpen(!open)
+        }
+        aria-expanded={paged ? undefined : open}
+        aria-controls={paged ? undefined : id}
+        aria-haspopup={paged ? "true" : undefined}
         className={cn(
           ROW,
           "hover:bg-foreground/[0.03] focus-visible:ring-accent-brand text-left outline-none focus-visible:ring-2 focus-visible:ring-inset",
@@ -613,18 +645,21 @@ export function Group({
       >
         <HugeiconsIcon
           icon={icon}
-          className="text-muted-foreground size-4 shrink-0"
+          className={cn(QUIET, "size-4 shrink-0")}
           strokeWidth={1.6}
           aria-hidden="true"
         />
         <span className="shrink-0 font-medium">{label}</span>
+        {/* `[icon] [label] ··· [value] [caret]`, as a fact row. */}
+        <span className="ml-auto flex items-center">{aside}</span>
         <Badge
           variant="secondary"
           className={cn(
             "rounded-[5px] px-1.5 leading-none tabular-nums",
             live
               ? "bg-tone-blue/10 text-tone-blue gap-1.5"
-              : "text-muted-foreground",
+              : // The same size as a fact's value ("main").
+                cn(QUIET, "bg-transparent px-0 text-[13px]"),
           )}
         >
           {live && (
@@ -636,20 +671,23 @@ export function Group({
           )}
           {count}
         </Badge>
-        <span className="ml-auto flex items-center">{aside}</span>
         <HugeiconsIcon
-          icon={ArrowDown01Icon}
+          icon={paged ? ArrowRight01Icon : ArrowDown01Icon}
           className={cn(
             "text-muted-foreground size-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none",
-            open && "rotate-180",
+            !paged && open && "rotate-180",
           )}
           strokeWidth={2}
           aria-hidden="true"
         />
       </button>
-      <ul id={id} hidden={!open} className="flex flex-col">
-        {children}
-      </ul>
+      {paged ? (
+        page.portal(children)
+      ) : (
+        <ul id={id} hidden={!open} className="flex flex-col">
+          {children}
+        </ul>
+      )}
     </section>
   );
 }

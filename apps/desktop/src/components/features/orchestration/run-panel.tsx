@@ -6,8 +6,10 @@ import {
   Delete02Icon,
   Folder01Icon,
   PlayIcon,
+  ShieldCheckIcon,
   StopIcon,
   Target02Icon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
@@ -32,6 +34,10 @@ import type {
 import { durationText } from "#/components/shared/agents/facts";
 import { FileBadge } from "#/components/shared/common/markdown-body";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
+import {
+  StepGlyph,
+  taskWaves,
+} from "#/components/shared/orchestration/run-steps";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import {
   AlertDialog,
@@ -58,11 +64,17 @@ import {
   TooltipTrigger,
 } from "#/components/ui/tooltip";
 import { ipcMessage } from "#/lib/ipc-error";
-import { taskBar, taskHint, taskLabel } from "#/lib/orchestration-status";
+import {
+  shownStatus,
+  taskBadge,
+  taskBar,
+  taskHint,
+  taskLabel,
+  taskTone,
+} from "#/lib/orchestration-status";
 import { cn } from "#/lib/utils";
 import { useProposalEdits } from "./orchestration-panel.store";
 import { RunReportSummary } from "./run-report-summary";
-import { StepGlyph, taskWaves } from "./run-steps";
 
 /**
  * A tooltip on `children` (FE-137): the app's own, never a bare `title`.
@@ -272,13 +284,47 @@ function LeftoverList({ left }: { left: RunLeftovers }) {
  * A worker's status as one square glyph the height of its title (see
  * `StepGlyph`), with what it means as its tooltip.
  */
-function StepMark({ task }: { task: OrchestrationTask }) {
+function StepMark({
+  task,
+  number,
+}: {
+  task: OrchestrationTask;
+  number: number;
+}) {
   return (
     <Tip label={taskHint(task)}>
       <span className="flex shrink-0">
-        <StepGlyph task={task} />
+        <StepGlyph task={task} size="size-9" number={number} />
       </span>
     </Tip>
+  );
+}
+
+/**
+ * The worker's status as a small tinted pill beside its title: its colour,
+ * a tick once it is done, the word in small caps.
+ */
+function StatusBadge({ task }: { task: OrchestrationTask }) {
+  const done = task.status === "completed";
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "flex h-5 shrink-0 items-center gap-1 rounded-full border border-current/25 bg-current/10 px-2 text-[10.5px] font-semibold tracking-[0.05em] uppercase",
+        taskTone(task),
+      )}
+    >
+      {done && (
+        <HugeiconsIcon
+          // Verified (the lead reviewed and took it) wears a shield.
+          icon={task.accepted ? ShieldCheckIcon : Tick02Icon}
+          className="size-3"
+          strokeWidth={2.4}
+          aria-hidden="true"
+        />
+      )}
+      {taskBadge(task)}
+    </span>
   );
 }
 
@@ -375,6 +421,7 @@ function WorkerRow({
   id,
   task,
   idWidth,
+  number,
   time,
   wider,
   waitingFor,
@@ -388,6 +435,8 @@ function WorkerRow({
   task: OrchestrationTask;
   /** The id column's width, the same on every row of the run. */
   idWidth: string;
+  /** Its place in the run, 1-based. */
+  number: number;
   time: string | null;
   wider: string[] | null;
   waitingFor: string | null;
@@ -404,41 +453,47 @@ function WorkerRow({
   const bodyId = `${id}-body`;
   return (
     <li id={`${id}-row`}>
+      {/* Two lines, as the proposal card's rows: the task, then its id and
+          time in muted words; the model pill and chevron at the end. The
+          row lifts on hover and stays lifted while open. */}
       <button
         type="button"
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => setChosen(!open)}
-        className="hover:bg-foreground/[0.03] flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left"
-      >
-        <StepMark task={task} />
-        <span className="sr-only">{taskLabel(task)}: </span>
-        {/* The column stays narrow; a long id is cut, and shown whole on
-            hover. */}
-        <Tip label={task.id}>
-          <span
-            className="text-muted-foreground shrink-0 truncate text-[12px] tabular-nums"
-            style={{ width: idWidth }}
-          >
-            {task.id}
-          </span>
-        </Tip>
-        <Tip label={task.title}>
-          <span className="text-foreground min-w-0 flex-1 truncate text-[13px]">
-            {task.title}
-          </span>
-        </Tip>
-        {time && (
-          <span className="text-muted-foreground/80 shrink-0 text-[11px] tabular-nums">
-            {time}
-          </span>
+        className={cn(
+          "flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors duration-150",
+          open ? "bg-muted/70" : "hover:bg-muted/50",
         )}
-        {/* Model and effort as one badge, as the proposal card shows them. */}
+      >
+        <StepMark task={task} number={number} />
+        <span className="sr-only">{taskLabel(task)}: </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex min-w-0 items-center gap-2">
+            <Tip label={task.title}>
+              <span className="text-foreground min-w-0 truncate text-[13px] leading-snug font-semibold">
+                {task.title}
+              </span>
+            </Tip>
+            <StatusBadge task={task} />
+          </span>
+          <span className="text-muted-foreground flex min-w-0 items-center gap-2.5 text-[11.5px] leading-snug">
+            <span
+              className="truncate font-mono text-[11px]"
+              style={{ maxWidth: idWidth }}
+              title={task.id}
+            >
+              {task.id}
+            </span>
+            {time && <span className="shrink-0 tabular-nums">{time}</span>}
+          </span>
+        </span>
+        {/* Model and effort as one outlined pill, as the proposal card's. */}
         <Tip
           label={`${modelName(task.model) ?? task.model}${task.effort ? `, ${EFFORT_LABELS[task.effort]} effort` : ""}${task.tier ? `, ${task.tier} tier` : ""}`}
         >
-          <span className="border-border text-muted-foreground hidden shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-[10.5px] sm:flex">
-            <TerminalKindIcon kind={task.agent} className="size-2.5 shrink-0" />
+          <span className="border-border bg-background text-muted-foreground hidden h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] sm:flex">
+            <TerminalKindIcon kind={task.agent} className="size-3.5 shrink-0" />
             <span>{modelName(task.model) ?? task.model}</span>
             {(task.effort || task.tier) && (
               <span className="text-muted-foreground/70">
@@ -458,18 +513,11 @@ function WorkerRow({
         />
       </button>
       {open && (
-        // Lined up with the id column: the row's padding, the square and
-        // the gap after it.
+        // Lined up with the title, under the lifted row.
         <div
           id={bodyId}
-          className="relative mr-3 mb-2.5 ml-9 flex min-w-0 flex-col gap-1.5 text-[12px]"
+          className="mt-2 mr-2 mb-3 ml-14 flex min-w-0 flex-col gap-1.5 text-[12px]"
         >
-          {/* The hook: down from under the square, then right into the
-              first line of what it holds. */}
-          <span
-            aria-hidden="true"
-            className="border-muted-foreground/40 pointer-events-none absolute -top-1.5 -left-4 h-[15px] w-3 rounded-bl-[6px] border-b border-l"
-          />
           {/* The files and folders it may change, with no label (FE-137):
               the chat's own badges, click to open, right-click for more. */}
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px]">
@@ -729,6 +777,7 @@ export function RunPanel({
         id={`${base}-${task.id}`}
         task={task}
         idWidth={idWidth}
+        number={run.tasks.indexOf(task) + 1}
         time={taskTime(task, run, now)}
         wider={wider}
         waitingFor={waitingFor}
@@ -773,38 +822,77 @@ export function RunPanel({
     <article
       aria-label={`Orchestration run: ${heading}`}
       // A soft lift off the chat, as the reference card has (FE-137).
-      className="bg-card border-border overflow-hidden rounded-xl border shadow-[0_1px_2px_rgb(0_0_0/0.04),0_8px_24px_-8px_rgb(0_0_0/0.12)]"
+      // The proposal card's shape: a white card on a muted shell that shows
+      // only below it, as an ear for the footer.
+      className="bg-muted/60 border-border overflow-hidden rounded-2xl border shadow-[0_1px_2px_rgb(0_0_0/0.04),0_8px_24px_-8px_rgb(0_0_0/0.12)]"
     >
-      {/* Said aloud, never drawn: what went wrong since the last read. */}
-      <p role="status" aria-live="polite" className="sr-only">
-        {announcement}
-      </p>
-      <header className="flex min-w-0 items-center gap-2 px-3 pt-2.5 pb-1.5">
-        {/* The run's mark: the title's height, muted (FE-137). */}
-        <HugeiconsIcon
-          icon={Target02Icon}
-          strokeWidth={2}
-          aria-hidden="true"
-          className="text-muted-foreground size-[13px] shrink-0"
-        />
-        <Tip label={heading}>
-          <h2
-            ref={headingRef}
-            // Not in the tab order: the focus is only moved here, from the
-            // card an approval replaced.
-            tabIndex={-1}
-            className="focus-visible:ring-ring/30 min-w-0 flex-1 truncate rounded-sm text-[13px] font-medium outline-none focus-visible:ring-2"
-          >
-            {heading}
-            <span className="sr-only">, {RUN_LABELS[run.status]}</span>
-          </h2>
-        </Tip>
-        {/* Status and clock, then the one action the run allows now:
+      <div className="bg-card border-border -m-px overflow-hidden rounded-2xl border">
+        {/* Said aloud, never drawn: what went wrong since the last read. */}
+        <p role="status" aria-live="polite" className="sr-only">
+          {announcement}
+        </p>
+        <header className="flex min-w-0 items-start gap-3 px-4 pt-3.5 pb-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            {/* A small caps eyebrow, as the proposal card has: what this is,
+            and how far it got (FE-137's counts). */}
+            <p className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] uppercase">
+              <HugeiconsIcon
+                icon={Target02Icon}
+                strokeWidth={2}
+                aria-hidden="true"
+                className="size-3 shrink-0"
+              />
+              <span>Run</span>
+              {run.tasks.length > 0 && (
+                <span className="text-muted-foreground/70 flex min-w-0 items-center gap-x-2.5 truncate tracking-normal normal-case tabular-nums">
+                  <span>
+                    {done} of {run.tasks.length} done
+                    {accepted > 0 && accepted < done
+                      ? `, ${accepted} accepted`
+                      : ""}
+                  </span>
+                  {running > 0 && <span>{running} working</span>}
+                  {waiting > 0 && (
+                    <span className="text-tone-amber">
+                      {waiting} waiting for the lead
+                    </span>
+                  )}
+                  {yours > 0 && (
+                    <span className="text-tone-amber">
+                      {yours} waiting for you
+                    </span>
+                  )}
+                </span>
+              )}
+            </p>
+            <Tip label={heading}>
+              <h2
+                ref={headingRef}
+                // Not in the tab order: the focus is only moved here, from the
+                // card an approval replaced.
+                tabIndex={-1}
+                className="focus-visible:ring-ring/30 line-clamp-2 rounded-sm text-[15px] leading-snug font-medium text-balance outline-none focus-visible:ring-2"
+              >
+                {heading}
+                <span className="sr-only">, {RUN_LABELS[run.status]}</span>
+              </h2>
+            </Tip>
+          </div>
+          {/* Status and clock, then the one action the run allows now:
             Run while it is paused, Stop while it runs (FE-137). */}
-        <ButtonGroup className="shrink-0">
-          {run.reason ? (
-            // Why it paused or stopped, kept off the card (FE-137).
-            <Tip label={run.reason}>
+          <ButtonGroup className="shrink-0">
+            {run.reason ? (
+              // Why it paused or stopped, kept off the card (FE-137).
+              <Tip label={run.reason}>
+                <ButtonGroupText
+                  aria-hidden="true"
+                  className="bg-muted text-muted-foreground h-6 gap-1.5 px-2 font-normal tabular-nums"
+                >
+                  <span>{RUN_LABELS[run.status]}</span>
+                  {total && <span className="text-foreground/80">{total}</span>}
+                </ButtonGroupText>
+              </Tip>
+            ) : (
               <ButtonGroupText
                 aria-hidden="true"
                 className="bg-muted text-muted-foreground h-6 gap-1.5 px-2 font-normal tabular-nums"
@@ -812,163 +900,154 @@ export function RunPanel({
                 <span>{RUN_LABELS[run.status]}</span>
                 {total && <span className="text-foreground/80">{total}</span>}
               </ButtonGroupText>
-            </Tip>
-          ) : (
-            <ButtonGroupText
-              aria-hidden="true"
-              className="bg-muted text-muted-foreground h-6 gap-1.5 px-2 font-normal tabular-nums"
-            >
-              <span>{RUN_LABELS[run.status]}</span>
-              {total && <span className="text-foreground/80">{total}</span>}
-            </ButtonGroupText>
-          )}
-          {total && <span className="sr-only">Running time {total}</span>}
-          {run.drivenBy && (
-            <Tip
-              label={`${run.drivenBy} drives this run. This window follows it live; pause, stop or review it there.`}
-            >
-              <ButtonGroupText className="text-muted-foreground h-6 px-2 font-normal">
-                Running in {run.drivenBy}
-              </ButtonGroupText>
-            </Tip>
-          )}
-          {live && surface && run.status === "paused" && (
-            <Tip label="Resume the run: interrupted workers continue">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy !== null}
-                onClick={() =>
-                  void act(
-                    "resume",
-                    () => surface.resume(project, run.id),
-                    "Could not resume the run.",
-                  )
-                }
+            )}
+            {total && <span className="sr-only">Running time {total}</span>}
+            {run.drivenBy && (
+              <Tip
+                label={`${run.drivenBy} drives this run. This window follows it live; pause, stop or review it there.`}
               >
-                <HugeiconsIcon
-                  icon={PlayIcon}
-                  strokeWidth={2}
-                  data-icon="inline-start"
-                  aria-hidden="true"
-                />
-                {busy === "resume" ? "Running…" : "Run"}
-              </Button>
-            </Tip>
-          )}
-          {live && surface && run.status === "active" && (
-            <Tip label="Stop the run">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy !== null}
-                onClick={() => setConfirmStop(true)}
-                className="text-destructive hover:text-destructive"
-              >
-                <HugeiconsIcon
-                  icon={StopIcon}
-                  strokeWidth={2}
-                  data-icon="inline-start"
-                  aria-hidden="true"
-                />
-                {busy === "stop" ? "Stopping…" : "Stop"}
-              </Button>
-            </Tip>
-          )}
-        </ButtonGroup>
-      </header>
-
-      {run.tasks.length > 0 && (
-        <div className="flex min-w-0 items-center gap-3 px-3 pb-2.5">
-          {/* One segment per worker, in its status colour (FE-137). */}
-          <div aria-hidden="true" className="flex h-1.5 min-w-0 flex-1 gap-0.5">
-            {run.tasks.map((task) => (
-              <Tip key={task.id} label={`${task.title}: ${taskLabel(task)}`}>
-                <span
-                  className={cn("h-full flex-1 rounded-full", taskBar(task))}
-                />
+                <ButtonGroupText className="text-muted-foreground h-6 px-2 font-normal">
+                  Running in {run.drivenBy}
+                </ButtonGroupText>
               </Tip>
-            ))}
-          </div>
-          {/* Counts set apart by space, not a separator between them. */}
-          <p className="text-muted-foreground flex shrink-0 items-center gap-x-3 text-[11px] tabular-nums">
-            <span>
-              {done} of {run.tasks.length} done
-              {accepted > 0 && accepted < done ? `, ${accepted} accepted` : ""}
-            </span>
-            {running > 0 && <span>{running} working</span>}
-            {waiting > 0 && (
-              <span className="text-tone-amber">
-                {waiting} waiting for the lead
-              </span>
             )}
-            {yours > 0 && (
-              <span className="text-tone-amber">{yours} waiting for you</span>
-            )}
-          </p>
-        </div>
-      )}
-
-      {run.report && (
-        <RunReportSummary
-          project={project}
-          runId={run.id}
-          report={run.report}
-          leadGuard={run.leadGuard}
-          tasks={run.tasks}
-          onJump={(task) => {
-            const row = document.getElementById(`${base}-${task.id}-row`);
-            row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-            row?.querySelector("button")?.focus({ preventScroll: true });
-          }}
-        />
-      )}
-
-      {run.tasks.length > 0 && (
-        <div className="border-border border-t">
-          {waves.map((wave, index) => {
-            const stepId = `${base}-step-${index + 1}`;
-            const stepped = waves.length > 1;
-            return (
-              // Each step set off from the one above by a hairline the
-              // panel's width.
-              <section
-                key={stepId}
-                aria-labelledby={stepped ? stepId : undefined}
-                className={cn("py-1", index > 0 && "border-border border-t")}
-              >
-                {stepped && (
-                  <h3
-                    id={stepId}
-                    className="text-muted-foreground px-3 pt-1.5 pb-0.5 text-[11px] font-medium"
-                  >
-                    Step {index + 1}
-                  </h3>
-                )}
-                <ul
-                  aria-label={
-                    stepped ? `Workers, step ${index + 1}` : "Workers"
+            {live && surface && run.status === "paused" && (
+              <Tip label="Resume the run: interrupted workers continue">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    void act(
+                      "resume",
+                      () => surface.resume(project, run.id),
+                      "Could not resume the run.",
+                    )
                   }
                 >
-                  {wave.map(workerRow)}
-                </ul>
-              </section>
-            );
-          })}
-        </div>
-      )}
+                  <HugeiconsIcon
+                    icon={PlayIcon}
+                    strokeWidth={2}
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                  />
+                  {busy === "resume" ? "Running…" : "Run"}
+                </Button>
+              </Tip>
+            )}
+            {live && surface && run.status === "active" && (
+              <Tip label="Stop the run">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy !== null}
+                  onClick={() => setConfirmStop(true)}
+                  className="text-destructive hover:text-destructive"
+                >
+                  <HugeiconsIcon
+                    icon={StopIcon}
+                    strokeWidth={2}
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                  />
+                  {busy === "stop" ? "Stopping…" : "Stop"}
+                </Button>
+              </Tip>
+            )}
+          </ButtonGroup>
+        </header>
 
-      {error && (
-        <p
-          role="alert"
-          className="text-destructive border-border border-t px-3 py-2 text-[12px]"
-        >
-          {error}
-        </p>
-      )}
+        {run.tasks.length > 0 && (
+          <div className="flex min-w-0 items-center px-4 pb-3">
+            {/* One segment per worker, in its status colour (FE-137). */}
+            <div
+              aria-hidden="true"
+              className="flex h-1.5 min-w-0 flex-1 gap-0.5"
+            >
+              {run.tasks.map((task) => (
+                <Tip key={task.id} label={`${task.title}: ${taskLabel(task)}`}>
+                  <span
+                    className={cn("h-full flex-1 rounded-full", taskBar(task))}
+                  />
+                </Tip>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {run.report && (
+          <RunReportSummary
+            project={project}
+            runId={run.id}
+            report={run.report}
+            leadGuard={run.leadGuard}
+            tasks={run.tasks}
+            onJump={(task) => {
+              const row = document.getElementById(`${base}-${task.id}-row`);
+              row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+              row?.querySelector("button")?.focus({ preventScroll: true });
+            }}
+          />
+        )}
+
+        {run.tasks.length > 0 && (
+          <div className="px-2 pb-2">
+            {waves.map((wave, index) => {
+              const stepId = `${base}-step-${index + 1}`;
+              const stepped = waves.length > 1;
+              return (
+                // Each step set off from the one above by a hairline the
+                // panel's width.
+                <section
+                  key={stepId}
+                  aria-labelledby={stepped ? stepId : undefined}
+                  className={cn(
+                    index > 0 && "border-border mt-1 border-t pt-1",
+                  )}
+                >
+                  {stepped && (
+                    // As the proposal card heads a step: its name, then a
+                    // soft badge with how many of it are done.
+                    <h3
+                      id={stepId}
+                      className="flex items-center gap-2 px-2 pt-2 pb-1 text-[13px] font-medium"
+                    >
+                      Step {index + 1}
+                      <span className="bg-muted text-muted-foreground rounded-md px-1.5 py-px text-[11px] font-normal tabular-nums">
+                        {
+                          wave.filter(
+                            (task) => shownStatus(task) === "completed",
+                          ).length
+                        }
+                        /{wave.length}
+                      </span>
+                    </h3>
+                  )}
+                  <ul
+                    aria-label={
+                      stepped ? `Workers, step ${index + 1}` : "Workers"
+                    }
+                  >
+                    {wave.map(workerRow)}
+                  </ul>
+                </section>
+              );
+            })}
+          </div>
+        )}
+
+        {error && (
+          <p
+            role="alert"
+            className="text-destructive border-border border-t px-3 py-2 text-[12px]"
+          >
+            {error}
+          </p>
+        )}
+      </div>
 
       {cleanable && surface && (
-        <footer className="border-border flex min-w-0 items-center justify-end border-t px-3 py-1.5">
+        <footer className="flex min-w-0 items-center justify-end px-4 py-2">
           <Tip label="Remove the checkouts, branches and refs this run left">
             <Button
               size="sm"

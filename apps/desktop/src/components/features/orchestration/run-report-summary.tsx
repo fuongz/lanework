@@ -10,6 +10,7 @@ import type {
   OrchestrationTask,
   RunReport,
 } from "#/../shared/orchestration";
+import { TONE_TEXT } from "#/lib/orchestration-status";
 import { cn } from "#/lib/utils";
 
 type Group = {
@@ -55,21 +56,21 @@ export function RunReportSummary({
       key: "done",
       label: "Done",
       icon: CheckmarkCircle02Icon,
-      tone: "text-tone-emerald",
+      tone: TONE_TEXT.emerald,
       ids: report.done,
     },
     {
       key: "failed",
       label: "Failed",
       icon: Alert02Icon,
-      tone: "text-destructive",
+      tone: TONE_TEXT.rose,
       ids: report.failed,
     },
     {
       key: "needsYou",
       label: "Needs you",
       icon: UserIcon,
-      tone: "text-tone-amber",
+      tone: TONE_TEXT.amber,
       ids: report.needsYou,
     },
   ];

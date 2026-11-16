@@ -1,11 +1,13 @@
 import {
   ArrowDown01Icon,
+  ArrowRight01Icon,
   ArrowUp01Icon,
   Link01Icon,
   Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
+import { usePanelPage } from "#/components/shared/common/panel-pages";
 import { LinkIcon } from "#/components/shared/conversation/link-icon";
 import {
   Tooltip,
@@ -64,6 +66,9 @@ function SearchRows({ search }: { search: WebSearch }) {
       : search.sources.slice(0, SHOWN);
   const label = search.query ?? "Read directly";
   const empty = search.sources.length === 0;
+  // In the panel's card a search opens its pages as a page of the card,
+  // every one of them; elsewhere it unfolds, eight at a time.
+  const page = usePanelPage(label, search.sources.length);
   return (
     <li className="flex flex-col">
       <Tooltip>
@@ -72,8 +77,11 @@ function SearchRows({ search }: { search: WebSearch }) {
             <button
               type="button"
               disabled={empty}
-              aria-expanded={empty ? undefined : open}
-              onClick={() => setOpen(!open)}
+              aria-expanded={empty || page.paged ? undefined : open}
+              aria-haspopup={page.paged && !empty ? "true" : undefined}
+              onClick={(event) =>
+                page.paged ? page.open(event.currentTarget) : setOpen(!open)
+              }
               className={`${ROW} text-muted-foreground hover:bg-foreground/[0.03] focus-visible:ring-accent-brand text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-inset disabled:hover:bg-transparent`}
             />
           }
@@ -90,8 +98,8 @@ function SearchRows({ search }: { search: WebSearch }) {
           </span>
           {!empty && (
             <HugeiconsIcon
-              icon={ArrowDown01Icon}
-              className={`size-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none ${open ? "rotate-180" : ""}`}
+              icon={page.paged ? ArrowRight01Icon : ArrowDown01Icon}
+              className={`size-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none ${!page.paged && open ? "rotate-180" : ""}`}
               strokeWidth={2}
               aria-hidden="true"
             />
@@ -101,14 +109,19 @@ function SearchRows({ search }: { search: WebSearch }) {
           {label}
         </TooltipContent>
       </Tooltip>
-      {shown.length > 0 && (
+      {page.portal(
+        search.sources.map((source) => (
+          <SourceRow key={source.url} source={source} />
+        )),
+      )}
+      {!page.paged && shown.length > 0 && (
         <ul className="flex flex-col">
           {shown.map((source) => (
             <SourceRow key={source.url} source={source} />
           ))}
         </ul>
       )}
-      {open && search.sources.length > SHOWN && (
+      {!page.paged && open && search.sources.length > SHOWN && (
         // Flush with the rows' icons, its own icon in their column.
         <button
           type="button"

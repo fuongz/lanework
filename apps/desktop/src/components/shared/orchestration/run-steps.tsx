@@ -1,8 +1,10 @@
 // The run panel's checklist parts: its tasks in dependency waves, and each
 // task's status as one small square glyph, as a sub-issue list draws them.
+import { Loading03Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import type { OrchestrationTask } from "#/../shared/orchestration";
-import { shownStatus } from "#/lib/orchestration-status";
+import { shownStatus, TONE_TEXT } from "#/lib/orchestration-status";
 import { cn } from "#/lib/utils";
 
 /**
@@ -13,13 +15,13 @@ import { cn } from "#/lib/utils";
  * NOTE: A dependency the run does not hold counts as met, and a cycle is cut
  * where it closes: main refuses both, so neither may hide a task here.
  */
-export function taskWaves(
-  tasks: readonly OrchestrationTask[],
-): OrchestrationTask[][] {
+export function taskWaves<
+  Task extends { id: string; dependsOn: readonly string[] },
+>(tasks: readonly Task[]): Task[][] {
   const byId = new Map(tasks.map((task) => [task.id, task]));
   const depth = new Map<string, number>();
   const visiting = new Set<string>();
-  const waveOf = (task: OrchestrationTask): number => {
+  const waveOf = (task: Task): number => {
     const known = depth.get(task.id);
     if (known !== undefined) return known;
     if (visiting.has(task.id)) return 0;
@@ -33,7 +35,7 @@ export function taskWaves(
     depth.set(task.id, wave);
     return wave;
   };
-  const waves: OrchestrationTask[][] = [];
+  const waves: Task[][] = [];
   for (const task of tasks) {
     const wave = waveOf(task);
     const group = waves[wave] ?? [];
@@ -54,10 +56,13 @@ type Shape = "outline" | "fill";
 function Square({
   shape,
   tone,
+  size = "size-4",
   children,
 }: {
   shape: Shape;
   tone: string;
+  /** Its box, e.g. `size-6` beside a two-line row. */
+  size?: string;
   children?: ReactNode;
 }) {
   const fill = shape === "fill";
@@ -66,23 +71,22 @@ function Square({
       viewBox="0 0 16 16"
       fill="none"
       aria-hidden="true"
-      className={cn("size-4 shrink-0", tone)}
+      className={cn("shrink-0", size, tone)}
     >
+      {/* A circle, as the proposal card numbers its tasks. */}
       {fill ? (
-        <rect width="16" height="16" rx="4.5" className="fill-current" />
+        <circle cx="8" cy="8" r="8" className="fill-current" />
       ) : (
-        <rect
-          x="0.75"
-          y="0.75"
-          width="14.5"
-          height="14.5"
-          rx="3.75"
-          strokeWidth="1.5"
+        <circle
+          cx="8"
+          cy="8"
+          r="7.4"
+          strokeWidth="1.1"
           className="stroke-current"
         />
       )}
       <g
-        strokeWidth="1.6"
+        strokeWidth="1.3"
         strokeLinecap="round"
         strokeLinejoin="round"
         className={
@@ -97,6 +101,10 @@ function Square({
 
 /** A tick. */
 const TICK = <path d="M4.75 8.25 6.9 10.4l4.35-4.65" fill="none" />;
+/** Two ticks, the second ahead of the first: reviewed and taken. */
+const DOUBLE_TICK = (
+  <path d="M3.4 8.4 5.3 10.3l4-4.3M7.6 10.1l.2.2 4-4.3" fill="none" />
+);
 /** Two short vertical bars: the worker is at it. */
 const BARS = <path d="M6.25 5.5v5M9.75 5.5v5" fill="none" />;
 /** A question mark, its dot a filled circle. */
@@ -126,79 +134,147 @@ const LOCK = (
   </>
 );
 
+/** Working's blue, the same as its segment of the run's bar. */
+const WORKING = TONE_TEXT.sky;
+
+/**
+ * A worker at it: a soft blue disc, ringed like the other marks, with a
+ * small spinner turning at its centre. Two bars read as a pause button, so
+ * they are left to Stopping and Interrupted. Still with reduced motion.
+ */
+function Working({ size = "size-4" }: { size?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "grid shrink-0 place-items-center rounded-full bg-current/10 ring-1 ring-current/30",
+        size,
+        WORKING,
+      )}
+    >
+      <HugeiconsIcon
+        icon={Loading03Icon}
+        className="size-[46%] animate-spin motion-reduce:animate-none"
+        strokeWidth={2.2}
+      />
+    </span>
+  );
+}
+
+/**
+ * Not started yet: its place in the run as a number, in a soft ringed
+ * circle, as the proposal card numbers its tasks.
+ */
+function Numbered({
+  size = "size-4",
+  number,
+}: {
+  size?: string;
+  number: number;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "bg-background text-muted-foreground ring-border grid shrink-0 place-items-center rounded-full text-[13px] font-medium tabular-nums ring-1",
+        size,
+      )}
+    >
+      {number}
+    </span>
+  );
+}
+
 /** The muted outline queued and paused tasks share. */
 const MUTED = "text-muted-foreground/70";
-/** Orange, for a worker at it: apart from the amber that asks for someone. */
-const ORANGE = "text-orange-600 dark:text-orange-400";
 
 /**
  * A worker's status as one rounded square the height of its title; the row
  * draws no other status:
  *
- * - Done or accepted: a green fill with a white tick (the label and the
- *   tooltip tell them apart).
- * - Working: an orange outline with two bars. Stopping: the same, in red.
+ * - Done: a green ring with a green tick. Accepted (the lead reviewed it):
+ *   a green fill with two white ticks (the badge beside the title wears
+ *   the shield).
+ * - Working: a soft blue ringed disc with a spinner at its centre (still with
+ *   reduced motion). Stopping: a rose outline with two bars.
  * - Waiting on the lead: an amber outline with a question mark.
- * - Queued, or waiting on a dependency: an empty muted outline; waiting for
+ * - Queued, or waiting on a dependency: its number in a ringed circle (an
+ *   empty muted outline without one); waiting for
  *   you to allow a wider scope: an amber outline with a padlock.
- * - Failed: a red fill with an exclamation mark. Blocked: a red outline with
- *   one. Interrupted: a muted outline with two bars. Cancelled: a muted
+ * - Failed: a rose fill with an exclamation mark. Blocked: an amber outline
+ *   with one. Interrupted: a muted outline with two bars. Cancelled: a muted
  *   outline with a cross.
+ *
+ * Every colour is the task's one tone (`taskToneName`), as its badge and
+ * its segment of the bar use.
  */
-export function StepGlyph({ task }: { task: OrchestrationTask }) {
+export function StepGlyph({
+  task,
+  size,
+  number,
+}: {
+  task: OrchestrationTask;
+  /** Its box; `size-4` unless given. */
+  size?: string;
+  /** Its place in the run, shown while it waits to start. */
+  number?: number;
+}) {
   const status = shownStatus(task);
+  // Done, not reviewed yet: a green ring and tick, no fill. Accepted by the
+  // lead: a green fill with two ticks.
   if (status === "completed")
-    return (
-      <Square shape="fill" tone="text-tone-emerald">
+    return task.accepted ? (
+      <Square size={size} shape="fill" tone={TONE_TEXT.emerald}>
+        {DOUBLE_TICK}
+      </Square>
+    ) : (
+      <Square size={size} shape="outline" tone={TONE_TEXT.emerald}>
         {TICK}
       </Square>
     );
   if (task.needsInput)
     return (
-      <Square shape="outline" tone="text-tone-amber">
+      <Square size={size} shape="outline" tone={TONE_TEXT.amber}>
         {QUESTION}
       </Square>
     );
-  if (status === "running")
-    return (
-      <Square shape="outline" tone={ORANGE}>
-        {BARS}
-      </Square>
-    );
+  if (status === "running") return <Working size={size} />;
   if (status === "cancelling")
     return (
-      <Square shape="outline" tone="text-destructive">
+      <Square size={size} shape="outline" tone={TONE_TEXT.rose}>
         {BARS}
       </Square>
     );
   if (status === "queued")
     return task.scopeApproval?.length ? (
-      <Square shape="outline" tone="text-tone-amber">
+      <Square size={size} shape="outline" tone={TONE_TEXT.amber}>
         {LOCK}
       </Square>
+    ) : number !== undefined ? (
+      <Numbered size={size} number={number} />
     ) : (
-      <Square shape="outline" tone={MUTED} />
+      <Square size={size} shape="outline" tone={MUTED} />
     );
   if (status === "failed")
     return (
-      <Square shape="fill" tone="text-destructive">
+      <Square size={size} shape="fill" tone={TONE_TEXT.rose}>
         {ALERT}
       </Square>
     );
   if (status === "blocked")
     return (
-      <Square shape="outline" tone="text-destructive">
+      <Square size={size} shape="outline" tone={TONE_TEXT.amber}>
         {ALERT}
       </Square>
     );
   if (status === "interrupted")
     return (
-      <Square shape="outline" tone={MUTED}>
+      <Square size={size} shape="outline" tone={MUTED}>
         {BARS}
       </Square>
     );
   return (
-    <Square shape="outline" tone={MUTED}>
+    <Square size={size} shape="outline" tone={MUTED}>
       {CROSS}
     </Square>
   );
