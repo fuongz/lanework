@@ -2,13 +2,13 @@ import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
   ArrowUpRight01Icon,
-  StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import type { AgentSession } from "#/../shared/terminal";
 import { StatusPing } from "#/components/shared/agents/status-ping";
+import { StopGlyph } from "#/components/shared/common/stop-glyph";
 import { TerminalKindIcon } from "#/components/shared/terminal/terminal-kind-icon";
 import { shortAge } from "#/lib/relative-time";
 import { cn } from "#/lib/utils";
@@ -115,16 +115,7 @@ function SessionActions({
             confirming && "w-auto px-2 text-xs font-medium",
           )}
         >
-          {confirming ? (
-            "Stop now?"
-          ) : (
-            <HugeiconsIcon
-              icon={StopIcon}
-              className="size-3.5"
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
-          )}
+          {confirming ? "Stop now?" : <StopGlyph className="size-3.5" />}
         </button>
       )}
     </>

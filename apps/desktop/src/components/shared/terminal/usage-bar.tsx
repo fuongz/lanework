@@ -3,9 +3,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   barTone,
   clamp,
-  NEARLY_SPENT,
   resetDuration,
   type UsageWindow,
+  usageTone,
 } from "#/lib/agent-usage";
 import { cn } from "#/lib/utils";
 
@@ -65,7 +65,7 @@ export function UsageBar({
         <span
           className={cn(
             "shrink-0 font-medium tabular-nums",
-            used !== null && used >= NEARLY_SPENT && "text-tone-amber",
+            used !== null && usageTone(used).text,
           )}
         >
           {used === null ? "—" : `${Math.round(used)}%`}

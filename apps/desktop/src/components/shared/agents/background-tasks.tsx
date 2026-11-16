@@ -8,7 +8,6 @@ import {
   HelpCircleIcon,
   Radar01Icon,
   Robot02Icon,
-  StopIcon,
   TaskDaily01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
@@ -22,6 +21,7 @@ import type {
   WorkflowRun,
 } from "#/../shared/terminal";
 import { useBackgroundTasks } from "#/components/shared/agents/use-background-tasks";
+import { StopGlyph } from "#/components/shared/common/stop-glyph";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import { WorkingMark } from "#/components/shared/terminal/working-mark";
 import { Alert, AlertDescription } from "#/components/ui/alert";
@@ -473,7 +473,7 @@ export function BackgroundTaskRow({
             className="shrink-0 opacity-0 group-hover/task:opacity-100 group-focus-within/task:opacity-100"
             onClick={() => onStop(task)}
           >
-            <HugeiconsIcon icon={StopIcon} strokeWidth={1.8} />
+            <StopGlyph />
           </Button>
         )}
       </div>

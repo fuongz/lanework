@@ -31,7 +31,6 @@ import {
   clamp,
   claudeView,
   codexView,
-  NEARLY_SPENT,
   opencodeView,
   resetClock,
   resetDuration,
@@ -41,6 +40,7 @@ import {
   type UsageView,
   updatedText,
   usageAgent,
+  usageTone,
 } from "#/lib/agent-usage";
 import { cn } from "#/lib/utils";
 import { useAgentSessions } from "#/stores/agent-sessions";
@@ -217,11 +217,7 @@ export function AgentUsageStrip({ project }: { project: string }) {
           <span className="opacity-70">{view.empty}</span>
         ) : (
           <>
-            <span
-              className={cn(
-                session.usedPercent >= NEARLY_SPENT && "text-tone-amber",
-              )}
-            >
+            <span className={cn(usageTone(clamp(session.usedPercent)).text)}>
               {`${Math.round(clamp(session.usedPercent))}%`}
             </span>
             {session.resetsAt != null && left !== null && (

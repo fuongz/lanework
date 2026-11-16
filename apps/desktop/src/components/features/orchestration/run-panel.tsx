@@ -7,7 +7,6 @@ import {
   EllipsisIcon,
   Folder01Icon,
   PlayIcon,
-  StopIcon,
   Target02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -33,6 +32,7 @@ import type {
 } from "#/../shared/orchestration";
 import { durationText } from "#/components/shared/agents/facts";
 import { FileBadge } from "#/components/shared/common/markdown-body";
+import { StopGlyph } from "#/components/shared/common/stop-glyph";
 import { ListSkeleton } from "#/components/shared/loading/skeletons";
 import {
   StepGlyph,
@@ -946,12 +946,7 @@ export function RunPanel({
                   onClick={() => setConfirmStop(true)}
                   className="text-destructive hover:text-destructive"
                 >
-                  <HugeiconsIcon
-                    icon={StopIcon}
-                    strokeWidth={2}
-                    data-icon="inline-start"
-                    aria-hidden="true"
-                  />
+                  <StopGlyph data-icon="inline-start" />
                   {busy === "stop" ? "Stopping…" : "Stop"}
                 </Button>
               </Tip>

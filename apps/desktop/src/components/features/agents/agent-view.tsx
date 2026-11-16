@@ -21,6 +21,7 @@ import {
 import type { Fact } from "#/components/shared/agents/facts";
 import { useConversationFacts } from "#/components/shared/agents/use-agent-facts";
 import { OrbitSpinner } from "#/components/shared/common/orbit-spinner";
+import { StopGlyph } from "#/components/shared/common/stop-glyph";
 import {
   WINDOW_TITLE,
   WindowTitlebar,
@@ -296,12 +297,7 @@ export function AgentView() {
             variant="destructive"
             onClick={() => (working ? setConfirming(true) : void end())}
           >
-            <HugeiconsIcon
-              icon={StopIcon}
-              strokeWidth={1.8}
-              data-icon="inline-start"
-              aria-hidden="true"
-            />
+            <StopGlyph data-icon="inline-start" />
             Stop
           </Button>
         )}

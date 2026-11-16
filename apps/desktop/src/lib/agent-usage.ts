@@ -11,7 +11,9 @@ import type {
   OpenCodeUsageWindow,
 } from "../../shared/terminal";
 
-/** A window this full reads in the warning tone. */
+/** A window this full turns yellow. */
+export const GETTING_FULL = 75;
+/** A window this full turns orange; at 100% it is red. */
 export const NEARLY_SPENT = 90;
 
 const ERROR_TEXT: Record<ClaudeUsageError, string> = {
@@ -231,8 +233,24 @@ export function opencodeView(
   };
 }
 
+/**
+ * How full a usage window reads, in three steps: yellow from 75%, orange
+ * from 90%, red once it is spent. Below 75% it takes no colour.
+ */
+export function usageTone(used: number): { text: string; bar: string } {
+  if (used >= 100) return { text: "text-tone-rose", bar: "bg-tone-rose" };
+  if (used >= NEARLY_SPENT)
+    return {
+      text: "text-orange-600 dark:text-orange-400",
+      bar: "bg-orange-500 dark:bg-orange-400",
+    };
+  if (used >= GETTING_FULL)
+    return { text: "text-tone-amber", bar: "bg-tone-amber" };
+  return { text: "", bar: "bg-foreground/55" };
+}
+
 export function barTone(used: number) {
-  return used >= NEARLY_SPENT ? "bg-tone-amber" : "bg-foreground/55";
+  return usageTone(used).bar;
 }
 
 export const usageAgent = (kind: string | undefined): UsageAgent | null =>
