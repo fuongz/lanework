@@ -1036,7 +1036,9 @@ export function registerProjects(devUrl?: string): void {
       )
         throw new Error("A card and a cursor are required");
       const [projectId, cardId] = requireId(args.slice(0, 2), 2);
-      if (await localTarget(projectId)) cloudOnly("A card's activity");
+      // A local board keeps no activity yet: an empty thread, not an error
+      // logged on every card opened (the card shows no activity either way).
+      if (await localTarget(projectId)) return { events: [], cursor: null };
       return fetchActivity(
         await authorizedRecord(),
         projectId,
