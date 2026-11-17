@@ -190,7 +190,7 @@ export function BranchSwitcher({
           {switchError && (
             <p
               role="alert"
-              className="text-destructive border-foreground/10 max-w-80 border-t px-3 py-2 text-xs/relaxed break-words whitespace-pre-wrap"
+              className="text-destructive max-w-80 px-3 py-2 text-xs/relaxed break-words whitespace-pre-wrap"
             >
               {switchError}
             </p>

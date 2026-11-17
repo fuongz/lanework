@@ -114,7 +114,7 @@ function CommandDialog({
 /**
  * The search field, edge to edge across the top of the list.
  *
- * A rule under it makes it the menu's header, not a boxed input inside it.
+ * No rule under it: the field and the list read as one surface, as ⌘K's.
  * `trailing` sits at its end (a Clear).
  */
 function CommandInput({
@@ -130,9 +130,7 @@ function CommandInput({
       data-slot="command-input-wrapper"
       className={cn(
         "flex shrink-0 items-center",
-        palette
-          ? "h-12 gap-2.5 px-4"
-          : "border-foreground/10 h-9 gap-2 border-b ps-3 pe-1.5",
+        palette ? "h-12 gap-2.5 px-4" : "h-9 gap-2 ps-3 pe-1.5",
       )}
     >
       <HugeiconsIcon

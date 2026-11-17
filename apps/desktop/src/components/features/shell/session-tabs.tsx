@@ -1,11 +1,6 @@
 import { Add01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Link,
-  useNavigate,
-  useParams,
-  useRouterState,
-} from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Reorder } from "motion/react";
 import { useEffect, useMemo, useRef } from "react";
 import type { AgentSession, TerminalAgent } from "#/../shared/terminal";
@@ -20,6 +15,9 @@ import { useSessionTabs } from "#/stores/session-tabs";
 
 /** A chat route's conversation: `/w/<slug>/agents/chat/<id>`, not `new`. */
 const CHAT_PATH = /^\/w\/[^/]+\/agents\/chat\/([^/]+)\/?$/;
+
+/** The project a path is under: `/w/<slug>/…`. */
+const PROJECT_PATH = /^\/w\/([^/]+)\//;
 
 const NONE: string[] = [];
 
@@ -39,10 +37,15 @@ const ACTIVE_CHIP =
  * chat (Issues, Files…) none is. `+` starts a new chat.
  */
 export function SessionTabs() {
-  const { slug } = useParams({ strict: false }) as { slug?: string };
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
+  // NOTE: The project from the path, not the route's params. Mid-switch the
+  // location already names the next project while the params still name
+  // this one (as project-layout.tsx notes), and a tab opened then was filed
+  // under the project being left: another project's chat in its strip.
+  const slugMatch = PROJECT_PATH.exec(pathname);
+  const slug = slugMatch ? decodeURIComponent(slugMatch[1]) : undefined;
   const navigate = useNavigate();
   const tabs = useSessionTabs((state) => (slug ? state.bySlug[slug] : NONE));
   const open = useSessionTabs((state) => state.open);
@@ -51,7 +54,8 @@ export function SessionTabs() {
   /** A drag is on, or just ended: the tab's click must not open it. */
   const dragged = useRef(false);
   const byProject = useAgentSessions((state) => state.byProject);
-  const runs = useOrchestrationRuns(useProjectKey(slug));
+  const project = useProjectKey(slug);
+  const runs = useOrchestrationRuns(project);
   const live = useAgentSessions((state) => state.live);
   const strip = useRef<HTMLDivElement>(null);
 
@@ -65,6 +69,20 @@ export function SessionTabs() {
   useEffect(() => {
     if (slug && active) open(slug, active);
   }, [slug, active, open]);
+
+  // A tab another project lists as its own was filed here by the bug above:
+  // it goes, as its chat would open as an empty "Claude conversation" here.
+  // Only once both lists are read, and never this project's own or a run's.
+  useEffect(() => {
+    if (!slug || !project || !byProject[project] || !tabs?.length) return;
+    const own = new Set(byProject[project].map((session) => session.id));
+    for (const [key, list] of Object.entries(byProject)) {
+      if (key === project) continue;
+      for (const session of list)
+        if (tabs.includes(session.id) && !own.has(session.id))
+          useSessionTabs.getState().close(slug, session.id);
+    }
+  }, [slug, project, byProject, tabs]);
 
   // The tab on screen scrolls into view when the strip overflows.
   useEffect(() => {
@@ -171,6 +189,9 @@ export function SessionTabs() {
       >
         {/* Dragged sideways to reorder, as a browser's tabs. */}
         <Reorder.Group
+          // One per project: switching projects swaps the strip at once,
+          // rather than gliding one project's chips into the other's.
+          key={slug}
           as="div"
           axis="x"
           values={shown}

@@ -1134,7 +1134,7 @@ function ConversationPage({ slug, id }: { slug: string; id: string }) {
             </div>
 
             <div>
-              <div className="mx-auto flex w-full max-w-[940px] min-w-0 flex-col gap-1.5 px-8 pb-4">
+              <div className="mx-auto flex w-full max-w-[940px] min-w-0 flex-col gap-1.5 px-8 pb-2">
                 {(actionError || engine.state === "error") && (
                   <p role="alert" className="text-destructive px-1 text-xs">
                     {actionError ??

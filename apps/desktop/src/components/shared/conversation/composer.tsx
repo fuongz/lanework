@@ -4,7 +4,6 @@ import {
   CubeIcon,
   EraserIcon,
   Folder01Icon,
-  Loading03Icon,
   SlashIcon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
@@ -1372,7 +1371,8 @@ export const Composer = forwardRef<
         </div>
 
         {/* Under the field: where it runs on the left; the model, the
-            access, working and the context ring on the right. */}
+            access and the context ring on the right. A turn at work is told by
+            the header's mark, the tab's and Stop; no spinner here. */}
         {!suspended && (
           <div className="text-muted-foreground flex min-h-7 min-w-0 items-center gap-1.5 px-1.5 text-[13px]">
             <BranchSwitcher slug={slug} variant="composer" />
@@ -1389,16 +1389,6 @@ export const Composer = forwardRef<
                   onChange={(permission) => onSettings({ permission })}
                 />
               </>
-            )}
-            {working && !dictating && (
-              <span role="status" aria-label="Working" className="flex">
-                <HugeiconsIcon
-                  icon={Loading03Icon}
-                  className="size-4 animate-spin motion-reduce:animate-none"
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                />
-              </span>
             )}
             {!dictating && corner}
           </div>
